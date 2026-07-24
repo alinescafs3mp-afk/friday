@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.30.0 — 2026-07-24
+
+0.30.0 — проверка LLM перестаёт врать: `--check-llm` подтверждает, что модель реально обслуживается, а не только что порт открыт.
+
+### Improved
+
+- **Реальная проверка LLM-endpoint.** `--check-llm` (`_port_reachable`) делал лишь TCP-connect → печатал «reachable», даже если vLLM отдаёт не ту модель (самый частый local-LLM грабль: `JERICHO_LLM_MODEL` должен точно совпадать с именем в vLLM). Новый `_llm_endpoint_status` после connect запрашивает `GET {llm_base_url}/models` (stdlib urllib) и проверяет, что настроенная модель в списке. Отдельный error-action `llm_model_not_served` (reachable, но модели нет) отделён от `start_llm_runtime` (endpoint недоступен), с перечнем обслуживаемых моделей. Admin-эндпоинт `/api/admin/diagnostics` больше не хардкодит `check_llm_port=False` — принимает `?check_llm=1`, так что веб-админка может запустить ту же проверку.
+
+### Compatibility
+
+- Схема БД не меняется (14). Ноль новых зависимостей (urllib — stdlib). Suite: **380 тестов**; ruff/mypy(44)/bandit(0 HIGH) ✓.
+
 ## 0.29.0 — 2026-07-24
 
 0.29.0 — операторская половина Telegram-наблюдаемости: очередь моста видна из diagnostics, `status` и админки.
