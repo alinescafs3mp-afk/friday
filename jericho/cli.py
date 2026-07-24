@@ -677,6 +677,9 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--no-bridge", action="store_true", help="Do not start the Telegram bridge")
     up.set_defaults(handler=_up)
 
+    tui = sub.add_parser("tui", help="Interactive launcher: configure the LLM endpoint/token, start, status")
+    tui.set_defaults(handler=_tui)
+
     services = sub.add_parser("install-services", help="Generate systemd --user units for backend and bridge")
     services.add_argument("--dir", help="Target directory (default: ~/.config/systemd/user)")
     services.set_defaults(handler=_install_services)
@@ -759,6 +762,13 @@ def _run_server() -> int:
 
     run_server()
     return 0
+
+
+def _tui(args: argparse.Namespace) -> int:
+    """Launch the interactive pseudographic launcher."""
+    from jericho.tui import run
+
+    return run(args)
 
 
 def _up(args: argparse.Namespace) -> int:
