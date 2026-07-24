@@ -182,6 +182,50 @@ async def test_search_rescues_lexically_disjoint_but_semantic_match(storage, set
     assert pet["id"] not in [item["id"] for item in without_dense["results"]]
 
 
+def _index_ko(storage, user_id, text, title):
+    ko = _make_ko(storage, user_id, text, title=title)
+    storage.upsert_knowledge_embeddings(
+        [
+            {
+                "knowledge_object_id": ko["id"],
+                "user_id": user_id,
+                "model": "test-embed",
+                "dim": 3,
+                "source_version": ko["version"],
+                "content_hash": "h",
+                "vector": pack_vector(_concept_vector(text)),
+            }
+        ]
+    )
+    return ko
+
+
+def test_get_user_embeddings_respects_limit(storage):
+    for i, text in enumerate(("первый", "второй", "третий")):
+        _index_ko(storage, "alice", text, f"K{i}")
+    assert len(storage.get_user_embeddings("alice", "test-embed", 3)) == 3
+    assert len(storage.get_user_embeddings("alice", "test-embed", 3, limit=2)) == 2
+
+
+@pytest.mark.asyncio
+async def test_dense_recall_caps_the_scan_and_flags_it(storage, settings):
+    # The pure-Python cosine scan is the retrieval scaling ceiling; the guard caps
+    # how many vectors are scored and makes the truncation visible, not silent.
+    tuned = dataclasses.replace(_embeddings_settings(settings), embeddings_dense_max_objects=1)
+    _index_ko(storage, "alice", "Мой пёс Рекс любит мяч", "Пёс")
+    _index_ko(storage, "alice", "Портфель акций вырос", "Финансы")
+
+    searcher = HybridSearcher(storage, _FakeEmbeddings(tuned))
+    meta: dict = {}
+    await searcher._dense_recall("alice", "нужен совет про питомца", {}, meta=meta)  # noqa: SLF001
+    assert meta["dense_scanned"] == 1  # only the newest vector was scored, not both
+    assert meta["dense_capped"] is True
+
+    # The cap is surfaced in the search strategy (visible in the explain-trace).
+    result = await searcher.search("alice", "нужен совет про питомца", limit=5)
+    assert result["strategy"].get("embeddings_capped") is True
+
+
 @pytest.mark.asyncio
 async def test_dense_recall_falls_back_to_pool_when_index_empty(storage, settings):
     tuned = _embeddings_settings(settings)

@@ -244,6 +244,9 @@ class JerichoSettings:
     embeddings_index_batch: int
     embeddings_index_interval_sec: float
     embeddings_recall_candidates: int
+    # Guard on the pure-Python dense-recall scan: cap how many (newest) vectors
+    # are scored per query so latency stays bounded on a large corpus (0 = no cap).
+    embeddings_dense_max_objects: int
     # Near-duplicate Knowledge Object detection (cosine over stored vectors).
     dedup_threshold: float
     dedup_interval_sec: float
@@ -480,6 +483,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         embeddings_index_batch=_int_env("JERICHO_EMBEDDINGS_INDEX_BATCH", 64, minimum=1),
         embeddings_index_interval_sec=_float_env("JERICHO_EMBEDDINGS_INDEX_INTERVAL_SEC", 120.0, minimum=5.0),
         embeddings_recall_candidates=_int_env("JERICHO_EMBEDDINGS_RECALL_CANDIDATES", 40, minimum=1),
+        embeddings_dense_max_objects=_int_env("JERICHO_EMBEDDINGS_DENSE_MAX_OBJECTS", 5000, minimum=0),
         dedup_threshold=_float_env("JERICHO_DEDUP_THRESHOLD", 0.92, minimum=0.5),
         dedup_interval_sec=_float_env("JERICHO_DEDUP_INTERVAL_SEC", 21600, minimum=300),
         dedup_max_objects=_int_env("JERICHO_DEDUP_MAX_OBJECTS", 1500, minimum=10),

@@ -94,6 +94,10 @@ JERICHO_VERIFY_ANSWERS=1
 JERICHO_EMBEDDINGS_ENABLED=0
 JERICHO_EMBEDDINGS_BASE_URL=http://127.0.0.1:8002/v1
 JERICHO_EMBEDDINGS_MODEL=
+# Latency guard: cap how many (newest) vectors dense recall scores per query on a
+# large corpus (the cosine scan is pure Python). 0 = no cap. Truncation is shown
+# in the retrieval explain-trace (strategy.embeddings_capped).
+JERICHO_EMBEDDINGS_DENSE_MAX_OBJECTS=5000
 # Near-duplicate Knowledge Object detection (needs embeddings). Cosine >= this
 # flags a likely duplicate as a review-gated conflict; resolve = deprecate one.
 JERICHO_DEDUP_THRESHOLD=0.92

@@ -4538,20 +4538,27 @@ class JerichoStorage:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_user_embeddings(self, user_id: str, model: str, dim: int) -> list[tuple[str, bytes]]:
+    def get_user_embeddings(
+        self, user_id: str, model: str, dim: int, *, limit: int | None = None
+    ) -> list[tuple[str, bytes]]:
         """Return (knowledge_object_id, packed vector) for a user's live vectors.
 
         Only rows matching the active model and dimension are returned, and vectors
         whose Knowledge Object has been soft-deleted are excluded, so a stale row can
-        never resurrect deleted knowledge into dense recall.
+        never resurrect deleted knowledge into dense recall. ``limit`` caps the scan
+        to the newest N objects (a latency guard on a large corpus).
         """
-        rows = self.execute(
-            """SELECT e.knowledge_object_id AS id, e.vector AS vector
-               FROM knowledge_embeddings e
-               JOIN knowledge_objects k ON k.id = e.knowledge_object_id
-               WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL""",
-            (user_id, model, int(dim)),
-        ).fetchall()
+        query = (
+            "SELECT e.knowledge_object_id AS id, e.vector AS vector "
+            "FROM knowledge_embeddings e "
+            "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
+            "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL"
+        )
+        params: list[Any] = [user_id, model, int(dim)]
+        if limit is not None and limit > 0:
+            query += " ORDER BY k.created_at DESC LIMIT ?"
+            params.append(int(limit))
+        rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 
     def get_user_vectors(self, user_id: str, model: str, *, limit: int = 5000) -> list[tuple[str, bytes]]:

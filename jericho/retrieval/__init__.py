@@ -295,8 +295,9 @@ class HybridSearcher:
         lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query)
         rankings = [fts_ranking, lexical_ranking]
         embedding_scores: dict[str, float] = {}
+        dense_meta: dict[str, Any] = {}
         if self.embeddings and self.embeddings.remote_enabled:
-            embedding_scores = await self._dense_recall(user_id, clean_query, candidate_map)
+            embedding_scores = await self._dense_recall(user_id, clean_query, candidate_map, meta=dense_meta)
             if embedding_scores:
                 candidates = list(candidate_map.values())
                 rankings.append(
@@ -552,18 +553,23 @@ class HybridSearcher:
                 entity_matches = kg.search_entities(user_id, clean_query, limit=5)
         else:
             entity_matches = []
+        strategy: dict[str, Any] = {
+            "fts": True,
+            "lexical": True,
+            "embeddings": bool(embedding_scores),
+            "feedback": True,
+            "graph": bool(kg),
+        }
+        if dense_meta.get("dense_capped"):
+            # Dense recall scored only the newest N vectors — latency degrades
+            # visibly (in the explain-trace) rather than silently on a big corpus.
+            strategy["embeddings_capped"] = True
         response: dict[str, Any] = {
             "query": clean_query,
             "results": results,
             "count": len(results),
             "entity_matches": entity_matches,
-            "strategy": {
-                "fts": True,
-                "lexical": True,
-                "embeddings": bool(embedding_scores),
-                "feedback": True,
-                "graph": bool(kg),
-            },
+            "strategy": strategy,
         }
         if explain:
             # Every candidate was already scored; expose the ranked set (returned,
@@ -763,6 +769,8 @@ class HybridSearcher:
         user_id: str,
         query: str,
         candidate_map: dict[str, dict[str, Any]],
+        *,
+        meta: dict[str, Any] | None = None,
     ) -> dict[str, float]:
         """Corpus-wide dense recall over persisted vectors.
 
@@ -782,7 +790,11 @@ class HybridSearcher:
         if query_dim == 0:
             return {}
         model = self.embeddings.settings.embeddings_model
-        stored = self.storage.get_user_embeddings(user_id, model, query_dim)
+        max_objects = int(self.embeddings.settings.embeddings_dense_max_objects)
+        stored = self.storage.get_user_embeddings(user_id, model, query_dim, limit=(max_objects or None))
+        if meta is not None:
+            meta["dense_scanned"] = len(stored)
+            meta["dense_capped"] = bool(max_objects) and len(stored) >= max_objects
         if not stored:
             return await self._dense_recall_pool(query_vector, candidate_map)
 
