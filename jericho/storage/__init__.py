@@ -849,15 +849,46 @@ class JerichoStorage:
     def __init__(self, settings: JerichoSettings) -> None:
         self.settings = settings
         self._db_path = settings.database_path
-        self._lock = threading.RLock()
-        self._conn: sqlite3.Connection | None = None
+        # Connection-per-thread: no two threads ever share one sqlite3.Connection,
+        # so cursors are never stepped concurrently on a single connection (the
+        # half-written-read hazard). WAL then gives many concurrent readers plus a
+        # single writer across the separate connections. ``threading.local`` holds
+        # each thread's connection; the registry lets close() shut every thread's
+        # connection down (e.g. before a restore swaps the database file), and the
+        # generation counter invalidates the per-thread caches after close() so the
+        # next use transparently reopens.
+        self._local = threading.local()
+        self._registry_lock = threading.Lock()
+        self._connections: list[sqlite3.Connection] = []
+        self._generation = 0
+        # Writers serialise through this process-wide lock, held for the whole
+        # transaction() block. Reads never take it, so the WAL many-reader win is
+        # preserved; writers, however, keep the single-writer invariant in Python
+        # (no two BEGIN IMMEDIATE ever contend at the SQLite level, so a writer can
+        # never surface "database is locked" from internal contention). close()
+        # also takes it, so a shutdown cannot close a connection out from under an
+        # in-flight write transaction on a background-worker thread — restoring the
+        # drain-before-close guarantee the old shared RLock provided. Reentrant so
+        # nested transaction() on one thread does not self-deadlock.
+        self._write_lock = threading.RLock()
+        # Schema creation/migration runs exactly once, on the first connection,
+        # behind this lock; every other connection only opens and configures itself.
+        self._init_lock = threading.Lock()
+        self._schema_ready = False
         self._fts_available = True
 
     @property
     def conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = self._open()
-        return self._conn
+        local = self._local
+        cached = getattr(local, "conn", None)
+        if cached is not None and getattr(local, "generation", None) == self._generation:
+            return cached
+        connection = self._open()
+        with self._registry_lock:
+            self._connections.append(connection)
+            local.conn = connection
+            local.generation = self._generation
+        return connection
 
     @staticmethod
     def _is_sqlite_busy(exc: sqlite3.OperationalError) -> bool:
@@ -887,109 +918,136 @@ class JerichoStorage:
 
     def _open_once(self) -> sqlite3.Connection:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False so close() can shut every thread's connection
+        # down from the shutdown/restore thread; cross-thread *use* is prevented
+        # structurally (the conn property only ever hands back the caller thread's
+        # own connection via threading.local), not by the sqlite thread check.
         conn = sqlite3.connect(str(self._db_path), check_same_thread=False, timeout=10.0)
         conn.row_factory = sqlite3.Row
         try:
-            # Apply busy handling before WAL negotiation; sqlite3's connect timeout
-            # alone does not reliably protect this PRAGMA on every platform.
+            # Per-connection configuration — applied to EVERY thread's connection.
+            # busy_timeout must precede WAL negotiation; sqlite3's connect timeout
+            # alone does not reliably protect that PRAGMA on every platform. WAL is
+            # persistent in the database header (idempotent to re-issue), but
+            # foreign_keys and synchronous are per-connection and non-persistent, so
+            # every connection must set them or FK enforcement silently disappears.
             conn.execute("PRAGMA busy_timeout=10000")
-
-            # Fail closed before executing any DDL. Opening a database produced by a
-            # newer Jericho build must never rewrite its schema marker or attempt a
-            # best-effort downgrade. A malformed explicit marker is treated the same
-            # way; databases without a marker remain valid pre-release migrations.
-            schema_meta_preexisting = (
-                conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
-                ).fetchone()
-                is not None
-            )
-            previous_schema_version: str | None = None
-            if schema_meta_preexisting:
-                row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-                previous_schema_version = str(row[0]).strip() if row else None
-                if previous_schema_version:
-                    try:
-                        parsed_version = int(previous_schema_version)
-                    except ValueError as exc:
-                        raise UnsupportedSchemaVersionError(
-                            f"Invalid database schema version: {previous_schema_version!r}"
-                        ) from exc
-                    if parsed_version < 0 or parsed_version > SCHEMA_VERSION:
-                        raise UnsupportedSchemaVersionError(
-                            f"Database schema version {parsed_version} is not supported by "
-                            f"this Jericho build (maximum {SCHEMA_VERSION})"
-                        )
-
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=NORMAL")
             # SQLite's lower()/NOCASE only fold ASCII; tags and entity names are
             # frequently Cyrillic, so Unicode-correct case-insensitive queries
-            # (browse-by-tag) go through Python's casefold instead.
+            # (browse-by-tag) go through Python's casefold instead. User functions
+            # are registered per connection.
             conn.create_function(
                 "jericho_casefold",
                 1,
                 lambda value: str(value).casefold() if value is not None else None,
                 deterministic=True,
             )
-            fts_preexisting = (
-                conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'"
-                ).fetchone()
-                is not None
-            )
-            with self._lock:
-                # Create/recognize tables first, then add legacy columns, and
-                # only then create indexes that reference those columns. Keep
-                # this core migration in one explicit transaction: sqlite3's
-                # executescript() commits an existing transaction implicitly,
-                # which otherwise leaves half-applied DDL/backfills after a
-                # migration failure.
-                try:
-                    conn.execute("BEGIN IMMEDIATE")
-                    self._execute_statements(conn, CORE_TABLE_SCHEMA)
-                    self._migrate_legacy_schema(conn)
-                    self._execute_statements(conn, CORE_INDEX_SCHEMA)
-                    conn.execute(
-                        "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) "
-                        "VALUES('schema_version', ?, ?)",
-                        (str(SCHEMA_VERSION), utc_now()),
-                    )
-                    conn.commit()
-                except BaseException:
-                    if conn.in_transaction:
-                        conn.rollback()
-                    raise
-
-                # FTS is an optional, self-healing derivative index. Build it
-                # only after the authoritative core schema/data transaction has
-                # committed, so an unavailable FTS5 module can never roll back
-                # or partially expose personal knowledge migration.
-                try:
-                    conn.executescript(FTS_SCHEMA)
-                    knowledge_count = conn.execute("SELECT COUNT(*) FROM knowledge_objects").fetchone()[0]
-                    if knowledge_count and not fts_preexisting:
-                        # An external-content FTS table created after rows already
-                        # exist starts with an empty index. Rebuild before update
-                        # triggers can attempt to delete missing index entries.
-                        conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')")
-                    elif fts_preexisting and previous_schema_version != str(SCHEMA_VERSION):
-                        try:
-                            conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('integrity-check')")
-                        except sqlite3.DatabaseError:
-                            LOGGER.warning("Rebuilding an inconsistent knowledge FTS index")
-                            conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')")
-                except sqlite3.OperationalError as exc:
-                    if self._is_sqlite_busy(exc):
-                        raise
-                    self._fts_available = False
-                    LOGGER.warning("SQLite FTS5 is unavailable; using LIKE search: %s", exc)
-                conn.commit()
+            # Schema creation/migration/FTS is applied exactly once, by the first
+            # connection; later connections open against the already-migrated file.
+            self._ensure_schema(conn)
+            # The core migration transiently lowers busy_timeout (a PRAGMA embedded
+            # in CORE_SCHEMA); restore the uniform value on the migrating connection.
+            conn.execute("PRAGMA busy_timeout=10000")
             return conn
         except BaseException:
             conn.close()
             raise
+
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
+        """Create/upgrade the schema exactly once, behind a barrier.
+
+        The first connection runs the (idempotent) migration; no connection may
+        run application queries until it has committed, so the double-checked
+        ``_init_lock`` both serialises the single migration and makes later
+        openers wait for it. A busy failure propagates so ``_open``'s retry loop
+        re-runs the still-idempotent migration on a fresh connection.
+        """
+
+        if self._schema_ready:
+            return
+        with self._init_lock:
+            if self._schema_ready:
+                return
+            self._migrate_schema(conn)
+            self._schema_ready = True
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        # Fail closed before executing any DDL. Opening a database produced by a
+        # newer Jericho build must never rewrite its schema marker or attempt a
+        # best-effort downgrade. A malformed explicit marker is treated the same
+        # way; databases without a marker remain valid pre-release migrations.
+        schema_meta_preexisting = (
+            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'").fetchone()
+            is not None
+        )
+        previous_schema_version: str | None = None
+        if schema_meta_preexisting:
+            row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+            previous_schema_version = str(row[0]).strip() if row else None
+            if previous_schema_version:
+                try:
+                    parsed_version = int(previous_schema_version)
+                except ValueError as exc:
+                    raise UnsupportedSchemaVersionError(
+                        f"Invalid database schema version: {previous_schema_version!r}"
+                    ) from exc
+                if parsed_version < 0 or parsed_version > SCHEMA_VERSION:
+                    raise UnsupportedSchemaVersionError(
+                        f"Database schema version {parsed_version} is not supported by "
+                        f"this Jericho build (maximum {SCHEMA_VERSION})"
+                    )
+
+        fts_preexisting = (
+            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'").fetchone()
+            is not None
+        )
+        # Create/recognize tables first, then add legacy columns, and only then
+        # create indexes that reference those columns. Keep this core migration in
+        # one explicit transaction: sqlite3's executescript() commits an existing
+        # transaction implicitly, which otherwise leaves half-applied DDL/backfills
+        # after a migration failure.
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._execute_statements(conn, CORE_TABLE_SCHEMA)
+            self._migrate_legacy_schema(conn)
+            self._execute_statements(conn, CORE_INDEX_SCHEMA)
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('schema_version', ?, ?)",
+                (str(SCHEMA_VERSION), utc_now()),
+            )
+            conn.commit()
+        except BaseException:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+
+        # FTS is an optional, self-healing derivative index. Build it only after
+        # the authoritative core schema/data transaction has committed, so an
+        # unavailable FTS5 module can never roll back or partially expose personal
+        # knowledge migration.
+        try:
+            conn.executescript(FTS_SCHEMA)
+            knowledge_count = conn.execute("SELECT COUNT(*) FROM knowledge_objects").fetchone()[0]
+            if knowledge_count and not fts_preexisting:
+                # An external-content FTS table created after rows already exist
+                # starts with an empty index. Rebuild before update triggers can
+                # attempt to delete missing index entries.
+                conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')")
+            elif fts_preexisting and previous_schema_version != str(SCHEMA_VERSION):
+                try:
+                    conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('integrity-check')")
+                except sqlite3.DatabaseError:
+                    LOGGER.warning("Rebuilding an inconsistent knowledge FTS index")
+                    conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')")
+        except sqlite3.OperationalError as exc:
+            if self._is_sqlite_busy(exc):
+                raise
+            self._fts_available = False
+            LOGGER.warning("SQLite FTS5 is unavailable; using LIKE search: %s", exc)
+        conn.commit()
 
     @staticmethod
     def _execute_statements(conn: sqlite3.Connection, script: str) -> None:
@@ -1371,23 +1429,55 @@ class JerichoStorage:
                 )
 
     def close(self) -> None:
-        with self._lock:
-            if self._conn is not None:
-                self._conn.commit()
-                self._conn.close()
-                self._conn = None
+        # Shut down every thread's connection (not just the caller's), commit any
+        # pending work, then invalidate the per-thread caches by bumping the
+        # generation and re-arming the one-time schema init. This makes close()
+        # release all WAL locks before a restore swaps the database file, and lets
+        # the next use on any thread transparently reopen (and re-migrate) — the
+        # reopen-after-close contract restore_backup() depends on.
+        #
+        # The write lock is taken first (same order as transaction()) so a shutdown
+        # drains any in-flight write transaction — e.g. a background worker whose
+        # asyncio task was cancelled but whose to_thread() DB call is still running
+        # — before its connection is closed, instead of committing a half-written
+        # transaction or closing the connection mid-statement.
+        with self._write_lock:
+            with self._registry_lock:
+                connections = list(self._connections)
+                self._connections.clear()
+                self._generation += 1
+                self._schema_ready = False
+            for connection in connections:
+                with suppress(sqlite3.Error):
+                    connection.commit()
+                with suppress(sqlite3.Error):
+                    connection.close()
 
     def execute(self, sql: str, params: tuple | dict | None = None) -> sqlite3.Cursor:
-        with self._lock:
-            return self.conn.execute(sql, params or ())
+        # No lock: this thread's own connection, and the caller fetches the cursor
+        # on this same thread, so no cursor is ever stepped across threads.
+        return self.conn.execute(sql, params or ())
 
     def commit(self) -> None:
-        with self._lock:
-            self.conn.commit()
+        self.conn.commit()
+
+    def optimize(self) -> None:
+        # PRAGMA optimize runs ANALYZE, which writes sqlite_stat*, so it is a writer
+        # and must take the write lock like transaction() — otherwise it contends
+        # with a concurrent BEGIN IMMEDIATE at the SQLite level (risking "database is
+        # locked") and close() cannot drain it before shutting the connection down.
+        with self._write_lock:
+            self.conn.execute("PRAGMA optimize")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
+        # Serialise writers in Python (single-writer invariant), so two threads'
+        # BEGIN IMMEDIATE never contend at the SQLite level and close() can drain
+        # the in-flight writer before shutting connections down. Reads never take
+        # this lock, so concurrent readers still run in parallel over WAL. The lock
+        # is reentrant, so a nested transaction() on the same thread — detected via
+        # this thread's own connection's in_transaction — does not self-deadlock.
+        with self._write_lock:
             conn = self.conn
             nested = conn.in_transaction
             if not nested:
@@ -4765,9 +4855,9 @@ class JerichoStorage:
     def _verify_backup_conn(self, backup_conn: sqlite3.Connection) -> tuple[str, list[Any], int]:
         """Integrity / foreign-key / schema check of a backup copy.
 
-        Runs entirely against the backup's own connection, so it never needs the
-        live storage lock — keeping it out from under ``self._lock`` is what lets
-        a backup avoid freezing concurrent requests during the full-DB scan.
+        Runs entirely against the backup's own connection, independent of the
+        live per-thread connections, so a backup never freezes concurrent
+        requests during the full-DB scan.
         """
         integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_key_violations = backup_conn.execute("PRAGMA foreign_key_check").fetchall()
@@ -4789,14 +4879,13 @@ class JerichoStorage:
 
         backup_conn = sqlite3.connect(str(destination))
         try:
-            # Hold the global lock ONLY for the checkpoint + copy — the sole steps
-            # that read the live connection. The integrity/foreign-key/schema scan
-            # runs against the backup copy on its own connection, so holding the
-            # lock across it would freeze every Telegram/Admin request for the
-            # whole (full-database) scan.
-            with self._lock:
-                self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                self.conn.backup(backup_conn)
+            # Checkpoint + copy run on this thread's own connection. SQLite's online
+            # backup API takes a transactionally consistent snapshot and restarts if
+            # a concurrent writer modifies the source, so no cross-thread lock is
+            # needed; a PASSIVE checkpoint never blocks other connections. The
+            # integrity/foreign-key/schema scan then runs on the backup copy.
+            self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            self.conn.backup(backup_conn)
             integrity, foreign_key_violations, backup_schema_version = self._verify_backup_conn(backup_conn)
         except BaseException:
             destination.unlink(missing_ok=True)

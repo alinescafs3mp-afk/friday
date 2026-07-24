@@ -732,6 +732,19 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             finally:
                 await workers.stop()
                 await web_surfer.close()
+                # workers.stop() only cancels the asyncio tasks; a worker cancelled
+                # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
+                # still running on the default executor thread. Drain the executor so
+                # storage.close() cannot close a connection out from under an
+                # in-flight background DB operation (a torn transaction / use-after-
+                # close). wait_for bounds it (shutdown_default_executor's own timeout
+                # arg is 3.12+, but requires-python is >=3.11) so a stuck op cannot
+                # hang shutdown indefinitely.
+                with suppress(Exception):
+                    await asyncio.wait_for(
+                        asyncio.get_running_loop().shutdown_default_executor(),
+                        timeout=30.0,
+                    )
                 storage.close()
                 LOGGER.info("Jericho API stopped")
 

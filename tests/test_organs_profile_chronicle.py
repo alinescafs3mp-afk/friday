@@ -55,7 +55,10 @@ def _seed_knowledge(
     )
     storage.store_knowledge_object(ko)
     if created_at:
-        storage.execute("UPDATE knowledge_objects SET created_at=? WHERE id=?", (created_at, ko.id))
+        # Commit the backdated timestamp so it is visible on other connections
+        # (the chronicle worker / endpoint reads it from a different thread).
+        with storage.transaction() as conn:
+            conn.execute("UPDATE knowledge_objects SET created_at=? WHERE id=?", (created_at, ko.id))
     return ko.id
 
 

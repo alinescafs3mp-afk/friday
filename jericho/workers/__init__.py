@@ -593,7 +593,7 @@ class WorkersManager:
             LOGGER.info("embeddings index updated %d objects", len(prepared))
 
     async def _database_optimize(self) -> None:
-        await asyncio.to_thread(self.storage.execute, "PRAGMA optimize")
+        await asyncio.to_thread(self.storage.optimize)
         # Drop expired single-use bridge nonces so the replay cache stays bounded.
         retention = max(60, self.settings.telegram_signature_max_age_sec * 4)
         await asyncio.to_thread(self.storage.prune_bridge_nonces, max_age_sec=retention)
