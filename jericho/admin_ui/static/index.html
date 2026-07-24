@@ -13,20 +13,20 @@
 <aside class="sidebar" id="sidebar">
   <div class="brand"><div class="mark">J</div><div><b>Jericho</b><small>Control Room</small></div></div>
   <nav class="nav" id="nav"></nav>
-  <div class="side-foot"><span id="healthDot">●</span> <span id="healthText">проверка связи…</span></div>
+  <div class="side-foot"><span id="healthDot" aria-hidden="true">●</span> <span id="healthText">проверка связи…</span></div>
 </aside>
 <section class="main">
   <header class="topbar">
-    <button class="btn mobile-menu" data-call='["toggleMenu"]'>☰</button>
+    <button class="btn mobile-menu" data-call='["toggleMenu"]' aria-label="Меню">☰</button>
     <h1 id="pageTitle">Обзор</h1>
-    <select id="userSelect" title="Контекст пользователя"></select>
+    <select id="userSelect" title="Контекст пользователя" aria-label="Контекст пользователя"></select>
     <button class="btn" data-call='["openTokenDialog"]'>API-ключ</button>
-    <button class="btn" data-call='["refresh"]'>↻</button>
+    <button class="btn" data-call='["refresh"]' aria-label="Обновить">↻</button>
   </header>
   <main class="content" id="app"><div class="card"><div class="empty">Загрузка…</div></div></main>
 </section>
 </div>
-<dialog id="modal"><div class="dialog-head"><h2 id="modalTitle"></h2><button class="btn small" data-call='["closeModal"]'>✕</button></div><div class="dialog-body" id="modalBody"></div><div class="dialog-foot" id="modalFoot"></div></dialog>
-<div class="toast" id="toast"></div>
+<dialog id="modal"><div class="dialog-head"><h2 id="modalTitle"></h2><button class="btn small" data-call='["closeModal"]' aria-label="Закрыть">✕</button></div><div class="dialog-body" id="modalBody"></div><div class="dialog-foot" id="modalFoot"></div></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
