@@ -236,10 +236,10 @@ async def settings_info(request: Request) -> dict[str, Any]:
 
 
 @router.get("/diagnostics")
-async def diagnostics(request: Request) -> dict[str, Any]:
+async def diagnostics(request: Request, check_llm: bool = False) -> dict[str, Any]:
     _require(request, "admin.diagnostics")
     state = _services(request)
-    return collect_diagnostics(state.settings, state.storage, check_llm_port=False)
+    return collect_diagnostics(state.settings, state.storage, check_llm_port=check_llm)
 
 
 @router.get("/users")

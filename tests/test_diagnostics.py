@@ -190,3 +190,40 @@ def test_bridge_queue_status_is_absent_when_no_inbox(settings):
     status = _bridge_queue_status(settings.state_dir / "telegram-inbox.sqlite3")
     assert status["state"] == "absent"
     assert status["pending"] == 0 and status["dead_letter"] == 0 and status["healthy"] is True
+
+
+def test_llm_endpoint_status_unreachable_skips_http(settings):
+    from jericho.diagnostics import _llm_endpoint_status
+
+    status = _llm_endpoint_status("http://127.0.0.1:1", "dispatcher", timeout=0.5)
+    assert status["reachable"] is False
+    assert status["model_served"] is None
+    assert status["served_models"] == []
+
+
+def test_diagnostics_flags_configured_model_not_served(settings, monkeypatch):
+    import jericho.diagnostics as diag
+
+    tuned = replace(settings, llm_enabled=True)
+    monkeypatch.setattr(
+        diag,
+        "_llm_endpoint_status",
+        lambda *a, **k: {"reachable": True, "model_served": False, "served_models": ["other-model"]},
+    )
+    report = diag.collect_diagnostics(tuned, check_llm_port=True)
+    codes = {a["code"] for a in report["actions"]}
+    assert "llm_model_not_served" in codes  # reachable but wrong model name
+    assert "start_llm_runtime" not in codes
+    assert report["ok"] is False
+
+
+def test_diagnostics_flags_llm_unreachable(settings, monkeypatch):
+    import jericho.diagnostics as diag
+
+    tuned = replace(settings, llm_enabled=True)
+    monkeypatch.setattr(
+        diag, "_llm_endpoint_status", lambda *a, **k: {"reachable": False, "model_served": None}
+    )
+    report = diag.collect_diagnostics(tuned, check_llm_port=True)
+    assert "start_llm_runtime" in {a["code"] for a in report["actions"]}
+    assert report["ok"] is False

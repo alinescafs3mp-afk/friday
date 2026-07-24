@@ -8,6 +8,7 @@ import math
 import os
 import socket
 import sqlite3
+import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -67,6 +68,38 @@ def _port_reachable(url: str, timeout: float = 1.0) -> dict[str, Any]:
             return {"reachable": True, "host": host, "port": port}
     except OSError as exc:
         return {"reachable": False, "host": host, "port": port, "error": str(exc)}
+
+
+def _llm_endpoint_status(base_url: str, model: str, *, timeout: float = 2.0) -> dict[str, Any]:
+    """Beyond a bare TCP connect: query ``{base_url}/models`` and confirm the
+    configured model is actually served. A wrong ``JERICHO_LLM_MODEL`` is the most
+    common local-LLM footgun and a socket probe reports it as 'reachable'."""
+    status: dict[str, Any] = {
+        **_port_reachable(base_url, timeout=1.0),
+        "model_expected": model,
+        "model_served": None,
+        "served_models": [],
+    }
+    if not status.get("reachable"):
+        return status
+    try:
+        request = urllib.request.Request(
+            f"{base_url.rstrip('/')}/models", headers={"Accept": "application/json"}
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - configured local URL
+            payload = json.loads(response.read())
+    except Exception as exc:  # noqa: BLE001 - any failure means we cannot confirm the model
+        status["models_error"] = f"{type(exc).__name__}: {exc}"
+        return status
+    data = payload.get("data") if isinstance(payload, dict) else None
+    served = (
+        [str(item.get("id")) for item in data if isinstance(item, dict) and item.get("id")]
+        if isinstance(data, list)
+        else []
+    )
+    status["served_models"] = served[:20]
+    status["model_served"] = (model in served) if served else None
+    return status
 
 
 def _database_status(path: Path) -> dict[str, Any]:
@@ -579,15 +612,27 @@ def collect_diagnostics(
         "actions": actions,
     }
     if check_llm_port and settings.llm_enabled:
-        result["llm_endpoint"] = _port_reachable(settings.llm_base_url)
-        result["ok"] = result["ok"] and bool(result["llm_endpoint"].get("reachable"))
-        if not result["llm_endpoint"].get("reachable"):
+        llm = _llm_endpoint_status(settings.llm_base_url, settings.llm_model)
+        result["llm_endpoint"] = llm
+        reachable = bool(llm.get("reachable"))
+        model_served = llm.get("model_served")
+        result["ok"] = result["ok"] and reachable and model_served is not False
+        if not reachable:
             add_action(
                 "start_llm_runtime",
                 "error",
                 "Локальная модель недоступна",
                 f"Проверьте vLLM endpoint {settings.llm_base_url} и профиль {settings.profile.name}.",
                 "docker compose --profile vllm up -d",
+            )
+        elif model_served is False:
+            served = ", ".join(llm.get("served_models") or []) or "—"
+            add_action(
+                "llm_model_not_served",
+                "error",
+                "Настроенная модель не обслуживается endpoint'ом",
+                f"vLLM отвечает, но не отдаёт модель '{settings.llm_model}'. "
+                f"Проверьте JERICHO_LLM_MODEL и имя модели vLLM. Обслуживаются: {served}.",
             )
     severities = {str(item.get("severity")) for item in actions}
     if not result["ok"] or "error" in severities:
