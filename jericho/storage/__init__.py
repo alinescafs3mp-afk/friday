@@ -55,6 +55,10 @@ from jericho.storage.models import (
 LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = 15
 
+# Upper bound for an API-token TTL (~100 years). Caps user input well below the
+# point where ``now + timedelta(seconds=ttl)`` would overflow ``datetime.max``.
+MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
+
 
 class UnsupportedSchemaVersionError(RuntimeError):
     """The database was created by an incompatible newer or corrupt schema."""
@@ -1608,6 +1612,8 @@ class JerichoStorage:
         if ttl_seconds is not None:
             if ttl_seconds <= 0:
                 raise ValueError("ttl_seconds must be a positive number of seconds")
+            if ttl_seconds > MAX_API_TOKEN_TTL_SECONDS:
+                raise ValueError(f"ttl_seconds must not exceed {MAX_API_TOKEN_TTL_SECONDS} (~100 years)")
             expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
         with self.transaction() as conn:
             conn.execute(

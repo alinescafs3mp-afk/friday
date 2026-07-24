@@ -39,6 +39,8 @@ _TTL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 def _parse_ttl_seconds(value: str) -> int:
     """Parse a TTL like '90d', '24h', '30m', '3600s', or bare seconds into seconds."""
 
+    from jericho.storage import MAX_API_TOKEN_TTL_SECONDS
+
     text = value.strip().lower()
     if not text:
         raise ValueError("empty TTL")
@@ -46,9 +48,12 @@ def _parse_ttl_seconds(value: str) -> int:
     if text[-1] in _TTL_UNITS:
         unit = _TTL_UNITS[text[-1]]
         text = text[:-1]
-    seconds = int(text) * unit  # int() raises ValueError on non-numeric input
-    if seconds <= 0:
-        raise ValueError("TTL must be positive")
+    # Strict ASCII digits only: reject signs, spaces, underscores, unicode digits.
+    if not (text.isascii() and text.isdigit()):
+        raise ValueError(f"invalid TTL: {value!r}")
+    seconds = int(text) * unit
+    if seconds <= 0 or seconds > MAX_API_TOKEN_TTL_SECONDS:
+        raise ValueError(f"TTL out of range: {value!r}")
     return seconds
 
 

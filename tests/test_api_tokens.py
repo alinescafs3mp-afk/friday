@@ -160,11 +160,18 @@ def test_ttl_token_is_rejected_after_expiry_but_perpetual_survives(storage):
     assert listed[kept["id"]]["expires_at"] is None
 
 
-def test_create_api_token_rejects_nonpositive_ttl(storage):
+def test_create_api_token_rejects_out_of_range_ttl(storage):
+    from jericho.storage import MAX_API_TOKEN_TTL_SECONDS
+
     storage.ensure_user("u1", preset_key="user")
-    for bad in (0, -5):
+    for bad in (0, -5, MAX_API_TOKEN_TTL_SECONDS + 1, 10**30):
         with pytest.raises(ValueError):
             storage.create_api_token("u1", hashlib.sha256(str(bad).encode()).hexdigest(), ttl_seconds=bad)
+    # The maximum itself is accepted (no overflow computing expires_at).
+    ok = storage.create_api_token(
+        "u1", hashlib.sha256(b"maxttl").hexdigest(), ttl_seconds=MAX_API_TOKEN_TTL_SECONDS
+    )
+    assert ok["expires_at"] is not None
 
 
 def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(settings, tmp_path):
@@ -225,11 +232,14 @@ def test_admin_mint_with_ttl_sets_expiry_and_rejects_bad_ttl(settings):
         assert perpetual.status_code == 200
         assert perpetual.json()["expires_at"] is None
 
-        for bad in (0, -1, "abc"):
+        # Non-positive, non-integer, JSON bool, and huge values are all 400 (never 500).
+        for bad in (0, -1, "abc", True, False, 10**30, 1e30):
             rejected = client.post(
                 "/api/admin/tokens", json={"user_id": "modt", "ttl_seconds": bad}, headers=owner
             )
-            assert rejected.status_code == 400
+            assert rejected.status_code == 400, (
+                f"ttl_seconds={bad!r} should be 400, got {rejected.status_code}"
+            )
 
 
 def test_parse_ttl_seconds_units_and_errors():
@@ -238,6 +248,8 @@ def test_parse_ttl_seconds_units_and_errors():
     assert _parse_ttl_seconds("30m") == 1800
     assert _parse_ttl_seconds("24h") == 86400
     assert _parse_ttl_seconds("90d") == 90 * 86400
-    for bad in ("", "abc", "10x", "0", "-5", "-1d"):
+    # Rejects: empty, non-numeric, unknown unit, non-positive, embedded space/underscore,
+    # unicode digits, and absurdly large values (no OverflowError leaks).
+    for bad in ("", "abc", "10x", "0", "-5", "-1d", "90 d", "1_000", "１０", "d", "999999999999d"):
         with pytest.raises(ValueError):
             _parse_ttl_seconds(bad)

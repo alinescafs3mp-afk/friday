@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from jericho.diagnostics import collect_diagnostics
 from jericho.permissions import LEGACY_OWNER_USER_ID
 from jericho.purge import purge_knowledge
-from jericho.storage import validate_user_id
+from jericho.storage import MAX_API_TOKEN_TTL_SECONDS, validate_user_id
 from jericho.storage.models import AuditEntry, InboxStatus, ResolutionStatus, new_id
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -312,12 +312,19 @@ async def create_token(request: Request) -> dict[str, Any]:
     ttl_seconds: int | None = None
     raw_ttl = body.get("ttl_seconds")
     if raw_ttl is not None:
+        # bool is an int subclass — reject it explicitly so `true` is not read as 1s.
+        if isinstance(raw_ttl, bool):
+            raise HTTPException(status_code=400, detail="ttl_seconds must be an integer")
         try:
             ttl_seconds = int(raw_ttl)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="ttl_seconds must be an integer") from exc
-        if ttl_seconds <= 0:
-            raise HTTPException(status_code=400, detail="ttl_seconds must be positive")
+        # Range-check before minting so a huge value is a 400, not a timedelta OverflowError (500).
+        if ttl_seconds <= 0 or ttl_seconds > MAX_API_TOKEN_TTL_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"ttl_seconds must be between 1 and {MAX_API_TOKEN_TTL_SECONDS}",
+            )
     secret = "jrc_" + secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
     record = state.storage.create_api_token(
