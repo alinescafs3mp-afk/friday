@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.40.0 — 2026-07-24
+
+0.40.0 — авто-накопление eval-кейсов из подтверждённого положительного feedback (золотой набор растёт сам).
+
+### Improved
+
+- **Майнинг eval-кейсов из feedback.** Золотой набор поиска (`eval_cases`: запрос → ожидаемые KO, питает метрику регрессии `retrieval_eval`) приходилось вести вручную. Положительный feedback на ответ уже несёт ровно этот сигнал — «для этого запроса процитированные KO были верны», — поэтому набор теперь растёт из него сам. При положительном (`score>0`) feedback типа SEARCH_QUALITY/ANSWER_USEFULNESS на ответ `record_feedback` берёт retrieval-запрос ответа (`metadata.search_query`) + его attributed `knowledge_object_ids` и вызывает `storage.upsert_feedback_eval_case`, создавая/обновляя кейс с `source='feedback'`. **Ручные кейсы никогда не затираются** (`ON CONFLICT … DO UPDATE … WHERE source<>'manual'`). Best-effort (после `store_feedback`, в try/except — сбой майнинга не ломает feedback); пропускаются негатив, tool-only ответы без цитат и пустые запросы. Гейтится `JERICHO_EVAL_MINE_FROM_FEEDBACK` (по умолчанию вкл). Кейсы видны в списке eval с `source='feedback'`; `run_eval` только считает recall@k (совещательно) — майненный кейс не влияет на ранжирование.
+- **По adversarial-review** (инварианты подтверждены: manual-preservation SQL, гейтинг, изоляция — корректны эмпирически): майнятся только «хорошие» запросы (`_is_mineable_eval_query`) — одна строка, 8..500 симв, **без синтетических контекстуализированных follow-up** (`"<prev>\nFollow-up: <clean>"` при 500-cap терял бы сам follow-up → вечный промах recall) и без тривиально коротких/generic («привет»), чтобы не плодить хрупкие дрейфующие кейсы.
+
+### Compatibility
+
+- Схема БД не меняется (**15**; в `eval_cases` уже есть колонка `source`). Ноль новых зависимостей. Suite: **436 тестов** (+4: upsert без затирания manual, майнинг положительного answer-feedback, пропуск negative/выкл/без-KO/follow-up/короткого, фильтр `_is_mineable_eval_query`); ruff/mypy(45)/`node --check`/codename=0 ✓.
+
 ## 0.39.0 — 2026-07-24
 
 0.39.0 — проактивный алерт на всплеск провалов аутентификации (форензика auth стала наблюдаемой).

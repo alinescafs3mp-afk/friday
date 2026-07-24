@@ -257,6 +257,7 @@ class JerichoSettings:
     eval_enabled: bool
     eval_interval_sec: float
     eval_k: int
+    eval_mine_from_feedback: bool
     # Local speech-to-text for voice notes (§9). Optional 'jericho[voice]' extra;
     # transcripts are model-generated, so they route inbox-first like vision/OCR.
     whisper_enabled: bool
@@ -501,6 +502,10 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         eval_enabled=_bool_env("JERICHO_EVAL_ENABLED", True),
         eval_interval_sec=_float_env("JERICHO_EVAL_INTERVAL_SEC", 86400, minimum=300),
         eval_k=_int_env("JERICHO_EVAL_K", 10, minimum=1),
+        # Grow the eval gold set from confirmed positive answer feedback (the cited
+        # KOs become the expected results for that query). Never overwrites a manual
+        # case. Disable to keep the gold set hand-curated.
+        eval_mine_from_feedback=_bool_env("JERICHO_EVAL_MINE_FROM_FEEDBACK", True),
         whisper_enabled=_bool_env("JERICHO_WHISPER_ENABLED", False),
         whisper_model=os.environ.get("JERICHO_WHISPER_MODEL", "small"),
         whisper_device=os.environ.get("JERICHO_WHISPER_DEVICE", "cpu"),

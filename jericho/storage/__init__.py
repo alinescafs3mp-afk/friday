@@ -2815,6 +2815,29 @@ class JerichoStorage:
             )
         return next((case for case in self.list_eval_cases(user_id) if case["query"] == clean_query), {})
 
+    def upsert_feedback_eval_case(self, user_id: str, query: str, expected_ids: Sequence[str]) -> bool:
+        """Insert or refresh a feedback-mined eval case, never overwriting a manual one.
+
+        The conditional ``WHERE source<>'manual'`` on the conflict path leaves a
+        hand-curated case for the same query untouched. Returns True if a case was
+        written or refreshed.
+        """
+        clean_query = " ".join(str(query or "").split()).strip()[:500]
+        ids = sorted({str(item) for item in expected_ids if str(item).strip()})
+        if not clean_query or not ids:
+            return False
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """INSERT INTO eval_cases(id, user_id, query, expected_ids_json, note, source, created_at)
+                   VALUES(?, ?, ?, ?, 'auto: подтверждённый feedback', 'feedback', ?)
+                   ON CONFLICT(user_id, query) DO UPDATE SET
+                     expected_ids_json=excluded.expected_ids_json,
+                     created_at=excluded.created_at
+                   WHERE eval_cases.source<>'manual'""",
+                (new_id("eval"), user_id, clean_query, json.dumps(ids), utc_now()),
+            )
+        return cursor.rowcount > 0
+
     def list_eval_cases(self, user_id: str, *, limit: int = 1000) -> list[dict[str, Any]]:
         rows = self.execute(
             "SELECT * FROM eval_cases WHERE user_id=? ORDER BY created_at DESC LIMIT ?",

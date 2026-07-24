@@ -209,6 +209,17 @@ EMPTY_KB_GUIDANCE = """Личная база знаний пока пуста. �
 SMALL_KB_GUIDANCE = """В личной базе только {count} объектов. Используй найденное, но явно отмечай, когда данных недостаточно."""
 
 
+def _is_mineable_eval_query(query: str) -> bool:
+    """A feedback-mined eval query must be a single, substantive, self-contained line.
+
+    Skips synthetic contextualized follow-ups (``_contextualize_query`` joins the
+    previous turn with ``\\nFollow-up:`` — multi-line and truncatable past the 500-char
+    store cap, which would drop the actual follow-up) and trivially short/generic
+    queries that make brittle, drift-prone eval cases.
+    """
+    return "\n" not in query and 8 <= len(query) <= 500
+
+
 @dataclass
 class AgentContext:
     conversation_id: str
@@ -1163,6 +1174,7 @@ class AgentRuntime:
         if not target_id:
             raise ValueError("target_id is required")
         feedback_context = dict(context or {})
+        mined_query = ""
         if target_type == "answer":
             message = self.storage.get_message(target_id, user_id)
             if not message or message.get("role") != "assistant":
@@ -1192,6 +1204,9 @@ class AgentRuntime:
                     if str(label).strip() and str(knowledge_id).strip()
                 }
             feedback_context["interaction_mode"] = str(metadata.get("interaction_mode") or "dialogue")
+            # The retrieval query behind this answer — the eval-case query if the
+            # user later confirms the answer was good.
+            mined_query = str(metadata.get("search_query") or "").strip()
         feedback = FeedbackItem(
             id=new_id("fb"),
             user_id=user_id,
@@ -1203,4 +1218,20 @@ class AgentRuntime:
             context_json=feedback_context,
         )
         self.storage.store_feedback(feedback)
+        # Grow the eval gold set from a confirmed-good answer: its retrieval query
+        # plus the KOs it cited become an eval case (best-effort — never blocks
+        # feedback, never overwrites a hand-curated case).
+        if (
+            self.settings.eval_mine_from_feedback
+            and target_type == "answer"
+            and score > 0
+            and feedback_type in {FeedbackType.SEARCH_QUALITY, FeedbackType.ANSWER_USEFULNESS}
+            and _is_mineable_eval_query(mined_query)
+        ):
+            expected = feedback_context.get("knowledge_object_ids") or []
+            if expected:
+                try:
+                    self.storage.upsert_feedback_eval_case(user_id, mined_query, expected)
+                except Exception:
+                    LOGGER.debug("eval-case mining from feedback failed", exc_info=True)
         return feedback.to_row()
