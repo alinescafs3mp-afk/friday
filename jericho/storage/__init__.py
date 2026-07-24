@@ -2329,6 +2329,22 @@ class JerichoStorage:
             cursor = conn.execute(query, tuple(values))
         return cursor.rowcount > 0
 
+    def claim_inbox_promotion(self, inbox_id: str, user_id: str, knowledge_object_id: str) -> bool:
+        """Atomically reserve an Inbox item for promotion.
+
+        Sets ``knowledge_object_id`` only if the item still has none, so exactly
+        one of several concurrent approvals wins; the losers get ``False`` and
+        must NOT create a second canonical Knowledge Object from one Raw Object
+        (the "Inbox before canonical, exactly once" invariant).
+        """
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE inbox SET knowledge_object_id=? "
+                "WHERE id=? AND user_id=? AND knowledge_object_id IS NULL",
+                (knowledge_object_id, inbox_id, user_id),
+            )
+        return cursor.rowcount == 1
+
     def update_inbox_suggestions(
         self,
         inbox_id: str,

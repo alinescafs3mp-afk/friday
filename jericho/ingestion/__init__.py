@@ -2540,19 +2540,29 @@ class IngestionPipeline:
                 promotion_score=1.0,
             )
             self.storage.store_knowledge_object(ko)
-            ko_id = ko.id
-            deferred_links, _ = self._link_entities(
-                user_id,
-                ko.id,
-                raw["id"],
-                suggestions.get("entities") or enrichment.entities,
-            )
-            if self.knowledge_graph:
-                # Parity with _promote_raw: confirmation-time promotion records
-                # event dates and proposes graph evolution the same way.
-                self._record_event_times(user_id, raw_content, deferred_links)
-                self.knowledge_graph.suggest_relations_for_knowledge(user_id, ko.id)
-                self.knowledge_graph.detect_conflicts_for_knowledge(user_id, ko.id)
+            # The FK requires the KO to exist before the Inbox row can point at it,
+            # so build it, then atomically CLAIM the slot. If a concurrent approval
+            # (Admin UI / Telegram / a worker) already promoted this item, discard
+            # our now-orphan KO and adopt the winner's — one Raw Object yields
+            # exactly one canonical KO ("Inbox before canonical, exactly once").
+            if self.storage.claim_inbox_promotion(inbox_id, user_id, ko.id):
+                ko_id = ko.id
+                deferred_links, _ = self._link_entities(
+                    user_id,
+                    ko.id,
+                    raw["id"],
+                    suggestions.get("entities") or enrichment.entities,
+                )
+                if self.knowledge_graph:
+                    # Parity with _promote_raw: confirmation-time promotion records
+                    # event dates and proposes graph evolution the same way.
+                    self._record_event_times(user_id, raw_content, deferred_links)
+                    self.knowledge_graph.suggest_relations_for_knowledge(user_id, ko.id)
+                    self.knowledge_graph.detect_conflicts_for_knowledge(user_id, ko.id)
+            else:
+                self.storage.purge_knowledge_object(ko.id, user_id, require_soft_deleted=False)
+                refreshed = self.storage.get_inbox_item(inbox_id, user_id)
+                ko_id = (refreshed or {}).get("knowledge_object_id")
 
         if ko_id:
             updates: dict[str, Any] = {}

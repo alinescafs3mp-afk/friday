@@ -86,3 +86,51 @@ async def test_strict_downgraded_source_replays_without_false_in_progress(settin
     assert replay["action"] == "review"
     assert replay["inbox_id"] == first["inbox_id"]
     assert storage.count_knowledge_objects("alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_inbox_promotion_creates_exactly_one_ko(settings, storage):
+    # Inbox before canonical, EXACTLY once: several approvals racing on one item
+    # (Admin UI + Telegram + a worker) must not each mint a KO from one Raw Object.
+    import threading
+
+    from jericho.storage.models import InboxStatus
+
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    seeded = await pipeline.ingest_text(
+        "alice",
+        "Проект Orion переходит на PostgreSQL 16, подтверждено командой инфраструктуры.",
+        source_ref="race:orion",
+        force_review=True,
+    )
+    inbox_id = seeded["inbox_id"]
+    raw_id = seeded["raw_object_id"]
+    assert storage.get_inbox_item(inbox_id, "alice")["knowledge_object_id"] is None
+
+    barrier = threading.Barrier(4)
+    errors: list = []
+
+    def approve():
+        try:
+            barrier.wait(timeout=5)
+            pipeline.classify_inbox_item(
+                "alice", inbox_id, InboxStatus.CLASSIFIED, promote=True, reviewed_by="alice"
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    workers = [threading.Thread(target=approve) for _ in range(4)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join(10)
+
+    assert not errors, errors
+    count = storage.execute(
+        "SELECT COUNT(*) AS n FROM knowledge_objects WHERE raw_object_id=? AND user_id=?",
+        (raw_id, "alice"),
+    ).fetchone()["n"]
+    assert count == 1, f"expected exactly one KO, got {count}"
+    ko = storage.get_knowledge_by_raw(raw_id, "alice")
+    assert ko is not None
+    assert storage.get_inbox_item(inbox_id, "alice")["knowledge_object_id"] == ko["id"]
