@@ -1702,8 +1702,13 @@ class JerichoStorage:
         return dict(row) if row else None
 
     def get_knowledge_by_raw(self, raw_id: str, user_id: str) -> dict[str, Any] | None:
+        # The LIVE Knowledge Object for a Raw Object: soft-deleted rows (e.g. a
+        # promotion-race loser's orphan, or an ignored KO) are excluded so callers
+        # never adopt a hidden object as the canonical one.
         row = self.execute(
-            "SELECT * FROM knowledge_objects WHERE raw_object_id=? AND user_id=? ORDER BY version DESC LIMIT 1",
+            "SELECT * FROM knowledge_objects "
+            "WHERE raw_object_id=? AND user_id=? AND deleted_at IS NULL "
+            "ORDER BY version DESC LIMIT 1",
             (raw_id, user_id),
         ).fetchone()
         return dict(row) if row else None

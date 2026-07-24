@@ -22,6 +22,7 @@ import mimetypes
 import os
 import re
 import tempfile
+import threading
 import unicodedata
 from collections import Counter
 from dataclasses import asdict, dataclass, field, replace
@@ -1117,6 +1118,9 @@ class IngestionPipeline:
         self.storage = storage
         self.knowledge_graph = knowledge_graph
         self.llm = llm
+        # Serialises inbox promotion within this (single) backend process so
+        # concurrent approvals cannot race on the shared storage connection.
+        self._promotion_lock = threading.Lock()
         self._doc_extractor = DocumentExtractor(
             max_archive_entries=settings.max_archive_entries,
             max_archive_uncompressed_bytes=settings.max_archive_uncompressed_bytes,
@@ -2467,6 +2471,89 @@ class IngestionPipeline:
             "idempotent_replay": False,
         }
 
+    def _create_promoted_ko(
+        self,
+        inbox_id: str,
+        user_id: str,
+        item: dict[str, Any],
+        reviewer: str,
+        *,
+        title: str | None,
+        summary: str | None,
+        knowledge_kind: str | None,
+        importance: float | None,
+        metadata: dict[str, Any] | None,
+        tags: list[str] | None,
+    ) -> str | None:
+        """Build the canonical KO for a promoted Inbox item and claim the slot.
+
+        Returns the resulting knowledge_object_id. The caller holds the promotion
+        lock, so the claim normally wins; the loser branch stays as defence in
+        depth and SOFT-deletes its orphan (never hard-purge — purge can cascade to
+        the Raw Object shared with the winner's KO).
+        """
+        raw = self.storage.get_raw_object(item["raw_object_id"], user_id)
+        if not raw:
+            raise ValueError("Inbox Raw Object not found")
+        suggestions = _json_dict(item.get("suggestions_json"))
+        raw_content = str(raw.get("raw_content") or "")
+        assessment = self.assess_text(raw_content, force_knowledge=True)
+        enrichment = self._enrich(raw_content, assessment, user_id=user_id)
+        suggested_metadata_value = suggestions.get("metadata")
+        suggested_metadata: dict[str, Any] = (
+            suggested_metadata_value if isinstance(suggested_metadata_value, dict) else {}
+        )
+        ko = KnowledgeObject(
+            id=new_id("ko"),
+            user_id=user_id,
+            raw_object_id=raw["id"],
+            content=raw_content,
+            content_type=str(raw.get("content_type") or "text"),
+            title=(title or suggestions.get("title") or enrichment.title)[:200],
+            summary=(summary or suggestions.get("summary") or enrichment.summary)[:2000],
+            tags_json=sorted(set(tags if tags is not None else suggestions.get("tags") or enrichment.tags))[
+                :32
+            ],
+            metadata_json={
+                **enrichment.metadata,
+                **suggested_metadata,
+                **(metadata or {}),
+                "manually_promoted_from_inbox": inbox_id,
+                "reviewed_by": reviewer,
+            },
+            knowledge_kind=str(
+                knowledge_kind or suggestions.get("knowledge_kind") or enrichment.knowledge_kind
+            )[:40],
+            importance=_clamp(
+                importance
+                if importance is not None
+                else float(suggestions.get("importance", enrichment.importance))
+            ),
+            quality_score=max(
+                0.55,
+                _clamp(float(suggestions.get("quality_score", enrichment.quality_score))),
+            ),
+            promotion_score=1.0,
+        )
+        self.storage.store_knowledge_object(ko)
+        if self.storage.claim_inbox_promotion(inbox_id, user_id, ko.id):
+            deferred_links, _ = self._link_entities(
+                user_id,
+                ko.id,
+                raw["id"],
+                suggestions.get("entities") or enrichment.entities,
+            )
+            if self.knowledge_graph:
+                # Parity with _promote_raw: confirmation-time promotion records
+                # event dates and proposes graph evolution the same way.
+                self._record_event_times(user_id, raw_content, deferred_links)
+                self.knowledge_graph.suggest_relations_for_knowledge(user_id, ko.id)
+                self.knowledge_graph.detect_conflicts_for_knowledge(user_id, ko.id)
+            return ko.id
+        self.storage.soft_delete_knowledge_object(ko.id, user_id)
+        refreshed = self.storage.get_inbox_item(inbox_id, user_id)
+        return (refreshed or {}).get("knowledge_object_id")
+
     def classify_inbox_item(
         self,
         user_id: str,
@@ -2496,73 +2583,25 @@ class IngestionPipeline:
         ko_id = item.get("knowledge_object_id")
         should_promote = promote is True or (promote is None and status == InboxStatus.CLASSIFIED)
         if not ko_id and should_promote:
-            raw = self.storage.get_raw_object(item["raw_object_id"], user_id)
-            if not raw:
-                raise ValueError("Inbox Raw Object not found")
-            suggestions = _json_dict(item.get("suggestions_json"))
-            raw_content = str(raw.get("raw_content") or "")
-            assessment = self.assess_text(raw_content, force_knowledge=True)
-            enrichment = self._enrich(raw_content, assessment, user_id=user_id)
-            suggested_metadata_value = suggestions.get("metadata")
-            suggested_metadata: dict[str, Any] = (
-                suggested_metadata_value if isinstance(suggested_metadata_value, dict) else {}
-            )
-            ko = KnowledgeObject(
-                id=new_id("ko"),
-                user_id=user_id,
-                raw_object_id=raw["id"],
-                content=raw_content,
-                content_type=str(raw.get("content_type") or "text"),
-                title=(title or suggestions.get("title") or enrichment.title)[:200],
-                summary=(summary or suggestions.get("summary") or enrichment.summary)[:2000],
-                tags_json=sorted(
-                    set(tags if tags is not None else suggestions.get("tags") or enrichment.tags)
-                )[:32],
-                metadata_json={
-                    **enrichment.metadata,
-                    **suggested_metadata,
-                    **(metadata or {}),
-                    "manually_promoted_from_inbox": inbox_id,
-                    "reviewed_by": reviewer,
-                },
-                knowledge_kind=str(
-                    knowledge_kind or suggestions.get("knowledge_kind") or enrichment.knowledge_kind
-                )[:40],
-                importance=_clamp(
-                    importance
-                    if importance is not None
-                    else float(suggestions.get("importance", enrichment.importance))
-                ),
-                quality_score=max(
-                    0.55,
-                    _clamp(float(suggestions.get("quality_score", enrichment.quality_score))),
-                ),
-                promotion_score=1.0,
-            )
-            self.storage.store_knowledge_object(ko)
-            # The FK requires the KO to exist before the Inbox row can point at it,
-            # so build it, then atomically CLAIM the slot. If a concurrent approval
-            # (Admin UI / Telegram / a worker) already promoted this item, discard
-            # our now-orphan KO and adopt the winner's — one Raw Object yields
-            # exactly one canonical KO ("Inbox before canonical, exactly once").
-            if self.storage.claim_inbox_promotion(inbox_id, user_id, ko.id):
-                ko_id = ko.id
-                deferred_links, _ = self._link_entities(
-                    user_id,
-                    ko.id,
-                    raw["id"],
-                    suggestions.get("entities") or enrichment.entities,
-                )
-                if self.knowledge_graph:
-                    # Parity with _promote_raw: confirmation-time promotion records
-                    # event dates and proposes graph evolution the same way.
-                    self._record_event_times(user_id, raw_content, deferred_links)
-                    self.knowledge_graph.suggest_relations_for_knowledge(user_id, ko.id)
-                    self.knowledge_graph.detect_conflicts_for_knowledge(user_id, ko.id)
-            else:
-                self.storage.purge_knowledge_object(ko.id, user_id, require_soft_deleted=False)
-                refreshed = self.storage.get_inbox_item(inbox_id, user_id)
-                ko_id = (refreshed or {}).get("knowledge_object_id")
+            with self._promotion_lock:
+                # Serialised within this (single) backend process so concurrent
+                # approvals cannot race on the shared storage connection. Re-read
+                # inside the lock: only the first holder creates the KO; the rest
+                # observe its id and adopt it.
+                ko_id = (self.storage.get_inbox_item(inbox_id, user_id) or item).get("knowledge_object_id")
+                if not ko_id:
+                    ko_id = self._create_promoted_ko(
+                        inbox_id,
+                        user_id,
+                        item,
+                        reviewer,
+                        title=title,
+                        summary=summary,
+                        knowledge_kind=knowledge_kind,
+                        importance=importance,
+                        metadata=metadata,
+                        tags=tags,
+                    )
 
         if ko_id:
             updates: dict[str, Any] = {}

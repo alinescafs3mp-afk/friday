@@ -126,11 +126,14 @@ async def test_concurrent_inbox_promotion_creates_exactly_one_ko(settings, stora
         w.join(10)
 
     assert not errors, errors
+    # Exactly one LIVE canonical KO from one Raw Object; race losers soft-delete
+    # their orphan (hidden from retrieval, provenance kept).
     count = storage.execute(
-        "SELECT COUNT(*) AS n FROM knowledge_objects WHERE raw_object_id=? AND user_id=?",
+        "SELECT COUNT(*) AS n FROM knowledge_objects "
+        "WHERE raw_object_id=? AND user_id=? AND deleted_at IS NULL",
         (raw_id, "alice"),
     ).fetchone()["n"]
-    assert count == 1, f"expected exactly one KO, got {count}"
+    assert count == 1, f"expected exactly one live KO, got {count}"
     ko = storage.get_knowledge_by_raw(raw_id, "alice")
-    assert ko is not None
+    assert ko is not None and ko.get("deleted_at") is None
     assert storage.get_inbox_item(inbox_id, "alice")["knowledge_object_id"] == ko["id"]
