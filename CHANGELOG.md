@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.0 — 2026-07-24
+
+0.29.0 — операторская половина Telegram-наблюдаемости: очередь моста видна из diagnostics, `status` и админки.
+
+### Improved
+
+- **Очередь Telegram-моста наблюдаема.** Раньше `telegram-inbox.sqlite3` (durable-очередь моста с pending/dead_letter) никто снаружи не читал — потерянные/отклонённые сообщения были видны только ручным чтением SQLite. `jericho/diagnostics._bridge_queue_status` открывает её **read-only** (`mode=ro`, как `_database_status`) и считает pending + dead_letter + последнюю ошибку. Пробрасывается в `collect_diagnostics` (`bridge_queue`), а dead-letter > 0 порождает warning-action. Показывается в `jericho status` («Bridge queue: N pending · M dead-letter») и в админ-вьюхе «Диагностика» (строка «Очередь моста» с бейджем). Пара к user-ответу при dead-letter из v0.28.0.
+
+### Compatibility
+
+- Схема БД не меняется (14). Ноль новых зависимостей. Suite: **377 тестов**; ruff/mypy(44)/`node --check`/браузерный smoke ✓.
+
 ## 0.28.0 — 2026-07-24
 
 0.28.0 — Telegram UX из бэклога аудита: команды перестают быть невидимыми, а отклонённые сообщения — немыми.
