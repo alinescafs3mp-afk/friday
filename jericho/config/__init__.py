@@ -277,6 +277,7 @@ class JerichoSettings:
     api_require_token_on_loopback: bool
     api_user_rate_limit_per_minute: int
     api_auth_failure_limit_per_minute: int
+    auth_failure_alert_threshold: int
     trust_proxy_headers: bool
     trusted_proxy_networks: list[str]
     cors_origins: list[str]
@@ -518,6 +519,11 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         api_auth_failure_limit_per_minute=_int_env(
             "JERICHO_API_AUTH_FAILURE_LIMIT_PER_MINUTE", 10, minimum=1
         ),
+        # Diagnostics/sentinel raise a warning when auth failures over the last 24h
+        # reach this count (possible brute-force / leaked-token abuse). The 24h
+        # window (vs. the hourly sentinel tick and quiet hours) means a sustained or
+        # overnight burst is not aliased away. 0 disables.
+        auth_failure_alert_threshold=_int_env("JERICHO_AUTH_FAILURE_ALERT_THRESHOLD", 60, minimum=0),
         trust_proxy_headers=_bool_env("JERICHO_TRUST_PROXY_HEADERS", False),
         trusted_proxy_networks=_list_env("JERICHO_TRUSTED_PROXY_NETWORKS", ["127.0.0.1/32", "::1/128"]),
         cors_origins=cors_origins,

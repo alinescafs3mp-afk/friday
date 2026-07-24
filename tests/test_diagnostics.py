@@ -227,3 +227,72 @@ def test_diagnostics_flags_llm_unreachable(settings, monkeypatch):
     report = diag.collect_diagnostics(tuned, check_llm_port=True)
     assert "start_llm_runtime" in {a["code"] for a in report["actions"]}
     assert report["ok"] is False
+
+
+# --- auth-failure burst alerting ------------------------------------------
+
+
+def _seed_auth_failures(storage, count, *, created_at=None):
+    from jericho.storage.models import AuditEntry, new_id, utc_now
+
+    for index in range(count):
+        entry = AuditEntry(
+            id=new_id("audit"),
+            user_id="anonymous",
+            action="auth.failed",
+            target_type="auth",
+            target_id="invalid_credentials",
+            after_json={"reason": "invalid_credentials", "status": 401},
+            ip_address="10.0.0.9",
+            request_id=f"req-{index}",
+            created_at=created_at or utc_now(),
+        )
+        storage.log_audit(entry)
+
+
+def test_count_recent_audit_respects_the_time_window(storage):
+    from datetime import UTC, datetime, timedelta
+
+    _seed_auth_failures(storage, 3)  # now
+    old = (datetime.now(UTC) - timedelta(hours=2)).isoformat(timespec="seconds")
+    _seed_auth_failures(storage, 5, created_at=old)  # 2h ago
+    since = (datetime.now(UTC) - timedelta(hours=1)).isoformat(timespec="seconds")
+    assert storage.count_recent_audit("auth.failed", since) == 3  # only the recent ones
+    assert storage.count_recent_audit("nope", since) == 0
+    # limit caps the scan for a threshold comparison (bounded cost on a bloated log).
+    assert storage.count_recent_audit("auth.failed", since, limit=2) == 2
+
+
+def test_auth_failure_burst_raises_a_warning_without_failing_ok(settings, storage):
+    tuned = replace(settings, auth_failure_alert_threshold=3)
+    _seed_auth_failures(storage, 4)  # >= threshold
+    report = collect_diagnostics(tuned, storage)
+    assert report["auth_failures"]["recent_failures"] == 4
+    assert report["auth_failures"]["threshold"] == 3
+    burst = [a for a in report["actions"] if a["code"] == "inspect_auth_failure_burst"]
+    assert burst and burst[0]["severity"] == "warning"  # sentinel forwards warnings -> push
+    # A burst is a warning, not a hard failure: it must not flip the ok flag.
+    ok_without = collect_diagnostics(replace(settings, auth_failure_alert_threshold=0), storage)["ok"]
+    assert report["ok"] == ok_without
+
+
+def test_auth_failure_below_threshold_and_disabled_emit_no_action(settings, storage):
+    _seed_auth_failures(storage, 2)
+    below = collect_diagnostics(replace(settings, auth_failure_alert_threshold=5), storage)
+    assert not any(a["code"] == "inspect_auth_failure_burst" for a in below["actions"])
+    # threshold 0 disables the alert entirely even with many failures.
+    _seed_auth_failures(storage, 20)
+    disabled = collect_diagnostics(replace(settings, auth_failure_alert_threshold=0), storage)
+    assert not any(a["code"] == "inspect_auth_failure_burst" for a in disabled["actions"])
+    assert disabled["auth_failures"]["recent_failures"] == 22
+
+
+def test_auth_failures_counted_read_only_without_open_storage(settings, tmp_path):
+    local = replace(settings, database_path=tmp_path / "audit.sqlite3", auth_failure_alert_threshold=2)
+    storage = init_storage(local)
+    _seed_auth_failures(storage, 3)
+    storage.close()
+    # storage=None -> the read-only connection path still counts and alerts.
+    report = collect_diagnostics(local, None)
+    assert report["auth_failures"]["recent_failures"] == 3
+    assert any(a["code"] == "inspect_auth_failure_burst" for a in report["actions"])

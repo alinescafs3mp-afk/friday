@@ -446,6 +446,60 @@ def _bridge_queue_status(path: Path) -> dict[str, Any]:
     }
 
 
+# Bound the auth-failure scan: only a threshold comparison is needed, and a
+# request flood keeps appending auth.failed rows even while rate-limited, so an
+# unbounded COUNT could scan a huge trailing window on every diagnostics call.
+_AUTH_FAILURE_SCAN_CAP = 1000
+
+
+def _count_auth_failures(db_path: Path, storage: JerichoStorage | None, since: str, cap: int) -> int:
+    """Count ``auth.failed`` audit entries at/after an ISO timestamp, scan capped at ``cap``.
+
+    Uses the live storage when available, else a read-only connection so
+    ``jericho status`` (which has no open storage) still sees the count.
+    """
+    if storage is not None:
+        try:
+            return int(storage.count_recent_audit("auth.failed", since, limit=cap))
+        except Exception:  # noqa: BLE001 - diagnostics must never raise
+            return 0
+    if not db_path.is_file():
+        return 0
+    try:
+        conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=2)
+        try:
+            conn.execute("PRAGMA query_only=ON")
+            row = conn.execute(
+                "SELECT COUNT(*) FROM "
+                "(SELECT 1 FROM audit_log WHERE action='auth.failed' AND created_at>=? LIMIT ?)",
+                (since, cap),
+            ).fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        return 0
+
+
+def _auth_failure_status(
+    db_path: Path, storage: JerichoStorage | None, *, threshold: int, window_hours: int = 24
+) -> dict[str, Any]:
+    """Recent auth-failure count vs the alert threshold (threshold 0 = disabled).
+
+    A 24h window (wider than the hourly sentinel tick and quiet hours) keeps a
+    sustained or overnight burst from being aliased away between polls.
+    """
+    since = (datetime.now(UTC) - timedelta(hours=window_hours)).isoformat(timespec="seconds")
+    cap = max(threshold, _AUTH_FAILURE_SCAN_CAP)
+    count = _count_auth_failures(db_path, storage, since, cap)
+    return {
+        "window_hours": window_hours,
+        "recent_failures": count,
+        "threshold": threshold,
+        "capped": count >= cap,
+    }
+
+
 def collect_diagnostics(
     settings: JerichoSettings,
     storage: JerichoStorage | None = None,
@@ -583,6 +637,20 @@ def collect_diagnostics(
             "но требуют внимания. Проверьте журнал моста и последнюю ошибку.",
             "jericho status",
         )
+    auth_failures = _auth_failure_status(
+        settings.database_path, storage, threshold=settings.auth_failure_alert_threshold
+    )
+    if auth_failures["threshold"] > 0 and auth_failures["recent_failures"] >= auth_failures["threshold"]:
+        shown = f"{'≥' if auth_failures['capped'] else ''}{auth_failures['recent_failures']}"
+        add_action(
+            "inspect_auth_failure_burst",
+            "warning",
+            "Всплеск неудачных аутентификаций",
+            f"{shown} провалов auth за 24 часа (порог {auth_failures['threshold']}). "
+            "Возможен брутфорс или злоупотребление токеном — проверьте "
+            "GET /api/admin/audit (action=auth.failed).",
+            "jericho status",
+        )
 
     result: dict[str, Any] = {
         "ok": not any(not issue.startswith("warning:") for issue in configuration)
@@ -605,6 +673,7 @@ def collect_diagnostics(
         "workers": workers,
         "backend_lease": backend_lease,
         "bridge_queue": bridge_queue,
+        "auth_failures": auth_failures,
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,

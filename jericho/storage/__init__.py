@@ -4383,6 +4383,26 @@ class JerichoStorage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def count_recent_audit(self, action: str, since: str, *, limit: int | None = None) -> int:
+        """Count audit-log entries for ``action`` created at/after an ISO timestamp.
+
+        ``limit`` caps the scan (``SELECT 1 ... LIMIT n``): callers that only need a
+        threshold comparison stay O(limit) regardless of how bloated the log is (a
+        request flood keeps auditing ``auth.failed`` even while being rate-limited).
+        """
+        if limit is not None:
+            row = self.execute(
+                "SELECT COUNT(*) AS count FROM "
+                "(SELECT 1 FROM audit_log WHERE action=? AND created_at>=? LIMIT ?)",
+                (action, since, max(0, limit)),
+            ).fetchone()
+        else:
+            row = self.execute(
+                "SELECT COUNT(*) AS count FROM audit_log WHERE action=? AND created_at>=?",
+                (action, since),
+            ).fetchone()
+        return int(row["count"] if row else 0)
+
     # ------------------------------------------------------------------
     # Runtime state, lifecycle, backup, and export
     # ------------------------------------------------------------------
