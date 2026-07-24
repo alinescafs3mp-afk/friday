@@ -31,6 +31,25 @@ TELEGRAM_TEXT_LIMIT = 4096
 RETRY_DELAYS_SEC = (2.0, 10.0, 30.0, 60.0, 300.0)
 CALLBACK_TARGET_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
 
+# Registered with Telegram (setMyCommands) so the client shows '/' autocomplete.
+# Names must be lowercase, 1-32 chars, no leading slash; kept in sync with /help.
+BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("chat", "обычный разговор"),
+    ("work", "работа с личными знаниями"),
+    ("research", "многошаговое исследование"),
+    ("search", "поиск по базе без ответа модели"),
+    ("browse", "записи по тегу, проекту или сущности"),
+    ("tags", "теги базы с количеством записей"),
+    ("inbox", "разобрать ближайшие предложения"),
+    ("merges", "подтвердить объединение дубликатов"),
+    ("mission", "многошаговая миссия в фоне"),
+    ("missions", "список миссий и управление"),
+    ("status", "состояние базы"),
+    ("new", "начать новый диалог"),
+    ("note", "явно сохранить заметку"),
+    ("help", "справка по командам"),
+)
+
 
 @dataclass(frozen=True)
 class TelegramConfig:
@@ -276,6 +295,7 @@ class TelegramBridge:
                 ) as backend,
             ):
                 LOGGER.info("Telegram bridge started at offset %d", self._offset)
+                await self._register_commands(telegram)
                 # Inbound polling and outbound push run concurrently; a crash in
                 # one loop must not take down the other, so each supervises itself.
                 await asyncio.gather(
@@ -286,6 +306,19 @@ class TelegramBridge:
             self._inbox.close()
             self._lease.release()
             LOGGER.info("Telegram bridge stopped")
+
+    async def _register_commands(self, telegram: httpx.AsyncClient) -> None:
+        """Register the command menu once so Telegram shows '/' autocomplete.
+
+        The command surface is otherwise discoverable only by remembering /help.
+        Best-effort: a failure here must never stop the bridge from starting.
+        """
+        payload = {"commands": [{"command": name, "description": desc} for name, desc in BOT_COMMANDS]}
+        try:
+            response = await telegram.post(f"{self._api_url}/setMyCommands", json=payload)
+            response.raise_for_status()
+        except Exception:
+            LOGGER.warning("Telegram setMyCommands failed (non-fatal)", exc_info=True)
 
     async def _poll_loop(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:
         backoff = 1.0

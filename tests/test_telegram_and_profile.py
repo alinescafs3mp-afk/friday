@@ -789,3 +789,20 @@ def test_api_search_endpoint_backs_the_command(settings):
         hit = next((r for r in results if r.get("id") == ko_id), None)
         assert hit is not None
         assert hit["title"] and hit["knowledge_kind"] and hit["lifecycle_stage"]
+
+
+@pytest.mark.asyncio
+async def test_register_commands_sets_the_telegram_menu(tmp_path):
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    try:
+        await bridge._register_commands(telegram)
+        posted = [payload for url, payload in telegram.calls if url.endswith("/setMyCommands")]
+        assert posted, telegram.calls
+        commands = posted[0]["commands"]
+        names = {c["command"] for c in commands}
+        assert {"search", "note", "inbox", "help", "status"} <= names
+        # Valid Telegram command tokens: lowercase, no leading slash, described.
+        assert all(c["command"].islower() and "/" not in c["command"] and c["description"] for c in commands)
+    finally:
+        bridge._inbox.close()
