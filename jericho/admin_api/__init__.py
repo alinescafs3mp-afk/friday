@@ -309,18 +309,35 @@ async def create_token(request: Request) -> dict[str, Any]:
     # A delegated administrator must not mint a token for an owner account.
     _protect_owner_target(request, user_id)
     label = str(body.get("label") or "")[:200]
+    ttl_seconds: int | None = None
+    raw_ttl = body.get("ttl_seconds")
+    if raw_ttl is not None:
+        try:
+            ttl_seconds = int(raw_ttl)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="ttl_seconds must be an integer") from exc
+        if ttl_seconds <= 0:
+            raise HTTPException(status_code=400, detail="ttl_seconds must be positive")
     secret = "jrc_" + secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
-    record = state.storage.create_api_token(user_id, token_hash, label=label, created_by=actor.user_id)
+    record = state.storage.create_api_token(
+        user_id, token_hash, label=label, created_by=actor.user_id, ttl_seconds=ttl_seconds
+    )
     _audit(
         request,
         "admin.token.create",
         "api_token",
         str(record.get("id") or ""),
-        after={"user_id": user_id, "label": label},
+        after={"user_id": user_id, "label": label, "expires_at": record.get("expires_at")},
     )
     # The plaintext token is returned exactly once and is never stored.
-    return {"token": secret, "id": record.get("id"), "user_id": user_id, "label": label}
+    return {
+        "token": secret,
+        "id": record.get("id"),
+        "user_id": user_id,
+        "label": label,
+        "expires_at": record.get("expires_at"),
+    }
 
 
 @router.delete("/tokens/{token_id}")

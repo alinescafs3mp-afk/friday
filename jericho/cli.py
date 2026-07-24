@@ -33,6 +33,25 @@ def _json_print(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+_TTL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _parse_ttl_seconds(value: str) -> int:
+    """Parse a TTL like '90d', '24h', '30m', '3600s', or bare seconds into seconds."""
+
+    text = value.strip().lower()
+    if not text:
+        raise ValueError("empty TTL")
+    unit = 1
+    if text[-1] in _TTL_UNITS:
+        unit = _TTL_UNITS[text[-1]]
+        text = text[:-1]
+    seconds = int(text) * unit  # int() raises ValueError on non-numeric input
+    if seconds <= 0:
+        raise ValueError("TTL must be positive")
+    return seconds
+
+
 def _write_private_text_atomic(path: Path, content: str) -> None:
     """Replace a local secret file atomically without following a target symlink."""
 
@@ -509,6 +528,14 @@ def _mint_token(args: argparse.Namespace) -> int:
         )
         return 2
 
+    ttl_seconds: int | None = None
+    if getattr(args, "ttl", None):
+        try:
+            ttl_seconds = _parse_ttl_seconds(args.ttl)
+        except ValueError:
+            print(f"Некорректный --ttl: {args.ttl!r}. Примеры: 90d, 24h, 30m, 3600s.", file=sys.stderr)
+            return 2
+
     settings = load_settings()
     ensure_runtime_dirs(settings)
     storage = init_storage(settings)
@@ -530,7 +557,13 @@ def _mint_token(args: argparse.Namespace) -> int:
         current = storage.get_user(user_id) or {}
         secret = "jrc_" + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
-        record = storage.create_api_token(user_id, token_hash, label=args.label or "", created_by="cli")
+        record = storage.create_api_token(
+            user_id,
+            token_hash,
+            label=args.label or "",
+            created_by="cli",
+            ttl_seconds=ttl_seconds,
+        )
     finally:
         storage.close()
     _json_print(
@@ -539,6 +572,7 @@ def _mint_token(args: argparse.Namespace) -> int:
             "user_id": user_id,
             "preset": current.get("preset_key"),
             "label": args.label or "",
+            "expires_at": record.get("expires_at"),
         }
     )
     print(f"API-токен (показывается один раз): {secret}", file=sys.stderr)
@@ -701,6 +735,7 @@ def build_parser() -> argparse.ArgumentParser:
     mint.add_argument("--user", required=True, help="Account id the token authenticates as")
     mint.add_argument("--preset", help="Set the account preset (owner/admin/moderator/user/guest)")
     mint.add_argument("--label", help="Human-readable label for the token")
+    mint.add_argument("--ttl", help="Token lifetime, e.g. 90d, 24h, 30m, 3600s (default: no expiry)")
     mint.set_defaults(handler=_mint_token)
 
     revoke = sub.add_parser("revoke-token", help="Revoke a previously issued API token by id")

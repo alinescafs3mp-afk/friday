@@ -53,7 +53,7 @@ from jericho.storage.models import (
 )
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 class UnsupportedSchemaVersionError(RuntimeError):
@@ -517,7 +517,8 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     created_by TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     last_used_at TEXT,
-    revoked_at TEXT
+    revoked_at TEXT,
+    expires_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_embeddings (
@@ -1123,6 +1124,8 @@ class JerichoStorage:
             },
             "conversations": {"mode": "TEXT NOT NULL DEFAULT 'dialogue'"},
             "channel_sessions": {"mode": "TEXT NOT NULL DEFAULT 'dialogue'"},
+            # NULL expires_at = a non-expiring token (all legacy tokens stay valid).
+            "api_tokens": {"expires_at": "TEXT"},
         }
         for table, columns in additions.items():
             if table not in table_names:
@@ -1590,25 +1593,40 @@ class JerichoStorage:
         *,
         label: str = "",
         created_by: str = "",
+        ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
-        """Store the SHA-256 of a scoped API token; the plaintext is never persisted."""
+        """Store the SHA-256 of a scoped API token; the plaintext is never persisted.
+
+        ``ttl_seconds`` (a positive number of seconds) makes the token expire that
+        long after creation; ``None`` mints a non-expiring token. created_at and
+        expires_at come from the same instant so the lifetime is exact.
+        """
         token_id = new_id("tok")
+        now = datetime.now(UTC)
+        created_at = now.isoformat(timespec="seconds")
+        expires_at: str | None = None
+        if ttl_seconds is not None:
+            if ttl_seconds <= 0:
+                raise ValueError("ttl_seconds must be a positive number of seconds")
+            expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
         with self.transaction() as conn:
             conn.execute(
-                """INSERT INTO api_tokens(id, user_id, token_sha256, label, created_by, created_at)
-                   VALUES(?, ?, ?, ?, ?, ?)""",
-                (token_id, user_id, token_sha256, label[:200], created_by, utc_now()),
+                """INSERT INTO api_tokens(id, user_id, token_sha256, label, created_by, created_at, expires_at)
+                   VALUES(?, ?, ?, ?, ?, ?, ?)""",
+                (token_id, user_id, token_sha256, label[:200], created_by, created_at, expires_at),
             )
         row = self.execute("SELECT * FROM api_tokens WHERE id=?", (token_id,)).fetchone()
         return dict(row) if row else {}
 
     def find_api_token(self, token_sha256: str) -> dict[str, Any] | None:
-        """Return the live (non-revoked) token row matching a SHA-256, if any."""
+        """Return the live token row for a SHA-256: non-revoked AND not expired."""
         if not token_sha256:
             return None
         row = self.execute(
-            "SELECT * FROM api_tokens WHERE token_sha256=? AND revoked_at IS NULL",
-            (token_sha256,),
+            """SELECT * FROM api_tokens
+               WHERE token_sha256=? AND revoked_at IS NULL
+                 AND (expires_at IS NULL OR expires_at > ?)""",
+            (token_sha256, utc_now()),
         ).fetchone()
         return dict(row) if row else None
 
@@ -1635,7 +1653,7 @@ class JerichoStorage:
             clauses.append("revoked_at IS NULL")
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.execute(
-            "SELECT id, user_id, label, created_by, created_at, last_used_at, revoked_at "
+            "SELECT id, user_id, label, created_by, created_at, last_used_at, revoked_at, expires_at "
             f"FROM api_tokens{where} ORDER BY created_at DESC",  # nosec B608
             tuple(params),
         ).fetchall()

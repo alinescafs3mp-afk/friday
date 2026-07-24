@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.34.0 — 2026-07-24
+
+0.34.0 — истекающие API-токены (TTL). Схема БД 14→15.
+
+### Improved
+
+- **TTL для scoped API-токенов.** `api_tokens` получает nullable `expires_at`; `create_api_token(ttl_seconds=)` минтит токен, истекающий через N секунд (`NULL` = бессрочный — все существующие токены остаются валидны). `find_api_token` теперь форсит `revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now)` — единственный путь валидации scoped-токена, поэтому истёкший токен отклоняется как «Invalid API token» (401). `list_api_tokens` отдаёт `expires_at` (только метаданные, хэш по-прежнему не раскрывается). CLI `mint-token --ttl 90d|24h|30m|3600s` (парсер `_parse_ttl_seconds`, `ttl<=0`/мусор → ошибка); `POST /api/admin/tokens` принимает `ttl_seconds` (валидирует положительное целое, иначе 400) и возвращает `expires_at`; аудит фиксирует `expires_at`. Сравнение лексикографическое по ISO-8601 UTC (обе метки из `utc_now()`, `timespec=seconds`, `+00:00`). Owner-bearer и loopback-пути не затрагиваются (они не DB-токены).
+
+### Compatibility
+
+- **Схема БД 14→15.** `_migrate_legacy_schema` идемпотентно добавляет `api_tokens.expires_at` (nullable) старым БД; смена версии триггерит безобидную FTS integrity-check. **Миграция проверена dry-run на консистентном снимке живой БД**: 14→15, `integrity_check ok`, 0 FK-нарушений, токен-round-trip. Ноль новых зависимостей. Suite: **393 теста** (+6 TTL: истечение отклоняется, бессрочный выживает, `ttl<=0` → ValueError, legacy-миграция добавляет колонку, expired→401 через auth, парсер `--ttl`); ruff/mypy(44)/`node --check`/codename=0 ✓.
+
 ## 0.33.0 — 2026-07-24
 
 0.33.0 — переархитектура хранилища: соединение-на-поток + WAL. Устранён hazard общего sqlite-курсора (корректность, не только латентность).

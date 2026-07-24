@@ -11,11 +11,17 @@ owner token (no privilege escalation).
 from __future__ import annotations
 
 import hashlib
+import sqlite3
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
+from jericho.cli import _parse_ttl_seconds
 from jericho.permissions import LEGACY_OWNER_USER_ID
 from jericho.server import create_app
+from jericho.storage import SCHEMA_VERSION, JerichoStorage
 
 
 def _issue(storage, user_id: str, preset: str, secret: str) -> dict:
@@ -122,3 +128,116 @@ def test_delegated_admin_cannot_mint_owner_token(settings):
         # …but not for the owner account (privilege escalation is refused).
         escalation = client.post("/api/admin/tokens", json={"user_id": LEGACY_OWNER_USER_ID}, headers=admin)
         assert escalation.status_code == 403
+
+
+# --- TTL / expiry ---------------------------------------------------------
+
+
+def _backdate(storage, token_id: str) -> None:
+    past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat(timespec="seconds")
+    with storage.transaction() as conn:
+        conn.execute("UPDATE api_tokens SET expires_at=? WHERE id=?", (past, token_id))
+
+
+def test_ttl_token_is_rejected_after_expiry_but_perpetual_survives(storage):
+    storage.ensure_user("u1", preset_key="user")
+    hashed = hashlib.sha256(b"jrc_ttl").hexdigest()
+    record = storage.create_api_token("u1", hashed, label="temp", created_by="t", ttl_seconds=3600)
+    assert record["expires_at"] is not None
+    assert storage.find_api_token(hashed) is not None  # not yet expired
+
+    _backdate(storage, record["id"])
+    assert storage.find_api_token(hashed) is None  # expired -> not found
+
+    # A token minted without a TTL is non-expiring and unaffected.
+    perpetual = hashlib.sha256(b"jrc_perm").hexdigest()
+    kept = storage.create_api_token("u1", perpetual, created_by="t")
+    assert kept["expires_at"] is None
+    assert storage.find_api_token(perpetual) is not None
+    # Listing exposes expires_at (metadata only, never the hash).
+    listed = {row["id"]: row for row in storage.list_api_tokens("u1")}
+    assert "expires_at" in listed[record["id"]]
+    assert listed[kept["id"]]["expires_at"] is None
+
+
+def test_create_api_token_rejects_nonpositive_ttl(storage):
+    storage.ensure_user("u1", preset_key="user")
+    for bad in (0, -5):
+        with pytest.raises(ValueError):
+            storage.create_api_token("u1", hashlib.sha256(str(bad).encode()).hexdigest(), ttl_seconds=bad)
+
+
+def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(settings, tmp_path):
+    database = tmp_path / "legacy-tokens.sqlite3"
+    seed = JerichoStorage(replace(settings, database_path=database))
+    seed.ensure_user("leg", preset_key="user")
+    hashed = hashlib.sha256(b"jrc_legacy").hexdigest()
+    record = seed.create_api_token("leg", hashed, label="old", created_by="t")
+    seed.close()
+
+    # Simulate a pre-expires_at database (schema 14): drop the column and marker.
+    raw = sqlite3.connect(database)
+    raw.execute("ALTER TABLE api_tokens DROP COLUMN expires_at")
+    raw.execute("UPDATE schema_meta SET value='14' WHERE key='schema_version'")
+    raw.commit()
+    raw.close()
+
+    migrated = JerichoStorage(replace(settings, database_path=database))
+    try:
+        columns = {row[1] for row in migrated.execute("PRAGMA table_info(api_tokens)").fetchall()}
+        assert "expires_at" in columns  # migration re-added the column
+        version = int(
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
+        )
+        assert version == SCHEMA_VERSION
+        found = migrated.find_api_token(hashed)
+        assert found is not None and found["id"] == record["id"]
+        assert found["expires_at"] is None  # legacy tokens are non-expiring
+    finally:
+        migrated.close()
+
+
+def test_expired_token_is_rejected_by_auth(settings):
+    app = create_app(settings)
+    with TestClient(app) as client:
+        record = _issue(app.state.storage, "modx", "moderator", "jrc_expiring")
+        header = {"Authorization": "Bearer jrc_expiring"}
+        assert client.get("/api/me", headers=header).status_code == 200
+
+        _backdate(app.state.storage, record["id"])
+        # The committed expiry is visible to the request handler's own connection.
+        assert client.get("/api/me", headers=header).status_code == 401
+
+
+def test_admin_mint_with_ttl_sets_expiry_and_rejects_bad_ttl(settings):
+    app = create_app(settings)
+    with TestClient(app) as client:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        storage = app.state.storage
+        storage.ensure_user("modt", source="admin", preset_key="moderator")
+        storage.update_user("modt", preset_key="moderator")
+
+        timed = client.post("/api/admin/tokens", json={"user_id": "modt", "ttl_seconds": 3600}, headers=owner)
+        assert timed.status_code == 200
+        assert timed.json()["expires_at"] is not None
+
+        perpetual = client.post("/api/admin/tokens", json={"user_id": "modt"}, headers=owner)
+        assert perpetual.status_code == 200
+        assert perpetual.json()["expires_at"] is None
+
+        for bad in (0, -1, "abc"):
+            rejected = client.post(
+                "/api/admin/tokens", json={"user_id": "modt", "ttl_seconds": bad}, headers=owner
+            )
+            assert rejected.status_code == 400
+
+
+def test_parse_ttl_seconds_units_and_errors():
+    assert _parse_ttl_seconds("3600") == 3600
+    assert _parse_ttl_seconds("3600s") == 3600
+    assert _parse_ttl_seconds("30m") == 1800
+    assert _parse_ttl_seconds("24h") == 86400
+    assert _parse_ttl_seconds("90d") == 90 * 86400
+    for bad in ("", "abc", "10x", "0", "-5", "-1d"):
+        with pytest.raises(ValueError):
+            _parse_ttl_seconds(bad)
