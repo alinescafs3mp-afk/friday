@@ -1066,9 +1066,18 @@ class AgentRuntime:
         response: str,
         context: AgentContext,
     ) -> dict[str, Any]:
+        # Judge the answer against the evidence it actually USED: the cited
+        # Knowledge Objects, rendered as query-focused snippets. Falling back to
+        # the top hits only when the answer cited nothing. Grading a [K6]-citing
+        # answer against an unrelated top-5 slice produced spurious cautions and
+        # let real drift through.
+        cited_ids = set(self._extract_cited_knowledge_ids(response, context))
+        hits = context.knowledge_hits
+        evidence_hits = [item for item in hits if str(item.get("id") or "") in cited_ids] or hits[:5]
         evidence = "\n".join(
-            f"- {item.get('title', '')}: {(item.get('content') or '')[:300]}"
-            for item in context.knowledge_hits[:5]
+            f"- {item.get('title', '')}: "
+            f"{best_snippet(query, str(item.get('content') or item.get('summary') or ''), max_chars=360)}"
+            for item in evidence_hits[:5]
         )
         messages = [
             {

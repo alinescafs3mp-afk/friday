@@ -203,3 +203,74 @@ async def test_short_answer_below_threshold_is_not_verified(settings, storage):
     assert llm.verify_calls == 0
     assert result["verification_status"] == "skipped"
     assert result["verification_caution"] == ""
+
+
+class _TwoHitSearcher:
+    async def search(self, user_id, query, **kwargs):
+        del user_id, query, kwargs
+        return {
+            "results": [
+                {
+                    "id": "ko_redis",
+                    "title": "Redis кэш",
+                    "content": "Redis используется для кэша сессий проекта.",
+                    "knowledge_kind": "note",
+                    "lifecycle_stage": "active",
+                },
+                {
+                    "id": "ko_pg",
+                    "title": "База Atlas",
+                    "content": "База Atlas работает на PostgreSQL 16 в Москве, порт 5432.",
+                    "knowledge_kind": "note",
+                    "lifecycle_stage": "active",
+                },
+            ],
+            "entity_matches": [],
+        }
+
+
+class _RecordingLLM:
+    enabled = True
+    model = "verify-test"
+
+    def __init__(self, answer: str, verdict: str):
+        self._answer = answer
+        self._verdict = verdict
+        self.verify_evidence: str | None = None
+
+    async def chat(self, messages, **kwargs):
+        del kwargs
+        is_verification = any(
+            "Проверь ответ" in str(m.get("content") or "") for m in messages if m.get("role") == "system"
+        )
+        if is_verification:
+            self.verify_evidence = next(
+                (str(m.get("content") or "") for m in messages if m.get("role") == "user"), ""
+            )
+            return {"content": self._verdict}
+        return {"content": self._answer}
+
+
+@pytest.mark.asyncio
+async def test_verifier_evidence_is_built_from_cited_knowledge_not_top_hit(settings, storage):
+    # An answer citing [K2] must be judged against K2, not the unrelated top hit
+    # K1 — otherwise the judge grades against evidence the answer never used.
+    llm = _RecordingLLM(
+        answer="База Atlas работает на PostgreSQL 16, порт 5432 [K2].",
+        verdict='{"ok": true, "score": 0.9, "issues": []}',
+    )
+    tuned = dataclasses.replace(settings, verify_min_answer_chars=1, verify_answers=True)
+    storage.ensure_user("alice")
+    runtime = AgentRuntime(tuned, storage, llm=llm)
+
+    await runtime.chat(
+        "alice",
+        "На чём работает база Atlas?",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        enable_tools=False,
+        hybrid_searcher=_TwoHitSearcher(),
+    )
+
+    assert llm.verify_evidence is not None
+    assert "PostgreSQL" in llm.verify_evidence  # the cited K2 is the evidence
+    assert "Redis" not in llm.verify_evidence  # the unrelated top hit is not
