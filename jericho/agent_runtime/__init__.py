@@ -18,6 +18,7 @@ from jericho.config import JerichoSettings
 from jericho.execution_kernel import ExecutionKernel
 from jericho.knowledge_graph import build_user_model
 from jericho.permissions import ActorContext, AuthorizationService
+from jericho.retrieval import best_snippet
 from jericho.storage import JerichoStorage, normalize_conversation_mode
 from jericho.storage.models import FeedbackItem, FeedbackType, new_id
 
@@ -898,7 +899,14 @@ class AgentRuntime:
                 "quality": round(float(hit.get("quality_score", 0.5) or 0.5), 3),
                 "retrieval_score": round(float(hit.get("_score", 0.0) or 0.0), 3),
                 "title": str(hit.get("title") or "")[:300],
-                "excerpt": str(hit.get("summary") or hit.get("content") or "")[:520],
+                # Query-aware: show the passage that actually matched, not the
+                # document head — long notes/files otherwise leave the grounding
+                # evidence off-screen for both the model and the verifier.
+                "excerpt": best_snippet(
+                    context.search_query,
+                    str(hit.get("content") or hit.get("summary") or ""),
+                    max_chars=520,
+                ),
                 "entities": [
                     str(entity.get("name") or "")[:200]
                     for entity in hit.get("_entities", [])[:5]

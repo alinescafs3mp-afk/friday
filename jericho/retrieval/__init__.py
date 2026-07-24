@@ -119,6 +119,50 @@ def sparse_cosine(left: dict[str, float], right: dict[str, float]) -> float:
     return sum(value * right.get(key, 0.0) for key, value in left.items())
 
 
+def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
+    """Return the passage of ``text`` most relevant to ``query`` (query-aware
+    excerpting) so a reader — the LLM or the answer verifier — sees the region
+    that actually matched, not the document head. Pure lexical scoring over the
+    shared tokenizer (no model, no embedding); falls back to the head when the
+    text is short or nothing matches.
+    """
+    body = (text or "").strip()
+    if len(body) <= max_chars:
+        return body
+    query_tokens = {
+        token.casefold()
+        for token in _TOKEN_RE.findall(query or "")
+        if len(token) > 1 and token.casefold() not in _STOPWORDS
+    }
+    if not query_tokens:
+        return body[:max_chars].rstrip() + "…"
+    lowered = body.casefold()
+    occurrences: list[tuple[int, str]] = []
+    for token in query_tokens:
+        start = 0
+        while True:
+            found = lowered.find(token, start)
+            if found < 0:
+                break
+            occurrences.append((found, token))
+            start = found + len(token)
+    if not occurrences:
+        return body[:max_chars].rstrip() + "…"
+    occurrences.sort()
+    # Pick the max_chars window that covers the most DISTINCT query tokens.
+    best_pos, best_distinct = occurrences[0][0], -1
+    for pos, _ in occurrences:
+        covered = {tok for (position, tok) in occurrences if pos <= position < pos + max_chars}
+        if len(covered) > best_distinct:
+            best_distinct = len(covered)
+            best_pos = pos
+    start = max(0, best_pos - 64)
+    snippet = body[start : start + max_chars].strip()
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if start + max_chars < len(body) else ""
+    return f"{prefix}{snippet}{suffix}"
+
+
 def dense_cosine(left: list[float], right: list[float]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0

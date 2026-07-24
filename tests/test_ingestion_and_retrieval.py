@@ -4,7 +4,7 @@ import pytest
 
 from jericho.ingestion import IngestionPipeline, _extract_entities
 from jericho.knowledge_graph import KnowledgeGraph
-from jericho.retrieval import HybridSearcher
+from jericho.retrieval import HybridSearcher, best_snippet
 
 
 def test_entity_extraction_uses_boundaries_and_explicit_markers():
@@ -74,3 +74,23 @@ async def test_vertical_ingestion_graph_retrieval_and_idempotency(settings, stor
             "graph": True,
         },
     }
+
+
+def test_best_snippet_returns_query_matched_passage_not_head():
+    head = "нейтральный вводный текст без ключевых слов. " * 12  # ~530 chars, no query terms
+    fact = "IP сервера Atlas равен 10.0.0.7 в дата-центре Москвы."
+    text = head + fact + " " + ("прочий хвост. " * 40)
+
+    snippet = best_snippet("IP сервера Atlas", text, max_chars=200)
+
+    # The matched passage is surfaced, not the (irrelevant) document head.
+    assert "Atlas" in snippet and "10.0.0.7" in snippet
+    assert snippet.startswith("…")  # a middle window, not the head
+    assert len(snippet) <= 202  # max_chars + the two ellipses
+
+
+def test_best_snippet_short_text_and_no_match_fallbacks():
+    assert best_snippet("что угодно", "короткий текст") == "короткий текст"
+    long_unmatched = "ааааа " * 200
+    fallback = best_snippet("zzz", long_unmatched, max_chars=100)
+    assert fallback.startswith("а") and fallback.endswith("…") and len(fallback) <= 101
