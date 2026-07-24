@@ -156,3 +156,37 @@ def test_diagnostics_handles_corrupt_worker_health_without_crashing(settings, st
     assert task["state_errors"] == ["consecutive_failures", "interval_sec", "status"]
     assert result["workers"]["degraded_tasks"] == ["corrupt_task"]
     assert result["state"] == "degraded"
+
+
+def test_bridge_queue_dead_letters_are_observable_in_diagnostics(settings):
+    from jericho.diagnostics import _bridge_queue_status
+    from jericho.telegram_bridge import _UpdateInbox
+
+    path = settings.state_dir / "telegram-inbox.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    inbox = _UpdateInbox(str(path))
+    try:
+        inbox.store({"update_id": 1, "message": {"text": "pending"}})
+        inbox.store({"update_id": 2, "message": {"text": "doomed"}})
+        inbox.mark_dead_letter(2, "PermanentUpdateError: bad payload")
+    finally:
+        inbox.close()
+
+    status = _bridge_queue_status(path)
+    assert status["state"] == "present"
+    assert status["pending"] == 1
+    assert status["dead_letter"] == 1
+    assert "bad payload" in status["last_dead_letter_error"]
+
+    # The read-only view and a warning action reach collect_diagnostics.
+    report = collect_diagnostics(settings)
+    assert report["bridge_queue"]["dead_letter"] == 1
+    assert any(a["code"] == "inspect_bridge_dead_letters" for a in report["actions"])
+
+
+def test_bridge_queue_status_is_absent_when_no_inbox(settings):
+    from jericho.diagnostics import _bridge_queue_status
+
+    status = _bridge_queue_status(settings.state_dir / "telegram-inbox.sqlite3")
+    assert status["state"] == "absent"
+    assert status["pending"] == 0 and status["dead_letter"] == 0 and status["healthy"] is True

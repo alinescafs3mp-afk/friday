@@ -222,6 +222,13 @@ def _status(args: argparse.Namespace) -> int:
             f"Bridge lease: {bridge_lease.get('state', 'unknown')}"
             f"{f' · pid {bridge_pid}' if bridge_pid else ''}"
         )
+        bridge_queue = result.get("bridge_queue", {})
+        if bridge_queue.get("state") == "present":
+            print(
+                "Bridge queue: "
+                f"{bridge_queue.get('pending', 0)} pending · "
+                f"{bridge_queue.get('dead_letter', 0)} dead-letter"
+            )
         outbound_pending = db.get("outbound_pending")
         if outbound_pending is not None:
             print(f"Outbound queue: {outbound_pending} pending")

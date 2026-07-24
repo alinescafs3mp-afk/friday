@@ -361,6 +361,54 @@ def _worker_status(
         }
 
 
+def _bridge_queue_status(path: Path) -> dict[str, Any]:
+    """Read-only view of the Telegram bridge's durable queue — pending and
+    dead-lettered update counts — so lost/rejected messages are observable
+    without hand-reading SQLite. Never creates or migrates the file."""
+    if not path.is_file():
+        return {"state": "absent", "pending": 0, "dead_letter": 0, "healthy": True}
+    try:
+        uri = f"{path.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=2)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA query_only=ON")
+            tables = {
+                str(row["name"])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            }
+            if "updates" not in tables:
+                return {"state": "empty", "pending": 0, "dead_letter": 0, "healthy": True}
+            counts = {
+                str(row["status"]): int(row["n"])
+                for row in conn.execute(
+                    "SELECT status, COUNT(*) AS n FROM updates GROUP BY status"
+                ).fetchall()
+            }
+            recent = conn.execute(
+                "SELECT last_error FROM updates WHERE status='dead_letter' AND last_error!='' "
+                "ORDER BY failed_at DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error) as exc:
+        return {
+            "state": "unreadable",
+            "pending": 0,
+            "dead_letter": 0,
+            "healthy": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    dead_letter = int(counts.get("dead_letter", 0))
+    return {
+        "state": "present",
+        "pending": int(counts.get("pending", 0)),
+        "dead_letter": dead_letter,
+        "healthy": dead_letter == 0,
+        "last_dead_letter_error": (str(recent["last_error"])[:200] if recent else ""),
+    }
+
+
 def collect_diagnostics(
     settings: JerichoSettings,
     storage: JerichoStorage | None = None,
@@ -376,6 +424,7 @@ def collect_diagnostics(
         settings.state_dir / "backend.lock",
         protocol="jericho.backend.v1",
     )
+    bridge_queue = _bridge_queue_status(settings.state_dir / "telegram-inbox.sqlite3")
     backend_active = backend_lease.get("active") is True or backend_lease.get("state") == "active_hint"
     if not backend_active and workers.get("stale_tasks"):
         # A stopped backend naturally has old worker timestamps.  Keep the
@@ -487,6 +536,16 @@ def collect_diagnostics(
             "Файл process lease небезопасен или принадлежит другому протоколу",
             "Не удаляйте lock-файл при работающем процессе; сначала установите владельца lease.",
         )
+    dead_letters = int(bridge_queue.get("dead_letter", 0))
+    if dead_letters:
+        add_action(
+            "inspect_bridge_dead_letters",
+            "warning",
+            "Есть недоставленные сообщения Telegram (dead-letter)",
+            f"{dead_letters} обновлений не удалось обработать — они не потеряны, "
+            "но требуют внимания. Проверьте журнал моста и последнюю ошибку.",
+            "jericho status",
+        )
 
     result: dict[str, Any] = {
         "ok": not any(not issue.startswith("warning:") for issue in configuration)
@@ -508,6 +567,7 @@ def collect_diagnostics(
         "backups": backups,
         "workers": workers,
         "backend_lease": backend_lease,
+        "bridge_queue": bridge_queue,
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,
