@@ -1,0 +1,194 @@
+name: jericho
+
+x-backend-environment: &backend-environment
+  JERICHO_HOME: /runtime
+  JERICHO_DATA_DIR: /runtime/data
+  JERICHO_CACHE_DIR: /runtime/cache
+  JERICHO_LOG_DIR: /runtime/logs
+  JERICHO_MODEL_ROOT: /runtime/models
+  JERICHO_PROFILE: ${JERICHO_PROFILE:-qwen36-vl}
+  JERICHO_LLM_BASE_URL: ${JERICHO_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}
+  JERICHO_LLM_MODEL: ${JERICHO_LLM_MODEL:-dispatcher}
+  JERICHO_LLM_ENABLED: ${JERICHO_LLM_ENABLED:-1}
+  JERICHO_LLM_TIMEOUT_SEC: ${JERICHO_LLM_TIMEOUT_SEC:-240}
+  JERICHO_LLM_MAX_TOKENS: ${JERICHO_LLM_MAX_TOKENS:-2048}
+  JERICHO_VERIFY_ANSWERS: ${JERICHO_VERIFY_ANSWERS:-1}
+  JERICHO_EMBEDDINGS_ENABLED: ${JERICHO_EMBEDDINGS_ENABLED:-0}
+  JERICHO_EMBEDDINGS_BASE_URL: ${JERICHO_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}
+  JERICHO_EMBEDDINGS_MODEL: ${JERICHO_EMBEDDINGS_MODEL:-}
+  JERICHO_API_HOST: 0.0.0.0
+  JERICHO_API_PORT: ${JERICHO_API_PORT:-8000}
+  JERICHO_API_TOKEN: ${JERICHO_API_TOKEN:?set JERICHO_API_TOKEN in .env}
+  JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK: "1"
+  JERICHO_API_USER_RATE_LIMIT_PER_MINUTE: ${JERICHO_API_USER_RATE_LIMIT_PER_MINUTE:-240}
+  JERICHO_TRUST_PROXY_HEADERS: ${JERICHO_TRUST_PROXY_HEADERS:-0}
+  JERICHO_TRUSTED_PROXY_NETWORKS: ${JERICHO_TRUSTED_PROXY_NETWORKS:-127.0.0.1/32,::1/128}
+  JERICHO_TELEGRAM_BRIDGE_SECRET: ${JERICHO_TELEGRAM_BRIDGE_SECRET:?set JERICHO_TELEGRAM_BRIDGE_SECRET in .env}
+  JERICHO_TELEGRAM_REALM_ID: ${JERICHO_TELEGRAM_REALM_ID:-telegram}
+  JERICHO_TELEGRAM_BOT_ID: ${JERICHO_TELEGRAM_BOT_ID:-}
+  JERICHO_TELEGRAM_ALLOWED_CHAT_IDS: ${JERICHO_TELEGRAM_ALLOWED_CHAT_IDS:-}
+  JERICHO_TELEGRAM_OWNER_CHAT_IDS: ${JERICHO_TELEGRAM_OWNER_CHAT_IDS:-}
+  JERICHO_TELEGRAM_SESSION_TTL_SECONDS: ${JERICHO_TELEGRAM_SESSION_TTL_SECONDS:-86400}
+  JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC: ${JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC:-90}
+  JERICHO_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: ${JERICHO_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE:-30}
+  JERICHO_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE: ${JERICHO_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE:-1200}
+  JERICHO_CORS_ORIGINS: ${JERICHO_CORS_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
+  JERICHO_AUTONOMY_ENABLED: ${JERICHO_AUTONOMY_ENABLED:-1}
+  JERICHO_OPERATOR_FULL_AUTONOMY: ${JERICHO_OPERATOR_FULL_AUTONOMY:-0}
+  JERICHO_COGNITION_ENABLED: ${JERICHO_COGNITION_ENABLED:-1}
+  JERICHO_COGNITION_INTERVAL_SEC: ${JERICHO_COGNITION_INTERVAL_SEC:-300}
+  JERICHO_COGNITION_MAX_TOKENS: ${JERICHO_COGNITION_MAX_TOKENS:-512}
+  JERICHO_EXECUTIVE_MAX_ACTIVE_MISSIONS: ${JERICHO_EXECUTIVE_MAX_ACTIVE_MISSIONS:-8}
+  JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION: ${JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION:-12}
+  JERICHO_EXECUTIVE_TASK_TOOL_BUDGET: ${JERICHO_EXECUTIVE_TASK_TOOL_BUDGET:-6}
+  JERICHO_EXECUTIVE_TICK_INTERVAL_SEC: ${JERICHO_EXECUTIVE_TICK_INTERVAL_SEC:-15}
+  JERICHO_TELEMETRY_INTERVAL_SEC: ${JERICHO_TELEMETRY_INTERVAL_SEC:-120}
+  JERICHO_HEALTH_INTERVAL_SEC: ${JERICHO_HEALTH_INTERVAL_SEC:-300}
+  JERICHO_WORKERS_ENABLED: ${JERICHO_WORKERS_ENABLED:-1}
+  JERICHO_CODE_EXECUTION_ENABLED: ${JERICHO_CODE_EXECUTION_ENABLED:-0}
+  JERICHO_CODE_EXECUTION_TIMEOUT_SEC: ${JERICHO_CODE_EXECUTION_TIMEOUT_SEC:-15}
+  JERICHO_CODE_EXECUTION_MAX_OUTPUT_BYTES: ${JERICHO_CODE_EXECUTION_MAX_OUTPUT_BYTES:-65536}
+  JERICHO_WEB_ALLOW_PRIVATE_NETWORKS: ${JERICHO_WEB_ALLOW_PRIVATE_NETWORKS:-0}
+  JERICHO_WEB_MAX_RESPONSE_BYTES: ${JERICHO_WEB_MAX_RESPONSE_BYTES:-5242880}
+  JERICHO_MAX_UPLOAD_BYTES: ${JERICHO_MAX_UPLOAD_BYTES:-52428800}
+  JERICHO_MAX_EXTRACTED_TEXT_CHARS: ${JERICHO_MAX_EXTRACTED_TEXT_CHARS:-2000000}
+  JERICHO_MAX_ARCHIVE_ENTRIES: ${JERICHO_MAX_ARCHIVE_ENTRIES:-500}
+  JERICHO_MAX_ARCHIVE_UNCOMPRESSED_BYTES: ${JERICHO_MAX_ARCHIVE_UNCOMPRESSED_BYTES:-262144000}
+  JERICHO_DEFAULT_CITY: ${JERICHO_DEFAULT_CITY:-}
+  JERICHO_BRAVE_SEARCH_API_KEY: ${JERICHO_BRAVE_SEARCH_API_KEY:-}
+  JERICHO_TAVILY_API_KEY: ${JERICHO_TAVILY_API_KEY:-}
+  JERICHO_SERPER_API_KEY: ${JERICHO_SERPER_API_KEY:-}
+
+x-backend-volumes: &backend-volumes
+  - type: bind
+    source: ${JERICHO_HOST_HOME:-D:/jericho}/data
+    target: /runtime/data
+  - type: bind
+    source: ${JERICHO_HOST_HOME:-D:/jericho}/cache
+    target: /runtime/cache
+  - type: bind
+    source: ${JERICHO_HOST_HOME:-D:/jericho}/logs
+    target: /runtime/logs
+  - type: bind
+    source: ${JERICHO_MODEL_ROOT:-D:/jericho/models}
+    target: /runtime/models
+    read_only: true
+
+services:
+  dispatcher:
+    profiles: ["llm"]
+    build:
+      context: .
+      dockerfile: docker/vllm-asyncio/Dockerfile
+    image: ${JERICHO_VLLM_IMAGE:-jericho/vllm-openai:v0.25.1-asyncio-e4f88a8}
+    container_name: jericho-dispatcher
+    restart: unless-stopped
+    ipc: host
+    command: >-
+      --model /models/qwen3.6-35b-a3b-nvfp4
+      --served-model-name ${JERICHO_LLM_MODEL:-dispatcher}
+      --dtype auto
+      ${JERICHO_QWEN_QUANT_ARGS:-}
+      ${JERICHO_QWEN_ENFORCE_EAGER:-}
+      --max-model-len 32768
+      --gpu-memory-utilization 0.90
+      --kv-cache-dtype fp8
+      --tokenizer-mode auto
+      --safetensors-load-strategy prefetch
+      --enable-prefix-caching
+      --max-num-seqs 16
+      --skip-mm-profiling
+      --mm-processor-cache-gb 4.0
+      --max-num-batched-tokens 4096
+      --limit-mm-per-prompt '{"image":4,"video":1}'
+      ${JERICHO_QWEN_EXTRA_ARGS:-}
+      --host 0.0.0.0
+      --port 8001
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "0"
+      VLLM_USE_V2_MODEL_RUNNER: ${VLLM_USE_V2_MODEL_RUNNER:-0}
+      VLLM_WEIGHT_OFFLOADING_DISABLE_UVA: ${VLLM_WEIGHT_OFFLOADING_DISABLE_UVA:-1}
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-0}
+      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+      CUDA_DEVICE_ORDER: ${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
+      CUDA_DISABLE_P2P: ${CUDA_DISABLE_P2P:-1}
+      NCCL_P2P_DISABLE: ${NCCL_P2P_DISABLE:-1}
+    volumes:
+      - type: bind
+        source: ${JERICHO_MODEL_ROOT:-D:/jericho/models}
+        target: /models
+        read_only: true
+      - type: bind
+        source: ${JERICHO_HOST_HOME:-D:/jericho}/cache
+        target: /root/.cache
+    ports:
+      - "127.0.0.1:8001:8001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 40
+      start_period: 600s
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: jericho-backend
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,noexec,nosuid,nodev
+    ports:
+      - "${JERICHO_API_BIND_ADDRESS:-127.0.0.1}:${JERICHO_API_PORT:-8000}:${JERICHO_API_PORT:-8000}"
+    environment: *backend-environment
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes: *backend-volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${JERICHO_API_PORT:-8000}/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  telegram:
+    profiles: ["telegram"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: jericho-telegram
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid,nodev
+    command: ["jericho", "telegram-bridge"]
+    environment:
+      <<: *backend-environment
+      JERICHO_BACKEND_URL: http://backend:${JERICHO_API_PORT:-8000}
+      JERICHO_TELEGRAM_BOT_TOKEN: ${JERICHO_TELEGRAM_BOT_TOKEN:?set JERICHO_TELEGRAM_BOT_TOKEN in .env}
+      JERICHO_WORKERS_ENABLED: "0"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes: *backend-volumes
+    depends_on:
+      backend:
+        condition: service_healthy

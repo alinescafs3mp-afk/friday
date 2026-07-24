@@ -1,0 +1,13 @@
+.git
+.env
+.env.local
+data
+cache
+logs
+models
+__pycache__
+.pytest_cache
+.ruff_cache
+.venv
+*.sqlite3*
+*.zip

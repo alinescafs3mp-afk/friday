@@ -1,0 +1,1308 @@
+"""First-class knowledge graph and conservative entity resolution."""
+
+from __future__ import annotations
+
+import json
+import re
+from collections import defaultdict, deque
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
+from jericho.storage import JerichoStorage
+from jericho.storage.models import (
+    Entity,
+    EntityResolutionCandidate,
+    EntityType,
+    Relation,
+    RelationType,
+    ResolutionStatus,
+    new_id,
+    utc_now,
+)
+
+# Timeline semantics: an event entity "occurred_at" a normalized ISO date/range.
+EVENT_TIME_RELATION = RelationType.OCCURRED_AT.value
+# Entity types that act as user-curated containers (browse/organization layer).
+CONTAINER_ENTITY_TYPES = frozenset({EntityType.PROJECT.value, EntityType.COLLECTION.value})
+
+
+def build_user_model(storage: JerichoStorage, user_id: str) -> dict[str, Any]:
+    """Deterministic user model derived from the graph (no LLM needed).
+
+    Recurring people/organizations (by accepted knowledge links), active
+    projects, standing interests (tags), and capture rhythm. This is a computed
+    REFLECTION of the knowledge — never a stored artifact — so it is always
+    current and is edited by editing the underlying material. Consumed by the
+    agent's chat context (personalization) and the profile organ's endpoint.
+    """
+    people = storage.list_entities_by_activity(user_id, types=("person",), limit=5)
+    organizations = storage.list_entities_by_activity(user_id, types=("organization",), limit=5)
+    projects = [
+        c
+        for c in storage.list_container_entities(user_id, tuple(sorted(CONTAINER_ENTITY_TYPES)))
+        if c.get("knowledge_count")
+    ]
+    projects.sort(key=lambda c: int(c.get("knowledge_count") or 0), reverse=True)
+    interests = storage.list_knowledge_tags(user_id, limit=8)
+
+    knowledge_total = storage.count_knowledge_objects(user_id)
+    since = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+    recent_count = len(storage.list_recent_knowledge(user_id, since_iso=since, limit=200))
+
+    return {
+        "knowledge_total": knowledge_total,
+        "recent_30d": recent_count,
+        "people": [{"name": e["name"], "knowledge_count": e["knowledge_count"]} for e in people],
+        "organizations": [
+            {"name": e["name"], "knowledge_count": e["knowledge_count"]} for e in organizations
+        ],
+        "projects": [
+            {"name": c["name"], "kind": c["entity_type"], "knowledge_count": c["knowledge_count"]}
+            for c in projects[:5]
+        ],
+        "interests": [{"tag": t["tag"], "count": t["count"]} for t in interests],
+    }
+
+
+# Hard safety ceiling for graph traversal; the effective depth is set by config
+# (graph_max_depth) but can never exceed this, to bound work on a large graph.
+_MAX_TRAVERSAL_DEPTH = 4
+_ISO_FULL_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})[-./](\d{1,2})\b")
+_DAY_FIRST_RE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")
+_YEAR_MONTH_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})\b")
+
+
+def _valid_iso(year: int, month: int, day: int) -> str | None:
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def parse_event_date(text: str) -> tuple[str, str] | None:
+    """First absolute date in ``text`` as (ISO ``YYYY-MM-DD``, precision), else None.
+
+    Relative expressions (today/tomorrow/weekday) are intentionally ignored: they
+    cannot be anchored deterministically and are left for the user to set explicitly.
+    """
+    if not text:
+        return None
+    for match in _ISO_FULL_RE.finditer(text):
+        iso = _valid_iso(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if iso:
+            return iso, "day"
+    for match in _DAY_FIRST_RE.finditer(text):
+        iso = _valid_iso(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        if iso:
+            return iso, "day"
+    for match in _YEAR_MONTH_RE.finditer(text):
+        iso = _valid_iso(int(match.group(1)), int(match.group(2)), 1)
+        if iso:
+            return iso, "month"
+    return None
+
+
+def normalize_event_date(value: str) -> tuple[str, str]:
+    """Normalize a user date (``YYYY`` / ``YYYY-MM`` / ``YYYY-MM-DD``) to (ISO, precision).
+
+    Raises ``ValueError`` on anything that is not a valid calendar date.
+    """
+    cleaned = (value or "").strip()
+    parts = re.split(r"[-./]", cleaned)
+    try:
+        nums = [int(part) for part in parts]
+        if len(nums) == 1 and len(parts[0]) == 4:
+            return date(nums[0], 1, 1).isoformat(), "year"
+        if len(nums) == 2:
+            return date(nums[0], nums[1], 1).isoformat(), "month"
+        if len(nums) == 3:
+            return date(nums[0], nums[1], nums[2]).isoformat(), "day"
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid date: {value!r}") from exc
+    raise ValueError(f"Invalid date: {value!r}")
+
+
+def _json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return [str(item) for item in parsed] if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _entity_terms(entity: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return canonical name and aliases without broad or morphological matching."""
+    output = [(str(entity.get("name") or "").strip(), "canonical_name")]
+    output.extend(
+        (alias.strip(), "alias") for alias in _json_list(entity.get("aliases_json")) if alias.strip()
+    )
+    unique: dict[str, tuple[str, str]] = {}
+    for value, source in output:
+        normalized = value.casefold()
+        if len(normalized) < 2:
+            continue
+        current = unique.get(normalized)
+        if current is None or source == "canonical_name":
+            unique[normalized] = (value, source)
+    return sorted(unique.values(), key=lambda item: len(item[0]), reverse=True)
+
+
+def _token_overlap(query: str, value: str) -> float:
+    left = set(re.findall(r"(?u)\b[\w.+#/-]{2,}\b", query.casefold()))
+    right = set(re.findall(r"(?u)\b[\w.+#/-]{2,}\b", value.casefold()))
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+_RELATION_PHRASES: tuple[tuple[re.Pattern[str], RelationType, float], ...] = (
+    (
+        re.compile(r"\b(?:использует|используют|uses?|runs?\s+on|работает\s+на)\b", re.I),
+        RelationType.USES,
+        0.90,
+    ),
+    (re.compile(r"\b(?:управляет|администрирует|manages?|administers?)\b", re.I), RelationType.MANAGES, 0.88),
+    (re.compile(r"\b(?:работает\s+над|works?\s+on)\b", re.I), RelationType.WORKS_ON, 0.88),
+    (re.compile(r"\b(?:зависит\s+от|depends?\s+on)\b", re.I), RelationType.DEPENDS_ON, 0.90),
+    (re.compile(r"\b(?:часть|входит\s+в|part\s+of)\b", re.I), RelationType.PART_OF, 0.82),
+    (re.compile(r"\b(?:член|участник|состоит\s+в|member\s+of)\b", re.I), RelationType.MEMBER_OF, 0.82),
+)
+
+_CONFLICT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "uses",
+        re.compile(
+            r"(?P<subject>[\wА-ЯЁа-яё.+#/@:-][\wА-ЯЁа-яё .+#/@:-]{1,80}?)\s+"
+            r"(?:использует|uses|работает\s+на|runs?\s+on)\s+"
+            r"(?P<value>[\wА-ЯЁа-яё.+#/@:-]+(?:\s+\d+(?:\.\d+)*)?)",
+            re.I,
+        ),
+    ),
+    (
+        "address",
+        re.compile(
+            r"(?P<subject>[\wА-ЯЁа-яё.+#/@:-][\wА-ЯЁа-яё .+#/@:-]{1,80}?)\s+"
+            r"(?:имеет\s+IP|IP(?:-адрес)?|has\s+IP)\s*[:=—-]?\s*"
+            r"(?P<value>(?:\d{1,3}\.){3}\d{1,3})",
+            re.I,
+        ),
+    ),
+    (
+        "quoted_value",
+        re.compile(
+            r"(?P<subject>[A-Za-zА-ЯЁ0-9][A-Za-zА-ЯЁа-яё0-9._+#/@:-]{1,63})\s*=\s*"
+            r"(?P<value>[-+]?\d[\d\s.,]*(?:\s*[A-ZА-ЯЁ]{2,8})?)",
+            re.I,
+        ),
+    ),
+    (
+        "scheduled_date",
+        re.compile(
+            r"(?P<subject>[A-Za-zА-ЯЁ0-9«\"][\wА-ЯЁа-яё .«»\"+#/@:-]{1,80}?)\s+"
+            r"(?:состоится|пройдёт|пройдет|запланирован\w*|назначен\w*|"
+            r"scheduled\s+(?:for|on)|will\s+be\s+held\s+on)\s+"
+            r"(?P<value>\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[./]\d{1,2}[./]\d{4})",
+            re.I,
+        ),
+    ),
+)
+
+
+def _normalized_claims(text: str) -> list[dict[str, str]]:
+    claims: list[dict[str, str]] = []
+    for predicate, pattern in _CONFLICT_PATTERNS:
+        for match in pattern.finditer(text or ""):
+            subject = " ".join(match.group("subject").split()).strip(" .,:;—-")
+            value = " ".join(match.group("value").split()).strip(" .,:;—-")
+            if not subject or not value:
+                continue
+            if predicate == "scheduled_date":
+                # Compare dates by their normalized ISO value, so the same day in a
+                # different format is NOT flagged as a contradiction.
+                parsed = parse_event_date(value)
+                if parsed:
+                    value = parsed[0]
+            claims.append(
+                {
+                    "predicate": predicate,
+                    "subject": subject,
+                    "subject_key": subject.casefold(),
+                    "value": value,
+                    "value_key": value.casefold(),
+                    "evidence": match.group(0)[:300],
+                }
+            )
+    return claims
+
+
+class EntityResolver:
+    """Detect duplicates, but never merge an uncertain pair automatically."""
+
+    def __init__(self, storage: JerichoStorage) -> None:
+        self.storage = storage
+
+    def detect_duplicates(
+        self,
+        user_id: str,
+        *,
+        min_confidence: float = 0.55,
+    ) -> list[EntityResolutionCandidate]:
+        output: list[EntityResolutionCandidate] = []
+        for candidate in self.storage.find_duplicate_candidates(
+            user_id,
+            min_confidence=max(0.0, min(1.0, min_confidence)),
+        ):
+            stored = self.storage.store_resolution_candidate(candidate)
+            if str(stored.status) in {ResolutionStatus.SUGGESTED.value, str(ResolutionStatus.SUGGESTED)}:
+                output.append(stored)
+        # Deduplicate pairs when storage returned an already existing proposal.
+        unique: dict[str, EntityResolutionCandidate] = {item.pair_key: item for item in output}
+        return sorted(unique.values(), key=lambda item: item.confidence, reverse=True)
+
+    def get_pending_resolutions(self, user_id: str) -> list[dict[str, Any]]:
+        pending = self.storage.list_resolution_candidates(user_id, ResolutionStatus.SUGGESTED)
+        enriched: list[dict[str, Any]] = []
+        for candidate in pending:
+            left = self.storage.get_entity(candidate["entity_a_id"], user_id)
+            right = self.storage.get_entity(candidate["entity_b_id"], user_id)
+            if not left or not right:
+                continue
+            left_links = self.storage.get_entity_knowledge(user_id, left["id"], limit=1000)
+            right_links = self.storage.get_entity_knowledge(user_id, right["id"], limit=1000)
+            left_relations = self.storage.get_entity_relations(left["id"], user_id)
+            right_relations = self.storage.get_entity_relations(right["id"], user_id)
+            confidence = float(candidate.get("confidence", 0.0))
+            if confidence >= 0.95:
+                recommendation = "strong_merge_candidate"
+            elif confidence >= 0.78:
+                recommendation = "compare_context"
+            else:
+                recommendation = "manual_review"
+            enriched.append(
+                {
+                    **candidate,
+                    "evidence": _json_dict(candidate.get("evidence_json")),
+                    "entity_a": {
+                        **left,
+                        "knowledge_count": len(left_links),
+                        "relation_count": len(left_relations),
+                    },
+                    "entity_b": {
+                        **right,
+                        "knowledge_count": len(right_links),
+                        "relation_count": len(right_relations),
+                    },
+                    "recommendation": recommendation,
+                }
+            )
+        return enriched
+
+    def accept_resolution(
+        self,
+        candidate_id: str,
+        user_id: str,
+        *,
+        target_entity_id: str | None = None,
+        resolved_by: str | None = None,
+    ) -> dict[str, Any]:
+        candidate = self.storage.get_resolution_candidate(candidate_id, user_id)
+        if not candidate or candidate["status"] != ResolutionStatus.SUGGESTED.value:
+            raise ValueError("Resolution candidate was not found or is no longer pending")
+        pair = {candidate["entity_a_id"], candidate["entity_b_id"]}
+        if target_entity_id is not None and target_entity_id not in pair:
+            raise ValueError("target_entity_id must be one of the proposed entities")
+
+        if target_entity_id is None:
+            left, right = candidate["entity_a_id"], candidate["entity_b_id"]
+            left_relations = len(self.storage.get_entity_relations(left, user_id))
+            right_relations = len(self.storage.get_entity_relations(right, user_id))
+            left_knowledge = len(self.storage.get_entity_knowledge(user_id, left, limit=1000))
+            right_knowledge = len(self.storage.get_entity_knowledge(user_id, right, limit=1000))
+            # Stable tie-break: richer entity, then older record (candidate A).
+            target_entity_id = (
+                left if (left_relations + left_knowledge) >= (right_relations + right_knowledge) else right
+            )
+        source_entity_id = next(entity_id for entity_id in pair if entity_id != target_entity_id)
+        merged = self.storage.merge_entities(
+            user_id,
+            source_entity_id,
+            target_entity_id,
+            merged_by=resolved_by or user_id,
+        )
+        self.storage.resolve_candidate(
+            candidate_id,
+            ResolutionStatus.MERGED,
+            resolved_by or user_id,
+            user_id=user_id,
+        )
+        return {
+            "source_entity_id": source_entity_id,
+            "target_entity_id": target_entity_id,
+            "merged_into": merged,
+        }
+
+    def reject_resolution(self, candidate_id: str, user_id: str, *, resolved_by: str | None = None) -> bool:
+        if not self.storage.resolve_candidate(
+            candidate_id,
+            ResolutionStatus.REJECTED,
+            resolved_by or user_id,
+            user_id=user_id,
+        ):
+            raise ValueError("Resolution candidate not found")
+        return True
+
+
+class KnowledgeGraph:
+    def __init__(self, storage: JerichoStorage) -> None:
+        self.storage = storage
+        self.resolver = EntityResolver(storage)
+
+    def create_entity(
+        self,
+        user_id: str,
+        name: str,
+        entity_type: EntityType = EntityType.OTHER,
+        *,
+        aliases: list[str] | None = None,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        clean_name = " ".join((name or "").split()).strip()
+        if not clean_name:
+            raise ValueError("Entity name is required")
+        existing = self.find_entity(user_id, clean_name)
+        if existing and existing.get("entity_type") == entity_type.value:
+            return existing
+        entity = Entity(
+            id=new_id("ent"),
+            user_id=user_id,
+            name=clean_name,
+            entity_type=entity_type,
+            aliases_json=aliases or [],
+            description=description,
+            metadata_json=metadata or {},
+        )
+        self.storage.create_entity(entity)
+        return self.storage.get_entity(entity.id, user_id) or {}
+
+    def get_entity(self, entity_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        return self.storage.get_entity(entity_id, user_id)
+
+    def set_event_time(
+        self,
+        user_id: str,
+        entity_id: str,
+        occurred_at: str,
+        *,
+        occurred_end: str | None = None,
+        precision: str | None = None,
+        source: str = "user",
+    ) -> dict[str, Any]:
+        """Give an event entity a temporal anchor (RelationType.OCCURRED_AT).
+
+        Both ends are normalized to a valid ISO date; an end before the start is
+        rejected. Only ``event`` entities may carry a time.
+        """
+        entity = self.storage.get_entity(entity_id, user_id)
+        if not entity or entity.get("deleted_at"):
+            raise ValueError("Event entity not found")
+        if str(entity.get("entity_type")) != EntityType.EVENT.value:
+            raise ValueError("Only event entities can have an occurrence time")
+        start_iso, start_precision = normalize_event_date(occurred_at)
+        end_iso: str | None = None
+        if occurred_end:
+            end_iso, _ = normalize_event_date(occurred_end)
+            if end_iso < start_iso:
+                raise ValueError("occurred_end must not precede occurred_at")
+        record = self.storage.set_entity_time(
+            entity_id,
+            user_id,
+            start_iso,
+            occurred_end=end_iso,
+            precision=precision or start_precision,
+            source=source,
+        )
+        record["relation"] = EVENT_TIME_RELATION
+        return record
+
+    def get_event_time(self, user_id: str, entity_id: str) -> dict[str, Any] | None:
+        record = self.storage.get_entity_time(entity_id, user_id)
+        if record:
+            record["relation"] = EVENT_TIME_RELATION
+        return record
+
+    def record_event_time_from_text(
+        self, user_id: str, entity_id: str, text: str, *, source: str = "ingestion"
+    ) -> dict[str, Any] | None:
+        """Best-effort: stamp an event with the first absolute date in its source text.
+
+        Only fills a gap — an existing (e.g. user-set) time is never overwritten.
+        """
+        if self.storage.get_entity_time(entity_id, user_id):
+            return None
+        parsed = parse_event_date(text)
+        if not parsed:
+            return None
+        occurred_at, precision = parsed
+        return self.storage.set_entity_time(
+            entity_id, user_id, occurred_at, precision=precision, source=source
+        )
+
+    def timeline(
+        self,
+        user_id: str,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Chronologically ordered dated events, optionally bounded to a window."""
+        bounds = {}
+        if start:
+            bounds["start"] = normalize_event_date(start)[0]
+        if end:
+            bounds["end"] = normalize_event_date(end)[0]
+        events = self.storage.list_events_in_range(user_id, limit=limit, **bounds)
+        for event in events:
+            event["relation"] = EVENT_TIME_RELATION
+        return events
+
+    def list_entities(
+        self,
+        user_id: str,
+        entity_type: EntityType | None = None,
+        *,
+        limit: int = 100,
+        include_merged: bool = False,
+    ) -> list[dict[str, Any]]:
+        return self.storage.list_entities(
+            user_id,
+            entity_type,
+            limit=limit,
+            include_merged=include_merged,
+        )
+
+    def find_entity(self, user_id: str, name: str) -> dict[str, Any] | None:
+        direct = self.storage.find_entity_by_name(user_id, name)
+        if direct:
+            return direct
+        aliases = self.storage.find_entity_by_alias(user_id, name)
+        return aliases[0] if aliases else None
+
+    def match_mentions(
+        self,
+        user_id: str,
+        text: str,
+        *,
+        limit: int = 30,
+    ) -> list[dict[str, Any]]:
+        """Match existing canonical names and aliases conservatively in text.
+
+        Names are matched literally with Unicode word boundaries.  This is
+        deliberately not stemming or prefix matching: an identifier or person
+        must actually occur in the input before it can influence graph links.
+        """
+        if not text.strip():
+            return []
+        matches: list[dict[str, Any]] = []
+        occupied: list[tuple[int, int]] = []
+        for entity in self.list_entities(user_id, limit=5000):
+            best: dict[str, Any] | None = None
+            for term, source in _entity_terms(entity):
+                pattern = re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", re.IGNORECASE | re.UNICODE)
+                for hit in pattern.finditer(text):
+                    # Prefer the longest non-overlapping interpretation.  The
+                    # same entity may still appear more than once, but one link
+                    # proposal is enough.
+                    if any(hit.start() < end and hit.end() > start for start, end in occupied):
+                        continue
+                    confidence = 0.99 if source == "canonical_name" else 0.96
+                    candidate = {
+                        "entity_id": entity["id"],
+                        "name": entity["name"],
+                        "entity_type": entity["entity_type"],
+                        "matched_text": hit.group(0),
+                        "span": [hit.start(), hit.end()],
+                        "confidence": confidence,
+                        "method": f"existing_{source}_exact",
+                    }
+                    if best is None or len(candidate["matched_text"]) > len(best["matched_text"]):
+                        best = candidate
+            if best:
+                matches.append(best)
+                occupied.append(tuple(best["span"]))
+        matches.sort(
+            key=lambda item: (-float(item["confidence"]), item["span"][0], -len(item["matched_text"]))
+        )
+        return matches[: max(1, min(limit, 200))]
+
+    def search_entities(self, user_id: str, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """Find graph entry points using exact mentions plus conservative token overlap."""
+        exact = {item["entity_id"]: item for item in self.match_mentions(user_id, query, limit=limit * 2)}
+        scored: list[tuple[dict[str, Any], float, str]] = []
+        for entity in self.list_entities(user_id, limit=5000):
+            if entity["id"] in exact:
+                scored.append(
+                    (entity, float(exact[entity["id"]]["confidence"]), exact[entity["id"]]["method"])
+                )
+                continue
+            score = 0.0
+            method = "token_overlap"
+            for term, _source in _entity_terms(entity):
+                score = max(score, _token_overlap(query, term))
+            score = max(score, _token_overlap(query, str(entity.get("description") or "")) * 0.65)
+            if score >= 0.30:
+                scored.append((entity, min(0.85, score), method))
+        scored.sort(key=lambda item: (-item[1], item[0].get("name", "").casefold()))
+        return [
+            {
+                **entity,
+                "_match_score": round(score, 4),
+                "_match_method": method,
+                "_relation_count": len(self.get_entity_relations(entity["id"], user_id)),
+                "_knowledge_count": len(self.get_entity_knowledge(entity["id"], user_id, limit=1000)),
+            }
+            for entity, score, method in scored[: max(1, min(limit, 100))]
+        ]
+
+    def context_for_query(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        depth: int = 1,
+        entity_limit: int = 8,
+        knowledge_limit: int = 30,
+        seed_knowledge_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build a compact scored subgraph for retrieval and agent context.
+
+        Query-matched entities are the primary roots. High-ranking Knowledge Objects may also
+        seed entities through accepted links. In addition to explicit relations, the traversal
+        can follow conservative *co-occurrence* edges between entities linked to the same
+        Knowledge Object. Those implicit edges are labelled and never persisted as asserted facts.
+        """
+
+        roots = self.search_entities(user_id, query, limit=entity_limit)
+        root_scores: dict[str, float] = {
+            str(root["id"]): float(root.get("_match_score", 0.0)) for root in roots
+        }
+        evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for root in roots:
+            evidence[str(root["id"])].append(
+                {
+                    "kind": "query_match",
+                    "method": root.get("_match_method"),
+                    "score": root.get("_match_score"),
+                }
+            )
+
+        for knowledge_id in seed_knowledge_ids or []:
+            for link in self.storage.list_knowledge_entity_links(
+                user_id,
+                knowledge_object_id=knowledge_id,
+                status="accepted",
+                limit=30,
+            ):
+                entity_id = str(link["entity_id"])
+                score = 0.72 * float(link.get("confidence", 1.0) or 1.0)
+                root_scores[entity_id] = max(root_scores.get(entity_id, 0.0), score)
+                evidence[entity_id].append(
+                    {
+                        "kind": "seed_knowledge_link",
+                        "knowledge_object_id": knowledge_id,
+                        "confidence": link.get("confidence"),
+                    }
+                )
+
+        if not root_scores:
+            return {
+                "roots": [],
+                "entities": [],
+                "nodes": [],
+                "relations": [],
+                "knowledge": [],
+                "knowledge_candidates": [],
+                "paths": [],
+            }
+
+        max_depth = max(0, min(depth, _MAX_TRAVERSAL_DEPTH))
+        entity_cache: dict[str, dict[str, Any] | None] = {}
+        entity_knowledge_cache: dict[str, list[dict[str, Any]]] = {}
+        entity_relation_cache: dict[str, list[dict[str, Any]]] = {}
+        knowledge_links_cache: dict[str, list[dict[str, Any]]] = {}
+
+        def get_entity(entity_id: str) -> dict[str, Any] | None:
+            if entity_id not in entity_cache:
+                entity_cache[entity_id] = self.get_entity(entity_id, user_id)
+            return entity_cache[entity_id]
+
+        def get_entity_knowledge(entity_id: str) -> list[dict[str, Any]]:
+            if entity_id not in entity_knowledge_cache:
+                entity_knowledge_cache[entity_id] = self.get_entity_knowledge(
+                    entity_id,
+                    user_id,
+                    limit=max(100, min(1000, knowledge_limit * 4)),
+                )
+            return entity_knowledge_cache[entity_id]
+
+        def get_entity_relations(entity_id: str) -> list[dict[str, Any]]:
+            if entity_id not in entity_relation_cache:
+                entity_relation_cache[entity_id] = self.get_entity_relations(entity_id, user_id)
+            return entity_relation_cache[entity_id]
+
+        def get_knowledge_links(knowledge_id: str) -> list[dict[str, Any]]:
+            if knowledge_id not in knowledge_links_cache:
+                knowledge_links_cache[knowledge_id] = self.storage.list_knowledge_entity_links(
+                    user_id,
+                    knowledge_object_id=knowledge_id,
+                    status="accepted",
+                    limit=30,
+                )
+            return knowledge_links_cache[knowledge_id]
+
+        entities: dict[str, dict[str, Any]] = {}
+        relations: dict[str, dict[str, Any]] = {}
+        paths: list[dict[str, Any]] = []
+        best_score = dict(root_scores)
+        best_depth: dict[str, int] = {entity_id: 0 for entity_id in root_scores}
+        queue: deque[tuple[str, int, list[str]]] = deque(
+            (entity_id, 0, [entity_id]) for entity_id in root_scores
+        )
+
+        def offer_neighbour(
+            *,
+            from_entity_id: str,
+            neighbour_id: str,
+            next_depth: int,
+            propagated: float,
+            relation_id: str,
+            relation_type: str,
+            evidence_item: dict[str, Any],
+            path_ids: list[str],
+        ) -> None:
+            if neighbour_id == from_entity_id or propagated < 0.12:
+                return
+            existing_depth = best_depth.get(neighbour_id, 999)
+            existing_score = best_score.get(neighbour_id, 0.0)
+            if existing_depth < next_depth and existing_score >= propagated:
+                return
+            if propagated <= existing_score and existing_depth <= next_depth:
+                return
+            best_score[neighbour_id] = max(existing_score, propagated)
+            best_depth[neighbour_id] = min(existing_depth, next_depth)
+            evidence[neighbour_id].append(evidence_item)
+            next_path = [*path_ids, neighbour_id]
+            paths.append(
+                {
+                    "entity_ids": next_path,
+                    "relation_id": relation_id,
+                    "relation_type": relation_type,
+                }
+            )
+            queue.append((neighbour_id, next_depth, next_path))
+
+        while queue:
+            entity_id, current_depth, path_ids = queue.popleft()
+            entity = get_entity(entity_id)
+            if not entity or entity.get("deleted_at"):
+                continue
+            linked_knowledge = get_entity_knowledge(entity_id)
+            explicit_relations = get_entity_relations(entity_id)
+            entities[entity_id] = {
+                **entity,
+                "_graph_depth": current_depth,
+                "_graph_score": round(best_score.get(entity_id, 0.0), 6),
+                "_evidence": evidence[entity_id],
+                "_relation_count": len(explicit_relations),
+                "_knowledge_count": len(linked_knowledge),
+            }
+            if current_depth >= max_depth:
+                continue
+
+            next_depth = current_depth + 1
+            for relation in explicit_relations:
+                relation_id = str(relation["id"])
+                relations[relation_id] = {**relation, "implicit": False}
+                neighbour_id = (
+                    str(relation["target_entity_id"])
+                    if str(relation["source_entity_id"]) == entity_id
+                    else str(relation["source_entity_id"])
+                )
+                relation_weight = max(0.0, min(1.5, float(relation.get("weight", 1.0))))
+                propagated = best_score.get(entity_id, 0.0) * 0.52 * relation_weight / next_depth
+                offer_neighbour(
+                    from_entity_id=entity_id,
+                    neighbour_id=neighbour_id,
+                    next_depth=next_depth,
+                    propagated=propagated,
+                    relation_id=relation_id,
+                    relation_type=str(relation.get("relation_type") or "related_to"),
+                    evidence_item={
+                        "kind": "explicit_relation",
+                        "from_entity_id": entity_id,
+                        "relation_id": relation_id,
+                        "relation_type": relation.get("relation_type"),
+                        "depth": next_depth,
+                    },
+                    path_ids=path_ids,
+                )
+
+            # Accepted links to one Knowledge Object provide useful graph structure without
+            # asserting a semantic relation that the user never confirmed.
+            for knowledge_item in linked_knowledge[: max(20, min(120, knowledge_limit * 2))]:
+                knowledge_id = str(knowledge_item["id"])
+                source_confidence = max(
+                    0.0,
+                    min(1.0, float(knowledge_item.get("_link_confidence", 1.0) or 1.0)),
+                )
+                for link in get_knowledge_links(knowledge_id):
+                    neighbour_id = str(link["entity_id"])
+                    if neighbour_id == entity_id:
+                        continue
+                    target_confidence = max(
+                        0.0,
+                        min(1.0, float(link.get("confidence", 1.0) or 1.0)),
+                    )
+                    pair = sorted((entity_id, neighbour_id))
+                    relation_id = f"co:{knowledge_id}:{pair[0]}:{pair[1]}"
+                    source_entity = get_entity(entity_id) or {}
+                    target_entity = get_entity(neighbour_id) or {}
+                    relations[relation_id] = {
+                        "id": relation_id,
+                        "user_id": user_id,
+                        "source_entity_id": entity_id,
+                        "target_entity_id": neighbour_id,
+                        "source_name": source_entity.get("name", ""),
+                        "target_name": target_entity.get("name", ""),
+                        "relation_type": "co_occurs_in",
+                        "weight": round(source_confidence * target_confidence, 6),
+                        "implicit": True,
+                        "knowledge_object_id": knowledge_id,
+                        "knowledge_title": knowledge_item.get("title", ""),
+                    }
+                    propagated = (
+                        best_score.get(entity_id, 0.0)
+                        * 0.42
+                        * (source_confidence * target_confidence) ** 0.5
+                        / next_depth
+                    )
+                    offer_neighbour(
+                        from_entity_id=entity_id,
+                        neighbour_id=neighbour_id,
+                        next_depth=next_depth,
+                        propagated=propagated,
+                        relation_id=relation_id,
+                        relation_type="co_occurs_in",
+                        evidence_item={
+                            "kind": "shared_knowledge_object",
+                            "from_entity_id": entity_id,
+                            "knowledge_object_id": knowledge_id,
+                            "knowledge_title": knowledge_item.get("title", ""),
+                            "depth": next_depth,
+                        },
+                        path_ids=path_ids,
+                    )
+
+        knowledge: dict[str, dict[str, Any]] = {}
+        knowledge_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for entity_id, entity in entities.items():
+            entity_score = float(entity.get("_graph_score", 0.0))
+            for item in get_entity_knowledge(entity_id):
+                link_confidence = float(item.get("_link_confidence", 1.0) or 1.0)
+                candidate_score = entity_score * max(0.0, min(1.0, link_confidence))
+                knowledge_evidence[str(item["id"])].append(
+                    {
+                        "entity_id": entity_id,
+                        "entity_name": entity.get("name", ""),
+                        "link_confidence": link_confidence,
+                        "entity_score": round(entity_score, 6),
+                    }
+                )
+                current = knowledge.get(str(item["id"]))
+                if current is None or candidate_score > float(current.get("_graph_score", 0.0)):
+                    knowledge[str(item["id"])] = {
+                        **item,
+                        "_graph_score": round(candidate_score, 6),
+                        "_graph_entity_id": entity_id,
+                        "_graph_entity_name": entity.get("name", ""),
+                        "_graph_depth": entity.get("_graph_depth", 0),
+                    }
+
+        ordered_knowledge = sorted(
+            knowledge.values(),
+            key=lambda item: (
+                -float(item.get("_graph_score", 0.0)),
+                -float(item.get("quality_score", 0.5)),
+                -float(item.get("importance", 0.5)),
+            ),
+        )[: max(1, min(knowledge_limit, 500))]
+        knowledge_candidates = [
+            {
+                "knowledge_object_id": item["id"],
+                "score": item.get("_graph_score", 0.0),
+                "evidence": knowledge_evidence[str(item["id"])],
+            }
+            for item in ordered_knowledge
+        ]
+        root_ids = set(root_scores)
+        node_items = sorted(
+            entities.values(),
+            key=lambda item: (
+                -float(item.get("_graph_score", 0.0)),
+                int(item.get("_graph_depth", 0)),
+                str(item.get("name", "")).casefold(),
+            ),
+        )
+        root_items = [entity for entity in node_items if str(entity["id"]) in root_ids]
+        relation_items = sorted(
+            relations.values(),
+            key=lambda item: (
+                bool(item.get("implicit")),
+                -float(item.get("weight", 1.0) or 1.0),
+                str(item.get("relation_type", "")),
+            ),
+        )
+        return {
+            "roots": root_items,
+            "entities": node_items,
+            "nodes": node_items,
+            "relations": relation_items,
+            "knowledge": ordered_knowledge,
+            "knowledge_candidates": knowledge_candidates,
+            "paths": paths,
+        }
+
+    def update_entity(self, user_id: str, entity_id: str, **fields: Any) -> dict[str, Any] | None:
+        current = self.storage.get_entity(entity_id, user_id)
+        if not current or current.get("deleted_at"):
+            return None
+        aliases = fields.get("aliases", fields.get("aliases_json", _json_list(current.get("aliases_json"))))
+        metadata = fields.get(
+            "metadata", fields.get("metadata_json", _json_dict(current.get("metadata_json")))
+        )
+        entity_type = fields.get("entity_type", current.get("entity_type", EntityType.OTHER.value))
+        entity = Entity(
+            id=current["id"],
+            user_id=user_id,
+            name=fields.get("name", current["name"]),
+            entity_type=EntityType(entity_type),
+            aliases_json=_json_list(aliases),
+            description=fields.get("description", current.get("description", "")),
+            metadata_json=_json_dict(metadata),
+            canonical=bool(current.get("canonical", 1)),
+            merged_into_id=current.get("merged_into_id"),
+            version=int(current.get("version", 1)),
+            created_at=str(current.get("created_at") or utc_now()),
+            updated_at=str(current.get("updated_at") or utc_now()),
+            deleted_at=current.get("deleted_at"),
+        )
+        self.storage.update_entity(entity)
+        return self.storage.get_entity(entity_id, user_id)
+
+    def delete_entity(self, user_id: str, entity_id: str) -> bool:
+        return self.storage.soft_delete_entity(entity_id, user_id)
+
+    def create_relation(
+        self,
+        user_id: str,
+        source_id: str,
+        target_id: str,
+        relation_type: RelationType = RelationType.RELATED_TO,
+        *,
+        weight: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+        origin: str = "manual",
+    ) -> Relation:
+        # Every edge carries a mandatory origin stamp; the parameter wins over
+        # caller-supplied metadata so an API body cannot spoof provenance.
+        relation = Relation(
+            id=new_id("rel"),
+            user_id=user_id,
+            source_entity_id=source_id,
+            target_entity_id=target_id,
+            relation_type=relation_type,
+            weight=weight,
+            metadata_json={**(metadata or {}), "origin": str(origin)[:40]},
+        )
+        return self.storage.create_relation(relation)
+
+    # ------------------------------------------------------------------
+    # Containers: user-curated project/collection entities organizing
+    # knowledge inside the graph itself (spec: "Knowledge Graph is central").
+    # Membership reuses knowledge_entity_links; hierarchy reuses PART_OF.
+    # ------------------------------------------------------------------
+
+    def list_containers(self, user_id: str) -> list[dict[str, Any]]:
+        """Container entities with member counts and PART_OF parent links.
+
+        Returns a flat list; each row carries ``knowledge_count`` and
+        ``parent_id`` (the strongest active PART_OF edge to another
+        container, or None for roots) so callers can render a tree.
+        """
+        containers = self.storage.list_container_entities(user_id, tuple(sorted(CONTAINER_ENTITY_TYPES)))
+        container_ids = {str(row["id"]) for row in containers}
+        parent_by_child: dict[str, str] = {}
+        for edge in self.storage.list_part_of_relations(user_id):
+            child = str(edge["source_entity_id"])
+            parent = str(edge["target_entity_id"])
+            # Rows arrive weight DESC, so first-seen wins as the display parent.
+            if child in container_ids and parent in container_ids and child not in parent_by_child:
+                parent_by_child[child] = parent
+        for row in containers:
+            row["parent_id"] = parent_by_child.get(str(row["id"]))
+        return containers
+
+    def create_container(
+        self,
+        user_id: str,
+        name: str,
+        *,
+        kind: str = EntityType.COLLECTION.value,
+        parent_id: str | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create (or return the existing) container entity, optionally under a parent.
+
+        An explicit user action creates the PART_OF edge directly — the review
+        gate applies to system suggestions, not to the user's own decisions.
+        """
+        if kind not in CONTAINER_ENTITY_TYPES:
+            allowed = ", ".join(sorted(CONTAINER_ENTITY_TYPES))
+            raise ValueError(f"Container kind must be one of: {allowed}")
+        entity = self.create_entity(
+            user_id,
+            name,
+            EntityType(kind),
+            description=description,
+            metadata={"container": True, "origin": "user"},
+        )
+        entity_id = str(entity.get("id") or "")
+        if parent_id:
+            if parent_id == entity_id:
+                raise ValueError("Container cannot be part of itself")
+            parent = self.storage.get_entity(parent_id, user_id)
+            if not parent or parent.get("deleted_at"):
+                raise ValueError("Parent container not found")
+            if str(parent.get("entity_type")) not in CONTAINER_ENTITY_TYPES:
+                raise ValueError("Parent must be a project or collection entity")
+            self.create_relation(
+                user_id,
+                entity_id,
+                parent_id,
+                RelationType.PART_OF,
+                weight=1.0,
+                origin="container",
+            )
+        return self.storage.get_entity(entity_id, user_id) or entity
+
+    def suggest_relations_for_knowledge(
+        self,
+        user_id: str,
+        knowledge_object_id: str,
+    ) -> list[dict[str, Any]]:
+        """Extract explicit, review-only relations from one Knowledge Object.
+
+        Co-occurrence alone is never enough.  Both entity mentions and an
+        explicit relation phrase must occur in the same local span.
+        """
+
+        knowledge = self.storage.get_knowledge_object(knowledge_object_id, user_id)
+        if not knowledge or knowledge.get("deleted_at"):
+            return []
+        text = str(knowledge.get("content") or knowledge.get("summary") or "")
+        links = self.storage.list_knowledge_entity_links(
+            user_id,
+            knowledge_object_id=knowledge_object_id,
+            status="accepted",
+            limit=100,
+        )
+        mentions: list[tuple[int, int, dict[str, Any]]] = []
+        for link in links:
+            name = str(link.get("entity_name") or "").strip()
+            if not name:
+                continue
+            pattern = re.compile(re.escape(name), re.I)
+            match = pattern.search(text)
+            if match:
+                mentions.append((match.start(), match.end(), link))
+        mentions.sort(key=lambda item: item[0])
+
+        suggestions: list[dict[str, Any]] = []
+        for index, left in enumerate(mentions):
+            for right in mentions[index + 1 :]:
+                if right[0] - left[1] > 160:
+                    break
+                between = text[left[1] : right[0]]
+                for phrase, relation_type, base_confidence in _RELATION_PHRASES:
+                    match = phrase.search(between)
+                    if not match:
+                        continue
+                    confidence = base_confidence
+                    span = text[max(0, left[0] - 30) : min(len(text), right[1] + 30)]
+                    candidate = self.storage.store_relation_candidate(
+                        user_id,
+                        str(left[2]["entity_id"]),
+                        str(right[2]["entity_id"]),
+                        relation_type.value,
+                        confidence=confidence,
+                        evidence={
+                            "knowledge_object_id": knowledge_object_id,
+                            "source_name": left[2].get("entity_name"),
+                            "target_name": right[2].get("entity_name"),
+                            "phrase": match.group(0),
+                            "excerpt": span[:500],
+                            "method": "explicit_local_relation_phrase",
+                        },
+                    )
+                    suggestions.append(candidate)
+                    break
+        unique = {str(item.get("id") or ""): item for item in suggestions if item.get("id")}
+        return sorted(unique.values(), key=lambda item: float(item.get("confidence", 0.0)), reverse=True)
+
+    def review_relation_candidate(
+        self,
+        user_id: str,
+        candidate_id: str,
+        status: str,
+        *,
+        reviewed_by: str,
+    ) -> dict[str, Any] | None:
+        return self.storage.review_relation_candidate(
+            user_id,
+            candidate_id,
+            status,
+            reviewed_by=reviewed_by,
+        )
+
+    def detect_conflicts_for_knowledge(
+        self,
+        user_id: str,
+        knowledge_object_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Propose potential contradictions without changing either claim."""
+
+        current = self.storage.get_knowledge_object(knowledge_object_id, user_id)
+        if not current or current.get("deleted_at"):
+            return []
+        current_claims = _normalized_claims(str(current.get("content") or ""))
+        if not current_claims:
+            return []
+
+        linked_entities = self.storage.list_knowledge_entity_links(
+            user_id,
+            knowledge_object_id=knowledge_object_id,
+            status="accepted",
+            limit=100,
+        )
+        candidate_ids: set[str] = set()
+        for link in linked_entities:
+            for item in self.storage.get_entity_knowledge(
+                user_id,
+                str(link["entity_id"]),
+                limit=250,
+            ):
+                candidate_id = str(item.get("id") or "")
+                if candidate_id and candidate_id != knowledge_object_id:
+                    candidate_ids.add(candidate_id)
+        if not candidate_ids:
+            # Bounded fallback for exact identifiers or properties that were
+            # not linked by legacy ingestion.
+            candidate_ids.update(
+                str(item["id"])
+                for item in self.storage.list_knowledge_objects(user_id, limit=300)
+                if item.get("id") != knowledge_object_id
+            )
+
+        output: list[dict[str, Any]] = []
+        for other_id in list(candidate_ids)[:500]:
+            other = self.storage.get_knowledge_object(other_id, user_id)
+            if not other or other.get("deleted_at"):
+                continue
+            other_claims = _normalized_claims(str(other.get("content") or ""))
+            for left in current_claims:
+                for right in other_claims:
+                    if left["predicate"] != right["predicate"]:
+                        continue
+                    if left["subject_key"] != right["subject_key"]:
+                        continue
+                    if left["value_key"] == right["value_key"]:
+                        continue
+                    confidence = 0.92 if left["predicate"] in {"address", "quoted_value"} else 0.82
+                    conflict = self.storage.store_knowledge_conflict(
+                        user_id,
+                        knowledge_object_id,
+                        other_id,
+                        conflict_type=f"{left['predicate']}_mismatch",
+                        confidence=confidence,
+                        evidence={
+                            "subject": left["subject"],
+                            "predicate": left["predicate"],
+                            "new_value": left["value"],
+                            "existing_value": right["value"],
+                            "new_evidence": left["evidence"],
+                            "existing_evidence": right["evidence"],
+                            "method": "same_subject_predicate_different_value",
+                        },
+                    )
+                    output.append(conflict)
+                    if len(output) >= max(1, min(limit, 100)):
+                        return output
+        return output
+
+    def review_conflict(
+        self,
+        user_id: str,
+        conflict_id: str,
+        status: str,
+        *,
+        reviewed_by: str,
+        resolution_note: str = "",
+    ) -> dict[str, Any] | None:
+        return self.storage.review_knowledge_conflict(
+            user_id,
+            conflict_id,
+            status,
+            reviewed_by=reviewed_by,
+            resolution_note=resolution_note,
+        )
+
+    def resolve_conflict(
+        self,
+        user_id: str,
+        conflict_id: str,
+        winner_id: str,
+        *,
+        reviewed_by: str,
+        resolution_note: str = "",
+    ) -> dict[str, Any] | None:
+        return self.storage.resolve_conflict(
+            user_id,
+            conflict_id,
+            winner_id,
+            reviewed_by=reviewed_by,
+            resolution_note=resolution_note,
+        )
+
+    def get_entity_relations(self, entity_id: str, user_id: str) -> list[dict[str, Any]]:
+        if not self.storage.get_entity(entity_id, user_id):
+            return []
+        return self.storage.get_entity_relations(entity_id, user_id)
+
+    def get_entity_graph(self, user_id: str, entity_id: str, depth: int = 2) -> dict[str, Any]:
+        return self.storage.get_entity_graph(user_id, entity_id, depth)
+
+    def link_knowledge_to_entity(
+        self,
+        ko_id: str,
+        entity_id: str,
+        user_id: str,
+        *,
+        confidence: float = 1.0,
+        evidence: dict[str, Any] | None = None,
+        status: str = "accepted",
+        reviewed_by: str | None = None,
+    ) -> dict[str, Any]:
+        return self.storage.link_knowledge_entity(
+            user_id,
+            ko_id,
+            entity_id,
+            confidence=confidence,
+            evidence=evidence,
+            status=status,
+            reviewed_by=reviewed_by,
+        )
+
+    def get_entity_knowledge(
+        self,
+        entity_id: str,
+        user_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if not self.storage.get_entity(entity_id, user_id):
+            return []
+        return self.storage.get_entity_knowledge(user_id, entity_id, limit=limit)
+
+    def review_knowledge_link(
+        self,
+        user_id: str,
+        link_id: str,
+        status: str,
+        *,
+        reviewed_by: str,
+    ) -> dict[str, Any] | None:
+        return self.storage.set_knowledge_entity_link_status(
+            link_id,
+            user_id,
+            status,
+            reviewed_by=reviewed_by,
+        )
+
+    def get_stats(self, user_id: str) -> dict[str, Any]:
+        entities = self.storage.list_entities(user_id, limit=5000)
+        by_type: dict[str, int] = defaultdict(int)
+        for entity in entities:
+            by_type[entity.get("entity_type", EntityType.OTHER.value)] += 1
+        relation_row = self.storage.execute(
+            "SELECT COUNT(*) AS count FROM relations WHERE user_id=? AND deleted_at IS NULL",
+            (user_id,),
+        ).fetchone()
+        inbox_row = self.storage.execute(
+            "SELECT COUNT(*) AS count FROM inbox WHERE user_id=? AND status='pending'",
+            (user_id,),
+        ).fetchone()
+        relation_candidate_row = self.storage.execute(
+            "SELECT COUNT(*) AS count FROM relation_candidates WHERE user_id=? AND status='suggested'",
+            (user_id,),
+        ).fetchone()
+        conflict_row = self.storage.execute(
+            "SELECT COUNT(*) AS count FROM knowledge_conflicts WHERE user_id=? AND status='suggested'",
+            (user_id,),
+        ).fetchone()
+        return {
+            "entity_count": len(entities),
+            "relation_count": int(relation_row["count"] if relation_row else 0),
+            "knowledge_object_count": self.storage.count_knowledge_objects(user_id),
+            "entities_by_type": dict(by_type),
+            "pending_resolutions": len(
+                self.storage.list_resolution_candidates(user_id, ResolutionStatus.SUGGESTED)
+            ),
+            "pending_inbox": int(inbox_row["count"] if inbox_row else 0),
+            "pending_relation_candidates": int(
+                relation_candidate_row["count"] if relation_candidate_row else 0
+            ),
+            "pending_conflicts": int(conflict_row["count"] if conflict_row else 0),
+        }
+
+    def is_empty(self, user_id: str) -> bool:
+        return self.storage.count_knowledge_objects(user_id) == 0 and not self.storage.list_entities(
+            user_id, limit=1
+        )
+
+    @staticmethod
+    def get_bootstrap_suggestions(user_id: str) -> list[str]:
+        del user_id
+        return [
+            "Отправьте заметку о проекте, человеке или решении — она появится во входящих.",
+            "Загрузите PDF, DOCX, таблицу или обычный текстовый файл.",
+            "Попросите сохранить факт явно: «Запомни: проект Альфа запускается в сентябре».",
+        ]
