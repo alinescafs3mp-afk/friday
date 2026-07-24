@@ -439,6 +439,35 @@ def _audit(
     )
 
 
+def _audit_auth_failure(request: Request, reason: str, *, status: int) -> None:
+    """Durably record an auth/authorization failure at the HTTP boundary.
+
+    Metadata only (reason code, status, method, path) — never the attempted
+    secret — so a leaked token's abuse (or a brute-force) is forensically
+    visible in the audit log. Best-effort: auditing a failure must never turn
+    the failure response into a 500.
+    """
+    actor = getattr(request.state, "actor", None)
+    with suppress(Exception):
+        request.app.state.storage.log_audit(
+            AuditEntry(
+                id=new_id("audit"),
+                user_id=getattr(actor, "user_id", None) or "anonymous",
+                action="auth.failed",
+                target_type="auth",
+                target_id=reason,
+                after_json={
+                    "status": status,
+                    "reason": reason,
+                    "method": request.method,
+                    "path": request.url.path,
+                },
+                ip_address=getattr(request.state, "client_ip", ""),
+                request_id=getattr(request.state, "request_id", ""),
+            )
+        )
+
+
 def _safe_owned_file(root: Path, candidate: str) -> Path:
     root = root.resolve()
     path = Path(candidate).resolve()
@@ -765,14 +794,18 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                     response = await call_next(request)
             except AuthenticationError as exc:
                 await _count_auth_failure()
+                _audit_auth_failure(request, "invalid_credentials", status=401)
                 response = JSONResponse({"detail": str(exc)}, status_code=401)
             except AuthorizationError as exc:
+                _audit_auth_failure(request, "capability_denied", status=403)
                 response = JSONResponse({"detail": str(exc)}, status_code=403)
             except HTTPException as exc:
                 # Exceptions raised before ``call_next`` are outside FastAPI's
                 # route exception handlers.  Convert them here so middleware
                 # checks such as rate limiting cannot accidentally surface as
                 # an internal server error.
+                if exc.status_code == 429:
+                    _audit_auth_failure(request, "rate_limited", status=429)
                 response = JSONResponse(
                     {"detail": exc.detail},
                     status_code=exc.status_code,
@@ -782,6 +815,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 # Malformed credentials (bad timestamps, chat ids, …) are
                 # authentication failures too and consume the same budget.
                 await _count_auth_failure()
+                _audit_auth_failure(request, "malformed_credentials", status=401)
                 response = JSONResponse({"detail": str(exc)}, status_code=401)
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"

@@ -125,3 +125,27 @@ def test_bearer_token_auth_ignores_origin(settings):
             },
         )
         assert response.status_code == 200
+
+
+def test_auth_failure_is_audited_without_leaking_the_secret(settings):
+    """A rejected credential leaves a durable, secret-free forensic record."""
+    from jericho.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        rejected = client.get(
+            "/api/admin/overview",
+            headers={"Authorization": "Bearer wrong-token-9f8e7d6c5b4a"},
+        )
+        assert rejected.status_code == 401
+
+        row = app.state.storage.execute(
+            "SELECT user_id, action, target_id, ip_address, after_json "
+            "FROM audit_log WHERE action='auth.failed' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        assert row is not None
+        assert row["target_id"] == "invalid_credentials"
+        assert row["user_id"] == "anonymous"
+        assert row["ip_address"]  # the IP is the key forensic datum
+        # The attempted secret is never persisted.
+        assert "wrong-token" not in (row["after_json"] or "")
