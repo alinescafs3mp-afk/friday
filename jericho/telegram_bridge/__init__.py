@@ -428,6 +428,7 @@ class TelegramBridge:
     ) -> None:
         for row in self._inbox.pending():
             update_id = int(row["update_id"])
+            update: dict[str, Any] = {}
             try:
                 update = json.loads(row["payload_json"])
                 cached = (
@@ -438,6 +439,10 @@ class TelegramBridge:
             except PermanentUpdateError as exc:
                 LOGGER.warning("Quarantining invalid Telegram update %s: %s", update_id, exc)
                 self._inbox.mark_dead_letter(update_id, f"{type(exc).__name__}: {exc}")
+                # MediaTooLargeError already told the user; others left them in
+                # silence — a rejected message must never just vanish.
+                if not isinstance(exc, MediaTooLargeError):
+                    await self._notify_dead_letter(telegram, update, permanent=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -448,7 +453,38 @@ class TelegramBridge:
                 )
                 if dead_lettered:
                     LOGGER.error("Telegram update %s exhausted its retry budget", update_id)
+                    await self._notify_dead_letter(telegram, update, permanent=False)
                 break
+
+    @staticmethod
+    def _update_chat_id(update: dict[str, Any]) -> int | None:
+        message = update.get("message") if isinstance(update, dict) else None
+        chat = message.get("chat") if isinstance(message, dict) else None
+        if not isinstance(chat, dict):
+            return None
+        try:
+            return int(chat.get("id", 0)) or None
+        except (TypeError, ValueError):
+            return None
+
+    async def _notify_dead_letter(
+        self, telegram: httpx.AsyncClient, update: dict[str, Any], *, permanent: bool
+    ) -> None:
+        """Tell the originating (allowlisted) chat its message could not be
+        processed, so a dead-lettered update is never pure silence. Deny-by-
+        default: only allowlisted chats are messaged; best-effort delivery."""
+        chat_id = self._update_chat_id(update)
+        if chat_id is None or chat_id not in self.config.allowed_chat_ids:
+            return
+        text = (
+            "⚠️ Не удалось обработать это сообщение — оно отклонено."
+            if permanent
+            else "⚠️ Не удалось обработать это сообщение, я отложил его. Попробуйте позже или переформулируйте."
+        )
+        try:
+            await self._send_message(telegram, chat_id, text)
+        except Exception:
+            LOGGER.warning("dead-letter notice to chat %s failed", chat_id, exc_info=True)
 
     async def _process_update(
         self,

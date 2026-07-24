@@ -806,3 +806,40 @@ async def test_register_commands_sets_the_telegram_menu(tmp_path):
         assert all(c["command"].islower() and "/" not in c["command"] and c["description"] for c in commands)
     finally:
         bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_dead_lettered_update_replies_to_the_user(tmp_path, monkeypatch):
+    from jericho.telegram_bridge import PermanentUpdateError
+
+    bridge = _media_bridge(tmp_path)  # allowlist [5001]
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+
+    async def _reject(*args, **kwargs):
+        raise PermanentUpdateError("backend rejected")
+
+    monkeypatch.setattr(bridge, "_process_update", _reject)
+    bridge._inbox.store(
+        {"update_id": 601, "message": {"chat": {"id": 5001}, "from": {"id": 5001}, "text": "hi"}}
+    )
+    try:
+        await bridge._drain_inbox(telegram, backend)
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert sends and sends[-1]["chat_id"] == 5001
+        assert "отклонено" in sends[-1]["text"]  # the user is told, not left silent
+        assert bridge._inbox.stats()["dead_letter"] == 1
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_notice_is_denied_for_unallowlisted_chat(tmp_path):
+    bridge = _media_bridge(tmp_path)  # allowlist [5001]
+    telegram = _FakeTelegramClient()
+    stray = {"message": {"chat": {"id": 999999}, "from": {"id": 999999}}}
+    try:
+        await bridge._notify_dead_letter(telegram, stray, permanent=True)
+        assert not any(u.endswith("/sendMessage") for u, _ in telegram.calls)
+    finally:
+        bridge._inbox.close()
