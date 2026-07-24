@@ -395,3 +395,47 @@ def test_restore_recovers_over_corrupt_active_database_and_preserves_raw_snapsho
     assert (recovery_dir / "jericho.sqlite3").read_bytes() == b"not-a-sqlite-database"
     assert storage.get_user("known-good-backup-user") is not None
     assert storage.diagnostics()["ok"] is True
+
+
+def test_backup_does_not_hold_lock_during_verification(storage, monkeypatch):
+    # The integrity/foreign-key scan runs against the backup copy on its own
+    # connection, so the live storage lock must be free while it runs — otherwise
+    # every request stalls for the whole (potentially minutes-long) scan.
+    import threading
+    import time
+
+    reached_verify = threading.Event()
+    release = threading.Event()
+    original = storage._verify_backup_conn
+
+    def slow_verify(conn):
+        reached_verify.set()
+        assert release.wait(3), "test stalled waiting to release verification"
+        return original(conn)
+
+    monkeypatch.setattr(storage, "_verify_backup_conn", slow_verify)
+
+    outcome: dict = {}
+    errors: list = []
+
+    def run_backup():
+        try:
+            outcome.update(storage.create_backup(label="concurrency"))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_backup)
+    worker.start()
+    assert reached_verify.wait(3), "backup never reached verification"
+
+    # Verification is in flight on the backup connection; a lock-taking read on
+    # this thread must return promptly rather than block until release.
+    start = time.monotonic()
+    storage.kv_get("backup-concurrency-probe")
+    elapsed = time.monotonic() - start
+    release.set()
+    worker.join(5)
+
+    assert not errors, errors
+    assert elapsed < 1.5, f"read blocked {elapsed:.2f}s — lock held during verification"
+    assert outcome.get("integrity_check") == "ok"

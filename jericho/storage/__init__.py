@@ -4734,6 +4734,21 @@ class JerichoStorage:
         result.update({row["lifecycle_stage"]: int(row["count"]) for row in rows})
         return result
 
+    def _verify_backup_conn(self, backup_conn: sqlite3.Connection) -> tuple[str, list[Any], int]:
+        """Integrity / foreign-key / schema check of a backup copy.
+
+        Runs entirely against the backup's own connection, so it never needs the
+        live storage lock — keeping it out from under ``self._lock`` is what lets
+        a backup avoid freezing concurrent requests during the full-DB scan.
+        """
+        integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()[0]
+        foreign_key_violations = backup_conn.execute("PRAGMA foreign_key_check").fetchall()
+        schema_row = backup_conn.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        backup_schema_version = int(schema_row[0]) if schema_row else -1
+        return integrity, foreign_key_violations, backup_schema_version
+
     def create_backup(self, *, label: str = "manual") -> dict[str, Any]:
         self.settings.backups_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -4744,22 +4759,22 @@ class JerichoStorage:
             destination = self.settings.backups_dir / f"{stem}-{suffix}.sqlite3"
             suffix += 1
 
-        with self._lock:
-            self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-            backup_conn = sqlite3.connect(str(destination))
-            try:
+        backup_conn = sqlite3.connect(str(destination))
+        try:
+            # Hold the global lock ONLY for the checkpoint + copy — the sole steps
+            # that read the live connection. The integrity/foreign-key/schema scan
+            # runs against the backup copy on its own connection, so holding the
+            # lock across it would freeze every Telegram/Admin request for the
+            # whole (full-database) scan.
+            with self._lock:
+                self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                 self.conn.backup(backup_conn)
-                integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()[0]
-                foreign_key_violations = backup_conn.execute("PRAGMA foreign_key_check").fetchall()
-                schema_row = backup_conn.execute(
-                    "SELECT value FROM schema_meta WHERE key='schema_version'"
-                ).fetchone()
-                backup_schema_version = int(schema_row[0]) if schema_row else -1
-            except BaseException:
-                destination.unlink(missing_ok=True)
-                raise
-            finally:
-                backup_conn.close()
+            integrity, foreign_key_violations, backup_schema_version = self._verify_backup_conn(backup_conn)
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
+        finally:
+            backup_conn.close()
         if integrity != "ok":
             destination.unlink(missing_ok=True)
             raise RuntimeError(f"Backup integrity check failed: {integrity}")
