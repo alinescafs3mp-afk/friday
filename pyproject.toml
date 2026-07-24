@@ -1,6 +1,6 @@
 [project]
 name = "jericho"
-version = "0.37.0"
+version = "0.38.0"
 description = "Local-first personal Knowledge Operating System with a provenance-first knowledge graph."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,6 +31,12 @@ dependencies = [
 # JERICHO_WHISPER_ENABLED and lazy-imported, so the core runs without it installed.
 voice = [
     "faster-whisper>=1.2,<2",
+]
+# Accelerates corpus-wide dense recall: the pure-Python cosine scan becomes one
+# BLAS matmul. Lazy-imported with a pure-Python fallback, so the core runs without
+# it; install `jericho[vectors]` when semantic search over a large corpus is used.
+vectors = [
+    "numpy>=1.26,<3",
 ]
 dev = [
     "bandit>=1.8,<2",

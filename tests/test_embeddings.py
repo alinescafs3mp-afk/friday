@@ -14,7 +14,14 @@ import hashlib
 
 import pytest
 
-from jericho.retrieval import EmbeddingBackend, HybridSearcher, pack_vector
+from jericho.retrieval import (
+    EmbeddingBackend,
+    HybridSearcher,
+    _dense_scores_numpy,
+    _dense_scores_python,
+    dense_scores,
+    pack_vector,
+)
 from jericho.storage.models import KnowledgeObject, RawObject, new_id
 from jericho.workers import WorkersManager
 
@@ -271,3 +278,65 @@ async def test_indexer_is_disabled_when_backend_not_configured(storage, settings
     _make_ko(storage, "alice", "Мой пёс Рекс", title="Пёс")
     await manager._embeddings_index_all()  # noqa: SLF001
     assert storage.count_knowledge_embeddings() == 0
+
+
+# --- vectorized dense scoring (jericho[vectors]) --------------------------
+
+
+def _rand_vectors(seed, count, dim):
+    import random
+
+    rng = random.Random(seed)
+    return [(f"d{i}", pack_vector([rng.gauss(0, 1) for _ in range(dim)])) for i in range(count)]
+
+
+def test_numpy_and_python_dense_scores_agree():
+    # The BLAS path must match the pure-Python reference in ranking (and value).
+    dim = 64
+    stored = _rand_vectors(seed=7, count=150, dim=dim)
+    stored.append(("wrongdim", pack_vector([0.1] * (dim - 1))))  # skipped by both paths
+    stored.append(("zero", pack_vector([0.0] * dim)))  # zero-norm, skipped by both
+    import random
+
+    query = [random.Random(99).gauss(0, 1) for _ in range(dim)]
+
+    numpy_scores = dict((d, s) for s, d in _dense_scores_numpy(query, stored, dim))
+    python_scores = dict((d, s) for s, d in _dense_scores_python(query, stored, dim))
+
+    assert set(numpy_scores) == set(python_scores)
+    assert "wrongdim" not in numpy_scores and "zero" not in numpy_scores
+    assert len(numpy_scores) == 150
+    # Identical top-10 ordering and near-bit-identical values.
+    order_numpy = [d for _, d in sorted(((s, d) for d, s in numpy_scores.items()), reverse=True)][:10]
+    order_python = [d for _, d in sorted(((s, d) for d, s in python_scores.items()), reverse=True)][:10]
+    assert order_numpy == order_python
+    # numpy scores in float32 (the stored precision); the loop accumulates in
+    # float64 — agreement to ~1e-6 is expected and far below any ranking threshold.
+    assert max(abs(numpy_scores[d] - python_scores[d]) for d in numpy_scores) < 1e-4
+
+
+def test_dense_scores_dispatches_to_numpy_when_available_else_python(monkeypatch):
+    import jericho.retrieval as retrieval
+
+    stored = _rand_vectors(seed=3, count=20, dim=32)
+    query = [0.5] * 32
+
+    # Force the pure-Python fallback (numpy absent) and confirm it still scores.
+    monkeypatch.setattr(retrieval, "_np", None)
+    fallback = dense_scores(query, stored, 32)
+    assert len(fallback) == 20
+
+    # With numpy present, results match the fallback ranking.
+    monkeypatch.undo()
+    if retrieval._np is not None:
+        accelerated = dense_scores(query, stored, 32)
+        top_a = [d for _, d in sorted(accelerated, reverse=True)][:5]
+        top_f = [d for _, d in sorted(fallback, reverse=True)][:5]
+        assert top_a == top_f
+
+
+def test_dense_scores_handle_empty_and_zero_query():
+    assert dense_scores([1.0, 2.0], [], 2) == []
+    stored = [("d0", pack_vector([1.0, 0.0]))]
+    assert dense_scores([0.0, 0.0], stored, 2) == []  # zero-norm query
+    assert _dense_scores_python([0.0, 0.0], stored, 2) == []
