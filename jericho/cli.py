@@ -108,15 +108,20 @@ JERICHO_HOME={settings.home}
 JERICHO_PROFILE=qwen36-vl
 JERICHO_MODEL_ROOT={settings.model_root}
 
+# Point BASE_URL at a local or LAN OpenAI-compatible endpoint, e.g. a vLLM on a
+# neighbouring machine: http://192.168.1.50:8001/v1 . If that endpoint requires a
+# token (vLLM --api-key), set JERICHO_LLM_API_KEY and it is sent as a Bearer token.
 JERICHO_LLM_BASE_URL=http://127.0.0.1:8001/v1
 JERICHO_LLM_MODEL=dispatcher
 JERICHO_LLM_ENABLED=1
+JERICHO_LLM_API_KEY=
 JERICHO_VERIFY_ANSWERS=1
 # Semantic search: point at a SEPARATE local OpenAI-compatible /embeddings service
 # (the chat vLLM above does not serve embeddings). Leave disabled to run on
-# lexical+FTS+graph retrieval only.
+# lexical+FTS+graph retrieval only. EMBEDDINGS_API_KEY defaults to LLM_API_KEY.
 JERICHO_EMBEDDINGS_ENABLED=0
 JERICHO_EMBEDDINGS_BASE_URL=http://127.0.0.1:8002/v1
+JERICHO_EMBEDDINGS_API_KEY=
 JERICHO_EMBEDDINGS_MODEL=
 # Latency guard: cap how many (newest) vectors dense recall scores per query on a
 # large corpus (the cosine scan is pure Python). 0 = no cap. Truncation is shown

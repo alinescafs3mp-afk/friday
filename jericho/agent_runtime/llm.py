@@ -240,6 +240,12 @@ class LLMRouter:
     def base_url(self) -> str:
         return self.settings.llm_base_url
 
+    def _auth_headers(self) -> dict[str, str]:
+        # Bearer auth for an OpenAI-compatible endpoint (e.g. a vLLM on the LAN
+        # started with --api-key). Empty key = no header (local unauthenticated).
+        key = self.settings.llm_api_key
+        return {"Authorization": f"Bearer {key}"} if key else {}
+
     @property
     def model(self) -> str:
         return self.settings.llm_model
@@ -344,7 +350,9 @@ class LLMRouter:
         for attempt in range(MAX_RETRIES):
             try:
                 timeout = httpx.Timeout(self.timeout_sec, connect=15.0)
-                async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                async with httpx.AsyncClient(
+                    timeout=timeout, trust_env=False, headers=self._auth_headers()
+                ) as client:
                     response = await client.post(f"{self.base_url}/chat/completions", json=payload)
                     response.raise_for_status()
                     data = response.json()
@@ -403,7 +411,7 @@ class LLMRouter:
         try:
             timeout = httpx.Timeout(self.timeout_sec, connect=15.0)
             async with (
-                httpx.AsyncClient(timeout=timeout, trust_env=False) as client,
+                httpx.AsyncClient(timeout=timeout, trust_env=False, headers=self._auth_headers()) as client,
                 client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as response,
             ):
                 response.raise_for_status()

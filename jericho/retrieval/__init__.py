@@ -216,7 +216,9 @@ class EmbeddingBackend:
             return None
         try:
             timeout = httpx.Timeout(min(self.settings.llm_timeout_sec, 60.0), connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            key = self.settings.embeddings_api_key
+            headers = {"Authorization": f"Bearer {key}"} if key else {}
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=headers) as client:
                 response = await client.post(
                     f"{self.settings.embeddings_base_url}/embeddings",
                     json={"model": self.settings.embeddings_model, "input": texts},

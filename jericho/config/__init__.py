@@ -235,11 +235,13 @@ class JerichoSettings:
     llm_enabled: bool
     llm_timeout_sec: float
     llm_max_tokens: int
+    llm_api_key: str
     verify_answers: bool
     verify_min_answer_chars: int
 
     embeddings_enabled: bool
     embeddings_base_url: str
+    embeddings_api_key: str
     embeddings_model: str
     embeddings_index_batch: int
     embeddings_index_interval_sec: float
@@ -363,12 +365,15 @@ class JerichoSettings:
                 "base_url": self.llm_base_url,
                 "model": self.llm_model,
                 "max_tokens": self.llm_max_tokens,
+                # Never expose the token itself — only whether auth is configured.
+                "auth": bool(self.llm_api_key),
                 "verify_answers": self.verify_answers,
                 "verify_min_answer_chars": self.verify_min_answer_chars,
             },
             "embeddings": {
                 "enabled": self.embeddings_enabled,
                 "base_url": self.embeddings_base_url,
+                "auth": bool(self.embeddings_api_key),
                 "model": self.embeddings_model,
                 "index_batch": self.embeddings_index_batch,
                 "index_interval_sec": self.embeddings_index_interval_sec,
@@ -475,10 +480,15 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         llm_enabled=_bool_env("JERICHO_LLM_ENABLED", True),
         llm_timeout_sec=_float_env("JERICHO_LLM_TIMEOUT_SEC", 240.0, minimum=1.0),
         llm_max_tokens=_int_env("JERICHO_LLM_MAX_TOKENS", 2048, minimum=64),
+        llm_api_key=os.environ.get("JERICHO_LLM_API_KEY", "").strip(),
         verify_answers=_bool_env("JERICHO_VERIFY_ANSWERS", True),
         verify_min_answer_chars=_int_env("JERICHO_VERIFY_MIN_ANSWER_CHARS", 300, minimum=1),
         embeddings_enabled=_bool_env("JERICHO_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=os.environ.get("JERICHO_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),
+        # A separate embeddings service may share the LLM's token; default to it.
+        embeddings_api_key=os.environ.get(
+            "JERICHO_EMBEDDINGS_API_KEY", os.environ.get("JERICHO_LLM_API_KEY", "")
+        ).strip(),
         embeddings_model=os.environ.get("JERICHO_EMBEDDINGS_MODEL", ""),
         embeddings_index_batch=_int_env("JERICHO_EMBEDDINGS_INDEX_BATCH", 64, minimum=1),
         embeddings_index_interval_sec=_float_env("JERICHO_EMBEDDINGS_INDEX_INTERVAL_SEC", 120.0, minimum=5.0),

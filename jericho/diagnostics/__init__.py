@@ -70,7 +70,9 @@ def _port_reachable(url: str, timeout: float = 1.0) -> dict[str, Any]:
         return {"reachable": False, "host": host, "port": port, "error": str(exc)}
 
 
-def _llm_endpoint_status(base_url: str, model: str, *, timeout: float = 2.0) -> dict[str, Any]:
+def _llm_endpoint_status(
+    base_url: str, model: str, *, api_key: str = "", timeout: float = 2.0
+) -> dict[str, Any]:
     """Beyond a bare TCP connect: query ``{base_url}/models`` and confirm the
     configured model is actually served. A wrong ``JERICHO_LLM_MODEL`` is the most
     common local-LLM footgun and a socket probe reports it as 'reachable'."""
@@ -83,9 +85,11 @@ def _llm_endpoint_status(base_url: str, model: str, *, timeout: float = 2.0) -> 
     if not status.get("reachable"):
         return status
     try:
-        request = urllib.request.Request(
-            f"{base_url.rstrip('/')}/models", headers={"Accept": "application/json"}
-        )
+        headers = {"Accept": "application/json"}
+        if api_key:
+            # An authenticated endpoint (e.g. vLLM --api-key) 401s /models otherwise.
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urllib.request.Request(f"{base_url.rstrip('/')}/models", headers=headers)
         with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - configured local URL
             payload = json.loads(response.read())
     except Exception as exc:  # noqa: BLE001 - any failure means we cannot confirm the model
@@ -612,7 +616,7 @@ def collect_diagnostics(
         "actions": actions,
     }
     if check_llm_port and settings.llm_enabled:
-        llm = _llm_endpoint_status(settings.llm_base_url, settings.llm_model)
+        llm = _llm_endpoint_status(settings.llm_base_url, settings.llm_model, api_key=settings.llm_api_key)
         result["llm_endpoint"] = llm
         reachable = bool(llm.get("reachable"))
         model_served = llm.get("model_served")
