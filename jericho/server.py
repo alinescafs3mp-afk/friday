@@ -537,13 +537,27 @@ async def _authenticate(request: Request) -> ActorContext:
         )
         user_id = _telegram_user_id(settings, identity.external_user_id)
         existing = state.storage.get_user(user_id)
+        # Allowlisting a GROUP chat handed an account with the full 'user' preset to
+        # every participant who wrote in it. Tenant isolation keeps the owner's
+        # knowledge private, so the exposure is not exfiltration but spending the
+        # owner's resources: that preset grants web search and fetch, file upload and
+        # background missions. A NEW account created in a non-private chat therefore
+        # gets 'guest' (read and chat only) — least privilege instead of a lockout, so
+        # nobody in the chat stops working. In Telegram a private chat's id equals the
+        # sender's, which is what distinguishes the two. ``ensure_user`` never rewrites
+        # an existing preset, so the owner and anyone already provisioned are untouched.
+        sender_number = int(identity.external_user_id) if identity.external_user_id.isdigit() else 0
+        in_private_chat = bool(sender_number) and chat_number == sender_number
+        preset_for_new_account = (
+            "user" if in_private_chat or settings.telegram_group_members_full_access else "guest"
+        )
         state.storage.ensure_user(
             user_id,
             source="telegram",
             external_id=identity.external_user_id,
             display_name=display_name,
             username=str(telegram_user.get("username") or ""),
-            preset_key="user",
+            preset_key=preset_for_new_account,
             metadata={"chat_id": identity.chat_id, "language_code": telegram_user.get("language_code")},
         )
         user = state.storage.get_user(user_id) or existing or {}

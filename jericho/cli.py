@@ -181,6 +181,10 @@ JERICHO_TELEGRAM_BOT_TOKEN=
 # Deny-by-default: the bot ignores every chat until one of these is set.
 JERICHO_TELEGRAM_ALLOWED_CHAT_IDS=
 JERICHO_TELEGRAM_OWNER_CHAT_IDS=
+# In a GROUP chat a first-time sender gets a read-and-chat 'guest' account, not the
+# full 'user' preset (which grants web access, uploads and background missions on
+# this instance). A private chat is unaffected; set this to 1 to opt out.
+JERICHO_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS=0
 JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC=90
 
 JERICHO_WORKERS_ENABLED=1

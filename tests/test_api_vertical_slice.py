@@ -33,7 +33,7 @@ def _signed_headers(secret: str, method: str, path: str, body: bytes, user: str,
     }
 
 
-def _bridge_request(client, settings, path, payload, *, user="1001", chat="5001"):
+def _bridge_request(client, settings, path, payload, *, user="5001", chat="5001"):
     body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return client.post(
         path,
@@ -42,14 +42,14 @@ def _bridge_request(client, settings, path, payload, *, user="1001", chat="5001"
     )
 
 
-def _bridge_get(client, settings, path, *, user="1001", chat="5001"):
+def _bridge_get(client, settings, path, *, user="5001", chat="5001"):
     return client.get(
         path,
         headers=_signed_headers(settings.telegram_bridge_secret, "GET", path, b"", user, chat),
     )
 
 
-def _bridge_json(client, settings, method, path, payload, *, user="1001", chat="5001"):
+def _bridge_json(client, settings, method, path, payload, *, user="5001", chat="5001"):
     body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return client.request(
         method,
@@ -130,8 +130,8 @@ def test_authenticated_api_and_telegram_vertical_slice(settings):
         assert second.status_code == 200
         assert second.json()["conversation_id"] == conversation_id
 
-        alice_knowledge = _bridge_get(client, settings, "/api/knowledge", user="1001", chat="5001")
-        bob_knowledge = _bridge_get(client, settings, "/api/knowledge", user="1002", chat="5002")
+        alice_knowledge = _bridge_get(client, settings, "/api/knowledge", user="5001", chat="5001")
+        bob_knowledge = _bridge_get(client, settings, "/api/knowledge", user="5002", chat="5002")
         assert alice_knowledge.status_code == 200
         assert alice_knowledge.json()["count"] >= 1
         assert bob_knowledge.status_code == 200
@@ -172,8 +172,8 @@ def test_authenticated_api_and_telegram_vertical_slice(settings):
 
         users = client.get("/api/admin/users", headers=owner_headers)
         ids = {user["id"] for user in users.json()["items"]}
-        assert "telegram:telegram:1001" in ids
-        assert "telegram:telegram:1002" in ids
+        assert "telegram:telegram:5001" in ids
+        assert "telegram:telegram:5002" in ids
         audit = client.get("/api/admin/audit", headers=owner_headers)
         assert audit.status_code == 200
         assert "Content-Security-Policy" in client.get("/admin/").headers
@@ -434,7 +434,7 @@ def test_maturity_workflows_are_reachable_through_signed_and_admin_apis(settings
 
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
-    user_id = "telegram:telegram:1001"
+    user_id = "telegram:telegram:5001"
     with TestClient(app) as client:
         mode = _bridge_json(
             client,
@@ -608,7 +608,7 @@ def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
                 "mode": "knowledge_work",
                 "telegram_user": {"id": 7001, "first_name": "Worker"},
             },
-            user="7001",
+            user="7002",
             chat="7002",
         )
         assert mode.status_code == 200
@@ -623,7 +623,7 @@ def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
                 "telegram_message_id": 1,
                 "telegram_user": {"id": 7001, "first_name": "Worker"},
             },
-            user="7001",
+            user="7002",
             chat="7002",
         )
         assert answer.status_code == 200, answer.text
@@ -637,7 +637,7 @@ def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
             "POST",
             "/api/assistant/candidates",
             {"message_id": payload["message_id"]},
-            user="7001",
+            user="7002",
             chat="7002",
         )
         assert queued.status_code == 200, queued.text
@@ -650,7 +650,7 @@ def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
             "POST",
             "/api/assistant/candidates",
             {"message_id": payload["message_id"]},
-            user="7001",
+            user="7002",
             chat="7002",
         )
         assert replay.status_code == 200
@@ -662,7 +662,7 @@ def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
             "POST",
             "/api/research/candidates",
             {"message_id": payload["message_id"]},
-            user="7001",
+            user="7002",
             chat="7002",
         )
         assert wrong_endpoint.status_code == 409
@@ -750,3 +750,58 @@ def test_admin_bulk_graph_review_is_bounded_and_reports_partial_failures(setting
             headers=owner_headers,
         )
         assert oversized.status_code == 400
+
+
+def test_group_chat_members_are_provisioned_with_least_privilege(settings):
+    """Allowlisting a GROUP chat used to hand every participant the full 'user' preset.
+
+    Tenant isolation keeps the owner's knowledge private, so the exposure was never
+    exfiltration — it was spending the owner's resources: web search and fetch, file
+    upload and background missions. A new account in a non-private chat is now 'guest'
+    (read and chat only), which keeps the chat working instead of locking anyone out.
+    """
+    from jericho.server import create_app
+
+    scoped = replace(settings, telegram_allowed_chat_ids=[5001, 9001], telegram_owner_chat_ids=[])
+    with TestClient(create_app(scoped)) as client:
+        owner = {"Authorization": f"Bearer {scoped.api_token}"}
+        # A private chat: in Telegram its id equals the sender's.
+        assert _bridge_get(client, scoped, "/api/me", user="5001", chat="5001").status_code == 200
+        # A group: the chat id is not the sender's.
+        assert _bridge_get(client, scoped, "/api/me", user="1234", chat="9001").status_code == 200
+
+        presets = {
+            row["id"]: row["preset_key"]
+            for row in client.get("/api/admin/users", headers=owner).json()["items"]
+        }
+        assert presets["telegram:telegram:5001"] == "user"
+        assert presets["telegram:telegram:1234"] == "guest"
+
+    # The opt-out restores the previous behaviour for operators who want it.
+    opened = replace(scoped, telegram_group_members_full_access=True)
+    with TestClient(create_app(opened)) as client:
+        assert _bridge_get(client, opened, "/api/me", user="4321", chat="9001").status_code == 200
+        owner = {"Authorization": f"Bearer {opened.api_token}"}
+        presets = {
+            row["id"]: row["preset_key"]
+            for row in client.get("/api/admin/users", headers=owner).json()["items"]
+        }
+        assert presets["telegram:telegram:4321"] == "user"
+
+
+def test_an_existing_account_is_never_downgraded_by_a_group_message(settings):
+    """ensure_user does not rewrite preset_key, so writing in a group must not strip
+    an established member (or the owner) of their capabilities."""
+    from jericho.server import create_app
+
+    scoped = replace(settings, telegram_allowed_chat_ids=[5001, 9001], telegram_owner_chat_ids=[])
+    with TestClient(create_app(scoped)) as client:
+        owner = {"Authorization": f"Bearer {scoped.api_token}"}
+        assert _bridge_get(client, scoped, "/api/me", user="5001", chat="5001").status_code == 200
+        # The same person now writes in a group chat.
+        assert _bridge_get(client, scoped, "/api/me", user="5001", chat="9001").status_code == 200
+        presets = {
+            row["id"]: row["preset_key"]
+            for row in client.get("/api/admin/users", headers=owner).json()["items"]
+        }
+        assert presets["telegram:telegram:5001"] == "user"

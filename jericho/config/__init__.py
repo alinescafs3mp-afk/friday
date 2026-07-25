@@ -312,6 +312,12 @@ class JerichoSettings:
     telegram_global_rate_limit_per_minute: int
     telegram_allowed_chat_ids: list[int]
     telegram_owner_chat_ids: list[int]
+    # Whether a NEW account auto-created for someone writing in an allowlisted GROUP
+    # chat gets the full 'user' preset. Off by default: such an account would be able
+    # to spend the owner's LLM budget, reach the web through this instance, upload
+    # files and run background missions. A private chat is unaffected, and an existing
+    # account never has its preset rewritten.
+    telegram_group_members_full_access: bool
     telegram_signature_max_age_sec: int
 
     autonomy_enabled: bool
@@ -581,6 +587,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ),
         telegram_allowed_chat_ids=_int_list_env("JERICHO_TELEGRAM_ALLOWED_CHAT_IDS"),
         telegram_owner_chat_ids=_int_list_env("JERICHO_TELEGRAM_OWNER_CHAT_IDS"),
+        telegram_group_members_full_access=_bool_env("JERICHO_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS", False),
         telegram_signature_max_age_sec=_int_env("JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC", 90, minimum=10),
         autonomy_enabled=_bool_env("JERICHO_AUTONOMY_ENABLED", True),
         operator_full_autonomy=_bool_env("JERICHO_OPERATOR_FULL_AUTONOMY", False),
