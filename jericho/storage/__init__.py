@@ -22,7 +22,7 @@ import tempfile
 import threading
 import time
 import unicodedata
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
@@ -53,11 +53,19 @@ from jericho.storage.models import (
 )
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # Upper bound for an API-token TTL (~100 years). Caps user input well below the
 # point where ``now + timedelta(seconds=ttl)`` would overflow ``datetime.max``.
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
+
+# ``len(retrieval.knowledge_search_text(row))`` expressed in SQL. It is shorter than
+# the Python value by exactly the four joining spaces, so "SQL says long" always
+# implies "the Python chunker will split it" -- never the other way round.
+_SEARCH_TEXT_LEN_SQL = (
+    "length(coalesce(k.title,'') || coalesce(k.summary,'') || coalesce(k.content,'')"
+    " || coalesce(k.tags_json,'') || coalesce(k.knowledge_kind,''))"
+)
 
 
 class UnsupportedSchemaVersionError(RuntimeError):
@@ -532,8 +540,31 @@ CREATE TABLE IF NOT EXISTS knowledge_embeddings (
     dim INTEGER NOT NULL,
     source_version INTEGER NOT NULL DEFAULT 0,
     content_hash TEXT NOT NULL DEFAULT '',
+    chunk_scheme TEXT NOT NULL DEFAULT '',
     vector BLOB NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+-- Passage-level vectors for long Knowledge Objects. ``knowledge_embeddings`` keeps
+-- exactly one whole-object vector per KO (near-duplicate detection and coverage
+-- counts depend on that), and that vector stays the FLOOR of dense recall: chunk
+-- rows can only raise an object's score, never lower it. Rows exist only for
+-- objects the chunker actually split. ``start_char``/``end_char`` are offsets into
+-- ``knowledge_objects.content`` so the winning passage can ground the answer.
+CREATE TABLE IF NOT EXISTS knowledge_chunk_embeddings (
+    knowledge_object_id TEXT NOT NULL REFERENCES knowledge_objects(id),
+    chunk_index INTEGER NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    model TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    source_version INTEGER NOT NULL DEFAULT 0,
+    chunk_scheme TEXT NOT NULL DEFAULT '',
+    start_char INTEGER NOT NULL DEFAULT 0,
+    end_char INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT NOT NULL DEFAULT '',
+    vector BLOB NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(knowledge_object_id, chunk_index)
 );
 
 -- Outbound push queue: organs enqueue a message for a target chat; the
@@ -608,6 +639,10 @@ CREATE INDEX IF NOT EXISTS idx_mission_tasks_mission ON mission_tasks(mission_id
 CREATE INDEX IF NOT EXISTS idx_mission_tasks_status ON mission_tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_user_model
     ON knowledge_embeddings(user_id, model);
+-- The composite primary key's implicit index already serves lookups and deletes by
+-- knowledge_object_id (leftmost prefix), so only the scan path needs an index.
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_user_model
+    ON knowledge_chunk_embeddings(user_id, model, dim);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_entity_time_user ON entity_time(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_outbound_status ON outbound_notifications(status, created_at);
@@ -1130,6 +1165,10 @@ class JerichoStorage:
             "channel_sessions": {"mode": "TEXT NOT NULL DEFAULT 'dialogue'"},
             # NULL expires_at = a non-expiring token (all legacy tokens stay valid).
             "api_tokens": {"expires_at": "TEXT"},
+            # Fingerprint of the chunking config an object's chunk rows were built
+            # with. '' means "not chunked" -- exactly what every pre-0.41 row already
+            # stores, so turning chunking off re-indexes nothing.
+            "knowledge_embeddings": {"chunk_scheme": "TEXT NOT NULL DEFAULT ''"},
         }
         for table, columns in additions.items():
             if table not in table_names:
@@ -2202,6 +2241,10 @@ class JerichoStorage:
                 if cursor.rowcount:
                     deleted[table] = deleted.get(table, 0) + cursor.rowcount
 
+            # Chunk rows first: an orphan here fails PRAGMA foreign_key_check, which
+            # makes create_backup delete its own backup and raise, so the first
+            # symptom would be "backups stopped working", not a write error.
+            _del("knowledge_chunk_embeddings", "knowledge_object_id=? AND user_id=?", (ko_id, owner))
             _del("knowledge_embeddings", "knowledge_object_id=? AND user_id=?", (ko_id, owner))
             _del("knowledge_usage", "knowledge_object_id=? AND user_id=?", (ko_id, owner))
             _del("knowledge_entity_links", "knowledge_object_id=? AND user_id=?", (ko_id, owner))
@@ -4676,12 +4719,24 @@ class JerichoStorage:
             )
         return cursor.rowcount
 
-    def list_knowledge_missing_embedding(self, model: str, *, limit: int = 64) -> list[dict[str, Any]]:
+    def list_knowledge_missing_embedding(
+        self,
+        model: str,
+        *,
+        limit: int = 64,
+        chunk_scheme: str = "",
+        chunk_threshold: int = 0,
+    ) -> list[dict[str, Any]]:
         """Knowledge Objects whose stored vector is absent, from another model, or stale.
 
         Staleness is keyed on the Knowledge Object ``version``, which bumps on every
         content-affecting update, so a re-enriched note is re-embedded on the next
         index cycle while a lifecycle-only change is not.
+
+        A change to the chunking configuration (``chunk_scheme``) re-stales ONLY the
+        objects long enough to actually be split, so enabling passage-level recall
+        does not rewrite the whole corpus of short notes. The join stays strictly 1:1
+        against ``knowledge_embeddings``, so ``limit`` keeps counting objects.
         """
         bounded = max(1, min(int(limit), 1000))
         rows = self.execute(
@@ -4693,10 +4748,13 @@ class JerichoStorage:
                WHERE k.deleted_at IS NULL
                  AND (e.knowledge_object_id IS NULL
                       OR e.model != ?
-                      OR e.source_version != k.version)
+                      OR e.source_version != k.version
+                      OR (e.chunk_scheme != ? AND """
+            + _SEARCH_TEXT_LEN_SQL
+            + """ > ?))
                ORDER BY k.updated_at DESC
                LIMIT ?""",
-            (model, bounded),
+            (model, chunk_scheme, max(0, int(chunk_threshold)), bounded),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -4741,24 +4799,144 @@ class JerichoStorage:
         ).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 
-    def upsert_knowledge_embeddings(self, items: Sequence[dict[str, Any]]) -> int:
-        """Insert or replace a batch of vectors in one transaction; return the count."""
-        if not items:
-            return 0
+    def get_user_chunk_embeddings(
+        self,
+        user_id: str,
+        model: str,
+        dim: int,
+        *,
+        object_limit: int | None = None,
+        row_limit: int | None = None,
+    ) -> list[tuple[str, bytes]]:
+        """Return (``ko_id#chunk_index``, packed vector) for a user's passage vectors.
+
+        ``object_limit`` is the SAME object window ``get_user_embeddings`` uses, so a
+        capped scan never covers a document only halfway; ``row_limit`` is a pure fuse
+        on top of it for a corpus where the objects in that window are heavily split.
+        Soft-deleted objects are excluded, mirroring the whole-object query — without
+        that, deleted knowledge would resurrect through its chunks.
+        """
+        query = (
+            "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
+            "FROM knowledge_chunk_embeddings c "
+            "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
+            "WHERE c.user_id = ? AND c.model = ? AND c.dim = ? AND k.deleted_at IS NULL"
+        )
+        params: list[Any] = [user_id, model, int(dim)]
+        if object_limit is not None and object_limit > 0:
+            query += (
+                " AND c.knowledge_object_id IN ("
+                "SELECT id FROM knowledge_objects WHERE user_id = ? AND deleted_at IS NULL "
+                "ORDER BY created_at DESC LIMIT ?)"
+            )
+            params.extend([user_id, int(object_limit)])
+        query += " ORDER BY k.created_at DESC, c.knowledge_object_id, c.chunk_index"
+        if row_limit is not None and row_limit > 0:
+            query += " LIMIT ?"
+            params.append(int(row_limit))
+        rows = self.execute(query, tuple(params)).fetchall()
+        return [(str(row["id"]), bytes(row["vector"])) for row in rows]
+
+    def get_chunk_spans(
+        self, user_id: str, model: str, keys: Sequence[tuple[str, int]]
+    ) -> dict[tuple[str, int], tuple[int, int]]:
+        """Character spans of specific chunks, so the answer can quote the passage
+        that actually matched instead of the lexically best window.
+
+        Only spans still valid for the object's CURRENT version are returned. Between
+        an edit and the next index tick the stored offsets describe the previous
+        revision; slicing today's content at them would quote an arbitrary window, so
+        a stale row yields nothing and the caller falls back to the whole body.
+        """
+        spans: dict[tuple[str, int], tuple[int, int]] = {}
+        wanted = {(str(ko_id), int(index)) for ko_id, index in keys}
+        if not wanted:
+            return spans
+        ordered = sorted({ko_id for ko_id, _ in wanted})
+        for start in range(0, len(ordered), 400):
+            batch = ordered[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                "SELECT c.knowledge_object_id AS knowledge_object_id, c.chunk_index AS chunk_index, "  # nosec B608
+                "c.start_char AS start_char, c.end_char AS end_char "
+                "FROM knowledge_chunk_embeddings c "
+                "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
+                "AND k.version = c.source_version "
+                f"WHERE c.user_id = ? AND c.model = ? AND c.knowledge_object_id IN ({placeholders})",
+                (user_id, model, *batch),
+            ).fetchall()
+            for row in rows:
+                key = (str(row["knowledge_object_id"]), int(row["chunk_index"]))
+                if key in wanted:
+                    spans[key] = (int(row["start_char"]), int(row["end_char"]))
+        return spans
+
+    def get_reusable_vectors(
+        self, knowledge_object_ids: Sequence[str], model: str
+    ) -> dict[str, dict[str, bytes]]:
+        """``{ko_id: {content_hash: packed vector}}`` across both vector tables.
+
+        The same text embedded by the same model yields the same vector, so a re-index
+        triggered by a lifecycle-only version bump or a chunking-config change costs no
+        HTTP call at all for the parts whose text did not change.
+        """
+        reusable: dict[str, dict[str, bytes]] = {}
+        ordered = sorted({str(value) for value in knowledge_object_ids})
+        if not ordered:
+            return reusable
+        for start in range(0, len(ordered), 400):
+            batch = ordered[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                "SELECT knowledge_object_id, content_hash, vector "  # nosec B608
+                "FROM knowledge_embeddings "
+                f"WHERE model = ? AND knowledge_object_id IN ({placeholders}) "
+                "UNION ALL "
+                "SELECT knowledge_object_id, content_hash, vector "
+                "FROM knowledge_chunk_embeddings "
+                f"WHERE model = ? AND knowledge_object_id IN ({placeholders})",
+                (model, *batch, model, *batch),
+            ).fetchall()
+            for row in rows:
+                content_hash = str(row["content_hash"] or "")
+                if not content_hash:
+                    continue
+                bucket = reusable.setdefault(str(row["knowledge_object_id"]), {})
+                bucket[content_hash] = bytes(row["vector"])
+        return reusable
+
+    def upsert_knowledge_vectors(
+        self,
+        items: Sequence[dict[str, Any]],
+        chunks: Mapping[str, Sequence[dict[str, Any]]] | None = None,
+    ) -> dict[str, int]:
+        """Write whole-object vectors and their passage vectors in ONE transaction.
+
+        Atomicity is load-bearing: staleness is decided from the whole-object row
+        alone, so a committed object row whose chunk rows were lost would look fresh
+        forever. Chunk rows are deleted-then-inserted rather than upserted, so an
+        object that shrank from nine chunks to three leaves no orphans behind — and an
+        empty chunk list is how disabling chunking cleans itself up.
+        """
+        if not items and not chunks:
+            return {"objects": 0, "chunks": 0}
         now = utc_now()
+        written_objects = 0
+        written_chunks = 0
         with self.transaction() as conn:
             for item in items:
                 conn.execute(
                     """INSERT INTO knowledge_embeddings(
                            knowledge_object_id, user_id, model, dim,
-                           source_version, content_hash, vector, updated_at)
-                       VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                           source_version, content_hash, chunk_scheme, vector, updated_at)
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(knowledge_object_id) DO UPDATE SET
                            user_id=excluded.user_id,
                            model=excluded.model,
                            dim=excluded.dim,
                            source_version=excluded.source_version,
                            content_hash=excluded.content_hash,
+                           chunk_scheme=excluded.chunk_scheme,
                            vector=excluded.vector,
                            updated_at=excluded.updated_at""",
                     (
@@ -4768,14 +4946,54 @@ class JerichoStorage:
                         int(item["dim"]),
                         int(item.get("source_version", 0)),
                         str(item.get("content_hash", "")),
+                        str(item.get("chunk_scheme", "")),
                         bytes(item["vector"]),
                         now,
                     ),
                 )
-        return len(items)
+                written_objects += 1
+            for knowledge_object_id, rows in (chunks or {}).items():
+                conn.execute(
+                    "DELETE FROM knowledge_chunk_embeddings WHERE knowledge_object_id=?",
+                    (str(knowledge_object_id),),
+                )
+                for row in rows:
+                    conn.execute(
+                        """INSERT INTO knowledge_chunk_embeddings(
+                               knowledge_object_id, chunk_index, user_id, model, dim,
+                               source_version, chunk_scheme, start_char, end_char,
+                               content_hash, vector, updated_at)
+                           VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            str(knowledge_object_id),
+                            int(row["chunk_index"]),
+                            str(row["user_id"]),
+                            str(row["model"]),
+                            int(row["dim"]),
+                            int(row.get("source_version", 0)),
+                            str(row.get("chunk_scheme", "")),
+                            int(row.get("start_char", 0)),
+                            int(row.get("end_char", 0)),
+                            str(row.get("content_hash", "")),
+                            bytes(row["vector"]),
+                            now,
+                        ),
+                    )
+                    written_chunks += 1
+        return {"objects": written_objects, "chunks": written_chunks}
+
+    def upsert_knowledge_embeddings(self, items: Sequence[dict[str, Any]]) -> int:
+        """Insert or replace a batch of whole-object vectors; return the count."""
+        return self.upsert_knowledge_vectors(items)["objects"]
 
     def delete_knowledge_embedding(self, knowledge_object_id: str) -> None:
+        """Drop an object's vectors — whole-object and passage-level together, so no
+        half-deleted state can outlive the call."""
         with self.transaction() as conn:
+            conn.execute(
+                "DELETE FROM knowledge_chunk_embeddings WHERE knowledge_object_id=?",
+                (knowledge_object_id,),
+            )
             conn.execute(
                 "DELETE FROM knowledge_embeddings WHERE knowledge_object_id=?",
                 (knowledge_object_id,),
@@ -4787,6 +5005,30 @@ class JerichoStorage:
         else:
             row = self.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_embeddings WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def count_knowledge_chunk_embeddings(self, user_id: str | None = None) -> int:
+        if user_id is None:
+            row = self.execute("SELECT COUNT(*) AS n FROM knowledge_chunk_embeddings").fetchone()
+        else:
+            row = self.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_chunk_embeddings WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def count_chunked_knowledge_objects(self, user_id: str | None = None) -> int:
+        """How many objects actually carry passage vectors (index-coverage signal)."""
+        if user_id is None:
+            row = self.execute(
+                "SELECT COUNT(DISTINCT knowledge_object_id) AS n FROM knowledge_chunk_embeddings"
+            ).fetchone()
+        else:
+            row = self.execute(
+                "SELECT COUNT(DISTINCT knowledge_object_id) AS n "
+                "FROM knowledge_chunk_embeddings WHERE user_id=?",
                 (user_id,),
             ).fetchone()
         return int(row["n"]) if row else 0

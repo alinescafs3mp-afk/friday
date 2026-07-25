@@ -249,6 +249,22 @@ class JerichoSettings:
     # Guard on the pure-Python dense-recall scan: cap how many (newest) vectors
     # are scored per query so latency stays bounded on a large corpus (0 = no cap).
     embeddings_dense_max_objects: int
+    # Passage-level recall: a long Knowledge Object is additionally embedded in
+    # overlapping chunks, so one relevant paragraph of a big import can carry the
+    # object. 0 disables chunking entirely and restores pre-0.41 behaviour.
+    embeddings_chunk_chars: int
+    embeddings_chunk_overlap_chars: int
+    embeddings_chunk_max_per_object: int
+    # Corroboration weight when collapsing per-chunk cosines into one object score:
+    # 0 is pure max-over-passages, higher values reward a document that matches in
+    # several places over one lucky fragment.
+    embeddings_chunk_blend: float
+    # Row-level fuse over the (object-granular) dense cap, so one heavily chunked
+    # corpus cannot blow up the scan even inside the object window.
+    embeddings_chunk_scan_multiplier: int
+    # Cap on how many texts go into a single embeddings HTTP request; chunking
+    # multiplies inputs per object, and a real endpoint rejects an oversized batch.
+    embeddings_max_inputs_per_request: int
     # Near-duplicate Knowledge Object detection (cosine over stored vectors).
     dedup_threshold: float
     dedup_interval_sec: float
@@ -380,6 +396,10 @@ class JerichoSettings:
                 "index_batch": self.embeddings_index_batch,
                 "index_interval_sec": self.embeddings_index_interval_sec,
                 "recall_candidates": self.embeddings_recall_candidates,
+                # Whether passage-level recall is on at all; the tuning knobs stay
+                # internal, like embeddings_dense_max_objects.
+                "chunk_chars": self.embeddings_chunk_chars,
+                "chunk_overlap_chars": self.embeddings_chunk_overlap_chars,
                 "dedup_threshold": self.dedup_threshold,
                 "dedup_interval_sec": self.dedup_interval_sec,
                 "eval_enabled": self.eval_enabled,
@@ -496,6 +516,17 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         embeddings_index_interval_sec=_float_env("JERICHO_EMBEDDINGS_INDEX_INTERVAL_SEC", 120.0, minimum=5.0),
         embeddings_recall_candidates=_int_env("JERICHO_EMBEDDINGS_RECALL_CANDIDATES", 40, minimum=1),
         embeddings_dense_max_objects=_int_env("JERICHO_EMBEDDINGS_DENSE_MAX_OBJECTS", 5000, minimum=0),
+        # ~1200 characters is roughly 300-420 tokens, inside the 512-token window
+        # multilingual embedding models are trained on. 0 = chunking off.
+        embeddings_chunk_chars=_int_env("JERICHO_EMBEDDINGS_CHUNK_CHARS", 1200, minimum=0),
+        # ~17% overlap: any fact shorter than this lands whole in at least one chunk.
+        embeddings_chunk_overlap_chars=_int_env("JERICHO_EMBEDDINGS_CHUNK_OVERLAP_CHARS", 200, minimum=0),
+        embeddings_chunk_max_per_object=_int_env("JERICHO_EMBEDDINGS_CHUNK_MAX_PER_OBJECT", 64, minimum=1),
+        embeddings_chunk_blend=_float_env("JERICHO_EMBEDDINGS_CHUNK_BLEND", 0.25, minimum=0.0),
+        embeddings_chunk_scan_multiplier=_int_env("JERICHO_EMBEDDINGS_CHUNK_SCAN_MULTIPLIER", 4, minimum=1),
+        embeddings_max_inputs_per_request=_int_env(
+            "JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST", 64, minimum=1
+        ),
         dedup_threshold=_float_env("JERICHO_DEDUP_THRESHOLD", 0.92, minimum=0.5),
         dedup_interval_sec=_float_env("JERICHO_DEDUP_INTERVAL_SEC", 21600, minimum=300),
         dedup_max_objects=_int_env("JERICHO_DEDUP_MAX_OBJECTS", 1500, minimum=10),

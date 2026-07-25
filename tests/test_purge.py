@@ -18,6 +18,7 @@ from jericho.memory import MemoryVault
 from jericho.permissions import ActorContext, AuthorizationService
 from jericho.purge import purge_knowledge
 from jericho.retrieval import pack_vector
+from jericho.storage import SCHEMA_VERSION
 from jericho.storage.models import FeedbackItem, FeedbackType, KnowledgeObject, RawObject, new_id
 
 
@@ -105,6 +106,26 @@ def test_purge_removes_every_trace_including_fts(storage):
             }
         ]
     )
+    storage.upsert_knowledge_vectors(
+        [],
+        {
+            ko_id: [
+                {
+                    "chunk_index": index,
+                    "user_id": "alice",
+                    "model": "m",
+                    "dim": 3,
+                    "source_version": 2,
+                    "chunk_scheme": "v1:1200:200:64",
+                    "start_char": index * 10,
+                    "end_char": index * 10 + 10,
+                    "content_hash": f"h{index}",
+                    "vector": pack_vector([1.0, 0.0, 0.0]),
+                }
+                for index in range(3)
+            ]
+        },
+    )
     storage.record_knowledge_usage("alice", [ko_id], used_in_answer=True)
     storage.store_feedback(
         FeedbackItem(
@@ -124,6 +145,7 @@ def test_purge_removes_every_trace_including_fts(storage):
         >= 1
     )
     assert storage.count_knowledge_embeddings("alice") == 1
+    assert storage.count_knowledge_chunk_embeddings("alice") == 3
     assert _count(storage, "SELECT COUNT(*) FROM knowledge_usage WHERE knowledge_object_id=?", (ko_id,)) == 1
     assert _count(storage, "SELECT COUNT(*) FROM feedback WHERE target_id=?", (ko_id,)) == 1
 
@@ -150,6 +172,12 @@ def test_purge_removes_every_trace_including_fts(storage):
         == 0
     )
     assert storage.count_knowledge_embeddings("alice") == 0
+    assert storage.count_knowledge_chunk_embeddings("alice") == 0
+    # A surviving chunk row would be an orphan, and an orphan makes foreign_key_check
+    # non-empty — which makes create_backup delete its own backup and raise. The first
+    # symptom of that class of bug is "backups stopped working", so assert both.
+    assert storage.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert storage.create_backup(label="purge-check")["schema_version"] == SCHEMA_VERSION
     assert _count(storage, "SELECT COUNT(*) FROM knowledge_usage WHERE knowledge_object_id=?", (ko_id,)) == 0
     assert _count(storage, "SELECT COUNT(*) FROM feedback WHERE target_id=?", (ko_id,)) == 0
     assert _count(storage, "SELECT COUNT(*) FROM raw_objects WHERE id=?", (raw_id,)) == 0

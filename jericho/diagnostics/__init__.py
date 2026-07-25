@@ -652,6 +652,20 @@ def collect_diagnostics(
             "jericho status",
         )
 
+    # Embedding-index coverage had no observability at all, so a chunking regression
+    # (rows silently not written) would only surface later as degraded answers.
+    embeddings_coverage: dict[str, Any] = {"available": False}
+    if storage is not None:
+        try:
+            embeddings_coverage = {
+                "available": True,
+                "indexed_objects": storage.count_knowledge_embeddings(),
+                "chunked_objects": storage.count_chunked_knowledge_objects(),
+                "chunk_rows": storage.count_knowledge_chunk_embeddings(),
+            }
+        except Exception:  # noqa: BLE001 - coverage is advisory, never a health gate
+            embeddings_coverage = {"available": False}
+
     result: dict[str, Any] = {
         "ok": not any(not issue.startswith("warning:") for issue in configuration)
         and bool(database.get("ok", True))
@@ -674,6 +688,7 @@ def collect_diagnostics(
         "backend_lease": backend_lease,
         "bridge_queue": bridge_queue,
         "auth_failures": auth_failures,
+        "embeddings_index": embeddings_coverage,
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,

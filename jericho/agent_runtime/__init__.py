@@ -56,6 +56,26 @@ VERDICT_UNKNOWN = "unknown"
 VERDICT_SKIPPED = "skipped"
 
 
+def _matched_region(hit: dict[str, Any]) -> str:
+    """The text a query-aware excerpt should be taken from.
+
+    Normally the whole body. When dense recall won on one passage, retrieval attaches
+    that passage's character span, and excerpting inside it keeps the evidence shown
+    to the model and the verifier aligned with the reason the object was retrieved.
+    """
+    body = str(hit.get("content") or hit.get("summary") or "")
+    span = hit.get("_embedding_chunk_span")
+    if isinstance(span, (list, tuple)) and len(span) == 2:
+        try:
+            start, end = int(span[0]), int(span[1])
+        except (TypeError, ValueError):
+            return body
+        content = str(hit.get("content") or "")
+        if 0 <= start < end <= len(content):
+            return content[start:end]
+    return body
+
+
 def _unknown_verdict(reason: str) -> dict[str, Any]:
     """Fail-closed verdict: a verifier that cannot vouch never reports success."""
     return {"status": VERDICT_UNKNOWN, "ok": False, "score": None, "issues": [reason]}
@@ -931,10 +951,12 @@ class AgentRuntime:
                 "title": str(hit.get("title") or "")[:300],
                 # Query-aware: show the passage that actually matched, not the
                 # document head — long notes/files otherwise leave the grounding
-                # evidence off-screen for both the model and the verifier.
+                # evidence off-screen for both the model and the verifier. When dense
+                # recall won on a specific passage, excerpt from THAT passage: the
+                # match was semantic, so the lexically best window can sit elsewhere.
                 "excerpt": best_snippet(
                     context.search_query,
-                    str(hit.get("content") or hit.get("summary") or ""),
+                    _matched_region(hit),
                     max_chars=520,
                 ),
                 "entities": [

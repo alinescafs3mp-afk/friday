@@ -1733,6 +1733,26 @@ async def run_eval_now(request: Request) -> dict[str, Any]:
     return {"user_id": target, "report": report}
 
 
+@router.post("/eval/chunk-ab")
+async def compare_chunk_recall_now(request: Request) -> dict[str, Any]:
+    """A/B the gold set with and without passage-level recall on THIS corpus."""
+    _require(request, "admin.all_data.read")
+    body = await _request_json(request)
+    target = _target_user(request, str(body.get("user_id") or "") or None)
+    from jericho.eval import compare_chunk_recall
+
+    state = _services(request)
+    report = await compare_chunk_recall(state.storage, state.embeddings, state.settings, target)
+    _audit(
+        request,
+        "admin.eval.chunk_ab",
+        "user",
+        target,
+        after={"delta": report.get("delta"), "cases": report.get("cases")},
+    )
+    return {"user_id": target, "report": report}
+
+
 @router.post("/lifecycle/apply")
 async def apply_lifecycle_review(request: Request) -> dict[str, Any]:
     """Apply an explicit lifecycle decision to selected reviewed candidates."""

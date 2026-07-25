@@ -19,7 +19,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jericho.config import JerichoSettings
-from jericho.retrieval import knowledge_search_text, pack_vector
+from jericho.retrieval import (
+    chunk_scheme,
+    knowledge_chunk_units,
+    knowledge_search_text,
+    pack_vector,
+    unpack_vector,
+)
 from jericho.storage.models import InboxStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -565,32 +571,161 @@ class WorkersManager:
             return
         model = self.settings.embeddings_model
         batch = self.settings.embeddings_index_batch
-        rows = await asyncio.to_thread(self.storage.list_knowledge_missing_embedding, model, limit=batch)
+        scheme = chunk_scheme(self.settings)
+        rows = await asyncio.to_thread(
+            self.storage.list_knowledge_missing_embedding,
+            model,
+            limit=batch,
+            chunk_scheme=scheme,
+            chunk_threshold=self.settings.embeddings_chunk_chars,
+        )
         if not rows:
             return
-        texts = [knowledge_search_text(row) for row in rows]
-        vectors = await self.embeddings.embed(texts)
-        if not vectors or len(vectors) != len(rows):
-            LOGGER.warning("embeddings index skipped a batch: backend returned no usable vectors")
-            return
-        prepared: list[dict[str, Any]] = []
-        for row, text, vector in zip(rows, texts, vectors, strict=False):
-            if not vector:
+
+        cap = max(1, int(self.settings.embeddings_max_inputs_per_request))
+        # An object is never split across requests, so its OWN input count must fit in
+        # one: the whole-object text plus at most cap-1 passages. Without this clamp
+        # the shipped defaults (64 chunks + 1 doc vs. a 64-input cap) overflow by one
+        # on every maximally-split object, and an endpoint that enforces its batch
+        # limit then rejects the request forever — leaving that object with no vector
+        # at all, not even the whole-object one it had before chunking existed.
+        max_chunks = max(1, min(int(self.settings.embeddings_chunk_max_per_object), cap - 1))
+
+        # One work item per object: the whole-object text first, then its passages.
+        # Keeping an object's inputs together means a failed request loses that object
+        # and not the whole batch.
+        plans: list[dict[str, Any]] = []
+        for row in rows:
+            units = knowledge_chunk_units(
+                row,
+                max_chars=self.settings.embeddings_chunk_chars,
+                overlap_chars=self.settings.embeddings_chunk_overlap_chars,
+                max_chunks=max_chunks,
+            )
+            doc_text = knowledge_search_text(row)
+            plans.append({"row": row, "doc_text": doc_text, "units": units})
+
+        reusable = await asyncio.to_thread(
+            self.storage.get_reusable_vectors, [str(plan["row"]["id"]) for plan in plans], model
+        )
+        groups: list[list[dict[str, Any]]] = []
+        current: list[dict[str, Any]] = []
+        current_size = 0
+        for plan in plans:
+            texts = [plan["doc_text"], *(unit[2] for unit in plan["units"])]
+            hashes = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts]
+            known = reusable.get(str(plan["row"]["id"]), {})
+            plan["texts"] = texts
+            plan["hashes"] = hashes
+            # Same text, same model -> the stored vector is still exact; skip the call.
+            plan["cached"] = {index: known[digest] for index, digest in enumerate(hashes) if digest in known}
+            plan["missing"] = [index for index in range(len(texts)) if index not in plan["cached"]]
+            if current and current_size + len(plan["missing"]) > cap:
+                groups.append(current)
+                current, current_size = [], 0
+            current.append(plan)
+            current_size += len(plan["missing"])
+        if current:
+            groups.append(current)
+
+        indexed = 0
+        for group in groups:
+            if not await self._embed_group(group, model, scheme):
                 continue
-            prepared.append(
+            indexed += len(group)
+        if indexed:
+            LOGGER.info("embeddings index updated %d objects", indexed)
+
+    async def _embed_group(self, group: list[dict[str, Any]], model: str, scheme: str) -> bool:
+        """Embed one request-sized group and persist it; return False if it was lost.
+
+        Written as an explicit offset/count ledger rather than ``zip``: with chunking a
+        length mismatch would silently attribute plausible-looking vectors to the WRONG
+        Knowledge Objects, which no test and no log line would ever reveal.
+        """
+        flattened: list[str] = []
+        offsets: list[tuple[dict[str, Any], int, int]] = []
+        for plan in group:
+            start = len(flattened)
+            flattened.extend(plan["texts"][index] for index in plan["missing"])
+            offsets.append((plan, start, len(plan["missing"])))
+        vectors: list[list[float]] = []
+        if flattened:
+            returned = await self.embeddings.embed(flattened)  # type: ignore[union-attr]
+            if not returned or len(returned) != len(flattened):
+                LOGGER.warning(
+                    "embeddings index skipped %d objects: backend returned no usable vectors",
+                    len(group),
+                )
+                return False
+            vectors = list(returned)
+
+        items: list[dict[str, Any]] = []
+        chunks: dict[str, Sequence[dict[str, Any]]] = {}
+        for plan, start, count in offsets:
+            row = plan["row"]
+            resolved: dict[int, bytes] = dict(plan["cached"])
+            dims: set[int] = set()
+            broken = False
+            for position, index in enumerate(plan["missing"][:count]):
+                vector = vectors[start + position]
+                if not vector:
+                    broken = True
+                    break
+                dims.add(len(vector))
+                resolved[index] = pack_vector(vector)
+            if broken or len(resolved) != len(plan["texts"]):
+                continue
+            # A backend that changes dimension mid-batch would poison the index.
+            cached_dims = {len(unpack_vector(plan["cached"][index])) for index in plan["cached"]}
+            if len(dims | cached_dims) != 1:
+                if dims and cached_dims - dims:
+                    # The model now answers in a different dimension under the same
+                    # name. The reuse cache would resurrect the old-dimension vectors
+                    # on every tick, so this object could never converge: drop its
+                    # stored vectors and let the next tick re-embed it in full.
+                    LOGGER.warning(
+                        "embeddings dimension changed for %s (%s -> %s); re-embedding it",
+                        row["id"],
+                        sorted(cached_dims),
+                        sorted(dims),
+                    )
+                    await asyncio.to_thread(self.storage.delete_knowledge_embedding, str(row["id"]))
+                continue
+            dim = (dims | cached_dims).pop()
+            source_version = int(row.get("version") or 1)
+            items.append(
                 {
                     "knowledge_object_id": row["id"],
                     "user_id": row["user_id"],
                     "model": model,
-                    "dim": len(vector),
-                    "source_version": int(row.get("version") or 1),
-                    "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                    "vector": pack_vector(vector),
+                    "dim": dim,
+                    "source_version": source_version,
+                    "content_hash": plan["hashes"][0],
+                    "chunk_scheme": scheme,
+                    "vector": resolved[0],
                 }
             )
-        if prepared:
-            await asyncio.to_thread(self.storage.upsert_knowledge_embeddings, prepared)
-            LOGGER.info("embeddings index updated %d objects", len(prepared))
+            chunks[str(row["id"])] = [
+                {
+                    "chunk_index": position,
+                    "user_id": row["user_id"],
+                    "model": model,
+                    "dim": dim,
+                    "source_version": source_version,
+                    "chunk_scheme": scheme,
+                    "start_char": unit[0],
+                    "end_char": unit[1],
+                    "content_hash": plan["hashes"][position + 1],
+                    "vector": resolved[position + 1],
+                }
+                for position, unit in enumerate(plan["units"])
+            ]
+        if items:
+            # Persisted per group: the whole tick runs under a timeout, so a single
+            # write at the very end would lose every group each time it expires.
+            await asyncio.to_thread(self.storage.upsert_knowledge_vectors, items, chunks)
+        return bool(items)
 
     async def _database_optimize(self) -> None:
         await asyncio.to_thread(self.storage.optimize)

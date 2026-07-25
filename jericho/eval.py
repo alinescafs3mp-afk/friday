@@ -20,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_K = 10
 _LAST_RUN_KEY = "eval:last_run:"
+_CHUNK_AB_KEY = "eval:chunk_ab:"
 
 
 def recall_at_k(retrieved: list[str], expected: set[str], k: int) -> float:
@@ -61,8 +62,17 @@ async def run_eval(
         return {"cases": 0, "recall_at_k": None, "reason": "no gold cases"}
 
     searcher = HybridSearcher(storage, embeddings, graph_max_depth=settings.graph_max_depth)
-    kg = KnowledgeGraph(storage)
+    report = await _score_cases(searcher, KnowledgeGraph(storage), user_id, cases, k)
+    report["regression"] = _compare_and_store(storage, user_id, report)
+    return report
 
+
+async def _score_cases(
+    searcher: Any, kg: Any, user_id: str, cases: list[dict[str, Any]], k: int
+) -> dict[str, Any]:
+    """Score a gold set with one searcher. Extracted so an A/B measures both arms
+    with byte-identical code — a difference in the numbers can only come from the
+    searcher, never from the harness."""
     per_case: list[dict[str, Any]] = []
     recall_sum = precision_sum = rr_sum = 0.0
     for case in cases:
@@ -84,12 +94,13 @@ async def run_eval(
                 "expected": len(expected),
                 "found": len(set(retrieved[:k]) & expected),
                 "recall_at_k": round(case_recall, 4),
+                "precision_at_k": round(case_precision, 4),
                 "reciprocal_rank": round(case_rr, 4),
             }
         )
 
     scored = len(per_case) or 1
-    report = {
+    return {
         "cases": len(per_case),
         "k": k,
         "recall_at_k": round(recall_sum / scored, 4),
@@ -97,7 +108,68 @@ async def run_eval(
         "mrr": round(rr_sum / scored, 4),
         "per_case": sorted(per_case, key=lambda item: item["recall_at_k"]),
     }
-    report["regression"] = _compare_and_store(storage, user_id, report)
+
+
+async def compare_chunk_recall(
+    storage: Any,
+    embeddings: Any,
+    settings: Any,
+    user_id: str,
+    *,
+    k: int = _DEFAULT_K,
+) -> dict[str, Any]:
+    """Run the gold set twice — without and with passage-level recall — and report the
+    difference.
+
+    Passage-level recall is a ranking change, and a ranking change is only an
+    improvement if it is measured on the operator's OWN corpus. Ship it when
+    ``delta.recall_at_k >= +0.05`` and ``delta.precision_at_k >= -0.02``; otherwise set
+    ``JERICHO_EMBEDDINGS_CHUNK_CHARS=0``. Advisory only: nothing here feeds ranking.
+    """
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.retrieval import HybridSearcher
+
+    cases = storage.list_eval_cases(user_id)
+    if not cases:
+        return {"cases": 0, "reason": "no gold cases"}
+    if settings.embeddings_chunk_chars <= 0:
+        return {"cases": len(cases), "reason": "chunking disabled"}
+
+    kg = KnowledgeGraph(storage)
+    arms: dict[str, dict[str, Any]] = {}
+    for name, chunk_recall in (("baseline", False), ("chunked", True)):
+        searcher = HybridSearcher(
+            storage,
+            embeddings,
+            graph_max_depth=settings.graph_max_depth,
+            chunk_recall=chunk_recall,
+        )
+        arms[name] = await _score_cases(searcher, kg, user_id, cases, k)
+
+    baseline_cases = {row["id"]: row for row in arms["baseline"]["per_case"]}
+    per_case = [
+        {
+            "id": row["id"],
+            "query": row["query"],
+            "baseline_recall": baseline_cases.get(row["id"], {}).get("recall_at_k", 0.0),
+            "chunked_recall": row["recall_at_k"],
+            "delta": round(row["recall_at_k"] - baseline_cases.get(row["id"], {}).get("recall_at_k", 0.0), 4),
+        }
+        for row in arms["chunked"]["per_case"]
+    ]
+    report = {
+        "k": k,
+        "cases": arms["chunked"]["cases"],
+        "baseline": arms["baseline"],
+        "chunked": arms["chunked"],
+        "delta": {
+            metric: round(arms["chunked"][metric] - arms["baseline"][metric], 4)
+            for metric in ("recall_at_k", "precision_at_k", "mrr")
+        },
+        # Regressions first: the point of the report is to find what got worse.
+        "per_case": sorted(per_case, key=lambda item: item["delta"]),
+    }
+    storage.kv_set(f"{_CHUNK_AB_KEY}{user_id}", json.dumps(report["delta"], ensure_ascii=False))
     return report
 
 

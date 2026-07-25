@@ -5,8 +5,10 @@ from __future__ import annotations
 import array
 import heapq
 import json
+import logging
 import math
 import re
+from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +23,8 @@ except ImportError:  # pragma: no cover - exercised only when numpy is absent
 
 if TYPE_CHECKING:
     from jericho.storage import JerichoStorage
+
+LOGGER = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁ][0-9a-zA-Zа-яёА-ЯЁ._+#-]*", re.UNICODE)
 _RELATIONAL_QUERY_RE = re.compile(
@@ -192,6 +196,134 @@ def knowledge_search_text(item: dict[str, Any]) -> str:
     )
 
 
+# A boundary is only worth honouring past this fraction of the window; nearer the
+# start it would trade a whole chunk for a stub.
+_CHUNK_BOUNDARY_FLOOR = 0.5
+_SENTENCE_END_RE = re.compile(r"[.!?…][»\"')\]]?\s")
+
+
+def _chunk_boundary(text: str, start: int, end: int, max_chars: int) -> int:
+    """The last natural boundary inside ``[start, end)``, else ``end``.
+
+    Searched backwards from the window edge in descending order of how much meaning
+    the break preserves: paragraph, sentence, line, word. A hard cut is the last
+    resort — a base64 blob with no whitespace at all must still terminate.
+    """
+    floor = start + int(max_chars * _CHUNK_BOUNDARY_FLOOR)
+    window = text[start:end]
+    paragraph = window.rfind("\n\n")
+    if paragraph >= 0 and start + paragraph + 2 > floor:
+        return start + paragraph + 2
+    sentence = None
+    for candidate in _SENTENCE_END_RE.finditer(window):
+        if start + candidate.end() > floor:
+            sentence = candidate
+    if sentence is not None:
+        return start + sentence.end()
+    for separator in ("\n", " "):
+        found = window.rfind(separator)
+        if found >= 0 and start + found + 1 > floor:
+            return start + found + 1
+    # Below the floor a word break still beats splitting mid-word.
+    found = window.rfind(" ")
+    return start + found + 1 if found > 0 else end
+
+
+def _advance(text: str, position: int, limit: int) -> int:
+    """Nudge an overlap start forward off the middle of a word."""
+    if position <= 0 or position >= len(text) or text[position - 1].isspace():
+        return position
+    found = text.find(" ", position)
+    return found + 1 if 0 <= found < limit else position
+
+
+def chunk_spans(text: str, *, max_chars: int, overlap_chars: int, max_chunks: int) -> list[tuple[int, int]]:
+    """Split ``text`` into overlapping ``[start, end)`` spans on natural boundaries.
+
+    Spans are character offsets into ``text`` itself (not into a normalised copy), so
+    the winning passage can be quoted back verbatim. Overlap means a fact shorter than
+    ``overlap_chars`` always lands whole inside at least one span.
+    """
+    body = text or ""
+    if max_chars <= 0 or not body:
+        return []
+    if len(body) <= max_chars:
+        return [(0, len(body))]
+    bounded_overlap = max(0, min(int(overlap_chars), max_chars // 2))
+    limit = max(1, int(max_chunks))
+
+    def _cut(window: int) -> list[tuple[int, int]]:
+        spans: list[tuple[int, int]] = []
+        start = 0
+        while start < len(body):
+            end = min(start + window, len(body))
+            if end < len(body):
+                end = _chunk_boundary(body, start, end, window)
+            spans.append((start, end))
+            if end >= len(body):
+                break
+            # ``start + 1`` guarantees forward progress whatever the overlap is.
+            start = _advance(body, max(start + 1, end - bounded_overlap), end)
+        return spans
+
+    spans = _cut(max_chars)
+    if len(spans) > limit:
+        # One widening pass rather than a search: enough to fit, never unbounded.
+        widened = min(max_chars * 4, math.ceil(len(body) / limit) + bounded_overlap)
+        spans = _cut(max(max_chars, widened))[:limit]
+    # A trailing stub scores erratically high on a short match; fold it backwards.
+    stub = max(120, max_chars // 6)
+    if len(spans) > 1 and spans[-1][1] - spans[-1][0] < stub:
+        spans[-2] = (spans[-2][0], spans[-1][1])
+        spans.pop()
+    return spans
+
+
+def knowledge_chunk_units(
+    item: dict[str, Any], *, max_chars: int, overlap_chars: int, max_chunks: int
+) -> list[tuple[int, int, str]]:
+    """``(start, end, text_to_embed)`` per passage, or ``[]`` when no chunking applies.
+
+    Returning ``[]`` for a short object is the load-bearing case: it keeps such an
+    object represented by exactly one whole-object vector computed from byte-identical
+    text, so enabling chunking changes nothing for the bulk of a personal corpus.
+    Each passage is prefixed with the object's header — a paragraph stripped of what
+    document it belongs to loses most of its topical signal.
+    """
+    if max_chars <= 0 or len(knowledge_search_text(item)) <= max_chars:
+        return []
+    content = str(item.get("content") or "")
+    spans = chunk_spans(content, max_chars=max_chars, overlap_chars=overlap_chars, max_chunks=max_chunks)
+    if len(spans) <= 1:
+        # One passage is what the whole-object vector already represents.
+        return []
+    header = " ".join(
+        part
+        for part in (
+            str(item.get("title") or ""),
+            str(item.get("summary") or ""),
+            str(item.get("knowledge_kind") or ""),
+        )
+        if part.strip()
+    )[: max(0, max_chars // 4)]
+    return [(start, end, f"{header}\n\n{content[start:end]}") for start, end in spans]
+
+
+def chunk_scheme(settings: JerichoSettings) -> str:
+    """Fingerprint of the chunking configuration a stored row was built with.
+
+    ``''`` means "not chunked" — exactly what every pre-0.41 row already stores, so
+    turning chunking off re-indexes nothing that was never chunked.
+    """
+    if settings.embeddings_chunk_chars <= 0:
+        return ""
+    return (
+        f"v1:{settings.embeddings_chunk_chars}"
+        f":{settings.embeddings_chunk_overlap_chars}"
+        f":{settings.embeddings_chunk_max_per_object}"
+    )
+
+
 def pack_vector(vector: list[float]) -> bytes:
     """Pack an embedding as little-agnostic float32 bytes for BLOB storage."""
     return array.array("f", (float(value) for value in vector)).tobytes()
@@ -257,6 +389,73 @@ def _dense_scores_numpy(
     return list(zip((float(score) for score in scores), valid_ids, strict=True))
 
 
+_CHUNK_CORROBORATION_K = 3
+
+
+def _trim_to_whole_objects(rows: list[tuple[str, bytes]], budget: int) -> list[tuple[str, bytes]]:
+    """Cut a chunk-row scan on an OBJECT boundary at or below ``budget``.
+
+    Rows arrive grouped by object (the query orders by object then chunk index). An
+    object is either scanned completely or not at all, so ``scanned == indexed`` for
+    every object that contributes a score — otherwise a half-scanned document both
+    hides its answering passage and escapes the corroboration discount.
+    """
+    if budget <= 0 or len(rows) <= budget:
+        return rows
+    kept = 0
+    current = rows[0][0].rpartition("#")[0]
+    for index, (key, _) in enumerate((*rows, ("\x00#0", b""))):
+        document_id = key.rpartition("#")[0]
+        if document_id == current:
+            continue
+        # ``current`` ended at ``index``. Take it whole if it fits — or if it is the
+        # first one, since dropping every row would be worse than a single overrun.
+        if index <= budget or kept == 0:
+            kept = index
+        else:
+            break
+        current = document_id
+    return rows[:kept]
+
+
+def aggregate_chunk_scores(
+    scored: Sequence[tuple[float, str]], *, blend: float
+) -> tuple[dict[str, float], dict[str, tuple[int, int]]]:
+    """Collapse per-chunk cosines into one score per Knowledge Object.
+
+    ``(1 - blend) * best + blend * mean(top-3)``. Max-over-passages is what makes a
+    single relevant paragraph of a long import recallable at all; the top-k mean is a
+    corroboration term, so one lucky fragment does not outrank a document that is
+    genuinely about the query — the expected maximum of N samples grows with N, and
+    against a fixed evidence gate that bias would convert directly into false rescues.
+    The result is a convex combination of cosines, so it stays on exactly the scale
+    the 0.17 blend weight and the 0.16 evidence gate were calibrated for.
+
+    Returns ``(score_by_object, {object: (best_chunk_index, chunks_scored)})``.
+    """
+    weight = max(0.0, min(1.0, float(blend)))
+    by_object: dict[str, list[tuple[float, int]]] = {}
+    for score, key in scored:
+        document_id, _, raw_index = key.rpartition("#")
+        if not document_id:
+            # Not a chunk key; ignore rather than mis-attribute it to an object.
+            continue
+        try:
+            index = int(raw_index)
+        except ValueError:
+            continue
+        by_object.setdefault(document_id, []).append((score, index))
+    aggregated: dict[str, float] = {}
+    provenance: dict[str, tuple[int, int]] = {}
+    for document_id, entries in by_object.items():
+        entries.sort(key=lambda pair: pair[0], reverse=True)
+        best, best_index = entries[0]
+        top = [score for score, _ in entries[:_CHUNK_CORROBORATION_K]]
+        aggregated[document_id] = (1.0 - weight) * best + weight * (sum(top) / len(top))
+        provenance[document_id] = (best_index, len(entries))
+    return aggregated, provenance
+
+
 def dense_scores(
     query_vector: list[float], stored: list[tuple[str, bytes]], query_dim: int
 ) -> list[tuple[float, str]]:
@@ -293,6 +492,9 @@ class EmbeddingBackend:
                 response.raise_for_status()
                 payload = response.json()
         except Exception:
+            # Chunking multiplies how often this path runs (more inputs, bigger
+            # requests), so the failure must stop being completely silent.
+            LOGGER.warning("embeddings backend request failed", exc_info=True)
             return None
         items = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(items, list) or len(items) != len(texts):
@@ -331,10 +533,13 @@ class HybridSearcher:
         embeddings: EmbeddingBackend | None = None,
         *,
         graph_max_depth: int = 2,
+        chunk_recall: bool = True,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
         self._graph_max_depth = max(1, int(graph_max_depth))
+        # Off only for the A/B harness, which must measure the same corpus twice.
+        self._chunk_recall = bool(chunk_recall)
 
     async def search(
         self,
@@ -365,8 +570,10 @@ class HybridSearcher:
         rankings = [fts_ranking, lexical_ranking]
         embedding_scores: dict[str, float] = {}
         dense_meta: dict[str, Any] = {}
+        chunk_provenance: dict[str, tuple[int, int]] = {}
         if self.embeddings and self.embeddings.remote_enabled:
             embedding_scores = await self._dense_recall(user_id, clean_query, candidate_map, meta=dense_meta)
+            chunk_provenance = dict(dense_meta.get("chunk_provenance") or {})
             if embedding_scores:
                 candidates = list(candidate_map.values())
                 rankings.append(
@@ -527,6 +734,9 @@ class HybridSearcher:
                 "exact_phrase": round(field_components[document_id]["exact_phrase"], 6),
                 "identifier_coverage": round(identifiers, 6),
                 "embedding": round(embedding, 6),
+                # -1 = the whole-object vector carried it, not a passage.
+                "embedding_chunk": chunk_provenance.get(document_id, (-1, 0))[0],
+                "embedding_chunks": chunk_provenance.get(document_id, (-1, 0))[1],
                 "graph": round(graph, 6),
                 "importance": round(importance, 6),
                 "quality": round(quality, 6),
@@ -590,6 +800,8 @@ class HybridSearcher:
             item["_field_score"] = round(field_score, 6)
             item["_field_matches"] = field_components[document_id]
             item["_embedding_score"] = round(embedding_score, 6)
+            if document_id in chunk_provenance:
+                item["_embedding_chunk"] = chunk_provenance[document_id][0]
             item["_graph_score"] = round(graph_score, 6)
             item["_feedback_score"] = round(feedback.get(document_id, 0.0), 6)
             item["_score_components"] = components[document_id]
@@ -599,6 +811,31 @@ class HybridSearcher:
             if entities:
                 item["_entities"] = entities
             results.append(item)
+
+        # Resolve the winning passage's offsets so the answer can quote what actually
+        # matched. Without this, a document recalled semantically at section 7 would
+        # still be shown to the LLM through a LEXICALLY chosen window near its head —
+        # precisely the case passage-level recall creates more of.
+        if chunk_provenance and self.embeddings is not None:
+            wanted = [
+                (str(item["id"]), int(item["_embedding_chunk"]))
+                for item in results
+                if item.get("_embedding_chunk") is not None
+                and int(item["_embedding_chunk"]) >= 0
+                # Only when dense recall is the REASON the object is here. A hit that
+                # also matched lexically must keep excerpting over the whole body, or
+                # the excerpt could drop the very phrase the user searched for.
+                and item["id"] not in fts_ranking
+            ]
+            if wanted:
+                with suppress(Exception):
+                    spans = self.storage.get_chunk_spans(
+                        user_id, self.embeddings.settings.embeddings_model, wanted
+                    )
+                    for item in results:
+                        key = (str(item["id"]), int(item.get("_embedding_chunk", -1)))
+                        if key in spans:
+                            item["_embedding_chunk_span"] = list(spans[key])
 
         # Ranking remains available if a read-only/locked deployment cannot
         # persist this optional, best-effort usage signal.
@@ -629,6 +866,12 @@ class HybridSearcher:
             "feedback": True,
             "graph": bool(kg),
         }
+        if chunk_provenance:
+            # At least one object was carried by a passage rather than its whole-object
+            # vector — the visible signature of passage-level recall doing work.
+            strategy["embeddings_chunked"] = True
+        if dense_meta.get("dense_chunks_capped"):
+            strategy["embeddings_chunks_capped"] = True
         if dense_meta.get("dense_capped"):
             # Dense recall scored only the newest N vectors — latency degrades
             # visibly (in the explain-trace) rather than silently on a big corpus.
@@ -858,27 +1101,102 @@ class HybridSearcher:
         query_dim = len(query_vector)
         if query_dim == 0:
             return {}
-        model = self.embeddings.settings.embeddings_model
-        max_objects = int(self.embeddings.settings.embeddings_dense_max_objects)
+        settings = self.embeddings.settings
+        model = settings.embeddings_model
+        max_objects = int(settings.embeddings_dense_max_objects)
         stored = self.storage.get_user_embeddings(user_id, model, query_dim, limit=(max_objects or None))
         if meta is not None:
+            # Deliberately still counted in OBJECTS: the cap, its explain-trace flag
+            # and the operator-facing wording all keep the meaning they had.
             meta["dense_scanned"] = len(stored)
             meta["dense_capped"] = bool(max_objects) and len(stored) >= max_objects
-        if not stored:
+        doc_scores = {
+            document_id: score for score, document_id in dense_scores(query_vector, stored, query_dim)
+        }
+
+        chunk_scores: dict[str, float] = {}
+        provenance: dict[str, tuple[int, int]] = {}
+        chunk_rows: list[tuple[str, bytes]] = []
+        if settings.embeddings_chunk_chars > 0 and self._chunk_recall:
+            # Floored at one object's worth of chunks: the fuse exists to bound a
+            # heavily split corpus, never to scan a single document only halfway.
+            row_cap = max(
+                max_objects * max(1, int(settings.embeddings_chunk_scan_multiplier)),
+                int(settings.embeddings_chunk_max_per_object) if max_objects else 0,
+            )
+            # Over-fetch by one object's worth, then drop the trailing PARTIAL object:
+            # a plain LIMIT cuts at an arbitrary chunk index, which both hides the
+            # passage that answers the query and — because the corroboration term
+            # averages over however many chunks were scanned — hands the truncated
+            # document an undiscounted score it did not earn.
+            over_fetch = int(settings.embeddings_chunk_max_per_object)
+            fetched = self.storage.get_user_chunk_embeddings(
+                user_id,
+                model,
+                query_dim,
+                object_limit=(max_objects or None),
+                row_limit=(row_cap + over_fetch if row_cap else None),
+            )
+            chunk_rows = _trim_to_whole_objects(fetched, row_cap) if row_cap else fetched
+            if meta is not None:
+                meta["dense_chunks_scanned"] = len(chunk_rows)
+                meta["dense_chunks_capped"] = bool(row_cap) and len(chunk_rows) < len(fetched)
+            chunk_scores, provenance = aggregate_chunk_scores(
+                dense_scores(query_vector, chunk_rows, query_dim),
+                blend=float(settings.embeddings_chunk_blend),
+            )
+
+        if not stored and not chunk_rows:
+            # Nothing indexed yet: degrade to re-ranking the pool, exactly as before.
             return await self._dense_recall_pool(query_vector, candidate_map)
 
-        scored = dense_scores(query_vector, stored, query_dim)
-        if not scored:
+        # The whole-object vector is the FLOOR: passage scores can only raise an
+        # object, never lower it, so chunking cannot regress any existing result.
+        # Built in a DETERMINISTIC order (doc rows first, in DB order) — a set union
+        # would iterate in per-process string-hash order and leak PYTHONHASHSEED into
+        # tie-breaking, which must stay identical to pre-0.41 when chunking is off.
+        combined: dict[str, float] = {}
+        for document_id in (*doc_scores, *chunk_scores):
+            if document_id not in combined:
+                combined[document_id] = max(
+                    doc_scores.get(document_id, -1.0), chunk_scores.get(document_id, -1.0)
+                )
+        if not combined:
             return {}
 
-        top_k = max(1, int(self.embeddings.settings.embeddings_recall_candidates))
-        for _, document_id in heapq.nlargest(top_k, scored):
+        # Promote from BOTH rankings. Selecting on the combined score alone would let
+        # chunk-boosted long documents evict objects the whole-object vector had
+        # already earned (max-over-passages is systematically higher than the document
+        # average) — and an object outside candidate_map loses its score entirely, so
+        # the floor would protect the value while the selection silently dropped it.
+        # Ties break on (score, id), matching the pre-0.41 nlargest over (score, id).
+        top_k = max(1, int(settings.embeddings_recall_candidates))
+
+        def _ranked(scores: dict[str, float]) -> list[str]:
+            return [
+                document_id
+                for document_id, _ in heapq.nlargest(
+                    top_k, scores.items(), key=lambda pair: (pair[1], pair[0])
+                )
+            ]
+
+        promoted = list(dict.fromkeys(_ranked(doc_scores) + _ranked(combined)))
+        for document_id in promoted:
             if document_id in candidate_map:
                 continue
             item = self.storage.get_knowledge_object(document_id, user_id)
             if item and not item.get("deleted_at"):
                 candidate_map[document_id] = item
-        return {document_id: score for score, document_id in scored if document_id in candidate_map}
+        if meta is not None:
+            # Per-call, never on the instance: HybridSearcher is shared and search()
+            # is async, so instance state would race between concurrent queries.
+            meta["chunk_provenance"] = {
+                document_id: provenance[document_id]
+                for document_id in combined
+                if document_id in provenance
+                and chunk_scores.get(document_id, -1.0) >= doc_scores.get(document_id, -1.0)
+            }
+        return {document_id: score for document_id, score in combined.items() if document_id in candidate_map}
 
     async def _dense_recall_pool(
         self,

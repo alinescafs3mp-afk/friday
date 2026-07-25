@@ -127,6 +127,14 @@ JERICHO_EMBEDDINGS_MODEL=
 # large corpus (the cosine scan is pure Python). 0 = no cap. Truncation is shown
 # in the retrieval explain-trace (strategy.embeddings_capped).
 JERICHO_EMBEDDINGS_DENSE_MAX_OBJECTS=5000
+# Passage-level recall: a long object is ALSO embedded in overlapping chunks, so one
+# relevant paragraph of a whole imported article is findable. The whole-object vector
+# stays the floor, so this can only add recall. 0 = off (pre-0.41 behaviour).
+# Visible in the explain-trace as strategy.embeddings_chunked.
+JERICHO_EMBEDDINGS_CHUNK_CHARS=1200
+JERICHO_EMBEDDINGS_CHUNK_OVERLAP_CHARS=200
+# Chunking multiplies inputs per object; cap one embeddings HTTP request.
+JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST=64
 # Near-duplicate Knowledge Object detection (needs embeddings). Cosine >= this
 # flags a likely duplicate as a review-gated conflict; resolve = deprecate one.
 JERICHO_DEDUP_THRESHOLD=0.92
