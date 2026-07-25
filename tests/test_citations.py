@@ -173,3 +173,138 @@ def test_telegram_appends_citation_legend():
     )
     assert "📎 Источники" in out
     assert out.rstrip().endswith("[K1] Atlas база")
+
+
+# --- deterministic overlap check ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ungrounded_cited_answer_is_flagged_without_an_llm(settings, storage):
+    """A citation pointing at an object that shares no vocabulary with the claim.
+
+    The LLM judge might catch this, might not, and costs a call. This is the cheap
+    repeatable complement: pure lexical overlap, no model involved.
+    """
+    storage.ensure_user("alice")
+    first = _store(storage, "alice", "Atlas использует PostgreSQL 16 для хранения.", "Atlas база")
+    hits = [{**first, "_score": 0.91, "_entities": []}]
+    llm = _StaticLLM("Небо сегодня зелёное и очень ветреное [K1].")
+    runtime = AgentRuntime(settings, storage, llm=llm)
+
+    result = await runtime.chat(
+        "alice",
+        "Что известно про Atlas?",
+        actor=_actor(),
+        enable_tools=False,
+        hybrid_searcher=_FakeSearcher(hits),
+    )
+
+    check = result["citation_check"]
+    assert check["status"] == "weak"
+    assert check["checked"] == 1
+    assert check["weak"] == 1
+    assert check["weakest"][0]["knowledge_object_id"] == first["id"]
+
+
+@pytest.mark.asyncio
+async def test_a_grounded_citation_reads_as_supported(settings, storage):
+    storage.ensure_user("alice")
+    first = _store(storage, "alice", "Atlas использует PostgreSQL 16 для хранения.", "Atlas база")
+    hits = [{**first, "_score": 0.91, "_entities": []}]
+    llm = _StaticLLM("Atlas использует PostgreSQL 16 для хранения [K1].")
+    runtime = AgentRuntime(settings, storage, llm=llm)
+
+    result = await runtime.chat(
+        "alice", "Что про Atlas?", actor=_actor(), enable_tools=False, hybrid_searcher=_FakeSearcher(hits)
+    )
+    assert result["citation_check"]["status"] == "ok"
+    assert result["citation_check"]["weak"] == 0
+
+
+@pytest.mark.asyncio
+async def test_citation_check_never_changes_the_answer(settings, storage):
+    """The check is advisory: a weak verdict must not touch the answer or grounding."""
+    storage.ensure_user("alice")
+    first = _store(storage, "alice", "Atlas использует PostgreSQL 16.", "Atlas база")
+    hits = [{**first, "_score": 0.91, "_entities": []}]
+    answer = "Небо сегодня зелёное и очень ветреное [K1]."
+    runtime = AgentRuntime(settings, storage, llm=_StaticLLM(answer))
+
+    result = await runtime.chat(
+        "alice", "Что про Atlas?", actor=_actor(), enable_tools=False, hybrid_searcher=_FakeSearcher(hits)
+    )
+    assert result["citation_check"]["status"] == "weak"
+    assert result["message"] == answer
+    assert result["answer_grounded"] is True  # the grounding verdict is untouched
+    assert [c["label"] for c in result["citations"]] == ["K1"]
+
+
+def test_citation_overlap_ignores_the_marker_and_short_claims():
+    from jericho.citation_check import citation_overlap
+
+    # An object containing the literal "K1" must not look like support for it.
+    report = citation_overlap(
+        "Совершенно посторонняя мысль о погоде и ветре [K1].",
+        {"K1": "ko_1"},
+        {"ko_1": "Маркер K1 упоминается здесь, но речь про базы данных PostgreSQL."},
+    )
+    assert report["status"] == "weak"
+
+    # Too few words to mean anything: counted as skipped, not as a miss.
+    short = citation_overlap("Да [K1].", {"K1": "ko_1"}, {"ko_1": "Длинный текст про PostgreSQL."})
+    assert short["status"] == "skipped"
+    assert short["skipped_short"] == 1
+    assert short["checked"] == 0
+
+
+def test_citation_overlap_is_length_invariant():
+    from jericho.citation_check import citation_overlap
+
+    claim = "Atlas использует PostgreSQL 16 для хранения [K1]."
+    short_body = "Atlas использует PostgreSQL 16 для хранения."
+    buried = ("Погода. " * 200) + short_body + (" Ещё заметки про отпуск." * 50)
+    assert citation_overlap(claim, {"K1": "ko_1"}, {"ko_1": short_body})["status"] == "ok"
+    # The same sentence buried in a large document must read the same way: the check
+    # scores sentence against sentence, not against the whole blob.
+    assert citation_overlap(claim, {"K1": "ko_1"}, {"ko_1": buried})["status"] == "ok"
+
+
+def test_citation_overlap_survives_a_decoy_region(settings, storage):
+    """Support buried BEHIND a decoy must still read as support.
+
+    Scoring a single query-aware window let an earlier region that merely contains the
+    claim's token substrings capture that window, so the genuinely supporting sentence
+    was never scored at all — a verbatim quote read as unsupported.
+    """
+    from jericho.citation_check import citation_overlap
+
+    claim = "Atlas использует PostgreSQL 16 для хранения [K1]."
+    support = "Atlas использует PostgreSQL 16 для хранения."
+    decoy = (
+        "Реестр устаревших обозначений: atlas-legacy, postgresql-совместимый, "
+        "срок-хранения-архива, шаблон-16-бис, использует-ли-подрядчик. "
+    )
+    body = decoy + ("Не относящийся к делу абзац. " * 40) + support + (" Ещё заметки." * 40)
+
+    assert citation_overlap(claim, {"K1": "ko_1"}, {"ko_1": support})["status"] == "ok"
+    assert citation_overlap(claim, {"K1": "ko_1"}, {"ko_1": body})["status"] == "ok"
+
+
+def test_citation_overlap_does_not_truncate_a_long_sentence():
+    """Text past a fixed cut point must still be scored.
+
+    Units used to be truncated to a fixed length, so the words carrying the support
+    were silently dropped when they sat past it. A single huge run-on sentence is
+    still a WEAK match by a bag-of-words measure — that part is honest — but the
+    support has to at least register, which is what separates it from a body that
+    genuinely says nothing on the subject.
+    """
+    from jericho.citation_check import citation_overlap
+
+    claim = "Atlas использует PostgreSQL 16 для хранения [K1]."
+    filler = "перечисление, " * 120
+    with_support = citation_overlap(
+        claim, {"K1": "ko_1"}, {"ko_1": filler + "Atlas использует PostgreSQL 16 для хранения"}
+    )
+    without_support = citation_overlap(claim, {"K1": "ko_1"}, {"ko_1": filler + "ничего по теме"})
+    assert with_support["min_overlap"] > without_support["min_overlap"] * 5

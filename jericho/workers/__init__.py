@@ -380,7 +380,13 @@ class WorkersManager:
             return
         from jericho.eval import run_eval
 
+        # Prune before measuring: a case whose expected objects were all deleted can
+        # never be satisfied and would depress recall for good. Mined rows only —
+        # a hand-curated case is never touched, however stale it looks.
+        hygiene = await asyncio.to_thread(self.storage.prune_eval_cases, user_id)
         report = await run_eval(self.storage, self.embeddings, self.settings, user_id, k=self.settings.eval_k)
+        if isinstance(report.get("gold_set"), dict):
+            report["gold_set"]["pruned"] = hygiene
         self.storage.kv_set(f"eval:last_report:{user_id}", json.dumps(report, ensure_ascii=False))
 
     async def _knowledge_dedup_all(self) -> None:

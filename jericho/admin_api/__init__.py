@@ -1731,13 +1731,43 @@ async def run_eval_now(request: Request) -> dict[str, Any]:
     from jericho.eval import run_eval
 
     state = _services(request)
-    report = await run_eval(state.storage, state.embeddings, state.settings, target)
+    # Same k as the worker uses, so a manual run cannot look like a regression purely
+    # because it measured a different metric than the stored baseline.
+    report = await run_eval(state.storage, state.embeddings, state.settings, target, k=state.settings.eval_k)
     _audit(
         request,
         "admin.eval.run",
         "user",
         target,
         after={"recall_at_k": report.get("recall_at_k"), "cases": report.get("cases")},
+    )
+    return {"user_id": target, "report": report}
+
+
+@router.post("/eval/ablation")
+async def measure_signal_ablation(request: Request) -> dict[str, Any]:
+    """Measure what each ranking weight earns, by switching it off on the gold set."""
+    _require(request, "admin.all_data.read")
+    body = await _request_json(request)
+    target = _target_user(request, str(body.get("user_id") or "") or None)
+    from jericho.eval import compare_signal_ablation
+
+    state = _services(request)
+    requested = body.get("signals")
+    report = await compare_signal_ablation(
+        state.storage,
+        state.embeddings,
+        state.settings,
+        target,
+        k=state.settings.eval_k,
+        signals=[str(item) for item in requested] if isinstance(requested, list) else None,
+    )
+    _audit(
+        request,
+        "admin.eval.ablation",
+        "user",
+        target,
+        after={"cases": report.get("cases"), "ranked": report.get("ranked")},
     )
     return {"user_id": target, "report": report}
 

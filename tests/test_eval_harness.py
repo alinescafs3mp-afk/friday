@@ -286,3 +286,192 @@ def test_is_mineable_eval_query_filters_followups_and_generic():
     assert _is_mineable_eval_query("что там\nFollow-up: а когда?") is False  # synthetic follow-up
     assert _is_mineable_eval_query("x" * 501) is False  # past the store cap
     assert _is_mineable_eval_query("") is False
+
+
+# --- the harness must not contaminate what it measures ---------------------
+
+
+@pytest.mark.asyncio
+async def test_eval_does_not_write_usage_counters(settings, storage):
+    """The gold-set run must leave the ranking signals it measures untouched.
+
+    ``HybridSearcher.search`` records a retrieval counter for its top hits, and
+    ``usage_signal`` reads that same counter back into the blend — so every eval run
+    was nudging the signal it is supposed to be measuring, and the two arms of an A/B
+    depended on which one ran first.
+    """
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7 в дата-центре.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+
+    before = storage.get_knowledge_usage("alice", [target])
+    await run_eval(storage, None, settings, "alice", k=5)
+    after = storage.get_knowledge_usage("alice", [target])
+
+    assert after.get(target, {}).get("retrieval_count", 0) == before.get(target, {}).get("retrieval_count", 0)
+
+
+def test_manual_case_survives_the_listing_window(storage):
+    """A hand-curated case must not be pushed out of the gold set by mined ones."""
+    storage.ensure_user("alice")
+    storage.add_eval_case("alice", "ручной эталонный запрос", ["ko_manual"])
+    for index in range(1100):
+        storage.upsert_feedback_eval_case("alice", f"намайненный запрос номер {index}", [f"ko_{index}"])
+
+    queries = {case["query"] for case in storage.list_eval_cases("alice")}
+    assert "ручной эталонный запрос" in queries
+
+
+# --- ablation --------------------------------------------------------------
+
+
+def test_sign_test_matches_the_exact_binomial():
+    from jericho.eval import _sign_test_p
+
+    assert _sign_test_p(6, 0) == pytest.approx(0.03125)
+    assert _sign_test_p(5, 0) == pytest.approx(0.0625)
+    assert _sign_test_p(0, 0) == 1.0
+    assert _sign_test_p(3, 3) == 1.0
+
+
+def test_ablation_seam_is_neutral_by_default(storage, settings):
+    """Turning the seam on with nothing ablated must reproduce the shipped ranking."""
+    from jericho.retrieval import ABLATABLE_SIGNALS, HybridSearcher
+
+    assert HybridSearcher(storage, None)._ablate == frozenset()  # noqa: SLF001
+    assert HybridSearcher(storage, None, ablate=())._ablate == frozenset()  # noqa: SLF001
+    # Only genuinely independent weights are offered for ablation.
+    assert set(ABLATABLE_SIGNALS) == {
+        "feedback",
+        "usage",
+        "kind_alignment",
+        "fts_bonus",
+        "noise_penalty",
+    }
+
+
+@pytest.mark.asyncio
+async def test_ablation_refuses_a_verdict_on_a_small_gold_set(settings, storage):
+    """Three cases cannot separate signal from noise — the honest answer is a refusal."""
+    from jericho.eval import compare_signal_ablation
+
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7 в дата-центре.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+
+    report = await compare_signal_ablation(storage, None, settings, "alice", k=5)
+    assert report["underpowered"] is True
+    assert report["min_cases_for_a_verdict"] == 12
+    assert {row["verdict"] for row in report["ranked"]} == {"insufficient_evidence"}
+    assert "reason" in report
+    # Entangled signals are named with a reason instead of given a fake number.
+    assert "embedding" in report["not_measured"]
+    assert all("delta_recall" not in str(key) for key in report["not_measured"])
+
+
+@pytest.mark.asyncio
+async def test_ablation_does_not_move_the_regression_baseline(settings, storage):
+    from jericho.eval import compare_signal_ablation, run_eval
+
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+    await run_eval(storage, None, settings, "alice", k=5)
+    baseline = storage.kv_get("eval:last_run:alice")
+
+    await compare_signal_ablation(storage, None, settings, "alice", k=5)
+    assert storage.kv_get("eval:last_run:alice") == baseline
+
+
+@pytest.mark.asyncio
+async def test_regression_is_not_flagged_across_a_k_change(settings, storage):
+    """recall@5 and recall@10 are different metrics; comparing them is a phantom."""
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+
+    await run_eval(storage, None, settings, "alice", k=10)
+    second = await run_eval(storage, None, settings, "alice", k=5)
+    assert second["regression"]["regressed"] is False
+    assert second["regression"]["reason"] == "k changed"
+
+
+# --- gold-set hygiene ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_eval_reports_gold_set_health(settings, storage):
+    """A case whose objects were deleted must be distinguishable from bad search."""
+    storage.ensure_user("alice")
+    alive = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
+    dead = _store(storage, "alice", "Старый сервер Borealis.", "Borealis")
+    storage.add_eval_case("alice", "IP сервера Atlas", [alive])
+    storage.add_eval_case("alice", "адрес Borealis", [dead])
+    storage.soft_delete_knowledge_object(dead, "alice")
+
+    report = await run_eval(storage, None, settings, "alice", k=5)
+    assert report["gold_set"]["stale"] == 1
+    assert report["gold_set"]["stale_manual"] == 1
+
+
+def test_prune_never_deletes_a_manual_case(storage):
+    storage.ensure_user("alice")
+    storage.add_eval_case("alice", "ручной кейс про мёртвый объект", ["ko_dead"])
+    storage.upsert_feedback_eval_case("alice", "намайненный кейс про мёртвый объект", ["ko_dead"])
+
+    pruned = storage.prune_eval_cases("alice")
+    queries = {case["query"] for case in storage.list_eval_cases("alice")}
+    assert "ручной кейс про мёртвый объект" in queries
+    assert "намайненный кейс про мёртвый объект" not in queries
+    assert pruned["deleted_dead"] == 1
+    assert storage.eval_case_health("alice")["stale_manual"] == 1
+
+
+def test_mined_cases_are_capped_per_user(storage):
+    from jericho.storage import EVAL_MINED_CASE_CAP
+
+    storage.ensure_user("alice")
+    live = _store(storage, "alice", "Живой объект для эталонов.", "Живой")
+    for index in range(EVAL_MINED_CASE_CAP + 50):
+        storage.upsert_feedback_eval_case("alice", f"намайненный запрос номер {index}", [live])
+
+    pruned = storage.prune_eval_cases("alice")
+    assert pruned["deleted_over_cap"] == 50
+    assert pruned["kept_mined"] == EVAL_MINED_CASE_CAP
+
+
+@pytest.mark.asyncio
+async def test_baseline_reanchors_after_a_k_change(settings, storage):
+    """Refusing one comparison is right; refusing every future one is a dead watchdog.
+
+    Returning early from the k guard skipped the write that stores the new baseline, so
+    the old k stayed forever and every later run took the same branch — regression
+    detection silently reported "no regression" no matter how far recall fell.
+    """
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+
+    await run_eval(storage, None, settings, "alice", k=10)
+    second = await run_eval(storage, None, settings, "alice", k=5)
+    assert second["regression"]["reason"] == "k changed"
+
+    # The run at the new k became the baseline, so the NEXT one compares normally.
+    third = await run_eval(storage, None, settings, "alice", k=5)
+    assert third["regression"]["previous_recall"] is not None
+    assert "reason" not in third["regression"]
+
+
+@pytest.mark.asyncio
+async def test_ablation_arms_are_deduplicated(settings, storage):
+    """Each arm is a full pass over the gold set; a repeated name must not multiply it."""
+    from jericho.eval import compare_signal_ablation
+
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+
+    report = await compare_signal_ablation(
+        storage, None, settings, "alice", k=5, signals=["usage", "usage", "usage", "нет-такого"]
+    )
+    assert [row["signal"] for row in report["ranked"]] == ["usage"]

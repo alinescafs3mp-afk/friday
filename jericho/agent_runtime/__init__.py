@@ -14,6 +14,8 @@ from jericho.agent_runtime.tool_protocol import (
     classify_tool_turn,
     normalize_native_tool_calls,
 )
+from jericho.citation_check import CITATION_MARKER_RE as _KNOWLEDGE_CITATION_RE
+from jericho.citation_check import citation_overlap
 from jericho.config import JerichoSettings
 from jericho.execution_kernel import ExecutionKernel
 from jericho.knowledge_graph import build_user_model
@@ -30,7 +32,6 @@ _MAX_TOOL_ROUNDS = 3
 # so a tool-grounded answer is judged against what it actually used — not only the
 # user's personal notes (which it may not rest on at all).
 _MAX_TOOL_EVIDENCE = 6
-_KNOWLEDGE_CITATION_RE = re.compile(r"\[(K\d{1,2})\]", re.IGNORECASE)
 _MODE_TOOL_BUDGETS = {
     "dialogue": (4, 2),
     "knowledge_work": (8, 3),
@@ -391,6 +392,10 @@ class AgentRuntime:
         else:
             answer_grounded = None
         citation_notice = _citation_notice(citations, answer_grounded)
+        # Deterministic companion to the LLM judge: does the sentence carrying [K#]
+        # share vocabulary with the object it cites? Advisory — it never edits the
+        # answer, the citations or the grounding verdict.
+        citation_check = self._citation_overlap_report(content, context)
 
         assistant_message = self.storage.store_message(
             conversation_id,
@@ -400,6 +405,7 @@ class AgentRuntime:
             metadata={
                 "verified": answer_verified,
                 "verification": verification,
+                "citation_check": citation_check,
                 "verification_status": verification_status,
                 "tools_used": response.get("tools_used", []),
                 "kb_size": context.kb_size,
@@ -442,6 +448,7 @@ class AgentRuntime:
             "citations": citations,
             "answer_grounded": answer_grounded,
             "citation_notice": citation_notice,
+            "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
             "context": {
                 "kb_size": context.kb_size,
@@ -758,6 +765,24 @@ class AgentRuntime:
                 context.knowledge_citations[label] for label in labels if label in context.knowledge_citations
             )
         )
+
+    @staticmethod
+    def _citation_overlap_report(content: str, context: Any) -> dict[str, Any]:
+        """Lexical overlap between each cited sentence and the object it cites.
+
+        Uses the Knowledge Objects already in the context — no extra database read.
+        Short-circuits when nothing was cited, so the ordinary no-citation answer costs
+        one regex search.
+        """
+        citations = dict(getattr(context, "knowledge_citations", {}) or {})
+        if not citations or not _KNOWLEDGE_CITATION_RE.search(content or ""):
+            return {"status": "skipped", "checked": 0}
+        texts = {
+            str(hit.get("id")): str(hit.get("content") or hit.get("summary") or "")
+            for hit in getattr(context, "knowledge_hits", []) or []
+            if hit.get("id")
+        }
+        return citation_overlap(content, citations, texts)
 
     def _build_citation_legend(
         self,

@@ -391,6 +391,31 @@ def _dense_scores_numpy(
 
 _CHUNK_CORROBORATION_K = 3
 
+# Signals whose weight can be zeroed WITHOUT changing anything else, so switching one
+# off and re-measuring the gold set answers "does this weight earn its place?".
+ABLATABLE_SIGNALS: tuple[str, ...] = (
+    "feedback",
+    "usage",
+    "kind_alignment",
+    "fts_bonus",
+    "noise_penalty",
+)
+# Signals that also decide candidate ADMISSION, feed the RRF fusion, or act as an
+# exclusion gate. Zeroing their weight is NOT the same as removing them, so an
+# ablation number for these would be confidently wrong — they are reported as
+# not measured, with the reason, instead.
+ENTANGLED_SIGNALS: dict[str, str] = {
+    "lexical": "feeds RRF and the insufficient_evidence gate",
+    "field": "feeds the insufficient_evidence gate",
+    "embedding": "decides candidate admission, feeds RRF and the evidence gate",
+    "graph": "expands the candidate pool and feeds the evidence gate",
+    "rrf": "a fusion of the other rankings, not a weight of its own",
+    "identifier_coverage": "drives the identifier_mismatch exclusion, not just a penalty",
+    "importance": "also a multiplicative lifecycle/quality input",
+    "quality": "also a multiplicative quality_factor input",
+    "promotion": "also a multiplicative quality_factor input",
+}
+
 
 def _trim_to_whole_objects(rows: list[tuple[str, bytes]], budget: int) -> list[tuple[str, bytes]]:
     """Cut a chunk-row scan on an OBJECT boundary at or below ``budget``.
@@ -534,12 +559,20 @@ class HybridSearcher:
         *,
         graph_max_depth: int = 2,
         chunk_recall: bool = True,
+        record_usage: bool = True,
+        ablate: Sequence[str] | None = None,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
         self._graph_max_depth = max(1, int(graph_max_depth))
         # Off only for the A/B harness, which must measure the same corpus twice.
         self._chunk_recall = bool(chunk_recall)
+        # Off for advisory harnesses: they must not write the counter that
+        # ``usage_signal`` reads back into the very blend they are measuring.
+        self._record_usage = bool(record_usage)
+        # Names from ABLATABLE_SIGNALS whose weight is forced to zero for this
+        # instance. Measurement only: a name can silence a weight, never raise it.
+        self._ablate = frozenset(ablate or ())
 
     async def search(
         self,
@@ -671,6 +704,16 @@ class HybridSearcher:
         rrf = reciprocal_rank_fusion([ranking for ranking in rankings if ranking], k=45)
         feedback = self._feedback_scores(user_id, list(candidate_map))
         usage = self.storage.get_knowledge_usage(user_id, list(candidate_map))
+        # Ablation seam: an advisory harness zeroes ONE weight and re-measures the gold
+        # set, which is what turns a hand-tuned constant into a measured one. Lifted
+        # out of the loop so the blend expression below stays a single readable line
+        # per signal, and so the default path is the literal constant it always was.
+        off = self._ablate
+        w_feedback = 0.0 if "feedback" in off else 0.05
+        w_usage = 0.0 if "usage" in off else 0.028
+        w_kind = 0.0 if "kind_alignment" in off else 0.035
+        w_fts_bonus = 0.0 if "fts_bonus" in off else 0.018
+        w_noise = 0.0 if "noise_penalty" in off else 1.0
         final_scores: dict[str, float] = {}
         components: dict[str, dict[str, float]] = {}
         for document_id, item in candidate_map.items():
@@ -714,11 +757,11 @@ class HybridSearcher:
                 + importance * 0.035
                 + quality * 0.045
                 + promotion * 0.03
-                + user_feedback * 0.05
-                + usage_signal * 0.028
-                + kind_alignment * 0.035
-                + (0.018 if document_id in fts_ranking else 0.0)
-                - noise_penalty
+                + user_feedback * w_feedback
+                + usage_signal * w_usage
+                + kind_alignment * w_kind
+                + (w_fts_bonus if document_id in fts_ranking else 0.0)
+                - noise_penalty * w_noise
                 - identifier_penalty
             )
             quality_factor = 0.42 + quality * 0.38 + promotion * 0.20
@@ -838,20 +881,23 @@ class HybridSearcher:
                             item["_embedding_chunk_span"] = list(spans[key])
 
         # Ranking remains available if a read-only/locked deployment cannot
-        # persist this optional, best-effort usage signal.
-        with suppress(Exception):
-            top_score = float(results[0].get("_score", 0.0) or 0.0) if results else 0.0
-            usage_floor = max(0.015, top_score * 0.32)
-            retrieved_ids = [
-                str(item["id"])
-                for item in results[:5]
-                if item.get("id") and float(item.get("_score", 0.0) or 0.0) >= usage_floor
-            ]
-            self.storage.record_knowledge_usage(
-                user_id,
-                retrieved_ids,
-                retrieved=True,
-            )
+        # persist this optional, best-effort usage signal. An advisory harness turns
+        # the write off entirely: ``usage_signal`` reads this counter back into the
+        # blend, so measuring the corpus would otherwise change it.
+        if self._record_usage:
+            with suppress(Exception):
+                top_score = float(results[0].get("_score", 0.0) or 0.0) if results else 0.0
+                usage_floor = max(0.015, top_score * 0.32)
+                retrieved_ids = [
+                    str(item["id"])
+                    for item in results[:5]
+                    if item.get("id") and float(item.get("_score", 0.0) or 0.0) >= usage_floor
+                ]
+                self.storage.record_knowledge_usage(
+                    user_id,
+                    retrieved_ids,
+                    retrieved=True,
+                )
 
         if include_entities and kg:
             entity_matches = list(graph_context.get("nodes", []))[:5]

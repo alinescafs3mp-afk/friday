@@ -59,6 +59,10 @@ SCHEMA_VERSION = 16
 # point where ``now + timedelta(seconds=ttl)`` would overflow ``datetime.max``.
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 
+# How many feedback-mined eval cases are kept per user. Mined cases grow without
+# bound; hand-curated ones are never counted against this and never pruned.
+EVAL_MINED_CASE_CAP = 200
+
 # ``len(retrieval.knowledge_search_text(row))`` expressed in SQL. It is shorter than
 # the Python value by exactly the four joining spaces, so "SQL says long" always
 # implies "the Python chunker will split it" -- never the other way round.
@@ -2887,7 +2891,10 @@ class JerichoStorage:
 
     def list_eval_cases(self, user_id: str, *, limit: int = 1000) -> list[dict[str, Any]]:
         rows = self.execute(
-            "SELECT * FROM eval_cases WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+            # Hand-curated cases first: mined ones grow without bound and would
+            # otherwise push the gold set a human actually chose out of the window.
+            "SELECT * FROM eval_cases WHERE user_id=? "
+            "ORDER BY (source='manual') DESC, created_at DESC LIMIT ?",
             (user_id, max(1, min(int(limit), 5000))),
         ).fetchall()
         cases = []
@@ -2896,6 +2903,84 @@ class JerichoStorage:
             case["expected_ids"] = _json_load(case.pop("expected_ids_json", "[]"), [])
             cases.append(case)
         return cases
+
+    def eval_case_health(self, user_id: str, *, cases: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """How much of the gold set can still be satisfied at all.
+
+        A case whose expected objects were all deleted depresses recall forever and is
+        indistinguishable, in the number alone, from search having got worse — so the
+        report says which it is.
+        """
+        rows = self.list_eval_cases(user_id) if cases is None else cases
+        wanted: set[str] = set()
+        for case in rows:
+            wanted.update(str(item) for item in case.get("expected_ids", []))
+        live: set[str] = set()
+        ordered = sorted(wanted)
+        for start in range(0, len(ordered), 400):
+            batch = ordered[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            found = self.execute(
+                "SELECT id FROM knowledge_objects "  # nosec B608
+                f"WHERE user_id=? AND deleted_at IS NULL AND id IN ({placeholders})",
+                (user_id, *batch),
+            ).fetchall()
+            live.update(str(row["id"]) for row in found)
+        dead_ids: list[str] = []
+        stale_manual = 0
+        for case in rows:
+            expected = {str(item) for item in case.get("expected_ids", [])}
+            if expected and not (expected & live):
+                dead_ids.append(str(case["id"]))
+                if str(case.get("source") or "") == "manual":
+                    stale_manual += 1
+        return {
+            "cases": len(rows),
+            "stale": len(dead_ids),
+            "stale_manual": stale_manual,
+            "stale_mined": len(dead_ids) - stale_manual,
+            "dead_case_ids": dead_ids,
+        }
+
+    def prune_eval_cases(self, user_id: str, *, cap: int = EVAL_MINED_CASE_CAP) -> dict[str, int]:
+        """Drop mined cases that can never be satisfied, and cap how many are kept.
+
+        ``source<>'manual'`` sits on the DELETE itself in BOTH branches rather than on
+        the Python-side candidate list: a mistake in the health check, the cap or the
+        subquery then costs an unpruned row, never a hand-curated case.
+        """
+        dead = [
+            case_id for case_id in self.eval_case_health(user_id)["dead_case_ids"] if isinstance(case_id, str)
+        ]
+        deleted_dead = 0
+        with self.transaction() as conn:
+            for start in range(0, len(dead), 400):
+                batch = dead[start : start + 400]
+                placeholders = ",".join("?" for _ in batch)
+                cursor = conn.execute(
+                    "DELETE FROM eval_cases "  # nosec B608
+                    f"WHERE user_id=? AND source<>'manual' AND id IN ({placeholders})",
+                    (user_id, *batch),
+                )
+                deleted_dead += cursor.rowcount or 0
+            cursor = conn.execute(
+                """DELETE FROM eval_cases
+                   WHERE user_id=? AND source<>'manual' AND id NOT IN (
+                       SELECT id FROM eval_cases
+                        WHERE user_id=? AND source<>'manual'
+                        ORDER BY created_at DESC LIMIT ?)""",
+                (user_id, user_id, max(1, int(cap))),
+            )
+            deleted_over_cap = cursor.rowcount or 0
+        kept = self.execute(
+            "SELECT COUNT(*) AS n FROM eval_cases WHERE user_id=? AND source<>'manual'",
+            (user_id,),
+        ).fetchone()
+        return {
+            "deleted_dead": deleted_dead,
+            "deleted_over_cap": deleted_over_cap,
+            "kept_mined": int(kept["n"]) if kept else 0,
+        }
 
     def delete_eval_case(self, user_id: str, case_id: str) -> bool:
         with self.transaction() as conn:
