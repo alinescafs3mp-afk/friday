@@ -475,3 +475,31 @@ async def test_ablation_arms_are_deduplicated(settings, storage):
         storage, None, settings, "alice", k=5, signals=["usage", "usage", "usage", "нет-такого"]
     )
     assert [row["signal"] for row in report["ranked"]] == ["usage"]
+
+
+def test_ablation_reports_reordering_that_recall_cannot_see():
+    """recall@k only asks whether the object is INSIDE the top k, so it is blind to
+    reordering within it — which is exactly where the 0.05/0.028/0.018 weights work.
+    A signal that only reorders must not be reported as having no effect."""
+    from jericho.eval import _MATERIAL_MRR, _sign_test_p
+
+    # Membership unchanged (recall delta 0), order moved consistently across cases.
+    assert _sign_test_p(0, 0) == 1.0  # nothing moved -> no evidence
+    assert _sign_test_p(8, 0) < 0.05  # every case moved the same way -> significant
+    assert _MATERIAL_MRR == 0.01
+
+
+@pytest.mark.asyncio
+async def test_ablation_row_carries_both_metrics(settings, storage):
+    from jericho.eval import compare_signal_ablation
+
+    storage.ensure_user("alice")
+    target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
+    storage.add_eval_case("alice", "IP сервера Atlas", [target])
+
+    report = await compare_signal_ablation(storage, None, settings, "alice", k=5, signals=["usage"])
+    row = report["ranked"][0]
+    # Both metrics and both p-values travel together, so a reordering effect is visible
+    # even when the verdict (correctly) refuses to conclude from it.
+    for key in ("delta_recall", "delta_mrr", "p_value", "p_value_mrr", "rank_better", "rank_worse"):
+        assert key in row, key

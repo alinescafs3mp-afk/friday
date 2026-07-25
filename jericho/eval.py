@@ -30,6 +30,14 @@ _ABLATION_KEY = "eval:ablation:"
 _MIN_ABLATION_CASES = 12
 # A recall difference smaller than this is not worth acting on even when significant.
 _MATERIAL_DELTA = 0.02
+# recall@k only asks whether the expected object is INSIDE the top k, so it is blind to
+# reordering within it — which is exactly where the small weights (0.05, 0.028, 0.018)
+# operate. Measured on a 139-object synthetic personal corpus with 16 gold cases:
+# ablating `feedback` moved recall@10 by 0.0000 while MRR moved +0.0314. That movement
+# came from 2 cases out of 16 (sign test p=0.5), so it is NOT a conclusion — but with
+# recall alone it was not even visible. MRR is paired separately so a signal that only
+# reorders gets its own verdict, and so the number is on the report either way.
+_MATERIAL_MRR = 0.01
 
 
 def _sign_test_p(better: int, worse: int) -> float:
@@ -254,27 +262,40 @@ async def compare_signal_ablation(
     scored_cases = full["cases"]
     underpowered = scored_cases < _MIN_ABLATION_CASES
     baseline = {row["id"]: row["recall_at_k"] for row in full["per_case"]}
+    baseline_rank = {row["id"]: row["reciprocal_rank"] for row in full["per_case"]}
 
     ranked: list[dict[str, Any]] = []
     for signal in wanted:
         arm = await _score_cases(_searcher((signal,)), kg, user_id, cases, k)
         better = worse = 0
+        rank_better = rank_worse = 0
         for row in arm["per_case"]:
             reference = baseline.get(row["id"])
-            if reference is None:
-                continue
-            if row["recall_at_k"] > reference:
-                better += 1
-            elif row["recall_at_k"] < reference:
-                worse += 1
+            if reference is not None:
+                if row["recall_at_k"] > reference:
+                    better += 1
+                elif row["recall_at_k"] < reference:
+                    worse += 1
+            rank_reference = baseline_rank.get(row["id"])
+            if rank_reference is not None:
+                if row["reciprocal_rank"] > rank_reference:
+                    rank_better += 1
+                elif row["reciprocal_rank"] < rank_reference:
+                    rank_worse += 1
         delta = round(arm["recall_at_k"] - full["recall_at_k"], 4)
+        delta_mrr = round(arm["mrr"] - full["mrr"], 4)
         p_value = round(_sign_test_p(better, worse), 4)
+        p_mrr = round(_sign_test_p(rank_better, rank_worse), 4)
         if underpowered:
             verdict = "insufficient_evidence"
         elif p_value <= 0.05 and worse > better and delta <= -_MATERIAL_DELTA:
             verdict = "earns_weight"
         elif p_value <= 0.05 and better > worse and delta >= _MATERIAL_DELTA:
             verdict = "harmful"
+        elif p_mrr <= 0.05 and abs(delta_mrr) >= _MATERIAL_MRR:
+            # Membership of the top k is unchanged, but the ORDER inside it moved
+            # significantly. Calling that "no effect" is what hid a demoting weight.
+            verdict = "reorders_within_k"
         else:
             verdict = "no_measurable_effect"
         ranked.append(
@@ -284,9 +305,15 @@ async def compare_signal_ablation(
                 # Recall WITHOUT the signal minus recall with it: negative means
                 # removing it hurt, i.e. the weight is doing work.
                 "delta_recall": delta,
+                # Positive means the ranking got BETTER without the signal, i.e. the
+                # weight was demoting correct answers.
+                "delta_mrr": delta_mrr,
                 "cases_better_without": better,
                 "cases_worse_without": worse,
+                "rank_better": rank_better,
+                "rank_worse": rank_worse,
                 "p_value": p_value,
+                "p_value_mrr": p_mrr,
             }
         )
     ranked.sort(key=lambda row: (row["delta_recall"], row["signal"]))
