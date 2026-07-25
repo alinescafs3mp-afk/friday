@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import hashlib
 import json
 import secrets
@@ -1251,7 +1253,14 @@ async def detect_knowledge_duplicates(request: Request) -> dict[str, Any]:
     from jericho.dedup import detect_near_duplicates
 
     state = _services(request)
-    result = detect_near_duplicates(state.storage, state.settings, target)
+    # Off the event loop: a manual scan on a large corpus would otherwise block every
+    # other request. ``full_rescan`` lets an operator re-walk history on demand.
+    result = await asyncio.to_thread(
+        functools.partial(detect_near_duplicates, full_rescan=bool(body.get("full_rescan"))),
+        state.storage,
+        state.settings,
+        target,
+    )
     _audit(request, "admin.knowledge.detect_duplicates", "user", target, after=result)
     return {"user_id": target, **result}
 

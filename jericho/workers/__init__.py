@@ -8,6 +8,7 @@ so one bad document or tenant cannot stop lifecycle, backup, or graph work.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -383,14 +384,31 @@ class WorkersManager:
         self.storage.kv_set(f"eval:last_report:{user_id}", json.dumps(report, ensure_ascii=False))
 
     async def _knowledge_dedup_all(self) -> None:
-        await self._for_each_user(self._knowledge_dedup)
+        # The tick budget is split across tenants, so no single scan can run the whole
+        # tick past the supervisor's timeout — asyncio.to_thread is not interruptible,
+        # and an over-long scan would show up as a recurring `timeout` in worker health
+        # while quietly still doing the work.
+        tenants = max(1, len(await asyncio.to_thread(self.storage.list_user_ids, active_only=True)))
+        share = max(1.0, float(self.settings.dedup_scan_max_seconds) / tenants)
+        await self._for_each_user(functools.partial(self._knowledge_dedup, max_seconds=share))
 
-    async def _knowledge_dedup(self, user_id: str) -> None:
+    async def _knowledge_dedup(self, user_id: str, *, max_seconds: float | None = None) -> None:
         from jericho.dedup import detect_near_duplicates
 
-        result = await asyncio.to_thread(detect_near_duplicates, self.storage, self.settings, user_id)
+        result = await asyncio.to_thread(
+            functools.partial(detect_near_duplicates, max_seconds=max_seconds),
+            self.storage,
+            self.settings,
+            user_id,
+        )
         if result.get("detected"):
             LOGGER.info("Near-duplicate scan for tenant %s: %d proposal(s)", user_id, result["detected"])
+        if result.get("incomplete"):
+            LOGGER.info(
+                "Near-duplicate scan for tenant %s paused with %d object(s) pending; resumes next tick",
+                user_id,
+                int(result.get("pending") or 0),
+            )
 
     async def _entity_resolution_all(self) -> None:
         await self._for_each_user(self._entity_resolution)

@@ -268,7 +268,12 @@ class JerichoSettings:
     # Near-duplicate Knowledge Object detection (cosine over stored vectors).
     dedup_threshold: float
     dedup_interval_sec: float
-    dedup_max_objects: int
+    # Incremental scan: objects probed against the corpus per tile (also the
+    # granularity at which the scan cursor advances), and the wall-clock budget one
+    # tick may spend across all tenants. Keep a tile well inside the supervisor's
+    # 900 s worker timeout — asyncio.to_thread is NOT interruptible.
+    dedup_scan_batch: int
+    dedup_scan_max_seconds: float
     # Periodic retrieval-quality evaluation over the gold set (recall@k).
     eval_enabled: bool
     eval_interval_sec: float
@@ -529,7 +534,8 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ),
         dedup_threshold=_float_env("JERICHO_DEDUP_THRESHOLD", 0.92, minimum=0.5),
         dedup_interval_sec=_float_env("JERICHO_DEDUP_INTERVAL_SEC", 21600, minimum=300),
-        dedup_max_objects=_int_env("JERICHO_DEDUP_MAX_OBJECTS", 1500, minimum=10),
+        dedup_scan_batch=_int_env("JERICHO_DEDUP_SCAN_BATCH", 512, minimum=1),
+        dedup_scan_max_seconds=_float_env("JERICHO_DEDUP_SCAN_MAX_SECONDS", 600.0, minimum=1.0),
         eval_enabled=_bool_env("JERICHO_EVAL_ENABLED", True),
         eval_interval_sec=_float_env("JERICHO_EVAL_INTERVAL_SEC", 86400, minimum=300),
         eval_k=_int_env("JERICHO_EVAL_K", 10, minimum=1),

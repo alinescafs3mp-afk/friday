@@ -643,6 +643,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_user_model
 -- knowledge_object_id (leftmost prefix), so only the scan path needs an index.
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_user_model
     ON knowledge_chunk_embeddings(user_id, model, dim);
+-- Keyset order for the incremental near-duplicate scan: (updated_at, id) is a total
+-- order that only ever moves UPWARD, because every vector write stamps updated_at.
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_user_model_updated
+    ON knowledge_embeddings(user_id, model, updated_at, knowledge_object_id);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_entity_time_user ON entity_time(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_outbound_status ON outbound_notifications(status, created_at);
@@ -3316,7 +3320,9 @@ class JerichoStorage:
         return self.get_relation_candidate(user_id, candidate_id)
 
     @staticmethod
-    def _conflict_pair_key(knowledge_a_id: str, knowledge_b_id: str) -> str:
+    def conflict_pair_key(knowledge_a_id: str, knowledge_b_id: str) -> str:
+        """Canonical key for an unordered pair — public so a detector can ask about a
+        pair it has not stored yet."""
         return "|".join(sorted((knowledge_a_id, knowledge_b_id)))
 
     def store_knowledge_conflict(
@@ -3338,7 +3344,7 @@ class JerichoStorage:
         parsed_confidence = float(confidence)
         if not math.isfinite(parsed_confidence) or not 0.0 <= parsed_confidence <= 1.0:
             raise ValueError("confidence must be a finite number between 0 and 1")
-        pair_key = self._conflict_pair_key(knowledge_a_id, knowledge_b_id)
+        pair_key = self.conflict_pair_key(knowledge_a_id, knowledge_b_id)
         conflict_id = new_id("conf")
         now = utc_now()
         with self.transaction() as conn:
@@ -3394,6 +3400,19 @@ class JerichoStorage:
                 ORDER BY c.confidence DESC, c.created_at DESC LIMIT ?"""  # nosec B608
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]
+
+    def get_conflict_pair_statuses(self, user_id: str, conflict_type: str) -> dict[str, str]:
+        """``pair_key -> status`` for one conflict type, in a single query.
+
+        A detector needs to know which pairs a human has already settled BEFORE it
+        proposes them again. Reading the whole map once per run also replaces the
+        per-pair full re-listing ``store_knowledge_conflict`` does to return its row.
+        """
+        rows = self.execute(
+            "SELECT pair_key, status FROM knowledge_conflicts WHERE user_id=? AND conflict_type=?",
+            (user_id, str(conflict_type)),
+        ).fetchall()
+        return {str(row["pair_key"]): str(row["status"] or "suggested") for row in rows}
 
     def get_knowledge_conflict(self, user_id: str, conflict_id: str) -> dict[str, Any] | None:
         row = self.execute(
@@ -4781,23 +4800,63 @@ class JerichoStorage:
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 
-    def get_user_vectors(self, user_id: str, model: str, *, limit: int = 5000) -> list[tuple[str, bytes]]:
-        """All live (ko_id, packed vector) for a model, any dimension.
+    def list_user_vectors_page(
+        self,
+        user_id: str,
+        model: str,
+        *,
+        after: tuple[str, str] | None = None,
+        before: tuple[str, str] | None = None,
+        max_updated_at: str | None = None,
+        descending: bool = False,
+        limit: int = 2048,
+    ) -> list[tuple[str, str, bytes]]:
+        """One keyset page of ``(knowledge_object_id, updated_at, vector)``.
 
-        Used by near-duplicate detection, which compares stored vectors against
-        each other rather than against a query, so it does not know the dim up
-        front. Soft-deleted objects are excluded. Ordered newest-first so a hard
-        cap keeps the most recent corpus.
+        Ordered by ``(updated_at, knowledge_object_id)`` — a TOTAL order, unlike the
+        bare ``created_at`` the old capped scan used, where a bulk import sharing one
+        second left it undefined which rows survived the LIMIT. ``after``/``before``
+        are strict bounds so paging can neither repeat nor skip a row, and
+        ``max_updated_at`` excludes the run's own second, whose rows are not
+        necessarily all written yet.
         """
-        rows = self.execute(
-            """SELECT e.knowledge_object_id AS id, e.vector AS vector
-               FROM knowledge_embeddings e
-               JOIN knowledge_objects k ON k.id = e.knowledge_object_id
-               WHERE e.user_id = ? AND e.model = ? AND k.deleted_at IS NULL
-               ORDER BY k.created_at DESC LIMIT ?""",
-            (user_id, model, max(1, int(limit))),
-        ).fetchall()
-        return [(str(row["id"]), bytes(row["vector"])) for row in rows]
+        clauses = ["e.user_id = ?", "e.model = ?", "k.deleted_at IS NULL"]
+        params: list[Any] = [user_id, model]
+        if after is not None:
+            clauses.append("(e.updated_at, e.knowledge_object_id) > (?, ?)")
+            params.extend([after[0], after[1]])
+        if before is not None:
+            clauses.append("(e.updated_at, e.knowledge_object_id) < (?, ?)")
+            params.extend([before[0], before[1]])
+        if max_updated_at is not None:
+            clauses.append("e.updated_at < ?")
+            params.append(max_updated_at)
+        direction = "DESC" if descending else "ASC"
+        query = (
+            "SELECT e.knowledge_object_id AS id, e.updated_at AS updated_at, e.vector AS vector "  # nosec B608
+            "FROM knowledge_embeddings e "
+            "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
+            f"WHERE {' AND '.join(clauses)} "
+            f"ORDER BY e.updated_at {direction}, e.knowledge_object_id {direction} LIMIT ?"
+        )
+        params.append(max(1, min(int(limit), 10000)))
+        rows = self.execute(query, tuple(params)).fetchall()
+        return [(str(row["id"]), str(row["updated_at"]), bytes(row["vector"])) for row in rows]
+
+    def count_user_vectors(self, user_id: str, model: str, *, before: tuple[str, str] | None = None) -> int:
+        """Corpus size, or how many rows are still strictly below a backfill cursor."""
+        clauses = ["e.user_id = ?", "e.model = ?", "k.deleted_at IS NULL"]
+        params: list[Any] = [user_id, model]
+        if before is not None:
+            clauses.append("(e.updated_at, e.knowledge_object_id) < (?, ?)")
+            params.extend([before[0], before[1]])
+        row = self.execute(
+            "SELECT COUNT(*) AS n FROM knowledge_embeddings e "  # nosec B608
+            "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
+            f"WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        ).fetchone()
+        return int(row["n"]) if row else 0
 
     def get_user_chunk_embeddings(
         self,
