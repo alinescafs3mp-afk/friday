@@ -68,8 +68,10 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 183
+EXPECTED_MEMBER_COUNT = 185
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
+    "group_pending_inbox": "(self, user_id: 'str', *, by: 'str' = 'extension', limit_ids: 'int' = 200, max_groups: 'int' = 100) -> 'list[dict[str, Any]]'",
     "count_events": "(self) -> 'int'",
     "list_events": "(self, *, event_type: 'str | None' = None, since: 'str | None' = None, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "record_event": "(self, event_type: 'str', payload: 'dict[str, Any] | None' = None) -> 'str'",

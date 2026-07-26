@@ -29,6 +29,40 @@ from jericho.admin_api._deps import (
 router = APIRouter()
 
 
+@router.get("/inbox/groups")
+async def group_inbox(
+    request: Request,
+    user_id: str | None = None,
+    by: str = "extension",
+) -> dict[str, Any]:
+    """Cut the pending queue into groups so one decision can cover many items.
+
+    Read-only. Each group carries the ids of its members, which the caller passes to
+    ``/inbox/bulk`` — the endpoint that already refuses to create knowledge. Reviewing
+    an import means recognising the noise and dismissing it wholesale; what remains is
+    small enough to read one item at a time, which is where promotion stays.
+
+    Ids travel with the group rather than being re-resolved from a predicate at commit
+    time: the queue moves, and acting on rows the user never saw is the failure mode
+    this design exists to avoid.
+    """
+
+    _require(request, "admin.all_data.read")
+    target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.inbox.read", target)
+    try:
+        groups = _services(request).storage.group_pending_inbox(target, by=by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "user_id": target,
+        "axis": by,
+        "axes": list(_services(request).storage.INBOX_GROUP_AXES),
+        "groups": groups,
+        "grouped": sum(group["total"] for group in groups),
+    }
+
+
 @router.get("/inbox")
 async def list_all_inbox(
     request: Request,

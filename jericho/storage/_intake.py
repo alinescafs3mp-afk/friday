@@ -11,6 +11,7 @@ from jericho.storage._base import (
     Any,
     InboxItem,
     InboxStatus,
+    PurePosixPath,
     RawObject,
     SourceReferenceConflictError,
     StorageShared,
@@ -21,6 +22,7 @@ from jericho.storage._base import (
     json,
     sqlite3,
     utc_now,
+    validate_user_id,
 )
 
 
@@ -147,6 +149,77 @@ class IntakeMixin(StorageShared):
                 (user_id, max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    # Axes a pending queue can usefully be cut along. Chosen from measurement, not
+    # taste: on a real import of 187 files, (extension x suggested_action) collapsed to
+    # 16 groups with the largest holding 154, while `promotion_score` — what the Inbox
+    # currently sorts by — had p25 = median = p75 = 0.90 and separated nothing.
+    INBOX_GROUP_AXES = ("extension", "directory", "source")
+
+    def group_pending_inbox(
+        self,
+        user_id: str,
+        *,
+        by: str = "extension",
+        limit_ids: int = 200,
+        max_groups: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Cut the pending queue into groups, and hand back their members.
+
+        Read-only on purpose. The ids come back with each group so the caller feeds
+        them to the existing bulk endpoint, which already refuses to canonize anything.
+        A grouping that carried its own mutation path would be a second door into the
+        review gate, and re-resolving a group by predicate at commit time would act on
+        rows the user never saw — the queue changes between deciding and confirming.
+
+        No new table either: ``purge`` hard-deletes inbox rows with foreign keys on, so
+        anything REFERENCES inbox(id) without a cascade would break purge and therefore
+        backups.
+        """
+        if by not in self.INBOX_GROUP_AXES:
+            raise ValueError(f"Unknown grouping axis: {by!r}")
+        validate_user_id(user_id)
+        rows = self.execute(
+            """SELECT i.id, i.suggested_action, r.source, r.content_type,
+                      json_extract(r.metadata_json, '$.import_source_path') AS import_path
+               FROM inbox i
+               JOIN raw_objects r ON r.id = i.raw_object_id AND r.user_id = i.user_id
+               WHERE i.user_id = ? AND i.status = 'pending'
+               ORDER BY i.created_at ASC, i.rowid ASC""",
+            (user_id,),
+        ).fetchall()
+
+        groups: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            key = self._inbox_group_key(dict(row), by)
+            group = groups.setdefault(
+                key,
+                {"key": key, "axis": by, "total": 0, "actions": {}, "inbox_ids": [], "truncated": False},
+            )
+            group["total"] += 1
+            action = str(row["suggested_action"] or "unknown")
+            group["actions"][action] = group["actions"].get(action, 0) + 1
+            if len(group["inbox_ids"]) < max(1, min(int(limit_ids), 200)):
+                group["inbox_ids"].append(row["id"])
+            else:
+                group["truncated"] = True
+        ordered = sorted(groups.values(), key=lambda item: (-item["total"], item["key"]))
+        return ordered[: max(1, int(max_groups))]
+
+    @staticmethod
+    def _inbox_group_key(row: dict[str, Any], by: str) -> str:
+        path = str(row.get("import_path") or "")
+        if by == "source":
+            return str(row.get("source") or "unknown")
+        if by == "directory":
+            # The immediate parent is what a person recognises ("Документы/Договоры"),
+            # where the full path is unique per file and groups nothing.
+            return str(PurePosixPath(path).parent) if path else "(не из импорта)"
+        suffix = PurePosixPath(path).suffix.lower() if path else ""
+        if suffix:
+            return suffix
+        content_type = str(row.get("content_type") or "").split(";", 1)[0].strip()
+        return content_type or "(без типа)"
 
     def list_inbox_detailed(
         self,

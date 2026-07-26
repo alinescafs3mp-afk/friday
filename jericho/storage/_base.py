@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from jericho.config import JerichoSettings
@@ -949,6 +949,7 @@ __all__ = [
     "MissionStatus",
     "MissionTask",
     "Path",
+    "PurePosixPath",
     "RawObject",
     "Relation",
     "RelationType",
