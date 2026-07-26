@@ -525,9 +525,15 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         embeddings_enabled=_bool_env("JERICHO_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=os.environ.get("JERICHO_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),
         # A separate embeddings service may share the LLM's token; default to it.
-        embeddings_api_key=os.environ.get(
-            "JERICHO_EMBEDDINGS_API_KEY", os.environ.get("JERICHO_LLM_API_KEY", "")
-        ).strip(),
+        # `.get(name, default)` only falls back when the variable is ABSENT, and an
+        # env file that writes `JERICHO_EMBEDDINGS_API_KEY=` supplies an empty VALUE —
+        # so the intended inheritance silently did not happen and the backend sent no
+        # Authorization header at all. Observed as 401 on every indexing request while
+        # a single-key check passed, because it resolved the fallback differently.
+        embeddings_api_key=(
+            os.environ.get("JERICHO_EMBEDDINGS_API_KEY", "").strip()
+            or os.environ.get("JERICHO_LLM_API_KEY", "").strip()
+        ),
         embeddings_model=os.environ.get("JERICHO_EMBEDDINGS_MODEL", ""),
         embeddings_index_batch=_int_env("JERICHO_EMBEDDINGS_INDEX_BATCH", 64, minimum=1),
         embeddings_index_interval_sec=_float_env("JERICHO_EMBEDDINGS_INDEX_INTERVAL_SEC", 120.0, minimum=5.0),

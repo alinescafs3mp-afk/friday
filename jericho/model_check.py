@@ -128,7 +128,7 @@ def _probe_embedding_batch(
     try:
         response = client.post(
             f"{settings.embeddings_base_url.rstrip('/')}/embeddings",
-            headers=_headers(settings.embeddings_api_key or api_key),
+            headers=_headers(settings.embeddings_api_key),
             json={
                 "model": settings.embeddings_model or settings.llm_model,
                 "input": [f"проверка {index}" for index in range(size)],
@@ -272,7 +272,7 @@ def check_model(settings: JerichoSettings, *, timeout: float = 60.0) -> ModelRep
             try:
                 response = client.post(
                     f"{settings.embeddings_base_url.rstrip('/')}/embeddings",
-                    headers=_headers(settings.embeddings_api_key or api_key),
+                    headers=_headers(settings.embeddings_api_key),
                     json={"model": settings.embeddings_model or model, "input": "проверка"},
                 )
                 elapsed = time.monotonic() - started

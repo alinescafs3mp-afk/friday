@@ -234,3 +234,66 @@ def test_a_batch_within_the_limit_passes(settings, monkeypatch):
 
     assert _probe(report, "embeddings batch").ok
     assert _probe(report, "embeddings batch").detail == "32/32 векторов"
+
+
+# --- key resolution: the check must resolve it the way the code does ------
+
+
+def test_an_empty_embeddings_key_inherits_the_llm_key(monkeypatch):
+    """`.get(name, default)` falls back only when the variable is ABSENT.
+
+    An env file line `JERICHO_EMBEDDINGS_API_KEY=` supplies an empty VALUE, so the
+    intended inheritance did not happen: the backend sent no Authorization header and
+    every indexing request came back 401 while the corpus quietly stayed unvectorised.
+    """
+    from jericho.config import load_settings
+
+    monkeypatch.setenv("JERICHO_LLM_API_KEY", "shared-key-value")
+    monkeypatch.setenv("JERICHO_EMBEDDINGS_API_KEY", "")
+    assert load_settings().embeddings_api_key == "shared-key-value"
+
+    monkeypatch.delenv("JERICHO_EMBEDDINGS_API_KEY")
+    assert load_settings().embeddings_api_key == "shared-key-value"
+
+    monkeypatch.setenv("JERICHO_EMBEDDINGS_API_KEY", "its-own-key")
+    assert load_settings().embeddings_api_key == "its-own-key"
+
+
+def test_the_check_authenticates_exactly_as_the_backend_does(settings, monkeypatch):
+    """A checker that resolves configuration its own way blesses broken setups.
+
+    model-check used `settings.embeddings_api_key or llm_key`, which treats empty as
+    absent; EmbeddingBackend uses settings.embeddings_api_key verbatim. So the probe
+    passed against an endpoint that rejected every real request.
+    """
+    import dataclasses
+
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/embeddings"):
+            seen.append(request.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [{"embedding": [0.1] * 8}]})
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "dispatcher"}]})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"k":1}'}, "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 3},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: original(*a, **{**k, "transport": transport}))
+
+    configured = dataclasses.replace(
+        settings, embeddings_enabled=True, embeddings_api_key="", llm_api_key="llm-only"
+    )
+    check_model(configured)
+
+    assert seen, "the embeddings probe did not run"
+    assert all(header is None for header in seen), (
+        "the probe invented an Authorization header the real backend would not send"
+    )
