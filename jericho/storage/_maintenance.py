@@ -623,6 +623,13 @@ class MaintenanceMixin(StorageShared):
             # ``table`` comes only from the fixed diagnostic allowlist above.
             row = self.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()  # nosec B608
             counts[table] = int(row["count"] if row else 0)
+        # Pending Inbox material is not knowledge yet: it cannot be found by search, so a
+        # forgotten backlog is imported material the owner can no longer reach. Reported
+        # here as well as in the offline `_database_status`, because this is the path a
+        # running instance takes — and therefore the one Sentinel actually sees.
+        backlog = self.execute(
+            "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM inbox WHERE status='pending'"
+        ).fetchone()
         return {
             "database_path": str(self._db_path),
             "database_size_bytes": self._db_path.stat().st_size if self._db_path.exists() else 0,
@@ -631,5 +638,7 @@ class MaintenanceMixin(StorageShared):
             "foreign_key_violations": foreign_keys,
             "fts_available": self._fts_available,
             "counts": counts,
+            "inbox_pending": int(backlog["count"] if backlog else 0),
+            "inbox_oldest_pending_at": (str(backlog["oldest"]) if backlog and backlog["oldest"] else None),
             "ok": integrity == "ok" and not foreign_keys,
         }

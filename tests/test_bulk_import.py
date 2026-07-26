@@ -253,3 +253,96 @@ def test_provenance_path_is_absolute(settings, storage, monkeypatch, tmp_path):
     stored = json.loads(raw["metadata_json"])["import_source_path"]
     assert Path(stored).is_absolute(), stored
     assert Path(stored).is_file()
+
+
+# --- the review gate under bulk pressure ----------------------------------
+
+
+def _pending_ids(settings, storage, count: int) -> list[str]:
+    pipeline = _pipeline(settings, storage)
+    ids = []
+    for index in range(count):
+        result = asyncio.run(
+            pipeline.ingest_file(
+                "alice",
+                None,
+                f"Проект {index} стартует в марте.".encode(),
+                filename=f"note-{index}.md",
+                force_review=True,
+            )
+        )
+        ids.append(result["inbox_id"])
+    return ids
+
+
+def test_bulk_review_cannot_canonize_with_an_omitted_flag(settings, storage):
+    """The minimal body — naming neither status nor promote — used to promote everything.
+
+    `status` defaulted to "classified" and `promote` to None, and classify_inbox_item
+    reads exactly that pair as consent. So the laziest possible request canonized every
+    item it was handed, without the caller ever typing the word promote.
+    """
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    ids = _pending_ids(settings, storage, 5)
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/api/admin/inbox/bulk",
+            json={"user_id": "alice", "inbox_ids": ids},
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert storage.list_knowledge_objects("alice") == []
+
+
+def test_bulk_review_refuses_explicit_promotion_too(settings, storage):
+    """Being explicit does not make approving 200 unread items a decision."""
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    ids = _pending_ids(settings, storage, 3)
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    with TestClient(create_app(settings)) as client:
+        for body in (
+            {"user_id": "alice", "inbox_ids": ids, "status": "classified", "promote": True},
+            {"user_id": "alice", "inbox_ids": ids, "status": "classified"},
+            {"user_id": "alice", "inbox_ids": ids, "status": "ignored", "promote": True},
+        ):
+            response = client.post("/api/admin/inbox/bulk", json=body, headers=headers)
+            assert response.status_code == 400, f"{body} -> {response.status_code}"
+    assert storage.list_knowledge_objects("alice") == []
+
+
+def test_bulk_review_still_dismisses(settings, storage):
+    """Dismissal is the point of a bulk action and must keep working."""
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    ids = _pending_ids(settings, storage, 4)
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/api/admin/inbox/bulk",
+            json={"user_id": "alice", "inbox_ids": ids, "status": "ignored", "promote": False},
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["changed"]) == 4
+    assert storage.list_knowledge_objects("alice") == []
+
+
+def test_single_item_promotion_is_untouched(settings, storage):
+    """The per-item path shows the content and stays the way knowledge is created."""
+    inbox_id = _pending_ids(settings, storage, 1)[0]
+    pipeline = _pipeline(settings, storage)
+
+    from jericho.storage.models import InboxStatus
+
+    pipeline.classify_inbox_item("alice", inbox_id, InboxStatus.CLASSIFIED, promote=True, reviewed_by="alice")
+
+    assert len(storage.list_knowledge_objects("alice")) == 1

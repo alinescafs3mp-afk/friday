@@ -171,6 +171,19 @@ def _database_status(path: Path) -> dict[str, Any]:
                     "SELECT COUNT(*) AS count FROM outbound_notifications WHERE status='pending'"
                 ).fetchone()
                 database["outbound_pending"] = int(pending_row["count"] if pending_row else 0)
+            if "inbox" in table_names:
+                # A pending item is not knowledge yet — it cannot be found by search. So a
+                # backlog is not untidiness, it is material the owner imported and can no
+                # longer reach. Age matters more than size: thousands of items minutes
+                # after an import is expected, the same thousands a month later means the
+                # review never happened.
+                backlog_row = conn.execute(
+                    "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM inbox WHERE status='pending'"
+                ).fetchone()
+                database["inbox_pending"] = int(backlog_row["count"] if backlog_row else 0)
+                database["inbox_oldest_pending_at"] = (
+                    str(backlog_row["oldest"]) if backlog_row and backlog_row["oldest"] else None
+                )
             database["ok"] = (
                 database["integrity_check"] == "ok"
                 and not database["foreign_key_violations"]
@@ -500,6 +513,40 @@ def _auth_failure_status(
     }
 
 
+# A backlog only becomes a problem once it has been ignored: right after `jericho
+# import` a large pending queue is exactly what should have happened. These two
+# thresholds together say "material has been waiting long enough that the review is
+# not going to happen on its own", which is the only version of this worth a push
+# notification.
+INBOX_BACKLOG_MIN_ITEMS = 25
+INBOX_BACKLOG_MIN_AGE_DAYS = 14
+
+
+def _add_inbox_backlog_action(add_action: Any, database: dict[str, Any]) -> None:
+    """Warn when reviewable material has been waiting long enough to be forgotten."""
+    pending = int(database.get("inbox_pending") or 0)
+    oldest_raw = database.get("inbox_oldest_pending_at")
+    if pending < INBOX_BACKLOG_MIN_ITEMS or not oldest_raw:
+        return
+    try:
+        oldest = datetime.fromisoformat(str(oldest_raw))
+    except ValueError:
+        return
+    if oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=UTC)
+    age_days = (datetime.now(UTC) - oldest).days
+    if age_days < INBOX_BACKLOG_MIN_AGE_DAYS:
+        return
+    add_action(
+        "inbox_backlog",
+        "warning",
+        "Inbox не разобран",
+        f"{pending} материалов ждут проверки, самый старый — {age_days} дн. "
+        "Пока они не подтверждены, они не ищутся и фактически недоступны.",
+        "jericho status",
+    )
+
+
 def collect_diagnostics(
     settings: JerichoSettings,
     storage: JerichoStorage | None = None,
@@ -553,6 +600,7 @@ def collect_diagnostics(
             issue.removeprefix("warning:").strip(),
             "jericho doctor",
         )
+    _add_inbox_backlog_action(add_action, database)
     database_state = str(database.get("state") or "")
     if database_state == "not_initialized":
         add_action(

@@ -100,7 +100,18 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
 
 @router.post("/inbox/bulk")
 async def bulk_classify_inbox(request: Request) -> dict[str, Any]:
-    """Apply one explicit review outcome to a bounded Inbox selection."""
+    """Apply one explicit review outcome to a bounded Inbox selection.
+
+    A bulk action may DISMISS material but never CANONIZE it. Promotion stays
+    one-at-a-time, through the review modal that shows the actual content.
+
+    The reason is the invariant, not caution: DATA_LIFECYCLE §3 says nothing becomes a
+    Knowledge Object without a human decision, and approving 200 items the reviewer has
+    not opened is not a decision. Promotion is also not a status change — it runs
+    enrichment, creates graph entities and auto-accepts links above the confidence
+    thresholds, then queues relation and conflict candidates. Two hundred of those from
+    one click produces more review work than it clears.
+    """
 
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
@@ -111,11 +122,26 @@ async def bulk_classify_inbox(request: Request) -> dict[str, Any]:
     unique_ids = list(dict.fromkeys(str(item) for item in inbox_ids if str(item).strip()))
     if len(unique_ids) > 200:
         raise HTTPException(status_code=400, detail="At most 200 Inbox items may be reviewed per request")
+    # `status` is required. It used to default to "classified", which — combined with
+    # `promote` defaulting to None and `classify_inbox_item` reading
+    # `promote is None and status == CLASSIFIED` as consent — meant the MINIMAL request
+    # body, naming neither, promoted every item it was given.
+    requested_status = str(body.get("status") or "").strip()
+    if not requested_status:
+        raise HTTPException(status_code=400, detail="status is required")
     try:
-        status = InboxStatus(str(body.get("status") or "classified"))
+        status = InboxStatus(requested_status)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
     promote = _parse_bool(body["promote"], field="promote") if "promote" in body else None
+    if promote is True or status == InboxStatus.CLASSIFIED:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Массовое действие не может создавать знания. Продвигайте материалы "
+                "по одному через разбор — там виден исходный текст."
+            ),
+        )
     changed: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     for inbox_id in unique_ids:

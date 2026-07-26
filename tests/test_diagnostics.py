@@ -296,3 +296,78 @@ def test_auth_failures_counted_read_only_without_open_storage(settings, tmp_path
     report = collect_diagnostics(local, None)
     assert report["auth_failures"]["recent_failures"] == 3
     assert any(a["code"] == "inspect_auth_failure_burst" for a in report["actions"])
+
+
+# --- Inbox backlog: material waiting long enough to be forgotten ----------
+
+
+def _seed_pending(storage, count: int, *, age_days: int) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    stamp = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
+    storage.ensure_user("alice", source="upload")
+    for index in range(count):
+        # inbox.raw_object_id is a real foreign key; a fake id inserts nothing.
+        storage.execute(
+            "INSERT INTO raw_objects (id, user_id, source, source_ref, raw_content, "
+            "content_type, content_hash, version, received_at, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                f"raw-{index}",
+                "alice",
+                "upload",
+                f"sha256:{index:064d}",
+                f"note {index}",
+                "text/plain",
+                f"{index:064d}",
+                1,
+                stamp,
+                stamp,
+            ),
+        )
+        storage.execute(
+            "INSERT INTO inbox (id, user_id, raw_object_id, status, promotion_score, "
+            "quality_score, created_at) VALUES (?,?,?,?,?,?,?)",
+            (f"inbox-{index}", "alice", f"raw-{index}", "pending", 0.9, 0.9, stamp),
+        )
+    storage.conn.commit()
+
+
+def test_backlog_alert_stays_quiet_right_after_an_import(settings, storage):
+    """Thousands pending minutes after `jericho import` is exactly what should happen."""
+    from jericho.diagnostics import collect_diagnostics
+
+    _seed_pending(storage, 500, age_days=0)
+    report = collect_diagnostics(settings, storage)
+    assert not [a for a in report["actions"] if a["code"] == "inbox_backlog"]
+
+
+def test_backlog_alert_stays_quiet_for_a_handful_of_old_items(settings, storage):
+    from jericho.diagnostics import collect_diagnostics
+
+    _seed_pending(storage, 5, age_days=400)
+    report = collect_diagnostics(settings, storage)
+    assert not [a for a in report["actions"] if a["code"] == "inbox_backlog"]
+
+
+def test_backlog_alert_fires_once_material_has_been_ignored(settings, storage):
+    """Pending means unsearchable: this is imported material the owner cannot reach."""
+    from jericho.diagnostics import collect_diagnostics
+
+    _seed_pending(storage, 300, age_days=30)
+    report = collect_diagnostics(settings, storage)
+    alerts = [a for a in report["actions"] if a["code"] == "inbox_backlog"]
+    assert len(alerts) == 1
+    assert alerts[0]["severity"] == "warning"
+    assert "300" in alerts[0]["detail"] and "30" in alerts[0]["detail"]
+
+
+def test_backlog_alert_reaches_the_sentinel_severity_filter(settings, storage):
+    """Sentinel only pushes error/warning; a signal below that would never be seen."""
+    from jericho.organs.sentinel import _ALERT_SEVERITIES
+
+    _seed_pending(storage, 300, age_days=30)
+    from jericho.diagnostics import collect_diagnostics
+
+    alert = [a for a in collect_diagnostics(settings, storage)["actions"] if a["code"] == "inbox_backlog"][0]
+    assert alert["severity"] in _ALERT_SEVERITIES
