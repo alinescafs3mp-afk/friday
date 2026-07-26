@@ -42,6 +42,12 @@ class IntervalTask:
     timeout_sec: float = 300.0
 
 
+# Consecutive per-item failures that mean the model endpoint is down rather than the
+# documents being bad. Three is enough to tell them apart without abandoning a batch
+# over one malformed item.
+_ADVICE_ENDPOINT_DOWN_AFTER = 3
+
+
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
 
@@ -514,6 +520,7 @@ class WorkersManager:
             return
         processed = 0
         failures = 0
+        consecutive_failures = 0
         for item in self.storage.list_inbox_detailed(
             user_id,
             InboxStatus.PENDING,
@@ -530,12 +537,28 @@ class WorkersManager:
                 raise
             except Exception:
                 failures += 1
+                consecutive_failures += 1
                 LOGGER.exception(
                     "Inbox model advice failed for tenant %s item %s",
                     user_id,
                     item.get("id"),
                 )
+                if consecutive_failures >= _ADVICE_ENDPOINT_DOWN_AFTER:
+                    # Isolated failures are per-item and worth stepping over; this many
+                    # in a row is the endpoint, not the documents. Continuing would run
+                    # the remaining items through three LLM retries each and exhaust the
+                    # worker's whole budget for nothing — observed here as 46 failures
+                    # and an eight-minute timeout while the endpoint was down. Stopping
+                    # also stops hammering something that is already struggling.
+                    LOGGER.warning(
+                        "Inbox model advice stopped after %d consecutive failures for tenant %s; "
+                        "treating the model endpoint as unavailable",
+                        consecutive_failures,
+                        user_id,
+                    )
+                    break
                 continue
+            consecutive_failures = 0
             if result.get("idempotent_replay"):
                 continue
             processed += 1
