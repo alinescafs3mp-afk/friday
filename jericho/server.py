@@ -31,6 +31,7 @@ from jericho import __version__
 from jericho.admin_api import router as admin_router
 from jericho.agent_runtime import AgentRuntime
 from jericho.agent_runtime.llm import LLMRouter
+from jericho.api.conversations import router as conversations_router
 from jericho.api.deps import (
     _audit,
     _parse_json_bool,
@@ -38,7 +39,10 @@ from jericho.api.deps import (
     _request_json,
     _require,
 )
+from jericho.api.inbox import router as inbox_router
+from jericho.api.ingest import router as ingest_router
 from jericho.api.kg import router as kg_router
+from jericho.api.knowledge import router as knowledge_router
 from jericho.config import (
     JerichoSettings,
     ensure_runtime_dirs,
@@ -72,7 +76,6 @@ from jericho.storage import init_storage, normalize_conversation_mode
 from jericho.storage.models import (
     AuditEntry,
     FeedbackType,
-    InboxStatus,
     new_id,
 )
 from jericho.web_surfer import WebSurfer
@@ -1088,56 +1091,6 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 with suppress(asyncio.CancelledError):
                     await heartbeat
 
-    @application.post("/api/conversations/channel/reset", tags=["chat"])
-    async def reset_channel_conversation(request: Request) -> dict[str, Any]:
-        actor = _require(request, "chat.use")
-        body = await _request_json(request)
-        channel = str(body.get("channel") or ("telegram" if actor.source == "telegram-bridge" else "api"))
-        channel_id = str(body.get("channel_id") or getattr(request.state, "bridge_chat_id", ""))
-        if not channel_id:
-            raise HTTPException(status_code=400, detail="channel_id is required")
-        cleared = request.app.state.storage.clear_channel_conversation(actor.user_id, channel, channel_id)
-        return {"status": "reset", "cleared": cleared}
-
-    @application.post("/api/conversations/channel/mode", tags=["chat"])
-    async def set_channel_mode(request: Request) -> dict[str, Any]:
-        actor = _require(request, "chat.use")
-        body = await _request_json(request)
-        channel = str(body.get("channel") or ("telegram" if actor.source == "telegram-bridge" else "api"))
-        channel_id = str(body.get("channel_id") or getattr(request.state, "bridge_chat_id", ""))
-        if not channel_id:
-            raise HTTPException(status_code=400, detail="channel_id is required")
-        try:
-            mode = normalize_conversation_mode(str(body.get("mode") or "dialogue"))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        session = request.app.state.storage.get_channel_session(actor.user_id, channel, channel_id)
-        if session:
-            updated = request.app.state.storage.set_channel_mode(
-                actor.user_id,
-                channel,
-                channel_id,
-                mode,
-            )
-            return {"mode": mode, "session": updated, "conversation_created": False}
-        conversation = request.app.state.storage.create_conversation(
-            actor.user_id,
-            title=f"{channel} {mode}",
-            mode=mode,
-        )
-        request.app.state.storage.set_channel_conversation(
-            actor.user_id,
-            channel,
-            channel_id,
-            str(conversation["id"]),
-            mode=mode,
-        )
-        return {
-            "mode": mode,
-            "session": request.app.state.storage.get_channel_session(actor.user_id, channel, channel_id),
-            "conversation_created": True,
-        }
-
     async def _queue_assistant_candidate(
         request: Request,
         *,
@@ -1193,68 +1146,6 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         # Kept for bridge/API compatibility; the generalized endpoint also
         # supports knowledge_work results.
         return await _queue_assistant_candidate(request, required_mode="research")
-
-    @application.post("/api/ingest", tags=["knowledge"])
-    async def ingest(request: Request) -> dict[str, Any]:
-        actor = _require(request, "knowledge.create")
-        body = await _request_json(request)
-        content = str(body.get("content") or "").strip()
-        if not content:
-            raise HTTPException(status_code=400, detail="content is required")
-        force_knowledge = _parse_json_bool(
-            body.get("force_knowledge"), field="force_knowledge", default=False
-        )
-        return await request.app.state.ingestion.ingest_text(
-            actor.user_id,
-            content,
-            source="api",
-            source_ref=str(body.get("source_ref") or ""),
-            force_knowledge=force_knowledge,
-            metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
-        )
-
-    @application.post("/api/ingest/url", tags=["knowledge"])
-    async def ingest_url(request: Request) -> dict[str, Any]:
-        # Fetching the public web needs web.fetch; turning it into knowledge
-        # needs knowledge.create. Both are enforced before anything happens.
-        actor = _require(request, "web.fetch")
-        request.app.state.auth_service.require(actor, "knowledge.create")
-        body = await _request_json(request)
-        url = str(body.get("url") or "").strip()
-        if not url:
-            raise HTTPException(status_code=400, detail="url is required")
-        result = await request.app.state.web_surfer.fetch(url)
-        if result.error or not result.text.strip():
-            # fetch() never raises — SSRF blocks, non-2xx and empty pages all
-            # surface as an error string; ingesting empty text is refused.
-            raise HTTPException(
-                status_code=422,
-                detail=f"Could not fetch a readable page: {result.error or 'empty content'}",
-            )
-        title = result.title or result.url
-        # The page is captured as a Raw Object and routed through the Inbox like
-        # any other material — it becomes a retrievable Knowledge Object only
-        # after review, never silently.
-        outcome = await request.app.state.ingestion.ingest_text(
-            actor.user_id,
-            result.text,
-            source="web",
-            source_ref=result.url,
-            metadata={
-                "url": result.url,
-                "title": title,
-                "status_code": result.status_code,
-                "content_source": "web_fetch",
-            },
-        )
-        _audit(
-            request,
-            "knowledge.ingest_url",
-            "raw_object",
-            outcome.get("raw_object_id"),
-            after={"url": result.url},
-        )
-        return {**outcome, "url": result.url, "title": title}
 
     @application.post("/api/feedback", tags=["feedback"])
     async def feedback(request: Request) -> dict[str, Any]:
@@ -1326,131 +1217,8 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         request.app.state.storage.mark_notifications(sent, failed)
         return {"sent": len(sent), "failed": len(failed)}
 
-    @application.get("/api/knowledge", tags=["knowledge"])
-    async def list_knowledge(
-        request: Request,
-        limit: int = Query(100, ge=1, le=1000),
-        offset: int = Query(0, ge=0),
-        lifecycle_stage: str | None = None,
-        tag: str | None = None,
-        entity_id: str | None = None,
-    ) -> dict[str, Any]:
-        actor = _require(request, "knowledge.read")
-        items = request.app.state.storage.list_knowledge_objects(
-            actor.user_id,
-            limit=limit,
-            offset=offset,
-            lifecycle_stage=lifecycle_stage,
-            tag=tag,
-            entity_id=entity_id,
-        )
-        return {"items": items, "count": len(items)}
-
     # Declared before /api/knowledge/{knowledge_id} so "tags" is never
     # captured as an object id by the path parameter.
-    @application.get("/api/knowledge/tags", tags=["knowledge"])
-    async def list_knowledge_tags(
-        request: Request,
-        limit: int = Query(200, ge=1, le=1000),
-    ) -> dict[str, Any]:
-        actor = _require(request, "knowledge.read")
-        items = request.app.state.storage.list_knowledge_tags(actor.user_id, limit=limit)
-        return {"items": items, "count": len(items)}
-
-    @application.get("/api/knowledge/{knowledge_id}", tags=["knowledge"])
-    async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
-        actor = _require(request, "knowledge.read")
-        item = request.app.state.storage.get_knowledge_object(knowledge_id, actor.user_id)
-        if not item:
-            raise HTTPException(status_code=404, detail="Knowledge object not found")
-        return {
-            "item": item,
-            "versions": request.app.state.storage.list_knowledge_versions(knowledge_id, actor.user_id),
-            "entity_links": request.app.state.storage.list_knowledge_entity_links(
-                actor.user_id,
-                knowledge_object_id=knowledge_id,
-                status=None,
-            ),
-        }
-
-    @application.patch("/api/knowledge/{knowledge_id}", tags=["knowledge"])
-    async def update_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
-        actor = _require(request, "knowledge.edit")
-        body = await _request_json(request)
-        state = request.app.state
-        before = state.storage.get_knowledge_object(knowledge_id, actor.user_id)
-        if not before:
-            raise HTTPException(status_code=404, detail="Knowledge object not found")
-        allowed = {
-            "title",
-            "summary",
-            "content",
-            "tags_json",
-            "importance",
-            "lifecycle_stage",
-            "knowledge_kind",
-            "quality_score",
-        }
-        updates = {key: body[key] for key in allowed if key in body}
-        try:
-            after = state.storage.update_knowledge_fields(knowledge_id, actor.user_id, **updates)
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        _audit(request, "knowledge.update", "knowledge_object", knowledge_id, before=before, after=after)
-        return {"item": after}
-
-    @application.delete("/api/knowledge/{knowledge_id}", tags=["knowledge"])
-    async def delete_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
-        actor = _require(request, "knowledge.delete")
-        state = request.app.state
-        before = state.storage.get_knowledge_object(knowledge_id, actor.user_id)
-        if not before or not state.storage.soft_delete_knowledge_object(knowledge_id, actor.user_id):
-            raise HTTPException(status_code=404, detail="Knowledge object not found")
-        after = state.storage.get_knowledge_object(knowledge_id, actor.user_id)
-        _audit(request, "knowledge.delete", "knowledge_object", knowledge_id, before=before, after=after)
-        return {"status": "soft_deleted"}
-
-    @application.get("/api/inbox", tags=["inbox"])
-    async def list_inbox(
-        request: Request,
-        status: str | None = None,
-        limit: int = Query(100, ge=1, le=1000),
-        offset: int = Query(0, ge=0),
-    ) -> dict[str, Any]:
-        actor = _require(request, "inbox.read")
-        try:
-            status_enum = InboxStatus(status) if status else None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
-        items = request.app.state.storage.list_inbox(
-            actor.user_id,
-            status_enum,
-            limit=limit,
-            offset=offset,
-        )
-        return {"items": items, "count": len(items)}
-
-    @application.post("/api/inbox/{inbox_id}/classify", tags=["inbox"])
-    async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
-        actor = _require(request, "inbox.review")
-        body = await _request_json(request)
-        try:
-            status = InboxStatus(str(body.get("status") or "classified"))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
-        item = request.app.state.ingestion.classify_inbox_item(
-            actor.user_id,
-            inbox_id,
-            status,
-            entity_id=body.get("entity_id"),
-            tags=body.get("tags") if isinstance(body.get("tags"), list) else None,
-            notes=str(body.get("notes") or ""),
-            reviewed_by=actor.user_id,
-        )
-        if not item:
-            raise HTTPException(status_code=404, detail="Inbox item not found")
-        _audit(request, "inbox.classify", "inbox", inbox_id, after=item)
-        return {"item": item}
 
     @application.get("/api/search", tags=["retrieval"])
     async def search(
@@ -1533,57 +1301,13 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         )
         return FileResponse(path, filename=str(metadata.get("filename") or path.name))
 
-    @application.get("/api/conversations", tags=["chat"])
-    async def conversations(
-        request: Request,
-        include_archived: bool = False,
-    ) -> dict[str, Any]:
-        actor = _require(request, "conversations.read")
-        items = request.app.state.storage.list_conversations(
-            actor.user_id,
-            include_archived=include_archived,
-        )
-        return {"items": items, "count": len(items)}
-
-    @application.get("/api/conversations/{conversation_id}/messages", tags=["chat"])
-    async def conversation_messages(
-        conversation_id: str,
-        request: Request,
-        limit: int = Query(100, ge=1, le=1000),
-    ) -> dict[str, Any]:
-        actor = _require(request, "conversations.read")
-        if not request.app.state.storage.get_conversation(conversation_id, actor.user_id):
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        items = request.app.state.storage.get_conversation_messages(
-            conversation_id,
-            user_id=actor.user_id,
-            limit=limit,
-        )
-        return {"items": items, "count": len(items)}
-
-    @application.post("/api/conversations/{conversation_id}/archive", tags=["chat"])
-    async def archive_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
-        actor = _require(request, "conversations.manage")
-        body = await _request_json(request)
-        archived = _parse_json_bool(body.get("archived"), field="archived", default=True)
-        updated = request.app.state.storage.set_conversation_archived(
-            conversation_id, actor.user_id, archived
-        )
-        if not updated:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        return {"conversation": updated}
-
-    @application.delete("/api/conversations/{conversation_id}", tags=["chat"])
-    async def delete_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
-        actor = _require(request, "conversations.manage")
-        report = request.app.state.storage.delete_conversation(conversation_id, actor.user_id)
-        if not report.get("existed"):
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        return {"status": "deleted", "report": report}
-
     application.include_router(missions_router)
     application.include_router(missions_admin_router)
     application.include_router(kg_router)
+    application.include_router(knowledge_router)
+    application.include_router(inbox_router)
+    application.include_router(ingest_router)
+    application.include_router(conversations_router)
     application.include_router(admin_router)
     # Organ-contributed routers (JOP). Built once per process at import time so
     # the app has a stable route set; the registry is authoritative.
