@@ -614,6 +614,10 @@ class KnowledgeMixin(StorageShared):
         if not math.isfinite(parsed_confidence) or not 0.0 <= parsed_confidence <= 1.0:
             raise ValueError("confidence must be a finite number between 0 and 1")
         pair_key = self.conflict_pair_key(knowledge_a_id, knowledge_b_id)
+        # Bound once and reused for both the write and the read-back: the row is unique
+        # on (user_id, pair_key, conflict_type), so reading by pair alone can return a
+        # DIFFERENT conflict about the same pair.
+        normalized_type = str(conflict_type or "potential_contradiction")[:80]
         conflict_id = new_id("conf")
         now = utc_now()
         with self.transaction() as conn:
@@ -634,14 +638,39 @@ class KnowledgeMixin(StorageShared):
                     knowledge_a_id,
                     knowledge_b_id,
                     pair_key,
-                    str(conflict_type or "potential_contradiction")[:80],
+                    normalized_type,
                     parsed_confidence,
                     json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True),
                     now,
                 ),
             )
-        rows = self.list_knowledge_conflicts(user_id, status=None, limit=5000)
-        return next((item for item in rows if item["pair_key"] == pair_key), {})
+        return self.get_knowledge_conflict_by_pair(user_id, pair_key, normalized_type)
+
+    # Projection shared with ``list_knowledge_conflicts`` so a conflict looks the same
+    # whether it was just written or read back from a list.
+    _CONFLICT_PROJECTION = """SELECT c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
+                       b.title AS knowledge_b_title, b.summary AS knowledge_b_summary
+                FROM knowledge_conflicts c
+                JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
+                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id"""
+
+    def get_knowledge_conflict_by_pair(
+        self, user_id: str, pair_key: str, conflict_type: str
+    ) -> dict[str, Any]:
+        """Read the one conflict identified by its full unique key.
+
+        ``store_knowledge_conflict`` used to answer this by listing up to 5000 conflicts
+        and scanning them in Python — O(n) work, growing, on every write, while conflict
+        detection runs per promoted object. It also matched on ``pair_key`` alone, and
+        the row is unique on ``(user_id, pair_key, conflict_type)``: with two conflict
+        types about the same pair it returned whichever had the higher confidence, not
+        the one just written. The lookup uses the leftmost prefix of that UNIQUE index.
+        """
+        row = self.execute(
+            f"{self._CONFLICT_PROJECTION} WHERE c.user_id=? AND c.pair_key=? AND c.conflict_type=?",  # nosec B608
+            (user_id, pair_key, conflict_type),
+        ).fetchone()
+        return dict(row) if row else {}
 
     def list_knowledge_conflicts(
         self,

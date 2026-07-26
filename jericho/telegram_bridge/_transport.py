@@ -50,6 +50,8 @@ class TransportMixin(BridgeShared):
         self._api_url = f"{API_BASE}/bot{config.bot_token}"
         self._file_url = f"{API_BASE}/file/bot{config.bot_token}"
         self._backend_url = config.backend_url.rstrip("/")
+        # Last known failing/healthy state per loop, for transition detection.
+        self._loop_failing: dict[str, bool] = {}
 
     async def run(self) -> None:
         install_secret_redaction(
@@ -105,6 +107,54 @@ class TransportMixin(BridgeShared):
             self._lease.release()
             LOGGER.info("Telegram bridge stopped")
 
+    async def _journal_transition(
+        self,
+        backend: httpx.AsyncClient,
+        loop_name: str,
+        *,
+        failing: bool,
+        error: BaseException | None = None,
+    ) -> None:
+        """Report a loop starting to fail, and starting to work again.
+
+        Transitions rather than ticks, for the reason the workers use the same rule: a
+        tunnel outage on this machine produced 295 consecutive polling failures across
+        three days. As ticks that is 295 rows saying one thing; as transitions it is two.
+
+        The bridge cannot write ``runtime_events`` itself — separate process, separate
+        database — so this posts to the backend, which is on loopback and therefore
+        still reachable when the tunnel that broke Telegram is down. Best effort in the
+        strongest sense: journalling must never be why the loop it observes stops.
+        """
+        previous = self._loop_failing.get(loop_name)
+        if previous == failing:
+            return
+        self._loop_failing[loop_name] = failing
+        if previous is None and not failing:
+            return  # the first successful round after start is not a recovery
+        signer = str(self.config.allowed_chat_ids[0]) if self.config.allowed_chat_ids else ""
+        if not signer:
+            return
+        payload: dict[str, Any] = {"loop": loop_name}
+        if error is not None:
+            # The type, never the message: an exception from an HTTP client can carry a
+            # full URL, and the bot token lives in Telegram URLs.
+            payload["error_type"] = type(error).__name__
+        try:
+            await self._backend_json(
+                backend,
+                "POST",
+                "/api/events",
+                {
+                    "event_type": f"bridge.{loop_name}_{'failed' if failing else 'recovered'}",
+                    "payload": payload,
+                },
+                signer,
+                signer,
+            )
+        except Exception:
+            LOGGER.debug("Could not journal bridge %s transition", loop_name, exc_info=True)
+
     async def _register_commands(self, telegram: httpx.AsyncClient) -> None:
         """Register the command menu once so Telegram shows '/' autocomplete.
 
@@ -131,10 +181,12 @@ class TransportMixin(BridgeShared):
                 if updates:
                     await self._drain_inbox(telegram, backend)
                 backoff = 1.0
+                await self._journal_transition(backend, "poll", failing=False)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 LOGGER.exception("Telegram bridge poll loop failed")
+                await self._journal_transition(backend, "poll", failing=True, error=exc)
                 await asyncio.sleep(backoff)
                 backoff = min(BACKOFF_MAX, backoff * 2)
 
@@ -143,10 +195,12 @@ class TransportMixin(BridgeShared):
         while self._running:
             try:
                 await self._drain_outbound(telegram, backend)
+                await self._journal_transition(backend, "outbound", failing=False)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 LOGGER.exception("Telegram bridge outbound loop failed")
+                await self._journal_transition(backend, "outbound", failing=True, error=exc)
             await asyncio.sleep(max(2.0, float(self.config.outbound_poll_interval_sec)))
 
     async def _drain_outbound(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:

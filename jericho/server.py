@@ -39,6 +39,7 @@ from jericho.api.deps import (
     _request_json,
     _require,
 )
+from jericho.api.events import router as events_router
 from jericho.api.files import router as files_router
 from jericho.api.inbox import router as inbox_router
 from jericho.api.ingest import router as ingest_router
@@ -1186,6 +1187,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
     application.include_router(conversations_router)
     application.include_router(files_router)
     application.include_router(notifications_router)
+    application.include_router(events_router)
     application.include_router(admin_router)
     # Organ-contributed routers (JOP). Built once per process at import time so
     # the app has a stable route set; the registry is authoritative.

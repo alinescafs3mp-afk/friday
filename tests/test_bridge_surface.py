@@ -223,8 +223,9 @@ EXPECTED_COMMANDS = {
     "/tags",
     "/work",
 }
-EXPECTED_BRIDGE_COUNT = 34
+EXPECTED_BRIDGE_COUNT = 35
 EXPECTED_BRIDGE: dict[str, str] = {
+    "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
     "_backend_json": "(self, client: 'httpx.AsyncClient', method: 'str', path: 'str', payload: 'dict[str, Any] | None', external_user_id: 'str', chat_id: 'str') -> 'dict[str, Any]'",
     "_clear_inline_markup": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int') -> 'None'",
