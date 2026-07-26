@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -33,16 +33,18 @@ from jericho.agent_runtime import AgentRuntime
 from jericho.agent_runtime.llm import LLMRouter
 from jericho.api.conversations import router as conversations_router
 from jericho.api.deps import (
-    _audit,
+    _json_load,
     _parse_json_bool,
     _parse_json_float,
     _request_json,
     _require,
 )
+from jericho.api.files import router as files_router
 from jericho.api.inbox import router as inbox_router
 from jericho.api.ingest import router as ingest_router
 from jericho.api.kg import router as kg_router
 from jericho.api.knowledge import router as knowledge_router
+from jericho.api.notifications import router as notifications_router
 from jericho.config import (
     JerichoSettings,
     ensure_runtime_dirs,
@@ -220,17 +222,6 @@ class SlidingWindowLimiter:
             return len(bucket) >= max(1, limit)
 
 
-def _json_load(value: Any, default: Any) -> Any:
-    if value in (None, ""):
-        return default
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return default
-
-
 def _client_ip(request: Request, settings: JerichoSettings) -> str:
     """Return the effective client IP without trusting attacker-supplied headers.
 
@@ -391,16 +382,6 @@ def _audit_auth_failure(request: Request, reason: str, *, status: int) -> None:
                 request_id=getattr(request.state, "request_id", ""),
             )
         )
-
-
-def _safe_owned_file(root: Path, candidate: str) -> Path:
-    root = root.resolve()
-    path = Path(candidate).resolve()
-    if path != root and root not in path.parents:
-        raise HTTPException(status_code=404, detail="File not found")
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return path
 
 
 async def _authenticate(request: Request) -> ActorContext:
@@ -1179,44 +1160,6 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"feedback": item}
 
-    def _require_bridge(request: Request) -> ActorContext:
-        # The outbound queue is drained only by the Telegram bridge — the sole
-        # holder of the bridge secret. Bearer/loopback actors are refused.
-        actor = request.state.actor
-        if actor.source != "telegram-bridge":
-            raise HTTPException(status_code=403, detail="Bridge authentication required")
-        return actor
-
-    @application.get("/api/notifications/pending", tags=["notifications"])
-    async def notifications_pending(
-        request: Request,
-        limit: int = Query(20, ge=1, le=100),
-    ) -> dict[str, Any]:
-        _require_bridge(request)
-        settings: JerichoSettings = request.app.state.settings
-        allowed = settings.telegram_effective_allowed_chat_ids
-        items = []
-        for row in request.app.state.storage.list_pending_notifications(limit=limit):
-            # Defence in depth: never hand the bridge a de-allowlisted chat.
-            try:
-                if int(str(row.get("chat_id"))) not in allowed:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            items.append({"id": row["id"], "chat_id": row["chat_id"], "body": row["body"]})
-        return {"items": items, "count": len(items)}
-
-    @application.post("/api/notifications/ack", tags=["notifications"])
-    async def notifications_ack(request: Request) -> dict[str, Any]:
-        _require_bridge(request)
-        body = await _request_json(request)
-        raw_sent = body.get("sent")
-        raw_failed = body.get("failed")
-        sent = [str(x) for x in raw_sent] if isinstance(raw_sent, list) else []
-        failed = [str(x) for x in raw_failed] if isinstance(raw_failed, list) else []
-        request.app.state.storage.mark_notifications(sent, failed)
-        return {"sent": len(sent), "failed": len(failed)}
-
     # Declared before /api/knowledge/{knowledge_id} so "tags" is never
     # captured as an object id by the path parameter.
 
@@ -1234,73 +1177,6 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             kg=request.app.state.kg,
         )
 
-    @application.post("/api/files", tags=["files"])
-    async def upload_file(
-        request: Request,
-        file: UploadFile = File(...),
-        source_ref: str = Form(""),
-    ) -> dict[str, Any]:
-        actor = _require(request, "files.upload")
-        content = await file.read(settings.max_upload_bytes + 1)
-        if len(content) > settings.max_upload_bytes:
-            raise HTTPException(status_code=413, detail="File is too large")
-        result = await request.app.state.ingestion.ingest_file(
-            actor.user_id,
-            None,
-            content,
-            filename=file.filename or "upload.bin",
-            mime_type=file.content_type or "application/octet-stream",
-            source_ref=source_ref,
-            metadata={"uploaded_via": "api"},
-        )
-        _audit(
-            request,
-            "file.upload",
-            "raw_object",
-            result.get("raw_object_id"),
-            after={"filename": file.filename, "size_bytes": len(content)},
-        )
-        return result
-
-    @application.get("/api/files", tags=["files"])
-    async def list_files(
-        request: Request,
-        limit: int = Query(100, ge=1, le=1000),
-    ) -> dict[str, Any]:
-        actor = _require(request, "files.read")
-        rows = request.app.state.storage.execute(
-            """SELECT id, source_ref, metadata_json, received_at, deleted_at
-               FROM raw_objects
-               WHERE user_id=? AND content_type='file' AND deleted_at IS NULL
-               ORDER BY received_at DESC LIMIT ?""",
-            (actor.user_id, limit),
-        ).fetchall()
-        items = []
-        for row in rows:
-            item = dict(row)
-            item["metadata"] = _json_load(item.pop("metadata_json", "{}"), {})
-            items.append(item)
-        return {"items": items, "count": len(items)}
-
-    @application.get("/api/files/{raw_id}", tags=["files"])
-    async def download_file(raw_id: str, request: Request):
-        actor = _require(request, "files.read")
-        state = request.app.state
-        raw = state.storage.get_raw_object(raw_id, actor.user_id)
-        if not raw or raw.get("content_type") != "file" or raw.get("deleted_at"):
-            raise HTTPException(status_code=404, detail="File not found")
-        metadata = _json_load(raw.get("metadata_json"), {})
-        path = _safe_owned_file(state.settings.files_dir, str(metadata.get("stored_path") or ""))
-        # File bytes leaving the system are always audited.
-        _audit(
-            request,
-            "file.download",
-            "raw_object",
-            raw_id,
-            after={"filename": str(metadata.get("filename") or "")},
-        )
-        return FileResponse(path, filename=str(metadata.get("filename") or path.name))
-
     application.include_router(missions_router)
     application.include_router(missions_admin_router)
     application.include_router(kg_router)
@@ -1308,6 +1184,8 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
     application.include_router(inbox_router)
     application.include_router(ingest_router)
     application.include_router(conversations_router)
+    application.include_router(files_router)
+    application.include_router(notifications_router)
     application.include_router(admin_router)
     # Organ-contributed routers (JOP). Built once per process at import time so
     # the app has a stable route set; the registry is authoritative.

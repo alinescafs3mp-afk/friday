@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -17,7 +18,16 @@ from fastapi import HTTPException, Request
 from jericho.permissions import ActorContext
 from jericho.storage.models import AuditEntry, new_id
 
-__all__ = ["_audit", "_parse_json_bool", "_parse_json_float", "_request_json", "_require"]
+__all__ = [
+    "_audit",
+    "_parse_json_bool",
+    "_parse_json_float",
+    "_request_json",
+    "_require",
+    "_require_bridge",
+    "_json_load",
+    "_safe_owned_file",
+]
 
 
 async def _request_json(request: Request) -> dict[str, Any]:
@@ -100,3 +110,33 @@ def _audit(
             request_id=getattr(request.state, "request_id", ""),
         )
     )
+
+
+def _require_bridge(request: Request) -> ActorContext:
+    # The outbound queue is drained only by the Telegram bridge — the sole holder of
+    # the bridge secret. Bearer/loopback actors are refused.
+    actor = request.state.actor
+    if actor.source != "telegram-bridge":
+        raise HTTPException(status_code=403, detail="Bridge authentication required")
+    return actor
+
+
+def _json_load(value: Any, default: Any) -> Any:
+    if value in (None, ""):
+        return default
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def _safe_owned_file(root: Path, candidate: str) -> Path:
+    root = root.resolve()
+    path = Path(candidate).resolve()
+    if path != root and root not in path.parents:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return path
