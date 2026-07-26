@@ -243,7 +243,16 @@ jericho backup [--label NAME]
 jericho verify-backup [FILENAME]
 jericho restore-backup [FILENAME] --yes
 jericho export-user USER_ID
+jericho import PATH [--dry-run] [--user U] [--suffix .md] [--limit N]
+jericho events [--type TYPE] [--limit N] [--json]
+jericho model-check [--json] [--timeout SEC]
+jericho eval-bootstrap [--limit N] [--save]
 ```
+
+- **`import`** — обходит каталог и прогоняет каждый файл через приём. Всё уходит в Inbox: указание на папку не является решением о каждом файле внутри. Возобновляем — `source_ref` выводится из хеша содержимого, поэтому повторный запуск не грузит ничего заново, а прерванный продолжается той же командой.
+- **`events`** — операционный журнал: что сломалось и починилось, пока никто не смотрел. Пишутся переходы, а не тики, поэтому воркер, сломанный всю ночь, даёт две записи, а не сотни.
+- **`model-check`** — проверяет эндпоинт **генерацией**, а не соединением: отдаётся ли модель, отвечает ли она в реальном бюджете токенов, не протекает ли цепочка рассуждений в ответ, парсится ли JSON, принимают ли эмбеддинги пакет того размера, каким ходит индексатор.
+- **`eval-bootstrap`** — черновики золотого набора для оценки поиска, с аудитом: вопрос, пересказывающий документ его же словами, отклоняется. Без `--save` ничего не сохраняется.
 
 Примеры:
 
@@ -255,6 +264,9 @@ jericho verify-backup
 # backend должен быть остановлен; команда сама проверит эксклюзивность
 jericho restore-backup jericho-YYYYMMDDTHHMMSSZ-before-upgrade.sqlite3 --yes
 jericho export-user telegram:telegram:123456789
+jericho import ~/Документы --dry-run     # состав, ничего не записывая
+jericho events --type worker.failed
+jericho model-check
 ```
 
 ## Где лежат данные

@@ -201,3 +201,31 @@ def test_the_alert_reaches_sentinel_and_names_the_file(settings, tmp_path, monke
     assert alerts[0]["severity"] in _ALERT_SEVERITIES
     assert "TG_token.txt" in alerts[0]["detail"]
     assert settings.api_token not in alerts[0]["detail"], "the alert must not repeat the secret"
+
+
+def test_semantic_search_without_numpy_is_a_visible_warning(settings, monkeypatch):
+    """The pure-Python fallback decides identically but scans the corpus per query.
+
+    numpy stays optional — the fallback is correct, and a mandatory dependency would
+    break the project's zero-required-deps rule. What is not acceptable is silence:
+    without it Jericho just looks slow, and the cause is invisible.
+    """
+    import builtins
+    import dataclasses
+
+    from jericho.config import validate_settings
+
+    real_import = builtins.__import__
+
+    def without_numpy(name, *args, **kwargs):
+        if name == "numpy":
+            raise ImportError("No module named 'numpy'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_numpy)
+
+    enabled = dataclasses.replace(settings, embeddings_enabled=True)
+    assert any("numpy" in item for item in validate_settings(enabled))
+    # Off, the scan never runs, so there is nothing to warn about.
+    disabled = dataclasses.replace(settings, embeddings_enabled=False)
+    assert not any("numpy" in item for item in validate_settings(disabled))

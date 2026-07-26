@@ -739,6 +739,19 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
             )
         elif scheme not in {"http", "https"}:
             errors.append("JERICHO_TELEGRAM_PROXY must be an http:// or https:// URL")
+    if settings.embeddings_enabled:
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            # Not an error: the pure-Python fallback produces IDENTICAL decisions, which
+            # is why numpy stays an optional extra. But with embeddings on, dense recall
+            # scores the corpus on EVERY query, and that scan is the difference between
+            # milliseconds and seconds once the corpus is real. Silence here would look
+            # like Jericho being slow rather than a missing extra.
+            warnings.append(
+                "semantic search is enabled without numpy: dense recall falls back to "
+                "pure Python and gets slow as the corpus grows — install 'jericho[vectors]'"
+            )
     if production and settings.code_execution_enabled:
         warnings.append("Host-side code execution is enabled; use a separate sandbox container")
     return errors + [f"warning: {item}" for item in warnings]
