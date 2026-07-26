@@ -618,7 +618,13 @@ def collect_diagnostics(
             "Не продолжайте запись до проверки целостности или восстановления подтверждённой копии.",
             "jericho restore-backup --yes",
         )
-    if settings.llm_enabled and model.get("placeholder_only"):
+    # Local weights are only needed when this host is the one serving the model. With
+    # the endpoint on another machine there is nothing to place in model_dir, and the
+    # advice ("or configure a working vLLM endpoint") is telling the owner to do what
+    # they have already done.
+    llm_host = urlparse(settings.llm_base_url).hostname or ""
+    serves_locally = llm_host in {"127.0.0.1", "localhost", "::1", ""}
+    if settings.llm_enabled and model.get("placeholder_only") and serves_locally:
         add_action(
             "install_model_weights",
             "warning",

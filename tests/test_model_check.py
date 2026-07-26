@@ -139,3 +139,26 @@ def test_embeddings_probe_reflects_configuration(settings, monkeypatch, enabled,
     report = check_model(settings)
 
     assert _probe(report, "embeddings").ok is expected_ok
+
+
+# --- local-weights advice must know where the model actually runs ---------
+
+
+@pytest.mark.parametrize(
+    "base_url,expect_warning",
+    [
+        ("http://127.0.0.1:8001/v1", True),
+        ("http://localhost:8001/v1", True),
+        ("http://203.0.113.11:8001/v1", False),
+    ],
+)
+def test_local_weights_advice_only_when_this_host_serves_the_model(settings, base_url, expect_warning):
+    """With the endpoint on another machine there is nothing to put in model_dir, and
+    the advice tells the owner to configure what they already configured."""
+    import dataclasses
+
+    from jericho.diagnostics import collect_diagnostics
+
+    settings = dataclasses.replace(settings, llm_enabled=True, llm_base_url=base_url)
+    codes = [a["code"] for a in collect_diagnostics(settings)["actions"]]
+    assert ("install_model_weights" in codes) is expect_warning
