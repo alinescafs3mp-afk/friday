@@ -463,6 +463,98 @@ def _export_user(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_import_user(storage: Any, requested: str | None) -> str:
+    """Pick the tenant to import into, refusing to guess when guessing could misfile.
+
+    A single-account instance is the normal case and asking for --user every time is
+    friction for nothing. With several accounts there is no defensible default: the
+    files would land in someone's knowledge base, and the wrong one is not recoverable
+    by a flag.
+    """
+    if requested:
+        return requested
+    users = storage.list_users(limit=5)
+    if len(users) == 1:
+        return str(users[0]["id"])
+    if not users:
+        raise ValueError("No accounts exist yet; pass --user to create one for the import")
+    raise ValueError(f"{len(users)} accounts exist; pass --user to say which one these files belong to")
+
+
+def _import(args: argparse.Namespace) -> int:
+    """Walk a directory and put every file through the review gate."""
+    from jericho.bulk_import import Outcome, plan_import, run_import, summarise
+    from jericho.config import ensure_runtime_dirs, load_settings
+    from jericho.ingestion import IngestionPipeline
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.storage import init_storage
+
+    root = Path(args.path).expanduser()
+    if not root.exists():
+        print(f"Путь не найден: {root}", file=sys.stderr)
+        return 2
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    plan = plan_import(
+        root,
+        max_bytes=settings.max_upload_bytes,
+        suffixes=args.suffix,
+        include_hidden=args.include_hidden,
+        follow_symlinks=args.follow_symlinks,
+        limit=args.limit,
+    )
+
+    megabytes = plan.total_bytes / (1024 * 1024)
+    print(f"Найдено файлов: {len(plan.candidates)} ({megabytes:.1f} МиБ), пропущено: {len(plan.skipped)}")
+    if plan.candidates:
+        shown = list(plan.by_suffix().items())[:8]
+        print("  По типам: " + ", ".join(f"{suffix} {count}" for suffix, count in shown))
+    if plan.skipped:
+        print("  Пропущено: " + ", ".join(f"{why} {count}" for why, count in plan.skip_reasons().items()))
+    if args.dry_run:
+        print("\n--dry-run: ничего не записано.")
+        return 0
+    if not plan.candidates:
+        return 0
+
+    storage = init_storage(settings)
+    try:
+        try:
+            user_id = _resolve_import_user(storage, args.user)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
+        print(f"Импорт в аккаунт {user_id}. Всё уходит в Inbox на ваше подтверждение.\n")
+
+        def progress(index: int, total: int, outcome: Outcome) -> None:
+            if outcome.status == "failed":
+                print(f"  [{index}/{total}] ОШИБКА {outcome.path}: {outcome.detail}", file=sys.stderr)
+            elif not args.quiet:
+                mark = "=" if outcome.status == "duplicate" else "+"
+                print(f"  [{index}/{total}] {mark} {outcome.path.name}")
+
+        try:
+            outcomes = asyncio.run(run_import(pipeline, user_id, plan, on_progress=progress))
+        except KeyboardInterrupt:
+            # Content-hash idempotency means a re-run resumes; say so rather than
+            # leaving the user guessing whether they have to start over.
+            print("\nПрервано. Повторите ту же команду — уже загруженные файлы будут пропущены.")
+            return 130
+    finally:
+        storage.close()
+
+    counts = summarise(outcomes)
+    print(
+        f"\nГотово: загружено {counts['ingested']}, "
+        f"уже было {counts['duplicate']}, ошибок {counts['failed']}."
+    )
+    if counts["ingested"]:
+        print("Разобрать: /inbox в Telegram или раздел Inbox в админке.")
+    return 1 if counts["failed"] else 0
+
+
 def _purge(args: argparse.Namespace) -> int:
     """Irreversibly hard-delete soft-deleted knowledge while the backend is stopped."""
 
@@ -740,6 +832,29 @@ def build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export-user", help="Export one tenant's data as JSON")
     export.add_argument("user_id")
     export.set_defaults(handler=_export_user)
+
+    importer = sub.add_parser(
+        "import",
+        help="Import a directory of files; everything lands in the Inbox for review",
+    )
+    importer.add_argument("path", help="Directory (or single file) to import")
+    importer.add_argument("--user", help="Target account (default: the only one, if there is one)")
+    importer.add_argument(
+        "--dry-run", action="store_true", help="Show what would be imported and write nothing"
+    )
+    importer.add_argument(
+        "--suffix",
+        action="append",
+        metavar=".md",
+        help="Only these extensions; repeatable. Default: every file type",
+    )
+    importer.add_argument(
+        "--limit", type=int, default=None, help="Stop after this many files (the walk is ordered)"
+    )
+    importer.add_argument("--include-hidden", action="store_true", help="Include dotfiles and dotdirs")
+    importer.add_argument("--follow-symlinks", action="store_true", help="Follow symlinks while walking")
+    importer.add_argument("--quiet", action="store_true", help="Only report failures and the summary")
+    importer.set_defaults(handler=_import)
 
     purge = sub.add_parser(
         "purge",

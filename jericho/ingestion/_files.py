@@ -328,6 +328,7 @@ class FilesMixin(PipelineShared):
         media_kind: str = "",
         metadata: dict[str, Any] | None = None,
         source_ref: str = "",
+        force_review: bool = False,
     ) -> dict[str, Any]:
         if len(file_content) > self.settings.max_upload_bytes:
             raise ValueError("file exceeds JERICHO_MAX_UPLOAD_BYTES")
@@ -546,7 +547,12 @@ class FilesMixin(PipelineShared):
                     # confirms it. Such files wait in the Inbox (no KO); the
                     # deferred-promotion branch of classify_inbox_item builds the
                     # KO from the stored suggestions on confirmation.
-                    needs_review = not extraction_succeeded or bool(vision)
+                    # ``force_review`` is the bulk-import case: pointing at a folder is
+                    # one explicit action, but the user has not read the files in it, so
+                    # none of them may become canonical without being seen. Same
+                    # reasoning as the text path, which has carried this flag since
+                    # strict review landed.
+                    needs_review = force_review or not extraction_succeeded or bool(vision)
                     if needs_review:
                         inbox_item = self._store_review_inbox(raw, assessment, file_enrichment)
                         promoted = {
