@@ -27,6 +27,29 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁ][0-9a-zA-Zа-яёА-ЯЁ._+#-]*", re.UNICODE)
+# Separators that carry meaning INSIDE a token but are punctuation at the end of one.
+# `+` and `#` are excluded on purpose: C++ and C# end in them legitimately.
+_TRAILING_PUNCTUATION = ".-"
+
+
+def tokens_of(text: str) -> list[str]:
+    """Tokenize the way every part of retrieval must agree to tokenize.
+
+    ``_TOKEN_RE`` deliberately lets ``. _ + # -`` continue a token so that ``file.txt``,
+    ``BRK.A`` and ``scale_factor`` survive as single units. The cost is that a token
+    ending a sentence swallows the full stop, and then the same identifier written in a
+    query and in a document is two different strings.
+
+    That is not cosmetic. ``_identifier_coverage`` drops any candidate whose identifiers
+    do not all appear in its text, so a document mentioning
+    ``autovacuum_vacuum_scale_factor.`` was unreachable by a query for
+    ``autovacuum_vacuum_scale_factor`` — FTS returned the hit and the blend discarded it
+    as ``identifier_mismatch``.
+    """
+
+    return [token.rstrip(_TRAILING_PUNCTUATION) for token in _TOKEN_RE.findall(text or "")]
+
+
 _RELATIONAL_QUERY_RE = re.compile(
     r"\b(?:связан\w*|завис\w*|участву\w*|работа\w*\s+над|относ\w*\s+к|"
     r"част\w*\s+(?:проекта|системы)|через\s+что|между\s+\w+\s+и\s+\w+|"
@@ -107,7 +130,7 @@ _STOPWORDS = {
 
 def lexical_vector(text: str) -> dict[str, float]:
     """L2-normalized word and character-trigram vector with identifier preservation."""
-    tokens = [token.casefold() for token in _TOKEN_RE.findall(text or "")]
+    tokens = [token.casefold() for token in tokens_of(text)]
     tokens = [token for token in tokens if token not in _STOPWORDS]
     weights: dict[str, float] = {}
     for token in tokens:
@@ -140,7 +163,7 @@ def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
         return body
     query_tokens = {
         token.casefold()
-        for token in _TOKEN_RE.findall(query or "")
+        for token in tokens_of(query)
         if len(token) > 1 and token.casefold() not in _STOPWORDS
     }
     if not query_tokens:
@@ -1013,7 +1036,7 @@ class HybridSearcher:
     @staticmethod
     def _query_identifiers(query: str) -> set[str]:
         identifiers: set[str] = set()
-        for token in _TOKEN_RE.findall(query or ""):
+        for token in tokens_of(query):
             has_discrete_separator = any(character in token for character in "._/#")
             has_hyphenated_code = "-" in token and any(character.isdigit() for character in token)
             has_alphanumeric_code = (
@@ -1034,8 +1057,7 @@ class HybridSearcher:
         if not identifiers:
             return 1.0
         tokens = {
-            token.casefold()
-            for token in _TOKEN_RE.findall(self._search_text(item) + " " + " ".join(entity_names))
+            token.casefold() for token in tokens_of(self._search_text(item) + " " + " ".join(entity_names))
         }
         return len(identifiers & tokens) / len(identifiers)
 
