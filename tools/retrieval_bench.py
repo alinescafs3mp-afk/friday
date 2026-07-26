@@ -353,6 +353,47 @@ def promote_everything(storage: Any, pipeline: Any, user_id: str) -> int:
     return promoted
 
 
+async def index_embeddings(settings: Any, storage: Any, kg: Any, embeddings: Any) -> dict[str, Any]:
+    """Vectorise the corpus using the production indexer, not a reimplementation.
+
+    Reusing ``WorkersManager._embeddings_index_all`` matters: it is the code that
+    decides chunking, batch sizes and what counts as already-indexed. A bench that
+    embedded documents its own way would be measuring a pipeline that does not exist.
+    """
+    from jericho.ingestion import IngestionPipeline
+    from jericho.workers import WorkersManager
+
+    manager = WorkersManager(
+        settings,
+        storage,
+        IngestionPipeline(settings, storage, kg, None),
+        kg,
+        embeddings=embeddings,
+    )
+    started = time.monotonic()
+    rounds = 0
+    # The worker indexes one bounded batch per call; loop until the corpus is covered.
+    while rounds < 200:
+        remaining = storage.list_knowledge_missing_embedding(
+            settings.embeddings_model,
+            limit=1,
+            chunk_scheme=None,
+            chunk_threshold=settings.embeddings_chunk_chars,
+        )
+        if not remaining:
+            break
+        await manager._embeddings_index_all()
+        rounds += 1
+    vectors = storage.execute("SELECT COUNT(*) AS n FROM knowledge_embeddings").fetchone()["n"]
+    chunks = storage.execute("SELECT COUNT(*) AS n FROM knowledge_chunk_embeddings").fetchone()["n"]
+    return {
+        "rounds": rounds,
+        "seconds": round(time.monotonic() - started, 1),
+        "object_vectors": int(vectors),
+        "chunk_vectors": int(chunks),
+    }
+
+
 async def measure(searcher: Any, kg: Any, user_id: str, k: int) -> dict[str, Any]:
     """Recall@k overall and per query kind, plus the queries that found nothing."""
     by_kind: dict[str, list[bool]] = {}
@@ -436,8 +477,18 @@ def main() -> int:
         # record_usage off: a harness must not write the counter that feeds the very
         # blend it is measuring.
         kg = KnowledgeGraph(storage)
+        embeddings = None
+        if settings.embeddings_enabled:
+            from jericho.retrieval import EmbeddingBackend
+
+            embeddings = EmbeddingBackend(settings)
+            report["index"] = asyncio.run(index_embeddings(settings, storage, kg, embeddings))
+        # The backend has to be HANDED to the searcher. Leaving it out is how the first
+        # run with embeddings enabled reported a byte-identical score: the setting said
+        # yes, the searcher was never told, and nothing measured anything new.
         searcher = HybridSearcher(
             storage,
+            embeddings,
             graph_max_depth=settings.graph_max_depth,
             record_usage=False,
         )

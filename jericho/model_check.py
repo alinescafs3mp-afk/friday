@@ -110,6 +110,56 @@ def _text_of(data: dict[str, Any]) -> str:
     return str((message or {}).get("content") or "")
 
 
+def _probe_embedding_batch(
+    client: httpx.Client, settings: JerichoSettings, api_key: str, report: ModelReport
+) -> None:
+    """Send a batch the size the indexer actually sends.
+
+    A single-input probe proves the service answers. It does not prove it accepts the
+    requests Jericho makes: the indexer batches up to
+    ``JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST`` inputs per call. Measured against a
+    real service — one input returned a 1024-dimension vector while every indexing
+    request failed 422 with "batch size 64 > maximum allowed batch size 32", so the
+    corpus ended up with zero vectors and retrieval scored exactly as it had without
+    embeddings at all.
+    """
+    size = max(1, int(settings.embeddings_max_inputs_per_request))
+    started = time.monotonic()
+    try:
+        response = client.post(
+            f"{settings.embeddings_base_url.rstrip('/')}/embeddings",
+            headers=_headers(settings.embeddings_api_key or api_key),
+            json={
+                "model": settings.embeddings_model or settings.llm_model,
+                "input": [f"проверка {index}" for index in range(size)],
+            },
+        )
+    except Exception as exc:
+        report.probes.append(
+            Probe("embeddings batch", False, f"{type(exc).__name__}: {exc}", time.monotonic() - started)
+        )
+        return
+    elapsed = time.monotonic() - started
+    if response.status_code == 200:
+        returned = len(response.json().get("data", []))
+        report.probes.append(
+            Probe("embeddings batch", returned == size, f"{returned}/{size} векторов", elapsed)
+        )
+        return
+    # The service usually states its limit; pass that through rather than making the
+    # owner go and read its log.
+    detail = response.text[:160].strip()
+    report.probes.append(
+        Probe(
+            "embeddings batch",
+            False,
+            f"HTTP {response.status_code} на пакете из {size}: {detail} "
+            "— уменьшите JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST",
+            elapsed,
+        )
+    )
+
+
 def check_model(settings: JerichoSettings, *, timeout: float = 60.0) -> ModelReport:
     """Run every probe against the configured chat endpoint and the embeddings one."""
 
@@ -229,6 +279,7 @@ def check_model(settings: JerichoSettings, *, timeout: float = 60.0) -> ModelRep
                 if response.status_code == 200:
                     vector = response.json()["data"][0]["embedding"]
                     report.probes.append(Probe("embeddings", True, f"{len(vector)} dimensions", elapsed))
+                    _probe_embedding_batch(client, settings, api_key, report)
                 else:
                     report.probes.append(Probe("embeddings", False, f"HTTP {response.status_code}", elapsed))
             except Exception as exc:

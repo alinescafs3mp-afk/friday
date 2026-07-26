@@ -162,3 +162,75 @@ def test_local_weights_advice_only_when_this_host_serves_the_model(settings, bas
     settings = dataclasses.replace(settings, llm_enabled=True, llm_base_url=base_url)
     codes = [a["code"] for a in collect_diagnostics(settings)["actions"]]
     assert ("install_model_weights" in codes) is expect_warning
+
+
+# --- batch size: reachable is not the same as usable ----------------------
+
+
+def _batched_endpoint(monkeypatch, *, max_batch: int, dimensions: int = 1024):
+    """An embeddings service that answers single inputs and caps its batch size."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "dispatcher"}]})
+        if path.endswith("/embeddings"):
+            body = json.loads(request.content)
+            values = body["input"]
+            values = values if isinstance(values, list) else [values]
+            if len(values) > max_batch:
+                return httpx.Response(
+                    422,
+                    json={
+                        "message": f"batch size {len(values)} > maximum allowed batch size {max_batch}",
+                        "code": 422,
+                    },
+                )
+            return httpx.Response(200, json={"data": [{"embedding": [0.1] * dimensions} for _ in values]})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"kind":"note"}'}, "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 6},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: original(*a, **{**k, "transport": transport}))
+
+
+def test_a_service_that_answers_one_input_but_rejects_the_batch_fails_the_check(settings, monkeypatch):
+    """The failure this probe exists for, measured against a real service.
+
+    One input returned a 1024-dimension vector, so the single-input probe passed and
+    the endpoint looked healthy — while every indexing request failed 422 and the
+    corpus silently ended up with no vectors at all. Retrieval then scored exactly as
+    it had without embeddings, which is indistinguishable from "embeddings did not
+    help" unless something checks.
+    """
+    import dataclasses
+
+    settings = dataclasses.replace(settings, embeddings_enabled=True, embeddings_max_inputs_per_request=64)
+    _batched_endpoint(monkeypatch, max_batch=32)
+
+    report = check_model(settings)
+
+    assert _probe(report, "embeddings").ok, "a single input still works — that is the trap"
+    batch = _probe(report, "embeddings batch")
+    assert not batch.ok
+    assert "maximum allowed batch size 32" in batch.detail
+    assert "JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST" in batch.detail
+    assert not report.ok
+
+
+def test_a_batch_within_the_limit_passes(settings, monkeypatch):
+    import dataclasses
+
+    settings = dataclasses.replace(settings, embeddings_enabled=True, embeddings_max_inputs_per_request=32)
+    _batched_endpoint(monkeypatch, max_batch=32)
+
+    report = check_model(settings)
+
+    assert _probe(report, "embeddings batch").ok
+    assert _probe(report, "embeddings batch").detail == "32/32 векторов"
