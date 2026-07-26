@@ -346,6 +346,46 @@ def _events(args: argparse.Namespace) -> int:
     return 0
 
 
+def _eval_bootstrap(args: argparse.Namespace) -> int:
+    """Draft gold cases from existing knowledge; save only what the owner keeps."""
+    from jericho.agent_runtime.llm import LLMRouter
+    from jericho.config import ensure_runtime_dirs, load_settings
+    from jericho.eval_bootstrap import propose_cases, save_accepted
+    from jericho.storage import init_storage
+
+    settings = load_settings()
+    if not settings.llm_enabled:
+        print("Нужна работающая модель: JERICHO_LLM_ENABLED=1.", file=sys.stderr)
+        return 2
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    try:
+        user_id = _resolve_import_user(storage, args.user)
+        proposals = asyncio.run(propose_cases(storage, LLMRouter(settings), user_id, limit=args.limit))
+        if not proposals:
+            print("Не из чего строить: в базе нет знаний.")
+            return 0
+        accepted = [item for item in proposals if item.accepted]
+        for item in proposals:
+            if item.accepted:
+                print(f"  + {item.query}\n      → {item.title[:70]}")
+            else:
+                shared = f" ({', '.join(item.shared_tokens)})" if item.shared_tokens else ""
+                print(f"  − {item.query or '—'}\n      отклонён: {item.reason}{shared}")
+        print(f"\nГодных {len(accepted)} из {len(proposals)}.")
+        if not args.save:
+            print("Ничего не сохранено. Повторите с --save, если вопросы разумны.")
+            return 0
+        saved = save_accepted(storage, user_id, accepted)
+        print(f"Сохранено кейсов: {saved}. Проверить качество поиска: jericho doctor / раздел «Качество».")
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    finally:
+        storage.close()
+    return 0
+
+
 def _model_check(args: argparse.Namespace) -> int:
     """Probe the configured endpoint by generating, not by connecting."""
     from jericho.config import load_settings
@@ -890,6 +930,15 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("--limit", type=int, default=50, help="How many to show (newest first)")
     events.add_argument("--json", action="store_true", help="Machine-readable output")
     events.set_defaults(handler=_events)
+
+    bootstrap = sub.add_parser(
+        "eval-bootstrap",
+        help="Draft retrieval gold cases from existing knowledge using the model",
+    )
+    bootstrap.add_argument("--user", help="Target account (default: the only one, if there is one)")
+    bootstrap.add_argument("--limit", type=int, default=20, help="How many cases to draft")
+    bootstrap.add_argument("--save", action="store_true", help="Persist the accepted cases")
+    bootstrap.set_defaults(handler=_eval_bootstrap)
 
     model_check = sub.add_parser(
         "model-check",
