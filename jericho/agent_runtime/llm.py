@@ -369,14 +369,15 @@ class LLMRouter:
                 if not isinstance(tool_calls, list):
                     tool_calls = []
 
+                finish_reason = str(choice.get("finish_reason") or "stop")
                 if self.settings.profile.suppress_model_thinking and content:
-                    content = self._strip_thinking(content)
+                    content = self._strip_thinking(content, finish_reason)
                 if detect_repeated_token_degeneration(content):
                     raise RuntimeError("LLM response rejected: repeated-token degeneration detected")
                 return {
                     "content": content,
                     "tool_calls": tool_calls,
-                    "finish_reason": choice.get("finish_reason", "stop"),
+                    "finish_reason": finish_reason,
                     "usage": data.get("usage", {}),
                 }
 
@@ -440,7 +441,7 @@ class LLMRouter:
                         yield {"type": "delta", "content": content}
                     if finish:
                         if self.settings.profile.suppress_model_thinking:
-                            buffer = self._strip_thinking(buffer)
+                            buffer = self._strip_thinking(buffer, str(finish))
                         if detect_repeated_token_degeneration(buffer):
                             yield {
                                 "type": "error",
@@ -452,9 +453,34 @@ class LLMRouter:
             yield {"type": "error", "error": str(exc)}
 
     @staticmethod
-    def _strip_thinking(content: str) -> str:
-        """Best-effort cleanup for runtimes that ignore ``enable_thinking=False``."""
+    def _strip_thinking(content: str, finish_reason: str = "stop") -> str:
+        """Remove a reasoning model's visible chain-of-thought from its answer.
 
+        Runtimes that ignore ``enable_thinking=False`` emit the monologue in ``content``
+        itself, and vLLM leaves ``message.reasoning`` empty rather than separating it.
+        Measured against the LAN endpoint: the reasoning is CLOSED by a literal
+        ``</think>`` with no opening tag, and the answer follows it. So the tag is the
+        only reliable boundary — the prose that precedes it is unstable, differing
+        between two calls with identical parameters and temperature 0.
+
+        The earlier marker heuristic assumed the opposite layout and cut everything
+        *before* a phrase like "Here's a thinking process:". Against this model that
+        returned either the empty string (marker at index 0, so the caller fell back to
+        "Не удалось сформировать ответ.") or the entire monologue, tag included. It is
+        kept below only as a fallback for runtimes that really do lead with the marker.
+
+        ``finish_reason`` matters because reasoning consumes the output budget: a
+        request that runs out of tokens mid-thought has NO answer to extract, and the
+        monologue must not be handed back as though it were one.
+        """
+
+        if "</think>" in content:
+            return content.rsplit("</think>", 1)[-1].strip()
+        if finish_reason == "length":
+            # Truncated before the model ever reached its answer. Verified on this
+            # endpoint: an entity-extraction prompt spends 2000 tokens and still never
+            # closes the tag. Empty lets the caller's own fallback speak.
+            return ""
         markers = (
             "Here's a thinking process:",
             "Here is the thinking process:",

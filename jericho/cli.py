@@ -318,6 +318,30 @@ def _doctor(args: argparse.Namespace) -> int:
     return 0 if result.get("state") in {"ready", "attention"} else 1
 
 
+def _model_check(args: argparse.Namespace) -> int:
+    """Probe the configured endpoint by generating, not by connecting."""
+    from jericho.config import load_settings
+    from jericho.model_check import check_model
+
+    settings = load_settings()
+    if not settings.llm_enabled:
+        print("JERICHO_LLM_ENABLED=0 — проверяю эндпоинт всё равно, но Jericho его не использует.\n")
+    report = check_model(settings, timeout=args.timeout)
+    if args.json:
+        _json_print(report.to_dict())
+        return 0 if report.ok else 1
+
+    print(f"Эндпоинт: {report.base_url}\nМодель:   {report.model}\n")
+    for probe in report.probes:
+        mark = "✓" if probe.ok else "✗"
+        timing = f"{probe.seconds:5.2f}s" if probe.seconds else "     "
+        tokens = f" {probe.tokens} ток." if probe.tokens is not None else ""
+        print(f"  {mark} {probe.name:22} {timing}{tokens}  {probe.detail}")
+    print()
+    print("Готово к работе." if report.ok else "Есть проблемы — см. отметки ✗ выше.")
+    return 0 if report.ok else 1
+
+
 def _backup(args: argparse.Namespace) -> int:
     from jericho.backup_mirror import mirror_backups
     from jericho.config import ensure_runtime_dirs, load_settings
@@ -832,6 +856,14 @@ def build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export-user", help="Export one tenant's data as JSON")
     export.add_argument("user_id")
     export.set_defaults(handler=_export_user)
+
+    model_check = sub.add_parser(
+        "model-check",
+        help="Probe the configured LLM endpoint by generating, not just connecting",
+    )
+    model_check.add_argument("--json", action="store_true", help="Machine-readable report")
+    model_check.add_argument("--timeout", type=float, default=60.0, help="Per-request timeout, seconds")
+    model_check.set_defaults(handler=_model_check)
 
     importer = sub.add_parser(
         "import",
