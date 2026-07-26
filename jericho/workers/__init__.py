@@ -224,6 +224,8 @@ class WorkersManager:
         # so an organ can never shadow a core worker's name silently.
         self._extra_workers: tuple[IntervalTask, ...] = tuple(extra_workers)
         self.supervisor = WorkerSupervisor(self._persist_worker_state)
+        # Last known failing/healthy state per worker, for transition detection.
+        self._worker_failing: dict[str, bool] = {}
         self._registered = False
         self._run_task: asyncio.Task[Any] | None = None
 
@@ -337,11 +339,48 @@ class WorkersManager:
                 timeout_sec=task.timeout_sec,
             )
 
+    # Statuses that mean the task did not do its job this round.
+    _FAILED_STATUSES = frozenset({"error", "timeout"})
+
     def _persist_worker_state(self, name: str, state: dict[str, Any]) -> None:
         self.storage.kv_set(
             f"workers:health:{name}",
             json.dumps(state, ensure_ascii=False, sort_keys=True),
         )
+        self._record_worker_transition(name, state)
+
+    def _record_worker_transition(self, name: str, state: dict[str, Any]) -> None:
+        """Journal the moment a worker starts failing, and the moment it recovers.
+
+        Transitions rather than states, deliberately. ``kv_set`` above already holds
+        the current health; what it cannot answer is "did anything break overnight and
+        did it come back". Recording every tick would answer that too, but a task on a
+        60-second interval broken for eight hours would write 480 rows to say one thing.
+        """
+        status = str(state.get("status") or "")
+        if status not in {"ok", *self._FAILED_STATUSES}:
+            return  # "running" is a heartbeat, not an event
+        failing = status in self._FAILED_STATUSES
+        previous = self._worker_failing.get(name)
+        if previous == failing:
+            return
+        self._worker_failing[name] = failing
+        if previous is None and not failing:
+            return  # first successful run after start is not a recovery
+        try:
+            self.storage.record_event(
+                "worker.failed" if failing else "worker.recovered",
+                {
+                    "worker": name,
+                    "status": status,
+                    # The message is already sanitised for logs by the supervisor.
+                    "error_type": state.get("error_type"),
+                    "consecutive_failures": state.get("consecutive_failures"),
+                },
+            )
+        except Exception:
+            # Journalling must never take down the worker it is observing.
+            LOGGER.debug("Could not record worker transition for %s", name, exc_info=True)
 
     async def _mission_runner_tick(self) -> None:
         # Advance a bounded number of ready mission tasks; the executive keeps
@@ -575,6 +614,18 @@ class WorkersManager:
         self.storage.kv_set("workers:last_backup_at", now.isoformat(timespec="seconds"))
         self.storage.kv_set("workers:last_backup", json.dumps(result, ensure_ascii=False))
         LOGGER.info("Scheduled database backup created: %s", result.get("database"))
+        # Every backup, not just failures: "when did this last actually run" is the
+        # question asked after something has already gone wrong, and by then the log
+        # that would have answered it has usually rotated.
+        self.storage.record_event(
+            "backup.created",
+            {
+                "database": result.get("database"),
+                "size_bytes": result.get("size_bytes"),
+                "integrity_check": result.get("integrity_check"),
+                "label": "scheduled",
+            },
+        )
         # A same-disk backup is not a real backup: mirror it offsite when
         # configured (encrypted when a key file is set).
         from jericho.backup_mirror import mirror_backups

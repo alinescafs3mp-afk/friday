@@ -8,6 +8,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 from __future__ import annotations
 
 from jericho.storage._base import (
+    RUNTIME_EVENT_CAP,
     UTC,
     Any,
     Sequence,
@@ -268,6 +269,70 @@ class RuntimeMixin(StorageShared):
                 (f"-{max(1, min(int(days), 365))} days",),
             )
         return cursor.rowcount
+
+    # A machine that runs fourteen background workers, a bridge and a backup schedule
+    # answers "what happened while I was asleep" from its logs today — which means
+    # grepping tracebacks and correlating timestamps by hand. These events exist to
+    # answer it directly.
+    #
+    # Bounded from the start: a journal that grows without limit is a worse defect than
+    # the empty table this replaces. Callers record TRANSITIONS, not states, so a worker
+    # broken all night costs two rows rather than one per tick.
+    def record_event(self, event_type: str, payload: dict[str, Any] | None = None) -> str:
+        """Append one operational event and trim the journal to its cap."""
+        event_id = new_id("evt")
+        with self.transaction() as conn:
+            conn.execute(
+                "INSERT INTO runtime_events(id, event_type, payload, created_at) VALUES(?,?,?,?)",
+                (event_id, str(event_type)[:64], json.dumps(payload or {}, ensure_ascii=False), utc_now()),
+            )
+            # Trim by row count rather than age: age alone lets a burst blow the table
+            # up inside the retention window, and a count is what bounds disk.
+            #
+            # Ordered by rowid within a timestamp, never by `id`. `created_at` has
+            # one-second resolution and `id` is random, so a burst — exactly when this
+            # journal earns its keep — would otherwise trim and list in arbitrary
+            # order, discarding the newest events instead of the oldest.
+            conn.execute(
+                """DELETE FROM runtime_events WHERE id IN (
+                       SELECT id FROM runtime_events ORDER BY created_at DESC, rowid DESC
+                       LIMIT -1 OFFSET ?)""",
+                (RUNTIME_EVENT_CAP,),
+            )
+        return event_id
+
+    def list_events(
+        self,
+        *,
+        event_type: str | None = None,
+        since: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if event_type:
+            clauses.append("event_type=?")
+            params.append(event_type)
+        if since:
+            clauses.append("created_at >= ?")
+            params.append(since)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(int(limit), 1000)))
+        rows = self.execute(
+            # ``clauses`` holds fixed predicates only; every value stays a bound parameter.
+            f"SELECT * FROM runtime_events {where} ORDER BY created_at DESC, rowid DESC LIMIT ?",  # nosec B608
+            tuple(params),
+        ).fetchall()
+        events = []
+        for row in rows:
+            event = dict(row)
+            event["payload"] = _json_load(event.get("payload"), {})
+            events.append(event)
+        return events
+
+    def count_events(self) -> int:
+        row = self.execute("SELECT COUNT(*) AS count FROM runtime_events").fetchone()
+        return int(row["count"] if row else 0)
 
     def kv_get(self, key: str) -> str | None:
         row = self.execute("SELECT value FROM runtime_kv WHERE key=?", (key,)).fetchone()

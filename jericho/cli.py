@@ -318,6 +318,34 @@ def _doctor(args: argparse.Namespace) -> int:
     return 0 if result.get("state") in {"ready", "attention"} else 1
 
 
+def _events(args: argparse.Namespace) -> int:
+    """What happened while nobody was watching."""
+    from jericho.config import load_settings
+    from jericho.storage import init_storage
+
+    settings = load_settings()
+    storage = init_storage(settings)
+    try:
+        events = storage.list_events(event_type=args.type, limit=args.limit)
+        total = storage.count_events()
+    finally:
+        storage.close()
+
+    if args.json:
+        _json_print(events)
+        return 0
+    if not events:
+        print("Событий пока нет." if not args.type else f"Событий типа {args.type} нет.")
+        return 0
+    print(f"Последние {len(events)} из {total} записей:\n")
+    for event in events:
+        stamp = str(event.get("created_at") or "")[:19].replace("T", " ")
+        payload = event.get("payload") or {}
+        detail = ", ".join(f"{key}={value}" for key, value in payload.items() if value not in (None, ""))
+        print(f"  {stamp}  {str(event.get('event_type')):20} {detail}")
+    return 0
+
+
 def _model_check(args: argparse.Namespace) -> int:
     """Probe the configured endpoint by generating, not by connecting."""
     from jericho.config import load_settings
@@ -856,6 +884,12 @@ def build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export-user", help="Export one tenant's data as JSON")
     export.add_argument("user_id")
     export.set_defaults(handler=_export_user)
+
+    events = sub.add_parser("events", help="Operational journal: what happened while you were away")
+    events.add_argument("--type", help="Only this event type, e.g. worker.failed")
+    events.add_argument("--limit", type=int, default=50, help="How many to show (newest first)")
+    events.add_argument("--json", action="store_true", help="Machine-readable output")
+    events.set_defaults(handler=_events)
 
     model_check = sub.add_parser(
         "model-check",

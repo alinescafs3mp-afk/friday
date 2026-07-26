@@ -59,6 +59,9 @@ LOGGER = logging.getLogger("jericho.storage")
 SCHEMA_VERSION = 16
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
+# Operational journal size. Roughly a month of transitions for this workload, and a
+# hard bound on what the table can cost regardless of how badly something flaps.
+RUNTIME_EVENT_CAP = 2000
 _SEARCH_TEXT_LEN_SQL = (
     "length(coalesce(k.title,'') || coalesce(k.summary,'') || coalesce(k.content,'')"
     " || coalesce(k.tags_json,'') || coalesce(k.knowledge_kind,''))"
@@ -927,6 +930,7 @@ __all__ = [
     "CORE_TABLE_SCHEMA",
     "Callable",
     "EVAL_MINED_CASE_CAP",
+    "RUNTIME_EVENT_CAP",
     "Entity",
     "EntityResolutionCandidate",
     "EntityType",

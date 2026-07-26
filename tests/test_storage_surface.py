@@ -68,8 +68,11 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 180
+EXPECTED_MEMBER_COUNT = 183
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "count_events": "(self) -> 'int'",
+    "list_events": "(self, *, event_type: 'str | None' = None, since: 'str | None' = None, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
+    "record_event": "(self, event_type: 'str', payload: 'dict[str, Any] | None' = None) -> 'str'",
     "_ensure_schema": "(self, conn: 'sqlite3.Connection') -> 'None'",
     "_execute_statements": "(conn: 'sqlite3.Connection', script: 'str') -> 'None'",
     "_is_sqlite_busy": "(exc: 'sqlite3.OperationalError') -> 'bool'",
