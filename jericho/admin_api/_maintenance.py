@@ -1,0 +1,112 @@
+"""Admin API: audit log, backups and exports.
+
+Lifted verbatim out of the single 1965-line module: same paths, methods,
+signatures and bodies. The router carries no prefix — ``jericho.admin_api``
+owns ``/api/admin`` and the order these modules are included in.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from jericho.admin_api._deps import (
+    Any,
+    FileResponse,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    _audit,
+    _request_json,
+    _require,
+    _safe_runtime_file,
+    _services,
+)
+
+router = APIRouter()
+
+
+@router.get("/audit")
+async def audit_log(
+    request: Request,
+    user_id: str | None = None,
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    _require(request, "admin.audit.read")
+    items = _services(request).storage.list_audit_log(user_id, limit=limit, offset=offset)
+    # Reading the audit trail is itself an auditable event (who inspected
+    # whose history); a plain INSERT, so there is no recursion.
+    _audit(
+        request,
+        "admin.audit.read",
+        "audit_log",
+        user_id or "*",
+        after={"limit": limit, "offset": offset, "returned": len(items)},
+    )
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/backups")
+async def list_backups(request: Request) -> dict[str, Any]:
+    _require(request, "admin.backup.manage")
+    items = _services(request).storage.list_backups()
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/backups")
+async def create_backup(request: Request) -> dict[str, Any]:
+    _require(request, "admin.backup.manage")
+    body = await _request_json(request)
+    label = str(body.get("label") or "manual")[:80]
+    result = _services(request).storage.create_backup(label=label)
+    _audit(request, "admin.backup.create", "backup", result.get("database"), after=result)
+    return {"backup": result}
+
+
+@router.post("/backups/{filename}/verify")
+async def verify_backup(filename: str, request: Request) -> dict[str, Any]:
+    _require(request, "admin.backup.manage")
+    try:
+        result = _services(request).storage.verify_backup(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Backup not found") from exc
+    _audit(request, "admin.backup.verify", "backup", filename, after=result)
+    return {"verification": result}
+
+
+@router.get("/backups/{filename}/download")
+async def download_backup(filename: str, request: Request):
+    _require(request, "admin.backup.manage")
+    path = _safe_runtime_file(
+        _services(request).settings.backups_dir,
+        str(_services(request).settings.backups_dir / Path(filename).name),
+    )
+    # A backup contains every tenant's data — the highest-value egress event.
+    _audit(request, "admin.backup.download", "backup", path.name)
+    return FileResponse(path, filename=path.name, media_type="application/vnd.sqlite3")
+
+
+@router.post("/exports")
+async def create_export(request: Request) -> dict[str, Any]:
+    _require(request, "admin.export")
+    body = await _request_json(request)
+    user_id = str(body.get("user_id") or request.state.actor.user_id)
+    try:
+        result = _services(request).storage.export_user(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _audit(request, "admin.export.create", "user", user_id, after=result)
+    return {"export": result}
+
+
+@router.get("/exports/{filename}/download")
+async def download_export(filename: str, request: Request):
+    _require(request, "admin.export")
+    path = _safe_runtime_file(
+        _services(request).settings.exports_dir,
+        str(_services(request).settings.exports_dir / Path(filename).name),
+    )
+    # Creation is audited separately; the download is the actual egress event.
+    _audit(request, "admin.export.download", "export", path.name)
+    return FileResponse(path, filename=path.name, media_type="application/json")
