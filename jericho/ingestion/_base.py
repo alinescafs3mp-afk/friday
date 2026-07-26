@@ -45,7 +45,9 @@ from jericho.whisper import WhisperUnavailable, looks_like_audio, transcribe_byt
 if TYPE_CHECKING:
     from jericho.agent_runtime.llm import LLMRouter
     from jericho.knowledge_graph import KnowledgeGraph
-LOGGER = logging.getLogger(__name__)
+# Named for the package, not this module: `__name__` here is "jericho.ingestion._base", and
+# the split must not rename the logger operators already read in the logs.
+LOGGER = logging.getLogger("jericho.ingestion")
 _PROMOTION_POLICY_VERSION = "moderate-v6"
 PromotionAction = Literal["promote", "review", "transient"]
 IdempotencyConflictError = SourceReferenceConflictError

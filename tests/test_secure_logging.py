@@ -51,3 +51,21 @@ def test_environment_secret_detection_does_not_treat_limits_as_credentials(monke
     assert "real-api-token-value" in secrets
     assert "2048" not in secrets
     assert "1" not in secrets
+
+
+def test_split_packages_keep_their_logger_names() -> None:
+    """Splitting a module into a package silently renames its logger.
+
+    ``logging.getLogger(__name__)`` moved into ``_base.py`` starts emitting under
+    ``jericho.storage._base`` instead of ``jericho.storage``. Nothing here configures
+    loggers by name, so nothing breaks — but the name is what an operator greps for,
+    and three refactors changed it without anyone asking. These are named explicitly
+    for that reason; this test is what keeps the next split honest.
+    """
+    from jericho.ingestion import _base as ingestion_base
+    from jericho.storage import _base as storage_base
+    from jericho.telegram_bridge import _base as bridge_base
+
+    assert storage_base.LOGGER.name == "jericho.storage"
+    assert ingestion_base.LOGGER.name == "jericho.ingestion"
+    assert bridge_base.LOGGER.name == "jericho.telegram_bridge"

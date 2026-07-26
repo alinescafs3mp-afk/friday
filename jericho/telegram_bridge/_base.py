@@ -27,7 +27,9 @@ from jericho.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
 from jericho.security import sign_bridge_request
 from jericho.telemetry.logging import install_secret_redaction
 
-LOGGER = logging.getLogger(__name__)
+# Named for the package, not this module: `__name__` here is "jericho.telegram_bridge._base", and
+# the split must not rename the logger operators already read in the logs.
+LOGGER = logging.getLogger("jericho.telegram_bridge")
 API_BASE = "https://api.telegram.org"
 POLL_TIMEOUT = 30
 BACKOFF_MAX = 60.0

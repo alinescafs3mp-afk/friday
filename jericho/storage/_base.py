@@ -53,7 +53,9 @@ from jericho.storage.models import (
     utc_now,
 )
 
-LOGGER = logging.getLogger(__name__)
+# Named for the package, not this module: `__name__` here is "jericho.storage._base", and
+# the split must not rename the logger operators already read in the logs.
+LOGGER = logging.getLogger("jericho.storage")
 SCHEMA_VERSION = 16
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
