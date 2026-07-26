@@ -650,6 +650,7 @@ def _run_telegram_bridge() -> int:
         inbox_db_path=str(settings.state_dir / "telegram-inbox.sqlite3"),
         max_document_bytes=settings.max_upload_bytes,
         backend_timeout_sec=max(30.0, settings.llm_timeout_sec + 30.0),
+        telegram_proxy=settings.telegram_proxy,
         # Outbound delivery polls faster than the reminder scan so a queued
         # message reaches the user promptly rather than on the next scan.
     )

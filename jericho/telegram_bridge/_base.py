@@ -66,6 +66,8 @@ class TelegramConfig:
     max_document_bytes: int = 50 * 1024 * 1024
     backend_timeout_sec: float = 300.0
     outbound_poll_interval_sec: float = 15.0
+    # Proxy for api.telegram.org only; the backend is always reached directly.
+    telegram_proxy: str = ""
 
     def validate(self) -> None:
         if not self.bot_token or ":" not in self.bot_token:
@@ -74,6 +76,10 @@ class TelegramConfig:
             raise ValueError("Telegram bridge secret must contain at least 32 characters")
         if not self.backend_url.startswith(("http://", "https://")):
             raise ValueError("backend_url must use HTTP or HTTPS")
+        if self.telegram_proxy and not self.telegram_proxy.startswith(("http://", "https://")):
+            # SOCKS would need httpx's optional `socksio` extra, which Jericho does
+            # not depend on; a mixed proxy accepts HTTP CONNECT on the same port.
+            raise ValueError("telegram_proxy must be an http:// or https:// URL")
         if not self.allowed_chat_ids:
             # Deny-by-default: refuse to run an open bot. The effective allowlist
             # (allowlist plus owner chats) is supplied by the caller.
@@ -81,6 +87,25 @@ class TelegramConfig:
                 "No allowed Telegram chats configured; set "
                 "JERICHO_TELEGRAM_ALLOWED_CHAT_IDS or JERICHO_TELEGRAM_OWNER_CHAT_IDS"
             )
+
+
+def _redact_userinfo(url: str) -> str:
+    """Strip ``user:password@`` from a URL so it is safe to log."""
+    scheme, separator, rest = url.partition("://")
+    if not separator or "@" not in rest:
+        return url
+    _, _, host = rest.rpartition("@")
+    return f"{scheme}://***@{host}"
+
+
+def _proxy_password(url: str) -> str:
+    """The password inside a proxy URL, if any, for the log redactor."""
+    _, separator, rest = url.partition("://")
+    if not separator or "@" not in rest:
+        return ""
+    userinfo, _, _ = rest.rpartition("@")
+    _, has_password, password = userinfo.partition(":")
+    return password if has_password else ""
 
 
 class PermanentUpdateError(RuntimeError):
@@ -160,6 +185,8 @@ __all__ = [
     "TELEGRAM_TEXT_LIMIT",
     "TelegramConfig",
     "_SINGLE_MEDIA_FIELDS",
+    "_proxy_password",
+    "_redact_userinfo",
     "asyncio",
     "base64",
     "dataclass",

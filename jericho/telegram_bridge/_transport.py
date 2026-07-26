@@ -22,6 +22,8 @@ from jericho.telegram_bridge._base import (
     ProcessLease,
     RuntimeLeaseError,
     TelegramConfig,
+    _proxy_password,
+    _redact_userinfo,
     asyncio,
     httpx,
     install_secret_redaction,
@@ -50,7 +52,17 @@ class TransportMixin(BridgeShared):
         self._backend_url = config.backend_url.rstrip("/")
 
     async def run(self) -> None:
-        install_secret_redaction((self.config.bot_token, self.config.bridge_secret))
+        install_secret_redaction(
+            tuple(
+                secret
+                for secret in (
+                    self.config.bot_token,
+                    self.config.bridge_secret,
+                    _proxy_password(self.config.telegram_proxy),
+                )
+                if secret
+            )
+        )
         try:
             self._lease.acquire()
         except RuntimeLeaseError:
@@ -60,13 +72,27 @@ class TransportMixin(BridgeShared):
         timeout = httpx.Timeout(POLL_TIMEOUT + 10.0, connect=15.0)
         try:
             async with (
-                httpx.AsyncClient(timeout=timeout, trust_env=False) as telegram,
+                # Only Telegram goes through the proxy. `trust_env` stays off on both
+                # clients: the proxy is a deliberate setting, not something a stray
+                # HTTPS_PROXY in the environment gets to impose — and the backend is
+                # loopback, which such a variable would happily misroute.
+                httpx.AsyncClient(
+                    timeout=timeout,
+                    trust_env=False,
+                    proxy=self.config.telegram_proxy or None,
+                ) as telegram,
                 httpx.AsyncClient(
                     timeout=httpx.Timeout(self.config.backend_timeout_sec, connect=15.0),
                     trust_env=False,
                 ) as backend,
             ):
-                LOGGER.info("Telegram bridge started at offset %d", self._offset)
+                LOGGER.info(
+                    "Telegram bridge started at offset %d%s",
+                    self._offset,
+                    f" via proxy {_redact_userinfo(self.config.telegram_proxy)}"
+                    if self.config.telegram_proxy
+                    else "",
+                )
                 await self._register_commands(telegram)
                 # Inbound polling and outbound push run concurrently; a crash in
                 # one loop must not take down the other, so each supervises itself.

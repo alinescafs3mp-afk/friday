@@ -312,6 +312,12 @@ class JerichoSettings:
     telegram_global_rate_limit_per_minute: int
     telegram_allowed_chat_ids: list[int]
     telegram_owner_chat_ids: list[int]
+    # Proxy for reaching api.telegram.org, e.g. "http://127.0.0.1:10808". Applies to
+    # Telegram traffic only — the bridge always talks to its own backend directly.
+    # Set this where Telegram is only reachable through a tunnel: it makes the bridge
+    # ask for the tunnel explicitly instead of depending on one that rewrites the
+    # host's routing table, which is both fragile and far harder to undo.
+    telegram_proxy: str
     # Whether a NEW account auto-created for someone writing in an allowlisted GROUP
     # chat gets the full 'user' preset. Off by default: such an account would be able
     # to spend the owner's LLM budget, reach the web through this instance, upload
@@ -587,6 +593,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ),
         telegram_allowed_chat_ids=_int_list_env("JERICHO_TELEGRAM_ALLOWED_CHAT_IDS"),
         telegram_owner_chat_ids=_int_list_env("JERICHO_TELEGRAM_OWNER_CHAT_IDS"),
+        telegram_proxy=os.environ.get("JERICHO_TELEGRAM_PROXY", "").strip(),
         telegram_group_members_full_access=_bool_env("JERICHO_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS", False),
         telegram_signature_max_age_sec=_int_env("JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC", 90, minimum=10),
         autonomy_enabled=_bool_env("JERICHO_AUTONOMY_ENABLED", True),
@@ -718,6 +725,20 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
             errors.append(message)
         else:
             warnings.append(message)
+    if settings.telegram_proxy:
+        scheme = settings.telegram_proxy.split("://", 1)[0].lower()
+        if scheme in {"socks4", "socks5", "socks5h"}:
+            # httpx needs the optional `socksio` package for SOCKS and raises a bare
+            # ImportError deep inside the first request otherwise. Jericho ships no
+            # mandatory dependency for this, and the usual local proxy accepts HTTP
+            # CONNECT on the same port, so say that here instead of failing later.
+            errors.append(
+                f"JERICHO_TELEGRAM_PROXY uses {scheme}://, which needs the optional "
+                "'socksio' package; use http:// instead (a mixed SOCKS/HTTP proxy "
+                "accepts HTTP CONNECT on the same port)"
+            )
+        elif scheme not in {"http", "https"}:
+            errors.append("JERICHO_TELEGRAM_PROXY must be an http:// or https:// URL")
     if production and settings.code_execution_enabled:
         warnings.append("Host-side code execution is enabled; use a separate sandbox container")
     return errors + [f"warning: {item}" for item in warnings]

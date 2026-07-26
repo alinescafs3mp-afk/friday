@@ -20,8 +20,12 @@ the split rather than pinning the layout that exists today.
 from __future__ import annotations
 
 import ast
+import asyncio
+import contextlib
 import inspect
 import pathlib
+
+import pytest
 
 from jericho.telegram_bridge import BOT_COMMANDS, TelegramBridge, _UpdateInbox
 
@@ -269,3 +273,71 @@ EXPECTED_INBOX: dict[str, str] = {
     "stats": "(self) -> 'dict[str, int]'",
     "store": "(self, update: 'dict[str, Any]') -> 'bool'",
 }
+
+
+# --- reaching Telegram through a proxy ------------------------------------
+
+
+def test_proxy_applies_to_telegram_only(monkeypatch) -> None:
+    """The tunnel is for api.telegram.org; the backend is loopback and must stay direct.
+
+    Routing the backend through a proxy would send signed, authenticated requests to
+    the tunnel's exit node instead of to 127.0.0.1 — a credential leak, not just a
+    misconfiguration. So the two clients are asserted separately.
+    """
+    import httpx
+
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    seen: list[str | None] = []
+    real_init = httpx.AsyncClient.__init__
+
+    def spy(self, *args, **kwargs):
+        seen.append(kwargs.get("proxy"))
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy)
+    config = TelegramConfig(
+        bot_token="1:aaa",
+        bridge_secret="x" * 32,
+        allowed_chat_ids=[1],
+        telegram_proxy="http://127.0.0.1:10808",
+    )
+    bridge = TelegramBridge(config)
+    seen.clear()
+
+    async def boom(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bridge, "_register_commands", boom)
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(bridge.run())
+
+    assert seen == ["http://127.0.0.1:10808", None], (
+        f"expected the Telegram client proxied and the backend client direct, got {seen}"
+    )
+
+
+def test_proxy_credentials_are_kept_out_of_the_log() -> None:
+    from jericho.telegram_bridge._base import _proxy_password, _redact_userinfo
+
+    assert _redact_userinfo("http://user:s3cret@127.0.0.1:10808") == "http://***@127.0.0.1:10808"
+    assert _proxy_password("http://user:s3cret@127.0.0.1:10808") == "s3cret"
+    # No credentials, nothing to hide, nothing to strip.
+    assert _redact_userinfo("http://127.0.0.1:10808") == "http://127.0.0.1:10808"
+    assert _proxy_password("http://127.0.0.1:10808") == ""
+
+
+def test_socks_proxy_is_refused_with_a_usable_message() -> None:
+    """httpx needs the optional `socksio` package for SOCKS and would otherwise fail
+    with a bare ImportError inside the first poll, long after startup looked fine."""
+    from jericho.telegram_bridge import TelegramConfig
+
+    config = TelegramConfig(
+        bot_token="1:aaa",
+        bridge_secret="x" * 32,
+        allowed_chat_ids=[1],
+        telegram_proxy="socks5://127.0.0.1:10808",
+    )
+    with pytest.raises(ValueError, match="http://"):
+        config.validate()
