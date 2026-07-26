@@ -28,6 +28,7 @@ from jericho.retrieval import (
     unpack_vector,
 )
 from jericho.storage.models import InboxStatus
+from jericho.workers._blocking import current_task, in_flight, run_blocking
 
 LOGGER = logging.getLogger(__name__)
 
@@ -153,6 +154,26 @@ class WorkerSupervisor:
                 error_message=None,
                 consecutive_failures=int(previous.get("consecutive_failures") or 0),
             )
+            # A previous run that timed out may still have a thread writing. Starting
+            # now would put two of the same task on one database; skipping costs a
+            # cycle and says so, which is the honest outcome.
+            stranded = in_flight(task.name)
+            if stranded:
+                LOGGER.warning(
+                    "Worker %s skipped: %d blocking call(s) from a previous run still executing",
+                    task.name,
+                    stranded,
+                )
+                self._publish(
+                    task,
+                    status="skipped",
+                    last_finished_at=datetime.now(UTC).isoformat(timespec="seconds"),
+                    error_type=None,
+                    error_message="previous run still has blocking work in flight",
+                )
+                await asyncio.sleep(max(1.0, task.interval_sec))
+                continue
+            token = current_task.set(task.name)
             try:
                 async with asyncio.timeout(task.timeout_sec):
                     await task.func()
@@ -196,6 +217,8 @@ class WorkerSupervisor:
                     error_message=None,
                     consecutive_failures=0,
                 )
+            finally:
+                current_task.reset(token)
             elapsed = time.monotonic() - started
             delay = max(1.0, task.interval_sec - elapsed)
             self._publish(
@@ -428,7 +451,7 @@ class WorkersManager:
         # Prune before measuring: a case whose expected objects were all deleted can
         # never be satisfied and would depress recall for good. Mined rows only —
         # a hand-curated case is never touched, however stale it looks.
-        hygiene = await asyncio.to_thread(self.storage.prune_eval_cases, user_id)
+        hygiene = await run_blocking(self.storage.prune_eval_cases, user_id)
         report = await run_eval(self.storage, self.embeddings, self.settings, user_id, k=self.settings.eval_k)
         if isinstance(report.get("gold_set"), dict):
             report["gold_set"]["pruned"] = hygiene
@@ -439,14 +462,14 @@ class WorkersManager:
         # tick past the supervisor's timeout — asyncio.to_thread is not interruptible,
         # and an over-long scan would show up as a recurring `timeout` in worker health
         # while quietly still doing the work.
-        tenants = max(1, len(await asyncio.to_thread(self.storage.list_user_ids, active_only=True)))
+        tenants = max(1, len(await run_blocking(self.storage.list_user_ids, active_only=True)))
         share = max(1.0, float(self.settings.dedup_scan_max_seconds) / tenants)
         await self._for_each_user(functools.partial(self._knowledge_dedup, max_seconds=share))
 
     async def _knowledge_dedup(self, user_id: str, *, max_seconds: float | None = None) -> None:
         from jericho.dedup import detect_near_duplicates
 
-        result = await asyncio.to_thread(
+        result = await run_blocking(
             functools.partial(detect_near_duplicates, max_seconds=max_seconds),
             self.storage,
             self.settings,
@@ -475,7 +498,7 @@ class WorkersManager:
     async def _knowledge_quality_scan(self, user_id: str) -> None:
         """Refresh a read-only quality report; never mutate or hide knowledge automatically."""
 
-        candidates = await asyncio.to_thread(
+        candidates = await run_blocking(
             self.ingestion.scan_legacy_quality,
             user_id,
             limit=250,
@@ -573,7 +596,7 @@ class WorkersManager:
         await self._for_each_user(self._lifecycle_management)
 
     async def _lifecycle_management(self, user_id: str) -> None:
-        candidates = await asyncio.to_thread(
+        candidates = await run_blocking(
             self.storage.list_lifecycle_candidates,
             user_id,
             days_threshold=90,
@@ -633,7 +656,7 @@ class WorkersManager:
             previous = None
         if previous and now - previous < timedelta(hours=24):
             return
-        result = await asyncio.to_thread(self.storage.create_backup, label="scheduled")
+        result = await run_blocking(self.storage.create_backup, label="scheduled")
         self.storage.kv_set("workers:last_backup_at", now.isoformat(timespec="seconds"))
         self.storage.kv_set("workers:last_backup", json.dumps(result, ensure_ascii=False))
         LOGGER.info("Scheduled database backup created: %s", result.get("database"))
@@ -653,7 +676,7 @@ class WorkersManager:
         # configured (encrypted when a key file is set).
         from jericho.backup_mirror import mirror_backups
 
-        mirror = await asyncio.to_thread(mirror_backups, self.settings)
+        mirror = await run_blocking(mirror_backups, self.settings)
         if mirror.get("enabled"):
             self.storage.kv_set("workers:last_backup_mirror", json.dumps(mirror, ensure_ascii=False))
 
@@ -670,7 +693,7 @@ class WorkersManager:
         model = self.settings.embeddings_model
         batch = self.settings.embeddings_index_batch
         scheme = chunk_scheme(self.settings)
-        rows = await asyncio.to_thread(
+        rows = await run_blocking(
             self.storage.list_knowledge_missing_embedding,
             model,
             limit=batch,
@@ -703,7 +726,7 @@ class WorkersManager:
             doc_text = knowledge_search_text(row)
             plans.append({"row": row, "doc_text": doc_text, "units": units})
 
-        reusable = await asyncio.to_thread(
+        reusable = await run_blocking(
             self.storage.get_reusable_vectors, [str(plan["row"]["id"]) for plan in plans], model
         )
         groups: list[list[dict[str, Any]]] = []
@@ -788,7 +811,7 @@ class WorkersManager:
                         sorted(cached_dims),
                         sorted(dims),
                     )
-                    await asyncio.to_thread(self.storage.delete_knowledge_embedding, str(row["id"]))
+                    await run_blocking(self.storage.delete_knowledge_embedding, str(row["id"]))
                 continue
             dim = (dims | cached_dims).pop()
             source_version = int(row.get("version") or 1)
@@ -822,14 +845,14 @@ class WorkersManager:
         if items:
             # Persisted per group: the whole tick runs under a timeout, so a single
             # write at the very end would lose every group each time it expires.
-            await asyncio.to_thread(self.storage.upsert_knowledge_vectors, items, chunks)
+            await run_blocking(self.storage.upsert_knowledge_vectors, items, chunks)
         return bool(items)
 
     async def _database_optimize(self) -> None:
-        await asyncio.to_thread(self.storage.optimize)
+        await run_blocking(self.storage.optimize)
         # Drop expired single-use bridge nonces so the replay cache stays bounded.
         retention = max(60, self.settings.telegram_signature_max_age_sec * 4)
-        await asyncio.to_thread(self.storage.prune_bridge_nonces, max_age_sec=retention)
+        await run_blocking(self.storage.prune_bridge_nonces, max_age_sec=retention)
 
     async def start(self) -> None:
         if not self.settings.workers_enabled or self._run_task is not None:
