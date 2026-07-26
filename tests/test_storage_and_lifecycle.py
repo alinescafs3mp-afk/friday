@@ -343,8 +343,10 @@ def test_restore_refuses_symlink_database_path_before_safety_backup(storage):
 
 
 def test_restore_detects_backup_change_during_staging_and_rolls_back(storage, monkeypatch):
-    from jericho import storage as storage_module
+    # Patched where the name is LOOKED UP: restore lives in the maintenance mixin and
+    # binds the helper at import time, so patching jericho.storage would not reach it.
     from jericho.diagnostics.runtime_lease import ProcessLease
+    from jericho.storage import _maintenance as storage_module
 
     storage.ensure_user("stable-before-staging-race")
     created = storage.create_backup(label="staging-race")
