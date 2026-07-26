@@ -234,7 +234,7 @@ def _status(args: argparse.Namespace) -> int:
     from jericho.diagnostics import collect_diagnostics
 
     settings = load_settings()
-    result = collect_diagnostics(settings, check_llm_port=args.check_llm)
+    result = collect_diagnostics(settings, check_llm_port=args.check_llm, check_secrets=True)
     if args.json:
         _json_print({"version": __version__, **result})
     else:
@@ -313,7 +313,7 @@ def _doctor(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     ensure_runtime_dirs(settings)
-    result = collect_diagnostics(settings, check_llm_port=args.check_llm)
+    result = collect_diagnostics(settings, check_llm_port=args.check_llm, check_secrets=True)
     _json_print(result)
     return 0 if result.get("state") in {"ready", "attention"} else 1
 

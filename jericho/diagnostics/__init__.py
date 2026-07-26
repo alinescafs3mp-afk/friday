@@ -547,11 +547,47 @@ def _add_inbox_backlog_action(add_action: Any, database: dict[str, Any]) -> None
     )
 
 
+def _add_secret_hygiene_actions(add_action: Any, settings: JerichoSettings) -> None:
+    """Report this instance's own credentials found outside the files meant to hold them.
+
+    Not a heuristic: the comparison is against the exact values this process was started
+    with, so a hit means that file contains this bot token, not something shaped like
+    one. Paths are reported; values never are.
+    """
+    from jericho.secret_hygiene import scan
+
+    protected = [path for path in (settings.backup_encryption_key_file,) if path]
+    roots = [settings.home, Path.home()]
+    try:
+        report = scan(roots, protected=protected)
+    except Exception:  # a hygiene check must never be why diagnostics fail
+        return
+
+    for path, mode in report.loose_permissions:
+        add_action(
+            "secret_file_permissions",
+            "warning",
+            "Файл с секретами доступен другим пользователям",
+            f"{path} имеет права {mode:o}. Ожидается 600.",
+            f"chmod 600 {path}",
+        )
+    for exposure in report.exposures:
+        add_action(
+            "secret_exposed_in_file",
+            "error",
+            "Секрет Jericho лежит в постороннем файле",
+            f"{exposure.path} содержит значение {exposure.secret_name}"
+            + (" и доступен на чтение другим пользователям" if exposure.world_readable else "")
+            + ". Удалите файл и перевыпустите этот секрет.",
+        )
+
+
 def collect_diagnostics(
     settings: JerichoSettings,
     storage: JerichoStorage | None = None,
     *,
     check_llm_port: bool = False,
+    check_secrets: bool = False,
 ) -> dict[str, Any]:
     """Collect safe diagnostics without exposing secrets or document contents."""
     configuration = validate_settings(settings, production=not settings.is_loopback_bind)
@@ -600,6 +636,8 @@ def collect_diagnostics(
             issue.removeprefix("warning:").strip(),
             "jericho doctor",
         )
+    if check_secrets:
+        _add_secret_hygiene_actions(add_action, settings)
     _add_inbox_backlog_action(add_action, database)
     database_state = str(database.get("state") or "")
     if database_state == "not_initialized":

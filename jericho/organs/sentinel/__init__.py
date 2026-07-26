@@ -57,7 +57,12 @@ async def scan_health(ctx: ServiceContext) -> None:
         # No delivery target configured — do not even run diagnostics.
         return
     try:
-        report = collect_diagnostics(settings, ctx.storage, check_llm_port=bool(settings.sentinel_check_llm))
+        report = collect_diagnostics(
+            settings,
+            ctx.storage,
+            check_llm_port=bool(settings.sentinel_check_llm),
+            check_secrets=True,
+        )
     except Exception:
         # Self-monitoring must never crash the worker loop it is meant to watch.
         LOGGER.exception("sentinel: diagnostics collection failed")
