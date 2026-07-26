@@ -120,7 +120,7 @@ def _fake_transcribe(content, **kwargs):
 
 @pytest.mark.asyncio
 async def test_voice_note_transcribes_inbox_first_then_confirms(settings, storage, monkeypatch):
-    monkeypatch.setattr("jericho.ingestion.transcribe_bytes", _fake_transcribe)
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
     settings = dataclasses.replace(settings, whisper_enabled=True)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -167,7 +167,7 @@ async def test_voice_note_untouched_when_whisper_disabled(settings, storage, mon
         calls.append(True)
         return _fake_transcribe(content, **kwargs)
 
-    monkeypatch.setattr("jericho.ingestion.transcribe_bytes", _spy)
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _spy)
     settings = dataclasses.replace(settings, whisper_enabled=False)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -200,7 +200,7 @@ async def test_empty_transcript_falls_back_to_unextractable(settings, storage, m
             model="small",
         )
 
-    monkeypatch.setattr("jericho.ingestion.transcribe_bytes", _silent)
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _silent)
     settings = dataclasses.replace(settings, whisper_enabled=True)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -227,7 +227,7 @@ async def test_long_audio_skipped_by_duration_guard(settings, storage, monkeypat
         calls.append(True)
         return _fake_transcribe(content, **kwargs)
 
-    monkeypatch.setattr("jericho.ingestion.transcribe_bytes", _spy)
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _spy)
     settings = dataclasses.replace(settings, whisper_enabled=True, whisper_max_audio_sec=60.0)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
