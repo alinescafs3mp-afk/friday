@@ -159,6 +159,34 @@ DOCUMENTS: list[tuple[str, str, str, str]] = [
         "есть Manager или Helper — скорее всего, ответственность не выделена.",
         "Проекты",
     ),
+    (
+        "grafana-latency",
+        "Grafana: checkout latency",
+        "Dashboard checkout p99 latency поднялся до 2.4s после релиза. Scrape interval 15s, "
+        "retention 30d. Alert fires above 1.5s for five minutes.",
+        "Работа",
+    ),
+    (
+        "ci-flaky",
+        "Flaky tests in CI",
+        "Pipeline fails intermittently on the integration stage. Retry budget exhausted. "
+        "Root cause: shared fixture teardown race between parallel workers.",
+        "Работа",
+    ),
+    (
+        "s3-lifecycle",
+        "S3 lifecycle policy",
+        "Objects transition to Glacier after 90 days and expire after 365. Versioning enabled, "
+        "noncurrent versions expire after 30 days.",
+        "Работа",
+    ),
+    (
+        "oauth-refresh",
+        "OAuth refresh token rotation",
+        "Access token TTL 15 minutes, refresh rotates on every use. Reuse detection revokes "
+        "the whole token family and forces re-authentication.",
+        "Работа",
+    ),
 ]
 
 # (query, expected document id, kind). Kind labels what the query is testing.
@@ -169,10 +197,19 @@ GOLD: list[tuple[str, str, str]] = [
     ("autovacuum_vacuum_scale_factor", "pg-vacuum", "literal"),
     ("maxmemory-policy allkeys-lru", "redis-evict", "literal"),
     ("Ирина Валентиновна стоматолог", "dentist", "literal"),
-    # CROSS-SCRIPT — Cyrillic question, Latin-only name in the document.
-    ("как чинить кластер после аварии", "k8s-restore", "cross-script"),
-    ("база данных раздулась что делать", "pg-vacuum", "cross-script"),
-    ("кэш теряет сессии под нагрузкой", "redis-evict", "cross-script"),
+    # CROSS-SCRIPT — the concept exists in the document ONLY as a Latin term, and the
+    # Russian question shares no token with it. Lexical search cannot bridge this by
+    # construction; an embedding can. These are the cases that measure what dense
+    # retrieval is worth, so they must not be satisfiable by word overlap.
+    ("почему оформление заказа стало медленным", "grafana-latency", "cross-script"),
+    ("тесты падают через раз без причины", "ci-flaky", "cross-script"),
+    ("как настроить удаление старых файлов в облаке", "s3-lifecycle", "cross-script"),
+    ("как устроено продление входа в систему", "oauth-refresh", "cross-script"),
+    # LEXICAL-OVERLAP — honest labelling of what these actually test: the question
+    # repeats words the document uses. Kept because a search engine must not fail them.
+    ("как чинить кластер после аварии", "k8s-restore", "lexical"),
+    ("база данных раздулась что делать", "pg-vacuum", "lexical"),
+    ("кэш теряет сессии под нагрузкой", "redis-evict", "lexical"),
     # PARAPHRASE — no shared content word with the document.
     ("когда менять летние покрышки", "car-service", "paraphrase"),
     ("что подарить маме летом", "mother-birthday", "paraphrase"),
@@ -181,11 +218,11 @@ GOLD: list[tuple[str, str, str]] = [
     ("кто присмотрит за цветами пока меня нет", "plants", "paraphrase"),
     # SYNONYM — the concept is named differently.
     ("зачем нужна ручная модерация входящего", "review-gate", "synonym"),
-    ("откуда взялся факт и кто его подтвердил", "thesis-idea", "synonym"),
+    ("можно ли доверять записи без источника", "thesis-idea", "synonym"),
     ("почему копия рядом с оригиналом бесполезна", "backup-rule", "synonym"),
     ("как называть классы правильно", "naming", "synonym"),
-    ("тесто не поднимается пахнет растворителем", "sourdough", "synonym"),
-    ("локальная сеть недоступна через туннель", "vpn-split", "cross-script"),
+    ("почему опара не растёт и даёт химический душок", "sourdough", "synonym"),
+    ("локальная сеть недоступна через туннель", "vpn-split", "lexical"),
     ("сколько ехать поездом до Татарстана", "kazan-trip", "paraphrase"),
 ]
 
@@ -202,6 +239,37 @@ FILLER_TOPICS = [
     "показания счётчиков",
     "маршрут пробежки",
 ]
+
+
+# Labels that promise the query gives lexical search nothing to latch onto. If one of
+# these shares content words with its document, the case is easy, the label lies, and
+# the score is inflated in exactly the category that is supposed to justify embeddings.
+SEMANTIC_KINDS = frozenset({"cross-script", "paraphrase", "synonym"})
+# One shared word can be incidental ("нет", "как"); two means the query is quoting.
+MAX_SHARED_TOKENS = 1
+
+
+def audit_gold_set() -> list[str]:
+    """Return a complaint per gold case whose label overstates its difficulty."""
+    from jericho.retrieval import _STOPWORDS, tokens_of
+
+    text_of = {doc_id: f"{title} {body}" for doc_id, title, body, _ in DOCUMENTS}
+    complaints: list[str] = []
+    for query, expected, kind in GOLD:
+        if kind not in SEMANTIC_KINDS:
+            continue
+        query_tokens = {
+            token.casefold()
+            for token in tokens_of(query)
+            if len(token) > 2 and token.casefold() not in _STOPWORDS
+        }
+        shared = query_tokens & {token.casefold() for token in tokens_of(text_of[expected])}
+        if len(shared) > MAX_SHARED_TOKENS:
+            complaints.append(
+                f"{kind}: {query!r} shares {sorted(shared)} with {expected!r} — "
+                "lexical search can answer it, so it does not test what the label claims"
+            )
+    return complaints
 
 
 @dataclass
@@ -353,6 +421,10 @@ def main() -> int:
         "filler": args.filler,
         "gold_cases": len(GOLD),
     }
+    complaints = audit_gold_set()
+    report["gold_set_audit"] = complaints or "ok"
+    for complaint in complaints:
+        print(f"GOLD SET WARNING: {complaint}", file=sys.stderr)
     try:
         report["ingest"] = asyncio.run(ingest(corpus, settings, storage, "bench"))
 
