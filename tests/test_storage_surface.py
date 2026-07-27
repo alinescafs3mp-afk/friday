@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 198
+EXPECTED_MEMBER_COUNT = 200
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -181,6 +181,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "kv_get": "(self, key: 'str') -> 'str | None'",
     "kv_list_prefix": "(self, prefix: 'str') -> 'list[dict[str, Any]]'",
     "kv_set": "(self, key: 'str', value: 'str') -> 'None'",
+    "known_vocabulary": "(self, terms: 'Sequence[str]') -> 'set[str]'",
     "link_knowledge_entity": "(self, user_id: 'str', knowledge_object_id: 'str', entity_id: 'str', *, status: 'str' = 'accepted', confidence: 'float' = 1.0, evidence: 'dict[str, Any] | None' = None, reviewed_by: 'str | None' = None) -> 'dict[str, Any]'",
     "list_api_tokens": "(self, user_id: 'str | None' = None, *, include_revoked: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_audit_log": "(self, user_id: 'str | None' = None, *, limit: 'int' = 100, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
@@ -265,6 +266,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "upsert_feedback_eval_case": "(self, user_id: 'str', query: 'str', expected_ids: 'Sequence[str]') -> 'bool'",
     "upsert_knowledge_embeddings": "(self, items: 'Sequence[dict[str, Any]]') -> 'int'",
     "upsert_knowledge_vectors": "(self, items: 'Sequence[dict[str, Any]]', chunks: 'Mapping[str, Sequence[dict[str, Any]]] | None' = None) -> 'dict[str, int]'",
+    "vocabulary_terms": "(self, prefixes: 'Sequence[str]', *, limit: 'int' = 400) -> 'list[str]'",
     "verify_backup": "(self, filename: 'str') -> 'dict[str, Any]'",
 }
 

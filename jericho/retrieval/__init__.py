@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from jericho.config import JerichoSettings
+from jericho.retrieval._morphology import stem
+from jericho.retrieval._repair import _MIN_MEANINGFUL_TERM, Repair, repair_query
 
 try:  # optional acceleration (jericho[vectors]); pure-Python fallback below
     import numpy as _np
@@ -151,12 +153,24 @@ _STOPWORDS = {
 
 
 def lexical_vector(text: str) -> dict[str, float]:
-    """L2-normalized word and character-trigram vector with identifier preservation."""
+    """L2-normalized word and character-trigram vector with identifier preservation.
+
+    The word feature is the STEM (see `_morphology`), so «Казань» and «в Казани»
+    are the same feature — Russian inflects, and a ranker that matches strings
+    counted them as different words. Both sides of every comparison run through
+    this one function, so the folding is symmetric by construction.
+
+    Trigrams stay on the surface form. They are the part that already tolerated
+    morphology approximately, and keeping them unstemmed preserves the signal a
+    stemmer cannot express — «список»/«списка» differ by a fleeting vowel that no
+    suffix rule reaches, and their trigrams still overlap almost completely.
+    """
     tokens = [token.casefold() for token in tokens_of(text)]
     tokens = [token for token in tokens if token not in _STOPWORDS]
     weights: dict[str, float] = {}
     for token in tokens:
-        weights[f"w:{token}"] = weights.get(f"w:{token}", 0.0) + 1.5
+        word = stem(token)
+        weights[f"w:{word}"] = weights.get(f"w:{word}", 0.0) + 1.5
         padded = f"#{token}#"
         for index in range(max(0, len(padded) - 2)):
             key = f"t:{padded[index : index + 3]}"
@@ -795,6 +809,52 @@ class HybridSearcher:
         # instance. Measurement only: a name can silence a weight, never raise it.
         self._ablate = frozenset(ablate or ())
 
+    def _repair_query(self, user_id: str, clean_query: str) -> Repair | None:
+        """Ask whether the question was typed the way it was meant.
+
+        Called only when the query as typed found nothing, so the common path
+        costs nothing at all. A candidate reading has to answer that same
+        question — the index is the arbiter, not a heuristic about how the text
+        looks.
+        """
+
+        def _substantive(text: str) -> list[str]:
+            return [
+                token.casefold()
+                for token in tokens_of(text)
+                if len(token) > 1 and token.casefold() not in _STOPWORDS
+            ]
+
+        # The caller has just established this, so it is not asked again.
+        answered: dict[str, bool] = {clean_query: False}
+
+        def _answerable(text: str) -> bool:
+            if text not in answered:
+                answered[text] = bool(self.storage.search_knowledge(user_id, text, limit=1))
+            return answered[text]
+
+        def _is_words(terms: Sequence[str]) -> bool:
+            """Is this reading made of words the corpus uses, not collisions?"""
+            long_enough = [term for term in terms if len(term) >= _MIN_MEANINGFUL_TERM]
+            if not long_enough:
+                return False
+            return bool(self.storage.known_vocabulary(long_enough))
+
+        try:
+            return repair_query(
+                clean_query,
+                substantive_terms=_substantive,
+                is_answerable=_answerable,
+                is_words=_is_words,
+                vocabulary=lambda prefixes: self.storage.vocabulary_terms(prefixes),
+            )
+        except Exception:
+            # A repair is a courtesy. If anything about it fails — an old database
+            # without the vocabulary view, say — the original question still gets
+            # searched for.
+            LOGGER.debug("Query repair failed for %r", clean_query, exc_info=True)
+            return None
+
     async def search(
         self,
         user_id: str,
@@ -811,6 +871,18 @@ class HybridSearcher:
             return {"query": query, "results": [], "count": 0, "entity_matches": []}
 
         fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=limit * 5)
+        # Only when the question as typed matched nothing at all. A stuck keyboard
+        # layout and a slipped finger produce strings the archive cannot match,
+        # and both are ordinary human typing rather than nonsense — without this
+        # they get the same empty answer as a pocket-dialled query, which is the
+        # one case where an empty answer is right. Gated on the search that was
+        # going to happen anyway, so a question that works pays nothing for this.
+        repair = None
+        if not fts_candidates:
+            repair = self._repair_query(user_id, clean_query)
+            if repair is not None:
+                clean_query = repair.query
+                fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=limit * 5)
         # Fuzzy matching needs a bounded recall pool even when FTS finds no exact token.
         pool_limit = min(self._pool_max, max(limit * 10, 100))
         recent_pool = self.storage.list_knowledge_objects(user_id, limit=pool_limit)
@@ -886,21 +958,27 @@ class HybridSearcher:
         graph_depth = self._graph_max_depth if _RELATIONAL_QUERY_RE.search(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
         if kg:
-            # NOT filtered by evidence, though it looks like it should be — see
-            # ARCHITECTURE «Графовый засев». `_lexical_rank` returns every candidate
-            # with no floor, so eight seeds always exist even for a query the archive
-            # cannot answer, and a graph score of 0.677 clears `insufficient_evidence`
-            # on its own. Measured: four nonsense queries return nothing without the
-            # graph and ten unrelated personal documents with it.
+            # A seed has to be a real match. `_lexical_rank` returns EVERY candidate
+            # with no floor, so the top eight exist even for a question the archive
+            # cannot answer — and a graph score of 0.677 clears `insufficient_evidence`
+            # on its own, so those eight turned "I have nothing on this" into ten
+            # unrelated personal documents. An empty answer is the only way the
+            # system can say it does not know something.
             #
-            # Filtering the seeds by `_LEXICAL_EVIDENCE_MIN` was written, measured and
-            # reverted: it breaks the case the graph exists for. A query «Казань»
-            # against a document saying «в Казани» scores 0.0597 lexically — under the
-            # floor — and reaches the answer only because it seeds the graph and its
-            # own entities vouch for it. That circularity is real and is doing useful
-            # work, because nothing else bridges Russian morphology here. Removing it
-            # without fixing lexical matching first makes retrieval worse, not honest.
-            seed_ids = list(dict.fromkeys([*fts_ranking[:8], *lexical_ranking[:8]]))
+            # This filter was written, measured and REVERTED once, because it broke
+            # the case the graph exists for: «Казань» against a document saying «в
+            # Казани» scored 0.0597 lexically — under the floor — and reached the
+            # answer only because it seeded the graph and its own entities vouched
+            # for it back. The circularity was standing in for morphology. Now that
+            # `lexical_vector` folds Russian inflection (see `_morphology`), that
+            # same pair scores far above the floor on its own merits, and the seeds
+            # can be honest. Order matters: applying this filter BEFORE stemming
+            # would have made retrieval worse, not more honest.
+            seed_ids = [
+                document_id
+                for document_id in dict.fromkeys([*fts_ranking[:8], *lexical_ranking[:8]])
+                if document_id in fts_ranking or lexical_scores.get(document_id, 0.0) >= _LEXICAL_EVIDENCE_MIN
+            ]
             try:
                 graph_context = kg.context_for_query(
                     user_id,
@@ -1227,6 +1305,14 @@ class HybridSearcher:
             "feedback": True,
             "graph": bool(kg),
         }
+        if repair is not None:
+            # Said out loud, always: the answer is about a different string than
+            # the one the user typed, and a reader who is not told that has no way
+            # to notice a repair that guessed wrong.
+            strategy["query_repaired"] = repair.kind
+            strategy["query_as_typed"] = query
+            if repair.detail:
+                strategy["query_repair_detail"] = repair.detail
         if chunk_provenance:
             # At least one object was carried by a passage rather than its whole-object
             # vector — the visible signature of passage-level recall doing work.

@@ -11,6 +11,7 @@ from jericho.storage._base import (
     CORE_INDEX_SCHEMA,
     CORE_TABLE_SCHEMA,
     FTS_SCHEMA,
+    FTS_VOCAB_SCHEMA,
     LOGGER,
     SCHEMA_VERSION,
     Any,
@@ -283,6 +284,13 @@ class CoreMixin(StorageShared):
             raw_count = conn.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0]
             if raw_count and (not raw_fts_preexisting or fts_unverified):
                 conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('rebuild')")
+            # The vocabulary view, in its own try: losing spelling repair on an
+            # SQLite without `fts5vocab` is a degradation, losing full-text search
+            # with it would be an outage.
+            try:
+                conn.executescript(FTS_VOCAB_SCHEMA)
+            except sqlite3.OperationalError as exc:
+                LOGGER.info("fts5vocab is unavailable; spelling repair disabled: %s", exc)
             # Last, and inside the same commit as the rebuilds it certifies.
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('fts_build', ?, ?)",

@@ -681,6 +681,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_outbound_dedup
 CORE_INDEX_MARKER = "CREATE INDEX IF NOT EXISTS idx_users_source_external"
 CORE_TABLE_SCHEMA, CORE_INDEX_SCHEMA_TAIL = CORE_SCHEMA.split(CORE_INDEX_MARKER, 1)
 CORE_INDEX_SCHEMA = CORE_INDEX_MARKER + CORE_INDEX_SCHEMA_TAIL
+# The vocabulary of the knowledge index, as a view over it: no second copy of any
+# text, no triggers, nothing to keep in sync. It answers "is this a word this
+# corpus uses?", which is what spelling repair must know before it dares replace
+# a term the user typed.
+#
+# Applied SEPARATELY from FTS_SCHEMA on purpose: it is an optional convenience,
+# and an SQLite build without the `fts5vocab` module must lose spelling repair
+# rather than lose full-text search along with it.
+FTS_VOCAB_SCHEMA = "CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vocab USING fts5vocab(knowledge_fts, 'row');"
 FTS_SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     content,

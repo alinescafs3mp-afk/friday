@@ -607,6 +607,68 @@ class KnowledgeMixin(StorageShared):
         )
         return updated is not None
 
+    def vocabulary_terms(self, prefixes: Sequence[str], *, limit: int = 400) -> list[str]:
+        """Indexed terms starting with any of ``prefixes`` — the corpus's own words.
+
+        Reads `knowledge_vocab`, a view over the FTS index (no second copy of the
+        text). Spelling repair needs to know what words this archive actually
+        uses before it dares replace one the user typed, and a range scan on a
+        two-letter prefix is the cheap half of that question.
+
+        Corpus-wide rather than per-tenant: `knowledge_vocab` shadows the index,
+        which has no user column. That is why a repaired query is only ACCEPTED
+        when it finds results for the asking user — a word borrowed from another
+        tenant's document simply returns nothing and the original query stands.
+        """
+        if not self._fts_available or not prefixes:
+            return []
+        terms: list[str] = []
+        remaining = max(1, int(limit))
+        for prefix in list(dict.fromkeys(prefixes))[:8]:
+            if not prefix:
+                continue
+            # `prefix + last-code-point` bounds the range without LIKE, so the
+            # scan uses the term index rather than reading every row.
+            upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+            try:
+                rows = self.execute(
+                    "SELECT term FROM knowledge_vocab WHERE term >= ? AND term < ? LIMIT ?",
+                    (prefix, upper, remaining),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []  # older database without the vocab view
+            terms.extend(str(row["term"]) for row in rows)
+            remaining = max(1, int(limit) - len(terms))
+            if len(terms) >= int(limit):
+                break
+        return terms
+
+    def known_vocabulary(self, terms: Sequence[str]) -> set[str]:
+        """Which of ``terms`` are words this corpus actually contains, verbatim.
+
+        The question `search_knowledge` cannot answer: it searches by PREFIX, so
+        a two-character fragment of noise matches any document containing a word
+        that starts with it. Measured — «хжщзхжщз ккккк» read on the other layout
+        becomes «[;op[;op rrrrr», whose token `op` prefix-matched a log file, and
+        that was enough to make a repair look justified. Exact membership is the
+        test that separates "this reading is words" from "this reading collides".
+        """
+        if not self._fts_available or not terms:
+            return set()
+        unique = [term for term in dict.fromkeys(terms) if term][:24]
+        if not unique:
+            return set()
+        placeholders = ",".join("?" for _ in unique)
+        try:
+            # The only interpolated fragment is a bounded sequence of ``?``.
+            rows = self.execute(
+                f"SELECT term FROM knowledge_vocab WHERE term IN ({placeholders})",  # nosec B608
+                tuple(unique),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return set()
+        return {str(row["term"]) for row in rows}
+
     def search_knowledge(self, user_id: str, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
         text = " ".join((query or "").split()).strip()
         if not text:
