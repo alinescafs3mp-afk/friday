@@ -650,7 +650,22 @@ class EmbeddingBackend:
         if not self.remote_enabled or not texts:
             return None
         try:
-            timeout = httpx.Timeout(min(self.settings.llm_timeout_sec, 60.0), connect=10.0)
+            # The operator's configured patience, exactly as the LLM client uses it.
+            # This used to be `min(llm_timeout_sec, 60.0)` — a hard ceiling that
+            # overrode the setting, and the only place in the codebase that did.
+            #
+            # Measured on the installed service: **768 characters/second**, not the
+            # 2800 the request-size cap was calibrated against. A full-size request
+            # (`_EMBED_REQUEST_MAX_CHARS`, 40000) therefore takes **51.6 seconds**
+            # against that 60-second ceiling — eight seconds of margin, which one
+            # busy moment eats. The whole batch then fails, and the objects in it
+            # keep no vector.
+            #
+            # Not hypothetical: the owner's log holds **83 failed embedding requests
+            # between 00:00 and 03:00** on one night, indexing a single large
+            # document, before it finally got through. Their `llm_timeout_sec` was
+            # 240 the entire time.
+            timeout = httpx.Timeout(self.settings.llm_timeout_sec, connect=10.0)
             key = self.settings.embeddings_api_key
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=headers) as client:

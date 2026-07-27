@@ -54,10 +54,17 @@ _DOC_VECTOR_MAX_CHARS = 20_000
 
 # How much TEXT one embeddings request may carry. Batches were bounded by input COUNT
 # alone, which says nothing about the work: 256 strings of eighteen characters and 65
-# passages of two thousand differ by two orders of magnitude. Measured on the live
-# service at ~2800 characters/second, so one object's 149000 characters needed ~53s
-# against a 60s request timeout and lost the race — leaving that object with no vector.
-# 40000 keeps a request near fifteen seconds at that rate, with room for a slower day.
+# passages of two thousand differ by two orders of magnitude.
+#
+# The rate this was calibrated against — ~2800 characters/second — was measured on a
+# quiet service. Re-measured under normal load it is **768 characters/second**, so a
+# full 40000-character request takes **51.6 seconds**, not fifteen. That is why the
+# request timeout now follows `llm_timeout_sec` instead of a hard 60 (see
+# `EmbeddingBackend.embed`): the cap and the timeout are two halves of one bound, and
+# they had drifted apart by a factor of three and a half.
+#
+# The cap stays where it is because it bounds MEMORY and latency per request, not
+# only the timeout race. Re-measure both together if the model changes.
 _EMBED_REQUEST_MAX_CHARS = 40_000
 
 
