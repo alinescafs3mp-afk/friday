@@ -318,6 +318,10 @@ _POOL_REQUEST_MAX_CHARS = 40_000
 # the list. Configurable because the number belongs to the model, not to Jericho.
 _DENSE_EVIDENCE_MIN_DEFAULT = 0.35
 _CHUNK_BOUNDARY_FLOOR = 0.5
+# Below this a lexical score is not weak evidence, it is none: the same number the
+# `insufficient_evidence` gate uses to say a document shares no vocabulary with the
+# query. Named because it is now consulted twice, and the two uses must not drift.
+_LEXICAL_EVIDENCE_MIN = 0.075
 _SENTENCE_END_RE = re.compile(r"[.!?…][»\"')\]]?\s")
 
 
@@ -800,6 +804,20 @@ class HybridSearcher:
         graph_depth = self._graph_max_depth if _RELATIONAL_QUERY_RE.search(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
         if kg:
+            # NOT filtered by evidence, though it looks like it should be — see
+            # ARCHITECTURE «Графовый засев». `_lexical_rank` returns every candidate
+            # with no floor, so eight seeds always exist even for a query the archive
+            # cannot answer, and a graph score of 0.677 clears `insufficient_evidence`
+            # on its own. Measured: four nonsense queries return nothing without the
+            # graph and ten unrelated personal documents with it.
+            #
+            # Filtering the seeds by `_LEXICAL_EVIDENCE_MIN` was written, measured and
+            # reverted: it breaks the case the graph exists for. A query «Казань»
+            # against a document saying «в Казани» scores 0.0597 lexically — under the
+            # floor — and reaches the answer only because it seeds the graph and its
+            # own entities vouch for it. That circularity is real and is doing useful
+            # work, because nothing else bridges Russian morphology here. Removing it
+            # without fixing lexical matching first makes retrieval worse, not honest.
             seed_ids = list(dict.fromkeys([*fts_ranking[:8], *lexical_ranking[:8]]))
             try:
                 graph_context = kg.context_for_query(
@@ -979,7 +997,7 @@ class HybridSearcher:
             # curated-field match can satisfy it without repeating body terms.
             if (
                 document_id not in fts_ranking
-                and lex < 0.075
+                and lex < _LEXICAL_EVIDENCE_MIN
                 and fld < 0.12
                 and emb < self._dense_evidence_min
                 and grp < graph_evidence_threshold
@@ -1191,9 +1209,41 @@ class HybridSearcher:
         return []
 
     @staticmethod
+    def _is_prose_not_an_identifier(token: str) -> bool:
+        """Reject the two shapes that look like codes and are ordinary language.
+
+        `identifier_mismatch` is the FIRST gate and it has no escape hatch: a token
+        it accepts must appear verbatim in a document or that document is dropped.
+        So anything it accepts by mistake empties the answer.
+
+        Measured on 342 real documents: adding « и т.д.» — three of the commonest
+        characters in written Russian — to a working query made `т.д` a required
+        identifier and took the correct document from 15 of 15 answers to **0 of
+        15**. Adding «примерно 12.5 процента» returned **nothing at all**, from any
+        query, because no document contains the literal `12.5`.
+
+        Two rules, both about shape rather than a list of words:
+
+        * every dot-separated part is a single character — `т.д`, `т.п`, `и.о`,
+          `e.g`, `i.e`. A real code has at least one part worth naming: `BRK.A`
+          keeps its `BRK`. (A guard for the single-part case was written and then
+          removed: mutation showed nothing reached it, because a lone character
+          carries no separator and never gets this far.)
+        * no letters at all — `12.5`, `9.00`, `4.2`. A number is a quantity, and
+          requiring it verbatim turns "about 12.5 percent" into a search for a
+          string.
+        """
+        parts = [part for part in token.replace("/", ".").replace("#", ".").split(".") if part]
+        if parts and all(len(part) == 1 for part in parts):
+            return True
+        return not any(character.isalpha() for character in token)
+
+    @staticmethod
     def _query_identifiers(query: str) -> set[str]:
         identifiers: set[str] = set()
         for token in tokens_of(query):
+            if HybridSearcher._is_prose_not_an_identifier(token):
+                continue
             has_discrete_separator = any(character in token for character in "._/#")
             has_hyphenated_code = "-" in token and any(character.isdigit() for character in token)
             has_alphanumeric_code = (
