@@ -346,8 +346,19 @@ class ExecutiveService:
             dep_states = [by_seq.get(dep) for dep in deps]
             if any(dep is None for dep in dep_states):
                 continue
-            if any(dep["status"] == TaskStatus.FAILED.value for dep in dep_states if dep):
-                # A failed prerequisite skips this task rather than running it blind.
+            if any(
+                dep["status"] in {TaskStatus.FAILED.value, TaskStatus.SKIPPED.value}
+                for dep in dep_states
+                if dep
+            ):
+                # A failed prerequisite skips this task rather than running it blind
+                # — and so does a SKIPPED one, or the cascade stops after a single
+                # level. A chain 1←2←3 whose first step failed left step 3 PENDING
+                # forever: not FAILED, not SKIPPED, so `_finalize` (which needs
+                # every task terminal) never ran and the mission stayed RUNNING
+                # with no completed_at, no audit row and nothing to notice it. A
+                # failing step is an ordinary path here — the model being briefly
+                # unavailable raises `MissionStepUnavailable`.
                 self.storage.update_mission_task_fields(
                     task["id"],
                     user_id,
@@ -411,6 +422,21 @@ class ExecutiveService:
                     task_id, user_id, status=TaskStatus.PENDING.value, started_at=""
                 )
             raise
+
+        # The user may have pressed stop while this step was waiting on the model.
+        # `cancel_mission` is two UPDATEs with nothing to interrupt an in-flight
+        # step, so without this re-read the returning step wrote its result into
+        # Inbox AFTER the stop, flipped its own SKIPPED back to DONE, and
+        # `_finalize` then flipped the mission's CANCELLED to COMPLETED. Stop has
+        # to mean stop; the work that was already done is simply dropped.
+        current = self.storage.get_mission(mission["id"], user_id)
+        if current and current["status"] in {item.value for item in MISSION_TERMINAL_STATUSES}:
+            LOGGER.info(
+                "Mission %s ended while step %s was running; discarding its result",
+                mission["id"],
+                task_id,
+            )
+            return
 
         inbox_id: str | None = None
         text = text.strip()[:_MAX_RESULT_CHARS]
@@ -562,6 +588,13 @@ class ExecutiveService:
     def _finalize(self, mission_id: str, user_id: str, tasks: list[dict[str, Any]]) -> None:
         terminal = {item.value for item in TASK_TERMINAL_STATUSES}
         done = sum(1 for task in tasks if task["status"] == TaskStatus.DONE.value)
+        # A mission the user cancelled is finished, and finishing it again would
+        # overwrite that decision with «completed».
+        mission = self.storage.get_mission(mission_id, user_id)
+        if mission and mission["status"] in {item.value for item in MISSION_TERMINAL_STATUSES}:
+            return
+        # A mission the user cancelled is finished, and finishing it again would
+        # overwrite that decision with «completed».
         if tasks and all(task["status"] in terminal for task in tasks):
             status = MissionStatus.COMPLETED if done else MissionStatus.FAILED
             self.storage.update_mission_fields(

@@ -480,6 +480,14 @@ class LLMRouter:
             # Truncated before the model ever reached its answer. Verified on this
             # endpoint: an entity-extraction prompt spends 2000 tokens and still never
             # closes the tag. Empty lets the caller's own fallback speak.
+            #
+            # An audit read this as "any long answer is erased" and proposed
+            # returning the partial text. Not taken, and the reason is the branch
+            # above: on a reasoning model a long ANSWER that hits the limit still
+            # carries its `</think>`, so it survives there with everything after
+            # the tag intact. Reaching this line means the monologue never closed,
+            # and there is no answer inside to rescue — only the model's notes,
+            # which the enrichment paths would parse as content.
             return ""
         markers = (
             "Here's a thinking process:",

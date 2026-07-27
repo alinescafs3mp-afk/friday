@@ -11,15 +11,22 @@ from __future__ import annotations
 import json
 import math
 import re
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 
 _MAX_CALLS_PER_TURN = 8
+# What fraction of a reply an embedded tool envelope must account for before the
+# reply counts as a control payload rather than prose that quotes one.
+_ENVELOPE_DOMINANCE = 0.6
 _MAX_ARGUMENT_BYTES = 64_000
 _MAX_TOOL_NAME_LENGTH = 128
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _FULL_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
-_CALL_MARKER_RE = re.compile(r"(?im)(?:^|\s)call\s*:\s*\S+")
+# A whole LINE that is nothing but «Call: something» — the shape a model emits
+# when it tries to invoke a tool in prose. Anchored end to end because the loose
+# version matched «Call: +7 495…» inside a sentence and threw the answer away.
+_CALL_MARKER_RE = re.compile(r"(?im)^\s*call\s*:\s*[A-Za-z_][A-Za-z0-9_.:-]*\s*$")
 _TOOL_JSON_KEY_RE = re.compile(
     r"""["'](?:tool|name|arguments|args|parameters|input|tool_calls|function_call|function)["']\s*:"""
 )
@@ -208,16 +215,68 @@ def is_tool_envelope(data: dict[str, Any]) -> bool:
     )
 
 
+def _embedded_objects(text: str, *, limit: int = 6) -> list[tuple[dict[str, Any], int]]:
+    """Parse JSON objects embedded in ``text`` as ``(object, length)`` pairs.
+
+    Scans for balanced brace spans and tries each one. Bounded on purpose: the
+    question is «is a control payload hiding in here», and a control payload is
+    near the start of whatever the model produced, not on page three.
+    """
+    found: list[tuple[dict[str, Any], int]] = []
+    index = 0
+    while len(found) < limit:
+        start = text.find("{", index)
+        if start < 0:
+            return found
+        depth = 0
+        end = -1
+        for position in range(start, min(len(text), start + 20_000)):
+            character = text[position]
+            if character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth == 0:
+                    end = position + 1
+                    break
+        if end < 0:
+            return found
+        with suppress(json.JSONDecodeError, ValueError):
+            decoded = _strict_json_loads(text[start:end])
+            if isinstance(decoded, dict):
+                found.append((decoded, end - start))
+        index = end
+    return found
+
+
 def contains_internal_tool_output(content: str) -> bool:
-    """Detect control-plane markers that must never be shown to the user."""
+    """Detect control-plane markers that must never be shown to the user.
+
+    Asks whether an actual tool ENVELOPE is present, not whether the text happens
+    to mention one of its key names. The old check fired on any `{` followed
+    anywhere by `"name":` — so an answer explaining a JSON config, a snippet from
+    the owner's own notes, or a reply quoting an API response was classified as a
+    protocol violation, discarded whole, and replaced with «Не удалось безопасно
+    завершить вызов инструмента». The user lost the answer and the rounds that
+    produced it, for writing about JSON.
+    """
 
     text = (content or "").strip()
     if not text:
         return False
-    if _CALL_MARKER_RE.search(text) or _TOOL_ENVELOPE_TEXT_RE.search(text):
+    if _CALL_MARKER_RE.search(text):
         return True
-    brace_at = text.find("{")
-    return brace_at >= 0 and bool(_TOOL_JSON_KEY_RE.search(text[brace_at:]))
+    # The payload has to BE the message, not appear in it. `{"name": …,
+    # "parameters": …}` is exactly the shape of a tool call AND exactly the shape
+    # of a configuration someone asks about, and nothing in the object itself
+    # tells the two apart — only how much of the reply it accounts for. A model
+    # that is calling a tool emits the envelope and nothing else; a model that is
+    # explaining one wraps it in sentences.
+    envelope_chars = max(
+        (length for candidate, length in _embedded_objects(text) if is_tool_envelope(candidate)),
+        default=0,
+    )
+    return envelope_chars >= len(text) * _ENVELOPE_DOMINANCE
 
 
 def classify_tool_turn(content: str) -> ToolTurn:

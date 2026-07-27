@@ -579,6 +579,14 @@ class WebSurfer:
         title = soup.title.get_text(" ", strip=True) if soup.title else ""
         for tag in soup.find_all(_DROP_TAGS):
             tag.decompose()
+        # Collect first, remove second. `decompose()` empties the tag AND every
+        # descendant, so removing while iterating a list taken beforehand meant
+        # the next descendant in that list had `attrs is None` and `tag.get(...)`
+        # raised AttributeError. Any element matching the drop list with a child
+        # inside it triggered that — which is every real page with a `<div
+        # class="sidebar">`. The exception surfaced as "the page could not be
+        # read", so a whole class of ordinary sites was simply unfetchable.
+        doomed = []
         for tag in soup.find_all(True):
             class_value = tag.get("class")
             if isinstance(class_value, list):
@@ -587,6 +595,10 @@ class WebSurfer:
                 classes = str(class_value or "")
             identifier = str(tag.get("id") or "")
             if _DROP_CLASS_RE.search(f"{classes} {identifier}"):
+                doomed.append(tag)
+        for tag in doomed:
+            # A nested match may already have gone with its parent.
+            if tag.parent is not None or tag is soup:
                 tag.decompose()
         root = soup.find("main") or soup.find("article") or soup.body or soup
         lines = [" ".join(line.split()) for line in root.get_text("\n").splitlines()]
