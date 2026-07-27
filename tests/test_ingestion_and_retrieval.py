@@ -308,10 +308,21 @@ async def test_a_weak_dense_score_alone_is_not_evidence(storage):
 
 
 def test_the_dense_evidence_floor_is_configurable(settings):
-    """The number belongs to the embedding model, so it cannot be baked in."""
+    """Число принадлежит модели И КОРПУСУ, поэтому оно настраивается.
+
+    Значение поднято 0.35 → 0.40 после замера на настоящем архиве: 0.35 калибровался
+    на синтетике, где чужие пары кончались на p90 = 0.3255, а на однородных русских
+    служебных документах чужие доходят до p90 = 0.427. Замер на 770 чужих и 122 своих
+    парах: 0.35 пропускает 28.8% чужих, 0.40 — 13.9% при сохранении 83.6% своих.
+
+    Тест держит не само число, а то, что настройка и константа не разъезжаются:
+    разъехавшись, они дадут одно поведение в коде и другое в документации.
+    """
     from jericho.retrieval import _DENSE_EVIDENCE_MIN_DEFAULT
 
-    assert settings.retrieval_dense_evidence_min == _DENSE_EVIDENCE_MIN_DEFAULT == 0.35
+    assert settings.retrieval_dense_evidence_min == _DENSE_EVIDENCE_MIN_DEFAULT
+    # Порог должен оставаться выше медианы шума, измеренной на настоящем корпусе.
+    assert _DENSE_EVIDENCE_MIN_DEFAULT > 0.308
 
 
 def test_a_snippet_never_starts_or_ends_mid_word():

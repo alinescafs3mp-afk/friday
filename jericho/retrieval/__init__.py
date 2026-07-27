@@ -316,7 +316,30 @@ _POOL_REQUEST_MAX_CHARS = 40_000
 # matters because this gate REMOVES results: erring low costs precision, erring
 # high costs recall, and only one of those is recoverable by reading further down
 # the list. Configurable because the number belongs to the model, not to Jericho.
-_DENSE_EVIDENCE_MIN_DEFAULT = 0.35
+#
+# 0.40, re-measured on a REAL corpus. The 0.35 above came from a synthetic stand
+# where unrelated pairs stopped at p90 = 0.3255. On 77 documents of the owner's own
+# working archive — long, formal, homogeneous Russian office text — unrelated pairs
+# reach p90 = 0.427 and max 0.568, because two formal Russian documents resemble each
+# other no matter what they are about. 770 unrelated pairs (10 questions on subjects
+# absent from the archive) against 122 matching pairs (questions built from a
+# document's own words):
+#
+#     threshold   unrelated passing   matching passing
+#       0.35            28.8%               97.5%
+#       0.40            13.9%               83.6%
+#       0.45             5.3%               69.7%
+#
+# 0.40 halves the false evidence and keeps five sixths of the real. Higher costs more
+# than it buys: dense recall exists precisely for the match that shares no words, and
+# this gate is one leg of a conjunction — a document with lexical or FTS evidence is
+# admitted regardless of it.
+#
+# The classes overlap (matching from 0.314, unrelated to 0.568), so no threshold
+# separates them and none is claimed to. And the number belongs to the CORPUS as much
+# as to the model: a homogeneous archive raises the floor. Re-measure rather than
+# inherit — the stand is described in ARCHITECTURE §7.
+_DENSE_EVIDENCE_MIN_DEFAULT = 0.40
 _CHUNK_BOUNDARY_FLOOR = 0.5
 # Below this a lexical score is not weak evidence, it is none: the same number the
 # `insufficient_evidence` gate uses to say a document shares no vocabulary with the
