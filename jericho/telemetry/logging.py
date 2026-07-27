@@ -29,6 +29,13 @@ _ASSIGNMENT = re.compile(
 _URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/@\s]+)@")
 _PRIVATE_KEY = re.compile(r"(?is)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----")
 _KNOWN_TOKEN = re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{12,})")
+# A Telegram bot token lives in the URL PATH — `api.telegram.org/bot<id>:<secret>/…`
+# — so it is not an assignment, not userinfo and not a `sk-` key: none of the
+# patterns above see it. Every httpx error quotes the failing URL, which is how
+# it reached the dead-letter queue and from there `jericho doctor`. Matched on
+# the shape (`/bot` + digits + colon + a long opaque tail) so it is removed even
+# when the process doing the logging has no idea what the token is.
+_TELEGRAM_BOT_TOKEN = re.compile(r"(?i)(/bot)(\d{5,}:[A-Za-z0-9_-]{20,})")
 
 
 def redact_text(value: Any) -> str:
@@ -39,6 +46,7 @@ def redact_text(value: Any) -> str:
     text = _AUTH_VALUE.sub(r"\1[redacted]", text)
     text = _PRIVATE_KEY.sub("[redacted:private-key]", text)
     text = _KNOWN_TOKEN.sub("[redacted:token]", text)
+    text = _TELEGRAM_BOT_TOKEN.sub(r"\1[redacted:token]", text)
     return _ASSIGNMENT.sub(r"\1\2[redacted]", text)
 
 

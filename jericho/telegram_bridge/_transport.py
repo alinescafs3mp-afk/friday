@@ -33,6 +33,30 @@ from jericho.telegram_bridge._base import (
     uuid,
 )
 from jericho.telegram_bridge._queue import _UpdateInbox
+from jericho.telemetry.logging import redact_text
+
+
+def _bridge_redactor(config: TelegramConfig):
+    """Remove this bridge's own credentials from a string, exactly and by shape.
+
+    Exact values first — the bot token is not a recognisable shape, it is a
+    specific string, and the URL it lives in (`.../bot<token>/sendMessage`) is
+    what httpx quotes back inside every error. Then the generic redaction, for
+    everything a message might carry that this bridge does not know about.
+    """
+    secrets = tuple(
+        value
+        for value in (config.bot_token, config.bridge_secret, _proxy_password(config.telegram_proxy))
+        if value and len(value) >= 8
+    )
+
+    def redact(value: object) -> str:
+        text = str(value)
+        for secret in secrets:
+            text = text.replace(secret, "[redacted]")
+        return redact_text(text)
+
+    return redact
 
 
 class TransportMixin(BridgeShared):
@@ -49,6 +73,13 @@ class TransportMixin(BridgeShared):
         self._offset = self._inbox.get_offset()
         self._api_url = f"{API_BASE}/bot{config.bot_token}"
         self._file_url = f"{API_BASE}/file/bot{config.bot_token}"
+        # The API URL CONTAINS the bot token, and httpx puts the URL in the text
+        # of every HTTPStatusError. Those strings were stored verbatim on the
+        # queue row and then surfaced by `jericho doctor`, `jericho status
+        # --json` and `GET /api/admin/diagnostics` — the credential printed by
+        # the health check. `install_secret_redaction` covers the LOG handlers;
+        # this covers what is written into the database.
+        self._redact = _bridge_redactor(config)
         self._backend_url = config.backend_url.rstrip("/")
         # Last known failing/healthy state per loop, for transition detection.
         self._loop_failing: dict[str, bool] = {}
@@ -366,7 +397,7 @@ class TransportMixin(BridgeShared):
                 self._inbox.remove(update_id)
             except PermanentUpdateError as exc:
                 LOGGER.warning("Quarantining invalid Telegram update %s: %s", update_id, exc)
-                self._inbox.mark_dead_letter(update_id, f"{type(exc).__name__}: {exc}")
+                self._inbox.mark_dead_letter(update_id, self._redact(f"{type(exc).__name__}: {exc}"))
                 # MediaTooLargeError already told the user; others left them in
                 # silence — a rejected message must never just vanish.
                 if not isinstance(exc, MediaTooLargeError):
@@ -377,7 +408,7 @@ class TransportMixin(BridgeShared):
                 LOGGER.warning("Telegram update %s deferred: %s", update_id, exc)
                 dead_lettered = self._inbox.mark_failure(
                     update_id,
-                    f"{type(exc).__name__}: {exc}",
+                    self._redact(f"{type(exc).__name__}: {exc}"),
                 )
                 if dead_lettered:
                     LOGGER.error("Telegram update %s exhausted its retry budget", update_id)

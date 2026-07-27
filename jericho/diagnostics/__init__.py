@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from jericho.config import JerichoSettings, validate_settings
 from jericho.diagnostics.runtime_lease import inspect_process_lease
 from jericho.telemetry import SystemTelemetry
+from jericho.telemetry.logging import redact_text
 
 if TYPE_CHECKING:
     from jericho.storage import JerichoStorage
@@ -500,7 +501,11 @@ def _bridge_queue_status(path: Path) -> dict[str, Any]:
         "pending": int(counts.get("pending", 0)),
         "dead_letter": dead_letter,
         "healthy": dead_letter == 0,
-        "last_dead_letter_error": (str(recent["last_error"])[:200] if recent else ""),
+        # Redacted a second time on the way out. The bridge already cleans what it
+        # writes, but this row can predate that fix or come from a queue file some
+        # other build produced, and diagnostics is exactly where a leaked
+        # credential gets copied into a bug report.
+        "last_dead_letter_error": (redact_text(str(recent["last_error"]))[:200] if recent else ""),
     }
 
 

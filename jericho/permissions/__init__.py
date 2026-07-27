@@ -253,6 +253,39 @@ class AuthorizationService:
         if not self.authorize(acting_actor, security_id).allowed:
             raise AuthorizationError(f"Cannot delegate capability not held by the actor: {security_id}")
 
+    def effective_capabilities(self, user_id: str) -> set[str]:
+        """Everything this account can do: its preset, plus and minus overrides."""
+        preset_key = self.get_user_preset(user_id)
+        granted = set(self._preset_grants(preset_key))
+        overrides = self.storage.get_permission_overrides(user_id) if self.storage else {}
+        for security_id, effect in overrides.items():
+            if effect == "allow":
+                granted.add(security_id)
+            elif effect == "deny":
+                granted.discard(security_id)
+        return granted
+
+    def require_delegable_account(self, acting_actor: ActorContext | None, target_user_id: str) -> None:
+        """The delegation invariant applied to an ACCOUNT rather than one capability.
+
+        `_require_delegable` guards `grant_permission`, `set_user_preset` and
+        custom presets, so an administrator cannot hand out authority they do not
+        hold. Minting an API token for another account hands out that account's
+        ENTIRE authority in one step and went through none of it: the only barrier
+        was `_protect_owner_target`, which recognises the legacy owner id and the
+        `owner` preset — and an ordinary account carrying one capability above the
+        administrator's own (say `code.run`, which no preset but `owner` grants)
+        is neither. Print a token, authenticate as them, keep the difference.
+        """
+        if acting_actor is None or acting_actor.is_owner:
+            return
+        for security_id in sorted(self.effective_capabilities(target_user_id)):
+            if not self.authorize(acting_actor, security_id).allowed:
+                raise AuthorizationError(
+                    "Cannot issue a token for an account holding a capability the actor "
+                    f"does not have: {security_id}"
+                )
+
     def set_user_preset(
         self,
         user_id: str,

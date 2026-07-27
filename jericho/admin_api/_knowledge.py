@@ -7,6 +7,8 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter
 
 from jericho.admin_api._deps import (
@@ -28,6 +30,33 @@ from jericho.admin_api._deps import (
 )
 
 router = APIRouter()
+
+
+def _knowledge_fingerprint(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Enough to identify a Knowledge Object in the journal, and no content.
+
+    `audit_log` is append-only at the DATABASE level — BEFORE UPDATE and BEFORE
+    DELETE triggers `RAISE(ABORT)` — so whatever a route writes here is permanent
+    beyond the reach of any later fix, purge or redaction. That makes the body of
+    a personal note the last thing that belongs in it. What an investigation
+    needs is which object, how big it was, and what it was called; what it does
+    not need is the note itself.
+    """
+    if not item:
+        return None
+    content = str(item.get("content") or "")
+    return {
+        "id": item.get("id"),
+        "user_id": item.get("user_id"),
+        "title": str(item.get("title") or "")[:120],
+        "knowledge_kind": item.get("knowledge_kind"),
+        "lifecycle_stage": item.get("lifecycle_stage"),
+        "version": item.get("version"),
+        "content_chars": len(content),
+        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
 
 
 @router.get("/knowledge")
@@ -260,7 +289,17 @@ async def update_knowledge(knowledge_id: str, request: Request) -> dict[str, Any
         after = state.storage.update_knowledge_fields(knowledge_id, target, **updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit(request, "admin.knowledge.update", "knowledge_object", knowledge_id, before=before, after=after)
+    # Fields the operator changed, not the document they live in — a note
+    # edited ten times would otherwise leave ten full copies in a table that
+    # cannot be cleaned.
+    _audit(
+        request,
+        "admin.knowledge.update",
+        "knowledge_object",
+        knowledge_id,
+        before=_knowledge_fingerprint(before),
+        after={"changed_fields": sorted(updates), **(_knowledge_fingerprint(after) or {})},
+    )
     return {"item": after}
 
 
@@ -272,7 +311,14 @@ async def delete_knowledge(knowledge_id: str, request: Request, user_id: str) ->
     if not before or not state.storage.soft_delete_knowledge_object(knowledge_id, user_id):
         raise HTTPException(status_code=404, detail="Knowledge object not found")
     after = state.storage.get_knowledge_object(knowledge_id, user_id)
-    _audit(request, "admin.knowledge.delete", "knowledge_object", knowledge_id, before=before, after=after)
+    _audit(
+        request,
+        "admin.knowledge.delete",
+        "knowledge_object",
+        knowledge_id,
+        before=_knowledge_fingerprint(before),
+        after=_knowledge_fingerprint(after),
+    )
     return {"status": "soft_deleted"}
 
 
@@ -304,5 +350,19 @@ async def purge_knowledge_endpoint(knowledge_id: str, request: Request, user_id:
     except ValueError as exc:
         # Not yet soft-deleted: purge requires the two-phase delete first.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    _audit(request, "admin.knowledge.purge", "knowledge_object", knowledge_id, before=before, after=report)
+    # A FINGERPRINT, never the body. `audit_log` carries BEFORE UPDATE and BEFORE
+    # DELETE triggers that `RAISE(ABORT)`, so anything written here cannot be
+    # removed afterwards by any code or any SQL. Auditing the whole row meant
+    # purge — the one operation whose entire purpose is to destroy every trace of
+    # a Knowledge Object — durably wrote that object's full text into the one
+    # table nothing can clean. The CLI path already did the right thing
+    # (`before_json=None`); this one did not.
+    _audit(
+        request,
+        "admin.knowledge.purge",
+        "knowledge_object",
+        knowledge_id,
+        before=_knowledge_fingerprint(before),
+        after=report,
+    )
     return {"status": "purged", "report": report}

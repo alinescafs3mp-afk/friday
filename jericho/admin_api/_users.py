@@ -96,8 +96,13 @@ async def create_token(request: Request) -> dict[str, Any]:
     state = _services(request)
     if not state.storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="User not found")
-    # A delegated administrator must not mint a token for an owner account.
+    # A delegated administrator must not mint a token for an owner account…
     _protect_owner_target(request, user_id)
+    # …nor for any account that can do something they cannot. A token IS that
+    # account's whole authority, so issuing one is the broadest delegation there
+    # is, and it was the only one not carrying the invariant every narrower
+    # delegation carries.
+    request.app.state.auth_service.require_delegable_account(actor, user_id)
     label = str(body.get("label") or "")[:200]
     ttl_seconds: int | None = None
     raw_ttl = body.get("ttl_seconds")

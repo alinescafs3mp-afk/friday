@@ -27,6 +27,46 @@ def _moderator(storage) -> ActorContext:
     return ActorContext("local:mod", "moderator", "test")
 
 
+def test_issuing_a_token_is_delegation_too(storage):
+    """A token IS the target account's whole authority, handed over in one step.
+
+    `_require_delegable` guards `grant_permission`, `set_user_preset` and custom
+    presets — the narrow delegations. Minting an API token for another account
+    was the broad one and carried no invariant at all: the only barrier
+    recognised the legacy owner id and the `owner` preset, so an ordinary account
+    holding one capability above the administrator's own (`code.run`, which no
+    preset but `owner` grants) slipped through. Print a token, authenticate as
+    them, keep the difference.
+    """
+    service = _service(storage)
+    moderator = _moderator(storage)
+    storage.ensure_user("local:tooled", preset_key="user")
+    service.grant_permission("local:tooled", "code.run")
+
+    with pytest.raises(AuthorizationError):
+        service.require_delegable_account(moderator, "local:tooled")
+
+    # An account strictly within the moderator's own authority is fine.
+    storage.ensure_user("local:plain", preset_key="guest")
+    service.require_delegable_account(moderator, "local:plain")
+
+    # And the owner delegates whatever they like — it is their authority.
+    service.require_delegable_account(None, "local:tooled")
+
+
+def test_effective_capabilities_follow_the_overrides(storage):
+    service = _service(storage)
+    storage.ensure_user("local:mixed", preset_key="guest")
+    baseline = service.effective_capabilities("local:mixed")
+
+    service.grant_permission("local:mixed", "code.run")
+    assert "code.run" in service.effective_capabilities("local:mixed")
+
+    denied = next(iter(baseline))
+    service.deny_permission("local:mixed", denied)
+    assert denied not in service.effective_capabilities("local:mixed")
+
+
 def test_grant_permission_enforces_delegation_at_service_level(storage):
     service = _service(storage)
     moderator = _moderator(storage)
