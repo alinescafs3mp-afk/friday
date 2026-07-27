@@ -91,11 +91,25 @@ async def test_loopback_guard_blocks_cross_origin_browser_mutations(settings):
         same_site = await client.post(DETECT, headers={"Sec-Fetch-Site": "same-origin"})
         assert same_site.status_code == 200
 
-        # Safe methods stay usable for local clients; cross-origin reads
-        # remain unreadable to pages via CORS, so no Origin check applies.
-        read = await client.get("/api/me")
+        # Reads are guarded on the same terms as writes. They used to be exempt,
+        # reasoning that "cross-origin reads stay blocked by CORS" — but CORS
+        # blocks reading the RESPONSE, not sending the request, and an
+        # owner-authority GET has consequences of its own: `?synthesize=true`
+        # runs the model over personal data, file routes emit bytes and write
+        # audit rows, and every such request spends the owner's rate budget.
+        read = await client.get("/api/me")  # non-browser client: still fine
         assert read.status_code == 200
         assert read.json()["actor"]["source"] == "loopback"
+
+        same_origin_read = await client.get("/api/me", headers={"Sec-Fetch-Site": "same-origin"})
+        assert same_origin_read.status_code == 200  # the admin UI's own fetches
+        typed_url = await client.get("/api/me", headers={"Sec-Fetch-Site": "none"})
+        assert typed_url.status_code == 200  # the owner typing the address
+
+        drive_by = await client.get("/api/me", headers={"Sec-Fetch-Site": "cross-site"})
+        assert drive_by.status_code == 403
+        foreign_origin = await client.get("/api/me", headers={"Origin": "https://evil.example"})
+        assert foreign_origin.status_code == 403
 
 
 @pytest.mark.asyncio

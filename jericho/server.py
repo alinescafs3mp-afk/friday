@@ -273,8 +273,6 @@ def _is_loopback(value: str) -> bool:
 
 # Hostnames a local browser legitimately uses to reach a loopback-bound API.
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
-# Methods that cannot mutate state; cross-origin reads stay blocked by CORS.
-_BROWSER_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def _request_hostname(value: str) -> str | None:
@@ -302,8 +300,21 @@ def _guard_loopback_browser_request(request: Request, settings: JerichoSettings)
     host = _request_hostname(request.headers.get("host", ""))
     if host not in _LOOPBACK_HOSTNAMES:
         raise AuthorizationError("Loopback authentication requires a loopback Host header; use an API token")
-    if request.method in _BROWSER_SAFE_METHODS:
-        return
+    # Reads are checked too. GET/HEAD used to return here, on the grounds that
+    # "cross-origin reads stay blocked by CORS" — but CORS blocks READING THE
+    # RESPONSE, not sending the request. With the credential-less loopback bypass
+    # enabled, any page the owner happens to open could fire owner-authority GETs
+    # at 127.0.0.1: `/api/profile?synthesize=true` and `/api/reflection?...` run
+    # the model over personal data, `/api/files/{id}` and the backup download
+    # emit bytes and write audit rows, and all of it silently spends the owner's
+    # own rate budget. The attacker not seeing the response does not make the
+    # request harmless.
+    #
+    # Legitimate callers are unaffected: the admin UI is same-origin (browsers
+    # send `Sec-Fetch-Site: same-origin`, and `Origin` when they send one at all
+    # points at the loopback host), a typed URL is `Sec-Fetch-Site: none`, and
+    # curl or the CLI send neither header. OPTIONS never reaches here — the
+    # middleware answers preflight before authentication.
     origin = request.headers.get("origin", "").strip()
     if origin:
         if origin in settings.cors_origins or _request_hostname(origin) in _LOOPBACK_HOSTNAMES:
@@ -720,13 +731,19 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 storage.close(final=True)
                 LOGGER.info("Jericho API stopped")
 
+    # The schema is behind a capability, so FastAPI's built-in (authenticated but
+    # ungated) routes are switched off and re-served below. Authentication alone
+    # was not enough: the guest preset is created automatically for anyone who
+    # writes in an allow-listed GROUP chat, and it could read the full inventory
+    # of routes, parameters and admin endpoints — a map of everything its own
+    # preset is forbidden to call.
     application = FastAPI(
         title="Jericho API",
         version=VERSION,
         lifespan=lifespan,
-        docs_url="/api/docs",
+        docs_url=None,
         redoc_url=None,
-        openapi_url="/api/openapi.json",
+        openapi_url=None,
     )
     application.state.settings = settings
     application.state.rate_limiter = SlidingWindowLimiter()
@@ -1298,6 +1315,18 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
     # the app has a stable route set; the registry is authoritative.
     for organ_router in build_registry(settings).routers():
         application.include_router(organ_router)
+
+    @application.get("/api/openapi.json", include_in_schema=False)
+    async def openapi_schema(request: Request) -> JSONResponse:
+        _require(request, "admin.diagnostics")
+        return JSONResponse(application.openapi())
+
+    @application.get("/api/docs", include_in_schema=False)
+    async def api_docs(request: Request) -> Any:
+        _require(request, "admin.diagnostics")
+        from fastapi.openapi.docs import get_swagger_ui_html
+
+        return get_swagger_ui_html(openapi_url="/api/openapi.json", title="Jericho API")
 
     static_dir = Path(__file__).parent / "admin_ui" / "static"
     if static_dir.is_dir():

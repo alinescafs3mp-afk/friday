@@ -522,7 +522,14 @@ class WorkersManager:
 
     async def _for_each_user(self, operation: Callable[[str], Awaitable[Any]]) -> None:
         failures = 0
-        for user_id in self.storage.list_user_ids(active_only=True):
+        # Every storage call a worker makes from coroutine context goes through
+        # `run_blocking`. A read does not take the write lock, but it still does
+        # disk IO on the event loop that serves the API, the Telegram bridge and
+        # every other worker — and a WRITE waits for the process-wide write lock,
+        # measured at 3.00 s while one batch of embedding vectors was committing.
+        # The rule is worth more than each individual saving: "no storage call on
+        # the loop" is checkable, "this particular one is cheap" is not.
+        for user_id in await run_blocking(self.storage.list_user_ids, active_only=True):
             try:
                 await operation(user_id)
             except asyncio.CancelledError:
@@ -538,7 +545,7 @@ class WorkersManager:
         await self._for_each_user(self._retrieval_eval)
 
     async def _retrieval_eval(self, user_id: str) -> None:
-        if not self.storage.list_eval_cases(user_id):
+        if not await run_blocking(self.storage.list_eval_cases, user_id):
             return
         from jericho.eval import run_eval
 
@@ -549,7 +556,9 @@ class WorkersManager:
         report = await run_eval(self.storage, self.embeddings, self.settings, user_id, k=self.settings.eval_k)
         if isinstance(report.get("gold_set"), dict):
             report["gold_set"]["pruned"] = hygiene
-        self.storage.kv_set(f"eval:last_report:{user_id}", json.dumps(report, ensure_ascii=False))
+        await run_blocking(
+            self.storage.kv_set, f"eval:last_report:{user_id}", json.dumps(report, ensure_ascii=False)
+        )
 
     async def _knowledge_dedup_all(self) -> None:
         # The tick budget is split across tenants, so no single scan can run the whole
@@ -611,7 +620,8 @@ class WorkersManager:
                 for item in candidates[:25]
             ],
         }
-        self.storage.kv_set(
+        await run_blocking(
+            self.storage.kv_set,
             f"workers:knowledge_quality:{user_id}",
             json.dumps(summary, ensure_ascii=False, sort_keys=True),
         )
@@ -638,11 +648,13 @@ class WorkersManager:
         processed = 0
         failures = 0
         consecutive_failures = 0
-        for item in self.storage.list_inbox_detailed(
+        pending = await run_blocking(
+            self.storage.list_inbox_detailed,
             user_id,
             InboxStatus.PENDING,
             limit=50,
-        ):
+        )
+        for item in pending:
             try:
                 result = await self.ingestion.advise_inbox_item(
                     user_id,
@@ -711,7 +723,8 @@ class WorkersManager:
                 for item in candidates[:100]
             ],
         }
-        self.storage.kv_set(
+        await run_blocking(
+            self.storage.kv_set,
             f"workers:lifecycle:{user_id}",
             json.dumps(report, ensure_ascii=False, sort_keys=True),
         )
@@ -770,7 +783,7 @@ class WorkersManager:
             LOGGER.info("Vault sync removed %d note(s) for objects that are no longer live", removed)
 
     async def _scheduled_backup(self) -> None:
-        raw = self.storage.kv_get("workers:last_backup_at")
+        raw = await run_blocking(self.storage.kv_get, "workers:last_backup_at")
         now = datetime.now(UTC)
         try:
             previous = datetime.fromisoformat(raw) if raw else None
@@ -781,13 +794,14 @@ class WorkersManager:
         if previous and now - previous < timedelta(hours=24):
             return
         result = await run_blocking(self.storage.create_backup, label="scheduled")
-        self.storage.kv_set("workers:last_backup_at", now.isoformat(timespec="seconds"))
-        self.storage.kv_set("workers:last_backup", json.dumps(result, ensure_ascii=False))
+        await run_blocking(self.storage.kv_set, "workers:last_backup_at", now.isoformat(timespec="seconds"))
+        await run_blocking(self.storage.kv_set, "workers:last_backup", json.dumps(result, ensure_ascii=False))
         LOGGER.info("Scheduled database backup created: %s", result.get("database"))
         # Every backup, not just failures: "when did this last actually run" is the
         # question asked after something has already gone wrong, and by then the log
         # that would have answered it has usually rotated.
-        self.storage.record_event(
+        await run_blocking(
+            self.storage.record_event,
             "backup.created",
             {
                 "database": result.get("database"),
@@ -805,13 +819,17 @@ class WorkersManager:
             # Stamped so diagnostics can tell "mirrored a moment ago" from
             # "mirrored last month and the disk has been unplugged since".
             mirror["reported_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-            self.storage.kv_set("workers:last_backup_mirror", json.dumps(mirror, ensure_ascii=False))
+            await run_blocking(
+                self.storage.kv_set,
+                "workers:last_backup_mirror",
+                json.dumps(mirror, ensure_ascii=False),
+            )
         # Prune AFTER mirroring, so an offsite copy of the oldest generation is made
         # before the local one goes. Retention is the missing half of a daily backup:
         # without it the disk fills, and it takes the live instance with it.
         pruned = await run_blocking(self.storage.prune_backups, keep=self.settings.backup_keep)
         if pruned.get("removed"):
-            self.storage.record_event("backup.pruned", pruned)
+            await run_blocking(self.storage.record_event, "backup.pruned", pruned)
 
     async def _embeddings_index_all(self) -> None:
         """Embed a bounded batch of Knowledge Objects lacking a current vector.
