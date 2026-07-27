@@ -48,6 +48,10 @@ class IntervalTask:
 # over one malformed item.
 _ADVICE_ENDPOINT_DOWN_AFTER = 3
 
+# Ceiling on the single input that carries an object's whole-document vector. Generous
+# next to a passage (default 1200) and far below what an embeddings service will refuse.
+_DOC_VECTOR_MAX_CHARS = 20_000
+
 
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
@@ -723,7 +727,14 @@ class WorkersManager:
                 overlap_chars=self.settings.embeddings_chunk_overlap_chars,
                 max_chunks=max_chunks,
             )
-            doc_text = knowledge_search_text(row)
+            # Bounded before it is sent. The whole-object vector is a COARSE signal —
+            # passage vectors carry the detail — but it goes as one input, and a large
+            # object makes that input alone exceed what an embeddings service will take.
+            # Measured: 104175 characters timed out where 20000 answered in seconds.
+            # Worse, the object's inputs travel in one request, so an oversized document
+            # lost its passages too and ended up with NO vector at all — appearing in
+            # the log as "backend returned no usable vectors" rather than as too long.
+            doc_text = knowledge_search_text(row)[:_DOC_VECTOR_MAX_CHARS]
             plans.append({"row": row, "doc_text": doc_text, "units": units})
 
         reusable = await run_blocking(

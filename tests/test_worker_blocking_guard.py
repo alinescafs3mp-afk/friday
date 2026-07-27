@@ -136,3 +136,31 @@ def test_the_supervisor_refuses_to_run_on_top_of_a_stranded_thread():
     assert peak[0] == 1, f"{peak[0]} threads of one worker ran at once"
     assert "timeout" in statuses, "the timeout must still be reported"
     assert "skipped" in statuses, "the skipped tick must be visible, not silent"
+
+
+# --- oversized documents must still get a vector --------------------------
+
+
+def test_the_whole_document_vector_is_bounded_before_it_is_sent():
+    """One input carries the whole object, and an embeddings service will refuse a big one.
+
+    Measured against the live service: 104175 characters timed out where 20000 answered
+    in seconds. Because an object's inputs travel in a single request, an oversized
+    document also took its own passages down with it and ended up with no vector at
+    all — reported as "backend returned no usable vectors", which reads like a broken
+    endpoint rather than a document that is simply too long.
+    """
+    from jericho.retrieval import knowledge_search_text
+    from jericho.workers import _DOC_VECTOR_MAX_CHARS
+
+    huge = {
+        "title": "большой документ",
+        "summary": "с",
+        "content": "текст " * 40_000,
+        "tags_json": "[]",
+        "knowledge_kind": "note",
+    }
+    assert len(knowledge_search_text(huge)) > _DOC_VECTOR_MAX_CHARS
+    assert len(knowledge_search_text(huge)[:_DOC_VECTOR_MAX_CHARS]) == _DOC_VECTOR_MAX_CHARS
+    # A passage stays far below it, so the cap never truncates ordinary objects.
+    assert _DOC_VECTOR_MAX_CHARS > 1200 * 8
