@@ -81,3 +81,35 @@ def test_ssrf_validation_rejects_local_and_non_http_destinations():
         with pytest.raises(UnsafeURLError):
             validate_public_url(url)
     assert validate_public_url("http://127.0.0.1/", allow_private_networks=True).startswith("http://")
+
+
+def test_the_archive_preview_cap_counts_decompressions_not_successes():
+    """A member that yields no text used to cost nothing against the cap.
+
+    `previewed += 1` sat inside `if preview:`, so an inner archive full of
+    zero-filled binary members never advanced the 24-file limit and the loop
+    decompressed EVERY member — nested, exactly the decompression bomb the cap
+    exists to bound. Measured on this machine with a 107 KB upload
+    (24 x 24 x 500 zero-filled members): **30.1 s before, 2.1 s after**, and all
+    of it synchronous on the event loop. The reported `previewed_files: 24` was
+    itself misleading — it claimed the cap had been reached while the work
+    continued.
+
+    The wall-clock bound below is loose on purpose: it fails a return to
+    success-counting, not a slow machine.
+    """
+    import time
+
+    inner = _zip({f"z{index}.bin": bytes(131_071) for index in range(500)})
+    middle = _zip({f"m{index}.zip": inner for index in range(24)})
+    outer = _zip({f"o{index}.zip": middle for index in range(24)})
+    assert len(outer) < 200_000  # a small upload, by design
+
+    extractor = DocumentExtractor()
+    started = time.perf_counter()
+    result = extractor.extract(outer, "bomb.zip")
+    elapsed = time.perf_counter() - started
+
+    assert result.success
+    assert result.metadata["previewed_files"] <= 24
+    assert elapsed < 10.0, f"archive preview took {elapsed:.1f}s — is the cap counting successes again?"

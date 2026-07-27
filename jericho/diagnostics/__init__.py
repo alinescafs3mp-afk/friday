@@ -334,7 +334,12 @@ def _decode_worker_states(rows: list[dict[str, Any]]) -> dict[str, Any]:
             failures = 0
             invalid_fields.append("consecutive_failures")
         status = str(task.get("status") or "unknown")
-        if status not in {"scheduled", "running", "ok", "error", "timeout", "unknown"}:
+        # "skipped" is published by the orphan-thread guard in the worker supervisor
+        # and was missing here, so the record decoded as `invalid` with
+        # `state_errors: ["status"]` and the worker was reported degraded. The guard
+        # working correctly looked like corrupt state — and a real corrupt record
+        # became indistinguishable from a healthy skip.
+        if status not in {"scheduled", "running", "ok", "error", "timeout", "skipped", "unknown"}:
             invalid_fields.append("status")
         try:
             interval_value = float(task.get("interval_sec") or 1.0)

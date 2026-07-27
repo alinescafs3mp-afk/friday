@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from jericho.diagnostics import collect_diagnostics
 from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
+from jericho.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +95,14 @@ async def scan_health(ctx: ServiceContext) -> None:
         # No delivery target configured — do not even run diagnostics.
         return
     try:
-        report = collect_diagnostics(
+        # Off the event loop. `collect_diagnostics` is fully synchronous and does a
+        # blocking `socket.create_connection`, a `urllib.request.urlopen`, a
+        # `PRAGMA integrity_check` over the whole database and a secret-hygiene scan
+        # of two directory trees. Called directly from this coroutine it froze the
+        # loop for the entire tick — including the `asyncio.timeout` that is supposed
+        # to bound it, which cannot fire while the loop is not running.
+        report = await run_blocking(
+            collect_diagnostics,
             settings,
             ctx.storage,
             check_llm_port=bool(settings.sentinel_check_llm),

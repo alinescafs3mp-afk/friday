@@ -798,12 +798,18 @@ class DocumentExtractor:
                     break
                 if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
                     continue
+                # Count the decompression, not the success. Incrementing only when a
+                # preview came back meant a member that yields no text — an inner
+                # archive of binary blobs, say — never advanced the cap, so the loop
+                # decompressed EVERY member. Nested, that is a decompression bomb the
+                # cap was supposed to bound: a 99 KB upload (24 x 24 x 500 zero-filled
+                # members) held the event loop for 31 seconds.
+                previewed += 1
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 preview = self._member_preview(member.filename, data, depth)
                 if preview:
                     parts.append(preview)
-                    previewed += 1
         return DocumentResult(
             "\n".join(parts),
             {"format": "zip", "files": len(files), "previewed_files": previewed},
@@ -839,12 +845,12 @@ class DocumentExtractor:
                 stream = archive.extractfile(member)
                 if stream is None:
                     continue
+                previewed += 1  # decompressions, not successes — see _extract_zip
                 with stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 preview = self._member_preview(member.name, data, depth)
                 if preview:
                     previews.append(preview)
-                    previewed += 1
             parts = [f"TAR archive: {file_count} files", *names, *previews]
         return DocumentResult(
             "\n".join(parts),
@@ -871,12 +877,12 @@ class DocumentExtractor:
             for member in files:
                 if previewed >= _MAX_ARCHIVE_PREVIEW_FILES or member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
                     continue
+                previewed += 1  # decompressions, not successes — see _extract_zip
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 preview = self._member_preview(member.filename, data, depth)
                 if preview:
                     parts.append(preview)
-                    previewed += 1
         return DocumentResult(
             "\n".join(parts), {"format": "rar", "files": len(files), "previewed_files": previewed}
         )

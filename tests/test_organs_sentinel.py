@@ -207,3 +207,55 @@ def test_no_filesystem_path_is_transmitted():
         {"severity": "error", "title": "vLLM недоступен", "detail": "http://127.0.0.1:8001/v1 не отвечает"}
     )
     assert "http://127.0.0.1:8001/v1" in endpoint
+
+
+@pytest.mark.asyncio
+async def test_the_scan_does_not_freeze_the_event_loop(storage, monkeypatch):
+    """`collect_diagnostics` is fully synchronous and was awaited as if it were not.
+
+    It does a blocking `socket.create_connection`, a `urllib.request.urlopen`, a
+    `PRAGMA integrity_check` over the whole database and a secret-hygiene scan of
+    two directory trees. Called straight from the coroutine it froze the loop for
+    the whole tick — including the `asyncio.timeout` meant to bound it, which
+    cannot fire while the loop is not running.
+
+    Measured as the WORST GAP between heartbeat ticks, with the heartbeat already
+    running before the scan starts. Counting ticks over the whole window does not
+    work: a scan that blocks first and returns leaves the rest of the window free,
+    and the tally comes out the same either way.
+    """
+    import asyncio
+    import time
+
+    import jericho.organs.sentinel as sentinel
+
+    def slow_diagnostics(*_args, **_kwargs):
+        time.sleep(0.5)
+        return {"actions": []}
+
+    monkeypatch.setattr(sentinel, "collect_diagnostics", slow_diagnostics)
+    settings = _sentinel_settings()
+    _seed_telegram_user(storage, "5001")
+    ctx = ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None)
+
+    worst = 0.0
+    running = True
+
+    async def heartbeat() -> None:
+        nonlocal worst
+        last = time.perf_counter()
+        while running:
+            await asyncio.sleep(0.01)
+            now = time.perf_counter()
+            worst = max(worst, now - last)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0.05)  # the heartbeat is established BEFORE the scan starts
+    try:
+        await scan_health(ctx)
+    finally:
+        running = False
+        await beat
+
+    assert worst < 0.25, f"the event loop stalled for {worst:.2f}s during a 0.5s scan"

@@ -371,3 +371,40 @@ def test_backlog_alert_reaches_the_sentinel_severity_filter(settings, storage):
 
     alert = [a for a in collect_diagnostics(settings, storage)["actions"] if a["code"] == "inbox_backlog"][0]
     assert alert["severity"] in _ALERT_SEVERITIES
+
+
+def test_a_skipped_worker_is_a_valid_state_not_a_corrupt_one(settings, storage):
+    """The orphan-thread guard's own signal decoded as corruption.
+
+    The worker supervisor publishes `status="skipped"` when a previous run still
+    has blocking work in flight — the guard added after two threads of one worker
+    were reproduced on a single SQLite. The decoder's allowlist never learned the
+    value, so the record became `invalid` with `state_errors: ["status"]` and the
+    worker was reported degraded: the guard working correctly looked like broken
+    state, and a genuinely corrupt record became indistinguishable from a healthy
+    skip.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from jericho.diagnostics import collect_diagnostics
+
+    storage.kv_set(
+        "workers:health:embeddings_index",
+        json.dumps(
+            {
+                "name": "embeddings_index",
+                "status": "skipped",
+                "consecutive_failures": 0,
+                "interval_sec": 120,
+                "last_finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "error_message": "previous run still has blocking work in flight",
+            }
+        ),
+    )
+    report = collect_diagnostics(replace(settings, workers_enabled=True), storage)
+    tasks = report["workers"]["tasks"]
+    record = tasks["embeddings_index"]
+    assert record["status"] == "skipped"
+    assert "state_errors" not in record
+    assert "embeddings_index" not in report["workers"].get("degraded", [])
