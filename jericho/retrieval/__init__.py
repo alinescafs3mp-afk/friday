@@ -309,10 +309,35 @@ def chunk_spans(text: str, *, max_chars: int, overlap_chars: int, max_chunks: in
         return spans
 
     spans = _cut(max_chars)
+    window = max_chars
+    while len(spans) > limit and window < len(body):
+        # Widen until it fits, instead of one pass followed by ``[:limit]``.
+        #
+        # The single pass was capped at ``max_chars * 4`` and sized by
+        # ``ceil(len/limit)``, which ignores that ``_chunk_boundary`` snaps a span
+        # back by up to half a window — so both bounds under-shoot, and whatever did
+        # not fit was cut away in silence. Measured with the shipped defaults
+        # (1200 / 200 / 63): a 490 KB document indexed **59% of itself**, and the
+        # missing 41% was reachable only through the whole-object vector, which is
+        # itself capped. Nothing downstream could tell a truncated document from a
+        # short one.
+        #
+        # Doubling makes the window grow with the document — a 490 KB body settles
+        # at ~9.6 K per passage, which is still well inside an embedding model's
+        # context. Very large documents do end up with coarse passages, and coarse
+        # passages beat absent ones: the whole-object vector remains the floor, so
+        # chunking can still only add recall.
+        estimate = math.ceil(len(body) / limit) + bounded_overlap
+        # The estimate first (it is right whenever boundary snapping is mild, and
+        # keeps passages as fine as they used to be), then gentle geometric growth
+        # for the cases where snapping makes it optimistic.
+        window = min(len(body), estimate if estimate > window else math.ceil(window * 1.5))
+        spans = _cut(window)
     if len(spans) > limit:
-        # One widening pass rather than a search: enough to fit, never unbounded.
-        widened = min(max_chars * 4, math.ceil(len(body) / limit) + bounded_overlap)
-        spans = _cut(max(max_chars, widened))[:limit]
+        spans = spans[:limit]
+        # Unreachable while the loop above can widen, but if it ever is reached the
+        # tail is content, not slack: carry the last span to the end of the body.
+        spans[-1] = (spans[-1][0], len(body))
     # A trailing stub scores erratically high on a short match; fold it backwards.
     stub = max(120, max_chars // 6)
     if len(spans) > 1 and spans[-1][1] - spans[-1][0] < stub:
@@ -603,10 +628,14 @@ class HybridSearcher:
         chunk_recall: bool = True,
         record_usage: bool = True,
         ablate: Sequence[str] | None = None,
+        pool_max: int = 400,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
         self._graph_max_depth = max(1, int(graph_max_depth))
+        # Ceiling on the fuzzy recall pool. Above it the lexical channel sees only
+        # the most important/recent slice of the corpus, and the answer has to say so.
+        self._pool_max = max(1, int(pool_max))
         # Off only for the A/B harness, which must measure the same corpus twice.
         self._chunk_recall = bool(chunk_recall)
         # Off for advisory harnesses: they must not write the counter that
@@ -633,10 +662,8 @@ class HybridSearcher:
 
         fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=limit * 5)
         # Fuzzy matching needs a bounded recall pool even when FTS finds no exact token.
-        recent_pool = self.storage.list_knowledge_objects(
-            user_id,
-            limit=min(400, max(limit * 10, 100)),
-        )
+        pool_limit = min(self._pool_max, max(limit * 10, 100))
+        recent_pool = self.storage.list_knowledge_objects(user_id, limit=pool_limit)
         candidate_map = {item["id"]: item for item in [*fts_candidates, *recent_pool]}
         candidates = list(candidate_map.values())
 
@@ -964,6 +991,16 @@ class HybridSearcher:
             # Dense recall scored only the newest N vectors — latency degrades
             # visibly (in the explain-trace) rather than silently on a big corpus.
             strategy["embeddings_capped"] = True
+        if len(recent_pool) >= pool_limit:
+            # The pool came back full, so the corpus may be larger than what the
+            # lexical channel actually looked at. The count is only paid here, on a
+            # saturated pool: an empty result over 8000 objects and an empty result
+            # over 40 mean opposite things, and until now they printed the same.
+            corpus_size = self.storage.count_knowledge_objects(user_id)
+            if corpus_size > pool_limit:
+                strategy["lexical_pool_capped"] = True
+                strategy["lexical_pool_scanned"] = pool_limit
+                strategy["corpus_size"] = corpus_size
         response: dict[str, Any] = {
             "query": clean_query,
             "results": results,

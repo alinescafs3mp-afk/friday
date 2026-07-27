@@ -242,6 +242,47 @@ def test_chunk_spans_terminate_on_a_blob_with_no_whitespace():
     assert spans[0][0] == 0 and spans[-1][1] == len(blob)
 
 
+def test_a_very_long_document_is_covered_to_its_last_character():
+    """The tail of a long document was cut away, and nothing said so.
+
+    The widening was a single pass — capped at ``max_chars * 4`` and sized by
+    ``ceil(len/limit)`` — followed by ``[:limit]``. Both bounds under-shoot,
+    because ``_chunk_boundary`` snaps a span back by up to half a window, so
+    whatever did not fit was dropped in silence. With the shipped defaults
+    (1200 / 200 / 63) a 490 KB body indexed **59% of itself**; the missing 41%
+    was reachable only through the whole-object vector, which is itself capped,
+    and no signal distinguished a truncated document from a short one.
+
+    Coarse passages are the accepted price: the whole-object vector stays the
+    floor, so chunking can only ever add recall.
+    """
+    import random as _random
+
+    _random.seed(3)
+    words = ["текст", "предложение", "данные", "система", "важно", "заметка"]
+    for size in (100_000, 500_000, 2_000_000):
+        body = " ".join(_random.choice(words) for _ in range(size // 8))[:size]
+        spans = chunk_spans(body, max_chars=1200, overlap_chars=200, max_chunks=63)
+        assert len(spans) <= 63
+        assert spans[0][0] == 0
+        assert spans[-1][1] == len(body), (
+            f"{size} chars: indexing stopped at {spans[-1][1]} — "
+            f"{100 * (1 - spans[-1][1] / len(body)):.1f}% of the document is unsearchable"
+        )
+        covered = bytearray(len(body))
+        for start, end in spans:
+            covered[start:end] = b"\x01" * (end - start)
+        assert 0 not in covered
+
+    # Passage granularity where it already fitted must not get coarser: a 100 KB
+    # body used ~63 spans of ~1.8 K before and has to keep doing so, or this
+    # "fix" would quietly degrade recall on the documents that already worked.
+    body = " ".join(_random.choice(words) for _ in range(100_000 // 8))[:100_000]
+    spans = chunk_spans(body, max_chars=1200, overlap_chars=200, max_chunks=63)
+    assert len(spans) >= 60
+    assert sum(end - start for start, end in spans) // len(spans) < 2_500
+
+
 @pytest.mark.asyncio
 async def test_chunking_is_inert_for_short_objects(storage, settings):
     """The load-bearing case: a short note is embedded byte-identically to 0.40.0."""

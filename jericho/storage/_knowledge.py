@@ -30,6 +30,45 @@ from jericho.storage._base import (
     utc_now,
 )
 
+# FTS MATCH accepts a bounded number of terms, and a natural-language question is
+# mostly function words. Twelve is the budget; which twelve is the whole question.
+_FTS_TERM_BUDGET = 12
+
+
+def _fts_terms(text: str) -> list[str]:
+    """Spend the term budget on the words that select a document, not the first typed.
+
+    The rule was ``re.findall(...)[:12]`` over the raw text, so a question longer
+    than twelve tokens lost its tail — and a Russian question front-loads «как»,
+    «почему», «в», «на», words every document contains, while the identifier that
+    actually names the answer comes last. A 14-term question containing
+    ``autovacuum_vacuum_scale_factor`` never got that term to the index at all.
+
+    Stopwords are dropped **only when the query is over budget**, and that
+    restraint is measured, not stylistic: dropping them unconditionally moved
+    ``tools/retrieval_bench.py`` from **0.583 to 0.458** (paraphrase 0.50→0.17,
+    synonym 0.40→0.20). At this stage FTS is a recall stage, and for a paraphrase
+    the common words are the *only* lexical bridge to the document. So a query
+    within budget keeps every token it had; only one that must lose something
+    loses the cheap words instead of the specific one. Text order is preserved —
+    reordering by length scored the same 0.458 and buys nothing.
+
+    Tokenisation goes through ``retrieval.tokens_of``: the fifth site still
+    rolling its own regex, and the one that made a sentence-final identifier
+    (``…scale_factor.``) a different string from the same identifier in a query.
+    """
+    from jericho.retrieval import _STOPWORDS, tokens_of
+
+    unique = list(dict.fromkeys(token for token in tokens_of(text) if len(token) >= 2))
+    if len(unique) <= _FTS_TERM_BUDGET:
+        return unique
+    chosen = [token for token in unique if token.casefold() not in _STOPWORDS][:_FTS_TERM_BUDGET]
+    if len(chosen) < _FTS_TERM_BUDGET:
+        # A long query that is mostly stopwords still gets a full budget.
+        taken = set(chosen)
+        chosen += [token for token in unique if token not in taken][: _FTS_TERM_BUDGET - len(chosen)]
+    return chosen
+
 
 class KnowledgeMixin(StorageShared):
     def get_knowledge_by_raw(self, raw_id: str, user_id: str) -> dict[str, Any] | None:
@@ -351,7 +390,7 @@ class KnowledgeMixin(StorageShared):
         if not text:
             return []
         rows: list[sqlite3.Row] = []
-        terms = re.findall(r"[\w#+.-]{2,}", text, flags=re.UNICODE)[:12]
+        terms = _fts_terms(text)
         if self._fts_available and terms:
             match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
             try:

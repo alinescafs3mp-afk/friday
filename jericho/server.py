@@ -597,7 +597,12 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             auth_service = AuthorizationService(storage)
             llm = LLMRouter(settings)
             embeddings = EmbeddingBackend(settings)
-            searcher = HybridSearcher(storage, embeddings, graph_max_depth=settings.graph_max_depth)
+            searcher = HybridSearcher(
+                storage,
+                embeddings,
+                graph_max_depth=settings.graph_max_depth,
+                pool_max=settings.retrieval_pool_max,
+            )
             graph = KnowledgeGraph(storage)
             ingestion = IngestionPipeline(settings, storage, graph, llm)
             web_surfer = WebSurfer(settings)

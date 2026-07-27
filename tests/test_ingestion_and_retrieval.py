@@ -173,3 +173,47 @@ def test_best_snippet_is_linear_in_the_number_of_matches():
     elapsed = time.perf_counter() - started
     assert len(snippet) <= 602
     assert elapsed < 2.0, f"best_snippet took {elapsed:.1f}s on {len(body)} chars — quadratic again?"
+
+
+@pytest.mark.asyncio
+async def test_a_capped_recall_pool_says_so(storage):
+    """Zero results over 8000 objects and zero over 40 must not print the same.
+
+    The fuzzy pool is bounded at 400 by default, so on a real corpus the lexical
+    channel only ever sees the most important/recent slice — and the response said
+    nothing about it. `strategy` already reports `embeddings_capped` for exactly
+    this reason; the lexical side now does too, and the count is paid only when
+    the pool comes back full.
+    """
+    from jericho.retrieval import HybridSearcher
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("owner")
+    for index in range(40):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="owner",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"заметка про проект номер {index}",
+            content_type="text",
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="owner",
+                raw_object_id=raw.id,
+                content=raw.raw_content,
+                title=f"Заметка {index}",
+                summary=raw.raw_content,
+            )
+        )
+
+    roomy = await HybridSearcher(storage, pool_max=400).search("owner", "проект", limit=5)
+    assert "lexical_pool_capped" not in roomy["strategy"]
+
+    tight = await HybridSearcher(storage, pool_max=10).search("owner", "проект", limit=5)
+    assert tight["strategy"]["lexical_pool_capped"] is True
+    assert tight["strategy"]["lexical_pool_scanned"] == 10
+    assert tight["strategy"]["corpus_size"] == 40

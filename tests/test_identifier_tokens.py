@@ -105,3 +105,81 @@ def test_a_query_identifier_must_still_match_a_whole_token(settings, storage):
     ]
 
     assert results == []
+
+
+def test_a_long_question_does_not_lose_the_term_that_identifies_the_answer(storage):
+    """FTS terms were the first twelve tokens *in text order*, before any filtering.
+
+    A Russian question front-loads «как», «почему», «пожалуйста», «именно» — words
+    every document contains — and the identifier that names the answer comes last.
+    A 14-token question therefore spent its entire budget on filler and the
+    identifier never reached the index, so the one document that contained it was
+    unreachable by its own exact term.
+
+    Stopwords are dropped only when the query is over budget. Doing it always cost
+    real recall: `tools/retrieval_bench.py` fell 0.583 → 0.458 (paraphrase
+    0.50→0.17, synonym 0.40→0.20), because for a paraphrase the common words are
+    the only lexical bridge there is.
+    """
+    import re
+
+    from jericho.storage._knowledge import _FTS_TERM_BUDGET, _fts_terms
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("owner")
+
+    def add(text: str, title: str, importance: float) -> str:
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="owner",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=text,
+            content_type="text",
+        )
+        storage.store_raw_object(raw)
+        ko = KnowledgeObject(
+            id=new_id("ko"),
+            user_id="owner",
+            raw_object_id=raw.id,
+            content=text,
+            title=title,
+            summary=text[:120],
+            importance=importance,
+        )
+        storage.store_knowledge_object(ko)
+        return ko.id
+
+    target = add(
+        "Настройка PostgreSQL: параметр autovacuum_vacuum_scale_factor управляет тем, "
+        "как часто запускается автоочистка на большой таблице.",
+        "PostgreSQL autovacuum",
+        0.1,  # deliberately low: it must win on the term, not on importance
+    )
+    for index in range(60):
+        add(
+            f"Планёрка {index}. Обсудили как и почему в этом квартале у нас на проекте "
+            f"что-то надо делать и какие для этого есть задачи по этому самому поводу.",
+            f"Планёрка {index}",
+            0.9,
+        )
+
+    question = (
+        "подскажи пожалуйста как именно в нашей базе на сервере правильно настроить "
+        "тот самый параметр autovacuum_vacuum_scale_factor"
+    )
+    previous = re.findall(r"[\w#+.-]{2,}", question, flags=re.UNICODE)[:12]
+    assert "autovacuum_vacuum_scale_factor" not in previous  # the defect, stated
+
+    chosen = _fts_terms(question)
+    assert "autovacuum_vacuum_scale_factor" in chosen
+    assert len(chosen) <= _FTS_TERM_BUDGET  # the budget itself is unchanged
+
+    results = storage.search_knowledge("owner", question, limit=10)
+    assert results, "the identifier still does not reach the index"
+    assert results[0]["id"] == target
+
+    # A query within budget keeps every token, stopwords included — that is what
+    # the bench measures, and it must not change.
+    short = "как чинить кластер"
+    assert _fts_terms(short) == ["как", "чинить", "кластер"]
