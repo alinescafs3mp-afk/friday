@@ -68,6 +68,32 @@ def build_user_model(storage: JerichoStorage, user_id: str) -> dict[str, Any]:
 # Hard safety ceiling for graph traversal; the effective depth is set by config
 # (graph_max_depth) but can never exceed this, to bound work on a large graph.
 _MAX_TRAVERSAL_DEPTH = 4
+# How much a document's SECOND and further shared entities add on top of its best
+# one: `1 - (1-best) * prod(1 - damping * s_i)` over the other distinct entities.
+# 0.0 is exactly the old max-over-entities. See `context_for_query` for the
+# measured rationale; the value itself is measured on the 342-document stand.
+_GRAPH_CORROBORATION_DAMPING = 0.5
+# How much the LAST seed document's entities lose against the first one's. 0.0 is
+# the old flat weight, 1.0 would make the last seed worth nothing at all.
+#
+# MEASURED on the 342-document stand, 198 queries built from the documents' own
+# words, embeddings off so the graph channel is visible (recall@10 / MRR / share
+# of returned graph scores tied with another result / results returned for ten
+# nonsense queries, where fewer is better):
+#
+#     decay   recall@10   MRR     tied   nonsense
+#      0.0     131/198    0.545   0.93      92
+#      0.4     134/198    0.556   0.87      92
+#      0.6     137/198    0.561   0.86      92
+#      0.8     146/198    0.571   0.87      90
+#      0.9     149/198    0.577   0.87      82
+#      1.0     150/198    0.584   0.86      74
+#
+# Monotone in every column: the further down the seed list an entity came from,
+# the less its vouching is worth. 1.0 measured marginally better still and is not
+# taken — a weight of exactly zero makes the last seed's presence meaningless and
+# quietly ties the result to how many seeds retrieval happens to pass.
+_GRAPH_SEED_RANK_DECAY = 0.9
 _ISO_FULL_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})[-./](\d{1,2})\b")
 _DAY_FIRST_RE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")
 _YEAR_MONTH_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})\b")
@@ -623,6 +649,12 @@ class KnowledgeGraph:
         root_scores: dict[str, float] = {
             str(root["id"]): float(root.get("_match_score", 0.0)) for root in roots
         }
+        # Entities the QUERY itself matched. Only these corroborate a document
+        # below: an entity discovered by traversal was very often discovered
+        # THROUGH the document it would then vouch for, and letting that count
+        # would pay a document for its own entity count rather than for agreeing
+        # with the question.
+        query_matched_ids = set(root_scores)
         evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for root in roots:
             evidence[str(root["id"])].append(
@@ -633,7 +665,18 @@ class KnowledgeGraph:
                 }
             )
 
-        for knowledge_id in seed_knowledge_ids or []:
+        # Seeds arrive in RELEVANCE ORDER (retrieval passes its best FTS and
+        # lexical hits, best first) and that order used to be discarded: every
+        # seeded entity got a flat `0.72 * confidence`. Since most graph-scored
+        # documents in production are reached this way, the channel handed a
+        # near-identical constant to a whole cluster and could not order it —
+        # measured on a real corpus, 93% of returned graph scores were tied with
+        # another result of the same query. Decayed by position, the best seed
+        # keeps its old weight and the tail is worth visibly less.
+        seeds = list(seed_knowledge_ids or [])
+        span = max(1, len(seeds) - 1)
+        for position, knowledge_id in enumerate(seeds):
+            rank_factor = 1.0 - _GRAPH_SEED_RANK_DECAY * (position / span)
             for link in self.storage.list_knowledge_entity_links(
                 user_id,
                 knowledge_object_id=knowledge_id,
@@ -641,7 +684,7 @@ class KnowledgeGraph:
                 limit=30,
             ):
                 entity_id = str(link["entity_id"])
-                score = 0.72 * float(link.get("confidence", 1.0) or 1.0)
+                score = 0.72 * rank_factor * float(link.get("confidence", 1.0) or 1.0)
                 root_scores[entity_id] = max(root_scores.get(entity_id, 0.0), score)
                 evidence[entity_id].append(
                     {
@@ -843,14 +886,18 @@ class KnowledgeGraph:
                         path_ids=path_ids,
                     )
 
-        knowledge: dict[str, dict[str, Any]] = {}
         knowledge_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # Per-document contributions, one slot per DISTINCT entity: the strongest
+        # link an entity offers a document. Collected first, combined below.
+        contributions: dict[str, dict[str, float]] = defaultdict(dict)
+        best_by_document: dict[str, tuple[float, str, dict[str, Any], dict[str, Any]]] = {}
         for entity_id, entity in entities.items():
             entity_score = float(entity.get("_graph_score", 0.0))
             for item in get_entity_knowledge(entity_id):
+                document_id = str(item["id"])
                 link_confidence = float(item.get("_link_confidence", 1.0) or 1.0)
                 candidate_score = entity_score * max(0.0, min(1.0, link_confidence))
-                knowledge_evidence[str(item["id"])].append(
+                knowledge_evidence[document_id].append(
                     {
                         "entity_id": entity_id,
                         "entity_name": entity.get("name", ""),
@@ -858,15 +905,42 @@ class KnowledgeGraph:
                         "entity_score": round(entity_score, 6),
                     }
                 )
-                current = knowledge.get(str(item["id"]))
-                if current is None or candidate_score > float(current.get("_graph_score", 0.0)):
-                    knowledge[str(item["id"])] = {
-                        **item,
-                        "_graph_score": round(candidate_score, 6),
-                        "_graph_entity_id": entity_id,
-                        "_graph_entity_name": entity.get("name", ""),
-                        "_graph_depth": entity.get("_graph_depth", 0),
-                    }
+                if entity_id in query_matched_ids and candidate_score > contributions[document_id].get(
+                    entity_id, 0.0
+                ):
+                    contributions[document_id][entity_id] = candidate_score
+                best = best_by_document.get(document_id)
+                if best is None or candidate_score > best[0]:
+                    best_by_document[document_id] = (candidate_score, entity_id, item, entity)
+
+        # Max-over-entities alone cannot rank: measured on a real corpus, 83% of
+        # candidate scores collapsed to one of two values (0.677 / 0.276), and a
+        # document sharing 16 entities with the query scored exactly the same as
+        # one sharing a single hub. Every additional QUERY-MATCHED entity is
+        # independent corroboration, so those fold in noisy-or fashion on top of
+        # the best one — damped, because entities linked to one document co-occur
+        # rather than testify independently, and the same number also feeds the
+        # evidence gate in retrieval, where inflation would readmit noise.
+        #
+        # Corroboration from traversal-discovered entities was written first and
+        # removed: a document linking A + three others is itself the edge by which
+        # those three are reached from a query for A, so it corroborated ITSELF and
+        # the score rose with entity count rather than with agreement. A test on a
+        # one-entity query caught it.
+        knowledge: dict[str, dict[str, Any]] = {}
+        for document_id, (strongest, best_entity_id, item, entity) in best_by_document.items():
+            remainder = 1.0
+            for contributor_id, score in contributions[document_id].items():
+                if contributor_id != best_entity_id:
+                    remainder *= 1.0 - _GRAPH_CORROBORATION_DAMPING * max(0.0, min(1.0, score))
+            combined = 1.0 - (1.0 - strongest) * remainder
+            knowledge[document_id] = {
+                **item,
+                "_graph_score": round(combined, 6),
+                "_graph_entity_id": best_entity_id,
+                "_graph_entity_name": entity.get("name", ""),
+                "_graph_depth": entity.get("_graph_depth", 0),
+            }
 
         ordered_knowledge = sorted(
             knowledge.values(),

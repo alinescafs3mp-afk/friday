@@ -128,8 +128,19 @@ async def update_entity(entity_id: str, request: Request) -> dict[str, Any]:
     before = state.kg.get_entity(entity_id, actor.user_id)
     if not before:
         raise HTTPException(status_code=404, detail="Entity not found")
+    # An allow-list, not the raw body. `update_entity(user_id, entity_id, **body)`
+    # splatted whatever JSON arrived into a call whose first two parameters are
+    # named `user_id` and `entity_id`, so `{"user_id": ...}` raised TypeError —
+    # a 500 from a request the caller was entitled to make — and every other
+    # unknown key was silently accepted and dropped, which reads as success.
+    # Same set the admin route already uses, plus `metadata`.
+    fields = {
+        key: body[key] for key in ("name", "entity_type", "aliases", "description", "metadata") if key in body
+    }
+    if not fields:
+        raise HTTPException(status_code=400, detail="No updatable entity fields in the request")
     try:
-        after = state.kg.update_entity(actor.user_id, entity_id, **body)
+        after = state.kg.update_entity(actor.user_id, entity_id, **fields)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _audit(request, "entity.update", "entity", entity_id, before=before, after=after)
