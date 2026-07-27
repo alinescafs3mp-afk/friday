@@ -15,6 +15,16 @@ from jericho.backup_mirror import decrypt_file, mirror_backups
 from jericho.storage import init_storage
 
 
+def _mounted(path: Path) -> Path:
+    """A mirror directory that exists, as a real mount would.
+
+    `mirror_backups` no longer creates it: `mkdir(parents=True)` on an unmounted
+    external disk silently produced a same-disk "offsite" copy and reported success.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _make_backup(settings) -> dict:
     storage = init_storage(settings)
     try:
@@ -25,7 +35,7 @@ def _make_backup(settings) -> dict:
 
 
 def test_plain_mirror_copies_and_is_idempotent(settings, tmp_path):
-    mirrored = replace(settings, backup_mirror_dir=tmp_path / "mirror")
+    mirrored = replace(settings, backup_mirror_dir=_mounted(tmp_path / "mirror"))
     manifest = _make_backup(mirrored)
 
     first = mirror_backups(mirrored)
@@ -49,7 +59,7 @@ def test_encrypted_mirror_roundtrip(settings, tmp_path):
     key_file.write_text(secrets.token_hex(32) + "\n", encoding="utf-8")
     mirrored = replace(
         settings,
-        backup_mirror_dir=tmp_path / "mirror",
+        backup_mirror_dir=_mounted(tmp_path / "mirror"),
         backup_encryption_key_file=key_file,
     )
     manifest = _make_backup(mirrored)
@@ -73,7 +83,7 @@ def test_encrypted_mirror_roundtrip(settings, tmp_path):
 def test_missing_key_file_is_a_counted_failure(settings, tmp_path):
     mirrored = replace(
         settings,
-        backup_mirror_dir=tmp_path / "mirror",
+        backup_mirror_dir=_mounted(tmp_path / "mirror"),
         backup_encryption_key_file=tmp_path / "no-such.key",
     )
     _make_backup(mirrored)
@@ -132,3 +142,53 @@ def test_a_database_without_a_manifest_is_not_pruned(storage, settings):
     Path(result["manifest_path"]).unlink()
     assert storage.prune_backups(keep=1)["removed"] == 0
     assert Path(result["path"]).exists()
+
+
+def test_an_unmounted_mirror_is_refused_not_created(settings, tmp_path):
+    """`mkdir(parents=True)` on an unplugged disk makes a same-disk copy silently.
+
+    The mirror exists because a backup on the same disk does not survive that disk
+    dying. Creating the mount point produced exactly the thing the module was
+    written to prevent, reported it as a successful mirror, and kept doing so for
+    as long as the drive stayed unplugged.
+    """
+    absent = tmp_path / "not-mounted"
+    mirrored = replace(settings, backup_mirror_dir=absent)
+    _make_backup(mirrored)
+
+    report = mirror_backups(mirrored)
+
+    assert report["enabled"] is True
+    assert report["error"] == "mirror_dir_missing"
+    assert report["copied"] == 0
+    assert not absent.exists(), "the mount point was created, so the copy is same-disk"
+
+
+def test_a_manifest_less_mirror_copy_is_repaired_not_skipped_forever(settings, tmp_path):
+    """A database without its manifest cannot be verified or restored.
+
+    Idempotency was decided on the database file alone while the manifest was
+    copied *after* `os.replace`. An interruption in that window left the
+    manifest-less database as the durable state, and every later run saw the file,
+    counted it as skipped, and moved on — leaving an offsite copy that
+    `verify_backup` refuses. The `except` branch could not clean it up either: it
+    unlinks `tmp`, which `os.replace` has already consumed.
+    """
+    mirror_dir = _mounted(tmp_path / "mirror")
+    mirrored = replace(settings, backup_mirror_dir=mirror_dir)
+    manifest = _make_backup(mirrored)
+
+    assert mirror_backups(mirrored)["copied"] == 1
+    mirror_manifest = mirror_dir / f"{Path(manifest['database']).stem}.manifest.json"
+    assert mirror_manifest.is_file()
+
+    # Recreate the torn state: the database is there, the manifest is not.
+    mirror_manifest.unlink()
+
+    report = mirror_backups(mirrored)
+    assert report["repaired"] == 1
+    assert report["skipped_existing"] == 0
+    assert mirror_manifest.is_file()
+
+    # And a complete pair is still a no-op.
+    assert mirror_backups(mirrored)["skipped_existing"] == 1

@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess  # nosec B404 - fixed openssl argv, no shell
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -92,15 +93,49 @@ def _verify_encrypted_copy(encrypted: Path, key_file: Path, expected_sha256: str
         probe.unlink(missing_ok=True)
 
 
+def _publish_manifest(source: Path, target: Path) -> None:
+    """Copy a manifest into place atomically, so a torn write is never visible."""
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        shutil.copy2(source, tmp)
+        tmp.chmod(0o600)
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def mirror_backups(settings: Any) -> dict[str, Any]:
     """Copy every verified backup that is missing from the mirror. Idempotent."""
     mirror_dir: Path | None = settings.backup_mirror_dir
     if mirror_dir is None:
         return {"enabled": False}
     key_file: Path | None = settings.backup_encryption_key_file
-    mirror_dir.mkdir(parents=True, exist_ok=True)
+    if not mirror_dir.is_dir():
+        # Never create it. `mkdir(parents=True)` on an unmounted external disk
+        # silently makes a directory AT the mount point — on the same physical
+        # disk — and then reports a successful mirror. "A copy on the same disk is
+        # not a backup" is this module's whole premise, and that is precisely what
+        # it produced, quietly, for as long as the disk stayed unplugged.
+        LOGGER.error("Каталог зеркала не смонтирован или отсутствует: %s", mirror_dir)
+        return {
+            "enabled": True,
+            "mirror_dir": str(mirror_dir),
+            "error": "mirror_dir_missing",
+            "copied": 0,
+            "skipped_existing": 0,
+            "repaired": 0,
+            "failed": 0,
+        }
+    same_device = False
+    with suppress(OSError):
+        same_device = mirror_dir.stat().st_dev == settings.backups_dir.stat().st_dev
+    if same_device:
+        LOGGER.warning(
+            "Зеркало %s лежит на том же устройстве, что и бэкапы — это не offsite-копия",
+            mirror_dir,
+        )
 
-    copied = skipped = failed = 0
+    copied = skipped = failed = repaired = 0
     for manifest_path in sorted(settings.backups_dir.glob("*.manifest.json")):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -113,8 +148,25 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         if not database or not expected_sha or not source.is_file():
             continue
         target = mirror_dir / (f"{database}.enc" if key_file else database)
-        if target.exists():
+        mirrored_manifest = mirror_dir / manifest_path.name
+        # A database and its manifest are ONE unit. Skipping on the database alone
+        # meant that an interruption between `os.replace` and the manifest copy left
+        # a manifest-less database as the durable state — and every later run saw
+        # the file, skipped it, and moved on. That copy cannot be verified or
+        # restored: `verify_backup` needs the manifest. The `except` branch below
+        # could not clean it up either, since it only unlinks `tmp`, which
+        # `os.replace` has already consumed.
+        if target.exists() and mirrored_manifest.exists():
             skipped += 1
+            continue
+        if target.exists() and not mirrored_manifest.exists():
+            try:
+                _publish_manifest(manifest_path, mirrored_manifest)
+                repaired += 1
+                LOGGER.info("Восстановлен манифест зеркальной копии %s", database)
+            except Exception:
+                failed += 1
+                LOGGER.warning("Не удалось восстановить манифест для %s", database, exc_info=True)
             continue
         tmp = target.with_name(target.name + ".tmp")
         try:
@@ -125,13 +177,13 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
                 shutil.copy2(source, tmp)
                 if _sha256(tmp) != expected_sha:
                     raise BackupMirrorError("Копия не совпала с манифестом (sha256)")
+            # Manifest FIRST. A manifest without its database is the harmless
+            # half of the pair — `verify_backup` reports a missing file and the
+            # next run completes the copy — while a database without its manifest
+            # is unrestorable and, before this, permanently skipped.
+            _publish_manifest(manifest_path, mirrored_manifest)
             os.replace(tmp, target)
-            with_mode = target
-            with_mode.chmod(0o600)
-            # The manifest rides along in plain form: it carries hashes and
-            # metadata, not content, and is needed to verify/restore offsite.
-            shutil.copy2(manifest_path, mirror_dir / manifest_path.name)
-            (mirror_dir / manifest_path.name).chmod(0o600)
+            target.chmod(0o600)
             copied += 1
         except Exception:
             failed += 1
@@ -143,7 +195,9 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         "encrypted": key_file is not None,
         "copied": copied,
         "skipped_existing": skipped,
+        "repaired": repaired,
         "failed": failed,
+        "same_device": same_device,
     }
     if copied or failed:
         LOGGER.info(

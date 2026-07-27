@@ -9,6 +9,7 @@ import os
 import socket
 import sqlite3
 import urllib.request
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -203,6 +204,45 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _mirror_status(settings: JerichoSettings, storage: JerichoStorage | None) -> dict[str, Any]:
+    """Decode the mirror worker's last report, and say whether it is still current.
+
+    Written every run to ``workers:last_backup_mirror`` and, until now, read by
+    nothing at all.
+    """
+    if settings.backup_mirror_dir is None:
+        return {"enabled": False}
+    if storage is None:
+        return {"enabled": True, "state": "unknown"}
+    raw = storage.kv_get("workers:last_backup_mirror")
+    if not raw:
+        return {"enabled": True, "state": "never_ran", "mirror_dir": str(settings.backup_mirror_dir)}
+    try:
+        report = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"enabled": True, "state": "invalid", "mirror_dir": str(settings.backup_mirror_dir)}
+    if not isinstance(report, dict):
+        return {"enabled": True, "state": "invalid", "mirror_dir": str(settings.backup_mirror_dir)}
+    report.setdefault("mirror_dir", str(settings.backup_mirror_dir))
+    # Stale = the local side moved on and the offsite side did not follow. The
+    # comparison is against the newest local manifest, because that is the thing
+    # the mirror is supposed to have picked up.
+    reported_at = str(report.get("reported_at") or "")
+    if reported_at:
+        newest_local = 0.0
+        with suppress(OSError):
+            newest_local = max(
+                (path.stat().st_mtime for path in settings.backups_dir.glob("*.manifest.json")),
+                default=0.0,
+            )
+        with suppress(ValueError):
+            stamp = datetime.fromisoformat(reported_at)
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=UTC)
+            report["stale"] = bool(newest_local and newest_local > stamp.timestamp() + 60)
+    return report
 
 
 def _latest_backup_status(backups_dir: Path) -> dict[str, Any]:
@@ -691,6 +731,44 @@ def collect_diagnostics(
             "Не используйте их для восстановления; создайте новую подтверждённую копию.",
             "jericho backup --label recovery",
         )
+
+    # The mirror worker has always written its outcome to `workers:last_backup_mirror`
+    # and nothing has ever read it. An offsite copy that stopped being made — an
+    # unplugged disk, a failing copy — was therefore invisible everywhere: the report
+    # said the local backups were fine, which they were, and said nothing at all
+    # about the copy that exists to survive the local disk dying.
+    mirror = _mirror_status(settings, storage)
+    if mirror.get("enabled"):
+        if mirror.get("error") == "mirror_dir_missing":
+            add_action(
+                "mirror_dir_missing",
+                "error",
+                "Каталог зеркала бэкапов недоступен",
+                f"{mirror.get('mirror_dir')} не смонтирован. Offsite-копии НЕ создаются; "
+                "локальные копии не защищают от отказа диска.",
+            )
+        elif mirror.get("failed"):
+            add_action(
+                "mirror_failed",
+                "error",
+                "Зеркалирование бэкапов завершилось с ошибками",
+                f"Не удалось скопировать {mirror.get('failed')} копий в {mirror.get('mirror_dir')}.",
+            )
+        elif mirror.get("same_device"):
+            add_action(
+                "mirror_same_device",
+                "warning",
+                "Зеркало на том же устройстве, что и бэкапы",
+                "Копия на том же диске не переживёт его отказ — укажите внешний носитель.",
+            )
+        elif mirror.get("stale"):
+            add_action(
+                "mirror_stale",
+                "warning",
+                "Зеркало отстаёт от локальных бэкапов",
+                f"Последнее зеркалирование: {mirror.get('reported_at') or 'неизвестно'}, "
+                "а локальная копия новее.",
+            )
     else:
         age = (backups.get("latest") or {}).get("age_seconds")
         if isinstance(age, (int, float)) and not isinstance(age, bool) and age > 7 * 86400:

@@ -726,6 +726,9 @@ class WorkersManager:
 
         mirror = await run_blocking(mirror_backups, self.settings)
         if mirror.get("enabled"):
+            # Stamped so diagnostics can tell "mirrored a moment ago" from
+            # "mirrored last month and the disk has been unplugged since".
+            mirror["reported_at"] = datetime.now(UTC).isoformat(timespec="seconds")
             self.storage.kv_set("workers:last_backup_mirror", json.dumps(mirror, ensure_ascii=False))
         # Prune AFTER mirroring, so an offsite copy of the oldest generation is made
         # before the local one goes. Retention is the missing half of a daily backup:

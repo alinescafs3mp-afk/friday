@@ -408,3 +408,53 @@ def test_a_skipped_worker_is_a_valid_state_not_a_corrupt_one(settings, storage):
     assert record["status"] == "skipped"
     assert "state_errors" not in record
     assert "embeddings_index" not in report["workers"].get("degraded", [])
+
+
+def test_a_mirror_that_stopped_working_reaches_the_operator(settings, storage, tmp_path):
+    """The worker wrote its outcome every run, and nothing ever read the key.
+
+    An offsite copy that stopped being made — an unplugged disk, a failing copy —
+    was invisible in every surface: the report said the local backups were fine,
+    which was true, and said nothing about the copy that exists precisely for the
+    case where the local disk is gone.
+    """
+    import json
+
+    from jericho.diagnostics import collect_diagnostics
+
+    mirrored = replace(settings, backup_mirror_dir=tmp_path / "mirror")
+
+    storage.kv_set(
+        "workers:last_backup_mirror",
+        json.dumps({"enabled": True, "mirror_dir": str(tmp_path / "mirror"), "error": "mirror_dir_missing"}),
+    )
+    codes = {action["code"] for action in collect_diagnostics(mirrored, storage)["actions"]}
+    assert "mirror_dir_missing" in codes
+
+    storage.kv_set(
+        "workers:last_backup_mirror",
+        json.dumps({"enabled": True, "mirror_dir": str(tmp_path / "mirror"), "failed": 3}),
+    )
+    codes = {action["code"] for action in collect_diagnostics(mirrored, storage)["actions"]}
+    assert "mirror_failed" in codes
+
+    storage.kv_set(
+        "workers:last_backup_mirror",
+        json.dumps(
+            {"enabled": True, "mirror_dir": str(tmp_path / "mirror"), "failed": 0, "same_device": True}
+        ),
+    )
+    codes = {action["code"] for action in collect_diagnostics(mirrored, storage)["actions"]}
+    assert "mirror_same_device" in codes
+
+    # A healthy mirror raises nothing.
+    storage.kv_set(
+        "workers:last_backup_mirror",
+        json.dumps({"enabled": True, "mirror_dir": str(tmp_path / "mirror"), "failed": 0, "copied": 1}),
+    )
+    codes = {action["code"] for action in collect_diagnostics(mirrored, storage)["actions"]}
+    assert not {"mirror_dir_missing", "mirror_failed", "mirror_same_device", "mirror_stale"} & codes
+
+    # Mirroring off means no mirror actions at all.
+    codes = {action["code"] for action in collect_diagnostics(settings, storage)["actions"]}
+    assert not [code for code in codes if code.startswith("mirror_")]
