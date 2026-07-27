@@ -831,9 +831,11 @@ class HybridSearcher:
         embedding_scores: dict[str, float] = {}
         dense_meta: dict[str, Any] = {}
         chunk_provenance: dict[str, tuple[int, int]] = {}
+        chunk_carried: set[str] = set()
         if self.embeddings and self.embeddings.remote_enabled:
             embedding_scores = await self._dense_recall(user_id, clean_query, candidate_map, meta=dense_meta)
             chunk_provenance = dict(dense_meta.get("chunk_provenance") or {})
+            chunk_carried = set(dense_meta.get("chunk_carried") or set())
             if embedding_scores:
                 candidates = list(candidate_map.values())
                 rankings.append(
@@ -1019,7 +1021,8 @@ class HybridSearcher:
                 "exact_phrase": round(field_components[document_id]["exact_phrase"], 6),
                 "identifier_coverage": round(identifiers, 6),
                 "embedding": round(embedding, 6),
-                # -1 = the whole-object vector carried it, not a passage.
+                # The passage the excerpt is taken from; -1 when the object has no
+                # passage vectors at all.
                 "embedding_chunk": chunk_provenance.get(document_id, (-1, 0))[0],
                 "embedding_chunks": chunk_provenance.get(document_id, (-1, 0))[1],
                 "graph": round(graph, 6),
@@ -1222,6 +1225,15 @@ class HybridSearcher:
                         "status": status,
                         "rank": entry_rank,
                         "reason": reason,
+                        # WHICH signal carried the retrieval — a different question
+                        # from which passage is quoted, and it used to be answered by
+                        # silently discarding the second one. Outside `components`
+                        # because that map is numeric by contract.
+                        "embedding_source": (
+                            "chunk"
+                            if document_id in chunk_carried
+                            else ("document" if document_id in chunk_provenance else "none")
+                        ),
                         "components": components.get(document_id, {}),
                     }
                 )
@@ -1531,8 +1543,33 @@ class HybridSearcher:
         if meta is not None:
             # Per-call, never on the instance: HybridSearcher is shared and search()
             # is async, so instance state would race between concurrent queries.
+            # Recorded for every object that HAS a best passage, without asking
+            # whether the whole-object vector outscored it.
+            #
+            # The comparison used to gate this, and it decided what the reader sees.
+            # Two things were wrong with it. `chunk_scores` is the corroborated
+            # aggregate — algebraically at most `best` and as low as 0.8333 * best —
+            # so a passage could genuinely beat the document vector and still lose its
+            # provenance. And `doc_scores` comes from a vector built on the FIRST
+            # 20 000 characters (`_DOC_VECTOR_MAX_CHARS`): on this archive 44 of 342
+            # objects are longer than that, the vector covering a median of 35% of the
+            # text and as little as 2.6% of the longest.
+            #
+            # What followed was deterministic: no provenance, no `_embedding_chunk`,
+            # no span lookup, `_matched_region` hands back the entire body, and
+            # `best_snippet` over a body with none of the query's words returns its
+            # first 520 characters. The model and the verifier were shown the header
+            # of a document that had matched somewhere in the middle.
+            #
+            # The best passage is the best passage whichever vector ranked higher, so
+            # the excerpt uses it unconditionally. Which signal actually carried the
+            # retrieval is a separate question, and it is answered separately —
+            # `embedding_source` in the trace below.
             meta["chunk_provenance"] = {
-                document_id: provenance[document_id]
+                document_id: provenance[document_id] for document_id in combined if document_id in provenance
+            }
+            meta["chunk_carried"] = {
+                document_id
                 for document_id in combined
                 if document_id in provenance
                 and chunk_scores.get(document_id, -1.0) >= doc_scores.get(document_id, -1.0)
