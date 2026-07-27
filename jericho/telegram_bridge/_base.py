@@ -35,6 +35,7 @@ POLL_TIMEOUT = 30
 BACKOFF_MAX = 60.0
 MAX_ATTEMPTS = 288
 BATCH_SIZE = 20
+# Telegram counts sendMessage's 4096 in UTF-16 code units, not code points.
 TELEGRAM_TEXT_LIMIT = 4096
 RETRY_DELAYS_SEC = (2.0, 10.0, 30.0, 60.0, 300.0)
 CALLBACK_TARGET_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
@@ -96,6 +97,53 @@ class TelegramConfig:
                 "No allowed Telegram chats configured; set "
                 "JERICHO_TELEGRAM_ALLOWED_CHAT_IDS or JERICHO_TELEGRAM_OWNER_CHAT_IDS"
             )
+
+
+def utf16_length(text: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units, so a non-BMP char costs 2."""
+    return len(text) + sum(1 for character in text if ord(character) > 0xFFFF)
+
+
+def _utf16_prefix_index(text: str, limit: int) -> int:
+    """Largest ``i`` with ``utf16_length(text[:i]) <= limit``."""
+    used = 0
+    for index, character in enumerate(text):
+        cost = 2 if ord(character) > 0xFFFF else 1
+        if used + cost > limit:
+            return index
+        used += cost
+    return len(text)
+
+
+def split_for_telegram(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
+    """Split a reply into sendMessage-sized chunks, preferring line then word breaks.
+
+    Measured in UTF-16 code units because that is the unit Telegram's 4096 is in.
+    ``len()`` counts code points, so a reply of 4092 code points containing five
+    emoji is 4097 units and the API rejects the whole message with 400 — the user
+    simply never receives the answer, and every emoji in it makes that more likely.
+    """
+    clean = str(text or "").strip() or "Готово."
+    limit = max(1, int(limit))
+    chunks: list[str] = []
+    while clean:
+        hard = _utf16_prefix_index(clean, limit)
+        if hard >= len(clean):
+            chunks.append(clean)
+            break
+        split_at = clean.rfind("\n", 0, hard)
+        if split_at < hard // 2:
+            split_at = clean.rfind(" ", 0, hard)
+        if split_at < hard // 2:
+            # No usable break: cut at the hard boundary. `hard` never lands inside a
+            # surrogate pair, because the cost of a non-BMP character is charged
+            # whole or not at all.
+            split_at = hard
+        piece = clean[:split_at].rstrip()
+        if piece:
+            chunks.append(piece)
+        clean = clean[split_at:].lstrip()
+    return chunks or ["Готово."]
 
 
 def _redact_userinfo(url: str) -> str:

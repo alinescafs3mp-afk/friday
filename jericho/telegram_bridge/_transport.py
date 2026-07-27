@@ -13,7 +13,6 @@ from jericho.telegram_bridge._base import (
     BOT_COMMANDS,
     LOGGER,
     POLL_TIMEOUT,
-    TELEGRAM_TEXT_LIMIT,
     Any,
     BridgeShared,
     MediaTooLargeError,
@@ -29,6 +28,7 @@ from jericho.telegram_bridge._base import (
     install_secret_redaction,
     json,
     sign_bridge_request,
+    split_for_telegram,
     time,
     uuid,
 )
@@ -411,19 +411,7 @@ class TransportMixin(BridgeShared):
         *,
         reply_markup: dict[str, Any] | None = None,
     ) -> None:
-        clean = str(text or "").strip() or "Готово."
-        chunks: list[str] = []
-        while clean:
-            if len(clean) <= TELEGRAM_TEXT_LIMIT:
-                chunks.append(clean)
-                break
-            split_at = clean.rfind("\n", 0, TELEGRAM_TEXT_LIMIT)
-            if split_at < TELEGRAM_TEXT_LIMIT // 2:
-                split_at = clean.rfind(" ", 0, TELEGRAM_TEXT_LIMIT)
-            if split_at < TELEGRAM_TEXT_LIMIT // 2:
-                split_at = TELEGRAM_TEXT_LIMIT
-            chunks.append(clean[:split_at].rstrip())
-            clean = clean[split_at:].lstrip()
+        chunks = split_for_telegram(text)
         for index, chunk in enumerate(chunks):
             payload: dict[str, Any] = {
                 "chat_id": chat_id,

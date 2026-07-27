@@ -48,7 +48,17 @@ class CommandsMixin(BridgeShared):
             return
 
         text = str(message.get("text") or message.get("caption") or "").strip()
-        command = text.split(maxsplit=1)[0].split("@", 1)[0].casefold() if text.startswith("/") else ""
+        # Command and argument come from the SAME split. They used to disagree: the
+        # command was found with `split(maxsplit=1)` (any whitespace, so a newline
+        # counted) while the argument was taken with `partition(" ")` (a literal
+        # space only). "/note\nПароли\nrouter: 12345" therefore matched /note and
+        # saved the argument "12345" — the note itself silently discarded, the
+        # fragment canonicalised as knowledge. "/note\nfoo" produced an empty
+        # argument and the usage message. A multi-line note is the normal way to
+        # send one from a phone.
+        parts = text.split(maxsplit=1)
+        command = parts[0].split("@", 1)[0].casefold() if text.startswith("/") else ""
+        argument = parts[1].strip() if command and len(parts) > 1 else ""
 
         async def register_backend_user() -> None:
             # Registration is an authentication side effect on the backend.
@@ -138,11 +148,11 @@ class CommandsMixin(BridgeShared):
             await self._send_tags(telegram, backend, chat_id, external_user_id, user)
             return
         if command == "/browse":
-            query = text.partition(" ")[2].strip()
+            query = argument
             await self._send_browse(telegram, backend, chat_id, external_user_id, user, query)
             return
         if command == "/search":
-            query = text.partition(" ")[2].strip()
+            query = argument
             await self._send_search(telegram, backend, chat_id, external_user_id, user, query)
             return
         if command == "/new":
@@ -166,7 +176,7 @@ class CommandsMixin(BridgeShared):
             )
             return
         if command == "/mission":
-            goal = text.partition(" ")[2].strip()
+            goal = argument
             if not goal:
                 await register_backend_user()
                 await self._send_message(
@@ -226,7 +236,7 @@ class CommandsMixin(BridgeShared):
 
         force_knowledge = False
         if command == "/note":
-            text = text.partition(" ")[2].strip()
+            text = argument
             if not text:
                 await register_backend_user()
                 await self._send_message(telegram, chat_id, "Использование: /note текст заметки")

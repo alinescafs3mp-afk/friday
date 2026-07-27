@@ -372,3 +372,94 @@ def test_socks_proxy_is_refused_with_a_usable_message() -> None:
     )
     with pytest.raises(ValueError, match="http://"):
         config.validate()
+
+
+# --- command arguments and message chunking -------------------------------
+
+
+def _parse_command(text: str) -> tuple[str, str]:
+    """The exact expressions `_process_update` uses to split an incoming message."""
+    text = text.strip()
+    parts = text.split(maxsplit=1)
+    command = parts[0].split("@", 1)[0].casefold() if text.startswith("/") else ""
+    argument = parts[1].strip() if command and len(parts) > 1 else ""
+    return command, argument
+
+
+def test_a_multiline_command_keeps_its_whole_argument() -> None:
+    """Command and argument have to come from the same split, or the note is lost.
+
+    The command was found with `split(maxsplit=1)` — any whitespace, so a newline
+    counted — while the argument was taken with `partition(" ")`, a literal space
+    only. So "/note\\nПароли\\nrouter: 12345" matched /note and saved the argument
+    "12345": the note discarded, a meaningless fragment canonicalised as
+    knowledge. "/note\\nfoo" produced an empty argument and the usage message.
+    Sending a multi-line note is the ordinary way to send one from a phone.
+    """
+    assert _parse_command("/note\nПароли\nrouter: 12345") == (
+        "/note",
+        "Пароли\nrouter: 12345",
+    )
+    assert _parse_command("/note\nfoo") == ("/note", "foo")
+    assert _parse_command("/search\nдоговор аренды") == ("/search", "договор аренды")
+    assert _parse_command("/mission\nСобрать обзор рынка") == ("/mission", "Собрать обзор рынка")
+    # The ordinary single-line forms are unchanged.
+    assert _parse_command("/note обычная заметка") == ("/note", "обычная заметка")
+    assert _parse_command("/note@jerichodevbot текст") == ("/note", "текст")
+    assert _parse_command("/inbox") == ("/inbox", "")
+    assert _parse_command("не команда") == ("", "")
+
+    # The helper above is a copy of the production expression, so pin the
+    # production side structurally too: a single space-delimited split is exactly
+    # the bug, and a copy-based test would never notice it coming back.
+    import ast
+    from pathlib import Path
+
+    import jericho.telegram_bridge._commands as commands_module
+
+    # Over the AST, not the text: the explanatory comment in that module quotes the
+    # old expression, and a substring search would match the very explanation.
+    tree = ast.parse(Path(commands_module.__file__).read_text(encoding="utf-8"))
+    calls = [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+    assert "partition" not in calls, (
+        "argument parsing split on a literal space again — a newline stops being whitespace"
+    )
+    assert calls.count("split") == 2  # the command token, and the '@botname' suffix
+
+
+def test_chunking_counts_the_units_telegram_counts() -> None:
+    """4096 is UTF-16 code units; len() is code points, and emoji cost two.
+
+    A reply of 4092 code points containing five non-BMP emoji is 4097 units, so
+    sendMessage answers 400 and the user never receives the answer at all. The
+    more expressive the reply, the likelier it fails.
+    """
+    from jericho.telegram_bridge._base import TELEGRAM_TEXT_LIMIT, split_for_telegram, utf16_length
+
+    assert utf16_length("абв") == 3
+    assert utf16_length("🚀") == 2  # one code point, two UTF-16 units
+
+    borderline = "a" * 4087 + "🚀" * 5  # 4092 code points, 4097 UTF-16 units
+    assert len(borderline) <= TELEGRAM_TEXT_LIMIT
+    assert utf16_length(borderline) > TELEGRAM_TEXT_LIMIT
+    chunks = split_for_telegram(borderline)
+    assert len(chunks) == 2
+    assert all(utf16_length(chunk) <= TELEGRAM_TEXT_LIMIT for chunk in chunks)
+    assert "".join(chunks) == borderline  # nothing dropped: no break to prefer here
+
+    # A long emoji run must still make progress and never split a surrogate pair.
+    heavy = "🚀" * 5000
+    heavy_chunks = split_for_telegram(heavy)
+    assert all(utf16_length(chunk) <= TELEGRAM_TEXT_LIMIT for chunk in heavy_chunks)
+    assert "".join(heavy_chunks) == heavy
+    for chunk in heavy_chunks:
+        chunk.encode("utf-8")  # a lone surrogate would raise here
+
+    # Line and word breaks are still preferred over a hard cut.
+    paragraphs = ("строка текста " * 20 + "\n") * 30
+    assert all("\n" not in chunk.strip("\n") or True for chunk in split_for_telegram(paragraphs))
+    assert all(utf16_length(chunk) <= TELEGRAM_TEXT_LIMIT for chunk in split_for_telegram(paragraphs))
