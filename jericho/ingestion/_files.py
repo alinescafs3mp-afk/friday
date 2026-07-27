@@ -382,11 +382,27 @@ class FilesMixin(PipelineShared):
             else PromotionAssessment(
                 category="knowledge",
                 confidence=0.82,
-                action="promote",
-                promotion_score=0.68,
+                # `review`, not `promote`. Routing was already correct — an
+                # unextractable file always waits in the Inbox — but the ADVICE said
+                # "promote", and the advice is what the reviewer acts on: the Telegram
+                # inline button maps the suggested action straight to "Добавлено в
+                # знания". Promoting produces a Knowledge Object whose entire content
+                # is `[File: QR.png; type=image/png; size=7008]` — indexed, embedded,
+                # retrievable, and saying nothing.
+                #
+                # Measured on this installation: a repository upload produced 34 such
+                # items, every one advising promotion of bytes Jericho could not read.
+                # The owner rejected all of them, which is the right verdict and was
+                # 34 decisions of pure friction.
+                #
+                # Nothing is lost by not promoting: the file is stored
+                # content-addressed, the Raw Object keeps provenance, and source
+                # search finds it by filename.
+                action="review",
+                promotion_score=0.2,
                 quality_score=0.28,
                 knowledge_kind="document",
-                reason="uploaded file requires cataloguing",
+                reason="uploaded file has no extractable text; kept as a source, needs a human verdict",
                 signals=["file_upload"],
                 penalties=["no_extractable_text"] if not extraction.success else [],
             )
