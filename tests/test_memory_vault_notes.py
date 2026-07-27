@@ -125,3 +125,24 @@ def test_readme_is_not_rewritten_once_the_owner_edits_it(vault):
     readme.write_text("мои заметки\n", encoding="utf-8")
     vault.sync_object(_ko(title="Другое"))
     assert readme.read_text(encoding="utf-8") == "мои заметки\n"
+
+
+def test_an_old_scheme_note_is_renamed_rather_than_duplicated(vault):
+    """Every note already on disk is `ko_<hash>--<digest>.md`. It has to convert.
+
+    The digest half is the same in both schemes, so the stale-twin sweep matches the
+    old name and the first sync after the upgrade renames the file in place. Had the
+    two schemes not shared it, every user would have silently ended up with two
+    copies of every note — the second one never updated again.
+    """
+    user_dir = vault._user_dir(USER)  # noqa: SLF001
+    user_dir.mkdir(parents=True, exist_ok=True)
+    new_path = vault._note_path(user_dir, _ko())  # noqa: SLF001
+    legacy = user_dir / f"ko_1a2b3c--{new_path.stem.rsplit('--', 1)[-1]}.md"
+    legacy.write_text("старое содержимое\n", encoding="utf-8")
+
+    written = vault.sync_object(_ko())
+
+    assert written == new_path and written.is_file()
+    assert not legacy.exists()
+    assert len(vault.read_vault(USER)) == 1
