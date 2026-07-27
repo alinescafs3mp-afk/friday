@@ -56,7 +56,10 @@ def _store(storage, title: str, content: str) -> str:
     "text,expected",
     [
         ("конец предложения.", ["конец", "предложения"]),
-        ("подъём autovacuum_vacuum_scale_factor.", ["подъём", "autovacuum_vacuum_scale_factor"]),
+        # `ё` folds to `е`: the same word is written both ways in Russian, and the
+        # index/query pair must agree. See `_YO_FOLD`.
+        ("подъём autovacuum_vacuum_scale_factor.", ["подъем", "autovacuum_vacuum_scale_factor"]),
+        ("подъём", tokens_of("подъем")),
         ("версия 1.2.3.", ["версия", "1.2.3"]),
         ("тире- и точка.", ["тире", "и", "точка"]),
         # Inside a token these characters are meaning, not punctuation.
@@ -173,7 +176,12 @@ def test_a_long_question_does_not_lose_the_term_that_identifies_the_answer(stora
 
     chosen = _fts_terms(question)
     assert "autovacuum_vacuum_scale_factor" in chosen
-    assert len(chosen) <= _FTS_TERM_BUDGET  # the budget itself is unchanged
+    # The budget counts WORDS. `чёрных` and `черных` are one word in two spellings
+    # (see `_yo_spellings`), added after the budget so a spelling never costs a
+    # distinct word its slot.
+    from jericho.retrieval import _YO_FOLD
+
+    assert len({term.translate(_YO_FOLD) for term in chosen}) <= _FTS_TERM_BUDGET
 
     results = storage.search_knowledge("owner", question, limit=10)
     assert results, "the identifier still does not reach the index"

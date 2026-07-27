@@ -166,6 +166,30 @@ def _valid_lifecycle_stage(value: Any) -> str:
     return stage
 
 
+# Both directions matter, and only one of them is free here.
+#
+# Query written with `ё`, document with `е`: folding the term covers it, one extra
+# alternative on the words the person actually typed that way. That is the case
+# measured on the owner's own data.
+#
+# Query with `е`, document with `ё`: the index holds the text as it was written, so
+# reaching it from here would mean GUESSING where the `ё` goes — `кластер` becomes
+# `кластёр` on every Russian query, doubling the term list with words nobody wrote.
+# Folding the indexed payload in the triggers would be the real fix, and it is a
+# trap: FTS5's own `rebuild` re-reads the content table and would silently restore
+# the unfolded text, leaving an index that disagrees with its own writer.
+#
+# It is also the less urgent direction, because FTS is one recall leg of several:
+# `lexical_vector` folds both sides through `tokens_of`, and embeddings never saw
+# the letter. Only this leg is spelling-bound.
+def _yo_spellings(token: str) -> list[str]:
+    """The spellings of one word to ask the index for, folded form last."""
+    from jericho.retrieval import _YO_FOLD
+
+    folded = token.translate(_YO_FOLD)
+    return [token] if folded == token else [token, folded]
+
+
 def _fts_terms(text: str) -> list[str]:
     """Spend the term budget on the words that select a document, not the first typed.
 
@@ -190,15 +214,26 @@ def _fts_terms(text: str) -> list[str]:
     """
     from jericho.retrieval import _STOPWORDS, tokens_of
 
-    unique = list(dict.fromkeys(token for token in tokens_of(text) if len(token) >= 2))
+    # Unfolded on purpose: the index stored the text as it was written, so the query
+    # has to reach BOTH spellings. `tokens_of` folds `ё` for scoring, which is
+    # symmetric because it runs over query and document alike; FTS is the one place
+    # where only the query passes through us. Terms are OR-ed by the caller, so a
+    # second spelling costs one more alternative and nothing else.
+    unique = list(dict.fromkeys(token for token in tokens_of(text, fold_yo=False) if len(token) >= 2))
     if len(unique) <= _FTS_TERM_BUDGET:
-        return unique
-    chosen = [token for token in unique if token.casefold() not in _STOPWORDS][:_FTS_TERM_BUDGET]
-    if len(chosen) < _FTS_TERM_BUDGET:
-        # A long query that is mostly stopwords still gets a full budget.
-        taken = set(chosen)
-        chosen += [token for token in unique if token not in taken][: _FTS_TERM_BUDGET - len(chosen)]
-    return chosen
+        chosen = unique
+    else:
+        chosen = [token for token in unique if token.casefold() not in _STOPWORDS][:_FTS_TERM_BUDGET]
+        if len(chosen) < _FTS_TERM_BUDGET:
+            # A long query that is mostly stopwords still gets a full budget.
+            taken = set(chosen)
+            chosen += [token for token in unique if token not in taken][: _FTS_TERM_BUDGET - len(chosen)]
+    # Spellings are added AFTER the budget so a variant never costs a distinct word
+    # its slot: the budget counts words, and `чёрных`/`черных` are one word.
+    expanded: list[str] = []
+    for token in chosen:
+        expanded.extend(_yo_spellings(token))
+    return list(dict.fromkeys(expanded))
 
 
 class KnowledgeMixin(StorageShared):

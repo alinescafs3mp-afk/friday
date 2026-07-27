@@ -33,7 +33,7 @@ _TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁ][0-9a-zA-Zа-яёА-ЯЁ._+#-]
 _TRAILING_PUNCTUATION = ".-"
 
 
-def tokens_of(text: str) -> list[str]:
+def tokens_of(text: str, *, fold_yo: bool = True) -> list[str]:
     """Tokenize the way every part of retrieval must agree to tokenize.
 
     ``_TOKEN_RE`` deliberately lets ``. _ + # -`` continue a token so that ``file.txt``,
@@ -46,9 +46,30 @@ def tokens_of(text: str) -> list[str]:
     ``autovacuum_vacuum_scale_factor.`` was unreachable by a query for
     ``autovacuum_vacuum_scale_factor`` — FTS returned the hit and the blend discarded it
     as ``identifier_mismatch``.
+
+    ``ё`` folds to ``е`` (see ``_YO_FOLD``). Callers that must see the letter as
+    typed — the FTS query builder, which has to search an index that stored the text
+    verbatim — pass ``fold_yo=False``.
     """
 
-    return [token.rstrip(_TRAILING_PUNCTUATION) for token in _TOKEN_RE.findall(text or "")]
+    tokens = [token.rstrip(_TRAILING_PUNCTUATION) for token in _TOKEN_RE.findall(text or "")]
+    return [token.translate(_YO_FOLD) for token in tokens] if fold_yo else tokens
+
+
+# `ё` and `е` are the same Russian letter as far as a reader is concerned, and the
+# language is written both ways in the same breath: phone keyboards produce `е`,
+# careful writers and most published text use `ё`, and one person mixes both within
+# a note. Measured on the owner's own document — the question «что выбрать для
+# чёрных списков» against a document saying «Для Черных Списков»: lexical similarity
+# 0.482 with matching letters, **0.275** without, and FTS `MATCH 'чёрных'` returned
+# nothing at all where `MATCH 'черных'` returned the document. Neither `unicode61
+# remove_diacritics 2` nor NFKC folds it: U+0451 is its own letter, not `е` plus a
+# combining mark.
+#
+# The cost is a handful of pairs distinguished only by this letter (все/всё,
+# небо/нёбо). For recall over a personal archive that is the right trade, and it is
+# the same one every Russian search engine makes.
+_YO_FOLD = str.maketrans({"ё": "е", "Ё": "Е"})
 
 
 _RELATIONAL_QUERY_RE = re.compile(
