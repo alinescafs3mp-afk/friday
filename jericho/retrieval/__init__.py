@@ -152,6 +152,34 @@ def sparse_cosine(left: dict[str, float], right: dict[str, float]) -> float:
     return sum(value * right.get(key, 0.0) for key, value in left.items())
 
 
+# How far a snippet edge may walk to reach a word boundary. Long enough for any
+# real word or product name, short enough that a base64 blob or a URL cannot drag
+# the edge across the document.
+_SNIPPET_BOUNDARY_SCAN = 48
+
+
+def _is_word_char(character: str) -> bool:
+    return character.isalnum() or character in "_-"
+
+
+def _word_start(text: str, index: int) -> int:
+    """Move an offset back to the start of the word it landed inside."""
+    limit = max(0, index - _SNIPPET_BOUNDARY_SCAN)
+    while index > limit and _is_word_char(text[index - 1]) and _is_word_char(text[index]):
+        index -= 1
+    return index
+
+
+def _word_end(text: str, index: int, *, floor: int) -> int:
+    """Move an offset back to the end of the last whole word before it."""
+    limit = max(floor, index - _SNIPPET_BOUNDARY_SCAN)
+    while (
+        index > limit and index < len(text) and _is_word_char(text[index - 1]) and _is_word_char(text[index])
+    ):
+        index -= 1
+    return index
+
+
 def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
     """Return the passage of ``text`` most relevant to ``query`` (query-aware
     excerpting) so a reader — the LLM or the answer verifier — sees the region
@@ -207,10 +235,19 @@ def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
         if len(counts) > best_distinct:
             best_distinct = len(counts)
             best_pos = pos
-    start = max(0, best_pos - 64)
-    snippet = body[start : start + max_chars].strip()
+    # Snap both edges to word boundaries. Cutting at an arbitrary offset decapitates
+    # whichever word straddles it, and the leading "…" makes the remainder look like
+    # a whole word rather than a fragment. Measured on the owner's own document: the
+    # question "какое приложение не решило проблему авторизации localhost" produced
+    # an excerpt beginning "…dify ❌ Проблема авторизации localhost-порта не решена"
+    # — the answer was present and the name of the application, Hiddify, was gone.
+    # Names, products and identifiers are exactly the words an excerpt exists to
+    # carry, and they sit at the edges as often as anywhere else.
+    start = _word_start(body, max(0, best_pos - 64))
+    end = _word_end(body, min(len(body), start + max_chars), floor=best_pos + 1)
+    snippet = body[start:end].strip()
     prefix = "…" if start > 0 else ""
-    suffix = "…" if start + max_chars < len(body) else ""
+    suffix = "…" if end < len(body) else ""
     return f"{prefix}{snippet}{suffix}"
 
 

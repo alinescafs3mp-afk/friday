@@ -97,7 +97,14 @@ def test_best_snippet_short_text_and_no_match_fallbacks():
 
 
 def _quadratic_best_snippet(query: str, text: str, max_chars: int) -> str:
-    """The original implementation, kept as an oracle for the linear rewrite."""
+    """The original implementation, kept as an oracle for the linear rewrite.
+
+    The edges use the production boundary snapping: this oracle exists to pin WHICH
+    WINDOW is chosen, and word-boundary trimming is a separate, deliberate change
+    (see `test_a_snippet_never_starts_or_ends_mid_word`). Reimplementing the snapping
+    here would make the oracle a copy of the code it checks; calling it keeps the
+    comparison about the window search, which is what the rewrite touched.
+    """
     from jericho.retrieval import _STOPWORDS, tokens_of
 
     body = (text or "").strip()
@@ -129,9 +136,12 @@ def _quadratic_best_snippet(query: str, text: str, max_chars: int) -> str:
         if len(covered) > best_distinct:
             best_distinct = len(covered)
             best_pos = pos
-    start = max(0, best_pos - 64)
-    snippet = body[start : start + max_chars].strip()
-    return f"{'…' if start > 0 else ''}{snippet}{'…' if start + max_chars < len(body) else ''}"
+    from jericho.retrieval import _word_end, _word_start
+
+    start = _word_start(body, max(0, best_pos - 64))
+    end = _word_end(body, min(len(body), start + max_chars), floor=best_pos + 1)
+    snippet = body[start:end].strip()
+    return f"{'…' if start > 0 else ''}{snippet}{'…' if end < len(body) else ''}"
 
 
 def test_best_snippet_picks_the_same_window_as_the_original():
@@ -302,3 +312,53 @@ def test_the_dense_evidence_floor_is_configurable(settings):
     from jericho.retrieval import _DENSE_EVIDENCE_MIN_DEFAULT
 
     assert settings.retrieval_dense_evidence_min == _DENSE_EVIDENCE_MIN_DEFAULT == 0.35
+
+
+def test_a_snippet_never_starts_or_ends_mid_word():
+    """A decapitated name is worse than no excerpt: it reads as a whole word.
+
+    Found on the owner's own document. The question "какое приложение не решило
+    проблему авторизации localhost" produced an excerpt beginning
+
+        …dify ❌ - последнее обновление было 5 марта. Проблема авторизации
+        localhost-порта не решена.
+
+    The answer was right there and the name of the application — Hiddify — had been
+    cut off by the window edge, which lands 64 characters before the matched token
+    with no regard for what sits at that offset. Names, products and identifiers are
+    exactly what an excerpt exists to carry, and they fall on the edges as often as
+    anywhere else.
+    """
+    body = (
+        "Проверка клиентов на проблему авторизации локального порта. "
+        + "Наполнитель, чтобы окно не начиналось с начала документа. " * 4
+        + "Пункт 7. Hiddify — последнее обновление было 5 марта, проблема "
+        "авторизации localhost-порта не решена. "
+        + "Дальше следует ещё текст про другие клиенты и настройки прокси. "
+        * 6
+    )
+    snippet = best_snippet("проблема авторизации localhost", body, max_chars=200)
+
+    assert "Hiddify" in snippet, snippet
+    stripped = snippet.strip("…").strip()
+    # Neither edge may sit inside a word.
+    assert body.find(stripped) >= 0
+    start = body.find(stripped)
+    assert start == 0 or not (body[start - 1].isalnum() and body[start].isalnum())
+    end = start + len(stripped)
+    assert end == len(body) or not (body[end - 1].isalnum() and body[end].isalnum())
+
+
+def test_boundary_snapping_cannot_be_dragged_across_the_document():
+    """A URL or a base64 blob is one long "word"; the edge must give up, not walk.
+
+    Without a scan limit the left edge walks to the start of the blob, and the whole
+    window then sits inside it — bounded in LENGTH, and no longer containing the
+    match it was built around. Length alone does not catch that, which is why the
+    assertion is about the matched terms.
+    """
+    blob = "A" * 5000
+    body = f"начало документа {blob} запрос конфиг " + "хвост " * 200
+    snippet = best_snippet("запрос конфиг", body, max_chars=300)
+    assert len(snippet) <= 300 + 2
+    assert "запрос" in snippet and "конфиг" in snippet, snippet
