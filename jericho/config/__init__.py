@@ -215,6 +215,12 @@ class JerichoSettings:
     data_dir: Path
     cache_dir: Path
     log_dir: Path
+    # `jericho up` copy-truncates a child log once it passes this size and keeps
+    # `log_backups` numbered generations. Unbounded child logs are a real way to
+    # fill the disk: the bridge alone polls the backend every 15s, and every poll
+    # costs an access-log line for as long as the process lives. 0 = never rotate.
+    log_max_bytes: int
+    log_backups: int
     model_root: Path
     model_dir: Path
     state_dir: Path
@@ -492,6 +498,8 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         data_dir=data_dir,
         cache_dir=cache_dir,
         log_dir=log_dir,
+        log_max_bytes=_int_env("JERICHO_LOG_MAX_BYTES", 16 * 1024 * 1024, minimum=0),
+        log_backups=_int_env("JERICHO_LOG_BACKUPS", 3, minimum=0),
         model_root=model_root,
         model_dir=model_root / profile.model_dir_name,
         state_dir=state_dir,

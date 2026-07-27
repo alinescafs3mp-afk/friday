@@ -1067,7 +1067,11 @@ def _up(args: argparse.Namespace) -> int:
 
     print(f"Запускаю {', '.join(child.name for child in children)}; логи в {settings.log_dir}")
     print("Остановка: Ctrl+C (дети получают SIGTERM и завершаются штатно).")
-    return Supervisor(children).run()
+    return Supervisor(
+        children,
+        log_max_bytes=settings.log_max_bytes,
+        log_backups=settings.log_backups,
+    ).run()
 
 
 _SYSTEMD_UNIT_TEMPLATE = """[Unit]

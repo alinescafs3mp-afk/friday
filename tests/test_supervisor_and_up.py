@@ -12,6 +12,7 @@ import argparse
 import sys
 import threading
 import time
+from contextlib import suppress
 
 from jericho.supervisor import ChildSpec, Supervisor
 
@@ -75,6 +76,117 @@ def test_child_output_lands_in_its_log(tmp_path):
     )
     sup.run()
     assert "привет из ребёнка" in (tmp_path / "talker.log").read_text(encoding="utf-8")
+
+
+# Writes one oversized blob, waits, then writes a marker. Deterministic on purpose:
+# the supervisor is guaranteed to see the log over the cap during the sleep, so the
+# marker lands *after* rotation without the test having to race a busy writer.
+_BLOAT_THEN_MARK = (
+    "import sys, time\n"
+    "sys.stdout.write('X' * 8192 + '\\n'); sys.stdout.flush()\n"
+    "time.sleep(1.5)\n"
+    "sys.stdout.write('ПОСЛЕ ПОВОРОТА\\n'); sys.stdout.flush()\n"
+    "time.sleep(30)\n"
+)
+
+
+def _wait_for(predicate, timeout: float = 20.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        # The log does not exist until the supervisor thread starts the child.
+        with suppress(FileNotFoundError):
+            if predicate():
+                return True
+        time.sleep(0.02)
+    return False
+
+
+def test_oversized_log_is_rotated_and_the_child_keeps_writing_into_the_live_file(tmp_path):
+    """The wiring test: rotation must not orphan the child's inherited fd.
+
+    A rename would leave the child appending to the rotated-away file and the live
+    log permanently empty — the mechanism would look fine in isolation and the
+    running system would silently stop logging. Asserting the post-rotation marker
+    lands in the live file is what actually proves copy-truncate is wired up.
+    """
+    sup = Supervisor(
+        [_spec(tmp_path, "flood", _BLOAT_THEN_MARK)],
+        poll_interval_sec=0.02,
+        log_max_bytes=4096,
+        log_backups=2,
+        log_check_interval_sec=0.0,
+    )
+    live = tmp_path / "flood.log"
+    first = tmp_path / "flood.log.1"
+    runner = threading.Thread(target=sup.run)
+    runner.start()
+    try:
+        assert _wait_for(first.exists), "лог не провернулся"
+        assert _wait_for(lambda: "ПОСЛЕ ПОВОРОТА" in live.read_text(encoding="utf-8")), (
+            "ребёнок перестал писать в живой лог после поворота"
+        )
+        fresh = live.read_text(encoding="utf-8")
+    finally:
+        sup.stop()
+        runner.join(timeout=15)
+    assert first.read_text(encoding="utf-8").startswith("X" * 8192)
+    # O_APPEND re-seeks to end on every write, so truncation leaves no sparse hole:
+    # the live file is exactly the post-rotation output, not 8 KiB of NUL plus it.
+    assert fresh == "ПОСЛЕ ПОВОРОТА\n"
+
+
+def test_rotation_off_by_default_keeps_one_growing_file(tmp_path):
+    sup = Supervisor(
+        [_spec(tmp_path, "flood", _BLOAT_THEN_MARK)],
+        poll_interval_sec=0.02,
+        log_max_bytes=0,  # disabled
+        log_check_interval_sec=0.0,
+    )
+    live = tmp_path / "flood.log"
+    runner = threading.Thread(target=sup.run)
+    runner.start()
+    try:
+        assert _wait_for(lambda: "ПОСЛЕ ПОВОРОТА" in live.read_text(encoding="utf-8"))
+    finally:
+        sup.stop()
+        runner.join(timeout=15)
+    assert not (tmp_path / "flood.log.1").exists()
+    assert live.stat().st_size > 8192
+
+
+def test_generations_shift_and_are_capped(tmp_path):
+    sup = Supervisor(
+        [_spec(tmp_path, "gen", "import sys; sys.exit(0)")],
+        log_max_bytes=100,
+        log_backups=2,
+        log_check_interval_sec=0.0,
+    )
+    live = tmp_path / "gen.log"
+    for marker in ("первый", "второй", "третий"):
+        live.write_text(marker + "!" * 200, encoding="utf-8")
+        sup._rotate_logs_if_needed()
+        assert live.stat().st_size == 0
+    assert (tmp_path / "gen.log.1").read_text(encoding="utf-8").startswith("третий")
+    assert (tmp_path / "gen.log.2").read_text(encoding="utf-8").startswith("второй")
+    assert not (tmp_path / "gen.log.3").exists()  # capped at log_backups
+
+
+def test_undersized_log_is_left_alone(tmp_path):
+    sup = Supervisor(
+        [_spec(tmp_path, "small", "import sys; sys.exit(0)")],
+        log_max_bytes=4096,
+        log_check_interval_sec=0.0,
+    )
+    live = tmp_path / "small.log"
+    live.write_text("коротко", encoding="utf-8")
+    sup._rotate_logs_if_needed()
+    assert live.read_text(encoding="utf-8") == "коротко"
+    assert not (tmp_path / "small.log.1").exists()
+
+
+def test_settings_bound_the_child_logs_by_default(settings):
+    assert settings.log_max_bytes == 16 * 1024 * 1024
+    assert settings.log_backups == 3
 
 
 def test_install_services_writes_units(tmp_path, settings):

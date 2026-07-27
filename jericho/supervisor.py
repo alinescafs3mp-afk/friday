@@ -14,6 +14,8 @@ The class is generic over argv so it is testable with plain shell commands;
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import signal
 import subprocess  # nosec B404 - supervising our own CLI subcommands
 import time
@@ -58,6 +60,9 @@ class Supervisor:
         crash_window_sec: float = 15.0,
         max_rapid_crashes: int = 3,
         poll_interval_sec: float = 0.5,
+        log_max_bytes: int = 0,
+        log_backups: int = 3,
+        log_check_interval_sec: float = 30.0,
     ) -> None:
         self._children = [_ChildState(spec=spec) for spec in children]
         self._backoff_initial = backoff_initial
@@ -65,7 +70,60 @@ class Supervisor:
         self._crash_window = crash_window_sec
         self._max_rapid_crashes = max_rapid_crashes
         self._poll_interval = poll_interval_sec
+        self._log_max_bytes = max(0, int(log_max_bytes))
+        self._log_backups = max(0, int(log_backups))
+        self._log_check_interval = max(0.0, float(log_check_interval_sec))
+        self._next_log_check = 0.0
         self._stopping = False
+
+    # -- log rotation ------------------------------------------------------
+
+    def _rotate(self, path: Path) -> None:
+        """Copy-truncate ``path``, keeping ``_log_backups`` numbered generations.
+
+        Copy-truncate, not rename: the child holds an inherited fd on this exact
+        inode, so a rename would leave it writing into the rotated-away file and
+        the live log would stay empty until the next restart. Truncation is safe
+        because the fd was opened ``"ab"`` (``O_APPEND``) — the kernel re-seeks to
+        end-of-file on every write, so the child continues at offset 0 instead of
+        leaving a multi-megabyte sparse hole.
+
+        The window between copy and truncate can drop the handful of lines written
+        inside it. That is the standard ``logrotate copytruncate`` trade and it is
+        the right one here: the alternative is piping every child through the
+        supervisor, which makes a stalled supervisor able to block the backend.
+        """
+        if self._log_backups:
+            path.with_name(f"{path.name}.{self._log_backups}").unlink(missing_ok=True)
+            for index in range(self._log_backups - 1, 0, -1):
+                generation = path.with_name(f"{path.name}.{index}")
+                if generation.exists():
+                    generation.replace(path.with_name(f"{path.name}.{index + 1}"))
+            shutil.copyfile(path, path.with_name(f"{path.name}.1"))
+        os.truncate(path, 0)
+
+    def _rotate_logs_if_needed(self) -> None:
+        if not self._log_max_bytes:
+            return
+        now = time.monotonic()
+        if now < self._next_log_check:
+            return
+        self._next_log_check = now + self._log_check_interval
+        for child in self._children:
+            path = child.spec.log_path
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            if size < self._log_max_bytes:
+                continue
+            try:
+                self._rotate(path)
+            except OSError as exc:
+                # An unrotatable log must not take the supervisor down with it.
+                LOGGER.warning("Не смог провернуть лог %s: %s", path, exc)
+                continue
+            LOGGER.info("Лог %s превысил %d байт — провёрнут", path, self._log_max_bytes)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -171,6 +229,7 @@ class Supervisor:
                 if alive == 0:
                     LOGGER.error("Все процессы остановлены с ошибками — завершаю supervision")
                     return 1
+                self._rotate_logs_if_needed()
                 time.sleep(self._poll_interval)
             self._terminate_all()
             return 0
