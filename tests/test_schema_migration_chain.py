@@ -186,3 +186,119 @@ def test_every_real_backup_migrates_and_opens(settings, tmp_path):
         checked.append((backup.name, origin))
 
     print(f"\n  migrated {len(checked)} real backups: {sorted({v for _, v in checked})} -> {SCHEMA_VERSION}")
+
+
+def _seed_ignored_verdict(storage, user_id: str = "owner") -> tuple[str, str]:
+    """Raw object + KO + inbox row, then the IGNORED verdict applied by hand.
+
+    Mirrors what `ingestion/_review.py` does for InboxStatus.IGNORED: soft-delete
+    the attached Knowledge Object and clear the Inbox link. Done at the storage
+    layer so the test pins the *migration*, not the review service.
+    """
+    from jericho.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user(user_id)
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="test",
+        source_ref=new_id("source"),
+        raw_content="черновик, который владелец отверг",
+        content_type="text",
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=raw.raw_content,
+        title="черновик",
+        summary=raw.raw_content,
+    )
+    storage.store_knowledge_object(ko)
+    item = storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=user_id,
+            raw_object_id=raw.id,
+            knowledge_object_id=ko.id,
+        )
+    )
+    storage.soft_delete_knowledge_object(ko.id, user_id)
+    storage.update_inbox_status(
+        item.id,
+        InboxStatus.IGNORED,
+        "owner",
+        user_id=user_id,
+        clear_knowledge_object_id=True,
+    )
+    row = storage.get_inbox_item(item.id, user_id)
+    assert not row["knowledge_object_id"], "seed failed: the verdict did not clear the link"
+    return item.id, ko.id
+
+
+def test_reopening_does_not_resurrect_an_ignored_verdict(settings, tmp_path):
+    """ "Игнорировать" is a verdict, and a migration must not overrule it.
+
+    DATA_LIFECYCLE §3: IGNORED soft-deletes the attached Knowledge Object and
+    clears the Inbox link, so the material leaves retrieval. The legacy-link
+    reconstruction in `_migrate_legacy_schema` then re-pointed that Inbox row at
+    the very object the human had just rejected — it matched on raw_object_id
+    with no `deleted_at` filter, and it ran on *every* process start rather than
+    only on an actual upgrade. Restart the backend and the rejected item is back
+    in the Inbox wearing its old KO.
+    """
+    database = tmp_path / "verdict.sqlite3"
+    first = JerichoStorage(replace(settings, database_path=database))
+    try:
+        inbox_id, ko_id = _seed_ignored_verdict(first)
+    finally:
+        first.close()
+
+    second = JerichoStorage(replace(settings, database_path=database))
+    try:
+        row = second.get_inbox_item(inbox_id, "owner")
+        assert row is not None
+        assert not row["knowledge_object_id"], f"reopening re-linked the ignored item to soft-deleted {ko_id}"
+    finally:
+        second.close()
+
+
+def test_legacy_reconstruction_is_skipped_once_the_schema_is_current(settings, tmp_path):
+    """The backfill is an upgrade step, not a startup chore.
+
+    It was invoked unconditionally by every process's first connection, which is
+    both how a fixed backfill keeps re-firing on already-correct data and a scan
+    of every entity row on every single start.
+    """
+    database = tmp_path / "current.sqlite3"
+    first = JerichoStorage(replace(settings, database_path=database))
+    try:
+        first.ensure_user("owner")
+    finally:
+        first.close()
+
+    from jericho.storage._core import CoreMixin
+
+    calls: list[int] = []
+    original = CoreMixin._migrate_legacy_schema
+
+    def counting(self, conn):
+        calls.append(1)
+        return original(self, conn)
+
+    # Patch the class that DEFINES the method. Assigning to JerichoStorage would
+    # add a shadowing entry to the subclass __dict__ that reassignment cannot
+    # remove, and `test_no_method_is_defined_twice_across_the_class_hierarchy`
+    # would then fail in whichever test file happens to run next.
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(CoreMixin, "_migrate_legacy_schema", counting)
+    try:
+        second = JerichoStorage(replace(settings, database_path=database))
+        try:
+            second.execute("SELECT 1").fetchone()
+        finally:
+            second.close()
+    finally:
+        monkeypatch.undo()
+    assert calls == [], "legacy reconstruction ran again on an already-current database"

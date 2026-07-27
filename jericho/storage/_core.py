@@ -196,10 +196,20 @@ class CoreMixin(StorageShared):
         # one explicit transaction: sqlite3's executescript() commits an existing
         # transaction implicitly, which otherwise leaves half-applied DDL/backfills
         # after a migration failure.
+        # The legacy reconstruction is an UPGRADE step, and it ran on every
+        # process's first connection instead. That is how a corrected backfill keeps
+        # re-firing on data that is already right — and it re-scanned every entity
+        # row on every start for nothing. The marker is only written after the whole
+        # migration transaction commits, so version == SCHEMA_VERSION already proves
+        # the backfill ran; an absent or lower marker still runs it.
+        already_current = previous_schema_version is not None and (
+            previous_schema_version.strip() == str(SCHEMA_VERSION)
+        )
         try:
             conn.execute("BEGIN IMMEDIATE")
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
-            self._migrate_legacy_schema(conn)
+            if not already_current:
+                self._migrate_legacy_schema(conn)
             self._execute_statements(conn, CORE_INDEX_SCHEMA)
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('schema_version', ?, ?)",
@@ -586,15 +596,24 @@ class CoreMixin(StorageShared):
                 )
 
         # Reconstruct links represented by legacy convenience columns.
+        #
+        # `k.deleted_at IS NULL` is load-bearing, not defensive. DATA_LIFECYCLE §3
+        # makes IGNORED a verdict: the attached Knowledge Object is soft-deleted and
+        # the Inbox link cleared, so the material leaves retrieval. Matching on
+        # raw_object_id alone re-pointed that Inbox row straight back at the object
+        # the human had just rejected — the reconstruction quietly overruled a
+        # review decision it knows nothing about.
         if "inbox" in table_names and "knowledge_objects" in table_names:
             conn.execute(
                 """UPDATE inbox
                    SET knowledge_object_id=(
                        SELECT k.id FROM knowledge_objects k
                        WHERE k.user_id=inbox.user_id AND k.raw_object_id=inbox.raw_object_id
+                         AND k.deleted_at IS NULL
                        ORDER BY k.version DESC LIMIT 1
                    )
-                   WHERE knowledge_object_id IS NULL OR knowledge_object_id=''"""
+                   WHERE (knowledge_object_id IS NULL OR knowledge_object_id='')
+                     AND reviewed_at IS NULL"""
             )
 
         if {"knowledge_objects", "entities", "knowledge_entity_links"} <= table_names:
@@ -642,7 +661,14 @@ class CoreMixin(StorageShared):
                 self._schema_ready = False
             for connection in connections:
                 with suppress(sqlite3.Error):
-                    connection.commit()
+                    # Roll back, never commit. A connection still inside a
+                    # transaction at shutdown is holding an *unfinished* unit of
+                    # work — committing it here is how an aborted write became
+                    # durable. Nothing legitimate depends on this commit: every DML
+                    # statement in the storage layer runs inside transaction(),
+                    # which commits on its own successful exit.
+                    if connection.in_transaction:
+                        connection.rollback()
                 with suppress(sqlite3.Error):
                     connection.close()
 
@@ -679,7 +705,13 @@ class CoreMixin(StorageShared):
                 yield conn
                 if not nested:
                     conn.commit()
-            except Exception:
+            except BaseException:
+                # BaseException, not Exception: KeyboardInterrupt, SystemExit and
+                # asyncio.CancelledError all unwind through here, and all three are
+                # ways a *real* transaction gets abandoned — Ctrl-C during `jericho
+                # import`, a cancelled worker tick. Catching only Exception left the
+                # BEGIN IMMEDIATE open on this connection, and close() then committed
+                # it: an interrupted unit of work became a durable partial write.
                 if not nested:
                     conn.rollback()
                 raise

@@ -281,3 +281,43 @@ def test_close_waits_for_in_flight_write_transaction(settings, tmp_path):
         assert store.count_knowledge_objects("erin") == 1
     finally:
         store.close()
+
+
+def test_an_interrupted_transaction_is_not_committed_by_close(settings, tmp_path):
+    """Ctrl-C mid-write must abort the unit of work, not persist half of it.
+
+    ``transaction()`` caught only ``Exception``, so ``KeyboardInterrupt``,
+    ``SystemExit`` and ``asyncio.CancelledError`` unwound past the rollback and
+    left ``BEGIN IMMEDIATE`` open on the connection. ``close()`` then called
+    ``connection.commit()`` on the way out — turning an interrupted `jericho
+    import` or a cancelled worker tick into a durable partial write. Both halves
+    are fixed here: rollback on BaseException, and close() rolls an open
+    transaction back instead of committing it.
+    """
+    import pytest
+
+    from jericho.storage.models import utc_now
+
+    database = tmp_path / "interrupted.sqlite3"
+    store = JerichoStorage(replace(settings, database_path=database))
+    try:
+        store.ensure_user("owner")
+        raw, ko = _make_pair("owner", 1)
+        with pytest.raises(KeyboardInterrupt), store.transaction() as conn:
+            conn.execute(
+                "INSERT INTO runtime_kv(key, value, updated_at) VALUES('half-written','1',?)",
+                (utc_now(),),
+            )
+            raise KeyboardInterrupt
+        # The connection must be usable again, not stuck inside an open BEGIN.
+        assert not store.conn.in_transaction
+    finally:
+        store.close()
+
+    reopened = JerichoStorage(replace(settings, database_path=database))
+    try:
+        row = reopened.execute("SELECT value FROM runtime_kv WHERE key='half-written'").fetchone()
+        assert row is None, "an interrupted transaction survived close() as a durable write"
+    finally:
+        reopened.close()
+    del raw, ko
