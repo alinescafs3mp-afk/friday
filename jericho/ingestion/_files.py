@@ -404,7 +404,18 @@ class FilesMixin(PipelineShared):
                 knowledge_kind="document",
                 reason="uploaded file has no extractable text; kept as a source, needs a human verdict",
                 signals=["file_upload"],
-                penalties=["no_extractable_text"] if not extraction.success else [],
+                # This branch IS "no text came out", so it says so unconditionally.
+                # The flag used to be keyed on `extraction.success`, which answers a
+                # different question — did the parser run without error. A scanned PDF
+                # parses perfectly and yields zero characters: measured on the owner's
+                # folder, all 18 unreadable PDFs are scans, `success=True`, `chars=0`,
+                # and none of them carried the flag that says a human is looking at a
+                # document with nothing in it.
+                penalties=(
+                    ["no_extractable_text"]
+                    if extraction.success
+                    else ["no_extractable_text", "extraction_failed"]
+                ),
             )
         )
         enrichment = self._enrich(text_content or filename, assessment, user_id=user_id)

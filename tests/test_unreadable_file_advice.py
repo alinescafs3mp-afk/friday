@@ -94,3 +94,37 @@ async def test_a_readable_file_keeps_its_promotion_advice(settings, storage):
     assessment = _json(raw["metadata_json"]).get("promotion_assessment", {})
     assert assessment.get("action") == "promote"
     assert "no_extractable_text" not in assessment.get("penalties", [])
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_parses_but_yields_nothing_still_says_so(settings, storage):
+    """A scan parses perfectly and contains no text — the two are different failures.
+
+    The flag was keyed on `extraction.success`, which answers "did the parser run
+    without error". Measured on the owner's folder: all 18 unreadable PDFs are scans,
+    `success=True` and `chars=0`, and not one of them carried the marker that tells a
+    reviewer they are looking at a document with nothing in it.
+    """
+    from jericho.documents import DocumentResult
+
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    # A parser that succeeds and returns nothing: exactly a scanned page.
+    pipeline._doc_extractor.extract = lambda *args, **kwargs: DocumentResult(  # noqa: SLF001
+        "", {"format": "pdf"}, True, ""
+    )
+    result = await pipeline.ingest_file(
+        "alice",
+        None,
+        b"%PDF-1.4 scan",
+        filename="скан.pdf",
+        mime_type="application/pdf",
+        source_ref="upload:scan",
+    )
+
+    assessment = _json(storage.get_raw_object(result["raw_object_id"], "alice")["metadata_json"]).get(
+        "promotion_assessment", {}
+    )
+    assert assessment.get("action") == "review"
+    assert "no_extractable_text" in assessment.get("penalties", [])
+    # The parser did not fail; only the document is empty. Keep them distinguishable.
+    assert "extraction_failed" not in assessment.get("penalties", [])
