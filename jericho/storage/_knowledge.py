@@ -36,8 +36,25 @@ from jericho.storage._base import (
 )
 
 # FTS MATCH accepts a bounded number of terms, and a natural-language question is
-# mostly function words. Twelve is the budget; which twelve is the whole question.
-_FTS_TERM_BUDGET = 12
+# mostly function words. The budget is the ceiling; WHICH terms survive it is the
+# whole question, and the answer lives in `_fts_terms` below.
+#
+# Twenty-four, not the previous twelve. Twelve was never measured against a query
+# that overflows it: `tools/retrieval_bench.py` has at most seven distinct tokens
+# per query, so its branch never ran there and raising the number provably cannot
+# move that benchmark. Measured where it does run — 60 questions of sixteen filler
+# words plus one term that occurs in exactly one document of a 342-document corpus,
+# placed last — the target reaches the top ten 9 times of 60 at twelve terms and
+# 12 of 60 at twenty-four. Thirty-six gains nothing further.
+#
+# Cost is flat: median FTS latency on that corpus is 47 ms at six terms and 55 ms at
+# thirty-six, inside run-to-run noise.
+#
+# The honest size of the win is three questions in sixty, not the twenty-one an
+# earlier estimate suggested. The ceiling of 12/60 even with an unlimited budget
+# says the real constraint is elsewhere: sixteen generic words drown the specific
+# one in bm25 regardless of whether it reaches the index.
+_FTS_TERM_BUDGET = 24
 
 
 # Below this length a name has too few characters for trigram blocking to be

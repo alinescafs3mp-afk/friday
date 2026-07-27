@@ -636,7 +636,20 @@ class AgentRuntime:
         )
         if not previous:
             return clean
-        return f"{previous[:500]}\nFollow-up: {clean}"
+        # The QUESTION first, the context after it. `_fts_terms` spends its budget in
+        # text order, so with the previous turn in front, a follow-up lost every one
+        # of its own words: measured on a synthetic pair, 35 content tokens went in,
+        # 13 reached FTS, and not one belonged to what the person had just asked.
+        # Twelve slots of "подскажи пожалуйста как именно в нашей базе…" and nothing
+        # of "а что по дежурству?".
+        #
+        # The same order fixes a second truncation already noted in
+        # `_is_mineable_eval_query`: the stored query is capped at 500 characters, and
+        # the follow-up was the part that fell off the end.
+        #
+        # No label between them. Any word added here — «контекст», «follow-up» —
+        # becomes an FTS term and spends the budget it was meant to protect.
+        return f"{clean}\n{previous[:500]}"
 
     async def _agentic_loop(
         self,
