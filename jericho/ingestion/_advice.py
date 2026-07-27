@@ -7,6 +7,7 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from jericho.ingestion._base import (
@@ -46,6 +47,36 @@ from jericho.ingestion._base import (
 
 if TYPE_CHECKING:
     from jericho.agent_runtime.llm import LLMRouter
+
+
+_MAX_SUGGESTIONS = 30
+# No single rule may own the reviewer's whole view of a document. Measured on the
+# one real document in this installation: `capitalized_person_name` produced 64 of
+# 103 candidates — Title Case in headings and English UI labels, not people — and
+# alphabetical tie-breaking at equal confidence handed it all 30 visible slots, so
+# every genuine identifier (`ERC-20`, `GPL-3.0`, `USDT-TON`) fell off the list the
+# reviewer actually sees. A cap per method costs the noisy rule its surplus and
+# nothing else: within a method the strongest candidates are the ones kept.
+_MAX_SUGGESTIONS_PER_METHOD = 8
+
+
+def _capped_per_method(ordered: list[dict[str, Any]], *, per_method: int, total: int) -> list[dict[str, Any]]:
+    """Take the strongest `total`, letting no method contribute more than `per_method`.
+
+    Input must already be sorted strongest-first; order is preserved, so the result
+    still reads as a confidence ranking.
+    """
+    seen: Counter[str] = Counter()
+    kept: list[dict[str, Any]] = []
+    for item in ordered:
+        method = str(item.get("method") or "unknown")
+        if seen[method] >= per_method:
+            continue
+        seen[method] += 1
+        kept.append(item)
+        if len(kept) >= total:
+            break
+    return kept
 
 
 class AdviceMixin(PipelineShared):
@@ -525,7 +556,8 @@ class AdviceMixin(PipelineShared):
             current = strongest.get(normalized_key)
             if current is None or float(item.get("confidence", 0.0)) > float(current.get("confidence", 0.0)):
                 strongest[normalized_key] = item
-        return sorted(
+        ordered = sorted(
             strongest.values(),
             key=lambda item: (-float(item.get("confidence", 0.0)), str(item.get("name", "")).casefold()),
-        )[:30]
+        )
+        return _capped_per_method(ordered, per_method=_MAX_SUGGESTIONS_PER_METHOD, total=_MAX_SUGGESTIONS)

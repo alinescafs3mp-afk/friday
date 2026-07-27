@@ -22,6 +22,7 @@ import pytest
 
 import jericho.ingestion._base as base
 from jericho.ingestion import IngestionPipeline
+from jericho.ingestion._advice import _capped_per_method
 from jericho.ingestion._base import (
     DECLARED_ENTITY_METHODS,
     EVIDENCE_ONLY_ENTITY_METHODS,
@@ -181,3 +182,72 @@ async def test_naming_a_method_explicit_no_longer_grants_it_authority(settings, 
     # High confidence and an `explicit_` name, but nobody put it on the list.
     assert by_name["Придуманное"]["status"] == "suggested"
     assert by_name["Атлас"]["status"] == "accepted"
+
+
+def test_one_noisy_rule_cannot_own_the_whole_suggestion_list():
+    """The reviewer's view of a document must not be monopolised by a single rule.
+
+    Measured on the live document: `capitalized_person_name` produced 64 of 103
+    candidates (Title Case in headings and English UI labels, not people). At equal
+    confidence the tie-break is alphabetical, so it took all 30 visible slots and
+    every genuine identifier — `ERC-20`, `GPL-3.0`, `USDT-TON` — fell off the list
+    the reviewer actually sees. Lowering `identifier_syntax` to 0.75 in the same
+    change made that worse, which is how it was noticed.
+    """
+    noisy = [
+        {"name": f"Ложное Имя {index}", "method": "capitalized_person_name", "confidence": 0.76}
+        for index in range(64)
+    ]
+    real = [
+        {"name": name, "method": "identifier_syntax", "confidence": 0.75}
+        for name in ("ERC-20", "GPL-3.0", "USDT-TON")
+    ]
+    kept = _capped_per_method(noisy + real, per_method=8, total=30)
+
+    assert sum(1 for item in kept if item["method"] == "capitalized_person_name") == 8
+    assert {item["name"] for item in kept} >= {"ERC-20", "GPL-3.0", "USDT-TON"}
+
+
+def test_the_cap_keeps_the_strongest_of_each_method_and_the_overall_order():
+    ordered = [
+        {"name": "сильный", "method": "a", "confidence": 0.9},
+        {"name": "слабый", "method": "a", "confidence": 0.5},
+        {"name": "средний", "method": "b", "confidence": 0.7},
+    ]
+    kept = _capped_per_method(ordered, per_method=1, total=30)
+    assert [item["name"] for item in kept] == ["сильный", "средний"]
+
+
+def test_the_total_cap_still_holds_when_many_methods_contribute():
+    ordered = [
+        {"name": f"{method}-{index}", "method": method, "confidence": 0.8}
+        for method in "abcdef"
+        for index in range(8)
+    ]
+    assert len(_capped_per_method(ordered, per_method=8, total=30)) == 30
+
+
+def test_a_method_below_the_cap_keeps_everything_it_has():
+    ordered = [{"name": "единственный", "method": "rare", "confidence": 0.9}]
+    assert _capped_per_method(ordered, per_method=8, total=30) == ordered
+
+
+def test_the_suggestion_builder_actually_applies_the_cap(settings, storage):
+    """Through `_entity_suggestions`, not the helper — the helper was already green.
+
+    Removing the call and going back to a plain `[:30]` left every unit test above
+    passing, because they exercise the mechanism and not the wiring. This is the
+    test that fails when the cap stops being used.
+    """
+    graph = KnowledgeGraph(storage)
+    pipeline = IngestionPipeline(settings, storage, graph)
+    storage.ensure_user("alice")
+    # Distinct Title Case bigrams; the person pattern wants letters, not digits.
+    titlecase = " ".join(f"Ложное Имя{chr(0x430 + index)}." for index in range(30))
+    content = f"{titlecase} Коды: ERC-20, GPL-3.0, USDT-TON, PK-04-04."
+
+    suggestions = pipeline._entity_suggestions("alice", content)  # noqa: SLF001
+
+    persons = [item for item in suggestions if item["method"] == "capitalized_person_name"]
+    assert len(persons) == 8, f"cap not applied: {len(persons)} person-name suggestions"
+    assert {item["name"] for item in suggestions} >= {"ERC-20", "GPL-3.0", "USDT-TON"}
