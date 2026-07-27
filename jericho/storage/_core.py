@@ -561,6 +561,13 @@ class CoreMixin(StorageShared):
         if "entities" in table_names:
             # Recompute all values because schema v5 preserves punctuation in compact identifiers.
             # This prevents distinct symbols such as ``ABC.A`` and ``ABC/B`` from collapsing.
+            #
+            # v18 recomputes them again: `normalize_entity_name` now folds Russian
+            # inflection and `ё`, so «CIDR-ПОДПИСКА» and «CIDR-ПОДПИСКУ» resolve to
+            # one node instead of accumulating one node per grammatical case. The
+            # rows are NOT merged here — folding changes what a lookup finds and
+            # makes the pair visible as a duplicate candidate, while merging two
+            # existing nodes stays the owner's decision.
             rows = conn.execute("SELECT id, name FROM entities").fetchall()
             for row in rows:
                 conn.execute(

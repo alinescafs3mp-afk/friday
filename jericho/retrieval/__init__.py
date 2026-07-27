@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from jericho.config import JerichoSettings
-from jericho.retrieval._morphology import stem
+from jericho.morphology import stem
 from jericho.retrieval._repair import _MIN_MEANINGFUL_TERM, Repair, repair_query
 
 try:  # optional acceleration (jericho[vectors]); pure-Python fallback below

@@ -144,6 +144,27 @@ def build_from_commit(version: int, commit: str, workspace: Path) -> Path:
         _run(["git", "worktree", "remove", "--force", str(worktree)], cwd=REPO)
 
 
+def build_from_working_tree(workspace: Path) -> Path:
+    """Let the CODE AS IT STANDS create its own database, whatever version that is.
+
+    The historical fixtures come from historical commits, but the newest one
+    cannot: the version that needs a fixture is the one being added right now,
+    and it has no commit yet. Without this the step was manual, and a manual step
+    in a chain the migration test walks is a gap waiting to happen — the test
+    fails with "fixtures stop at 17 but the code is at 18" and the only
+    documented way forward is a tool that cannot make 18.
+    """
+    home = workspace / "home-current"
+    script = REPO / "_seed_fixture.py"
+    script.write_text(_seed_script(home), encoding="utf-8")
+    try:
+        reported = _run(["env", f"JERICHO_HOME={home}", sys.executable, str(script)], cwd=REPO).strip()
+    finally:
+        script.unlink(missing_ok=True)
+    version = int(reported)
+    return _finalise(home / "data" / "state" / "jericho.sqlite3", version)
+
+
 def build_from_backup(version: int, backup: Path, workspace: Path) -> Path:
     """Rebuild an out-of-history schema from a real backup's DDL, carrying no rows."""
     with sqlite3.connect(f"file:{backup}?mode=ro", uri=True) as source_db:
@@ -227,10 +248,21 @@ def main() -> int:
         type=Path,
         help="A real schema-13 backup to lift the DDL from (structure only, no rows)",
     )
+    parser.add_argument(
+        "--current-only",
+        action="store_true",
+        help="Build only the fixture for the schema this working tree produces",
+    )
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="jericho-fixtures-") as temporary:
         workspace = Path(temporary)
+        if args.current_only:
+            path = build_from_working_tree(workspace)
+            print(f"  current    {path.name}  {path.stat().st_size:>8,} bytes  (from the working tree)")
+            return 0
+        path = build_from_working_tree(workspace)
+        print(f"  current    {path.name}  {path.stat().st_size:>8,} bytes  (from the working tree)")
         for version, commit in sorted(COMMITS.items()):
             path = build_from_commit(version, commit, workspace)
             print(f"  schema {version:>2}  {path.name}  {path.stat().st_size:>8,} bytes  (from {commit})")

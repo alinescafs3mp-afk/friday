@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+from jericho.morphology import stem
 from jericho.retrieval import lexical_vector, sparse_cosine
-from jericho.retrieval._morphology import stem
 
 
 @pytest.mark.parametrize(
@@ -94,7 +94,7 @@ def test_an_oblique_case_becomes_real_evidence():
 
 def test_folding_beats_no_folding_on_an_oblique_case():
     """The number that made this worth doing, in miniature."""
-    from jericho.retrieval import _morphology
+    from jericho import morphology as _morphology
 
     query_text, document_text = "Казань", "поездка в Казани прошла хорошо"
     before_min = _morphology._MIN_STEM_INPUT

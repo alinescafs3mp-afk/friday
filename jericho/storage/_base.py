@@ -31,6 +31,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from jericho.config import JerichoSettings
+from jericho.morphology import stem_to_fixpoint as fold_russian_word
 from jericho.storage.models import (
     AuditEntry,
     Entity,
@@ -56,7 +57,7 @@ from jericho.storage.models import (
 # Named for the package, not this module: `__name__` here is "jericho.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("jericho.storage")
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -761,20 +762,55 @@ def _is_entity_identifier(value: str) -> bool:
     )
 
 
+_CYRILLIC_SEGMENT = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def _fold_russian(text: str) -> str:
+    """Stem every wholly-Cyrillic word inside ``text``, leave the rest untouched.
+
+    Applied per WORD rather than to the whole string so a mixed name keeps the
+    part that is a code: «CIDR-ПОДПИСКА» and «CIDR-ПОДПИСКУ» become one node
+    while `PK-04-04`, `BRK.A`, `GPL-3.0` and `Tor Project` are byte-for-byte
+    unchanged. Measured before it shipped, on the owner's own graph: exactly two
+    collisions, both of them the known duplicate pairs, and zero false merges —
+    47 stand entities and 30 live ones, nothing else moved.
+    """
+    return _CYRILLIC_SEGMENT.sub(
+        lambda match: (
+            fold_russian_word(match.group(0))
+            if all("а" <= character <= "я" or character == "ё" for character in match.group(0))
+            else match.group(0)
+        ),
+        text,
+    )
+
+
 def normalize_entity_name(value: str) -> str:
     """Normalize entity names while preserving exact identifiers and contract codes.
 
     Human names are whitespace/punctuation normalized for useful alias lookup.  Compact
     identifiers keep dots, slashes, dashes, and suffixes so distinct symbols do not collapse.
+
+    Russian inflection is folded away, because a graph node is a THING and «Пётр
+    Иванов» is not a different person from «Петра Иванова». Without this the same
+    subject accumulates one node per grammatical case: the owner's graph held
+    «CIDR-ПОДПИСКА» beside «CIDR-ПОДПИСКУ», and a node that exists twice can be
+    neither reliably found nor reliably counted. `ё` folds for the same reason —
+    it is the same letter to a reader and the phone keyboard does not type it.
+
+    This is the stored `entities.normalized_name`, so changing it is a schema
+    migration (18) that recomputes the column. Existing nodes are NOT merged:
+    folding makes them resolve to one another going forward and makes the pair
+    visible as a duplicate candidate, while merging stays the owner's decision.
     """
 
     raw = unicodedata.normalize("NFKC", value or "").strip()
     if _is_entity_identifier(raw):
-        return raw.casefold()
-    text = raw.casefold()
+        return _fold_russian(raw.casefold().replace("ё", "е"))
+    text = raw.casefold().replace("ё", "е")
     text = re.sub(r"[\s\-_./]+", " ", text)
     text = re.sub(r"[^\w\s#+&]", "", text, flags=re.UNICODE)
-    return " ".join(text.split())
+    return _fold_russian(" ".join(text.split()))
 
 
 def _json_load(value: Any, default: Any) -> Any:

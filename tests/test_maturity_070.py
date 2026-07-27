@@ -271,7 +271,7 @@ async def test_research_synthesis_crosses_only_the_inbox_boundary(settings, stor
 
 
 def test_conversation_modes_and_lifecycle_candidates_are_persistent_and_safe(storage):
-    assert SCHEMA_VERSION == 17
+    assert SCHEMA_VERSION == 18
     conversation = storage.create_conversation("alice", "Research", mode="research")
     assert conversation["mode"] == "research"
     storage.set_channel_conversation(
