@@ -8,7 +8,7 @@ import json
 import logging
 import math
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
@@ -359,6 +359,8 @@ _CHUNK_BOUNDARY_FLOOR = 0.5
 # `insufficient_evidence` gate uses to say a document shares no vocabulary with the
 # query. Named because it is now consulted twice, and the two uses must not drift.
 _LEXICAL_EVIDENCE_MIN = 0.075
+# How many documents' lexical vectors stay cached between requests.
+_VECTOR_CACHE_MAX = 2048
 _SENTENCE_END_RE = re.compile(r"[.!?…][»\"')\]]?\s")
 
 
@@ -808,6 +810,20 @@ class HybridSearcher:
         # Names from ABLATABLE_SIGNALS whose weight is forced to zero for this
         # instance. Measurement only: a name can silence a weight, never raise it.
         self._ablate = frozenset(ablate or ())
+        # Lexical vectors ACROSS requests, keyed by what makes one stale.
+        #
+        # `lexical_vector` runs once per candidate over that candidate's full body
+        # and dominates a search: profiled on the 342-document stand it accounted
+        # for 69 s of the 85 s spent in `search`, and one call on a 205 KB body
+        # costs 48 ms. The per-request cache below it only ever helped the second
+        # of the two `_lexical_rank` passes; the same document was rebuilt from
+        # scratch on the next question, and on the one after that.
+        #
+        # The key is (id, version, updated_at): version moves on an edit, and
+        # updated_at moves on anything that touches the row at all, so a stale
+        # vector cannot outlive its text. Bounded by entry count — this is a
+        # personal corpus, and the alternative is a cache that grows with it.
+        self._vector_cache: OrderedDict[tuple[str, str, str], dict[str, float]] = OrderedDict()
 
     def _repair_query(self, user_id: str, clean_query: str) -> Repair | None:
         """Ask whether the question was typed the way it was meant.
@@ -1585,6 +1601,23 @@ class HybridSearcher:
     def _search_text(item: dict[str, Any]) -> str:
         return knowledge_search_text(item)
 
+    def _cached_vector(self, item: dict[str, Any]) -> dict[str, float]:
+        """The candidate's lexical vector, reused until its row changes."""
+        key = (
+            str(item.get("id") or ""),
+            str(item.get("version") or ""),
+            str(item.get("updated_at") or ""),
+        )
+        cached = self._vector_cache.get(key)
+        if cached is not None:
+            self._vector_cache.move_to_end(key)
+            return cached
+        vector = lexical_vector(self._search_text(item))
+        self._vector_cache[key] = vector
+        while len(self._vector_cache) > _VECTOR_CACHE_MAX:
+            self._vector_cache.popitem(last=False)
+        return vector
+
     def _lexical_rank(
         self,
         candidates: list[dict[str, Any]],
@@ -1615,7 +1648,7 @@ class HybridSearcher:
             document_id = str(item["id"])
             vector = vectors.get(document_id)
             if vector is None:
-                vector = lexical_vector(self._search_text(item))
+                vector = self._cached_vector(item)
                 vectors[document_id] = vector
             scored.append((document_id, sparse_cosine(query_vector, vector)))
             if query_words and not query_words.isdisjoint(vector):

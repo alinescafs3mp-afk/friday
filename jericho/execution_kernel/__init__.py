@@ -34,10 +34,19 @@ Handler = Callable[..., Awaitable[dict[str, Any]]]
 
 
 async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Best-effort hard stop for a timed-out executor and all descendants."""
+    """Best-effort hard stop for a timed-out executor and all descendants.
 
-    if process.returncode is not None:
-        return
+    The GROUP is killed whether or not the direct child is still alive. It used
+    to return early on `returncode is not None`, which reads as «nothing to kill»
+    and is exactly wrong: untrusted code that spawns a helper and exits leaves a
+    live process group behind a dead leader. Reproduced against the repository's
+    own timeout test with one change — the child exits instead of sleeping — and
+    its `assert not marker.exists()` failed: the orphan wrote its file two
+    seconds AFTER the tool had reported «timed out». The process group id is the
+    dead leader's pid and stays valid while any member lives, so `killpg` still
+    reaches them; `ProcessLookupError` covers the empty case.
+    """
+
     if os.name == "posix":
         # Code executors are started in a new session, so their PID is also the
         # process-group ID inherited by descendants.
@@ -113,7 +122,10 @@ async def _collect_bounded_process_output(
             {process_waiter, limit_waiter},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if limit_waiter in done and limit_exceeded.is_set() and process.returncode is None:
+        # No `returncode is None` guard here either: the flood may be coming from
+        # a descendant while the leader has already exited, which is precisely
+        # when the group still needs killing.
+        if limit_waiter in done and limit_exceeded.is_set():
             terminated_for_limit = True
             await _terminate_process_tree(process)
         await process_waiter

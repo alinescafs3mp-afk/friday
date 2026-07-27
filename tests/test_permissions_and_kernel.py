@@ -115,3 +115,45 @@ async def test_timed_out_code_execution_kills_child(settings, storage, tmp_path)
         assert not marker.exists()
     finally:
         await web.close()
+
+
+@pytest.mark.asyncio
+async def test_a_descendant_outliving_its_parent_is_killed_too(settings, storage, tmp_path):
+    """The same timeout, with the direct child EXITING instead of sleeping.
+
+    `_terminate_process_tree` began with «if the process already exited, there is
+    nothing to kill» — which is exactly backwards for the case that matters:
+    untrusted code that spawns a helper and returns leaves a live process group
+    behind a dead leader, and the group id is still the leader's pid. The kill
+    never ran, `gather(*readers)` hung on the pipes the descendant inherited
+    until the outer timeout, the tool reported «timed out», and the helper went
+    on working. This is the one-character difference from the test above, and it
+    failed on it.
+    """
+    storage.ensure_user("operator", preset_key="owner")
+    executable_settings = replace(settings, code_execution_enabled=True, code_execution_timeout_sec=1)
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    ingestion = IngestionPipeline(executable_settings, storage, graph)
+    web = WebSurfer(executable_settings)
+    kernel = ExecutionKernel(auth, executable_settings)
+    kernel.bind_services(storage, graph, web, ingestion)
+    actor = auth.actor_for_user("operator", source="test")
+
+    marker = tmp_path / "orphan-survived.txt"
+    grandchild = (
+        "import pathlib, time; "
+        "time.sleep(3); "
+        f"pathlib.Path({str(marker)!r}).write_text('survived', encoding='utf-8')"
+    )
+    code = (
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-I', '-S', '-B', '-c', {grandchild!r}])\n"
+        # …and the direct child returns immediately.
+    )
+    try:
+        result = await kernel.execute("code_run", {"code": code}, actor=actor)
+        await asyncio.sleep(3.5)
+        assert not marker.exists(), f"the orphan outlived the tool (result.success={result.success})"
+    finally:
+        await web.close()
