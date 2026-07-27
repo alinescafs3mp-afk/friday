@@ -118,7 +118,19 @@ def resolve_chat_id(storage, user_id: str) -> str | None:
         return None
     chat_id = metadata.get("chat_id") if isinstance(metadata, dict) else None
     chat_id = str(chat_id or "").strip()
-    return chat_id or None
+    if not chat_id:
+        return None
+    # Telegram numbers groups, supergroups and channels negatively; a private chat
+    # id equals the sender's and is positive. A proactive push carries the user's
+    # own knowledge, so anything that is not a private chat is not a delivery
+    # target. This also disarms rows already poisoned by the bug above, which no
+    # amount of care at the write site can reach.
+    try:
+        if int(chat_id) <= 0:
+            return None
+    except ValueError:
+        return None
+    return chat_id
 
 
 def in_quiet_hours(hour: int, start: int, end: int) -> bool:
@@ -168,11 +180,14 @@ __all__ = [
     "resolve_chat_id",
 ]
 
-# Documented list of shipped organs (kept in sync with build_registry).
+# Documented list of shipped organs. `sentinel` was missing here for three
+# releases while build_registry shipped it, so the drift is now pinned by
+# test_the_documented_organ_list_matches_the_registry rather than by a comment.
 BUILTIN_ORGAN_NAMES: tuple[str, ...] = (
     "reminders",
     "reflection",
     "profile",
     "chronicle",
     "importer",
+    "sentinel",
 )

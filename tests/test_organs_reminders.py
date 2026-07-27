@@ -168,3 +168,95 @@ def _reminders_settings(*, quiet_start: int = 0, quiet_end: int = 0):
         quiet_hours_start=quiet_start,
         quiet_hours_end=quiet_end,
     )
+
+
+# --- a push target must be a chat the user is alone in --------------------
+
+
+@pytest.mark.asyncio
+async def test_a_group_chat_is_never_a_push_target(storage):
+    """A poisoned chat_id must not deliver, even though it is already on disk.
+
+    Every proactive organ pushes to `metadata.chat_id`, and the backend used to
+    overwrite it on *every* signed bridge request — including one sent in an
+    allowlisted group. One message in a group therefore redirected the weekly
+    digest, reminders and "on this day" into that group: the owner's own
+    knowledge, read out to everyone in the room, silently and permanently.
+    Repairing the write site cannot reach rows already stored, so resolution
+    refuses a non-private chat id outright.
+    """
+    from jericho.organs import resolve_chat_id
+
+    group = "-1001234567890"
+    reminders_settings = replace(
+        _reminders_settings(), telegram_allowed_chat_ids=[-1001234567890], telegram_owner_chat_ids=[]
+    )
+    poisoned = _seed_telegram_user(storage, group)
+    _seed_event(storage, poisoned, "Личное: результаты анализов", _today_iso(0))
+
+    assert resolve_chat_id(storage, poisoned) is None
+
+    ctx = ServiceContext(
+        settings=reminders_settings, storage=storage, kg=KnowledgeGraph(storage), ingestion=None
+    )
+    await scan_reminders(ctx)
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+def test_writing_from_a_group_keeps_the_private_chat_on_file(settings):
+    """The group message must not overwrite a known-good private target."""
+    import json
+    import time
+    import uuid
+
+    from jericho.security import sign_bridge_request
+
+    group_settings = replace(settings, telegram_allowed_chat_ids=[5001, -1001234567890])
+    with TestClient(create_app(group_settings)) as client:
+        storage = client.app.state.storage
+
+        def bridge_get(chat: str) -> int:
+            path = "/api/me"
+            timestamp = int(time.time())
+            nonce = uuid.uuid4().hex
+            return client.get(
+                path,
+                headers={
+                    "X-Jericho-Timestamp": str(timestamp),
+                    "X-Jericho-User": "5001",
+                    "X-Jericho-Chat": chat,
+                    "X-Jericho-Nonce": nonce,
+                    "X-Jericho-Signature": sign_bridge_request(
+                        group_settings.telegram_bridge_secret,
+                        timestamp=timestamp,
+                        method="GET",
+                        path=path,
+                        external_user_id="5001",
+                        chat_id=chat,
+                        nonce=nonce,
+                        body=b"",
+                    ),
+                },
+            ).status_code
+
+        assert bridge_get("5001") == 200  # private chat: id equals the sender's
+        user_id = next(u["id"] for u in storage.list_users() if str(u.get("external_id") or "") == "5001")
+        stored = json.loads(storage.get_user(user_id)["metadata_json"])
+        assert stored["chat_id"] == "5001"
+
+        assert bridge_get("-1001234567890") == 200  # same person, now in a group
+        stored = json.loads(storage.get_user(user_id)["metadata_json"])
+        assert stored["chat_id"] == "5001", "a group message overwrote the private push target"
+
+
+def test_the_documented_organ_list_matches_the_registry(settings):
+    """A hand-maintained list next to the thing it describes always drifts.
+
+    `BUILTIN_ORGAN_NAMES` is the exported, documented inventory of shipped organs
+    and it silently lost `sentinel` — `build_registry` had six, the constant
+    named five. Pinned here so the next organ cannot be added to only one of them.
+    """
+    from jericho.organs import BUILTIN_ORGAN_NAMES
+
+    registered = tuple(organ.name for organ in build_registry(settings).organs)
+    assert sorted(BUILTIN_ORGAN_NAMES) == sorted(registered)

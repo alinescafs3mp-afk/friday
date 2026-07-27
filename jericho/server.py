@@ -458,6 +458,16 @@ async def _authenticate(request: Request) -> ActorContext:
         preset_for_new_account = (
             "user" if in_private_chat or settings.telegram_group_members_full_access else "guest"
         )
+        # `chat_id` is not bookkeeping: it is where every proactive organ delivers.
+        # Recording the chat the user last wrote in meant one message sent in an
+        # allowlisted GROUP redirected the weekly digest, reminders and "on this day"
+        # — the owner's own knowledge — into that group, silently and permanently.
+        # A push target has to be a chat the user is alone in, so only a private chat
+        # updates it; from a group we leave whatever private chat is already on file
+        # (ensure_user merges metadata rather than replacing it).
+        metadata: dict[str, Any] = {"language_code": telegram_user.get("language_code")}
+        if in_private_chat:
+            metadata["chat_id"] = identity.chat_id
         state.storage.ensure_user(
             user_id,
             source="telegram",
@@ -465,7 +475,7 @@ async def _authenticate(request: Request) -> ActorContext:
             display_name=display_name,
             username=str(telegram_user.get("username") or ""),
             preset_key=preset_for_new_account,
-            metadata={"chat_id": identity.chat_id, "language_code": telegram_user.get("language_code")},
+            metadata=metadata,
         )
         user = state.storage.get_user(user_id) or existing or {}
         if user.get("status") != "active":
