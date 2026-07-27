@@ -46,6 +46,24 @@ _CORPUS_PAGE = 2048
 # Preserves today's arrival rate into the review queue (was find_near_duplicate_pairs'
 # max_pairs default). A module constant, not a setting: nobody would turn this dial.
 _MAX_PAIRS_PER_RUN = 200
+# Highest cosine MEASURED between two documents that are not duplicates, on the
+# installed model at document scale (`tools/dedup_threshold_probe.py`, 20 pairs of
+# Russian notes of the length this installation stores). It comes from two weekly
+# meeting notes written to the same template — same project, same attendees, same
+# headings, one differing line. Two entries about one apartment scored 0.917 and
+# 0.914; a Monday and a Tuesday log, 0.779.
+#
+# Genuine duplicates span 0.683 (the same event described independently) to 1.000,
+# so the two classes OVERLAP and no threshold separates them. Adding lexical overlap
+# does not help: the templated pair scores 0.845 there against 0.632 for a genuine
+# reformatting. Whole-document similarity cannot tell "the same note again" from
+# "the next note in a series", because a series is textually near-identical by
+# construction.
+#
+# The consequence for the threshold: this detector can only be operated for
+# precision. Any value that reaches the reformatted or retold classes first proposes
+# merging the owner's weekly minutes.
+_MEASURED_NON_DUPLICATE_CEILING = 0.928
 # What storage.list_user_vectors_page will actually honour; a bigger request is
 # silently trimmed there, and a short page must never be read as end-of-history.
 _MAX_PAGE_ROWS = 10000

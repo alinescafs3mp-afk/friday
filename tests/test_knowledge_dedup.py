@@ -749,3 +749,26 @@ def test_a_row_appearing_below_the_watermark_reopens_the_backfill(settings, stor
     conflicts = storage.list_knowledge_conflicts("alice", status="suggested")
     assert len(conflicts) == 1
     assert {conflicts[0]["knowledge_a_id"], conflicts[0]["knowledge_b_id"]} == {old_a, old_b}
+
+
+def test_the_default_threshold_clears_the_measured_non_duplicate_ceiling():
+    """The shipped default must sit ABOVE what non-duplicates actually score.
+
+    The previous default, 0.92, sat inside that distribution: two weekly meeting
+    notes written to one template scored 0.928 on the installed model, two entries
+    about one apartment 0.917 and 0.914. Whether a series of minutes got proposed
+    for merging came down to the third decimal — and the reviewer sees only a number,
+    with no way to tell "the same note twice" from "the next note in the series".
+
+    Measured by `tools/dedup_threshold_probe.py`; rerun it if the model changes, and
+    move the ceiling constant to whatever it then reports rather than moving this
+    assertion.
+    """
+    from jericho.config import load_settings
+    from jericho.dedup import _MEASURED_NON_DUPLICATE_CEILING
+
+    default = load_settings().dedup_threshold
+    assert default > _MEASURED_NON_DUPLICATE_CEILING, (
+        f"default {default} does not clear the measured non-duplicate ceiling "
+        f"{_MEASURED_NON_DUPLICATE_CEILING}"
+    )

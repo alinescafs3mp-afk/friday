@@ -568,7 +568,16 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         embeddings_max_inputs_per_request=_int_env(
             "JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST", 64, minimum=1
         ),
-        dedup_threshold=_float_env("JERICHO_DEDUP_THRESHOLD", 0.92, minimum=0.5),
+        # 0.95, not the previous 0.92, which sat INSIDE the measured distribution of
+        # non-duplicates (two weekly meeting notes from one template: 0.928; two
+        # entries about one apartment: 0.917 and 0.914). Whether a series of minutes
+        # got proposed for merging came down to the third decimal. 0.95 catches
+        # exactly as many real duplicates on the measured stand — the classes it
+        # could reach, 0.888 and below, are unreachable at any safe value — with no
+        # false proposal. See `jericho/dedup.py::_MEASURED_NON_DUPLICATE_CEILING`
+        # and `tools/dedup_threshold_probe.py`. Raising costs no rescan; lowering
+        # triggers one, by design.
+        dedup_threshold=_float_env("JERICHO_DEDUP_THRESHOLD", 0.95, minimum=0.5),
         dedup_interval_sec=_float_env("JERICHO_DEDUP_INTERVAL_SEC", 21600, minimum=300),
         dedup_scan_batch=_int_env("JERICHO_DEDUP_SCAN_BATCH", 512, minimum=1),
         dedup_scan_max_seconds=_float_env("JERICHO_DEDUP_SCAN_MAX_SECONDS", 600.0, minimum=1.0),
