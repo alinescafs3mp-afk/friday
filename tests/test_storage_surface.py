@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 194
+EXPECTED_MEMBER_COUNT = 195
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -163,6 +163,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_raw_object": "(self, raw_id: 'str', user_id: 'str | None' = None) -> 'dict[str, Any] | None'",
     "get_relation_candidate": "(self, user_id: 'str', candidate_id: 'str') -> 'dict[str, Any] | None'",
     "get_resolution_candidate": "(self, candidate_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
+    "get_vectors_by_content_hash": "(self, content_hashes: 'Sequence[str]', model: 'str') -> 'dict[str, bytes]'",
     "get_reusable_vectors": "(self, knowledge_object_ids: 'Sequence[str]', model: 'str') -> 'dict[str, dict[str, bytes]]'",
     "get_user": "(self, user_id: 'str') -> 'dict[str, Any] | None'",
     "get_user_chunk_embeddings": "(self, user_id: 'str', model: 'str', dim: 'int', *, object_limit: 'int | None' = None, row_limit: 'int | None' = None) -> 'list[tuple[str, bytes]]'",

@@ -185,6 +185,39 @@ class VectorsMixin(StorageShared):
                 bucket[content_hash] = bytes(row["vector"])
         return reusable
 
+    def get_vectors_by_content_hash(self, content_hashes: Sequence[str], model: str) -> dict[str, bytes]:
+        """``{content_hash: packed vector}`` for ANY object, not just one.
+
+        `get_reusable_vectors` answers "has THIS object embedded this text before",
+        which covers a re-index and nothing else. The same text embedded by the same
+        model yields the same vector whoever owns it — the sibling method's own
+        docstring says so — and a real archive is full of the same text twice: one
+        folder of 342 documents held 13 groups of byte-identical files, 29 objects,
+        each paying the model for a vector that already existed. Re-importing a folder
+        that was imported before is the same case in the extreme, and it used to cost
+        a full re-embedding of everything.
+        """
+        unique = sorted({str(value) for value in content_hashes if value})
+        if not unique:
+            return {}
+        found: dict[str, bytes] = {}
+        for start in range(0, len(unique), 400):
+            batch = unique[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                "SELECT content_hash, vector FROM knowledge_embeddings "  # nosec B608
+                f"WHERE model = ? AND content_hash IN ({placeholders}) "
+                "UNION ALL "
+                "SELECT content_hash, vector FROM knowledge_chunk_embeddings "
+                f"WHERE model = ? AND content_hash IN ({placeholders})",
+                (model, *batch, model, *batch),
+            ).fetchall()
+            for row in rows:
+                digest = str(row["content_hash"] or "")
+                if digest and digest not in found:
+                    found[digest] = bytes(row["vector"])
+        return found
+
     def upsert_knowledge_vectors(
         self,
         items: Sequence[dict[str, Any]],

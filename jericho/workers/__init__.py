@@ -803,18 +803,29 @@ class WorkersManager:
             doc_text = knowledge_search_text(row)[:_DOC_VECTOR_MAX_CHARS]
             plans.append({"row": row, "doc_text": doc_text, "units": units})
 
+        for plan in plans:
+            texts = [plan["doc_text"], *(unit[2] for unit in plan["units"])]
+            plan["texts"] = texts
+            plan["hashes"] = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts]
+
         reusable = await run_blocking(
             self.storage.get_reusable_vectors, [str(plan["row"]["id"]) for plan in plans], model
+        )
+        # Second lookup, by TEXT rather than by object: a vector for this exact text
+        # may already exist under a different object. Costs one indexed query and
+        # saves the model an entire re-embedding when a folder is imported twice.
+        shared = await run_blocking(
+            self.storage.get_vectors_by_content_hash,
+            [digest for plan in plans for digest in plan["hashes"]],
+            model,
         )
         groups: list[list[dict[str, Any]]] = []
         current: list[dict[str, Any]] = []
         current_size = 0
         for plan in plans:
-            texts = [plan["doc_text"], *(unit[2] for unit in plan["units"])]
-            hashes = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts]
-            known = reusable.get(str(plan["row"]["id"]), {})
-            plan["texts"] = texts
-            plan["hashes"] = hashes
+            texts = plan["texts"]
+            hashes = plan["hashes"]
+            known = {**shared, **reusable.get(str(plan["row"]["id"]), {})}
             # Same text, same model -> the stored vector is still exact; skip the call.
             plan["cached"] = {index: known[digest] for index, digest in enumerate(hashes) if digest in known}
             plan["missing"] = [index for index in range(len(texts)) if index not in plan["cached"]]
