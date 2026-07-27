@@ -177,18 +177,38 @@ class ConversationsMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def count_conversations(self, user_id: str, *, include_archived: bool = False) -> int:
+        """Total, so a truncated page can say it is truncated."""
+        archived_clause = "" if include_archived else " AND is_archived=0"
+        # ``archived_clause`` is selected solely by the boolean argument above.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count FROM conversations WHERE user_id=?{archived_clause}",  # nosec B608
+            (user_id,),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
     def list_conversations(
         self,
         user_id: str,
         *,
         include_archived: bool = False,
         limit: int = 200,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """One page of conversations, newest first.
+
+        ``offset`` exists because there was none: the listing clamped at 1000 rows
+        and `count` was `len(items)`, so a longer history was simply unreachable and
+        the response said the total was 1000. Conversations hold the transient
+        record of what was actually said, and the oldest are the ones a person goes
+        looking for.
+        """
         archived_clause = "" if include_archived else " AND is_archived=0"
         # ``archived_clause`` is selected solely by the boolean argument above.
         rows = self.execute(
-            f"SELECT * FROM conversations WHERE user_id=?{archived_clause} ORDER BY updated_at DESC LIMIT ?",  # nosec B608
-            (user_id, max(1, min(limit, 1000))),
+            f"SELECT * FROM conversations WHERE user_id=?{archived_clause} "  # nosec B608
+            "ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (user_id, max(1, min(limit, 1000)), max(0, int(offset))),
         ).fetchall()
         return [dict(row) for row in rows]
 

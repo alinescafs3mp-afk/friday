@@ -91,3 +91,68 @@ def test_cross_tenant_reads_are_audited_own_reads_are_not(settings):
             client.get("/api/admin/inbox", params={"user_id": "local:kate"}, headers=owner).status_code == 200
         )
         assert "admin.inbox.read" in _actions(storage)
+
+
+def test_every_admin_read_of_another_account_is_audited(settings):
+    """Inventory-shaped on purpose: a list of call sites drifts, an enumeration does not.
+
+    `_audit_cross_tenant_read` existed and was wired into knowledge, graph, inbox,
+    conversations and files — and not into eval, quality, retrieval-explain or
+    lifecycle. Those four read another account's material and left no trace, which
+    is the one thing the audit trail exists for. This walks the routes rather than
+    naming them, so the next module extracted from admin_api cannot quietly repeat
+    it.
+    """
+    import inspect
+
+    from jericho.server import create_app
+
+    def _admin_get_routes(app):
+        """`include_router` stores an `_IncludedRouter` wrapper rather than flattening."""
+        found: list[tuple[str, object]] = []
+
+        def walk(routes, prefix: str) -> None:
+            for route in routes:
+                nested = getattr(route, "original_router", None)
+                if nested is not None:
+                    context = getattr(route, "include_context", None)
+                    walk(nested.routes, prefix + getattr(context, "prefix", ""))
+                    continue
+                path = getattr(route, "path", None)
+                if path is None or "GET" not in (getattr(route, "methods", None) or set()):
+                    continue
+                found.append((prefix + path, route.endpoint))
+
+        walk(app.routes, "")
+        return found
+
+    app = create_app(settings)
+    storage = None
+    with TestClient(app) as client:
+        storage = app.state.storage
+        storage.ensure_user("victim", preset_key="user")
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+
+        checked: list[str] = []
+        unaudited: list[str] = []
+
+        def audit_count() -> int:
+            row = storage.execute("SELECT COUNT(*) AS c FROM audit_log").fetchone()
+            return int(row["c"] if row else 0)
+
+        for path, endpoint in _admin_get_routes(app):
+            if not path.startswith("/api/admin/") or "{" in path:
+                continue
+            if "user_id" not in inspect.signature(endpoint).parameters:
+                continue
+
+            before = audit_count()
+            response = client.get(path, params={"user_id": "victim", "q": "проба"}, headers=owner)
+            if response.status_code >= 400:
+                continue  # a route needing more parameters is not this test's subject
+            checked.append(path)
+            if audit_count() == before:
+                unaudited.append(path)
+
+    assert checked, "no admin GET with a user_id parameter was reachable — the walk is broken"
+    assert not unaudited, f"these read another account without an audit row: {unaudited}"

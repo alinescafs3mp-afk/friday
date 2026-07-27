@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
+from contextlib import suppress
 
 from jericho.storage._base import (
     _SEARCH_TEXT_LEN_SQL,
@@ -108,6 +109,43 @@ def _blocking_keys(entity_type: str, variants: Sequence[str]) -> set[tuple[str, 
         # their bigrams so they still meet longer neighbours.
         keys.add(("bigram", entity_type, compact[offset : offset + 2]))
     return keys
+
+
+def _lifecycle_protection_reasons(item: dict[str, Any], days_threshold: int) -> list[str]:
+    """Why this object must not be archived automatically. Empty means it may be.
+
+    Extracted so the SELECTIVE archive answers to exactly the same rules the
+    read-only candidate scan does. They used to disagree: `list_lifecycle_candidates`
+    protected file-derived, explicitly saved, positively rated and recently used
+    knowledge, and `deprecate_stale_knowledge` archived on `importance < 0.3` alone,
+    with none of it.
+    """
+    metadata = _json_load(item.get("metadata_json"), {})
+    metadata = metadata if isinstance(metadata, dict) else {}
+    assessment = metadata.get("promotion_assessment")
+    assessment = assessment if isinstance(assessment, dict) else {}
+    reasons: list[str] = []
+    if item.get("content_type") == "file" or metadata.get("source_filename"):
+        reasons.append("file-derived knowledge")
+    if assessment.get("reason") in {"explicit save intent", "human review"}:
+        reasons.append("explicitly saved or reviewed")
+    if int(item.get("positive_feedback_count") or 0) > int(item.get("negative_feedback_count") or 0):
+        reasons.append("positive user feedback")
+    recent_cutoff = datetime.now(UTC) - timedelta(days=max(7, int(days_threshold) // 3))
+    for field, label in (
+        ("last_used_at", "recently used in an answer"),
+        ("last_retrieved_at", "recently retrieved"),
+    ):
+        timestamp = str(item.get(field) or "")
+        if not timestamp:
+            continue
+        with suppress(ValueError):
+            parsed = datetime.fromisoformat(timestamp)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            if parsed >= recent_cutoff:
+                reasons.append(label)
+    return reasons
 
 
 def _valid_lifecycle_stage(value: Any) -> str:
@@ -1436,33 +1474,7 @@ class KnowledgeMixin(StorageShared):
         output: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
-            metadata = _json_load(item.get("metadata_json"), {})
-            assessment = metadata.get("promotion_assessment") if isinstance(metadata, dict) else {}
-            assessment = assessment if isinstance(assessment, dict) else {}
-            protected_reasons: list[str] = []
-            if item.get("content_type") == "file" or metadata.get("source_filename"):
-                protected_reasons.append("file-derived knowledge")
-            if assessment.get("reason") in {"explicit save intent", "human review"}:
-                protected_reasons.append("explicitly saved or reviewed")
-            if int(item.get("positive_feedback_count") or 0) > int(item.get("negative_feedback_count") or 0):
-                protected_reasons.append("positive user feedback")
-            recent_cutoff = datetime.now(UTC) - timedelta(days=max(7, days // 3))
-            for field, label in (
-                ("last_used_at", "recently used in an answer"),
-                ("last_retrieved_at", "recently retrieved"),
-            ):
-                timestamp = str(item.get(field) or "")
-                if not timestamp:
-                    continue
-                try:
-                    parsed = datetime.fromisoformat(timestamp)
-                    if parsed.tzinfo is None:
-                        parsed = parsed.replace(tzinfo=UTC)
-                    if parsed >= recent_cutoff:
-                        protected_reasons.append(label)
-                except ValueError:
-                    pass
-            if protected_reasons:
+            if _lifecycle_protection_reasons(item, days):
                 continue
 
             importance = max(0.0, min(1.0, float(item.get("importance") or 0.5)))
@@ -1504,25 +1516,54 @@ class KnowledgeMixin(StorageShared):
             )
         return sorted(output, key=lambda item: item["risk_score"], reverse=True)
 
-    def deprecate_stale_knowledge(self, user_id: str, days_threshold: int = 90) -> int:
-        """Archive low-value stale items, creating a version for every transition."""
+    def archive_selected_knowledge(
+        self, user_id: str, ids: Sequence[str], *, days_threshold: int = 90
+    ) -> dict[str, Any]:
+        """Archive the objects the reviewer chose, honouring the same protections.
+
+        Replaces ``deprecate_stale_knowledge``, which swept every active object
+        under ``importance < 0.3`` older than the threshold — no selection, and
+        none of the protections `list_lifecycle_candidates` applies. A file the
+        owner uploaded, a note they explicitly saved, something used in an answer
+        last week: all archived in one unreviewed call. DATA_LIFECYCLE §5 says the
+        opposite in as many words — "изменение importance/lifecycle применяется
+        только к явно выбранным объектам".
+
+        A selected object that is protected is reported, not silently skipped: the
+        reviewer asked for it and deserves to know why it did not happen.
+        """
         days = max(1, min(int(days_threshold), 36500))
-        rows = self.execute(
-            """SELECT id FROM knowledge_objects
-               WHERE user_id=? AND lifecycle_stage='active' AND deleted_at IS NULL
-                 AND importance < 0.3
-                 AND datetime(updated_at) < datetime('now', ?)""",
-            (user_id, f"-{days} days"),
-        ).fetchall()
-        changed = 0
-        for row in rows:
-            if self.update_knowledge_fields(
-                str(row["id"]),
-                user_id,
-                lifecycle_stage=LifecycleStage.ARCHIVED.value,
-            ):
-                changed += 1
-        return changed
+        archived: list[str] = []
+        skipped: list[dict[str, str]] = []
+        for ko_id in list(dict.fromkeys(str(item) for item in ids))[:1000]:
+            row = self.execute(
+                """SELECT k.*, u.positive_feedback_count, u.negative_feedback_count,
+                          u.last_retrieved_at, u.last_used_at
+                   FROM knowledge_objects k
+                   LEFT JOIN knowledge_usage u
+                     ON u.user_id=k.user_id AND u.knowledge_object_id=k.id
+                   WHERE k.id=? AND k.user_id=?""",
+                (ko_id, user_id),
+            ).fetchone()
+            if row is None:
+                skipped.append({"id": ko_id, "reason": "not found"})
+                continue
+            item = dict(row)
+            if item.get("deleted_at"):
+                skipped.append({"id": ko_id, "reason": "soft-deleted"})
+                continue
+            if item.get("lifecycle_stage") != LifecycleStage.ACTIVE.value:
+                skipped.append({"id": ko_id, "reason": f"already {item.get('lifecycle_stage')}"})
+                continue
+            protection = _lifecycle_protection_reasons(item, days)
+            if protection:
+                skipped.append({"id": ko_id, "reason": "; ".join(protection)})
+                continue
+            if self.update_knowledge_fields(ko_id, user_id, lifecycle_stage=LifecycleStage.ARCHIVED.value):
+                archived.append(ko_id)
+            else:
+                skipped.append({"id": ko_id, "reason": "update failed"})
+        return {"archived": archived, "skipped": skipped}
 
     def get_lifecycle_stats(self, user_id: str) -> dict[str, int]:
         rows = self.execute(

@@ -16,6 +16,7 @@ from jericho.admin_api._deps import (
     Query,
     Request,
     _audit,
+    _audit_cross_tenant_read,
     _protect_owner_target,
     _request_json,
     _require,
@@ -79,6 +80,7 @@ async def list_tokens(
     include_revoked: bool = False,
 ) -> dict[str, Any]:
     _require(request, "admin.tokens.manage")
+    _audit_cross_tenant_read(request, "admin.tokens.read", user_id)
     items = _services(request).storage.list_api_tokens(user_id, include_revoked=include_revoked)
     return {"items": items, "count": len(items)}
 

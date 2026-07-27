@@ -62,6 +62,7 @@ async def list_all_knowledge_tags(
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.knowledge.read", target)
     items = _services(request).storage.list_knowledge_tags(target, limit=limit)
     return {"user_id": target, "items": items, "count": len(items)}
 
@@ -70,6 +71,7 @@ async def list_all_knowledge_tags(
 async def list_all_containers(request: Request, user_id: str | None = None) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.containers.read", target)
     items = _services(request).kg.list_containers(target)
     return {"user_id": target, "items": items, "count": len(items)}
 
@@ -282,6 +284,7 @@ async def list_purgeable_data(
     limit: int = Query(200, ge=1, le=2000),
 ) -> dict[str, Any]:
     _require(request, "admin.data.purge")
+    _audit_cross_tenant_read(request, "admin.purge.read", user_id)
     state = _services(request)
     days = state.settings.purge_retention_days if older_than_days is None else max(0, int(older_than_days))
     items = state.storage.list_purgeable_knowledge(user_id, older_than_days=days, limit=limit)

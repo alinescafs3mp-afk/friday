@@ -15,6 +15,7 @@ from jericho.admin_api._deps import (
     Query,
     Request,
     _audit,
+    _audit_cross_tenant_read,
     _json_value,
     _parse_bool,
     _parse_int,
@@ -34,6 +35,7 @@ async def preview_legacy_cleanup(
     include_archived: bool = False,
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.cleanup.read", user_id)
     if not _services(request).storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="User not found")
     items = _services(request).ingestion.scan_legacy_quality(
@@ -123,6 +125,7 @@ async def lifecycle_candidates(
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.lifecycle.read", user_id)
     items = _services(request).storage.list_lifecycle_candidates(
         user_id,
         days_threshold=days_threshold,
@@ -214,15 +217,45 @@ async def apply_lifecycle_review(request: Request) -> dict[str, Any]:
 @router.get("/lifecycle")
 async def lifecycle_stats(request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.lifecycle.read", user_id)
     return {"user_id": user_id, "stages": _services(request).storage.get_lifecycle_stats(user_id)}
 
 
 @router.post("/lifecycle/deprecate")
 async def run_deprecation(request: Request) -> dict[str, Any]:
+    """Archive the objects the reviewer selected. `ids` is required.
+
+    It used to sweep every active object under `importance < 0.3` older than the
+    threshold, with no selection and none of the protections the read-only
+    candidate scan applies — the exact shape of the review-gate bypasses already
+    found in `bulk_classify_inbox` and the disk importer, and a direct
+    contradiction of DATA_LIFECYCLE §5.
+    """
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    raw_ids = body.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="ids is required: lifecycle changes apply only to explicitly selected objects",
+        )
     days = max(1, min(_parse_int(body.get("days_threshold", 90), field="days_threshold"), 36500))
-    count = _services(request).storage.deprecate_stale_knowledge(user_id, days)
-    _audit(request, "admin.lifecycle.deprecate", "user", user_id, after={"count": count, "days": days})
-    return {"user_id": user_id, "archived": count}
+    result = _services(request).storage.archive_selected_knowledge(
+        user_id, [str(item) for item in raw_ids], days_threshold=days
+    )
+    _audit(
+        request,
+        "admin.lifecycle.deprecate",
+        "user",
+        user_id,
+        after={"archived": result["archived"], "skipped": result["skipped"], "days": days},
+    )
+    # Distinct keys: `**result` also carries `archived` as a LIST, and in a dict
+    # literal the later key wins — the count was being overwritten by the ids.
+    return {
+        "user_id": user_id,
+        "archived": len(result["archived"]),
+        "archived_ids": result["archived"],
+        "skipped": result["skipped"],
+    }

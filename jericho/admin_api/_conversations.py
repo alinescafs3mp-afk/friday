@@ -33,16 +33,29 @@ async def list_all_conversations(
     request: Request,
     user_id: str | None = None,
     include_archived: bool = False,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.conversations.read", target)
-    items = _services(request).storage.list_conversations(
+    storage = _services(request).storage
+    items = storage.list_conversations(
         target,
         include_archived=include_archived,
-        limit=1000,
+        limit=limit,
+        offset=offset,
     )
-    return {"user_id": target, "items": items, "count": len(items)}
+    # `count` used to be `len(items)` against a hard 1000-row cap, so a longer
+    # history reported itself as exactly 1000 and the rest was unreachable.
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        "total": storage.count_conversations(target, include_archived=include_archived),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/conversations/{conversation_id}/archive")

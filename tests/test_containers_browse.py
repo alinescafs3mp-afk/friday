@@ -342,3 +342,28 @@ def test_graph_context_reads_a_projection_not_document_bodies(storage):
 
     context = graph.context_for_query("owner", "Орион")
     assert any(item["knowledge_object_id"] == ko.id for item in context["knowledge_candidates"])
+
+
+def test_conversation_history_beyond_the_first_page_is_reachable(storage):
+    """`count` was `len(items)` against a hard 1000-row cap, with no offset at all.
+
+    A longer history reported itself as exactly 1000 and the rest could not be
+    fetched by any parameter. Conversations hold the transient record of what was
+    actually said, and the oldest are the ones a person goes looking for.
+    """
+    storage.ensure_user("owner")
+    created = []
+    for index in range(25):
+        conversation_id = storage.create_conversation("owner", title=f"Диалог {index}")
+        created.append(conversation_id if isinstance(conversation_id, str) else conversation_id["id"])
+
+    assert storage.count_conversations("owner") == 25
+
+    first = storage.list_conversations("owner", limit=10, offset=0)
+    second = storage.list_conversations("owner", limit=10, offset=10)
+    third = storage.list_conversations("owner", limit=10, offset=20)
+
+    assert [len(first), len(second), len(third)] == [10, 10, 5]
+    ids = [item["id"] for item in (*first, *second, *third)]
+    assert len(set(ids)) == 25, "pages overlapped or skipped rows"
+    assert set(ids) == set(created)

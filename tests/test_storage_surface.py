@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 191
+EXPECTED_MEMBER_COUNT = 192
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -102,6 +102,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_chunked_knowledge_objects": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_chunk_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
+    "count_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False) -> 'int'",
     "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_objects": "(self, user_id: 'str') -> 'int'",
@@ -118,7 +119,6 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "delete_entity_time": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'bool'",
     "delete_eval_case": "(self, user_id: 'str', case_id: 'str') -> 'bool'",
     "delete_knowledge_embedding": "(self, knowledge_object_id: 'str') -> 'None'",
-    "deprecate_stale_knowledge": "(self, user_id: 'str', days_threshold: 'int' = 90) -> 'int'",
     "diagnostics": "(self) -> 'dict[str, Any]'",
     "diff_knowledge_versions": "(self, ko_id: 'str', user_id: 'str', *, from_version: 'int | None' = None, to_version: 'int | None' = None) -> 'dict[str, Any] | None'",
     "enqueue_notification": "(self, user_id: 'str', chat_id: 'str', body: 'str', *, kind: 'str' = '', dedup_key: 'str' = '') -> 'bool'",
@@ -183,7 +183,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_audit_log": "(self, user_id: 'str | None' = None, *, limit: 'int' = 100, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_backups": "(self) -> 'list[dict[str, Any]]'",
     "list_container_entities": "(self, user_id: 'str', types: 'tuple[str, ...]') -> 'list[dict[str, Any]]'",
-    "list_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
+    "list_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False, limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_custom_presets": "(self) -> 'list[dict[str, Any]]'",
     "list_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, limit: 'int' = 100, include_merged: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_entities_by_activity": "(self, user_id: 'str', *, types: 'tuple[str, ...] | None' = None, limit: 'int' = 5) -> 'list[dict[str, Any]]'",

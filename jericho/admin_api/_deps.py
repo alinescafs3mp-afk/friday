@@ -130,13 +130,21 @@ def _target_user(request: Request, user_id: str | None) -> str:
     return user_id or request.state.actor.user_id
 
 
-def _audit_cross_tenant_read(request: Request, action: str, target_user: str, **detail: Any) -> None:
+def _audit_cross_tenant_read(request: Request, action: str, target_user: str | None, **detail: Any) -> None:
     """Record an admin reading ANOTHER account's content.
 
     Same-tenant reads stay unlogged — the owner browsing their own data would
     flood the trail with no privacy signal. Data egress (downloads, exports,
     audit-log reads) is always logged separately regardless of tenant.
+
+    ``target_user=None`` means the route was called without a tenant filter, i.e.
+    it read EVERY account. That is strictly more sensitive than reading one
+    foreign account, so it is always recorded — the routes that accept an optional
+    ``user_id`` were the ones most worth logging and the easiest to overlook.
     """
+    if target_user is None:
+        _audit(request, action, "user", "*", after={**detail, "scope": "all_tenants"})
+        return
     if target_user != request.state.actor.user_id:
         _audit(request, action, "user", target_user, after=detail or None)
 

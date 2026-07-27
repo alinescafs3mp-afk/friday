@@ -115,6 +115,7 @@ async def list_relation_candidates(
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.relations.read", user_id)
     try:
         items = _services(request).storage.list_relation_candidates(
             user_id,

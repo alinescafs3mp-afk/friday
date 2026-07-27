@@ -71,6 +71,14 @@ def test_provenance_tenant_isolation_versions_and_soft_delete(storage):
 
 
 def test_stale_lifecycle_transition_is_versioned(storage):
+    """Rewritten, not deleted: it pinned the UNPROTECTED mass archive.
+
+    `deprecate_stale_knowledge` swept every active object under `importance < 0.3`
+    older than the threshold — no selection, and none of the protections
+    `list_lifecycle_candidates` applies. DATA_LIFECYCLE §5 says lifecycle changes
+    apply only to explicitly selected objects, so the archive now takes ids. What
+    this test was really about — the transition is versioned — still holds.
+    """
     _, ko = make_knowledge(
         storage,
         "alice",
@@ -78,12 +86,33 @@ def test_stale_lifecycle_transition_is_versioned(storage):
         importance=0.1,
         updated_at="2020-01-01T00:00:00+00:00",
     )
-    changed = storage.deprecate_stale_knowledge("alice", days_threshold=90)
+    result = storage.archive_selected_knowledge("alice", [ko.id], days_threshold=90)
     archived = storage.get_knowledge_object(ko.id, "alice")
-    assert changed == 1
+    assert result["archived"] == [ko.id]
     assert archived and archived["lifecycle_stage"] == "archived"
     assert archived["version"] == 2
     assert len(storage.list_knowledge_versions(ko.id, "alice")) == 2
+
+
+def test_a_protected_object_is_reported_not_archived(storage):
+    """The reviewer selected it, so "nothing happened" is not an acceptable answer."""
+    raw, ko = make_knowledge(
+        storage,
+        "alice",
+        "Скан договора",
+        importance=0.1,
+        updated_at="2020-01-01T00:00:00+00:00",
+    )
+    # File-derived knowledge is protected from automated archiving.
+    storage.update_knowledge_fields(ko.id, "alice", content_type="file")
+
+    result = storage.archive_selected_knowledge("alice", [ko.id], days_threshold=90)
+
+    assert result["archived"] == []
+    assert result["skipped"] and result["skipped"][0]["id"] == ko.id
+    assert "file-derived" in result["skipped"][0]["reason"]
+    assert storage.get_knowledge_object(ko.id, "alice")["lifecycle_stage"] == "active"
+    del raw
 
 
 def test_online_backup_and_manifest_are_verifiable(storage):
@@ -474,3 +503,41 @@ async def test_the_vault_stops_keeping_plaintext_of_deleted_knowledge(settings, 
     assert "Пароль от роутера" not in body
     assert "Рабочая заметка" in body
     del kept_raw, kept
+
+
+def test_mass_archive_without_selection_is_refused(settings):
+    """DATA_LIFECYCLE §5: lifecycle changes apply only to explicitly selected objects.
+
+    `POST /api/admin/lifecycle/deprecate` swept every active object under
+    `importance < 0.3` older than the threshold — no ids, and none of the
+    protections `list_lifecycle_candidates` applies. A file the owner uploaded, a
+    note they explicitly saved, something used in an answer last week: archived in
+    one unreviewed call. Same shape as the review-gate bypasses already closed in
+    `bulk_classify_inbox` and the disk importer.
+    """
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        storage.ensure_user("owner")
+        _, ko = make_knowledge(
+            storage, "owner", "Старая заметка", importance=0.1, updated_at="2020-01-01T00:00:00+00:00"
+        )
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+
+        refused = client.post("/api/admin/lifecycle/deprecate", json={"user_id": "owner"}, headers=owner)
+        assert refused.status_code == 400
+        assert "ids is required" in refused.json()["detail"]
+        assert storage.get_knowledge_object(ko.id, "owner")["lifecycle_stage"] == "active"
+
+        accepted = client.post(
+            "/api/admin/lifecycle/deprecate",
+            json={"user_id": "owner", "ids": [ko.id]},
+            headers=owner,
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["archived"] == 1
+        assert storage.get_knowledge_object(ko.id, "owner")["lifecycle_stage"] == "archived"

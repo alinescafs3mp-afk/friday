@@ -16,6 +16,7 @@ from jericho.admin_api._deps import (
     Query,
     Request,
     _audit,
+    _audit_cross_tenant_read,
     _request_json,
     _require,
     _services,
@@ -31,6 +32,7 @@ async def knowledge_quality_dashboard(request: Request, user_id: str) -> dict[st
 
     _require(request, "admin.all_data.read")
     state = _services(request)
+    _audit_cross_tenant_read(request, "admin.quality.read", user_id)
     if not state.storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="User not found")
     usage = state.storage.execute(
@@ -72,6 +74,7 @@ async def eval_search(
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.eval.read", target)
     state = _services(request)
     result = await state.hybrid_searcher.search(target, q, limit=limit, kg=state.kg)
     items = [
@@ -96,6 +99,7 @@ async def retrieval_explain(
     user sees, with the per-signal breakdown and discard reasons surfaced."""
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.eval.read", target)
     state = _services(request)
     result = await state.hybrid_searcher.search(target, q, limit=limit, kg=state.kg, explain=True)
     trace = result.get("trace", [])
@@ -116,6 +120,7 @@ async def retrieval_explain(
 async def list_eval_cases(request: Request, user_id: str | None = None) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.eval.read", target)
     cases = _services(request).storage.list_eval_cases(target)
     return {"user_id": target, "items": cases, "count": len(cases)}
 
@@ -222,6 +227,7 @@ async def compare_chunk_recall_now(request: Request) -> dict[str, Any]:
 @router.get("/feedback")
 async def feedback_stats(request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.feedback.read", user_id)
     storage = _services(request).storage
     return {
         "user_id": user_id,

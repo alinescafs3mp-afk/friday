@@ -254,7 +254,11 @@ def _client_ip(request: Request, settings: JerichoSettings) -> str:
     for address in reversed(chain):
         if not any(address in network for network in trusted):
             return str(address)
-    return str(chain[0])
+    # Every hop is trusted, so the chain contains no address this deployment
+    # actually vouches for. Falling back to `chain[0]` returned the LEFTMOST entry
+    # — the one the client writes itself — and it fed a security decision. The peer
+    # is the only address observed rather than asserted.
+    return host
 
 
 def _is_loopback(value: str) -> bool:
@@ -521,8 +525,13 @@ async def _authenticate(request: Request) -> ActorContext:
             identity_id=str(token_row["id"]),
         )
 
-    client_ip = _client_ip(request, settings)
-    if not settings.api_require_token_on_loopback and _is_loopback(client_ip):
+    # The TCP PEER, not the forwarded chain. `X-Forwarded-For` is client-supplied
+    # and may legitimately influence rate-limit attribution; it must never decide
+    # authentication. Behind a trusted reverse proxy, a remote request carrying
+    # `X-Forwarded-For: 127.0.0.1` otherwise resolved to loopback and took the
+    # credential-less owner path.
+    peer_ip = str(getattr(request.client, "host", "") or "")
+    if not settings.api_require_token_on_loopback and _is_loopback(peer_ip):
         _guard_loopback_browser_request(request, settings)
         user = state.storage.ensure_user(
             LEGACY_OWNER_USER_ID,

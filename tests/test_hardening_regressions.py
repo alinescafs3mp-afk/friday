@@ -995,7 +995,9 @@ def test_admin_api_rejects_malformed_and_non_object_json_with_400(settings):
     [
         (
             "/api/admin/lifecycle/deprecate",
-            {"user_id": "owner", "days_threshold": "not-a-number"},
+            # `ids` is required now; without it the route rejects on that first and
+            # this case would stop testing scalar validation at all.
+            {"user_id": "owner", "ids": ["ko_x"], "days_threshold": "not-a-number"},
             "days_threshold must be an integer",
         ),
         (
@@ -1193,3 +1195,47 @@ def test_precision_at_k_divides_by_k():
     assert precision_at_k(["a"] + [f"x{i}" for i in range(9)], {"a"}, 10) == 0.1
     assert precision_at_k(["a", "b", "c"], {"a", "b", "c"}, 3) == 1.0
     assert precision_at_k([], {"a"}, 10) == 0.0
+
+
+def test_a_forwarded_header_cannot_claim_to_be_loopback(settings):
+    """`X-Forwarded-For` is client-supplied; it must not decide authentication.
+
+    `_client_ip` walked the chain right-to-left for the first untrusted hop and,
+    when EVERY hop was trusted, fell back to `chain[0]` — the leftmost entry, the
+    one the client writes itself. That value gated the credential-less loopback
+    owner path, so behind a trusted reverse proxy a remote request carrying
+    `X-Forwarded-For: 127.0.0.1` became the owner without credentials.
+
+    Two changes, deliberately redundant: the all-trusted fallback returns the
+    observed peer instead of the asserted leftmost hop, AND the loopback decision
+    reads the TCP peer directly. Mutation-checked one at a time — reverting either
+    alone still passes, because the other still refuses; only reverting both
+    reproduces the bypass. That is the point of defence in depth, and it is why
+    this test asserts the property rather than one mechanism.
+    """
+    from dataclasses import replace as _replace
+
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    trusting = _replace(
+        settings,
+        api_require_token_on_loopback=False,
+        # Both, or the forwarded chain is never consulted and this test proves
+        # nothing: `_client_ip` returns the peer immediately when the first is off.
+        trust_proxy_headers=True,
+        trusted_proxy_networks=["127.0.0.0/8", "10.0.0.0/8"],
+    )
+    app = create_app(trusting)
+    # Sequential, not nested: both clients enter the lifespan, and the backend
+    # process lease permits exactly one holder at a time.
+    with TestClient(app, client=("10.0.0.9", 5555)) as remote:
+        spoofed = remote.get("/api/me", headers={"X-Forwarded-For": "127.0.0.1"})
+        assert spoofed.status_code == 401, "a forwarded header bought owner access"
+
+    # A genuine loopback peer still gets the documented bypass.
+    # A loopback Host too: `_guard_loopback_browser_request` refuses the
+    # credential-less path for a request that arrived under any other name.
+    with TestClient(app, client=("127.0.0.1", 5555), base_url="http://127.0.0.1:8000") as local:
+        assert local.get("/api/me").status_code == 200

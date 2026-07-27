@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from jericho.admin_api._deps import _audit_cross_tenant_read
 from jericho.permissions import ActorContext
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
@@ -105,6 +106,7 @@ async def admin_list_missions(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.missions.read")
+    _audit_cross_tenant_read(request, "admin.missions.read", user_id)
     executive = request.app.state.executive
     items = executive.list_mission_views(user_id, status=status, limit=limit, offset=offset)
     response: dict[str, Any] = {"items": items, "count": len(items)}

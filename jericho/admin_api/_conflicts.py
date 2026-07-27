@@ -16,6 +16,7 @@ from jericho.admin_api._deps import (
     Request,
     ResolutionStatus,
     _audit,
+    _audit_cross_tenant_read,
     _json_value,
     _request_json,
     _require,
@@ -36,6 +37,7 @@ async def list_conflicts(
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.conflicts.read", user_id)
     try:
         items = _services(request).storage.list_knowledge_conflicts(
             user_id,
@@ -150,6 +152,7 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
 @router.get("/resolutions")
 async def list_resolutions(request: Request, user_id: str, status: str | None = None) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.resolutions.read", user_id)
     try:
         status_enum = ResolutionStatus(status) if status else None
     except ValueError as exc:
