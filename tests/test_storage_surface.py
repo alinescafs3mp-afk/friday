@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 195
+EXPECTED_MEMBER_COUNT = 196
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -120,6 +120,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "delete_eval_case": "(self, user_id: 'str', case_id: 'str') -> 'bool'",
     "delete_knowledge_embedding": "(self, knowledge_object_id: 'str') -> 'None'",
     "diagnostics": "(self) -> 'dict[str, Any]'",
+    "discard_notifications": "(self, ids: 'Sequence[str]', *, reason: 'str') -> 'int'",
     "diff_knowledge_versions": "(self, ko_id: 'str', user_id: 'str', *, from_version: 'int | None' = None, to_version: 'int | None' = None) -> 'dict[str, Any] | None'",
     "enqueue_notification": "(self, user_id: 'str', chat_id: 'str', body: 'str', *, kind: 'str' = '', dedup_key: 'str' = '') -> 'bool'",
     "ensure_user": "(self, user_id: 'str', *, source: 'str' = 'local', external_id: 'str' = '', display_name: 'str' = '', username: 'str' = '', preset_key: 'str' = 'user', metadata: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",

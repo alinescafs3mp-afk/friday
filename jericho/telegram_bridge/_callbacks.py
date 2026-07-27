@@ -230,11 +230,28 @@ class CallbacksMixin(BridgeShared):
         *,
         alert: bool = False,
     ) -> None:
-        response = await client.post(
-            f"{self._api_url}/answerCallbackQuery",
-            json={"callback_query_id": callback_id, "text": text[:200], "show_alert": alert},
-        )
-        response.raise_for_status()
+        """Acknowledge the button press. Never raises — the action already ran.
+
+        This is a UI acknowledgement, not a state change, and it happens AFTER
+        the backend call it acknowledges. Letting it raise made the whole update
+        retryable, so the side effect was replayed on every retry: a callback id
+        expires (Telegram answers 400 «query is too old»), and one press of 👍
+        could re-POST `/api/feedback` up to 288 times over ~24 hours. The audit
+        trail filled with duplicates; the answer's rating did not change, because
+        `feedback_state` is upserted per (user, target, type) — but "the visible
+        damage is small" is not a reason to retry an action that succeeded.
+
+        Same shape as `_clear_inline_markup` two methods down, and for the same
+        reason: cosmetic follow-ups must not undo settled work.
+        """
+        try:
+            response = await client.post(
+                f"{self._api_url}/answerCallbackQuery",
+                json={"callback_query_id": callback_id, "text": text[:200], "show_alert": alert},
+            )
+            response.raise_for_status()
+        except Exception:
+            LOGGER.info("Could not answer Telegram callback query %s", callback_id, exc_info=True)
 
     async def _clear_inline_markup(
         self,

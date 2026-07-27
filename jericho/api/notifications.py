@@ -24,16 +24,26 @@ async def notifications_pending(
 ) -> dict[str, Any]:
     _require_bridge(request)
     settings: JerichoSettings = request.app.state.settings
+    storage = request.app.state.storage
     allowed = settings.telegram_effective_allowed_chat_ids
     items = []
-    for row in request.app.state.storage.list_pending_notifications(limit=limit):
+    undeliverable: list[str] = []
+    for row in storage.list_pending_notifications(limit=limit):
         # Defence in depth: never hand the bridge a de-allowlisted chat.
         try:
             if int(str(row.get("chat_id"))) not in allowed:
+                undeliverable.append(str(row["id"]))
                 continue
         except (TypeError, ValueError):
+            undeliverable.append(str(row["id"]))
             continue
         items.append({"id": row["id"], "chat_id": row["chat_id"], "body": row["body"]})
+    # Skipping was not enough: the row stayed pending with attempts=0 and no way
+    # to ever leave the queue, and the queue is drained oldest-first with a limit
+    # of 20 — twenty such rows and every later notification stops being delivered,
+    # silently. Retiring them here keeps the queue moving.
+    if undeliverable:
+        storage.discard_notifications(undeliverable, reason="chat_not_allowed")
     return {"items": items, "count": len(items)}
 
 

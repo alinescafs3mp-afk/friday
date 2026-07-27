@@ -147,6 +147,40 @@ def test_a_western_document_is_not_forced_into_cyrillic():
     assert "résumé des activités" in text
 
 
+# An English technical note with a Russian header and signature — a shape this
+# archive is full of. Cyrillic is under a tenth of the bytes.
+MOSTLY_ENGLISH = (
+    "Приложение к отчёту\r"
+    "The deployment procedure is described below. Run the installer with the "
+    "default profile, confirm the certificate fingerprint, and verify that the "
+    "service answers on the management port before handing the host over to the "
+    "operations team. Repeat the health check after the first scheduled restart, "
+    "because the configuration is re-read only at startup and a stale value will "
+    "otherwise survive unnoticed until the next maintenance window.\r"
+    "Исполнитель: Петров"
+)
+
+
+def test_a_russian_header_survives_a_mostly_english_document():
+    """The share of Cyrillic answers the wrong question.
+
+    The guess used to be "are more than 15% of the bytes high?", which asks
+    whether the document is Cyrillic-DOMINANT. A document with large English
+    sections — or an English one with a Russian header and signature block — sits
+    under any such threshold and decodes as cp1252, turning every Russian word
+    into mojibake that still looks like text, indexes cleanly, embeds cleanly and
+    is never noticed. Here Cyrillic is ~8% of the bytes.
+    """
+    document = build_doc(MOSTLY_ENGLISH)
+    cyrillic_share = sum(1 for character in MOSTLY_ENGLISH if "А" <= character <= "я") / len(MOSTLY_ENGLISH)
+    assert cyrillic_share < 0.15, "the premise: this document is not Cyrillic-dominant"
+
+    text, _ = extract_doc_text(document)
+    assert "Приложение к отчёту" in text
+    assert "Исполнитель: Петров" in text
+    assert "deployment procedure" in text  # and the English half is untouched
+
+
 def test_field_instructions_are_dropped_and_results_kept():
     """`HYPERLINK "http://…"` is machinery; what the reader sees is the result.
 

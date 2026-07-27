@@ -42,6 +42,13 @@ _FIELD_BEGIN = "\x13"
 _FIELD_SEPARATOR = "\x14"
 _FIELD_END = "\x15"
 _PARAGRAPH_MARKS = {"\r", "\x0b", "\x0c", "\x07"}
+# What counts as "a Cyrillic word" when guessing the codepage: a run of high
+# bytes at least this long, and at least this many such runs. Three characters is
+# the shortest common Russian word («для», «при»); accented Latin in a cp1252
+# document appears as isolated single high bytes, never as runs. Four runs so a
+# stray byte sequence in a Western document cannot flip the decision.
+_CYRILLIC_RUN_MIN = 3
+_CYRILLIC_RUNS_MIN = 4
 _DROPPED = {"\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x08", "\x1e", "\x1f", "\x00"}
 
 
@@ -177,8 +184,37 @@ def _decode_pieces(pieces: list[tuple[bool, bytes]]) -> str:
     eight_bit = b"".join(raw for compressed, raw in pieces if compressed)
     codepage = "cp1252"
     if eight_bit:
-        cyrillic = sum(1 for byte in eight_bit if 0xC0 <= byte <= 0xFF)
-        if cyrillic / len(eight_bit) > 0.15:
+        # Two signals, because one is not enough.
+        #
+        # The share of high bytes over the WHOLE text answers "is this document
+        # mostly Cyrillic?" and nothing else. A technical document with large
+        # English sections, or an English document with a Russian header and
+        # signature block, sits below any threshold you pick and silently decodes
+        # as cp1252 — every Cyrillic word becomes mojibake that still looks like
+        # text, indexes cleanly and is never noticed.
+        #
+        # Measuring the share over NON-ASCII bytes instead does not work either:
+        # cp1252's accented Latin (é 0xE9, ü 0xFC, à 0xE0) lives in the same
+        # range, so a French document would score ~1.0 and turn into Cyrillic.
+        #
+        # What separates them is SHAPE, not proportion. Russian words are runs of
+        # high bytes; Western accents are single high bytes inside ASCII words.
+        # So: a Cyrillic-dominant document by share, or a handful of runs long
+        # enough to be words.
+        high_bytes = 0
+        run = 0
+        word_like_runs = 0
+        for byte in eight_bit:
+            if 0xC0 <= byte <= 0xFF or byte in (0xA8, 0xB8):  # + Ё/ё, outside the block
+                high_bytes += 1
+                run += 1
+            else:
+                if run >= _CYRILLIC_RUN_MIN:
+                    word_like_runs += 1
+                run = 0
+        if run >= _CYRILLIC_RUN_MIN:
+            word_like_runs += 1
+        if high_bytes / len(eight_bit) > 0.15 or word_like_runs >= _CYRILLIC_RUNS_MIN:
             codepage = "cp1251"
     parts: list[str] = []
     for compressed, raw in pieces:

@@ -53,6 +53,35 @@ class RuntimeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def discard_notifications(self, ids: Sequence[str], *, reason: str) -> int:
+        """Terminate rows that can never be delivered, without spending attempts.
+
+        A pending row that the bridge is not allowed to deliver — its chat is no
+        longer in the allow-list — used to be skipped in the route and left
+        exactly as it was: `status='pending'`, `attempts=0`, no marker, no path
+        to cleanup. Since the queue is drained `ORDER BY created_at ASC LIMIT 20`,
+        twenty such rows fill every slot forever and NOTHING else is ever
+        delivered again: no reminders, no digest, no sentinel alert — silently,
+        with no error anywhere.
+
+        The dedup key is released for the same reason it is released at the
+        attempt cap: the row is gone, so the organ must be able to raise the
+        matter again if the chat is ever re-allowed.
+        """
+        cleaned = [str(value) for value in ids if str(value)]
+        if not cleaned:
+            return 0
+        marker = f"undeliverable:{reason}"[:64]
+        with self.transaction() as conn:
+            for notification_id in cleaned:
+                conn.execute(
+                    """UPDATE outbound_notifications
+                       SET status='failed', dedup_key='', kind=?
+                       WHERE id=? AND status='pending'""",
+                    (marker, notification_id),
+                )
+        return len(cleaned)
+
     def mark_notifications(
         self,
         sent_ids: Sequence[str] = (),
