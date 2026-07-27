@@ -67,6 +67,11 @@ _DOC_VECTOR_MAX_CHARS = 20_000
 # only the timeout race. Re-measure both together if the model changes.
 _EMBED_REQUEST_MAX_CHARS = 40_000
 
+# How many objects one vault render page carries. Named so a test can shrink it:
+# the page-boundary skew this loop had to stop having needs more than one page,
+# and a test that never crosses a boundary passes on the broken code too.
+_VAULT_PAGE = 250
+
 
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
@@ -676,11 +681,23 @@ class WorkersManager:
         if self.memory_vault is None:
             return
         offset = 0
-        live: set[str] = set()
         vault = self.memory_vault
+        # The prune set is ONE snapshot, taken before the render loop — not the sum
+        # of the pages that loop reads. Paging orders by `importance DESC,
+        # updated_at DESC` and both keys change under concurrent edits, so an
+        # object edited while the loop runs can move across a page boundary and
+        # appear in NEITHER page. `prune_orphans` would then see a live object as
+        # an orphan and delete its note from the user's vault. Editing an object is
+        # the commonest write there is and this loop runs every five minutes, so
+        # the two overlap by construction.
+        #
+        # Taken early, the snapshot can only be stale in the harmless direction: an
+        # object created during the loop is absent from the set, has no note yet
+        # either, and is rendered on the next cycle.
+        live: set[str] = await run_blocking(self.storage.list_live_knowledge_ids, user_id)
         while True:
             objects = await run_blocking(
-                self.storage.list_knowledge_objects, user_id, limit=250, offset=offset
+                self.storage.list_knowledge_objects, user_id, limit=_VAULT_PAGE, offset=offset
             )
             if not objects:
                 break
@@ -689,13 +706,11 @@ class WorkersManager:
             # it at all, so a whole-corpus re-render ran on the event loop every 300
             # seconds — the fsyncs alone stall it for as long as the disk takes.
             await run_blocking(_sync_vault_page, vault, self.storage, objects)
-            live.update(str(item.get("id") or "") for item in objects)
             offset += len(objects)
-            if len(objects) < 250:
+            if len(objects) < _VAULT_PAGE:
                 break
-        # Only after the paging loop has run to completion: `live` is then the whole
-        # live set, and pruning against a partial one would delete valid notes. An
-        # exception inside the loop propagates and skips this entirely.
+        # Only after the render loop has run to completion. An exception inside it
+        # propagates and skips the prune entirely — a stale note beats a deleted one.
         #
         # Without it the vault only ever grew. `list_knowledge_objects` filters
         # `deleted_at IS NULL` and `delete_object` was called from the hard-purge path

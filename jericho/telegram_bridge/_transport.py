@@ -278,14 +278,58 @@ class TransportMixin(BridgeShared):
             # Gentle per-chat pacing to stay within Telegram send limits.
             await asyncio.sleep(0.05)
         if sent or failed:
-            await self._backend_json(
-                backend,
-                "POST",
-                "/api/notifications/ack",
-                {"sent": sent, "failed": failed},
-                signer_chat,
-                signer_chat,
-            )
+            await self._ack_outbound(backend, signer_chat, sent, failed)
+
+    async def _ack_outbound(
+        self,
+        backend: httpx.AsyncClient,
+        signer_chat: str,
+        sent: list[str],
+        failed: list[str],
+    ) -> None:
+        """Report the batch's outcome, retrying in place before giving up.
+
+        Delivery state lives ONLY in this local list until the ack lands, so a
+        single failed ack means every message of the batch — up to twenty — is
+        still `pending` and gets delivered to the user AGAIN on the next cycle,
+        fifteen seconds later, and on every cycle until an ack succeeds. The
+        window is the whole batch: twenty sends, each a round trip to Telegram.
+
+        Acking each message right after its send would shrink the window to one,
+        and is NOT done: the bridge signs its service calls as the owner, so they
+        count against `telegram:user:<owner>` — 30 requests per minute by default,
+        shared with the owner's own messages. Twenty acks per drain would spend
+        that budget on bookkeeping and start 429-ing real traffic.
+
+        So the ack is retried here instead: three attempts inside the drain, which
+        turns "one transient 5xx or one backend restart" into "three failures in a
+        row within two seconds". The complete fix is an `in_flight` lease on the
+        row itself, which is a schema change and needs its own expiry story —
+        deliberately not started at the tail of this work.
+        """
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                await self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/notifications/ack",
+                    {"sent": sent, "failed": failed},
+                    signer_chat,
+                    signer_chat,
+                )
+                return
+            except Exception as exc:  # noqa: PERF203 - the retry IS the point here
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        # Loud, because the consequence is user-visible: these messages were
+        # delivered and will be delivered again.
+        LOGGER.error(
+            "Outbound ack failed after retries: %d delivered notifications will be re-sent",
+            len(sent),
+            exc_info=last_error,
+        )
 
     async def stop(self) -> None:
         self._running = False

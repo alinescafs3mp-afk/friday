@@ -439,6 +439,23 @@ class KnowledgeMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
+    def list_live_knowledge_ids(self, user_id: str) -> set[str]:
+        """Every live object's id, in ONE snapshot.
+
+        The vault prune needs a complete set, and assembling one by paging is not
+        the same thing: `list_knowledge_objects` orders by `importance DESC,
+        updated_at DESC`, both of which change under concurrent edits, so a row
+        can move across a page boundary between two pages and never appear in
+        either. The prune then treats that live object as an orphan and deletes
+        its note. Ids only, no ordering, no pagination — cheap enough to take
+        whole even on a large corpus.
+        """
+        rows = self.execute(
+            "SELECT id FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL",
+            (user_id,),
+        ).fetchall()
+        return {str(row["id"]) for row in rows}
+
     def list_knowledge_objects(
         self,
         user_id: str,

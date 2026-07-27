@@ -19,22 +19,45 @@ from jericho.server import create_app
 
 
 def test_failed_auth_attempts_are_rate_limited_per_ip(settings):
+    """The budget is spent by failures and it gates failures — not the caller.
+
+    It used to gate the ADDRESS: once spent, credentials were not evaluated at
+    all and a valid token got 429 like everything else. That reads as strict, and
+    on this deployment it is a denial of service. Everything arrives from
+    127.0.0.1 — the admin UI, the CLI, the Telegram bridge, the owner's browser —
+    so ten credential-less requests took the whole API offline for a minute, for
+    everyone. Any web page can send exactly those (`fetch(url, {mode:'no-cors'})`
+    is a simple GET: no preflight, opaque response, nothing to consent to).
+
+    Brute force is unaffected: guessing means failing, failures still spend the
+    budget, and once it is spent every failure is answered 429 instead of 401.
+    """
     limited = replace(settings, api_auth_failure_limit_per_minute=3)
     with TestClient(create_app(limited)) as client:
         bad = {"Authorization": "Bearer " + "x" * 48}
         for _ in range(3):
             assert client.get("/api/me", headers=bad).status_code == 401
 
-        # Budget spent: further attempts are refused before credential checks —
-        # even a valid token is locked out from the abusive address.
+        # Budget spent: further FAILURES are refused with 429, not 401.
         blocked = client.get("/api/me", headers=bad)
         assert blocked.status_code == 429
         assert blocked.headers.get("Retry-After") == "60"
+        # …and the owner still gets in with a valid token.
         good = {"Authorization": f"Bearer {limited.api_token}"}
-        assert client.get("/api/me", headers=good).status_code == 429
+        assert client.get("/api/me", headers=good).status_code == 200
 
         # Public endpoints never consume or require the auth budget.
         assert client.get("/api/health").status_code == 200
+
+
+def test_anonymous_traffic_cannot_lock_the_owner_out(settings):
+    """The drive-by shape: no credentials at all, then the owner tries to work."""
+    limited = replace(settings, api_auth_failure_limit_per_minute=3)
+    with TestClient(create_app(limited)) as client:
+        for _ in range(10):
+            assert client.get("/api/me").status_code in {401, 429}
+        good = {"Authorization": f"Bearer {limited.api_token}"}
+        assert client.get("/api/me", headers=good).status_code == 200
 
 
 def test_valid_auth_does_not_consume_failure_budget(settings):

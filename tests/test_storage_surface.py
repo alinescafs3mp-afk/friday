@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 196
+EXPECTED_MEMBER_COUNT = 197
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -198,6 +198,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_knowledge_entity_links_for": "(self, knowledge_ids: 'Sequence[str]') -> 'dict[str, list[str]]'",
     "list_knowledge_entity_links": "(self, user_id: 'str', *, entity_id: 'str | None' = None, knowledge_object_id: 'str | None' = None, status: 'str | None' = 'accepted', limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "list_knowledge_missing_embedding": "(self, model: 'str', *, limit: 'int' = 64, chunk_scheme: 'str' = '', chunk_threshold: 'int' = 0) -> 'list[dict[str, Any]]'",
+    "list_live_knowledge_ids": "(self, user_id: 'str') -> 'set[str]'",
     "list_knowledge_objects": "(self, user_id: 'str', *, limit: 'int' = 100, offset: 'int' = 0, lifecycle_stage: 'str | None' = None, tag: 'str | None' = None, entity_id: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "list_knowledge_on_this_day": "(self, user_id: 'str', *, month_day: 'str', before_iso: 'str', limit: 'int' = 10) -> 'list[dict[str, Any]]'",
     "list_knowledge_tags": "(self, user_id: 'str', *, limit: 'int' = 200) -> 'list[dict[str, Any]]'",

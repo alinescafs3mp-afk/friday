@@ -762,6 +762,34 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             async def _count_auth_failure() -> None:
                 await limiter.allow(failure_key, failure_limit)
 
+            # The budget is spent by FAILURES and it gates FAILURES — it is read
+            # here and acted on only in the handlers below.
+            #
+            # It used to short-circuit before `_authenticate`, so a spent budget
+            # refused valid credentials too. The budget is keyed on the client IP,
+            # and on the default single-host deployment the admin UI, the CLI and
+            # the Telegram bridge all arrive from 127.0.0.1 — so ten credential-less
+            # requests from a browser tab took the whole API offline for a minute,
+            # for every caller, including the owner. A cross-origin page can send
+            # exactly those requests (`fetch(url, {mode: 'no-cors'})` — a simple GET,
+            # no preflight), which made it a drive-by outage.
+            #
+            # Verifying credentials first costs one HMAC or one indexed token
+            # lookup per request, and brute force is unaffected: guessing means
+            # failing, failures still spend the budget, and once it is spent every
+            # failure is answered with 429 instead of 401.
+            budget_spent = await limiter.exhausted(failure_key, failure_limit)
+
+            def _auth_failure_response(detail: str) -> JSONResponse:
+                if budget_spent:
+                    _audit_auth_failure(request, "rate_limited", status=429)
+                    return JSONResponse(
+                        {"detail": "Too many failed authentication attempts"},
+                        status_code=429,
+                        headers={"Retry-After": "60"},
+                    )
+                return JSONResponse({"detail": detail}, status_code=401)
+
             # Only the credential phase is guarded here. ``call_next`` used to sit
             # inside this block, which meant any ValueError escaping a route handler
             # came back as 401 "malformed credentials" AND spent the per-IP
@@ -769,18 +797,13 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             # instance with 429. Route-raised exceptions belong to FastAPI's own
             # handlers (registered below) and to ServerErrorMiddleware.
             try:
-                if await limiter.exhausted(failure_key, failure_limit):
-                    raise HTTPException(
-                        status_code=429,
-                        detail="Too many failed authentication attempts",
-                        headers={"Retry-After": "60"},
-                    )
                 actor = await _authenticate(request)
                 await _enforce_rate_limit(request, actor)
             except AuthenticationError as exc:
                 await _count_auth_failure()
-                _audit_auth_failure(request, "invalid_credentials", status=401)
-                response = JSONResponse({"detail": str(exc)}, status_code=401)
+                if not budget_spent:
+                    _audit_auth_failure(request, "invalid_credentials", status=401)
+                response = _auth_failure_response(str(exc))
             except AuthorizationError as exc:
                 _audit_auth_failure(request, "capability_denied", status=403)
                 response = JSONResponse({"detail": str(exc)}, status_code=403)
@@ -800,8 +823,9 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 # Malformed credentials (bad timestamps, chat ids, …) are
                 # authentication failures too and consume the same budget.
                 await _count_auth_failure()
-                _audit_auth_failure(request, "malformed_credentials", status=401)
-                response = JSONResponse({"detail": str(exc)}, status_code=401)
+                if not budget_spent:
+                    _audit_auth_failure(request, "malformed_credentials", status=401)
+                response = _auth_failure_response(str(exc))
             else:
                 # `else`, not a trailing block: the handlers above must not see
                 # anything ``call_next`` raises, and the credentials are known good
