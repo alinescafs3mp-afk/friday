@@ -188,6 +188,19 @@ class AccountsMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_api_token(self, token_id: str) -> dict[str, Any] | None:
+        """The token record by id, hash excluded — enough to know whose token it is.
+
+        Revocation has to answer "whose?" before it answers "yes", or a delegated
+        administrator can lock the owner out of their own instance.
+        """
+        row = self.execute(
+            "SELECT id, user_id, label, created_by, created_at, expires_at, revoked_at, last_used_at"
+            " FROM api_tokens WHERE id=?",
+            (token_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def revoke_api_token(self, token_id: str, *, user_id: str | None = None) -> bool:
         clause = " AND user_id=?" if user_id else ""
         params: tuple[Any, ...] = (utc_now(), token_id, user_id) if user_id else (utc_now(), token_id)

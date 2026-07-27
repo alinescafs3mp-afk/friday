@@ -35,6 +35,24 @@ from jericho.storage._base import (
 _FTS_TERM_BUDGET = 12
 
 
+def _valid_lifecycle_stage(value: Any) -> str:
+    """Reject a lifecycle stage that is not one of the four.
+
+    The DDL constrains importance, quality_score and promotion_score with CHECK, but
+    not this column, and ``update_knowledge_fields`` passed whatever PATCH supplied
+    straight through. Both ``"Active"`` (wrong case) and ``"totally-bogus"``
+    persisted: ``get_lifecycle_stats`` then reported a stage nobody defined, and the
+    object matched no lifecycle filter, so it fell out of every governance scan while
+    still answering searches. A typo in one request quietly removed an object from
+    oversight.
+    """
+    stage = str(getattr(value, "value", value) or "").strip().casefold()
+    allowed = {item.value for item in LifecycleStage}
+    if stage not in allowed:
+        raise ValueError(f"lifecycle_stage must be one of {sorted(allowed)}")
+    return stage
+
+
 def _fts_terms(text: str) -> list[str]:
     """Spend the term budget on the words that select a document, not the first typed.
 
@@ -165,7 +183,9 @@ class KnowledgeMixin(StorageShared):
             importance=float(fields.get("importance", current.get("importance", 0.5))),
             quality_score=float(fields.get("quality_score", current.get("quality_score", 0.5))),
             promotion_score=float(fields.get("promotion_score", current.get("promotion_score", 0.5))),
-            lifecycle_stage=fields.get("lifecycle_stage", current.get("lifecycle_stage", "active")),
+            lifecycle_stage=_valid_lifecycle_stage(
+                fields.get("lifecycle_stage", current.get("lifecycle_stage", "active"))
+            ),
             version=int(current.get("version", 1)),
             superseded_by_id=fields.get("superseded_by_id", current.get("superseded_by_id")),
             created_at=current.get("created_at", utc_now()),

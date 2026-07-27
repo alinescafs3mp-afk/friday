@@ -661,7 +661,6 @@ def _purge(args: argparse.Namespace) -> int:
     from jericho.config import ensure_runtime_dirs, load_settings
     from jericho.diagnostics.runtime_lease import ProcessLease
     from jericho.memory import MemoryVault
-    from jericho.permissions import LEGACY_OWNER_USER_ID
     from jericho.purge import purge_knowledge
     from jericho.storage import init_storage
     from jericho.storage.models import AuditEntry, new_id
@@ -673,7 +672,19 @@ def _purge(args: argparse.Namespace) -> int:
         try:
             vault = MemoryVault(settings.memory_vault_dir)
             if args.id:
-                owner = args.user or LEGACY_OWNER_USER_ID
+                # `--user` scopes the purge when given; without it, resolve the
+                # object's real owner. Defaulting to LEGACY_OWNER_USER_ID meant
+                # `--id` silently searched only the owner tenant while `--user`'s own
+                # help promises "all tenants for batch", so purging anyone else's
+                # object reported "Объект не найден." and the object stayed forever.
+                owner = args.user
+                if not owner:
+                    existing = storage.get_knowledge_object(args.id)
+                    if existing is None:
+                        print("Объект не найден.", file=sys.stderr)
+                        return 2
+                    owner = str(existing.get("user_id") or "")
+                    print(f"Объект принадлежит арендатору {owner}.")
                 try:
                     report = purge_knowledge(storage, settings, vault, args.id, owner)
                 except ValueError as exc:

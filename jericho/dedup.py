@@ -296,7 +296,14 @@ class _PairCollector:
             if score <= previous:
                 return
             self._best[(low, high)] = score
-            self._heap = [item for item in self._heap if (item[1], item[2]) != (low, high)]
+            # Filtering a heap with a comprehension leaves a plain list, not a heap:
+            # removing an interior element breaks the invariant, and the very next
+            # ``heappush`` assumes it holds. ``_heap[0]`` then stops being the minimum
+            # and ``heappushpop`` below evicts a pair that is not the weakest —
+            # reproduced as 116 of 282 evictions discarding a stronger candidate than
+            # the arrival that displaced it. Re-heapify; a re-score is rare and O(n)
+            # here is nothing next to the cosine that produced the score.
+            heapq.heapify(self._heap)
             heapq.heappush(self._heap, (score, low, high))
             return
         self.total += 1

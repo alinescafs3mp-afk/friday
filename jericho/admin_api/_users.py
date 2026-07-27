@@ -138,7 +138,15 @@ async def create_token(request: Request) -> dict[str, Any]:
 @router.delete("/tokens/{token_id}")
 async def revoke_token(token_id: str, request: Request) -> dict[str, Any]:
     _require(request, "admin.tokens.manage")
-    if not _services(request).storage.revoke_api_token(token_id):
+    state = _services(request)
+    record = state.storage.get_api_token(token_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Token not found or already revoked")
+    # Minting a token for an owner was already guarded; revoking one was not, and
+    # revocation is the more damaging half — a delegated administrator could lock the
+    # owner out of their own instance.
+    _protect_owner_target(request, str(record.get("user_id") or ""))
+    if not state.storage.revoke_api_token(token_id):
         raise HTTPException(status_code=404, detail="Token not found or already revoked")
     _audit(request, "admin.token.revoke", "api_token", token_id)
     return {"status": "revoked"}

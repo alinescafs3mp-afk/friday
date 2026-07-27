@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 186
+EXPECTED_MEMBER_COUNT = 187
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -130,6 +130,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "find_entity_by_name": "(self, user_id: 'str', name: 'str') -> 'dict[str, Any] | None'",
     "find_inbox_by_raw": "(self, raw_object_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "find_raw_by_source_ref": "(self, user_id: 'str', source: 'str', source_ref: 'str') -> 'dict[str, Any] | None'",
+    "get_api_token": "(self, token_id: 'str') -> 'dict[str, Any] | None'",
     "get_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'str | None'",
     "get_channel_session": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'dict[str, Any] | None'",
     "get_chunk_spans": "(self, user_id: 'str', model: 'str', keys: 'Sequence[tuple[str, int]]') -> 'dict[tuple[str, int], tuple[int, int]]'",

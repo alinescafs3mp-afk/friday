@@ -130,6 +130,42 @@ def test_delegated_admin_cannot_mint_owner_token(settings):
         assert escalation.status_code == 403
 
 
+def test_delegated_admin_cannot_revoke_an_owner_token(settings):
+    """Minting for an owner was guarded; revoking an owner's token was not.
+
+    Revocation is the more damaging half — it does not grant the delegated admin
+    anything, it takes the owner's access to their own instance away. `create_token`
+    calls `_protect_owner_target` with an explicit comment about escalation;
+    `revoke_token` only checked the capability and then revoked by id.
+    """
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        _issue(storage, "adm2", "admin", "jrc_admin_revoker")
+        admin = {"Authorization": "Bearer jrc_admin_revoker"}
+
+        storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+        storage.update_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+        owner_token = storage.create_api_token(
+            LEGACY_OWNER_USER_ID,
+            hashlib.sha256(b"jrc_owner_secret").hexdigest(),
+            label="owner phone",
+            created_by="test",
+        )
+        refused = client.delete(f"/api/admin/tokens/{owner_token['id']}", headers=admin)
+        assert refused.status_code == 403
+        assert storage.get_api_token(owner_token["id"])["revoked_at"] is None
+
+        # A normal account's token is still revocable by that same admin.
+        ordinary = _issue(storage, "user10", "user", "jrc_ordinary")
+        assert client.delete(f"/api/admin/tokens/{ordinary['id']}", headers=admin).status_code == 200
+        assert storage.get_api_token(ordinary["id"])["revoked_at"] is not None
+
+        # And the owner may still revoke their own.
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        assert client.delete(f"/api/admin/tokens/{owner_token['id']}", headers=owner).status_code == 200
+
+
 # --- TTL / expiry ---------------------------------------------------------
 
 

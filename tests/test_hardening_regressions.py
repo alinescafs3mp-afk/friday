@@ -1101,3 +1101,95 @@ def test_public_api_rejects_ambiguous_booleans_and_nonfinite_or_out_of_range_num
 
         assert app.state.storage.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0] == 0
         assert app.state.storage.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+
+
+# --- small defects found by the 2026-07-27 audit ---------------------------
+
+
+def test_lifecycle_stage_cannot_be_set_to_something_that_is_not_a_stage(storage):
+    """A typo in a PATCH removed an object from governance without removing it from search.
+
+    The DDL CHECK-constrains importance, quality_score and promotion_score but not
+    this column, and `update_knowledge_fields` passed whatever arrived straight
+    through. Both "Active" (wrong case) and "totally-bogus" persisted:
+    `get_lifecycle_stats` then reported a stage nobody defined, and the object
+    matched no lifecycle filter — so it fell out of every governance scan while
+    still answering searches.
+    """
+    import pytest
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("owner")
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id="owner",
+        source="test",
+        source_ref=new_id("src"),
+        raw_content="заметка",
+        content_type="text",
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id="owner",
+        raw_object_id=raw.id,
+        content="заметка",
+        title="Заметка",
+        summary="заметка",
+    )
+    storage.store_knowledge_object(ko)
+
+    for bogus in ("totally-bogus", "", "deleted_at"):
+        with pytest.raises(ValueError, match="lifecycle_stage"):
+            storage.update_knowledge_fields(ko.id, "owner", lifecycle_stage=bogus)
+
+    # Case is normalised rather than rejected — "Active" is an obvious intent.
+    updated = storage.update_knowledge_fields(ko.id, "owner", lifecycle_stage="Archived")
+    assert updated is not None and updated["lifecycle_stage"] == "archived"
+    assert storage.get_lifecycle_stats("owner").get("archived") == 1
+
+
+def test_rescoring_a_pair_keeps_the_duplicate_heap_a_heap():
+    """Filtering a heap with a comprehension is not a heap operation.
+
+    `_PairCollector` rebuilt `_heap` as a plain list to drop a re-scored pair, then
+    pushed onto it as if the invariant still held. `_heap[0]` stops being the
+    minimum, so `heappushpop` evicts a pair that is not the weakest — strong
+    near-duplicate candidates were discarded in favour of weaker ones.
+    """
+    import heapq
+
+    from jericho.dedup import _PairCollector
+
+    collector = _PairCollector({})
+    for index in range(200):
+        collector.add(f"a{index:03d}", f"b{index:03d}", 0.50 + index / 1000)
+    # Re-score a batch: this is the path that used to corrupt the ordering.
+    for index in range(0, 200, 7):
+        collector.add(f"a{index:03d}", f"b{index:03d}", 0.50 + index / 1000 + 1e-6)
+
+    heap = collector._heap  # noqa: SLF001 - the invariant is the whole point
+    assert heap[0][0] == min(item[0] for item in heap)
+    copy = list(heap)
+    heapq.heapify(copy)
+    assert copy[0] == heap[0]
+
+    ranked = collector.ranked()
+    assert ranked == sorted(ranked, key=lambda item: (-item[2], item[0], item[1]))
+
+
+def test_precision_at_k_divides_by_k():
+    """One hit in two results and one hit in ten are not 0.50 and 0.10 of the same thing.
+
+    `min(k, len(retrieved[:k]))` collapses to the returned count, so the denominator
+    was however many results came back. `compare_chunk_recall` compares two arms
+    that legitimately return different numbers of results, so the metric moved for
+    a reason unrelated to quality.
+    """
+    from jericho.eval import precision_at_k
+
+    assert precision_at_k(["a", "b"], {"a"}, 10) == 0.1
+    assert precision_at_k(["a"] + [f"x{i}" for i in range(9)], {"a"}, 10) == 0.1
+    assert precision_at_k(["a", "b", "c"], {"a", "b", "c"}, 3) == 1.0
+    assert precision_at_k([], {"a"}, 10) == 0.0

@@ -64,9 +64,13 @@ def recall_at_k(retrieved: list[str], expected: set[str], k: int) -> float:
 def precision_at_k(retrieved: list[str], expected: set[str], k: int) -> float:
     if k <= 0 or not retrieved:
         return 0.0
-    top = retrieved[:k]
-    hits = sum(1 for item in top if item in expected)
-    return hits / min(k, len(top))
+    hits = sum(1 for item in retrieved[:k] if item in expected)
+    # Divide by k, not by how many came back. ``min(k, len(retrieved[:k]))`` collapses
+    # to the returned count, so one hit out of two results scored 0.50 and one hit out
+    # of ten scored 0.10 — the same retrieval quality, five times apart. That is not
+    # only non-standard, it silently biases ``compare_chunk_recall``, whose two arms
+    # legitimately return different numbers of results.
+    return hits / k
 
 
 def reciprocal_rank(retrieved: list[str], expected: set[str]) -> float:
