@@ -59,10 +59,15 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
 @dataclass(frozen=True)
 class TelegramConfig:
     bot_token: str
+    # Absolute, and deliberately without a default. This path locates BOTH the
+    # durable update queue and the singleton lease beside it, so a cwd-relative
+    # value is not a cosmetic wart: a bridge started from another directory opens
+    # a different (empty) queue behind a different lock, which orphans undelivered
+    # updates and lets a second bridge long-poll the same bot at the same time.
+    inbox_db_path: str
     backend_url: str = "http://127.0.0.1:8000"
     bridge_secret: str = ""
     allowed_chat_ids: list[int] = field(default_factory=list)
-    inbox_db_path: str = "telegram_inbox.sqlite3"
     max_document_bytes: int = 50 * 1024 * 1024
     backend_timeout_sec: float = 300.0
     outbound_poll_interval_sec: float = 15.0
@@ -76,6 +81,10 @@ class TelegramConfig:
             raise ValueError("Telegram bridge secret must contain at least 32 characters")
         if not self.backend_url.startswith(("http://", "https://")):
             raise ValueError("backend_url must use HTTP or HTTPS")
+        if not self.inbox_db_path or not Path(self.inbox_db_path).is_absolute():
+            # Fail closed before `_UpdateInbox` gets a chance to create the file:
+            # a queue whose location depends on the cwd is not durable.
+            raise ValueError("inbox_db_path must be an absolute path")
         if self.telegram_proxy and not self.telegram_proxy.startswith(("http://", "https://")):
             # SOCKS would need httpx's optional `socksio` extra, which Jericho does
             # not depend on; a mixed proxy accepts HTTP CONNECT on the same port.

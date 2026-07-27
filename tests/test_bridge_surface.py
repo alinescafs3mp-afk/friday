@@ -279,7 +279,7 @@ EXPECTED_INBOX: dict[str, str] = {
 # --- reaching Telegram through a proxy ------------------------------------
 
 
-def test_proxy_applies_to_telegram_only(monkeypatch) -> None:
+def test_proxy_applies_to_telegram_only(monkeypatch, tmp_path) -> None:
     """The tunnel is for api.telegram.org; the backend is loopback and must stay direct.
 
     Routing the backend through a proxy would send signed, authenticated requests to
@@ -300,6 +300,7 @@ def test_proxy_applies_to_telegram_only(monkeypatch) -> None:
     monkeypatch.setattr(httpx.AsyncClient, "__init__", spy)
     config = TelegramConfig(
         bot_token="1:aaa",
+        inbox_db_path=str(tmp_path / "telegram-inbox.sqlite3"),
         bridge_secret="x" * 32,
         allowed_chat_ids=[1],
         telegram_proxy="http://127.0.0.1:10808",
@@ -329,6 +330,34 @@ def test_proxy_credentials_are_kept_out_of_the_log() -> None:
     assert _proxy_password("http://127.0.0.1:10808") == ""
 
 
+def test_durable_queue_path_has_no_cwd_relative_default() -> None:
+    """The queue location must never depend on where the process was started.
+
+    `inbox_db_path` locates both the durable update queue and the singleton lease
+    beside it. A relative default meant a bridge launched from another directory
+    opened a *different, empty* queue behind a *different* lock: undelivered
+    updates were orphaned and a second bridge could long-poll the same bot
+    concurrently. It also left a stray sqlite3 file in the repository root after
+    every test run — that artifact is what surfaced this.
+    """
+    import dataclasses
+
+    from jericho.telegram_bridge import TelegramConfig
+
+    field_map = {f.name: f for f in dataclasses.fields(TelegramConfig)}
+    path_field = field_map["inbox_db_path"]
+    assert path_field.default is dataclasses.MISSING
+    assert path_field.default_factory is dataclasses.MISSING
+
+    with pytest.raises(ValueError, match="absolute"):
+        TelegramConfig(
+            bot_token="1:aaa",
+            inbox_db_path="telegram_inbox.sqlite3",
+            bridge_secret="x" * 32,
+            allowed_chat_ids=[1],
+        ).validate()
+
+
 def test_socks_proxy_is_refused_with_a_usable_message() -> None:
     """httpx needs the optional `socksio` package for SOCKS and would otherwise fail
     with a bare ImportError inside the first poll, long after startup looked fine."""
@@ -336,6 +365,7 @@ def test_socks_proxy_is_refused_with_a_usable_message() -> None:
 
     config = TelegramConfig(
         bot_token="1:aaa",
+        inbox_db_path="/tmp/telegram-inbox.sqlite3",  # nosec B108 - never opened
         bridge_secret="x" * 32,
         allowed_chat_ids=[1],
         telegram_proxy="socks5://127.0.0.1:10808",

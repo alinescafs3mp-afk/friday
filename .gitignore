@@ -21,6 +21,10 @@ logs/
 *.sqlite3-wal
 *.sqlite3-shm
 *.sqlite3-journal
+# Singleton leases carry a live pid; they are runtime state, never source.
+*.sqlite3.lock
+*.lock
+!requirements.lock
 *.manifest.json
 
 # Model weights (the empty model directory and its README stay tracked)
