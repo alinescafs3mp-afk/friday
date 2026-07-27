@@ -769,6 +769,37 @@ class HybridSearcher:
         candidates = list(candidate_map.values())
 
         fts_ranking = [item["id"] for item in fts_candidates]
+        # A SECOND ranking, over the content-bearing words only, used by nothing but
+        # the exclusion gate below.
+        #
+        # `fts_ranking` is a recall pool and it is right to be generous: FTS keeps
+        # stopwords and searches every term as a prefix, deliberately (ARCHITECTURE
+        # §«стоп-слова»). But `_exclusion_reason` then treated membership in that pool
+        # as EVIDENCE, and `"по"*` matches 314 of 342 real documents, `"на"*` 290,
+        # `"за"*` 259. Measured on the owner's corpus: 26.7% of answered results
+        # contained not one content-bearing word of the question, and in 42 of 232
+        # queries that filler filled the answer completely and pushed the right
+        # document out.
+        #
+        # Removing the exemption outright is worse, not better — measured too:
+        # recall@10 54.2% -> 50.8%, because `lex < 0.075` is unreachable for a long
+        # document even when it contains every word of the query (39% of this corpus
+        # scores under 0.075 against its own full title). The exemption has to stay
+        # and be earned. Same prefix semantics, same tokenizer, one extra indexed
+        # query: 26.7% -> 4.9% empty results, recall@10 52.5% -> 63.3%, 13 documents
+        # recovered and none lost.
+        substantive = [
+            token for token in tokens_of(clean_query) if len(token) > 1 and token.casefold() not in _STOPWORDS
+        ]
+        if substantive and len(substantive) < len(tokens_of(clean_query)):
+            evidence_ranking = {
+                str(item["id"])
+                for item in self.storage.search_knowledge(user_id, " ".join(substantive), limit=limit * 5)
+            }
+        else:
+            # Nothing to strip, or nothing left after stripping: a question made of
+            # stopwords has no better evidence than the pool it already produced.
+            evidence_ranking = set(fts_ranking)
         # Shared by both `_lexical_rank` passes and by the snippet pass below, so a
         # candidate's body is tokenized once per request rather than once per use.
         lexical_cache: dict[str, dict[str, float]] = {}
@@ -996,7 +1027,7 @@ class HybridSearcher:
             # Recent-pool records need real evidence; graph expansion or a strong
             # curated-field match can satisfy it without repeating body terms.
             if (
-                document_id not in fts_ranking
+                document_id not in evidence_ranking
                 and lex < _LEXICAL_EVIDENCE_MIN
                 and fld < 0.12
                 and emb < self._dense_evidence_min
