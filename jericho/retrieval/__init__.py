@@ -924,7 +924,9 @@ class HybridSearcher:
         # Shared by both `_lexical_rank` passes and by the snippet pass below, so a
         # candidate's body is tokenized once per request rather than once per use.
         lexical_cache: dict[str, dict[str, float]] = {}
-        lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query, cache=lexical_cache)
+        lexical_ranking, lexical_scores, shares_word = self._lexical_rank(
+            candidates, clean_query, cache=lexical_cache
+        )
         rankings = [fts_ranking, lexical_ranking]
         embedding_scores: dict[str, float] = {}
         dense_meta: dict[str, Any] = {}
@@ -954,6 +956,10 @@ class HybridSearcher:
             "knowledge_candidates": [],
         }
         graph_scores: dict[str, float] = {}
+        # Documents vouched for by an entity the QUERY named, as opposed to one
+        # reached through another document. Only the first is evidence by itself
+        # — see the gate below.
+        graph_query_matched: set[str] = set()
         graph_evidence: dict[str, list[dict[str, Any]]] = {}
         graph_depth = self._graph_max_depth if _RELATIONAL_QUERY_RE.search(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
@@ -999,6 +1005,8 @@ class HybridSearcher:
                     if not item or item.get("deleted_at"):
                         continue
                     candidate_map[document_id] = item
+                    if candidate.get("query_matched"):
+                        graph_query_matched.add(document_id)
                     graph_scores[document_id] = max(
                         graph_scores.get(document_id, 0.0),
                         float(candidate.get("score", 0.0)),
@@ -1010,7 +1018,9 @@ class HybridSearcher:
 
         # Re-rank after graph expansion so newly discovered records receive lexical evidence too.
         candidates = list(candidate_map.values())
-        lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query, cache=lexical_cache)
+        lexical_ranking, lexical_scores, shares_word = self._lexical_rank(
+            candidates, clean_query, cache=lexical_cache
+        )
         rankings[1] = lexical_ranking
         if graph_scores:
             rankings.append(
@@ -1182,12 +1192,27 @@ class HybridSearcher:
                 return "identifier_mismatch"
             # Recent-pool records need real evidence; graph expansion or a strong
             # curated-field match can satisfy it without repeating body terms.
+            # The graph counts as evidence only when the QUERY named the entity.
+            # «Этот документ про то, о чём вы спросили» is a claim about the
+            # document; «этот документ делит сущность с чем-то, что совпало» is a
+            # claim about its neighbour, and the score is the same number either
+            # way — a seeded entity vouches at a flat 0.677, which clears any
+            # threshold on its own. Measured on the real corpus after seeds were
+            # filtered honestly: ten invented-word questions still returned 20
+            # documents, every one of them carried by the graph alone, and every
+            # one reached through a neighbour rather than through the question.
+            graph_evidence_value = grp if document_id in graph_query_matched else 0.0
+            # A lexical score counts only when the document actually contains one
+            # of the query's words — see `_lexical_rank`. Trigram similarity is
+            # useful for ORDERING and useless as proof: nonsense words reach 0.086
+            # against ordinary Russian text on letter overlap alone.
+            lexical_evidence = lex if document_id in shares_word else 0.0
             if (
                 document_id not in evidence_ranking
-                and lex < _LEXICAL_EVIDENCE_MIN
+                and lexical_evidence < _LEXICAL_EVIDENCE_MIN
                 and fld < 0.12
                 and emb < self._dense_evidence_min
-                and grp < graph_evidence_threshold
+                and graph_evidence_value < graph_evidence_threshold
             ):
                 return "insufficient_evidence"
             # A deprecated record needs STRONGER evidence than a live one to earn a
@@ -1566,7 +1591,7 @@ class HybridSearcher:
         query: str,
         *,
         cache: dict[str, dict[str, float]] | None = None,
-    ) -> tuple[list[str], dict[str, float]]:
+    ) -> tuple[list[str], dict[str, float], set[str]]:
         query_vector = lexical_vector(query)
         # One vector per candidate per request. `_lexical_rank` runs twice — once
         # before dense recall widens the pool and once after — and each run rebuilt
@@ -1574,7 +1599,18 @@ class HybridSearcher:
         # Profiling one search over a 400-candidate pool counted 2708 calls to
         # `lexical_vector`, about half the request's total time.
         vectors = cache if cache is not None else {}
+        # Which query WORDS exist at all, separately from how similar the texts
+        # look. `lexical_vector` mixes word features with character trigrams, and
+        # trigrams are what let a document score without sharing a single word:
+        # measured on the real corpus, invented Russian-shaped words
+        # («переквантовать сизиморбность») reach 0.081-0.086 against ordinary
+        # documents — over the 0.075 evidence floor — purely on letter overlap.
+        # Trigrams earn their place in RANKING, where approximate is useful; in a
+        # gate that decides whether there is any evidence at all they are noise
+        # wearing the shape of a score.
+        query_words = {key for key in query_vector if key.startswith("w:")}
         scored: list[tuple[str, float]] = []
+        shares_word: set[str] = set()
         for item in candidates:
             document_id = str(item["id"])
             vector = vectors.get(document_id)
@@ -1582,8 +1618,10 @@ class HybridSearcher:
                 vector = lexical_vector(self._search_text(item))
                 vectors[document_id] = vector
             scored.append((document_id, sparse_cosine(query_vector, vector)))
+            if query_words and not query_words.isdisjoint(vector):
+                shares_word.add(document_id)
         scored.sort(key=lambda pair: pair[1], reverse=True)
-        return [document_id for document_id, _ in scored], dict(scored)
+        return [document_id for document_id, _ in scored], dict(scored), shares_word
 
     async def _dense_recall(
         self,

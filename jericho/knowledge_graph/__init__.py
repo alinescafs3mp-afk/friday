@@ -655,6 +655,13 @@ class KnowledgeGraph:
         # would pay a document for its own entity count rather than for agreeing
         # with the question.
         query_matched_ids = set(root_scores)
+        # Entities whose presence traces back to the question — the query matched
+        # them, or they are reachable from such a match through relations the
+        # USER asserted. Co-occurrence edges and seed documents do NOT ground:
+        # «Альфа зависит от Беты» is the owner's own claim and makes Beta's
+        # document relevant to a question about Alpha, while «эти двое
+        # встретились в одном документе» is an observation about that document.
+        grounded_ids: set[str] = set(root_scores)
         evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for root in roots:
             evidence[str(root["id"])].append(
@@ -762,9 +769,15 @@ class KnowledgeGraph:
             relation_type: str,
             evidence_item: dict[str, Any],
             path_ids: list[str],
+            grounds: bool = False,
         ) -> None:
             if neighbour_id == from_entity_id or propagated < 0.12:
                 return
+            # Grounding travels along asserted relations only, and only from an
+            # already-grounded entity — one hop of "the owner said these are
+            # connected" from something the question actually named.
+            if grounds and from_entity_id in grounded_ids:
+                grounded_ids.add(neighbour_id)
             existing_depth = best_depth.get(neighbour_id, 999)
             existing_score = best_score.get(neighbour_id, 0.0)
             if existing_depth < next_depth and existing_score >= propagated:
@@ -828,6 +841,7 @@ class KnowledgeGraph:
                         "depth": next_depth,
                     },
                     path_ids=path_ids,
+                    grounds=True,
                 )
 
             # Accepted links to one Knowledge Object provide useful graph structure without
@@ -955,6 +969,17 @@ class KnowledgeGraph:
                 "knowledge_object_id": item["id"],
                 "score": item.get("_graph_score", 0.0),
                 "evidence": knowledge_evidence[str(item["id"])],
+                # Did the QUERY name one of the entities vouching for this
+                # document, or was it reached because some other document did?
+                # The two are different claims — "this is about what you asked
+                # about" versus "this is near something that matched" — and only
+                # the first is evidence on its own. Retrieval decides what to do
+                # with the distinction; the graph just has to report it, because
+                # by the time the score arrives it is one number either way.
+                "query_matched": any(
+                    str(entry.get("entity_id") or "") in grounded_ids
+                    for entry in knowledge_evidence[str(item["id"])]
+                ),
             }
             for item in ordered_knowledge
         ]

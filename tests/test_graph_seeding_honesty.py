@@ -83,6 +83,64 @@ async def test_a_subject_the_archive_never_heard_of_returns_nothing(storage):
 
 
 @pytest.mark.asyncio
+async def test_letter_similarity_is_not_evidence(storage):
+    """Invented words that merely LOOK Russian must not clear the evidence gate.
+
+    `lexical_vector` mixes word features with character trigrams, and trigrams
+    are what let a document score without sharing a single word: measured on the
+    real corpus, «переквантовать сизиморбность» reached 0.081–0.086 against
+    ordinary documents — above the 0.075 floor — purely on letter overlap. Those
+    documents then passed the gate and the graph's flat 0.677 lifted them into
+    the answer. Trigrams earn their place in ranking, where approximate is
+    useful; in a gate that decides whether there is any evidence at all they are
+    noise wearing the shape of a score.
+    """
+    _seed_corpus(storage)
+    searcher = HybridSearcher(storage, None, record_usage=False)
+    kg = KnowledgeGraph(storage)
+    for invented in ("переквантовать сизиморбность", "конфигурационность дежурственный"):
+        result = await searcher.search("alice", invented, limit=10, kg=kg, explain=True)
+        assert result["count"] == 0, (
+            f"{invented!r} returned {result['count']}: "
+            f"{[(i.get('title'), i.get('_lexical_score')) for i in result['results']]}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_word_shared_with_the_document_still_counts(storage):
+    """The other half: a real shared word must keep working as evidence."""
+    ids = _seed_corpus(storage)
+    searcher = HybridSearcher(storage, None, record_usage=False)
+    kg = KnowledgeGraph(storage)
+    result = await searcher.search("alice", "конфигурация подписки", limit=10, kg=kg)
+    assert ids["vpn"] in {item["id"] for item in result["results"]}
+
+
+@pytest.mark.asyncio
+async def test_an_asserted_relation_still_carries_a_neighbour(storage):
+    """Grounding travels along relations the OWNER asserted, and must keep doing so.
+
+    «Альфа зависит от Беты» is the owner's own claim, so a question about Alpha
+    legitimately reaches Beta's document — even though the question never named
+    Beta. Only co-occurrence («these two appeared in one document») and seeded
+    entities stop grounding. The distinction is the whole point: without it this
+    filter would have cut the graph channel's real work along with its noise.
+    """
+    from jericho.storage.models import RelationType
+
+    ids = _seed_corpus(storage)
+    kg = KnowledgeGraph(storage)
+    entities = {entity["name"]: entity["id"] for entity in kg.list_entities("alice", limit=50)}
+    kg.create_relation("alice", entities["Казань"], entities["Караул"], RelationType.DEPENDS_ON, weight=1.0)
+
+    searcher = HybridSearcher(storage, None, record_usage=False)
+    result = await searcher.search("alice", "Казань", limit=10, kg=kg)
+    found = {item["id"] for item in result["results"]}
+    assert ids["kazan"] in found
+    assert ids["duty"] in found, "an asserted relation stopped carrying its neighbour"
+
+
+@pytest.mark.asyncio
 async def test_an_inflected_question_still_reaches_its_document(storage):
     """The case the unfiltered seeding existed to serve, now served honestly."""
     ids = _seed_corpus(storage)
