@@ -52,6 +52,14 @@ _ADVICE_ENDPOINT_DOWN_AFTER = 3
 # next to a passage (default 1200) and far below what an embeddings service will refuse.
 _DOC_VECTOR_MAX_CHARS = 20_000
 
+# How much TEXT one embeddings request may carry. Batches were bounded by input COUNT
+# alone, which says nothing about the work: 256 strings of eighteen characters and 65
+# passages of two thousand differ by two orders of magnitude. Measured on the live
+# service at ~2800 characters/second, so one object's 149000 characters needed ~53s
+# against a 60s request timeout and lost the race — leaving that object with no vector.
+# 40000 keeps a request near fifteen seconds at that rate, with room for a slower day.
+_EMBED_REQUEST_MAX_CHARS = 40_000
+
 
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
@@ -768,6 +776,36 @@ class WorkersManager:
         if indexed:
             LOGGER.info("embeddings index updated %d objects", indexed)
 
+    async def _embed_in_volume_slices(self, texts: list[str]) -> list[list[float]] | None:
+        """Embed in slices small enough to answer inside the request timeout.
+
+        Order is preserved and the result is concatenated, so the caller's offset ledger
+        still lines up. All-or-nothing on purpose: a partially embedded object would
+        keep some passages and silently lose others, and nothing downstream could tell
+        that apart from an object that simply has fewer passages.
+
+        A single text larger than the budget still goes on its own — refusing it would
+        drop content, and ``_DOC_VECTOR_MAX_CHARS`` already keeps the largest input far
+        below what a service will take.
+        """
+        collected: list[list[float]] = []
+        slice_texts: list[str] = []
+        slice_chars = 0
+        for text in [*texts, None]:
+            over_budget = (
+                text is not None and slice_texts and slice_chars + len(text) > _EMBED_REQUEST_MAX_CHARS
+            )
+            if (text is None or over_budget) and slice_texts:
+                returned = await self.embeddings.embed(slice_texts)  # type: ignore[union-attr]
+                if not returned or len(returned) != len(slice_texts):
+                    return None
+                collected.extend(returned)
+                slice_texts, slice_chars = [], 0
+            if text is not None:
+                slice_texts.append(text)
+                slice_chars += len(text)
+        return collected
+
     async def _embed_group(self, group: list[dict[str, Any]], model: str, scheme: str) -> bool:
         """Embed one request-sized group and persist it; return False if it was lost.
 
@@ -783,14 +821,14 @@ class WorkersManager:
             offsets.append((plan, start, len(plan["missing"])))
         vectors: list[list[float]] = []
         if flattened:
-            returned = await self.embeddings.embed(flattened)  # type: ignore[union-attr]
-            if not returned or len(returned) != len(flattened):
+            returned = await self._embed_in_volume_slices(flattened)
+            if returned is None or len(returned) != len(flattened):
                 LOGGER.warning(
                     "embeddings index skipped %d objects: backend returned no usable vectors",
                     len(group),
                 )
                 return False
-            vectors = list(returned)
+            vectors = returned
 
         items: list[dict[str, Any]] = []
         chunks: dict[str, Sequence[dict[str, Any]]] = {}
