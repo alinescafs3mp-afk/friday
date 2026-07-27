@@ -88,6 +88,9 @@ from jericho.workers._blocking import wait_until_idle
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
 _REALM_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+# What a client-proposed correlation id may look like: long enough for a UUID or
+# a trace id, plain enough that it cannot smuggle a header or a log line.
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -746,7 +749,16 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
     @application.middleware("http")
     async def authentication_middleware(request: Request, call_next):
         path = request.url.path
-        request.state.request_id = request.headers.get("x-request-id") or secrets.token_hex(12)
+        # A client may propose a correlation id, but only in a shape that cannot
+        # forge evidence. This value is written into every audit row for the
+        # request and echoed back in the response, and it was taken verbatim: a
+        # caller could stamp their own writes with somebody else's id, or with
+        # kilobytes of junk, in the exact field an investigator uses to tie events
+        # together. Anything that is not a short, plain token is replaced rather
+        # than rejected — correlation is a convenience, not a reason to fail a
+        # legitimate request.
+        proposed = str(request.headers.get("x-request-id") or "")
+        request.state.request_id = proposed if _REQUEST_ID_RE.fullmatch(proposed) else secrets.token_hex(12)
         request.state.client_ip = _client_ip(request, settings)
         public = path == "/" or path == "/api/health" or path == "/admin" or path.startswith("/admin/")
         if request.method == "OPTIONS" or public:

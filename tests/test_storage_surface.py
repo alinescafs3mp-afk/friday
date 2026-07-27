@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 197
+EXPECTED_MEMBER_COUNT = 198
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -86,6 +86,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_open_once": "(self) -> 'sqlite3.Connection'",
     "_raw_from_row": "(self, row: 'sqlite3.Row | dict[str, Any]') -> 'RawObject'",
     "_resolution_from_row": "(row: 'sqlite3.Row | dict[str, Any]') -> 'EntityResolutionCandidate'",
+    "_soft_delete_entity_locked": "(self, entity_id: 'str', user_id: 'str | None') -> 'bool'",
     "_store_entity_version": "(self, conn: 'sqlite3.Connection', row: 'dict[str, Any]') -> 'None'",
     "_store_ko_version": "(self, conn: 'sqlite3.Connection', row: 'dict[str, Any]') -> 'None'",
     "_table_columns": "(conn: 'sqlite3.Connection', table: 'str') -> 'set[str]'",

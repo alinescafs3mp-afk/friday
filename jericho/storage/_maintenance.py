@@ -78,18 +78,26 @@ class MaintenanceMixin(StorageShared):
         intentionally destroys provenance, so it refuses anything not already
         soft-deleted unless explicitly overridden.
         """
-        current = self.get_knowledge_object(ko_id, user_id)
-        if not current:
-            return {"existed": False, "knowledge_object_id": ko_id}
-        owner = str(current["user_id"])
-        if require_soft_deleted and not current.get("deleted_at"):
-            raise ValueError("Knowledge object must be soft-deleted before it can be purged")
-        raw_object_id = str(current.get("raw_object_id") or "")
         deleted: dict[str, int] = {}
         raw_removed = False
         raw_file_path = ""
         unlink_file = False
+        # The guardrail is re-read INSIDE the write transaction. It used to be
+        # checked on a snapshot taken before the lock, and nothing in the
+        # transaction looked at `deleted_at` again — so an object restored between
+        # the check and `BEGIN IMMEDIATE` was hard-deleted anyway, together with
+        # its versions, its Raw Object, its file and its vault note. This is the
+        # one place the system destroys provenance on purpose; the window where it
+        # does so by accident must not exist. `transaction()` is reentrant, so the
+        # read simply moves inside it.
         with self.transaction() as conn:
+            current = self.get_knowledge_object(ko_id, user_id)
+            if not current:
+                return {"existed": False, "knowledge_object_id": ko_id}
+            owner = str(current["user_id"])
+            if require_soft_deleted and not current.get("deleted_at"):
+                raise ValueError("Knowledge object must be soft-deleted before it can be purged")
+            raw_object_id = str(current.get("raw_object_id") or "")
 
             def _del(table: str, where: str, params: tuple[Any, ...]) -> None:
                 cursor = conn.execute(f"DELETE FROM {table} WHERE {where}", params)  # nosec B608

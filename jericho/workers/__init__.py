@@ -87,6 +87,9 @@ class WorkerSupervisor:
         self._handles: list[asyncio.Task[Any]] = []
         self._states: dict[str, dict[str, Any]] = {}
         self._state_sink = state_sink
+        # Health writes are queued and drained on a thread — see `_publish`.
+        self._sink_queue: asyncio.Queue[tuple[str, dict[str, Any]]] | None = None
+        self._sink_handle: asyncio.Task[None] | None = None
 
     def register(
         self,
@@ -138,16 +141,48 @@ class WorkerSupervisor:
             }
         )
         self._states[task.name] = current
-        if self._state_sink is not None:
+        if self._state_sink is None:
+            return
+        if self._sink_queue is not None:
+            # Off the event loop, in order. The sink writes to SQLite, and every
+            # write takes the process-wide write lock: measured with a worker
+            # thread holding a 3-second transaction (the shape of one batch of
+            # embedding vectors), this call blocked the loop for 3.00 seconds —
+            # no HTTP request, no Telegram message, no other worker, until the
+            # writer committed. `_publish` runs on the loop several times per task
+            # run, so this is the health bookkeeping stalling the product.
+            #
+            # A queue rather than a task per write: these are heartbeats for the
+            # same few keys, and out-of-order writes would leave a stale "running"
+            # sitting on top of the "ok" that followed it.
+            self._sink_queue.put_nowait((task.name, current))
+            return
+        try:  # no loop running (unit tests call `_publish` directly)
+            self._state_sink(task.name, current)
+        except Exception:
+            LOGGER.debug("Could not persist worker state for %s", task.name, exc_info=True)
+
+    async def _drain_state_sink(self) -> None:
+        assert self._sink_queue is not None
+        while True:
+            name, state = await self._sink_queue.get()
             try:
-                self._state_sink(task.name, current)
+                if self._state_sink is not None:
+                    await asyncio.to_thread(self._state_sink, name, state)
             except Exception:
-                LOGGER.debug("Could not persist worker state for %s", task.name, exc_info=True)
+                LOGGER.debug("Could not persist worker state for %s", name, exc_info=True)
+            finally:
+                self._sink_queue.task_done()
 
     async def run(self) -> None:
         if self._running:
             return
         self._running = True
+        if self._state_sink is not None:
+            self._sink_queue = asyncio.Queue()
+            self._sink_handle = asyncio.create_task(
+                self._drain_state_sink(), name="jericho-worker-state-sink"
+            )
         self._handles = [
             asyncio.create_task(self._run_task(task), name=f"jericho-worker:{task.name}")
             for task in self._tasks
@@ -163,6 +198,19 @@ class WorkerSupervisor:
             handle.cancel()
         await asyncio.gather(*self._handles, return_exceptions=True)
         self._handles.clear()
+        if self._sink_handle is not None:
+            # Let the queued health writes land before cancelling the drainer:
+            # the last thing every task publishes is why it stopped, and losing
+            # that turns a clean shutdown into a worker that looks stuck at
+            # "running" forever.
+            if self._sink_queue is not None:
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._sink_queue.join(), timeout=5.0)
+            self._sink_handle.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._sink_handle
+            self._sink_handle = None
+            self._sink_queue = None
         LOGGER.info("Worker supervisor stopped")
 
     async def _run_task(self, task: IntervalTask) -> None:

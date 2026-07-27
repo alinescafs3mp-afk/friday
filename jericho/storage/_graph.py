@@ -157,7 +157,20 @@ class GraphMixin(StorageShared):
         return results
 
     def soft_delete_entity(self, entity_id: str, user_id: str | None = None) -> bool:
-        """Soft-delete an entity and record the state as a new entity version."""
+        """Soft-delete an entity and record the state as a new entity version.
+
+        Read and write in ONE transaction. `update_entity` overwrites every field
+        from the snapshot handed to it, so a read taken before the write lock
+        means any merge or edit that commits in between is silently reverted on
+        the tombstone — and the reverted state is then stored as a new
+        `entity_versions` row, which is the record a reviewer would trust. Same
+        shape as the read-modify-write races already fixed in `update_entity` and
+        `merge_entities`; `transaction()` is reentrant, so nesting is safe.
+        """
+        with self.transaction():
+            return self._soft_delete_entity_locked(entity_id, user_id)
+
+    def _soft_delete_entity_locked(self, entity_id: str, user_id: str | None) -> bool:
         current = self.get_entity(entity_id, user_id)
         if not current or current.get("deleted_at"):
             return False
