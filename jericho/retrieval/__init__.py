@@ -963,14 +963,26 @@ class HybridSearcher:
                 + fields["exact_phrase"] * 0.18,
             )
             identifier_coverage[document_id] = self._identifier_coverage(item, query_identifiers, names)
-        field_ranking = [
-            document_id
-            for document_id, score in sorted(field_scores.items(), key=lambda pair: pair[1], reverse=True)
-            if score >= 0.035
-        ]
-        if field_ranking:
-            rankings.append(field_ranking)
-
+        # The curated-field signal is deliberately NOT a fourth RRF ranking. It used
+        # to be one, admitted by an absolute `score >= 0.035` — a threshold sitting
+        # inside the signal's working range (median per-query maximum 0.05), which
+        # made the most trusted signal behave as a binary trigger: two documents at
+        # 0.0349 / 0.0351 diverged by a whole RRF membership step (~0.022, about 7
+        # positions at the median adjacent gap), and in 8 of 20 measured queries the
+        # channel silently vanished from the fusion altogether. Measured on the real
+        # 342-document stand, two disjoint 120-document query samples (title-token
+        # and body-token queries, embeddings and graph off):
+        #
+        #     recall@10        base 187/198 and 178/186
+        #     without the RRF  187/198 and 178/186   (MRR ±0.006, noise)
+        #     threshold-free   181/198 and 177/186   (strictly worse: trigram dust
+        #                       from unrelated titles buys whole RRF memberships)
+        #
+        # The channel's information survives in two graduated places: `field * 0.17`
+        # in the blend and `fld >= 0.12` as evidence in the exclusion gates. FTS
+        # already carries exact title/tag tokens into the fusion, which is why
+        # removing the redundant ranking costs nothing — and a cliff nothing pays
+        # for should not decide seven positions.
         rrf = reciprocal_rank_fusion([ranking for ranking in rankings if ranking], k=45)
         feedback = self._feedback_scores(user_id, list(candidate_map))
         usage = self.storage.get_knowledge_usage(user_id, list(candidate_map))
