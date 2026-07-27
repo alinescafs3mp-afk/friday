@@ -26,6 +26,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from jericho.morphology import stem
 from jericho.retrieval import _STOPWORDS, tokens_of
 
 LOGGER = logging.getLogger(__name__)
@@ -73,15 +74,38 @@ class Proposal:
 
 
 def content_tokens(text: str) -> set[str]:
-    return {token.casefold() for token in tokens_of(text) if len(token) > 2} - _STOPWORDS
+    """Content words as the RANKER sees them — stems, not surface forms.
+
+    The audit exists to reject a question that merely echoes its answer, so it
+    has to measure overlap in the same features retrieval matches on. Those are
+    stems (`lexical_vector` folds Russian inflection), and comparing raw strings
+    made the check weaker than the matcher it is supposed to challenge: a
+    question restating the note in another grammatical case shared zero surface
+    tokens, passed as a hard case, and the lexical channel then found it
+    instantly. The gold set was quietly grading the easy questions.
+    """
+    return {stem(token.casefold()) for token in tokens_of(text) if len(token) > 2} - _STOPWORDS
 
 
 def audit(query: str, document_text: str) -> tuple[bool, str, list[str]]:
-    """Decide whether a proposed question actually tests retrieval."""
+    """Decide whether a proposed question actually tests retrieval.
+
+    Compared on stems, reported in the words the person actually typed: the
+    comparison has to match what the ranker does, and the explanation has to be
+    readable by whoever decides whether to keep the case. «копи» is the right
+    unit for one and the wrong one for the other.
+    """
     words = query.split()
     if len(words) < MIN_QUERY_WORDS:
         return False, f"слишком короткий вопрос ({len(words)} сл.)", []
-    shared = sorted(content_tokens(query) & content_tokens(document_text))
+    document_stems = content_tokens(document_text)
+    surface_by_stem: dict[str, str] = {}
+    for token in tokens_of(query):
+        folded = token.casefold()
+        if len(folded) > 2:
+            surface_by_stem.setdefault(stem(folded), folded)
+    shared_stems = {value for value in surface_by_stem if value in document_stems} - _STOPWORDS
+    shared = sorted(surface_by_stem[value] for value in shared_stems)
     if len(shared) > MAX_SHARED_TOKENS:
         return False, "вопрос пересказывает заметку словами из неё", shared
     return True, "", shared

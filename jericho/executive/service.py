@@ -79,6 +79,9 @@ GATHER_TOOLS = frozenset(
 _MAX_GOAL_CHARS = 4000
 _MAX_RESULT_CHARS = 8000
 _MAX_TASKS_PER_TICK = 3
+# Written into a step's `error` when the tick budget cut it short. Doubles as the
+# attempt counter the schema has no column for: seeing it again means twice.
+_INTERRUPTED_MARKER = "interrupted by tick budget"
 _PROPOSE_INBOX_THRESHOLD = 10
 _NON_TERMINAL_STATUSES = ("proposed", "ready", "running", "paused", "blocked")
 
@@ -416,10 +419,34 @@ class ExecutiveService:
             # `_finalize` needs every task terminal, so the mission was wedged with
             # no lease, heartbeat or reaper to notice. Hand it back to PENDING and
             # let the cancellation continue.
+            # Two strikes. Returning it to PENDING unconditionally means a step
+            # that systematically outlives the 900-second tick budget — a slow
+            # local model plus a tool loop — is restarted on every tick forever,
+            # burning the whole budget and starving the rest of the mission, with
+            # nothing in the row to show it ever happened. There is no attempts
+            # column, so the marker IS the record: the second interruption in a
+            # row fails the step, which the skip cascade then propagates and
+            # `_finalize` can act on.
+            previous_error = str(task.get("error") or "")
+            if previous_error.startswith(_INTERRUPTED_MARKER):
+                LOGGER.warning("Mission task interrupted twice, failing it: %s", task_id)
+                with suppress(Exception):
+                    self.storage.update_mission_task_fields(
+                        task_id,
+                        user_id,
+                        status=TaskStatus.FAILED.value,
+                        error=f"{_INTERRUPTED_MARKER}: does not fit the tick budget",
+                        completed_at=utc_now(),
+                    )
+                raise
             LOGGER.warning("Mission task interrupted, returning it to pending: %s", task_id)
             with suppress(Exception):
                 self.storage.update_mission_task_fields(
-                    task_id, user_id, status=TaskStatus.PENDING.value, started_at=""
+                    task_id,
+                    user_id,
+                    status=TaskStatus.PENDING.value,
+                    started_at="",
+                    error=_INTERRUPTED_MARKER,
                 )
             raise
 

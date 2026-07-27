@@ -212,13 +212,27 @@ class ScanState:
     swept_below: int | None = None
 
 
-def _merge_concurrent(raw_before: str | None, state: ScanState) -> ScanState:
+def _merge_concurrent(
+    raw_before: str | None, state: ScanState, *, restart_backfill: bool = False
+) -> ScanState:
     """Fold this run's progress into whatever is stored NOW, conservatively.
 
     The state is a read-modify-write of one blob spanning the whole run, and the worker
     tick and the manual admin scan can overlap. Rather than a lease, resolve it so the
     loser can only cost extra work, never coverage: take the further cursor (both runs
     genuinely swept it), and declare history finished only if BOTH runs agree.
+
+    ``raw_before`` must be re-read immediately before saving, NOT the snapshot the
+    run started from. Merging against your own past turns «both agree» into «I
+    agree with myself as I was»: once a single tick ended with
+    ``backfill_done=False`` — which any corpus larger than one tick's budget does
+    — no later run could ever record history as finished, because the old value
+    it was comparing against always said False.
+
+    ``restart_backfill`` says «start history again from the top», which cannot be
+    expressed as ``backfill=None``: the merge drops falsy cursors and would hand
+    back the stored deep one, leaving the scan asking for rows below the bottom
+    of the corpus and calling that finished.
     """
     if raw_before is None:
         return state
@@ -226,6 +240,14 @@ def _merge_concurrent(raw_before: str | None, state: ScanState) -> ScanState:
         stored = _decode_scan_state(raw_before)
     except (ValueError, TypeError, json.JSONDecodeError):
         return state
+    if restart_backfill:
+        return replace(
+            state,
+            watermark=max(filter(None, (state.watermark, stored.watermark)), default=None),
+            backfill=state.backfill,
+            backfill_done=False,
+            swept_below=None,
+        )
     return replace(
         state,
         watermark=max(filter(None, (state.watermark, stored.watermark)), default=None),
@@ -442,7 +464,6 @@ def detect_near_duplicates(
     # silently trimmed there, and a short page must never be read as end-of-history.
     batch = max(1, min(int(settings.dedup_scan_batch), _MAX_PAGE_ROWS))
 
-    raw_state = storage.kv_get(f"{_SCAN_STATE_PREFIX}{user_id}")
     state = load_scan_state(storage, user_id)
     # A LOWER threshold makes previously rejected pairs eligible while no vector moved,
     # so the walk has to start over. Raising it needs no rescan.
@@ -546,6 +567,7 @@ def detect_near_duplicates(
             continue
 
     corpus_size = storage.count_user_vectors(user_id, model)
+    reopened_backfill = False
     if state.backfill_done:
         # A wall-clock step backwards (or any future path that writes a row with an
         # older stamp) can land a row BELOW the watermark, where the strict `after`
@@ -560,6 +582,7 @@ def detect_near_duplicates(
                 below_watermark - state.swept_below,
             )
             state = replace(state, backfill=None, backfill_done=False, swept_below=None)
+            reopened_backfill = True
         else:
             state = replace(state, swept_below=below_watermark)
     pending = 0 if state.backfill_done else storage.count_user_vectors(user_id, model, before=state.backfill)
@@ -573,10 +596,17 @@ def detect_near_duplicates(
         )
     if threshold is None:
         # A one-off admin threshold experiment must not move the persistent cursor.
+        # Re-read immediately before writing: merging against the snapshot this
+        # run STARTED from compares the run with its own past, and «both agree»
+        # then means «I agree with myself as I was».
         save_scan_state(
             storage,
             user_id,
-            _merge_concurrent(raw_state, replace(state, model=model, threshold=effective_threshold)),
+            _merge_concurrent(
+                storage.kv_get(f"{_SCAN_STATE_PREFIX}{user_id}"),
+                replace(state, model=model, threshold=effective_threshold),
+                restart_backfill=reopened_backfill,
+            ),
         )
     return {
         "detected": stored,

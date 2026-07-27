@@ -105,16 +105,16 @@ class FetchResult:
 
 
 def _is_forbidden_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return any(
-        (
-            address.is_private,
-            address.is_loopback,
-            address.is_link_local,
-            address.is_multicast,
-            address.is_reserved,
-            address.is_unspecified,
-        )
-    )
+    """Allow-list by reachability, not a list of the private ranges we remembered.
+
+    The check used to enumerate flags — private, loopback, link-local, multicast,
+    reserved, unspecified — and every range outside that list was «public». The
+    shared address space `100.64.0.0/10` (RFC 6598) is none of those in Python:
+    `is_private` is False and `is_global` is False. That range carries CGNAT
+    networks, Tailscale addresses and one cloud's metadata service, so «fetch
+    this URL» could reach the owner's own tailnet.
+    """
+    return not address.is_global or address.is_multicast or address.is_reserved
 
 
 def _resolve_addresses(hostname: str, port: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
