@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from jericho.api.deps import _parse_json_bool, _request_json, _require
+from jericho.api.deps import _json_load, _parse_json_bool, _request_json, _require
 from jericho.storage import normalize_conversation_mode
 
 router = APIRouter(prefix="/api/conversations", tags=["chat"])
@@ -27,6 +27,53 @@ async def reset_channel_conversation(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="channel_id is required")
     cleared = request.app.state.storage.clear_channel_conversation(actor.user_id, channel, channel_id)
     return {"status": "reset", "cleared": cleared}
+
+
+@router.get("/channel/why", tags=["chat"])
+async def channel_answer_diagnostics(
+    request: Request,
+    channel: str | None = None,
+    channel_id: str | None = None,
+) -> dict[str, Any]:
+    """Why the last answer in this chat came out the way it did.
+
+    Answers the question the owner actually asks — "I definitely saved that note,
+    why does it say there is nothing?" — with the query the agent really ran and the
+    candidates it discarded, each with its reason. Those reasons
+    (`identifier_mismatch`, `insufficient_evidence`, `deprecated_weak`) are computed
+    on every query and were kept only for an admin explain call, so diagnosing it
+    meant opening the admin panel on the host and retyping an approximation of a
+    query the agent had rewritten — a different run, and often a different answer.
+    """
+    actor = _require(request, "conversations.read")
+    storage = request.app.state.storage
+    resolved_channel = str(channel or ("telegram" if actor.source == "telegram-bridge" else "api"))
+    resolved_id = str(channel_id or getattr(request.state, "bridge_chat_id", ""))
+    if not resolved_id:
+        raise HTTPException(status_code=400, detail="channel_id is required")
+    conversation_id = storage.get_channel_conversation(actor.user_id, resolved_channel, resolved_id)
+    if not conversation_id:
+        raise HTTPException(status_code=404, detail="No conversation in this channel yet")
+    messages = storage.get_conversation_messages(conversation_id, user_id=actor.user_id, limit=30)
+    latest = next(
+        (item for item in reversed(messages) if str(item.get("role")) == "assistant"),
+        None,
+    )
+    if latest is None:
+        raise HTTPException(status_code=404, detail="No answer to explain yet")
+    metadata = _json_load(latest.get("metadata_json"), {})
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return {
+        "conversation_id": conversation_id,
+        "created_at": latest.get("created_at"),
+        "search_query": metadata.get("search_query", ""),
+        "answer_mode": metadata.get("answer_mode", ""),
+        "knowledge_hits": metadata.get("knowledge_hits", 0),
+        "answer_grounded": metadata.get("answer_grounded"),
+        "retrieval_confidence": metadata.get("retrieval_confidence"),
+        "citations": metadata.get("knowledge_citations", {}),
+        "trace": metadata.get("retrieval_trace", []),
+    }
 
 
 @router.post("/channel/mode", tags=["chat"])

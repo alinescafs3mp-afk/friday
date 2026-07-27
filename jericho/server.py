@@ -1227,13 +1227,24 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         request: Request,
         q: str = Query(min_length=1, max_length=2000),
         limit: int = Query(20, ge=1, le=100),
+        explain: bool = Query(False),
     ) -> dict[str, Any]:
+        """Search one's own knowledge. `explain=true` adds the ranking trace.
+
+        The trace names every candidate that was considered and, for the ones that
+        did not make it, WHY — `identifier_mismatch`, `insufficient_evidence`,
+        `deprecated_weak`. Those reasons were computed on every query and discarded
+        unless an admin asked for them, so "the note is definitely there and search
+        says it is not" had no answer short of the admin panel. It is the caller's
+        own tenant data, so `search.use` is the whole gate.
+        """
         actor = _require(request, "search.use")
         return await request.app.state.hybrid_searcher.search(
             actor.user_id,
             q,
             limit=limit,
             kg=request.app.state.kg,
+            explain=explain,
         )
 
     application.include_router(missions_router)

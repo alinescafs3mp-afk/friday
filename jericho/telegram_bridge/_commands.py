@@ -102,6 +102,7 @@ class CommandsMixin(BridgeShared):
                 "/browse тег или название — записи по тегу, проекту или сущности\n"
                 "/search запрос — найти записи по смыслу, без ответа модели\n"
                 "/status — состояние базы\n"
+                "/why — почему был такой ответ\n"
                 "/new — начать новый диалог\n"
                 "/note текст — явно сохранить заметку\n\n"
                 "Ответы можно оценивать кнопками, а результаты /work, /research и миссий — "
@@ -204,6 +205,38 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/missions":
             await self._send_missions(telegram, backend, chat_id, external_user_id, user)
+            return
+        if command == "/why":
+            data = await self._backend_json(
+                backend,
+                "GET",
+                "/api/conversations/channel/why",
+                None,
+                external_user_id,
+                str(chat_id),
+            )
+            trace = data.get("trace") or []
+            dropped = [item for item in trace if item.get("reason")]
+            lines = [
+                f"Запрос, который реально выполнялся: «{data.get('search_query') or '—'}»",
+                f"Режим: {data.get('answer_mode') or '—'}; найдено записей: {data.get('knowledge_hits', 0)}",
+            ]
+            citations = data.get("citations") or {}
+            if citations:
+                lines.append("Источники: " + ", ".join(sorted(citations)))
+            if dropped:
+                lines.append("")
+                lines.append("Отброшено при ранжировании:")
+                for item in dropped[:8]:
+                    title = str(item.get("title") or item.get("id") or "")[:60]
+                    lines.append(f"• {title} — {item.get('reason')}")
+            elif trace:
+                lines.append("")
+                lines.append("Ничего не отбрасывалось: всё, что нашлось, попало в ответ.")
+            else:
+                lines.append("")
+                lines.append("Трассировки нет — последний ответ шёл без поиска по базе.")
+            await self._send_message(telegram, chat_id, "\n".join(lines))
             return
         if command == "/status":
             data = await self._backend_json(

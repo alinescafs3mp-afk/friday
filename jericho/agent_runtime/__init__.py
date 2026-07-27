@@ -254,6 +254,8 @@ class AgentContext:
     pending_inbox: int = 0
     pending_resolutions: int = 0
     search_query: str = ""
+    # Top rows of the retrieval trace: what was considered and why it was dropped.
+    retrieval_trace: list[dict[str, Any]] = field(default_factory=list)
     answer_mode: str = "general_conversation"
     retrieval_confidence: float = 0.0
     graph_context: dict[str, Any] = field(default_factory=dict)
@@ -415,6 +417,7 @@ class AgentRuntime:
                 "answer_mode": context.answer_mode,
                 "retrieval_confidence": context.retrieval_confidence,
                 "search_query": context.search_query,
+                "retrieval_trace": context.retrieval_trace,
                 "ingestion_action": context.ingestion.get("action", "not_assessed"),
                 "interaction_mode": context.interaction_mode,
                 "knowledge_object_ids": attributed_knowledge_ids,
@@ -503,9 +506,25 @@ class AgentRuntime:
                     search_query,
                     limit=retrieval_limit,
                     kg=kg,
+                    # The reasons a candidate was DROPPED are computed on every
+                    # query and thrown away unless asked for. Keeping a compact
+                    # copy is what makes "я точно сохранял эту заметку" answerable
+                    # without re-running an approximation of the query by hand in
+                    # the admin panel — which is a different run.
+                    explain=True,
                 )
                 context.knowledge_hits = retrieval_result.get("results", [])
                 context.entity_hits = retrieval_result.get("entity_matches", [])
+                context.retrieval_trace = [
+                    {
+                        "id": str(item.get("id") or ""),
+                        "title": str(item.get("title") or "")[:120],
+                        "score": item.get("score"),
+                        "status": item.get("status"),
+                        "reason": item.get("reason"),
+                    }
+                    for item in (retrieval_result.get("trace") or [])[:10]
+                ]
             except Exception:
                 LOGGER.exception("Hybrid retrieval failed; using SQLite search")
                 context.knowledge_hits = self.storage.search_knowledge(

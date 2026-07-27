@@ -221,6 +221,7 @@ EXPECTED_COMMANDS = {
     "/start",
     "/status",
     "/tags",
+    "/why",
     "/work",
 }
 EXPECTED_BRIDGE_COUNT = 36
