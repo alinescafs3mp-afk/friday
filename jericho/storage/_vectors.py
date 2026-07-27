@@ -27,16 +27,35 @@ class VectorsMixin(StorageShared):
         never resurrect deleted knowledge into dense recall. ``limit`` caps the scan
         to the newest N objects (a latency guard on a large corpus).
         """
-        query = (
-            "SELECT e.knowledge_object_id AS id, e.vector AS vector "
-            "FROM knowledge_embeddings e "
-            "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
-            "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL"
-        )
         params: list[Any] = [user_id, model, int(dim)]
         if limit is not None and limit > 0:
-            query += " ORDER BY k.created_at DESC LIMIT ?"
-            params.append(int(limit))
+            # The window is chosen FIRST, by id, and only then are vectors fetched.
+            #
+            # Joining and sorting by ``k.created_at DESC LIMIT ?`` put the sort key on
+            # the far side of the join, so the LIMIT could not short-circuit: every
+            # vector BLOB belonging to the tenant was read and pushed through a temp
+            # b-tree before N of them survived. Measured at 10k 1024-float vectors:
+            # 469 ms, and the whole point of the cap was to avoid exactly that.
+            # `idx_knowledge_user_created` makes the inner select an index walk that
+            # stops after N rows.
+            query = (
+                "SELECT e.knowledge_object_id AS id, e.vector AS vector "
+                "FROM knowledge_embeddings e "
+                "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? "
+                "AND e.knowledge_object_id IN ("
+                "  SELECT id FROM knowledge_objects"
+                "  WHERE user_id = ? AND deleted_at IS NULL"
+                "  ORDER BY created_at DESC LIMIT ?"
+                ")"
+            )
+            params.extend([user_id, int(limit)])
+        else:
+            query = (
+                "SELECT e.knowledge_object_id AS id, e.vector AS vector "
+                "FROM knowledge_embeddings e "
+                "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
+                "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL"
+            )
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 

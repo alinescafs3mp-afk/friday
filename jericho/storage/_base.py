@@ -603,6 +603,18 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_user_lifecycle
     ON knowledge_objects(user_id, lifecycle_stage, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_quality
     ON knowledge_objects(user_id, quality_score DESC, promotion_score DESC, importance DESC);
+-- The recall pool's own order. `idx_knowledge_user_quality` starts with user_id, so
+-- SQLite used it to FIND the rows and then sorted every one of them in a temp
+-- b-tree — importance is its fourth column, which orders nothing here. Measured at
+-- 10k objects: 90.9 ms for a 400-row page. Partial on `deleted_at IS NULL` because
+-- every caller filters on it, which also makes it serve `count_knowledge_objects`.
+CREATE INDEX IF NOT EXISTS idx_knowledge_user_importance
+    ON knowledge_objects(user_id, importance DESC, updated_at DESC) WHERE deleted_at IS NULL;
+-- Dense recall caps its scan to the newest N objects, and the sort key lives on the
+-- joined table, so the LIMIT could not short-circuit: every vector BLOB of the tenant
+-- was read into a temp b-tree first. Measured at 10k vectors: 469 ms.
+CREATE INDEX IF NOT EXISTS idx_knowledge_user_created
+    ON knowledge_objects(user_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_raw ON knowledge_objects(raw_object_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_version
     ON knowledge_object_versions(knowledge_object_id, version);

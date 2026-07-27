@@ -257,3 +257,122 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "upsert_knowledge_vectors": "(self, items: 'Sequence[dict[str, Any]]', chunks: 'Mapping[str, Sequence[dict[str, Any]]] | None' = None) -> 'dict[str, int]'",
     "verify_backup": "(self, filename: 'str') -> 'dict[str, Any]'",
 }
+
+
+def _plan(storage, sql: str, params: tuple) -> list[str]:
+    return [str(row["detail"]) for row in storage.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()]
+
+
+def test_the_hot_read_paths_are_index_ordered(storage):
+    """A sort the index cannot serve is a temp b-tree over the whole tenant.
+
+    Both of these are per-search. Measured on a synthetic 10k-object corpus before
+    the indexes existed: the recall pool page took **90.9 ms** and the dense-vector
+    window **469 ms**, each building a temp b-tree first. After: 1.6 ms and 125 ms,
+    and `count_knowledge_objects` — which the capped-pool signal now calls — went
+    66.2 ms to 0.2 ms because the partial index covers it.
+
+    `idx_knowledge_user_quality` was already there and starts with `user_id`, which
+    is exactly why this hid: SQLite used it to FIND the rows and then sorted every
+    one of them, because `importance` is its fourth column and orders nothing here.
+    """
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("owner")
+    for index in range(200):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="owner",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"заметка {index}",
+            content_type="text",
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="owner",
+                raw_object_id=raw.id,
+                content=raw.raw_content,
+                title=f"Заметка {index}",
+                summary=raw.raw_content,
+                importance=index / 200,
+            )
+        )
+    # Deliberately no ANALYZE: with statistics for a 200-row table SQLite decides a
+    # temp sort is cheaper than a second index, which is true at 200 rows and false
+    # at the scale this test exists for. The plan under default assumptions is the
+    # one that matters.
+
+    pool = _plan(
+        storage,
+        "SELECT * FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL "
+        "ORDER BY importance DESC, updated_at DESC LIMIT ? OFFSET ?",
+        ("owner", 400, 0),
+    )
+    assert not [line for line in pool if "TEMP B-TREE" in line], pool
+    assert any("idx_knowledge_user_importance" in line for line in pool), pool
+
+    vectors = _plan(
+        storage,
+        "SELECT e.knowledge_object_id AS id, e.vector AS vector FROM knowledge_embeddings e "
+        "WHERE e.user_id=? AND e.model=? AND e.dim=? AND e.knowledge_object_id IN ("
+        "  SELECT id FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL"
+        "  ORDER BY created_at DESC LIMIT ?)",
+        ("owner", "m", 4, "owner", 100),
+    )
+    assert not [line for line in vectors if "TEMP B-TREE" in line], vectors
+    assert any("idx_knowledge_user_created" in line for line in vectors), vectors
+
+
+def test_the_capped_vector_window_still_returns_the_newest_object(storage):
+    """The rewrite must keep 'newest N', not just 'N'.
+
+    Choosing the window in a subquery is what lets the LIMIT short-circuit; it also
+    moves the ORDER BY off the outer result, so the property that actually matters
+    is pinned here rather than implied by a plan.
+    """
+    from jericho.retrieval import pack_vector
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("owner")
+    ids = []
+    for index in range(5):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="owner",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"вектор {index}",
+            content_type="text",
+        )
+        storage.store_raw_object(raw)
+        ko = KnowledgeObject(
+            id=new_id("ko"),
+            user_id="owner",
+            raw_object_id=raw.id,
+            content=raw.raw_content,
+            title=f"K{index}",
+            summary=raw.raw_content,
+            created_at=f"2026-0{index + 1}-01T00:00:00Z",
+        )
+        storage.store_knowledge_object(ko)
+        storage.upsert_knowledge_embeddings(
+            [
+                {
+                    "knowledge_object_id": ko.id,
+                    "user_id": "owner",
+                    "model": "m",
+                    "dim": 4,
+                    "source_version": 1,
+                    "content_hash": ko.id,
+                    "vector": pack_vector([float(index), 0.0, 0.0, 0.0]),
+                }
+            ]
+        )
+        ids.append(ko.id)
+
+    assert [row[0] for row in storage.get_user_embeddings("owner", "m", 4, limit=1)] == [ids[-1]]
+    assert len(storage.get_user_embeddings("owner", "m", 4, limit=3)) == 3
+    assert len(storage.get_user_embeddings("owner", "m", 4)) == 5
