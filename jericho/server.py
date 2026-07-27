@@ -714,6 +714,12 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             async def _count_auth_failure() -> None:
                 await limiter.allow(failure_key, failure_limit)
 
+            # Only the credential phase is guarded here. ``call_next`` used to sit
+            # inside this block, which meant any ValueError escaping a route handler
+            # came back as 401 "malformed credentials" AND spent the per-IP
+            # auth-failure budget — a handler bug locked the owner out of their own
+            # instance with 429. Route-raised exceptions belong to FastAPI's own
+            # handlers (registered below) and to ServerErrorMiddleware.
             try:
                 if await limiter.exhausted(failure_key, failure_limit):
                     raise HTTPException(
@@ -723,9 +729,6 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                     )
                 actor = await _authenticate(request)
                 await _enforce_rate_limit(request, actor)
-                request.state.actor = actor
-                with bind_actor(actor):
-                    response = await call_next(request)
             except AuthenticationError as exc:
                 await _count_auth_failure()
                 _audit_auth_failure(request, "invalid_credentials", status=401)
@@ -751,6 +754,13 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 await _count_auth_failure()
                 _audit_auth_failure(request, "malformed_credentials", status=401)
                 response = JSONResponse({"detail": str(exc)}, status_code=401)
+            else:
+                # `else`, not a trailing block: the handlers above must not see
+                # anything ``call_next`` raises, and the credentials are known good
+                # exactly here.
+                request.state.actor = actor
+                with bind_actor(actor):
+                    response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"

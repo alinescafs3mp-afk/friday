@@ -47,6 +47,59 @@ def test_valid_auth_does_not_consume_failure_budget(settings):
         assert client.get("/api/me", headers={"Authorization": "Bearer " + "y" * 48}).status_code == 401
 
 
+def test_a_route_level_valueerror_is_not_charged_to_the_auth_budget(settings):
+    """A bug in a handler must not read as a credential attack on the owner.
+
+    The middleware's ``except ValueError`` was outside ``call_next``, so *any*
+    ValueError escaping a route handler was answered 401 "malformed credentials"
+    and billed to the per-IP auth-failure budget. Two consequences, both bad: the
+    caller is told their credentials are wrong when the real fault is a 500, and
+    a handful of such requests spend the budget and lock the legitimate owner out
+    of their own instance with 429 — self-inflicted denial of service from a bug
+    that has nothing to do with authentication.
+    """
+    limited = replace(settings, api_auth_failure_limit_per_minute=2)
+    app = create_app(limited)
+
+    async def boom():
+        raise ValueError("mode must be dialogue, knowledge_work, or research")
+
+    app.add_api_route("/api/_boom", boom, methods=["GET"], include_in_schema=False)
+
+    good = {"Authorization": f"Bearer {limited.api_token}"}
+    with TestClient(app, raise_server_exceptions=False) as client:
+        for _ in range(4):  # comfortably past the 2-failure budget
+            assert client.get("/api/_boom", headers=good).status_code == 500
+        # The budget is untouched, so the owner is still served.
+        assert client.get("/api/me", headers=good).status_code == 200
+        # …and a real credential failure still consumes it as before.
+        bad = {"Authorization": "Bearer " + "x" * 48}
+        assert client.get("/api/me", headers=bad).status_code == 401
+        assert client.get("/api/me", headers=bad).status_code == 401
+        assert client.get("/api/me", headers=bad).status_code == 429
+
+
+def test_malformed_credentials_still_cost_the_budget(settings):
+    """The narrowed catch must keep charging genuinely malformed credentials.
+
+    A bridge signature with a non-numeric timestamp raises ValueError inside
+    ``_authenticate`` — that one is an authentication failure and has to stay one,
+    or the brute-force budget can be bypassed by sending garbage instead of a
+    wrong-but-well-formed token.
+    """
+    limited = replace(settings, api_auth_failure_limit_per_minute=2)
+    with TestClient(create_app(limited)) as client:
+        garbage = {
+            "X-Jericho-Timestamp": "not-a-number",
+            "X-Jericho-User": "42",
+            "X-Jericho-Chat": "42",
+            "X-Jericho-Signature": "deadbeef",
+        }
+        assert client.get("/api/me", headers=garbage).status_code == 401
+        assert client.get("/api/me", headers=garbage).status_code == 401
+        assert client.get("/api/me", headers=garbage).status_code == 429
+
+
 @pytest.mark.asyncio
 async def test_disabled_owner_cannot_use_loopback_bypass(settings):
     app = create_app(replace(settings, api_require_token_on_loopback=False))
