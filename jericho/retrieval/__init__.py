@@ -245,6 +245,20 @@ def knowledge_search_text(item: dict[str, Any]) -> str:
 # and one request stays inside the measured ~2800 chars/s throughput.
 _POOL_TEXT_MAX_CHARS = 20_000
 _POOL_REQUEST_MAX_CHARS = 40_000
+# A raw cosine below this is noise, not evidence — the floor for the
+# `insufficient_evidence` gate. MEASURED against the production model
+# (qwen3-embedding-0.6b, dim 1024) at the operating point that matters, a short
+# query against a document body: 56 query x unrelated-document pairs scored
+# min 0.1032 / p50 0.2361 / p90 0.3255 / max 0.3878, while 8 query x own-document
+# pairs scored min 0.4188 / p50 0.5197 / max 0.6196.
+#
+# The previous constant, 0.16, sat *below the median of the noise*: it admitted
+# 48 of those 56 unrelated documents — 85.7% — as dense evidence. 0.35 clears
+# noise p90 while leaving 0.07 of headroom under the weakest genuine match, which
+# matters because this gate REMOVES results: erring low costs precision, erring
+# high costs recall, and only one of those is recoverable by reading further down
+# the list. Configurable because the number belongs to the model, not to Jericho.
+_DENSE_EVIDENCE_MIN_DEFAULT = 0.35
 _CHUNK_BOUNDARY_FLOOR = 0.5
 _SENTENCE_END_RE = re.compile(r"[.!?…][»\"')\]]?\s")
 
@@ -634,6 +648,7 @@ class HybridSearcher:
         record_usage: bool = True,
         ablate: Sequence[str] | None = None,
         pool_max: int = 400,
+        dense_evidence_min: float = _DENSE_EVIDENCE_MIN_DEFAULT,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
@@ -641,6 +656,10 @@ class HybridSearcher:
         # Ceiling on the fuzzy recall pool. Above it the lexical channel sees only
         # the most important/recent slice of the corpus, and the answer has to say so.
         self._pool_max = max(1, int(pool_max))
+        # Cosine below which a dense score is not evidence. Model-dependent, so it is
+        # configurable and its default is measured rather than chosen — see
+        # `JERICHO_RETRIEVAL_DENSE_EVIDENCE_MIN` in docs/ARCHITECTURE.md §7.
+        self._dense_evidence_min = float(dense_evidence_min)
         # Off only for the A/B harness, which must measure the same corpus twice.
         self._chunk_recall = bool(chunk_recall)
         # Off for advisory harnesses: they must not write the counter that
@@ -889,7 +908,7 @@ class HybridSearcher:
                 document_id not in fts_ranking
                 and lex < 0.075
                 and fld < 0.12
-                and emb < 0.16
+                and emb < self._dense_evidence_min
                 and grp < graph_evidence_threshold
             ):
                 return "insufficient_evidence"

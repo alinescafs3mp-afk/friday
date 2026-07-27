@@ -305,6 +305,9 @@ class JerichoSettings:
     # Ceiling on the lexical recall pool per search. Above it the fuzzy channel sees
     # only the most important/recent slice, and `strategy.lexical_pool_capped` says so.
     retrieval_pool_max: int
+    # Cosine below which a dense score is not treated as evidence. Model-dependent:
+    # the shipped default is measured against qwen3-embedding-0.6b.
+    retrieval_dense_evidence_min: float
 
     api_host: str
     api_port: int
@@ -588,6 +591,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ingestion_strict_review=_bool_env("JERICHO_INGESTION_STRICT_REVIEW", False),
         graph_max_depth=_int_env("JERICHO_GRAPH_MAX_DEPTH", 2, minimum=1),
         retrieval_pool_max=_int_env("JERICHO_RETRIEVAL_POOL_MAX", 400, minimum=10),
+        retrieval_dense_evidence_min=_float_env("JERICHO_RETRIEVAL_DENSE_EVIDENCE_MIN", 0.35, minimum=0.0),
         api_host=os.environ.get("JERICHO_API_HOST", "127.0.0.1"),
         api_port=_int_env("JERICHO_API_PORT", 8000, minimum=1),
         api_token=os.environ.get("JERICHO_API_TOKEN", ""),

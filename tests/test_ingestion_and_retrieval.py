@@ -217,3 +217,88 @@ async def test_a_capped_recall_pool_says_so(storage):
     assert tight["strategy"]["lexical_pool_capped"] is True
     assert tight["strategy"]["lexical_pool_scanned"] == 10
     assert tight["strategy"]["corpus_size"] == 40
+
+
+@pytest.mark.asyncio
+async def test_a_weak_dense_score_alone_is_not_evidence(storage):
+    """The `insufficient_evidence` floor is a property of the MODEL, not a constant.
+
+    Measured against the production model (qwen3-embedding-0.6b) at the operating
+    point that matters — a short query against a document body — 56 query ×
+    unrelated-document pairs scored min 0.1032 / p50 0.2361 / p90 0.3255 / max
+    0.3878, while 8 query × own-document pairs scored min 0.4188 / p50 0.5197.
+
+    The shipped constant was 0.16, *below the median of the noise*: it admitted 48
+    of those 56 unrelated documents — 85.7% — as dense evidence. The default is now
+    0.35, which clears noise p90 with headroom under the weakest genuine match, and
+    it is configurable because the next model will land somewhere else entirely.
+
+    `tools/retrieval_bench.py` against the live model reads 0.8333 both before and
+    after, category for category, so the tightening costs no recall on the gold set.
+    """
+    from jericho.retrieval import HybridSearcher
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    class _FixedCosine:
+        """Returns vectors whose cosine with the query is exactly `similarity`."""
+
+        remote_enabled = True
+
+        def __init__(self, settings, similarity: float) -> None:
+            self.settings = settings
+            self._similarity = similarity
+
+        async def embed(self, texts):
+            import math
+
+            # Keyed on the TEXT, not its position: the query is embedded in its own
+            # call, so an index-based fake gives the first document cosine 1.0.
+            angle = math.acos(max(-1.0, min(1.0, self._similarity)))
+            document = [math.cos(angle), math.sin(angle)]
+            return [[1.0, 0.0] if "отчётность" in text else document for text in texts]
+
+    storage.ensure_user("owner")
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id="owner",
+        source="test",
+        source_ref=new_id("src"),
+        raw_content="Совершенно посторонний документ о ремонте велосипеда",
+        content_type="text",
+    )
+    storage.store_raw_object(raw)
+    storage.store_knowledge_object(
+        KnowledgeObject(
+            id=new_id("ko"),
+            user_id="owner",
+            raw_object_id=raw.id,
+            content=raw.raw_content,
+            title="Велосипед",
+            summary=raw.raw_content,
+        )
+    )
+
+    # A query sharing no tokens with the document: lexical, field and graph are all
+    # at zero, so the dense term is the only thing that can carry it.
+    query = "квартальная отчётность"
+    from dataclasses import replace as _replace
+
+    settings_stub = _replace(storage.settings, embeddings_enabled=True)
+
+    lenient = HybridSearcher(storage, _FixedCosine(settings_stub, 0.25), dense_evidence_min=0.16)
+    strict = HybridSearcher(storage, _FixedCosine(settings_stub, 0.25), dense_evidence_min=0.35)
+
+    kept = await lenient.search("owner", query, limit=5, explain=True)
+    dropped = await strict.search("owner", query, limit=5, explain=True)
+
+    reasons = {item["reason"] for item in dropped.get("trace", [])}
+    assert kept["count"] == 1, "the premise: a 0.25 cosine used to be enough on its own"
+    assert dropped["count"] == 0
+    assert "insufficient_evidence" in reasons
+
+
+def test_the_dense_evidence_floor_is_configurable(settings):
+    """The number belongs to the embedding model, so it cannot be baked in."""
+    from jericho.retrieval import _DENSE_EVIDENCE_MIN_DEFAULT
+
+    assert settings.retrieval_dense_evidence_min == _DENSE_EVIDENCE_MIN_DEFAULT == 0.35

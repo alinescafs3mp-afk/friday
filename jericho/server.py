@@ -603,6 +603,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 embeddings,
                 graph_max_depth=settings.graph_max_depth,
                 pool_max=settings.retrieval_pool_max,
+                dense_evidence_min=settings.retrieval_dense_evidence_min,
             )
             graph = KnowledgeGraph(storage)
             ingestion = IngestionPipeline(settings, storage, graph, llm)
