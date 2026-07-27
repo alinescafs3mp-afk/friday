@@ -181,9 +181,22 @@ class CoreMixin(StorageShared):
             is not None
         )
         previous_schema_version: str | None = None
+        # Separate from the schema marker ON PURPOSE. The core migration commits
+        # first, then the FTS phase runs and commits second — and `executescript`
+        # makes the FTS DDL durable on its own. A process that died in that window
+        # left a database whose schema marker was current and whose FTS tables
+        # existed but were EMPTY, and the next open saw "marker current, tables
+        # present" and skipped the rebuild forever: every pre-crash document became
+        # unfindable by search, silently and permanently.
+        #
+        # This marker is written only after the FTS phase itself commits, so the
+        # crash window reopens as "index not built by this version" and heals.
+        fts_build_marker: str | None = None
         if schema_meta_preexisting:
             row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
             previous_schema_version = str(row[0]).strip() if row else None
+            marker_row = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
+            fts_build_marker = str(marker_row[0]).strip() if marker_row else None
             if previous_schema_version:
                 try:
                     parsed_version = int(previous_schema_version)
@@ -243,10 +256,17 @@ class CoreMixin(StorageShared):
         # the authoritative core schema/data transaction has committed, so an
         # unavailable FTS5 module can never roll back or partially expose personal
         # knowledge migration.
+        # True whenever this build has not recorded a finished FTS build. Covers
+        # the crash window above and every database written before the marker
+        # existed. `integrity-check` cannot stand in for it: measured on SQLite,
+        # an external-content index that is entirely EMPTY passes integrity-check
+        # and matches nothing — the check verifies what the index claims against
+        # itself, not against the content table it shadows.
+        fts_unverified = fts_build_marker != str(SCHEMA_VERSION)
         try:
             conn.executescript(FTS_SCHEMA)
             knowledge_count = conn.execute("SELECT COUNT(*) FROM knowledge_objects").fetchone()[0]
-            if knowledge_count and not fts_preexisting:
+            if knowledge_count and (not fts_preexisting or fts_unverified):
                 # An external-content FTS table created after rows already exist
                 # starts with an empty index. Rebuild before update triggers can
                 # attempt to delete missing index entries.
@@ -261,8 +281,13 @@ class CoreMixin(StorageShared):
             # created over existing rows starts EMPTY, and the update triggers would
             # then try to delete index entries that were never written.
             raw_count = conn.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0]
-            if raw_count and not raw_fts_preexisting:
+            if raw_count and (not raw_fts_preexisting or fts_unverified):
                 conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('rebuild')")
+            # Last, and inside the same commit as the rebuilds it certifies.
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('fts_build', ?, ?)",
+                (str(SCHEMA_VERSION), utc_now()),
+            )
         except sqlite3.OperationalError as exc:
             if self._is_sqlite_busy(exc):
                 raise
