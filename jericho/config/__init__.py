@@ -228,6 +228,10 @@ class JerichoSettings:
     files_dir: Path
     memory_vault_dir: Path
     backups_dir: Path
+    # How many verified backups to keep locally. The schedule adds a full copy of the
+    # database every 24 hours and nothing used to remove one, so the disk filled and
+    # took the live instance down with it. 0 = keep everything (pre-0.86 behaviour).
+    backup_keep: int
     exports_dir: Path
     # Offsite mirror for verified backups (external disk / synced folder).
     # Empty = mirroring off. A same-disk backup is not a real backup.
@@ -580,6 +584,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         whisper_max_audio_sec=_float_env("JERICHO_WHISPER_MAX_AUDIO_SEC", 900.0, minimum=0.0),
         whisper_download_root=os.environ.get("JERICHO_WHISPER_DOWNLOAD_ROOT", ""),
         purge_retention_days=_int_env("JERICHO_PURGE_RETENTION_DAYS", 30, minimum=0),
+        backup_keep=_int_env("JERICHO_BACKUP_KEEP", 14, minimum=0),
         ingestion_strict_review=_bool_env("JERICHO_INGESTION_STRICT_REVIEW", False),
         graph_max_depth=_int_env("JERICHO_GRAPH_MAX_DEPTH", 2, minimum=1),
         retrieval_pool_max=_int_env("JERICHO_RETRIEVAL_POOL_MAX", 400, minimum=10),

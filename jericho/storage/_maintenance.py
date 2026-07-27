@@ -8,6 +8,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 from __future__ import annotations
 
 from jericho.storage._base import (
+    LOGGER,
     SCHEMA_VERSION,
     UTC,
     Any,
@@ -241,6 +242,46 @@ class MaintenanceMixin(StorageShared):
         manifest_path = destination.with_suffix(".manifest.json")
         _write_json_atomic(manifest_path, manifest)
         return {**manifest, "path": str(destination), "manifest_path": str(manifest_path)}
+
+    def prune_backups(self, *, keep: int) -> dict[str, Any]:
+        """Delete all but the ``keep`` newest verified backups. ``keep <= 0`` is off.
+
+        A daily backup that is never removed is a disk that fills: the schedule adds
+        a full copy of the database every 24 hours and nothing in the codebase ever
+        took one away. Retention was the missing half of the backup story, not a
+        nicety — the failure mode is the machine running out of space, which takes
+        the live instance down along with the backups.
+
+        Only complete ``(database, manifest)`` pairs are eligible. A database without
+        a manifest is left alone: that is the shape of an interrupted mirror write,
+        and deleting it would destroy evidence rather than reclaim space.
+        """
+        keep = int(keep)
+        if keep <= 0:
+            return {"enabled": False, "removed": 0, "kept": 0}
+        # `list_backups` is already newest-first (the stem carries a sortable UTC
+        # timestamp) and already refuses symlinks and paths outside backups_dir.
+        backups = self.list_backups()
+        removed: list[str] = []
+        for entry in backups[keep:]:
+            database = Path(str(entry.get("path") or ""))
+            manifest = Path(str(entry.get("manifest_path") or ""))
+            try:
+                # -wal/-shm can be left beside a copy taken from a live database.
+                for path in (
+                    database,
+                    database.with_name(database.name + "-wal"),
+                    database.with_name(database.name + "-shm"),
+                    manifest,
+                ):
+                    path.unlink(missing_ok=True)
+            except OSError as exc:  # a locked or read-only file must not fail the tick
+                LOGGER.warning("Could not prune backup %s: %s", database.name, exc)
+                continue
+            removed.append(database.name)
+        if removed:
+            LOGGER.info("Pruned %d backup(s), keeping the newest %d", len(removed), keep)
+        return {"enabled": True, "removed": len(removed), "kept": min(len(backups), keep)}
 
     def list_backups(self) -> list[dict[str, Any]]:
         self.settings.backups_dir.mkdir(parents=True, exist_ok=True)

@@ -691,6 +691,12 @@ class WorkersManager:
         mirror = await run_blocking(mirror_backups, self.settings)
         if mirror.get("enabled"):
             self.storage.kv_set("workers:last_backup_mirror", json.dumps(mirror, ensure_ascii=False))
+        # Prune AFTER mirroring, so an offsite copy of the oldest generation is made
+        # before the local one goes. Retention is the missing half of a daily backup:
+        # without it the disk fills, and it takes the live instance with it.
+        pruned = await run_blocking(self.storage.prune_backups, keep=self.settings.backup_keep)
+        if pruned.get("removed"):
+            self.storage.record_event("backup.pruned", pruned)
 
     async def _embeddings_index_all(self) -> None:
         """Embed a bounded batch of Knowledge Objects lacking a current vector.

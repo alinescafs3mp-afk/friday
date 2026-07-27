@@ -69,12 +69,24 @@ class RuntimeMixin(StorageShared):
             for notif_id in failed_ids:
                 # A failed send stays pending for retry until the attempt cap;
                 # then it becomes a terminal 'failed' row rather than looping.
+                #
+                # Reaching that cap also releases the dedup key. There is no delay
+                # column, and the bridge drains every 15 s, so five attempts are
+                # spent in about 75 seconds — a two-minute network outage exhausts
+                # every queued reminder. The key kept the row in `uq_outbound_dedup`
+                # (partial: `WHERE dedup_key <> ''`), so `enqueue_notification` then
+                # refused to queue that reminder ever again: an event silently lost
+                # its only notification because the WAN blinked. Clearing it lets the
+                # organ re-enqueue on its next scan. Only on the terminal transition
+                # — a `sent` row keeps its key, or the same message would be sent
+                # twice.
                 conn.execute(
                     """UPDATE outbound_notifications
                        SET attempts=attempts+1,
-                           status=CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END
+                           status=CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
+                           dedup_key=CASE WHEN attempts + 1 >= ? THEN '' ELSE dedup_key END
                        WHERE id=?""",
-                    (max(1, int(max_attempts)), str(notif_id)),
+                    (max(1, int(max_attempts)), max(1, int(max_attempts)), str(notif_id)),
                 )
 
     def idempotency_get(

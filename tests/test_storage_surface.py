@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 187
+EXPECTED_MEMBER_COUNT = 188
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -215,6 +215,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "optimize": "(self) -> 'None'",
     "prune_bridge_nonces": "(self, *, max_age_sec: 'int') -> 'int'",
     "prune_eval_cases": "(self, user_id: 'str', *, cap: 'int' = 200) -> 'dict[str, int]'",
+    "prune_backups": "(self, *, keep: 'int') -> 'dict[str, Any]'",
     "purge_knowledge_object": "(self, ko_id: 'str', user_id: 'str | None' = None, *, require_soft_deleted: 'bool' = True) -> 'dict[str, Any]'",
     "record_knowledge_usage": "(self, user_id: 'str', knowledge_object_ids: 'list[str]', *, retrieved: 'bool' = False, used_in_answer: 'bool' = False) -> 'int'",
     "resolve_candidate": "(self, candidate_id: 'str', status: 'ResolutionStatus', resolved_by: 'str | None' = None, *, user_id: 'str | None' = None) -> 'bool'",

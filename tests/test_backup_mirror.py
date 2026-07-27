@@ -85,3 +85,50 @@ def test_missing_key_file_is_a_counted_failure(settings, tmp_path):
 
 def test_mirror_disabled_reports_disabled(settings):
     assert mirror_backups(settings) == {"enabled": False}
+
+
+def test_backups_are_pruned_to_the_retention_window(storage, settings):
+    """A daily backup that is never removed is a disk that fills.
+
+    The schedule adds a full copy of the database every 24 hours and nothing in
+    the codebase ever took one away — `create_backup` always mints a new
+    timestamped stem, and the only unlink calls in that module are error cleanup
+    for the copy being made. Retention was the missing half of the backup story,
+    and the failure mode takes the live instance down along with the backups.
+    """
+    import json as _json
+
+    for index in range(6):
+        result = storage.create_backup(label=f"t{index}")
+        # Same-second stems would collide; make the ordering unambiguous.
+        stem = Path(result["path"]).with_suffix("")
+        renamed = stem.with_name(f"jericho-2026010{index}T000000Z-t{index}").with_suffix(".sqlite3")
+        Path(result["path"]).rename(renamed)
+        manifest = _json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+        manifest["database"] = renamed.name
+        Path(result["manifest_path"]).unlink()
+        renamed.with_suffix(".manifest.json").write_text(
+            _json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+
+    assert len(storage.list_backups()) == 6
+    report = storage.prune_backups(keep=3)
+    assert report == {"enabled": True, "removed": 3, "kept": 3}
+
+    survivors = [entry["database"] for entry in storage.list_backups()]
+    assert len(survivors) == 3
+    assert survivors == sorted(survivors, reverse=True)  # the three NEWEST survive
+    assert "jericho-20260105T000000Z-t5.sqlite3" in survivors
+    assert "jericho-20260100T000000Z-t0.sqlite3" not in survivors
+
+    # Pruning is opt-out, and a second run is a no-op.
+    assert storage.prune_backups(keep=0) == {"enabled": False, "removed": 0, "kept": 0}
+    assert storage.prune_backups(keep=3)["removed"] == 0
+
+
+def test_a_database_without_a_manifest_is_not_pruned(storage, settings):
+    """That shape is an interrupted write, not slack — deleting it destroys evidence."""
+    result = storage.create_backup(label="orphan")
+    Path(result["manifest_path"]).unlink()
+    assert storage.prune_backups(keep=1)["removed"] == 0
+    assert Path(result["path"]).exists()

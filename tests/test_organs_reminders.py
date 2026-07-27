@@ -260,3 +260,37 @@ def test_the_documented_organ_list_matches_the_registry(settings):
 
     registered = tuple(organ.name for organ in build_registry(settings).organs)
     assert sorted(BUILTIN_ORGAN_NAMES) == sorted(registered)
+
+
+def test_a_reminder_that_exhausted_its_retries_can_be_queued_again(storage):
+    """Five attempts are spent in about 75 seconds, and then it was gone for good.
+
+    There is no delay column: the bridge drains every 15 s and each failed send
+    increments `attempts`, so a two-minute network outage exhausts every queued
+    push. The terminal `failed` row kept its `dedup_key`, which keeps it in
+    `uq_outbound_dedup` — so `enqueue_notification` refused to queue that reminder
+    ever again. An event silently lost its only notification because the WAN
+    blinked once.
+
+    A `sent` row must keep its key, or the same message goes out twice.
+    """
+    storage.ensure_user("alice")
+    assert storage.enqueue_notification("alice", "5001", "Событие завтра", dedup_key="event:1")
+    assert not storage.enqueue_notification("alice", "5001", "Событие завтра", dedup_key="event:1")
+
+    pending = storage.list_pending_notifications(limit=10)
+    assert len(pending) == 1
+    notif_id = pending[0]["id"]
+
+    for _ in range(5):
+        storage.mark_notifications(failed_ids=[notif_id], max_attempts=5)
+    assert storage.list_pending_notifications(limit=10) == []
+
+    # The organ's next scan can queue it again — the reminder is not lost.
+    assert storage.enqueue_notification("alice", "5001", "Событие завтра", dedup_key="event:1")
+    assert len(storage.list_pending_notifications(limit=10)) == 1
+
+    # A delivered notification still suppresses a duplicate.
+    delivered = storage.list_pending_notifications(limit=10)[0]["id"]
+    storage.mark_notifications(sent_ids=[delivered])
+    assert not storage.enqueue_notification("alice", "5001", "Событие завтра", dedup_key="event:1")
