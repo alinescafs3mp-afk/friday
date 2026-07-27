@@ -47,6 +47,8 @@ Model advice не является решением: он не меняет stat
 
 Knowledge Object хранит нормализованное содержимое, summary/title, kind, metadata, tags, importance, quality/promotion score, lifecycle stage и ссылку на Raw Object.
 
+**Markdown-vault — проекция, а не архив.** Синхронизация не только пишет живые объекты, но и удаляет заметки тех, кто живым быть перестал. Раньше она только добавляла: `list_knowledge_objects` фильтрует `deleted_at IS NULL`, а `MemoryVault.delete_object` вызывался единственным местом — путём жёсткой очистки. Мягко удалённый объект (и объект, отклонённый как IGNORED) сохранял **plaintext-копию своего полного содержимого на диске навсегда**, хотя пользователю сообщили об удалении и поиск с этим соглашался; бэкапы уносили копию дальше. Уборка выполняется только после того, как страничный обход прошёл целиком, — по частичному списку удалять нельзя.
+
 Перед изменением storage сохраняет snapshot предыдущей версии. Human correction, re-enrichment, lifecycle transition и soft delete увеличивают version. Markdown-vault синхронизируется асинхронно, но SQLite остаётся источником истины. Любые две версии сравнимы: `GET /api/admin/knowledge/{id}/diff` (кнопка «Изменения версий» в инспекторе) отдаёт структурный diff — скаляры before→after, длинный текст unified line-diff, теги added/removed, metadata по ключам (`jericho/versions.py`).
 
 ## 5. Lifecycle stages

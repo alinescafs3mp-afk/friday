@@ -647,15 +647,29 @@ class WorkersManager:
         if self.memory_vault is None:
             return
         offset = 0
+        live: set[str] = set()
         while True:
             objects = self.storage.list_knowledge_objects(user_id, limit=250, offset=offset)
             if not objects:
                 break
             for item in objects:
                 self.memory_vault.sync_object(item)
+                live.add(str(item.get("id") or ""))
             offset += len(objects)
             if len(objects) < 250:
                 break
+        # Only after the paging loop has run to completion: `live` is then the whole
+        # live set, and pruning against a partial one would delete valid notes. An
+        # exception inside the loop propagates and skips this entirely.
+        #
+        # Without it the vault only ever grew. `list_knowledge_objects` filters
+        # `deleted_at IS NULL` and `delete_object` was called from the hard-purge path
+        # alone, so a soft-deleted or IGNORED object kept a plaintext copy of its full
+        # content on disk forever — while the user was told it was deleted and search
+        # agreed with them.
+        removed = self.memory_vault.prune_orphans(user_id, live)
+        if removed:
+            LOGGER.info("Vault sync removed %d note(s) for objects that are no longer live", removed)
 
     async def _scheduled_backup(self) -> None:
         raw = self.storage.kv_get("workers:last_backup_at")

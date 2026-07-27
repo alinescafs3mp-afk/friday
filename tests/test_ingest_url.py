@@ -64,8 +64,20 @@ def test_ingest_url_creates_review_gated_raw_object(settings):
         assert raw["source_ref"] == "https://example.com/article"
 
         # It waits in the Inbox for review — it is not silently canonical.
+        #
+        # The old assertion was `inbox is not None`, which holds whether or not a
+        # Knowledge Object was created: an inbox row exists on both paths. The route
+        # called ingest_text WITHOUT force_review, so under the default policy the
+        # classifier auto-promoted a fetched page and the object became canonical
+        # with nobody having seen it. The comment above was true of the intent and
+        # false of the code, and the test agreed with the comment.
         inbox = app.state.storage.find_inbox_by_raw(raw_id, LEGACY_OWNER_USER_ID)
         assert inbox is not None
+        assert inbox["status"] == "pending"
+        assert not inbox["knowledge_object_id"]
+        assert body.get("promoted") is False
+        assert body.get("knowledge_object") is None
+        assert app.state.storage.count_knowledge_objects(LEGACY_OWNER_USER_ID) == 0
 
         # Re-ingesting the same URL+content is idempotent, not a duplicate.
         replay = client.post("/api/ingest/url", json={"url": "https://example.com/article"}, headers=owner)
@@ -101,5 +113,51 @@ def test_ingest_url_requires_url(settings):
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         response = client.post("/api/ingest/url", json={}, headers=owner)
         assert response.status_code == 400
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_an_article_shaped_page_still_waits_for_review(settings):
+    """The gate has to hold for the material that actually trips the classifier.
+
+    `test_ingest_url_creates_review_gated_raw_object` uses five repeats of one
+    sentence, which scores below the promotion threshold — so it passed with or
+    without the gate and guarded nothing. A real fetched page has headings, dates,
+    names, deadlines and a contact address; measured, that body returns
+    `promoted=True` and a canonical Knowledge Object under the default policy.
+
+    That is the third path found bypassing the review gate (after
+    `bulk_classify_inbox` and the disk importer), and a page from the open
+    internet is precisely the material the gate exists for.
+    """
+    article = (
+        "Руководство по настройке PostgreSQL 16 в проекте Orion. "
+        "Мы решили перейти на версию 16 в третьем квартале 2026 года. "
+        "Ответственный — Иван Петров из команды инфраструктуры. "
+        "Основные шаги: обновить схему, проверить индексы, прогнать нагрузочные тесты. "
+        "Крайний срок — 15 сентября 2026. Контакт: ops@example.com. "
+        "Документация лежит в Confluence, раздел Orion/Migrations. "
+    ) * 4
+    result = FetchResult(
+        url="https://example.com/guide",
+        title="PostgreSQL 16 в Orion",
+        text=article,
+        text_length=len(article),
+        status_code=200,
+    )
+    app, client, surfer = _client_with_surfer(settings, result)
+    try:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        response = client.post("/api/ingest/url", json={"url": "https://example.com/guide"}, headers=owner)
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body.get("promoted") is False
+        assert body.get("knowledge_object") is None
+        assert app.state.storage.count_knowledge_objects(LEGACY_OWNER_USER_ID) == 0
+
+        inbox = app.state.storage.find_inbox_by_raw(body["raw_object_id"], LEGACY_OWNER_USER_ID)
+        assert inbox is not None and inbox["status"] == "pending"
+        assert not inbox["knowledge_object_id"]
     finally:
         client.__exit__(None, None, None)

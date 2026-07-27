@@ -13,6 +13,8 @@ import logging
 import os
 import re
 import tempfile
+from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +82,35 @@ class MemoryVault:
         """Remove the Markdown projection; the database keeps deletion history."""
         filepath = self._user_dir(user_id) / f"{_safe_component(ko_id, fallback='knowledge')}.md"
         filepath.unlink(missing_ok=True)
+
+    def prune_orphans(self, user_id: str, live_ko_ids: Iterable[str]) -> int:
+        """Drop projections of objects that are no longer live. Returns the count.
+
+        The vault is a projection, and a projection that only ever gains rows is
+        not one. ``sync_object`` wrote every live object and nothing removed a file
+        when an object stopped being live: ``list_knowledge_objects`` filters
+        ``deleted_at IS NULL``, and ``delete_object`` had exactly one production
+        caller — the hard-purge path. So a soft-deleted Knowledge Object, or one the
+        reviewer marked IGNORED, kept a **plaintext Markdown copy of its full
+        content on disk forever**, while the user was told it had been deleted and
+        the search agreed.
+
+        Compared by filename rather than by parsing each file: ``sync_object``
+        derives the name from the id through the same encoder, so the mapping is
+        exact and no file has to be opened to decide its fate.
+        """
+        user_dir = self._user_dir(user_id)
+        if not user_dir.is_dir():
+            return 0
+        expected = {f"{_safe_component(ko_id, fallback='knowledge')}.md" for ko_id in live_ko_ids}
+        removed = 0
+        for path in sorted(user_dir.glob("*.md")):
+            if path.name in expected or path.is_symlink():
+                continue
+            with suppress(OSError):
+                path.unlink()
+                removed += 1
+        return removed
 
     def read_vault(self, user_id: str | None = None) -> list[dict[str, Any]]:
         """Read notes, optionally filtering by the original (not encoded) user ID."""

@@ -441,3 +441,36 @@ def test_backup_does_not_hold_lock_during_verification(storage, monkeypatch):
     assert not errors, errors
     assert elapsed < 1.5, f"read blocked {elapsed:.2f}s — lock held during verification"
     assert outcome.get("integrity_check") == "ok"
+
+
+@pytest.mark.asyncio
+async def test_the_vault_stops_keeping_plaintext_of_deleted_knowledge(settings, storage):
+    """ "Deleted" has to mean deleted on disk too, not only in the database.
+
+    `_vault_sync` iterated `list_knowledge_objects`, which filters
+    `deleted_at IS NULL`, and never reconciled removals; `MemoryVault.delete_object`
+    had exactly one production caller — the hard-purge path. So a soft-deleted
+    object, or one the reviewer marked IGNORED, kept a **plaintext Markdown copy of
+    its full content** in the vault forever, while the user was told it was deleted
+    and search agreed with them. Backups then carried that copy onward.
+    """
+    from jericho.workers import WorkersManager
+
+    kept_raw, kept = make_knowledge(storage, "alice", "Рабочая заметка, которая остаётся")
+    _, doomed = make_knowledge(storage, "alice", "Пароль от роутера: 12345, удалить это")
+    vault = MemoryVault(settings.memory_vault_dir)
+    manager = WorkersManager(settings, storage, None, None, memory_vault=vault)
+
+    await manager._vault_sync("alice")  # noqa: SLF001
+    files = {path.name for path in (settings.memory_vault_dir / "users").rglob("*.md")}
+    assert len(files) == 2
+
+    storage.soft_delete_knowledge_object(doomed.id, "alice")
+    await manager._vault_sync("alice")  # noqa: SLF001
+
+    remaining = list((settings.memory_vault_dir / "users").rglob("*.md"))
+    assert len(remaining) == 1
+    body = remaining[0].read_text(encoding="utf-8")
+    assert "Пароль от роутера" not in body
+    assert "Рабочая заметка" in body
+    del kept_raw, kept

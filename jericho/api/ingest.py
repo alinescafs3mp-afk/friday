@@ -61,6 +61,15 @@ async def ingest_url(request: Request) -> dict[str, Any]:
         result.text,
         source="web",
         source_ref=result.url,
+        # `force_review` is what makes the comment above true. Without it the default
+        # (non-strict) policy auto-promotes anything the classifier finds
+        # substantial, and a real fetched page — headings, dates, names, contacts —
+        # is exactly that: measured, an article-shaped body returns promoted=True and
+        # a Knowledge Object with no human in the loop. That contradicts
+        # ARCHITECTURE §3 ("Knowledge Object только после review") and this route's
+        # own comment. Third path found bypassing this gate, after
+        # bulk_classify_inbox and the disk importer; both were closed the same way.
+        force_review=True,
         metadata={
             "url": result.url,
             "title": title,
