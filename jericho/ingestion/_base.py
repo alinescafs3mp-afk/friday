@@ -634,6 +634,45 @@ def _trim_capture(value: str) -> str:
     return " ".join(clean).strip('"«».,;:!?')
 
 
+# Methods where the AUTHOR declared what the thing is — a marker word ("проект X",
+# "код Y"), a suffix (ООО, Inc), or quotes they typed themselves. Only these may
+# create a graph node and an accepted link without review.
+#
+# Listed one by one on purpose. This used to be `method.startswith("explicit_")`,
+# and a method called `explicit_identifier_syntax` — pure capitalisation matching,
+# nothing declared — inherited auto-acceptance from its own name. A prefix test
+# grants authority to whatever a future author calls their pattern; a list makes
+# the grant a decision. `test_every_extraction_method_is_classified` fails on any
+# method that appears in neither this set nor the evidence-only one below.
+DECLARED_ENTITY_METHODS = frozenset(
+    {
+        "existing_entity_exact_mention",
+        "explicit_concept_marker",
+        "explicit_event_name",
+        "explicit_identifier",
+        "explicit_infrastructure_marker",
+        "explicit_location_marker",
+        "explicit_organization_marker",
+        "explicit_project_marker",
+        "explicit_technology_context",
+        "explicit_technology_version",
+        "organization_suffix",
+        "quoted_document_name",
+        "quoted_event_name",
+    }
+)
+
+# Shape alone: a capitalised bigram, a word after a preposition, punctuation between
+# capitals. Useful as a suggestion, never as a fact.
+EVIDENCE_ONLY_ENTITY_METHODS = frozenset(
+    {
+        "capitalized_person_name",
+        "identifier_syntax",
+        "location_preposition",
+    }
+)
+
+
 def _extract_entities(text: str) -> list[dict[str, Any]]:
     """Extract conservative entity suggestions with explainable confidence."""
 
@@ -707,7 +746,16 @@ def _extract_entities(text: str) -> list[dict[str, Any]]:
     for match in _IDENTIFIER_RE.finditer(text):
         add(match.group(1), EntityType.OTHER, 0.9, "explicit_identifier")
     for match in _COMPACT_IDENTIFIER_RE.finditer(text):
-        add(match.group(1), EntityType.OTHER, 0.89, "explicit_identifier_syntax")
+        # `identifier_syntax`, NOT `explicit_identifier_syntax`. Nothing here is
+        # explicit: the pattern matches capitals joined by punctuation, with no word
+        # declaring what the thing is. The old name granted it auto-acceptance
+        # through the `explicit_` prefix test in `_link_entities`, and on the only
+        # real document available it produced 26 accepted graph nodes of which
+        # roughly a quarter were things — the rest were `CIDR-ПОДПИСКА` (a Russian
+        # word shouted in a heading, twice, in two grammatical cases), `README-EN`,
+        # `SET_DEFAULT_BROWSER`, `ТОП-100`, `V2-`. Shape is evidence; only a
+        # declaring word is a fact, so this now stays a reviewer suggestion.
+        add(match.group(1), EntityType.OTHER, 0.75, "identifier_syntax")
     for match in _PERSON_RE.finditer(text):
         candidate = match.group(1)
         if (
@@ -929,6 +977,8 @@ __all__ = [
     "looks_like_audio",
     "mimetypes",
     "new_id",
+    "DECLARED_ENTITY_METHODS",
+    "EVIDENCE_ONLY_ENTITY_METHODS",
     "normalize_entity_name",
     "os",
     "re",

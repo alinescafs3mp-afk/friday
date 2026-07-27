@@ -203,10 +203,10 @@ def test_entity_extraction_preserves_compact_identifiers_exactly():
     )
     by_name = {item["name"]: item for item in entities}
     assert set(by_name) == {"BRK.A", "BRK.B", "BRNQ26", "US0378331005"}
-    assert by_name["BRK.A"]["method"] == "explicit_identifier_syntax"
-    assert by_name["BRK.B"]["method"] == "explicit_identifier_syntax"
+    assert by_name["BRK.A"]["method"] == "identifier_syntax"
+    assert by_name["BRK.B"]["method"] == "identifier_syntax"
     assert by_name["BRNQ26"]["method"] == "explicit_identifier"
-    assert by_name["US0378331005"]["method"] == "explicit_identifier_syntax"
+    assert by_name["US0378331005"]["method"] == "identifier_syntax"
 
 
 def test_a_bare_number_never_becomes_an_entity():

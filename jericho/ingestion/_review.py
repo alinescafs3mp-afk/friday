@@ -8,6 +8,7 @@ exactly as before and no call site moved.
 from __future__ import annotations
 
 from jericho.ingestion._base import (
+    DECLARED_ENTITY_METHODS,
     LOGGER,
     Any,
     EntityType,
@@ -525,7 +526,7 @@ class ReviewMixin(PipelineShared):
 
             created = False
             method = str(candidate.get("method") or "unknown")
-            explicit = method.startswith(("explicit_", "quoted_", "organization_"))
+            explicit = method in DECLARED_ENTITY_METHODS
             # Creating a graph node is less destructive than merging, but we still require a
             # reasonably strong mention.  Weak names remain Inbox suggestions.
             if not entity and confidence >= (0.8 if explicit else 0.88):
