@@ -209,6 +209,23 @@ def test_entity_extraction_preserves_compact_identifiers_exactly():
     assert by_name["US0378331005"]["method"] == "explicit_identifier_syntax"
 
 
+def test_a_bare_number_never_becomes_an_entity():
+    """`id: 1609461599` is an identifier that leaked in, not a thing in the graph.
+
+    Found on the live database: of 30 accepted entity links, 8 were bare Telegram
+    numeric ids pulled out of a config listing by the `id`/`код`/`ticket` pattern.
+    A letterless node cannot be resolved, merged or recognised later, and every
+    document mentioning the same bare number collapses onto it. Identifiers worth
+    naming keep their letters, which the assertions below hold on to.
+    """
+    entities = _extract_entities(
+        "chat id 1609461599, код 6446814690; ticket PK-04-04, контракт ERC-20, лицензия GPL-3.0."
+    )
+    names = {item["name"] for item in entities}
+    assert not {name for name in names if not any(ch.isalpha() for ch in name)}
+    assert {"PK-04-04", "ERC-20", "GPL-3.0"} <= names
+
+
 def test_entity_extraction_understands_named_infrastructure_without_person_noise():
     entities = _extract_entities("Сервер Atlas работает на Ubuntu 24.04.")
     assert entities == [

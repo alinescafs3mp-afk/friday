@@ -652,6 +652,15 @@ def _extract_entities(text: str) -> list[dict[str, Any]]:
         normalized = normalize_entity_name(clean)
         if not normalized or normalized in {"project", "проект", "company", "компания"}:
             return
+        # A name without a single letter is an identifier that leaked in, not an
+        # entity: `id 1609461599` from a config listing became a graph node named
+        # `1609461599`. It cannot be resolved, merged or recognised later, and — the
+        # real damage — every document that happens to mention the same bare number
+        # collapses onto the same node. Codes worth naming always carry a letter
+        # (PK-04-04, ERC-20, GPL-3.0), so this costs nothing and it is the identifier
+        # patterns above that need the guard the most.
+        if not any(character.isalpha() for character in normalized):
+            return
         key = (entity_type.value, normalized)
         current = found.get(key)
         item = {
