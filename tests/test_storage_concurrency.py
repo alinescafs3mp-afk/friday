@@ -321,3 +321,118 @@ def test_an_interrupted_transaction_is_not_committed_by_close(settings, tmp_path
     finally:
         reopened.close()
     del raw, ko
+
+
+def _one_knowledge_object(storage, user_id: str = "owner"):
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user(user_id)
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="test",
+        source_ref=new_id("src"),
+        raw_content="исходный текст",
+        content_type="text",
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content="исходный текст",
+        title="Заметка",
+        summary="исходный текст",
+    )
+    storage.store_knowledge_object(ko)
+    return ko
+
+
+def test_concurrent_edits_to_one_object_all_survive(storage):
+    """A lost edit is worse than a failed one: nothing says it happened.
+
+    `update_knowledge_fields` read the row, merged the change and wrote — with the
+    write lock held only for the last step. Two editors both read version 1, both
+    computed 2, and the second UPDATE overwrote the first. The version snapshot went
+    with it, because `_store_ko_version` is INSERT OR IGNORE on
+    `(knowledge_object_id, version)`, so the duplicate is dropped in silence.
+
+    Reproduced before the fix, three runs out of three: six concurrent edits ended
+    at **version 3 instead of 7** with three snapshots instead of seven. No
+    exception anywhere — four edits and four pieces of history simply gone.
+    """
+    writers = 6
+    ko = _one_knowledge_object(storage)
+    barrier = threading.Barrier(writers)
+    failures: list[BaseException] = []
+
+    def edit(index: int) -> None:
+        try:
+            barrier.wait()
+            storage.update_knowledge_fields(ko.id, "owner", title=f"правка-{index}")
+        except BaseException as exc:  # noqa: BLE001 - surface any thread failure
+            failures.append(exc)
+
+    threads = [threading.Thread(target=edit, args=(index,)) for index in range(writers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert not failures, f"writers failed: {failures}"
+    final = storage.get_knowledge_object(ko.id, "owner")
+    assert int(final["version"]) == writers + 1, "an edit was overwritten"
+
+    versions = [
+        int(row["version"])
+        for row in storage.execute(
+            "SELECT version FROM knowledge_object_versions WHERE knowledge_object_id=? ORDER BY version",
+            (ko.id,),
+        ).fetchall()
+    ]
+    assert versions == list(range(1, writers + 2)), f"version history has holes: {versions}"
+    # The surviving title belongs to one of the writers, not to a half-applied merge.
+    assert final["title"] in {f"правка-{index}" for index in range(writers)}
+
+
+def test_concurrent_entity_edits_all_survive(storage):
+    """`update_entity` had the identical shape, and so does its snapshot table."""
+    from jericho.storage.models import Entity, EntityType, new_id
+
+    writers = 6
+    storage.ensure_user("owner")
+    entity = Entity(
+        id=new_id("ent"),
+        user_id="owner",
+        name="Проект Орион",
+        entity_type=EntityType.PROJECT.value,
+    )
+    storage.create_entity(entity)
+    barrier = threading.Barrier(writers)
+    failures: list[BaseException] = []
+
+    def edit(index: int) -> None:
+        try:
+            current = storage.get_entity(entity.id, "owner")
+            updated = Entity(
+                id=str(current["id"]),
+                user_id="owner",
+                name=f"Орион {index}",
+                entity_type=str(current["entity_type"]),
+                version=int(current["version"]),
+            )
+            barrier.wait()
+            storage.update_entity(updated)
+        except BaseException as exc:  # noqa: BLE001
+            failures.append(exc)
+
+    threads = [threading.Thread(target=edit, args=(index,)) for index in range(writers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert not failures, f"writers failed: {failures}"
+    assert int(storage.get_entity(entity.id, "owner")["version"]) == writers + 1
+    versions = [int(row["version"]) for row in storage.list_entity_versions(entity.id, "owner")]
+    assert sorted(versions) == list(range(1, writers + 2)), f"version history has holes: {versions}"

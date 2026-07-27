@@ -75,14 +75,19 @@ class GraphMixin(StorageShared):
         return entity
 
     def update_entity(self, entity: Entity) -> Entity:
-        existing = self.get_entity(entity.id, entity.user_id)
-        if not existing:
-            raise ValueError("Entity not found for user")
-        entity.version = max(int(existing.get("version", 1)) + 1, int(entity.version))
-        entity.updated_at = utc_now()
-        row = entity.to_row()
-        row["normalized_name"] = normalize_entity_name(entity.name)
+        # Same shape as `update_knowledge_object`, same fix: the version is read
+        # inside the transaction that writes it. Read-then-lock let two editors both
+        # see version 1, both compute 2, and the loser's UPDATE disappear together
+        # with its snapshot — `_store_entity_version` is INSERT OR IGNORE on
+        # (entity, version), so the duplicate is dropped without a word.
         with self.transaction() as conn:
+            existing = self.get_entity(entity.id, entity.user_id)
+            if not existing:
+                raise ValueError("Entity not found for user")
+            entity.version = max(int(existing.get("version", 1)) + 1, int(entity.version))
+            entity.updated_at = utc_now()
+            row = entity.to_row()
+            row["normalized_name"] = normalize_entity_name(entity.name)
             conn.execute(
                 """UPDATE entities SET name=:name, normalized_name=:normalized_name,
                    entity_type=:entity_type, aliases_json=:aliases_json, description=:description,
@@ -642,25 +647,33 @@ class GraphMixin(StorageShared):
     ) -> dict[str, Any]:
         if source_id == target_id:
             raise ValueError("Cannot merge an entity into itself")
-        source = self.get_entity(source_id, user_id)
-        target = self.get_entity(target_id, user_id)
-        if not source or not target or source.get("deleted_at") or target.get("deleted_at"):
-            raise ValueError("Both canonical entities must belong to the same user")
-
-        source_aliases = _json_load(source.get("aliases_json"), [])
-        target_aliases = _json_load(target.get("aliases_json"), [])
-        aliases = {
-            item.strip()
-            for item in [*source_aliases, *target_aliases, source["name"]]
-            if item and item.strip() and normalize_entity_name(item) != normalize_entity_name(target["name"])
-        }
-        now = utc_now()
-        target_after = dict(target)
-        target_after["aliases_json"] = json.dumps(sorted(aliases, key=str.casefold), ensure_ascii=False)
-        target_after["version"] = int(target.get("version", 1)) + 1
-        target_after["updated_at"] = now
-
+        # Both entities are read INSIDE the transaction that merges them. Reading
+        # first and locking afterwards meant two merges into the same target each
+        # saw the pre-merge alias set and the pre-merge version: the second UPDATE
+        # overwrote the first, so one merge's aliases were dropped and its snapshot
+        # silently ignored by INSERT OR IGNORE. A merge moves links and relations,
+        # which makes losing half of one considerably worse than losing an edit.
         with self.transaction() as conn:
+            source = self.get_entity(source_id, user_id)
+            target = self.get_entity(target_id, user_id)
+            if not source or not target or source.get("deleted_at") or target.get("deleted_at"):
+                raise ValueError("Both canonical entities must belong to the same user")
+
+            source_aliases = _json_load(source.get("aliases_json"), [])
+            target_aliases = _json_load(target.get("aliases_json"), [])
+            aliases = {
+                item.strip()
+                for item in [*source_aliases, *target_aliases, source["name"]]
+                if item
+                and item.strip()
+                and normalize_entity_name(item) != normalize_entity_name(target["name"])
+            }
+            now = utc_now()
+            target_after = dict(target)
+            target_after["aliases_json"] = json.dumps(sorted(aliases, key=str.casefold), ensure_ascii=False)
+            target_after["version"] = int(target.get("version", 1)) + 1
+            target_after["updated_at"] = now
+
             conn.execute(
                 """UPDATE entities SET aliases_json=?, version=?, updated_at=?
                    WHERE id=? AND user_id=?""",

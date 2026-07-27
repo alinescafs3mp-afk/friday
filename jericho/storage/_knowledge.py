@@ -217,13 +217,17 @@ class KnowledgeMixin(StorageShared):
         return obj
 
     def update_knowledge_object(self, obj: KnowledgeObject) -> KnowledgeObject:
-        existing = self.get_knowledge_object(obj.id, obj.user_id)
-        if not existing:
-            raise ValueError("Knowledge object not found for user")
-        obj.version = max(int(existing.get("version", 1)) + 1, int(obj.version))
-        obj.updated_at = utc_now()
-        row = obj.to_row()
+        # The version is READ INSIDE the transaction that writes it. Reading first
+        # and locking afterwards let two editors both see version 1, both compute 2,
+        # and the loser's UPDATE vanish — along with its snapshot, since
+        # `_store_ko_version` is INSERT OR IGNORE on (object, version).
         with self.transaction() as conn:
+            existing = self.get_knowledge_object(obj.id, obj.user_id)
+            if not existing:
+                raise ValueError("Knowledge object not found for user")
+            obj.version = max(int(existing.get("version", 1)) + 1, int(obj.version))
+            obj.updated_at = utc_now()
+            row = obj.to_row()
             conn.execute(
                 """UPDATE knowledge_objects SET entity_id=:entity_id, content=:content,
                    content_type=:content_type, title=:title, summary=:summary, tags_json=:tags_json,
@@ -238,37 +242,53 @@ class KnowledgeMixin(StorageShared):
         return obj
 
     def update_knowledge_fields(self, ko_id: str, user_id: str, **fields: Any) -> dict[str, Any] | None:
-        current = self.get_knowledge_object(ko_id, user_id)
-        if not current:
-            return None
-        tags = fields.get("tags_json", _json_load(current.get("tags_json"), []))
-        metadata = fields.get("metadata_json", _json_load(current.get("metadata_json"), {}))
-        obj = KnowledgeObject(
-            id=current["id"],
-            user_id=current["user_id"],
-            raw_object_id=current["raw_object_id"],
-            entity_id=fields.get("entity_id", current.get("entity_id")),
-            content=fields.get("content", current.get("content", "")),
-            content_type=fields.get("content_type", current.get("content_type", "")),
-            title=fields.get("title", current.get("title", "")),
-            summary=fields.get("summary", current.get("summary", "")),
-            tags_json=tags if isinstance(tags, list) else _json_load(tags, []),
-            metadata_json=metadata if isinstance(metadata, dict) else _json_load(metadata, {}),
-            knowledge_kind=str(fields.get("knowledge_kind", current.get("knowledge_kind", "note"))),
-            importance=float(fields.get("importance", current.get("importance", 0.5))),
-            quality_score=float(fields.get("quality_score", current.get("quality_score", 0.5))),
-            promotion_score=float(fields.get("promotion_score", current.get("promotion_score", 0.5))),
-            lifecycle_stage=_valid_lifecycle_stage(
-                fields.get("lifecycle_stage", current.get("lifecycle_stage", "active"))
-            ),
-            version=int(current.get("version", 1)),
-            superseded_by_id=fields.get("superseded_by_id", current.get("superseded_by_id")),
-            created_at=current.get("created_at", utc_now()),
-            updated_at=current.get("updated_at", utc_now()),
-            deleted_at=fields.get("deleted_at", current.get("deleted_at")),
-        )
-        self.update_knowledge_object(obj)
-        return self.get_knowledge_object(ko_id, user_id)
+        """Merge ``fields`` into a Knowledge Object and version the result.
+
+        Read, merge and write happen inside ONE transaction. They used to be three
+        separate steps with the lock taken only for the last one, which is a
+        read-modify-write race in the plainest form: two editors both read version 1,
+        both compute 2, and the second UPDATE overwrites the first. The snapshot is
+        lost with it, because ``_store_ko_version`` is ``INSERT OR IGNORE`` on
+        ``(knowledge_object_id, version)`` and the duplicate version is dropped in
+        silence. Reproduced with six concurrent edits: final version **3 instead of
+        7**, three snapshots instead of seven, no error raised anywhere — four edits
+        and their history simply gone.
+
+        ``transaction()`` is reentrant on the same thread, so the nested
+        ``update_knowledge_object`` below does not deadlock.
+        """
+        with self.transaction():
+            current = self.get_knowledge_object(ko_id, user_id)
+            if not current:
+                return None
+            tags = fields.get("tags_json", _json_load(current.get("tags_json"), []))
+            metadata = fields.get("metadata_json", _json_load(current.get("metadata_json"), {}))
+            obj = KnowledgeObject(
+                id=current["id"],
+                user_id=current["user_id"],
+                raw_object_id=current["raw_object_id"],
+                entity_id=fields.get("entity_id", current.get("entity_id")),
+                content=fields.get("content", current.get("content", "")),
+                content_type=fields.get("content_type", current.get("content_type", "")),
+                title=fields.get("title", current.get("title", "")),
+                summary=fields.get("summary", current.get("summary", "")),
+                tags_json=tags if isinstance(tags, list) else _json_load(tags, []),
+                metadata_json=metadata if isinstance(metadata, dict) else _json_load(metadata, {}),
+                knowledge_kind=str(fields.get("knowledge_kind", current.get("knowledge_kind", "note"))),
+                importance=float(fields.get("importance", current.get("importance", 0.5))),
+                quality_score=float(fields.get("quality_score", current.get("quality_score", 0.5))),
+                promotion_score=float(fields.get("promotion_score", current.get("promotion_score", 0.5))),
+                lifecycle_stage=_valid_lifecycle_stage(
+                    fields.get("lifecycle_stage", current.get("lifecycle_stage", "active"))
+                ),
+                version=int(current.get("version", 1)),
+                superseded_by_id=fields.get("superseded_by_id", current.get("superseded_by_id")),
+                created_at=current.get("created_at", utc_now()),
+                updated_at=current.get("updated_at", utc_now()),
+                deleted_at=fields.get("deleted_at", current.get("deleted_at")),
+            )
+            self.update_knowledge_object(obj)
+            return self.get_knowledge_object(ko_id, user_id)
 
     def get_knowledge_object(self, ko_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         if user_id is None:
