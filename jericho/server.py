@@ -995,7 +995,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 filename = str(document.get("filename") or "telegram-file.bin")
                 mime_type = str(document.get("mime_type") or "application/octet-stream")
                 if explicit_no_save:
-                    transient_file = state.ingestion.inspect_file_transient(
+                    transient_file = await state.ingestion.inspect_file_transient(
                         file_content,
                         filename=filename,
                         mime_type=mime_type,

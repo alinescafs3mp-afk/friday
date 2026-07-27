@@ -45,6 +45,38 @@ def test_pipeline_exposes_the_same_surface() -> None:
     assert not changed, f"signatures changed: {changed}"
 
 
+# Which members are coroutines is part of the contract and `inspect.signature`
+# does not show it: a method that quietly becomes `async` returns a coroutine to
+# every existing caller, and a caller that forgets `await` gets a truthy object
+# instead of a result — no exception, no test failure, just a silently skipped
+# step. Pinned separately for that reason.
+EXPECTED_ASYNC = frozenset(
+    {
+        "_extract_visual_document",
+        "_transcribe_audio",
+        "advise_inbox_item",
+        "ingest_file",
+        "ingest_text",
+        "inspect_file_transient",
+        "queue_agent_candidate",
+        "queue_knowledge_work_candidate",
+        "queue_research_candidate",
+    }
+)
+
+
+def test_async_members_are_exactly_the_pinned_ones() -> None:
+    actual = {
+        name
+        for name, member in inspect.getmembers(IngestionPipeline)
+        if not name.startswith("__") and inspect.iscoroutinefunction(member)
+    }
+    assert actual == EXPECTED_ASYNC, (
+        f"became async: {sorted(actual - EXPECTED_ASYNC)}; "
+        f"stopped being async: {sorted(EXPECTED_ASYNC - actual)}"
+    )
+
+
 def test_no_pipeline_method_is_defined_twice() -> None:
     seen: dict[str, str] = {}
     duplicates: list[str] = []

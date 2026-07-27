@@ -119,6 +119,37 @@ class _BinaryReadable(Protocol):
     def close(self) -> None: ...
 
 
+class _ArchiveBudget:
+    """What ONE upload may spend on unpacking, across every nesting level.
+
+    The limits used to be per archive: each nested member started again with a
+    full allowance of 24 previews and `max_archive_uncompressed_bytes`, so the
+    ceilings multiplied instead of dividing. Measured: a 3.0 MB zip of 24
+    `.tar.gz` members (440 x 250 KiB inside each) expanded to ~2.7 GB and held
+    the event loop for 107 seconds, returning `success=True` and raising nothing
+    — the operator's "250 MB per upload" was in fact 250 MB per level.
+    """
+
+    __slots__ = ("expanded_bytes", "previews")
+
+    def __init__(self, *, previews: int, expanded_bytes: int) -> None:
+        self.previews = max(0, int(previews))
+        self.expanded_bytes = max(0, int(expanded_bytes))
+
+    def take_preview(self) -> bool:
+        if self.previews <= 0:
+            return False
+        self.previews -= 1
+        return True
+
+    def spend_bytes(self, count: int) -> None:
+        self.expanded_bytes = max(0, self.expanded_bytes - max(0, int(count)))
+
+    @property
+    def spent_out(self) -> bool:
+        return self.previews <= 0 or self.expanded_bytes <= 0
+
+
 class DocumentExtractor:
     def __init__(
         self,
@@ -140,11 +171,17 @@ class DocumentExtractor:
         mime_type: str = "",
         *,
         _depth: int = 0,
+        _budget: _ArchiveBudget | None = None,
     ) -> DocumentResult:
         if not isinstance(content, bytes):
             return DocumentResult("", success=False, error="Document content must be bytes")
         if _depth > _MAX_NESTING_DEPTH:
             return DocumentResult("", success=False, error="Archive nesting limit exceeded")
+        # One budget per upload, created at the top and carried down the nesting.
+        budget = _budget or _ArchiveBudget(
+            previews=_MAX_ARCHIVE_PREVIEW_FILES,
+            expanded_bytes=self.max_archive_uncompressed_bytes,
+        )
         if len(content) > self.max_input_bytes:
             return DocumentResult(
                 "",
@@ -177,7 +214,7 @@ class DocumentExtractor:
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
             elif ext in _ARCHIVE_EXTENSIONS or ext.startswith(".tar."):
-                result = self._extract_archive(content, safe_name, ext, _depth)
+                result = self._extract_archive(content, safe_name, ext, _depth, budget)
             elif detected_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
             else:
@@ -766,26 +803,28 @@ class DocumentExtractor:
             metadata,
         )
 
-    def _extract_archive(self, content: bytes, filename: str, ext: str, depth: int) -> DocumentResult:
+    def _extract_archive(
+        self, content: bytes, filename: str, ext: str, depth: int, budget: _ArchiveBudget
+    ) -> DocumentResult:
         if ext == ".zip":
-            return self._extract_zip(content, depth)
+            return self._extract_zip(content, depth, budget)
         if ext in {".tar", ".tar.gz", ".tar.bz2", ".tar.xz"}:
-            return self._extract_tar(content, ext, depth)
+            return self._extract_tar(content, ext, depth, budget)
         if ext in {".gz", ".bz2", ".xz", ".zst"}:
-            decompressed = self._decompress_single(content, ext)
+            decompressed = self._decompress_single(content, ext, budget)
             inner_name = filename[: -len(ext)] or "decompressed.txt"
-            return self.extract(decompressed, inner_name, _depth=depth + 1)
+            return self.extract(decompressed, inner_name, _depth=depth + 1, _budget=budget)
         if ext == ".rar":
-            return self._extract_rar(content, depth)
+            return self._extract_rar(content, depth, budget)
         if ext == ".7z":
             return self._extract_7z(content)
         if ext == ".tar.zst":
-            decompressed = self._decompress_single(content, ".zst")
-            return self._extract_tar(decompressed, ".tar", depth)
+            decompressed = self._decompress_single(content, ".zst", budget)
+            return self._extract_tar(decompressed, ".tar", depth, budget)
         return DocumentResult("", {"format": ext.lstrip(".")}, False, "Unsupported archive format")
 
-    def _decompress_single(self, content: bytes, ext: str) -> bytes:
-        limit = min(self.max_archive_uncompressed_bytes, self.max_input_bytes)
+    def _decompress_single(self, content: bytes, ext: str, budget: _ArchiveBudget) -> bytes:
+        limit = min(self.max_archive_uncompressed_bytes, self.max_input_bytes, budget.expanded_bytes)
         if ext == ".gz":
             stream: _BinaryReadable = gzip.GzipFile(fileobj=io.BytesIO(content))
         elif ext == ".bz2":
@@ -801,23 +840,23 @@ class DocumentExtractor:
         else:
             raise ValueError(f"Unsupported compressor: {ext}")
         with closing(stream):
-            return self._read_stream_limited(stream, limit)
+            data = self._read_stream_limited(stream, limit)
+        budget.spend_bytes(len(data))
+        return data
 
-    def _member_preview(self, name: str, data: bytes, depth: int) -> str:
-        result = self.extract(data, name, _depth=depth + 1)
+    def _member_preview(self, name: str, data: bytes, depth: int, budget: _ArchiveBudget) -> str:
+        result = self.extract(data, name, _depth=depth + 1, _budget=budget)
         if not result.success or not result.text:
             return ""
         return f"\n--- {name} ---\n{result.text[:20_000]}"
 
-    def _extract_zip(self, content: bytes, depth: int) -> DocumentResult:
+    def _extract_zip(self, content: bytes, depth: int, budget: _ArchiveBudget) -> DocumentResult:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_zip(archive)
             files = [member for member in members if not member.is_dir()]
             parts = [f"ZIP archive: {len(files)} files", *(member.filename for member in files[:100])]
             previewed = 0
             for member in files:
-                if previewed >= _MAX_ARCHIVE_PREVIEW_FILES:
-                    break
                 if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
                     continue
                 # Count the decompression, not the success. Incrementing only when a
@@ -826,10 +865,16 @@ class DocumentExtractor:
                 # decompressed EVERY member. Nested, that is a decompression bomb the
                 # cap was supposed to bound: a 99 KB upload (24 x 24 x 500 zero-filled
                 # members) held the event loop for 31 seconds.
+                #
+                # The allowance belongs to the UPLOAD, not to this archive: a nested
+                # member used to start over with a full one.
+                if not budget.take_preview():
+                    break
                 previewed += 1
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
-                preview = self._member_preview(member.filename, data, depth)
+                budget.spend_bytes(len(data))
+                preview = self._member_preview(member.filename, data, depth, budget)
                 if preview:
                     parts.append(preview)
         return DocumentResult(
@@ -837,7 +882,7 @@ class DocumentExtractor:
             {"format": "zip", "files": len(files), "previewed_files": previewed},
         )
 
-    def _extract_tar(self, content: bytes, ext: str, depth: int) -> DocumentResult:
+    def _extract_tar(self, content: bytes, ext: str, depth: int, budget: _ArchiveBudget) -> DocumentResult:
         # Streaming mode avoids materialising an attacker-controlled member
         # list before the configured entry limit can be enforced.
         with tarfile.open(fileobj=io.BytesIO(content), mode="r|*") as archive:
@@ -847,6 +892,7 @@ class DocumentExtractor:
             names: list[str] = []
             previews: list[str] = []
             previewed = 0
+            exhausted = False
             for member in archive:
                 entry_count += 1
                 if entry_count > self.max_archive_entries:
@@ -860,26 +906,43 @@ class DocumentExtractor:
                 total += member_size
                 if total > self.max_archive_uncompressed_bytes:
                     raise ArchiveLimitError("Archive uncompressed size exceeds configured limit")
+                budget.spend_bytes(member_size)
                 if len(names) < 100:
                     names.append(member.name)
-                if previewed >= _MAX_ARCHIVE_PREVIEW_FILES or member_size > _MAX_MEMBER_PREVIEW_BYTES:
+                # Walking the members is itself the cost here: streaming mode has to
+                # read past every member it skips. When the upload's allowance is
+                # gone, stop walking rather than skip in a loop — that is where the
+                # nested bomb's 107 seconds were actually spent.
+                if budget.expanded_bytes <= 0:
+                    exhausted = True
+                    break
+                if member_size > _MAX_MEMBER_PREVIEW_BYTES:
                     continue
                 stream = archive.extractfile(member)
                 if stream is None:
                     continue
+                if not budget.take_preview():
+                    exhausted = True
+                    break
                 previewed += 1  # decompressions, not successes — see _extract_zip
                 with stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
-                preview = self._member_preview(member.name, data, depth)
+                preview = self._member_preview(member.name, data, depth, budget)
                 if preview:
                     previews.append(preview)
             parts = [f"TAR archive: {file_count} files", *names, *previews]
-        return DocumentResult(
-            "\n".join(parts),
-            {"format": ext.lstrip("."), "files": file_count, "previewed_files": previewed},
-        )
+        metadata: dict[str, Any] = {
+            "format": ext.lstrip("."),
+            "files": file_count,
+            "previewed_files": previewed,
+        }
+        if exhausted:
+            # Said out loud: the listing is partial, and a caller reading `files`
+            # as "what the archive holds" would otherwise be quietly wrong.
+            metadata["archive_budget_exhausted"] = True
+        return DocumentResult("\n".join(parts), metadata)
 
-    def _extract_rar(self, content: bytes, depth: int) -> DocumentResult:
+    def _extract_rar(self, content: bytes, depth: int, budget: _ArchiveBudget) -> DocumentResult:
         try:
             import rarfile  # type: ignore[import-untyped]
         except ImportError:
@@ -897,12 +960,15 @@ class DocumentExtractor:
             parts = [f"RAR archive: {len(files)} files", *(member.filename for member in files[:100])]
             previewed = 0
             for member in files:
-                if previewed >= _MAX_ARCHIVE_PREVIEW_FILES or member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
+                if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
                     continue
+                if not budget.take_preview():
+                    break
                 previewed += 1  # decompressions, not successes — see _extract_zip
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
-                preview = self._member_preview(member.filename, data, depth)
+                budget.spend_bytes(len(data))
+                preview = self._member_preview(member.filename, data, depth, budget)
                 if preview:
                     parts.append(preview)
         return DocumentResult(

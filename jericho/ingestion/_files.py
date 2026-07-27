@@ -75,7 +75,8 @@ class FilesMixin(PipelineShared):
         """Run bounded local vision/OCR and return advisory-only metadata."""
         if not self.llm or not self.llm.enabled or not self.settings.profile.vision_capable:
             return None
-        assets = self._doc_extractor.extract_visual_assets(
+        assets = await asyncio.to_thread(
+            self._doc_extractor.extract_visual_assets,
             file_content,
             filename,
             mime_type,
@@ -347,7 +348,14 @@ class FilesMixin(PipelineShared):
             self._store_file(user_id, file_content, digest, filename)
             return self._replay_file_source(user_id, existing)
 
-        extraction = self._doc_extractor.extract(file_content, filename, mime_type)
+        # Off the event loop. Extraction is pure CPU — archive walking, PDF text,
+        # a Word 97 reader — and one uvicorn worker serves the API, the Telegram
+        # bridge and every organ from the same loop, so a slow document meant no
+        # chat, no worker and no /health for its whole duration. Bounded now
+        # (see `_ArchiveBudget`), but bounded is not instant: the shipped ceiling
+        # still allows seconds of unpacking, and seconds of a frozen backend is
+        # not a thing to leave in place.
+        extraction = await asyncio.to_thread(self._doc_extractor.extract, file_content, filename, mime_type)
         text_content = extraction.text if extraction.success else ""
         if len(text_content) > self.settings.max_extracted_text_chars:
             text_content = text_content[: self.settings.max_extracted_text_chars]
@@ -662,7 +670,7 @@ class FilesMixin(PipelineShared):
             raise RuntimeError("File ingestion completed without a result")
         return committed_result
 
-    def inspect_file_transient(
+    async def inspect_file_transient(
         self,
         file_content: bytes,
         *,
@@ -682,7 +690,11 @@ class FilesMixin(PipelineShared):
         safe_filename = self._sanitize_filename(filename or "upload.bin")
         guessed_type, _ = mimetypes.guess_type(safe_filename)
         safe_mime_type = (mime_type or guessed_type or "application/octet-stream").split(";", 1)[0].strip()
-        extraction = self._doc_extractor.extract(file_content, safe_filename, safe_mime_type)
+        # Async for the same reason as `ingest_file`: this runs while a Telegram
+        # user waits for a reply, on the loop that serves everyone else.
+        extraction = await asyncio.to_thread(
+            self._doc_extractor.extract, file_content, safe_filename, safe_mime_type
+        )
         limit = max(1_000, min(int(preview_chars), 48_000))
         return {
             "filename": safe_filename,
