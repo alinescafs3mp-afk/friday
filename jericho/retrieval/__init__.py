@@ -240,6 +240,11 @@ def knowledge_search_text(item: dict[str, Any]) -> str:
 
 # A boundary is only worth honouring past this fraction of the window; nearer the
 # start it would trade a whole chunk for a stub.
+# Mirrors the indexer's own ceilings (`_DOC_VECTOR_MAX_CHARS` / `_EMBED_REQUEST_MAX_CHARS`
+# in jericho/workers): one candidate never exceeds what an embeddings service accepts,
+# and one request stays inside the measured ~2800 chars/s throughput.
+_POOL_TEXT_MAX_CHARS = 20_000
+_POOL_REQUEST_MAX_CHARS = 40_000
 _CHUNK_BOUNDARY_FLOOR = 0.5
 _SENTENCE_END_RE = re.compile(r"[.!?…][»\"')\]]?\s")
 
@@ -668,7 +673,10 @@ class HybridSearcher:
         candidates = list(candidate_map.values())
 
         fts_ranking = [item["id"] for item in fts_candidates]
-        lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query)
+        # Shared by both `_lexical_rank` passes and by the snippet pass below, so a
+        # candidate's body is tokenized once per request rather than once per use.
+        lexical_cache: dict[str, dict[str, float]] = {}
+        lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query, cache=lexical_cache)
         rankings = [fts_ranking, lexical_ranking]
         embedding_scores: dict[str, float] = {}
         dense_meta: dict[str, Any] = {}
@@ -732,7 +740,7 @@ class HybridSearcher:
 
         # Re-rank after graph expansion so newly discovered records receive lexical evidence too.
         candidates = list(candidate_map.values())
-        lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query)
+        lexical_ranking, lexical_scores = self._lexical_rank(candidates, clean_query, cache=lexical_cache)
         rankings[1] = lexical_ranking
         if graph_scores:
             rankings.append(
@@ -749,9 +757,10 @@ class HybridSearcher:
         field_scores: dict[str, float] = {}
         identifier_coverage: dict[str, float] = {}
         query_identifiers = self._query_identifiers(clean_query)
+        query_lexical_vector = lexical_vector(clean_query)
         for document_id, item in candidate_map.items():
             names = [str(entity.get("name") or "") for entity in entity_links.get(document_id, [])]
-            fields = self._field_scores(item, clean_query, names)
+            fields = self._field_scores(item, clean_query, names, query_vector=query_lexical_vector)
             field_components[document_id] = fields
             field_scores[document_id] = min(
                 1.0,
@@ -1191,12 +1200,24 @@ class HybridSearcher:
         self,
         candidates: list[dict[str, Any]],
         query: str,
+        *,
+        cache: dict[str, dict[str, float]] | None = None,
     ) -> tuple[list[str], dict[str, float]]:
         query_vector = lexical_vector(query)
-        scored = [
-            (item["id"], sparse_cosine(query_vector, lexical_vector(self._search_text(item))))
-            for item in candidates
-        ]
+        # One vector per candidate per request. `_lexical_rank` runs twice — once
+        # before dense recall widens the pool and once after — and each run rebuilt
+        # the token and trigram vector of every candidate's FULL body from scratch.
+        # Profiling one search over a 400-candidate pool counted 2708 calls to
+        # `lexical_vector`, about half the request's total time.
+        vectors = cache if cache is not None else {}
+        scored: list[tuple[str, float]] = []
+        for item in candidates:
+            document_id = str(item["id"])
+            vector = vectors.get(document_id)
+            if vector is None:
+                vector = lexical_vector(self._search_text(item))
+                vectors[document_id] = vector
+            scored.append((document_id, sparse_cosine(query_vector, vector)))
         scored.sort(key=lambda pair: pair[1], reverse=True)
         return [document_id for document_id, _ in scored], dict(scored)
 
@@ -1327,13 +1348,36 @@ class HybridSearcher:
         query_vector: list[float],
         candidate_map: dict[str, dict[str, Any]],
     ) -> dict[str, float]:
-        """Fallback: embed and score the current pool when no vectors are indexed."""
+        """Fallback: embed and score the current pool when no vectors are indexed.
+
+        Bounded twice, because neither bound the indexer applies reached here. Every
+        candidate's FULL body went into a single request — title, summary, content,
+        tags, kind, untruncated, for up to `pool_max` objects — so the fallback that
+        exists to keep search working before the index is built was the one request
+        most likely to time out or be rejected outright. A 400-object pool of
+        ordinary articles is several megabytes in one POST.
+        """
         assert self.embeddings is not None
         candidates = list(candidate_map.values())
         if not candidates:
             return {}
-        vectors = await self.embeddings.embed([self._search_text(item) for item in candidates])
-        if not vectors or len(vectors) != len(candidates):
+        texts = [self._search_text(item)[:_POOL_TEXT_MAX_CHARS] for item in candidates]
+        vectors: list[list[float]] = []
+        start = 0
+        while start < len(texts):
+            end, volume = start, 0
+            while end < len(texts) and (end == start or volume + len(texts[end]) <= _POOL_REQUEST_MAX_CHARS):
+                volume += len(texts[end])
+                end += 1
+            returned = await self.embeddings.embed(texts[start:end])
+            if not returned or len(returned) != end - start:
+                # All-or-nothing, like the indexer: a partially embedded pool would
+                # score some candidates densely and others not at all, which reads as
+                # a ranking decision rather than a failed request.
+                return {}
+            vectors.extend(returned)
+            start = end
+        if len(vectors) != len(candidates):
             return {}
         return {
             item["id"]: dense_cosine(query_vector, vectors[index]) for index, item in enumerate(candidates)
@@ -1344,8 +1388,12 @@ class HybridSearcher:
         item: dict[str, Any],
         query: str,
         entity_names: list[str],
+        *,
+        query_vector: dict[str, float] | None = None,
     ) -> dict[str, float]:
-        vector = lexical_vector(query)
+        # The QUERY vector does not depend on the candidate, and this runs once per
+        # candidate: on a 400-object pool that was 400 rebuilds of the same thing.
+        vector = lexical_vector(query) if query_vector is None else query_vector
         query_folded = query.casefold()
         title = str(item.get("title") or "")
         summary = str(item.get("summary") or "")

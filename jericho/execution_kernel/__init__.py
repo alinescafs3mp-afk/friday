@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from jericho.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
 from jericho.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
+from jericho.workers._blocking import run_blocking
 
 if TYPE_CHECKING:
     from jericho.config import JerichoSettings
@@ -516,7 +517,9 @@ class ExecutionKernel:
 
     async def _resolve_duplicates(self, *, actor: ActorContext) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
-        candidates = kg.resolver.detect_duplicates(actor.user_id)
+        # Off the event loop: the scan is quadratic in entity count and this is a
+        # tool the agent calls mid-conversation.
+        candidates = await run_blocking(kg.resolver.detect_duplicates, actor.user_id)
         return {"candidates": [item.to_row() for item in candidates], "count": len(candidates)}
 
     async def _inbox_list(self, *, actor: ActorContext, status: str | None = None) -> dict[str, Any]:

@@ -133,3 +133,135 @@ def test_pending_resolutions_are_enriched_for_review(storage):
     assert item["entity_b"]["name"] == "Ivan Petroff"
     assert item["entity_a"]["knowledge_count"] == 1
     assert item["recommendation"] == "strong_merge_candidate"
+
+
+# --- duplicate detection at corpus scale ----------------------------------
+
+
+def _seed_entities(storage, names: list[str], *, user_id: str = "owner") -> None:
+    from jericho.storage.models import new_id, utc_now
+
+    storage.ensure_user(user_id)
+    now = utc_now()
+    with storage.transaction() as conn:
+        for name in names:
+            conn.execute(
+                "INSERT INTO entities(id,user_id,name,normalized_name,entity_type,description,"
+                "aliases_json,metadata_json,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    new_id("ent"),
+                    user_id,
+                    name,
+                    name.strip().casefold(),
+                    "project",
+                    "",
+                    "[]",
+                    "{}",
+                    1,
+                    now,
+                    now,
+                ),
+            )
+
+
+def _exhaustive(storage, *, min_confidence: float) -> list[tuple[str, str, float, str]]:
+    """The pre-blocking all-pairs scan, kept as an oracle.
+
+    Setting the short-name threshold beyond any real name puts every entity in the
+    one exhaustive bucket, which is exactly the original algorithm.
+    """
+    import jericho.storage._knowledge as module
+
+    saved = module._SHORT_NAME_CHARS
+    module._SHORT_NAME_CHARS = 10_000
+    try:
+        return [
+            (c.entity_a_id, c.entity_b_id, round(c.confidence, 9), c.resolution_method)
+            for c in storage.find_duplicate_candidates("owner", min_confidence=min_confidence)
+        ]
+    finally:
+        module._SHORT_NAME_CHARS = saved
+
+
+def test_blocking_proposes_exactly_what_the_exhaustive_scan_proposed(storage):
+    """Blocking is an optimisation. If it changes the proposals it is a bug.
+
+    The scan was quadratic in entity count with three-plus SequenceMatcher calls per
+    surviving pair, and it runs from an agent tool call and two HTTP routes as well
+    as a worker: measured at 2000 entities, **94 seconds** on the event loop.
+
+    Candidate pairs now come from blocking keys — a shared alias, a shared word, a
+    matching acronym, a shared character bigram — chosen so that any pair capable of
+    reaching the threshold shares at least one. Trigrams were tried first and lost
+    2% of the proposals («Орион» vs «Орион2 1», «ООО 24» vs «ОСОО 40»), which is why
+    the keys are bigrams and short names keep an exhaustive bucket as well.
+    """
+    names = [
+        "Проект Орион",
+        "Орион Проект",
+        "Орион",
+        "Орин",
+        "Орион2",
+        "Атлас Инфраструктура",
+        "Инфраструктура Атлас",
+        "Атлас",
+        "Атлаc",
+        "Общество С Ограниченной Ответственностью",
+        "ОСОО",
+        "ООО",
+        "BRK.A",
+        "BRK.B",
+        "v1.2.3",
+        "v1.2.4",
+        "Ким",
+        "Ли",
+        "Ын",
+        "Ан",
+        "Сервис Уведомлений",
+        "Сервис Уведомленй",
+        "Служба Уведомлений",
+        "Kubernetes",
+        "Kubernets",
+        "K8s",
+    ]
+    _seed_entities(
+        storage,
+        [
+            f"{name} {index // len(names)}" if index >= len(names) else name
+            for index, name in enumerate(names * 8)
+        ],
+    )
+
+    for threshold in (0.5, 0.55, 0.6):
+        blocked = [
+            (c.entity_a_id, c.entity_b_id, round(c.confidence, 9), c.resolution_method)
+            for c in storage.find_duplicate_candidates("owner", min_confidence=threshold)
+        ]
+        oracle = _exhaustive(storage, min_confidence=threshold)
+        assert sorted(blocked) == sorted(oracle), (
+            f"threshold {threshold}: blocking changed the proposal set "
+            f"(missing {len(set(map(lambda t: t[:2], oracle)) - set(map(lambda t: t[:2], blocked)))})"
+        )
+    assert oracle, "the fixture produced no duplicates, so this proves nothing"
+
+
+def test_the_pair_ceiling_is_announced_rather_than_silent(storage, caplog):
+    """A short list must not be mistaken for "nothing left to merge".
+
+    The scan is bounded so an HTTP route gets an answer instead of an eventual one,
+    and the bound drops the flimsiest evidence first — but a reviewer reading a
+    truncated list has no way to know it was truncated unless it is said.
+    """
+    import logging
+
+    import jericho.storage._knowledge as module
+
+    _seed_entities(storage, [f"Сервис Уведомлений {index}" for index in range(120)])
+    saved = module._MAX_DUPLICATE_PAIRS
+    module._MAX_DUPLICATE_PAIRS = 50
+    try:
+        with caplog.at_level(logging.WARNING, logger="jericho.storage"):
+            storage.find_duplicate_candidates("owner", min_confidence=0.55)
+    finally:
+        module._MAX_DUPLICATE_PAIRS = saved
+    assert any("PARTIAL" in record.message for record in caplog.records), caplog.text

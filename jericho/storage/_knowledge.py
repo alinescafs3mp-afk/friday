@@ -7,8 +7,12 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
+
 from jericho.storage._base import (
     _SEARCH_TEXT_LEN_SQL,
+    LOGGER,
     UTC,
     Any,
     EntityResolutionCandidate,
@@ -33,6 +37,77 @@ from jericho.storage._base import (
 # FTS MATCH accepts a bounded number of terms, and a natural-language question is
 # mostly function words. Twelve is the budget; which twelve is the whole question.
 _FTS_TERM_BUDGET = 12
+
+
+# Below this length a name has too few characters for trigram blocking to be
+# meaningful, so short names of the same type are compared against each other
+# exhaustively. There are few of them and n² over few is nothing.
+_SHORT_NAME_CHARS = 6
+# Ceiling on evaluated pairs. Four SequenceMatcher calls per surviving pair put
+# this at a few seconds — a scan reachable from an HTTP route needs an answer, not
+# an eventual one. Reaching it is a WARNING, never silent.
+_MAX_DUPLICATE_PAIRS = 200_000
+# Evidence strength of the key that introduced a pair, strongest first. Used only
+# to decide what the ceiling drops.
+_KEY_RANK = {"variant": 0, "token": 1, "acronym": 2, "short": 3, "bigram": 4}
+
+
+def _ratio_ceiling(left: str, right: str, left_counts: Counter[str], right_counts: Counter[str]) -> float:
+    """Highest ``SequenceMatcher.ratio()`` these two strings can reach. Exact.
+
+    ``ratio()`` is ``2·M/(len(a)+len(b))``, and the matched characters form a common
+    subsequence, so ``M`` is bounded twice over: by the shorter string, and by the
+    size of the two strings' character multiset intersection. The second bound is
+    the one that pays — same-length names defeat the first entirely, while the
+    multiset bound prunes them for a third of what one ``SequenceMatcher`` call
+    costs. Both are upper bounds, so nothing that could have qualified is skipped.
+    """
+    total = len(left) + len(right)
+    if not total:
+        return 0.0
+    shared = sum((left_counts & right_counts).values())
+    return 2.0 * min(len(left), len(right), shared) / total
+
+
+def _blocking_keys(entity_type: str, variants: Sequence[str]) -> set[tuple[str, ...]]:
+    """Cheap keys such that any pair that could score ≥ ~0.5 shares at least one.
+
+    Derived from the scoring below rather than guessed. Ignoring the ≤0.14 context
+    boost, which cannot carry a pair on its own, a candidate needs one of:
+
+    * a shared normalized variant           → ``exact_alias`` (0.995)
+    * an identical token set                → 0.94, and it implies a shared token
+    * ``token_jaccard ≥ 0.40``              → a shared token
+    * matching acronyms                     → 0.82
+    * ``name_similarity ≥ 0.51`` and friends → half the shorter name's characters
+      match in order, which for a name of six characters or more forces a shared
+      character trigram.
+
+    The last one is the only approximation, and it is bounded: names under
+    ``_SHORT_NAME_CHARS`` skip trigrams and land in one exhaustive per-type bucket.
+    """
+    keys: set[tuple[str, ...]] = set()
+    for variant in variants:
+        keys.add(("variant", entity_type, variant))
+        for token in variant.split():
+            keys.add(("token", entity_type, token))
+    name = variants[0] if variants else ""
+    tokens = [token for token in name.split() if token]
+    if len(tokens) >= 2:
+        keys.add(("acronym", entity_type, "".join(token[0] for token in tokens).casefold()))
+    compact = name.replace(" ", "")
+    if len(compact) < _SHORT_NAME_CHARS:
+        # Too few characters for an n-gram to mean anything; these all meet.
+        keys.add(("short", entity_type))
+    for offset in range(len(compact) - 1):
+        # Bigrams, not trigrams — measured, not assumed. Trigrams lost 2% of the
+        # exhaustive scan's proposals: «Орион» vs «Орион2 1» (short and long names
+        # landed in disjoint bucket families) and «ООО 24» vs «ОСОО 40» (similar
+        # strings sharing no three consecutive characters). Bigrams recover every
+        # one of those, and short names keep their exhaustive bucket *as well as*
+        # their bigrams so they still meet longer neighbours.
+        keys.add(("bigram", entity_type, compact[offset : offset + 2]))
+    return keys
 
 
 def _valid_lifecycle_stage(value: Any) -> str:
@@ -630,6 +705,48 @@ class KnowledgeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def count_entity_knowledge(self, user_id: str, entity_id: str) -> int:
+        """How many accepted, live Knowledge Objects an entity carries.
+
+        Exists because the graph layer answered this by loading up to a thousand
+        full rows — bodies, summaries, tags — and calling ``len()`` on the list.
+        """
+        row = self.execute(
+            """SELECT COUNT(*) AS count FROM knowledge_entity_links l
+               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL""",
+            (user_id, entity_id),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_entity_knowledge_refs(
+        self, user_id: str, entity_id: str, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Ranking-relevant columns only, for callers that never read the body.
+
+        ``context_for_query`` traverses the graph loading every linked object at up
+        to 1000 rows per entity, for every entity the BFS dequeues — and the only
+        fields it ever touches are the id, the link confidence and the two scores it
+        sorts by. Everything else was megabytes of document text read from disk and
+        thrown away.
+        """
+        rows = self.execute(
+            """SELECT k.id, k.importance, k.quality_score, l.confidence AS _link_confidence
+               FROM knowledge_entity_links l
+               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
+               ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",
+            (user_id, entity_id, max(1, min(limit, 1000))),
+        ).fetchall()
+        if not rows:
+            rows = self.execute(
+                """SELECT id, importance, quality_score, 1.0 AS _link_confidence
+                   FROM knowledge_objects WHERE user_id=? AND entity_id=?
+                   AND deleted_at IS NULL ORDER BY importance DESC, updated_at DESC LIMIT ?""",
+                (user_id, entity_id, max(1, min(limit, 1000))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_entity_knowledge(self, user_id: str, entity_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.execute(
             """SELECT k.*, l.confidence AS _link_confidence, l.evidence_json AS _link_evidence_json
@@ -927,6 +1044,9 @@ class KnowledgeMixin(StorageShared):
             {
                 "entity": entity,
                 "variants": variants(entity),
+                # Counted once per entity, not once per pair: the multiset bound
+                # below is only cheap if this is not rebuilt 200 000 times.
+                "counts": [Counter(variant) for variant in variants(entity)],
                 "identifier": any(
                     _is_entity_identifier(str(value))
                     for value in [entity.get("name", ""), *_json_load(entity.get("aliases_json"), [])]
@@ -934,105 +1054,191 @@ class KnowledgeMixin(StorageShared):
             }
             for entity in entities
         ]
-        for index, left_data in enumerate(prepared):
+        # Blocking, not all-pairs. The exhaustive scan is quadratic in entity count
+        # with three-plus SequenceMatcher calls per surviving pair, and it runs from
+        # an agent tool call and two HTTP routes as well as a worker. Measured on a
+        # synthetic corpus of 2000 entities: **94 seconds**, on the event loop, with
+        # `list_entities(limit=5000)` allowing well over twice that.
+        blocks: dict[tuple[str, ...], list[int]] = {}
+        for index, data in enumerate(prepared):
+            for key in _blocking_keys(str(data["entity"]["entity_type"]), data["variants"]):
+                blocks.setdefault(key, []).append(index)
+
+        # No block is dropped for being large. Skipping a crowded bucket was the
+        # obvious way to bound the work and it is the wrong one: a pair whose only
+        # shared key lives in that bucket disappears from the proposals with nothing
+        # to show for it — silent truncation, dressed as an optimisation. The pruning
+        # is done instead by `_ratio_ceiling` below, which is exact.
+        # Each pair remembers the STRONGEST key that introduced it, so the ceiling
+        # below removes the flimsiest evidence first rather than whatever happens to
+        # sort last. A shared alias outranks a shared word, which outranks two
+        # adjacent characters.
+        # Blocks are consumed strongest-key-first and enumeration stops at the
+        # ceiling, so the ceiling bounds wall time and not merely the scoring: on a
+        # corpus whose entity names share common words, 2000 entities produce 1.7
+        # MILLION candidate pairs, and simply building that set costs more than
+        # scoring the ones worth scoring.
+        ordered: list[tuple[int, int]] = []
+        seen_pairs: set[tuple[int, int]] = set()
+        truncated = False
+        for key in sorted(blocks, key=lambda item: (_KEY_RANK.get(item[0], len(_KEY_RANK)), item)):
+            if truncated:
+                break
+            members = blocks[key]
+            for position, left_index in enumerate(members):
+                for right_index in members[position + 1 :]:
+                    pair = (left_index, right_index)
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    ordered.append(pair)
+                if len(ordered) > _MAX_DUPLICATE_PAIRS:
+                    truncated = True
+                    break
+        if truncated:
+            # Said out loud. The scan is quadratic in entity count with several
+            # SequenceMatcher calls per surviving pair; an exhaustive run over those
+            # 2000 entities takes **166 seconds**. Returning a short list in silence
+            # would let the reviewer believe there is nothing more to merge — so the
+            # cheapest evidence (two adjacent characters) is what gets dropped, and
+            # the fact that anything was dropped is a warning.
+            LOGGER.warning(
+                "duplicate detection stopped at %d candidate pairs for tenant %s — "
+                "the proposal list is PARTIAL; weakest evidence was dropped first",
+                len(ordered),
+                user_id,
+            )
+
+        for left_index, right_index in ordered:
+            left_data = prepared[left_index]
+            right_data = prepared[right_index]
             left = left_data["entity"]
+            right = right_data["entity"]
             left_variants = left_data["variants"]
+            right_variants = right_data["variants"]
             left_name = left_variants[0] if left_variants else ""
-            for right_data in prepared[index + 1 :]:
-                right = right_data["entity"]
-                if left["entity_type"] != right["entity_type"]:
-                    continue
-                right_variants = right_data["variants"]
-                right_name = right_variants[0] if right_variants else ""
-                if not left_name or not right_name:
-                    continue
+            right_name = right_variants[0] if right_variants else ""
+            if left["entity_type"] != right["entity_type"] or not left_name or not right_name:
+                continue
 
-                exact_alias = bool(set(left_variants) & set(right_variants))
-                # Codes, tickers, contract identifiers, and versioned names are exact-match only.
-                if (left_data["identifier"] or right_data["identifier"]) and not exact_alias:
-                    continue
+            exact_alias = bool(set(left_variants) & set(right_variants))
+            # Codes, tickers, contract identifiers, and versioned names are exact-match only.
+            if (left_data["identifier"] or right_data["identifier"]) and not exact_alias:
+                continue
 
-                name_similarity = SequenceMatcher(None, left_name, right_name).ratio()
-                left_tokens = set(left_name.split())
-                right_tokens = set(right_name.split())
-                token_jaccard = overlap(left_tokens, right_tokens)
-                sorted_similarity = SequenceMatcher(
-                    None,
-                    " ".join(sorted(left_tokens)),
-                    " ".join(sorted(right_tokens)),
-                ).ratio()
-                alias_similarity = max(
-                    (
-                        SequenceMatcher(None, left_variant, right_variant).ratio()
-                        for left_variant in left_variants
-                        for right_variant in right_variants
-                    ),
-                    default=0.0,
+            left_tokens = set(left_name.split())
+            right_tokens = set(right_name.split())
+            token_jaccard = overlap(left_tokens, right_tokens)
+            acronym_match = bool(
+                acronym(left_name)
+                and acronym(left_name) == acronym(right_name)
+                and len(left_tokens) >= 2
+                and len(right_tokens) >= 2
+            )
+            if not exact_alias and not (left_tokens == right_tokens and len(left_tokens) >= 2):
+                # Exact ceiling before spending three-plus SequenceMatcher calls.
+                # `ratio()` is 2·M/(len(a)+len(b)) and matched characters cannot
+                # exceed the shorter string, so `_ratio_ceiling` bounds it from above
+                # for free — and `sorted_similarity` compares strings of the same
+                # lengths, so the same bound holds. Adding the context boost's maximum
+                # keeps this an over-estimate, so nothing that could have qualified is
+                # skipped: the candidate set is unchanged, only the arithmetic is.
+                left_counts = left_data["counts"]
+                right_counts = right_data["counts"]
+                name_ceiling = (
+                    _ratio_ceiling(left_name, right_name, left_counts[0], right_counts[0])
+                    if left_counts and right_counts
+                    else 0.0
                 )
-                acronym_match = bool(
-                    acronym(left_name)
-                    and acronym(left_name) == acronym(right_name)
-                    and len(left_tokens) >= 2
-                    and len(right_tokens) >= 2
-                )
-                shared_knowledge = overlap(
-                    knowledge_by_entity.get(str(left["id"]), set()),
-                    knowledge_by_entity.get(str(right["id"]), set()),
-                )
-                shared_neighbours = overlap(
-                    neighbours_by_entity.get(str(left["id"]), set()),
-                    neighbours_by_entity.get(str(right["id"]), set()),
-                )
-
-                if exact_alias:
-                    confidence = 0.995
-                    method = "exact_name_or_alias"
-                elif left_tokens == right_tokens and len(left_tokens) >= 2:
-                    confidence = 0.94
-                    method = "same_tokens_different_order"
-                else:
-                    confidence = max(
-                        name_similarity * 0.70,
-                        sorted_similarity * 0.78,
-                        token_jaccard * 0.90,
-                        alias_similarity * 0.76,
-                        0.82 if acronym_match else 0.0,
+                ceiling = max(
+                    name_ceiling * 0.78,
+                    token_jaccard * 0.90,
+                    max(
+                        (
+                            _ratio_ceiling(left_variant, right_variant, left_count, right_count)
+                            for left_variant, left_count in zip(left_variants, left_counts, strict=True)
+                            for right_variant, right_count in zip(right_variants, right_counts, strict=True)
+                        ),
+                        default=0.0,
                     )
-                    context_boost = min(0.14, shared_knowledge * 0.09 + shared_neighbours * 0.07)
-                    confidence = min(0.97, confidence + context_boost)
-                    method = "name_alias_and_graph_evidence"
-
-                # A single generic token needs very strong evidence; fuzzy short names create noise.
-                if len(left_tokens) == len(right_tokens) == 1 and not exact_alias:
-                    if min(len(left_name), len(right_name)) < 5:
-                        confidence *= 0.72
-                    if shared_knowledge == 0 and shared_neighbours == 0:
-                        confidence *= 0.88
-                if confidence < min_confidence:
-                    continue
-                candidates.append(
-                    EntityResolutionCandidate(
-                        id=new_id("er"),
-                        user_id=user_id,
-                        entity_a_id=left["id"],
-                        entity_b_id=right["id"],
-                        confidence=round(confidence, 6),
-                        resolution_method=method,
-                        evidence_json={
-                            "left_name": left["name"],
-                            "right_name": right["name"],
-                            "name_similarity": round(name_similarity, 4),
-                            "sorted_token_similarity": round(sorted_similarity, 4),
-                            "token_jaccard": round(token_jaccard, 4),
-                            "alias_similarity": round(alias_similarity, 4),
-                            "exact_alias": exact_alias,
-                            "acronym_match": acronym_match,
-                            "shared_knowledge": round(shared_knowledge, 4),
-                            "shared_graph_neighbours": round(shared_neighbours, 4),
-                            "identifier_safe": not (left_data["identifier"] or right_data["identifier"]),
-                        },
-                    )
+                    * 0.76,
+                    0.82 if acronym_match else 0.0,
                 )
+                if min(0.97, ceiling + 0.14) < min_confidence:
+                    continue
+
+            name_similarity = SequenceMatcher(None, left_name, right_name).ratio()
+            sorted_similarity = SequenceMatcher(
+                None,
+                " ".join(sorted(left_tokens)),
+                " ".join(sorted(right_tokens)),
+            ).ratio()
+            alias_similarity = max(
+                (
+                    SequenceMatcher(None, left_variant, right_variant).ratio()
+                    for left_variant in left_variants
+                    for right_variant in right_variants
+                ),
+                default=0.0,
+            )
+            shared_knowledge = overlap(
+                knowledge_by_entity.get(str(left["id"]), set()),
+                knowledge_by_entity.get(str(right["id"]), set()),
+            )
+            shared_neighbours = overlap(
+                neighbours_by_entity.get(str(left["id"]), set()),
+                neighbours_by_entity.get(str(right["id"]), set()),
+            )
+
+            if exact_alias:
+                confidence = 0.995
+                method = "exact_name_or_alias"
+            elif left_tokens == right_tokens and len(left_tokens) >= 2:
+                confidence = 0.94
+                method = "same_tokens_different_order"
+            else:
+                confidence = max(
+                    name_similarity * 0.70,
+                    sorted_similarity * 0.78,
+                    token_jaccard * 0.90,
+                    alias_similarity * 0.76,
+                    0.82 if acronym_match else 0.0,
+                )
+                context_boost = min(0.14, shared_knowledge * 0.09 + shared_neighbours * 0.07)
+                confidence = min(0.97, confidence + context_boost)
+                method = "name_alias_and_graph_evidence"
+
+            # A single generic token needs very strong evidence; fuzzy short names create noise.
+            if len(left_tokens) == len(right_tokens) == 1 and not exact_alias:
+                if min(len(left_name), len(right_name)) < 5:
+                    confidence *= 0.72
+                if shared_knowledge == 0 and shared_neighbours == 0:
+                    confidence *= 0.88
+            if confidence < min_confidence:
+                continue
+            candidates.append(
+                EntityResolutionCandidate(
+                    id=new_id("er"),
+                    user_id=user_id,
+                    entity_a_id=left["id"],
+                    entity_b_id=right["id"],
+                    confidence=round(confidence, 6),
+                    resolution_method=method,
+                    evidence_json={
+                        "left_name": left["name"],
+                        "right_name": right["name"],
+                        "name_similarity": round(name_similarity, 4),
+                        "sorted_token_similarity": round(sorted_similarity, 4),
+                        "token_jaccard": round(token_jaccard, 4),
+                        "alias_similarity": round(alias_similarity, 4),
+                        "exact_alias": exact_alias,
+                        "acronym_match": acronym_match,
+                        "shared_knowledge": round(shared_knowledge, 4),
+                        "shared_graph_neighbours": round(shared_neighbours, 4),
+                        "identifier_safe": not (left_data["identifier"] or right_data["identifier"]),
+                    },
+                )
+            )
         candidates.sort(key=lambda item: item.confidence, reverse=True)
         return candidates
 

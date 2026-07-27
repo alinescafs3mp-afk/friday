@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 188
+EXPECTED_MEMBER_COUNT = 191
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -102,6 +102,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_chunked_knowledge_objects": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_chunk_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
+    "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
+    "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_objects": "(self, user_id: 'str') -> 'int'",
     "count_missions": "(self, user_id: 'str', *, statuses: 'Sequence[str] | None' = None) -> 'int'",
     "count_recent_audit": "(self, action: 'str', since: 'str', *, limit: 'int | None' = None) -> 'int'",

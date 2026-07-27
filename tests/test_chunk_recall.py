@@ -799,3 +799,48 @@ def test_candidate_ties_break_deterministically_by_id():
     scores = {f"ko_{index}": 0.5 for index in range(10)}
     ordered = [key for key, _ in heapq.nlargest(3, scores.items(), key=lambda p: (p[1], p[0]))]
     assert ordered == sorted(scores, reverse=True)[:3]
+
+
+@pytest.mark.asyncio
+async def test_the_pool_fallback_bounds_what_it_sends(storage, settings):
+    """Before the index exists, the fallback embedded the whole pool in one request.
+
+    Every candidate's FULL search text — title, summary, content, tags, kind,
+    untruncated — for up to `pool_max` objects, in a single POST. The path that
+    keeps search working before the indexer has run was therefore the request most
+    likely to time out or be refused outright: a 400-object pool of ordinary
+    articles is several megabytes.
+    """
+    from jericho.retrieval import _POOL_REQUEST_MAX_CHARS, _POOL_TEXT_MAX_CHARS, HybridSearcher
+
+    class _RecordingEmbeddings:
+        def __init__(self, settings) -> None:
+            self.settings = settings
+            self.remote_enabled = True
+            self.requests: list[list[str]] = []
+
+        async def embed(self, texts):
+            self.requests.append(list(texts))
+            return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+    storage.ensure_user("alice")
+    for index in range(40):
+        _make_ko(
+            storage,
+            "alice",
+            "проект " + "очень длинное тело документа " * 3000,
+            title=f"K{index}",
+            summary="проект",
+        )
+
+    fake = _RecordingEmbeddings(_embeddings_settings(settings, embeddings_chunk_chars=1200))
+    searcher = HybridSearcher(storage, fake)
+    await searcher.search("alice", "проект", limit=5)
+
+    assert fake.requests, "the fallback never ran"
+    # The query embedding is one request; the pool is split into bounded ones.
+    pool_requests = [batch for batch in fake.requests if len(batch) > 1 or len(batch[0]) > 200]
+    assert pool_requests, "the pool was not embedded"
+    for batch in pool_requests:
+        assert sum(len(text) for text in batch) <= max(_POOL_REQUEST_MAX_CHARS, _POOL_TEXT_MAX_CHARS)
+        assert all(len(text) <= _POOL_TEXT_MAX_CHARS for text in batch)

@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from jericho.api.deps import _audit, _parse_json_float, _request_json, _require
 from jericho.storage.models import EntityType, RelationType, ResolutionStatus
+from jericho.workers._blocking import run_blocking
 
 router = APIRouter(prefix="/api/kg", tags=["knowledge-graph"])
 
@@ -218,7 +219,9 @@ async def entity_graph(
 @router.post("/resolutions/detect", tags=["knowledge-graph"])
 async def detect_duplicates(request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.read")
-    candidates = request.app.state.kg.resolver.detect_duplicates(actor.user_id, min_confidence=0.55)
+    candidates = await run_blocking(
+        request.app.state.kg.resolver.detect_duplicates, actor.user_id, min_confidence=0.55
+    )
     return {"items": [candidate.to_row() for candidate in candidates], "count": len(candidates)}
 
 

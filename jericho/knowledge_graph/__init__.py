@@ -6,6 +6,7 @@ import json
 import re
 from collections import defaultdict, deque
 from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 from jericho.storage import JerichoStorage
@@ -368,6 +369,12 @@ class EntityResolver:
         return True
 
 
+@lru_cache(maxsize=4096)
+def _mention_pattern(term: str) -> re.Pattern[str]:
+    """Compiled once per distinct term and reused across queries and tenants."""
+    return re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", re.IGNORECASE | re.UNICODE)
+
+
 class KnowledgeGraph:
     def __init__(self, storage: JerichoStorage) -> None:
         self.storage = storage
@@ -522,10 +529,20 @@ class KnowledgeGraph:
             return []
         matches: list[dict[str, Any]] = []
         occupied: list[tuple[int, int]] = []
+        lowered = text.casefold()
         for entity in self.list_entities(user_id, limit=5000):
             best: dict[str, Any] | None = None
             for term, source in _entity_terms(entity):
-                pattern = re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", re.IGNORECASE | re.UNICODE)
+                # Necessary condition first, at C speed. The pattern below is the same
+                # literal term with word boundaries, so it cannot match unless the term
+                # occurs as a substring — and a term matching under IGNORECASE is equal
+                # under casefold, so this never hides a real mention. It was compiling
+                # one regex per entity per query: profiling a search over a
+                # 2000-entity graph showed 2000 compilations as the single largest
+                # cost in the whole request.
+                if term.casefold() not in lowered:
+                    continue
+                pattern = _mention_pattern(term)
                 for hit in pattern.finditer(text):
                     # Prefer the longest non-overlapping interpretation.  The
                     # same entity may still appear more than once, but one link
@@ -575,8 +592,11 @@ class KnowledgeGraph:
                 **entity,
                 "_match_score": round(score, 4),
                 "_match_method": method,
-                "_relation_count": len(self.get_entity_relations(entity["id"], user_id)),
-                "_knowledge_count": len(self.get_entity_knowledge(entity["id"], user_id, limit=1000)),
+                # COUNT(*), not len(rows). This ran per returned entity and pulled
+                # up to 1000 full Knowledge Objects — bodies and all — to produce a
+                # number, plus every relation with both endpoint names.
+                "_relation_count": self.storage.count_entity_relations(entity["id"], user_id),
+                "_knowledge_count": self.storage.count_entity_knowledge(user_id, entity["id"]),
             }
             for entity, score, method in scored[: max(1, min(limit, 100))]
         ]
@@ -655,9 +675,12 @@ class KnowledgeGraph:
 
         def get_entity_knowledge(entity_id: str) -> list[dict[str, Any]]:
             if entity_id not in entity_knowledge_cache:
-                entity_knowledge_cache[entity_id] = self.get_entity_knowledge(
-                    entity_id,
+                # Projection, not full rows: the traversal reads the id, the link
+                # confidence and the two scores it sorts by, and nothing else — the
+                # document bodies it used to load were read from disk and discarded.
+                entity_knowledge_cache[entity_id] = self.storage.list_entity_knowledge_refs(
                     user_id,
+                    entity_id,
                     limit=max(100, min(1000, knowledge_limit * 4)),
                 )
             return entity_knowledge_cache[entity_id]

@@ -292,6 +292,26 @@ class GraphMixin(StorageShared):
                     raise
         return relation
 
+    def count_entity_relations(self, entity_id: str, user_id: str | None = None) -> int:
+        """Relation count without the two entity joins and the full rows.
+
+        ``search_entities`` asked for this by materialising every relation of every
+        returned entity, with both endpoint names, and calling ``len()``.
+        """
+        params: list[Any] = [entity_id, entity_id]
+        user_clause = ""
+        if user_id is not None:
+            user_clause = " AND user_id=?"
+            params.append(user_id)
+        # ``user_clause`` is one fixed optional predicate; the value is bound.
+        row = self.execute(
+            "SELECT COUNT(*) AS count FROM relations "
+            "WHERE (source_entity_id=? OR target_entity_id=?)"  # nosec B608
+            f"{user_clause} AND deleted_at IS NULL",
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
     def get_entity_relations(self, entity_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         params: list[Any] = [entity_id, entity_id]
         user_clause = ""

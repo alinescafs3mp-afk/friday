@@ -254,3 +254,91 @@ def test_bridge_signature_covers_query_string(settings):
         # signed "/x?limit=25" while the server verified only "/x".
         assert signed_get("/api/knowledge/tags?limit=25").status_code == 200
         assert signed_get("/api/knowledge?tag=%D0%B8%D0%B4%D0%B5%D0%B8&limit=8").status_code == 200
+
+
+# --- the graph layer stops loading rows it never reads --------------------
+
+
+def _make_knowledge(storage, user_id: str, text: str):
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user(user_id)
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="test",
+        source_ref=new_id("src"),
+        raw_content=text,
+        content_type="text",
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=text,
+        title=text[:50],
+        summary=text[:120],
+    )
+    storage.store_knowledge_object(ko)
+    return raw, ko
+
+
+def test_entity_counts_do_not_materialise_the_rows_they_count(storage, monkeypatch):
+    """`search_entities` produced two numbers by loading everything behind them.
+
+    `_knowledge_count` came from `len(get_entity_knowledge(..., limit=1000))` — up to
+    a thousand full Knowledge Objects, bodies included — and `_relation_count` from
+    every relation with both endpoint names joined in. Per returned entity, per
+    query.
+    """
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.storage.models import EntityType
+
+    graph = KnowledgeGraph(storage)
+    storage.ensure_user("owner")
+    entity = graph.create_entity("owner", "Проект Орион", EntityType.PROJECT)
+    for index in range(30):
+        raw, ko = _make_knowledge(storage, "owner", f"заметка {index} про Орион")
+        graph.link_knowledge_to_entity(ko.id, entity["id"], "owner")
+        del raw
+
+    heavy: list[str] = []
+    original = storage.get_entity_knowledge
+
+    def watched(*args, **kwargs):
+        heavy.append("get_entity_knowledge")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(storage, "get_entity_knowledge", watched)
+
+    found = graph.search_entities("owner", "Орион", limit=5)
+    assert found and found[0]["_knowledge_count"] == 30
+    assert found[0]["_relation_count"] == 0
+    assert heavy == [], "counting still went through the full-row query"
+
+
+def test_graph_context_reads_a_projection_not_document_bodies(storage):
+    """The BFS uses the id, the link confidence and two scores. Nothing else.
+
+    It loaded up to 1000 full rows per entity — for every entity the traversal
+    dequeued, neighbours included — and the document text was read from disk and
+    discarded. `list_entity_knowledge_refs` returns the four columns that are
+    actually consulted.
+    """
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.storage.models import EntityType
+
+    graph = KnowledgeGraph(storage)
+    storage.ensure_user("owner")
+    entity = graph.create_entity("owner", "Проект Орион", EntityType.PROJECT)
+    raw, ko = _make_knowledge(storage, "owner", "Орион " + "тело документа " * 400)
+    graph.link_knowledge_to_entity(ko.id, entity["id"], "owner")
+    del raw
+
+    refs = storage.list_entity_knowledge_refs("owner", entity["id"], limit=10)
+    assert refs and set(refs[0]) == {"id", "importance", "quality_score", "_link_confidence"}
+    assert "content" not in refs[0]
+
+    context = graph.context_for_query("owner", "Орион")
+    assert any(item["knowledge_object_id"] == ko.id for item in context["knowledge_candidates"])

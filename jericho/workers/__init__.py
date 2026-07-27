@@ -240,6 +240,12 @@ class WorkerSupervisor:
             await asyncio.sleep(delay)
 
 
+def _sync_vault_page(vault: Any, objects: Sequence[dict[str, Any]]) -> None:
+    """Write one page of Knowledge Objects to the vault, off the event loop."""
+    for item in objects:
+        vault.sync_object(item)
+
+
 class WorkersManager:
     def __init__(
         self,
@@ -500,7 +506,7 @@ class WorkersManager:
         await self._for_each_user(self._entity_resolution)
 
     async def _entity_resolution(self, user_id: str) -> None:
-        candidates = self.kg.resolver.detect_duplicates(user_id, min_confidence=0.60)
+        candidates = await run_blocking(self.kg.resolver.detect_duplicates, user_id, min_confidence=0.60)
         if candidates:
             LOGGER.info("Suggested %d potential entity merges for tenant %s", len(candidates), user_id)
 
@@ -648,13 +654,19 @@ class WorkersManager:
             return
         offset = 0
         live: set[str] = set()
+        vault = self.memory_vault
         while True:
-            objects = self.storage.list_knowledge_objects(user_id, limit=250, offset=offset)
+            objects = await run_blocking(
+                self.storage.list_knowledge_objects, user_id, limit=250, offset=offset
+            )
             if not objects:
                 break
-            for item in objects:
-                self.memory_vault.sync_object(item)
-                live.add(str(item.get("id") or ""))
+            # One page per offload, not one file. `sync_object` is mkstemp + write +
+            # **fsync** + os.replace for every object, and the loop had no `await` in
+            # it at all, so a whole-corpus re-render ran on the event loop every 300
+            # seconds — the fsyncs alone stall it for as long as the disk takes.
+            await run_blocking(_sync_vault_page, vault, objects)
+            live.update(str(item.get("id") or "") for item in objects)
             offset += len(objects)
             if len(objects) < 250:
                 break
@@ -667,7 +679,7 @@ class WorkersManager:
         # alone, so a soft-deleted or IGNORED object kept a plaintext copy of its full
         # content on disk forever — while the user was told it was deleted and search
         # agreed with them.
-        removed = self.memory_vault.prune_orphans(user_id, live)
+        removed = await run_blocking(self.memory_vault.prune_orphans, user_id, live)
         if removed:
             LOGGER.info("Vault sync removed %d note(s) for objects that are no longer live", removed)
 
