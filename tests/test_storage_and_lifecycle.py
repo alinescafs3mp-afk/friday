@@ -490,19 +490,59 @@ async def test_the_vault_stops_keeping_plaintext_of_deleted_knowledge(settings, 
     vault = MemoryVault(settings.memory_vault_dir)
     manager = WorkersManager(settings, storage, None, None, memory_vault=vault)
 
+    def notes() -> list[Path]:
+        # README.md is the vault's own signpost, not a projection of a KO.
+        return [
+            path for path in (settings.memory_vault_dir / "users").rglob("*.md") if path.name != "README.md"
+        ]
+
     await manager._vault_sync("alice")  # noqa: SLF001
-    files = {path.name for path in (settings.memory_vault_dir / "users").rglob("*.md")}
-    assert len(files) == 2
+    assert len(notes()) == 2
 
     storage.soft_delete_knowledge_object(doomed.id, "alice")
     await manager._vault_sync("alice")  # noqa: SLF001
 
-    remaining = list((settings.memory_vault_dir / "users").rglob("*.md"))
+    remaining = notes()
     assert len(remaining) == 1
     body = remaining[0].read_text(encoding="utf-8")
     assert "Пароль от роутера" not in body
     assert "Рабочая заметка" in body
     del kept_raw, kept
+
+
+@pytest.mark.asyncio
+async def test_the_vault_worker_carries_entity_links_into_the_notes(settings, storage):
+    """The `[[wikilinks]]` are only useful if the sync pass actually supplies them.
+
+    `MemoryVault` renders whatever entity names it is handed; the wiring that
+    fetches them lives in the worker, one batched query per page. A rename of that
+    storage method, or a page loop that forgets to pass it, would leave every note
+    linkless and every test in `test_memory_vault_notes.py` still green.
+    """
+    from jericho.storage.models import Entity, EntityType
+    from jericho.workers import WorkersManager
+
+    _, ko = make_knowledge(storage, "alice", "Аренда квартиры на Мира")
+    entity = storage.create_entity(
+        Entity(id=new_id("ent"), user_id="alice", name="Квартира на Мира", entity_type=EntityType.OTHER)
+    )
+    storage.link_knowledge_entity("alice", ko.id, entity.id, status="accepted")
+    rejected = storage.create_entity(
+        Entity(id=new_id("ent"), user_id="alice", name="Ошибочная сущность", entity_type=EntityType.OTHER)
+    )
+    storage.link_knowledge_entity("alice", ko.id, rejected.id, status="rejected")
+
+    vault = MemoryVault(settings.memory_vault_dir)
+    manager = WorkersManager(settings, storage, None, None, memory_vault=vault)
+    await manager._vault_sync("alice")  # noqa: SLF001
+
+    note = next(
+        path for path in (settings.memory_vault_dir / "users").rglob("*.md") if path.name != "README.md"
+    )
+    body = note.read_text(encoding="utf-8")
+    assert "[[Квартира на Мира]]" in body
+    # A link the reviewer rejected is a wrong edge in the graph, not a weak one.
+    assert "Ошибочная сущность" not in body
 
 
 def test_mass_archive_without_selection_is_refused(settings):

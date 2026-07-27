@@ -20,6 +20,11 @@ from typing import Any
 
 LOGGER = logging.getLogger(__name__)
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
+# Filenames may keep any letter — the user's titles are Russian, and the ASCII-only
+# encoder above would flatten every one of them to the same empty slug. Only what
+# Windows actually forbids is removed: the reserved punctuation and control codes.
+# The `--<digest>` suffix keeps reserved device names (CON, PRN, ...) unreachable.
+_UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 
 def _safe_component(value: str, *, fallback: str = "unknown") -> str:
@@ -52,6 +57,52 @@ class MemoryVault:
     def _user_dir(self, user_id: str) -> Path:
         return self._users_dir / _safe_component(user_id)
 
+    @staticmethod
+    def _note_stem(ko_id: str) -> str:
+        """The stable half of a note's filename: identity, never the title.
+
+        A note is named `<title-slug>--<id-digest>.md`. The digest half is what
+        `delete_object` and `prune_orphans` match on, so retitling an object renames
+        its file without breaking either — and two objects that happen to share a
+        title never collide.
+        """
+        return _safe_component(ko_id, fallback="knowledge").rsplit("--", 1)[-1]
+
+    def _note_path(self, user_dir: Path, ko: dict[str, Any]) -> Path:
+        ko_id = str(ko.get("id") or "")
+        title = str(ko.get("title") or "").strip()
+        slug = _UNSAFE_FILENAME_RE.sub("-", title)
+        slug = re.sub(r"\s+", " ", slug).strip(" .-")[:60].strip(" .-")
+        return user_dir / f"{slug or 'без-названия'}--{self._note_stem(ko_id)}.md"
+
+    @staticmethod
+    def _ensure_readme(user_dir: Path, user_id: str) -> None:
+        """Name the tenant, because the directory name cannot.
+
+        The folder is `<slug>--<digest>` for multi-tenant safety, which tells a
+        person opening the vault nothing at all about whose knowledge they are
+        looking at.
+        """
+        readme = user_dir / "README.md"
+        if readme.exists():
+            return
+        with suppress(OSError):
+            readme.write_text(
+                f"# Хранилище знаний Jericho\n\n"
+                f"Аккаунт: `{user_id}`\n\n"
+                "Это **проекция**: источник истины — SQLite внутри Jericho. Правки в этих\n"
+                "файлах будут перезаписаны при следующей синхронизации; правьте знания\n"
+                "в самом Jericho.\n\n"
+                "Заметка называется `<заголовок>--<идентификатор>.md`. Раздел «Связи»\n"
+                "содержит `[[ссылки]]` на сущности — по ним и строится граф.\n",
+                encoding="utf-8",
+            )
+
+    def _existing_notes(self, user_dir: Path, ko_id: str) -> list[Path]:
+        if not user_dir.is_dir():
+            return []
+        return sorted(user_dir.glob(f"*--{self._note_stem(ko_id)}.md"))
+
     def sync_object(self, ko: dict[str, Any]) -> Path | None:
         """Write or update one knowledge object with an atomic replace."""
         ko_id = str(ko.get("id") or "").strip()
@@ -61,7 +112,8 @@ class MemoryVault:
 
         user_dir = self._user_dir(user_id)
         user_dir.mkdir(parents=True, exist_ok=True)
-        filepath = user_dir / f"{_safe_component(ko_id, fallback='knowledge')}.md"
+        self._ensure_readme(user_dir, user_id)
+        filepath = self._note_path(user_dir, ko)
         content = self._render_markdown(ko)
 
         descriptor, temp_name = tempfile.mkstemp(
@@ -74,14 +126,25 @@ class MemoryVault:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_path, filepath)
+            # A retitled object gets a new name; without this its old file stays
+            # behind as a stale twin that read_vault would return alongside it.
+            for stale in self._existing_notes(user_dir, ko_id):
+                if stale != filepath:
+                    with suppress(OSError):
+                        stale.unlink()
         finally:
             temp_path.unlink(missing_ok=True)
         return filepath
 
     def delete_object(self, ko_id: str, user_id: str) -> None:
-        """Remove the Markdown projection; the database keeps deletion history."""
-        filepath = self._user_dir(user_id) / f"{_safe_component(ko_id, fallback='knowledge')}.md"
-        filepath.unlink(missing_ok=True)
+        """Remove the Markdown projection; the database keeps deletion history.
+
+        By id-digest, not by exact name: the title is part of the filename now, and
+        deleting by a reconstructed name would miss a note whose title had changed.
+        """
+        for path in self._existing_notes(self._user_dir(user_id), ko_id):
+            with suppress(OSError):
+                path.unlink()
 
     def prune_orphans(self, user_id: str, live_ko_ids: Iterable[str]) -> int:
         """Drop projections of objects that are no longer live. Returns the count.
@@ -102,10 +165,13 @@ class MemoryVault:
         user_dir = self._user_dir(user_id)
         if not user_dir.is_dir():
             return 0
-        expected = {f"{_safe_component(ko_id, fallback='knowledge')}.md" for ko_id in live_ko_ids}
+        # Matched on the id digest, because the title half of the name changes.
+        expected = {self._note_stem(str(ko_id)) for ko_id in live_ko_ids}
         removed = 0
         for path in sorted(user_dir.glob("*.md")):
-            if path.name in expected or path.is_symlink():
+            if path.name == "README.md" or path.is_symlink():
+                continue
+            if path.stem.rsplit("--", 1)[-1] in expected:
                 continue
             with suppress(OSError):
                 path.unlink()
@@ -123,6 +189,8 @@ class MemoryVault:
             if not user_dir.is_dir():
                 continue
             for md_file in user_dir.glob("*.md"):
+                if md_file.name == "README.md":
+                    continue
                 try:
                     content = md_file.read_text(encoding="utf-8")
                     frontmatter = self._parse_frontmatter(content)
@@ -171,6 +239,17 @@ class MemoryVault:
             safe_summary = summary.replace("\n", "\n> ")
             lines.extend([f"> {safe_summary}", ""])
         lines.append(str(ko.get("content") or ""))
+        # Wikilinks, so the vault is a graph in Obsidian rather than a flat pile.
+        # Two notes about the same project meet at that project's node — which is
+        # the whole point of opening the vault outside Jericho, and it was missing:
+        # `list_knowledge_entity_links` existed and the vault never called it.
+        # Unresolved links are fine here: Obsidian shows them in the graph, and the
+        # entity note is created the moment the owner clicks one.
+        entities = [str(name).strip() for name in (ko.get("_entity_names") or []) if str(name).strip()]
+        if entities:
+            unique = list(dict.fromkeys(entities))
+            lines.extend(["", "## Связи", ""])
+            lines.extend(f"- [[{name}]]" for name in unique)
         return "\n".join(lines).rstrip() + "\n"
 
     @staticmethod

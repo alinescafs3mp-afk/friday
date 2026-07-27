@@ -665,6 +665,31 @@ class KnowledgeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else {}
 
+    def list_knowledge_entity_links_for(self, knowledge_ids: Sequence[str]) -> dict[str, list[str]]:
+        """Accepted entity NAMES per Knowledge Object, in one query for the batch.
+
+        The vault renders `[[wikilinks]]` from these. Fetched per page rather than
+        per object on purpose — a per-object lookup here would rebuild the N+1 that
+        the graph traversal was just cured of.
+        """
+        ids = [str(item) for item in knowledge_ids if item]
+        if not ids:
+            return {}
+        result: dict[str, list[str]] = {}
+        for start in range(0, len(ids), 400):
+            batch = ids[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                "SELECT l.knowledge_object_id AS ko, e.name AS name "  # nosec B608
+                "FROM knowledge_entity_links l JOIN entities e ON e.id=l.entity_id "
+                f"WHERE l.status='accepted' AND e.deleted_at IS NULL AND l.knowledge_object_id IN ({placeholders}) "
+                "ORDER BY e.name COLLATE NOCASE",
+                tuple(batch),
+            ).fetchall()
+            for row in rows:
+                result.setdefault(str(row["ko"]), []).append(str(row["name"]))
+        return result
+
     def list_knowledge_entity_links(
         self,
         user_id: str,

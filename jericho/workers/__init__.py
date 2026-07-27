@@ -250,10 +250,16 @@ class WorkerSupervisor:
             await asyncio.sleep(delay)
 
 
-def _sync_vault_page(vault: Any, objects: Sequence[dict[str, Any]]) -> None:
-    """Write one page of Knowledge Objects to the vault, off the event loop."""
+def _sync_vault_page(vault: Any, storage: Any, objects: Sequence[dict[str, Any]]) -> None:
+    """Write one page of Knowledge Objects to the vault, off the event loop.
+
+    Entity names come along so the note can carry `[[wikilinks]]`; they are fetched
+    per page rather than per object so the vault sync does not become the N+1 that
+    the graph layer just stopped being.
+    """
+    links = storage.list_knowledge_entity_links_for([str(item.get("id") or "") for item in objects])
     for item in objects:
-        vault.sync_object(item)
+        vault.sync_object({**item, "_entity_names": links.get(str(item.get("id") or ""), [])})
 
 
 class WorkersManager:
@@ -675,7 +681,7 @@ class WorkersManager:
             # **fsync** + os.replace for every object, and the loop had no `await` in
             # it at all, so a whole-corpus re-render ran on the event loop every 300
             # seconds — the fsyncs alone stall it for as long as the disk takes.
-            await run_blocking(_sync_vault_page, vault, objects)
+            await run_blocking(_sync_vault_page, vault, self.storage, objects)
             live.update(str(item.get("id") or "") for item in objects)
             offset += len(objects)
             if len(objects) < 250:
