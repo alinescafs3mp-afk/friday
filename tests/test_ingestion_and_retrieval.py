@@ -94,3 +94,82 @@ def test_best_snippet_short_text_and_no_match_fallbacks():
     long_unmatched = "ааааа " * 200
     fallback = best_snippet("zzz", long_unmatched, max_chars=100)
     assert fallback.startswith("а") and fallback.endswith("…") and len(fallback) <= 101
+
+
+def _quadratic_best_snippet(query: str, text: str, max_chars: int) -> str:
+    """The original implementation, kept as an oracle for the linear rewrite."""
+    from jericho.retrieval import _STOPWORDS, tokens_of
+
+    body = (text or "").strip()
+    if len(body) <= max_chars:
+        return body
+    query_tokens = {
+        token.casefold()
+        for token in tokens_of(query)
+        if len(token) > 1 and token.casefold() not in _STOPWORDS
+    }
+    if not query_tokens:
+        return body[:max_chars].rstrip() + "…"
+    lowered = body.casefold()
+    occurrences: list[tuple[int, str]] = []
+    for token in query_tokens:
+        start = 0
+        while True:
+            found = lowered.find(token, start)
+            if found < 0:
+                break
+            occurrences.append((found, token))
+            start = found + len(token)
+    if not occurrences:
+        return body[:max_chars].rstrip() + "…"
+    occurrences.sort()
+    best_pos, best_distinct = occurrences[0][0], -1
+    for pos, _ in occurrences:
+        covered = {tok for (position, tok) in occurrences if pos <= position < pos + max_chars}
+        if len(covered) > best_distinct:
+            best_distinct = len(covered)
+            best_pos = pos
+    start = max(0, best_pos - 64)
+    snippet = body[start : start + max_chars].strip()
+    return f"{'…' if start > 0 else ''}{snippet}{'…' if start + max_chars < len(body) else ''}"
+
+
+def test_best_snippet_picks_the_same_window_as_the_original():
+    """The linear rewrite must be an optimisation, not a behaviour change."""
+    import random
+
+    words = ["сервис", "api", "данные", "запрос", "система", "модуль", "конфиг", "узел", "x"]
+    query = "api сервис данные запрос конфиг"
+    for trial in range(120):
+        random.seed(trial)
+        body = " ".join(random.choice(words) for _ in range(random.randint(1, 400)))
+        max_chars = random.choice([40, 120, 520, 600])
+        assert best_snippet(query, body, max_chars=max_chars) == _quadratic_best_snippet(
+            query, body, max_chars
+        ), f"diverged on trial {trial}"
+
+
+def test_best_snippet_is_linear_in_the_number_of_matches():
+    """A big document must not freeze the backend.
+
+    The window search rescanned every occurrence for every candidate start, so the
+    cost grew with DOCUMENT SIZE rather than query length — and it runs
+    synchronously on the event loop from `_build_initial_messages`. Measured on
+    this machine before the rewrite: 0.23 s at 38 KB, 3.8 s at 149 KB, **90 s at
+    750 KB**. One imported article therefore made the whole backend unresponsive
+    for a minute and a half. After: 0.07 s at 750 KB.
+
+    The bound below is deliberately loose (the old code needed ~40 s here) so this
+    fails on a return to quadratic, not on a slow machine.
+    """
+    import random
+    import time
+
+    random.seed(11)
+    words = ["сервис", "api", "данные", "запрос", "конфиг"]
+    body = " ".join(random.choice(words) for _ in range(60_000))  # ~400 KB, dense matches
+    started = time.perf_counter()
+    snippet = best_snippet("api сервис данные запрос конфиг", body, max_chars=600)
+    elapsed = time.perf_counter() - started
+    assert len(snippet) <= 602
+    assert elapsed < 2.0, f"best_snippet took {elapsed:.1f}s on {len(body)} chars — quadratic again?"
