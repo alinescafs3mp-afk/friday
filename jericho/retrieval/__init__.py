@@ -991,7 +991,14 @@ class HybridSearcher:
             )
             kind_alignment = self._kind_alignment(clean_query, str(item.get("knowledge_kind", "note")))
             noise_penalty = self._noise_penalty(item)
-            identifier_penalty = 0.22 if query_identifiers and identifiers < 1.0 else 0.0
+            # Identifier coverage is NOT a weight. A candidate missing any query
+            # identifier is dropped outright by `identifier_mismatch` in
+            # `_exclusion_reason` below, and that gate fires for exactly the
+            # candidates a penalty here would touch — both read the same coverage
+            # map over the same keys. A `-0.22` term lived here for a while and
+            # could never change a single ranking: whoever tunes strictness must
+            # tune the gate, so the knob that does nothing is gone.
+            fts_bonus = w_fts_bonus if document_id in fts_ranking else 0.0
             base = (
                 rrf.get(document_id, 0.0)
                 + lexical * 0.19
@@ -1004,9 +1011,8 @@ class HybridSearcher:
                 + user_feedback * w_feedback
                 + usage_signal * w_usage
                 + kind_alignment * w_kind
-                + (w_fts_bonus if document_id in fts_ranking else 0.0)
+                + fts_bonus
                 - noise_penalty * w_noise
-                - identifier_penalty
             )
             quality_factor = 0.42 + quality * 0.38 + promotion * 0.20
             final_scores[document_id] = max(0.0, base * lifecycle_factor * quality_factor)
@@ -1032,8 +1038,16 @@ class HybridSearcher:
                 "feedback": round(user_feedback, 6),
                 "usage": round(usage_signal, 6),
                 "kind_alignment": round(kind_alignment, 6),
+                # The APPLIED bonus, not the weight: an admin replaying the blend
+                # from this map must get the published score back. This term and
+                # `quality_factor` used to be missing, and with a median gap of
+                # ~0.003 between adjacent ranks an invisible 0.018 was large
+                # enough to explain almost any neighbouring pair — the trace
+                # claimed to show the ranker's arithmetic and did not add up.
+                "fts_bonus": round(fts_bonus, 6),
                 "noise_penalty": round(noise_penalty, 6),
                 "lifecycle_factor": round(lifecycle_factor, 6),
+                "quality_factor": round(quality_factor, 6),
             }
 
         def _exclusion_reason(
@@ -1060,10 +1074,28 @@ class HybridSearcher:
                 and grp < graph_evidence_threshold
             ):
                 return "insufficient_evidence"
+            # A deprecated record needs STRONGER evidence than a live one to earn a
+            # slot — but every kind of evidence must count. This gate once looked
+            # only at FTS membership, `lex` and `grp`, so a deprecated note recalled
+            # by meaning (cosine 0.9) or by an exact title/tag match was gone for
+            # good: two lines above, `insufficient_evidence` had just accepted
+            # `emb >= dense_min` / `fld >= 0.12` as proof, and this gate threw the
+            # object away without looking at either. `lex >= 0.25` alone could not
+            # save it — measured across 11 286 query x candidate pairs on a real
+            # corpus, p99 lexical is 0.153; even a query built from a document's own
+            # title clears 0.25 in 8.6% of cases. DATA_LIFECYCLE promises a
+            # deprecated record «остаётся в поиске» with a demoted rank, and the
+            # demotion already happens in the blend (`lifecycle_factor` 0.36).
+            #
+            # FTS membership is `evidence_ranking`, not `fts_ranking`, for the same
+            # measured reason as `insufficient_evidence`: `"по"*` matches 314 of 342
+            # documents, so a stopword-prefix hit is presence, not proof.
             if (
                 item.get("lifecycle_stage") == "deprecated"
-                and document_id not in fts_ranking
+                and document_id not in evidence_ranking
                 and lex < 0.25
+                and fld < 0.12
+                and emb < self._dense_evidence_min
                 and grp < 0.45
             ):
                 return "deprecated_weak"

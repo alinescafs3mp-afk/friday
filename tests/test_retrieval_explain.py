@@ -59,6 +59,54 @@ async def test_explain_trace_reports_returned_and_discarded(settings, storage):
 
 
 @pytest.mark.asyncio
+async def test_score_reconstructs_from_components(settings, storage):
+    """The published components must reproduce the published score, exactly.
+
+    This is the trace's contract — «показывает ровно то, что применил ранкер» —
+    and it is also a tripwire: any term added to the blend without being added to
+    `components` (an invisible bonus, a resurrected penalty) lands here first.
+    The applied `fts_bonus` and the multiplicative `quality_factor` were once
+    missing, and with a median gap of ~0.003 between adjacent ranks an unseen
+    0.018 could explain almost any neighbouring pair the admin was staring at.
+    """
+    await _seed(settings, storage)
+    searcher = HybridSearcher(storage)
+
+    result = await searcher.search("alice", "Сервер Москва", limit=5, explain=True)
+    trace = result["trace"]
+    assert trace
+    statuses = {row["status"] for row in trace}
+    assert "returned" in statuses  # the reconstruction must cover live results…
+    assert "discarded" in statuses  # …and rejected candidates alike
+
+    bonuses = set()
+    for row in trace:
+        c = row["components"]
+        base = (
+            c["rrf"]
+            + c["lexical"] * 0.19
+            + c["field"] * 0.17
+            + c["embedding"] * 0.17
+            + c["graph"] * 0.16
+            + c["importance"] * 0.035
+            + c["quality"] * 0.045
+            + c["promotion"] * 0.03
+            + c["feedback"] * 0.05
+            + c["usage"] * 0.028
+            + c["kind_alignment"] * 0.035
+            + c["fts_bonus"]
+            - c["noise_penalty"]
+        )
+        expected = max(0.0, base * c["lifecycle_factor"] * c["quality_factor"])
+        assert row["score"] == pytest.approx(expected, abs=1e-5), row["title"]
+        bonuses.add(c["fts_bonus"])
+    # The seed guarantees both sides of the bonus: the FTS hit carries 0.018,
+    # the recall-pool bystander carries 0.0 — so a trace that simply omitted
+    # the field again (all zeros) could not pass.
+    assert bonuses == {0.0, 0.018}
+
+
+@pytest.mark.asyncio
 async def test_plain_search_has_no_trace_key(settings, storage):
     await _seed(settings, storage)
     searcher = HybridSearcher(storage)
