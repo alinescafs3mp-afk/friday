@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jericho.agent_runtime.llm import LLMRouter
@@ -41,6 +43,23 @@ from jericho.storage.models import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+class MissionStepUnavailable(RuntimeError):
+    """The step could not be executed at all — typically the model is unreachable.
+
+    A distinct type because the alternative was returning a human-readable
+    apology string, which ``_run_task`` could not tell apart from a real answer:
+    it stored the apology as the step's DONE result, routed it to the Inbox as a
+    knowledge candidate, and ``_finalize`` then reported the mission COMPLETED.
+    A mission that produced nothing must not look like one that succeeded.
+    """
+
+
+# A RUNNING row older than this is not running: the worker tick is bounded at 900 s
+# for up to three tasks, so nothing legitimate lives an hour. Reclaim covers the case
+# no in-process handler can — the process was killed between the two writes.
+_STALE_RUNNING_SECONDS = 3600
 
 # Tools a mission step may call: read/search/gather only.  Side-effecting tools
 # (memory_save, entity_create, entity_link) are excluded because a mission's
@@ -246,6 +265,8 @@ class ExecutiveService:
             statuses=[MissionStatus.READY.value, MissionStatus.RUNNING.value],
             limit=self.settings.executive_max_active_missions,
         )
+        for mission in active:
+            self._reclaim_stale_tasks(mission)
         ran = 0
         for mission in active:
             if ran >= _MAX_TASKS_PER_TICK:
@@ -256,6 +277,43 @@ class ExecutiveService:
             except Exception:
                 LOGGER.exception("Mission tick failed for %s", mission.get("id"))
         return {"ran": ran, "active": len(active)}
+
+    def _reclaim_stale_tasks(self, mission: dict[str, Any]) -> int:
+        """Return long-RUNNING tasks to PENDING so the mission can move again.
+
+        The in-process handler covers cancellation; nothing in-process covers the
+        process being killed between "mark RUNNING" and "mark DONE". Without this the
+        row stays RUNNING for good and the mission never finalizes — there is no
+        lease and no heartbeat on a mission task.
+
+        The window is an hour against a 900 s tick budget, so a healthy long task is
+        never reset under itself. A reclaimed step re-runs, which is safe: the Inbox
+        route is idempotent on ``mission:<id>:task:<seq>``.
+        """
+        reclaimed = 0
+        cutoff = datetime.now(UTC) - timedelta(seconds=_STALE_RUNNING_SECONDS)
+        for task in self.storage.get_mission_tasks(mission["id"], mission["user_id"]):
+            if task.get("status") != TaskStatus.RUNNING.value:
+                continue
+            started = str(task.get("started_at") or "")
+            try:
+                began = datetime.fromisoformat(started) if started else None
+            except ValueError:
+                began = None
+            if began is not None and began.tzinfo is None:
+                began = began.replace(tzinfo=UTC)
+            if began is not None and began > cutoff:
+                continue
+            LOGGER.warning(
+                "Mission task stuck in running since %s — returning it to pending: %s",
+                started or "unknown",
+                task["id"],
+            )
+            self.storage.update_mission_task_fields(
+                task["id"], mission["user_id"], status=TaskStatus.PENDING.value, started_at=""
+            )
+            reclaimed += 1
+        return reclaimed
 
     async def _advance_mission(self, mission: dict[str, Any]) -> bool:
         mission_id = mission["id"]
@@ -318,6 +376,18 @@ class ExecutiveService:
         upstream = self._upstream_context(task, by_seq)
         try:
             text, tools_used = await self._execute_task(mission, task, upstream, actor)
+        except MissionStepUnavailable as exc:
+            # Named separately from a crash so the operator can tell "the model was
+            # down" from "the step is broken" without opening the logs.
+            LOGGER.warning("Mission task could not run: %s (%s)", task_id, exc)
+            self.storage.update_mission_task_fields(
+                task_id,
+                user_id,
+                status=TaskStatus.FAILED.value,
+                error=f"step unavailable: {exc}",
+                completed_at=utc_now(),
+            )
+            return
         except Exception:
             LOGGER.exception("Mission task execution failed: %s", task_id)
             self.storage.update_mission_task_fields(
@@ -328,6 +398,19 @@ class ExecutiveService:
                 completed_at=utc_now(),
             )
             return
+        except BaseException:
+            # CancelledError (the worker's 900 s timeout) is a BaseException, so it
+            # used to unwind straight past the handler above and leave the row
+            # RUNNING for good: `_pick_runnable` never selects a RUNNING task and
+            # `_finalize` needs every task terminal, so the mission was wedged with
+            # no lease, heartbeat or reaper to notice. Hand it back to PENDING and
+            # let the cancellation continue.
+            LOGGER.warning("Mission task interrupted, returning it to pending: %s", task_id)
+            with suppress(Exception):
+                self.storage.update_mission_task_fields(
+                    task_id, user_id, status=TaskStatus.PENDING.value, started_at=""
+                )
+            raise
 
         inbox_id: str | None = None
         text = text.strip()[:_MAX_RESULT_CHARS]
@@ -455,9 +538,13 @@ class ExecutiveService:
             final_turn = classify_tool_turn(str(final.get("content") or ""))
             if final_turn.kind == "answer" and final_turn.text:
                 return final_turn.text.strip(), tools_used
-        except Exception:
+        except Exception as exc:
             LOGGER.exception("Mission final synthesis failed")
-        return "Не удалось собрать результат шага автоматически.", tools_used
+            raise MissionStepUnavailable("final synthesis failed") from exc
+        # Reached when the model answered but produced nothing usable. Still a
+        # failure of the step, not a result: returning prose here is what made a
+        # dead endpoint look like a completed mission.
+        raise MissionStepUnavailable("the model returned no usable result for this step")
 
     @staticmethod
     def _classify(result: dict[str, Any]) -> tuple[Any, str | None, ToolTurn]:

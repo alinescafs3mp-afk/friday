@@ -283,3 +283,101 @@ async def test_backlog_proposer_dedupes_worker_missions(settings, storage):
         assert len(worker_missions) == 1
     finally:
         await web.close()
+
+
+class _DeadEndpointLLM:
+    """Plans fine, then every step call fails — a model that went away mid-mission."""
+
+    enabled = True
+    model = "dead"
+
+    async def chat(self, messages, **kwargs):
+        system = str(messages[0].get("content") or "")
+        if "планировщик миссий" in system:
+            return {
+                "content": json.dumps(
+                    {
+                        "title": "Один шаг",
+                        "tasks": [
+                            {
+                                "seq": 1,
+                                "kind": "produce",
+                                "title": "Итог",
+                                "instruction": "Сведи итог",
+                                "depends_on": [],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+            }
+        raise RuntimeError("connection refused")
+
+
+@pytest.mark.asyncio
+async def test_a_dead_model_fails_the_step_instead_of_completing_the_mission(settings, storage):
+    """An unreachable endpoint must not produce a "successful" mission.
+
+    Every round of the tool loop broke and the final synthesis raised, and the
+    executor returned the literal string "Не удалось собрать результат шага
+    автоматически." as the step's answer. `_run_task` could not tell that from a
+    real result: it stored it as the DONE result, routed it to the Inbox as a
+    knowledge candidate, and `_finalize` saw done > 0 and reported the mission
+    COMPLETED. The user is told their mission finished and hands back an apology.
+    """
+    autonomous = replace(settings, autonomy_enabled=True)
+    storage.ensure_user("alice", preset_key="user")
+    executive, _, web = await _build_executive(autonomous, storage, llm=_DeadEndpointLLM())
+    try:
+        mission = await executive.create_mission("alice", "Собрать обзор рынка", origin=MissionOrigin.USER)
+        await executive.tick()
+
+        tasks = storage.get_mission_tasks(mission["id"], "alice")
+        assert [task["status"] for task in tasks] == ["failed"]
+        assert "unavailable" in str(tasks[0]["error"])
+        assert not tasks[0]["result"]
+        assert not tasks[0]["inbox_id"], "an apology was routed to the Inbox as knowledge"
+
+        refreshed = storage.get_mission(mission["id"], "alice")
+        assert refreshed["status"] == "failed"
+        assert storage.list_inbox("alice", limit=50) == []
+    finally:
+        await web.close()
+
+
+@pytest.mark.asyncio
+async def test_a_task_stuck_in_running_is_reclaimed(settings, storage):
+    """Nothing in-process can cover the process being killed mid-task.
+
+    `_run_task` writes RUNNING and only leaves that state via its own handlers, so
+    a kill between the two writes strands the row for good: `_pick_runnable` never
+    selects a RUNNING task and `_finalize` needs every task terminal. There is no
+    lease and no heartbeat on a mission task, so the mission is wedged forever.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    autonomous = replace(settings, autonomy_enabled=True)
+    storage.ensure_user("alice", preset_key="user")
+    executive, _, web = await _build_executive(autonomous, storage, llm=PlanLLM())
+    try:
+        mission = await executive.create_mission("alice", "Разобрать Atlas", origin=MissionOrigin.USER)
+        task = storage.get_mission_tasks(mission["id"], "alice")[0]
+        stale = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
+        storage.update_mission_task_fields(task["id"], "alice", status="running", started_at=stale)
+
+        # A healthy long task must NOT be reset under itself.
+        fresh = storage.get_mission_tasks(mission["id"], "alice")[-1]
+        if fresh["id"] != task["id"]:
+            storage.update_mission_task_fields(
+                fresh["id"], "alice", status="running", started_at=datetime.now(UTC).isoformat()
+            )
+
+        await executive.tick()
+
+        reclaimed = storage.get_mission_tasks(mission["id"], "alice")
+        by_id = {item["id"]: item for item in reclaimed}
+        assert by_id[task["id"]]["status"] != "running"
+        if fresh["id"] != task["id"]:
+            assert by_id[fresh["id"]]["status"] == "running"
+    finally:
+        await web.close()
