@@ -201,6 +201,14 @@ class CoreMixin(StorageShared):
             conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'").fetchone()
             is not None
         )
+        # Probed BEFORE the FTS DDL runs, like the line above. Asking afterwards
+        # always answers "yes" — the table has just been created — and the rebuild
+        # that populates an external-content index over pre-existing rows is then
+        # skipped, leaving an index that reports rows and matches nothing.
+        raw_fts_preexisting = (
+            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_fts'").fetchone()
+            is not None
+        )
         # Create/recognize tables first, then add legacy columns, and only then
         # create indexes that reference those columns. Keep this core migration in
         # one explicit transaction: sqlite3's executescript() commits an existing
@@ -249,6 +257,12 @@ class CoreMixin(StorageShared):
                 except sqlite3.DatabaseError:
                     LOGGER.warning("Rebuilding an inconsistent knowledge FTS index")
                     conn.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')")
+            # Same contract for the source index: an external-content FTS table
+            # created over existing rows starts EMPTY, and the update triggers would
+            # then try to delete index entries that were never written.
+            raw_count = conn.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0]
+            if raw_count and not raw_fts_preexisting:
+                conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('rebuild')")
         except sqlite3.OperationalError as exc:
             if self._is_sqlite_busy(exc):
                 raise

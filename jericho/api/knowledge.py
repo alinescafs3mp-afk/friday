@@ -37,6 +37,38 @@ async def list_knowledge(
     return {"items": items, "count": len(items)}
 
 
+@router.get("/sources", tags=["knowledge"])
+async def search_sources(
+    request: Request,
+    q: str,
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Find the SOURCE document a phrase came from, not the knowledge derived from it.
+
+    A Knowledge Object keeps a normalised, often summarised version; the original
+    characters live in the Raw Object and, until now, no index covered them —
+    measured on this installation, 93% of everything ingested. This answers "which
+    file did I read that in", which is a provenance question, not a recall one.
+
+    Deliberately NOT wired into `HybridSearcher`, the agent context or any tool:
+    source text is evidence about where something came from, and the place where
+    resurrecting rejected material would do the most damage is an agent quoting it
+    as fact. Material the reviewer marked IGNORED is excluded — see
+    `storage.search_raw_objects`.
+    """
+    actor = _require(request, "knowledge.read")
+    items = request.app.state.storage.search_raw_objects(actor.user_id, q, limit=limit)
+    return {
+        "query": q,
+        "items": items,
+        "count": len(items),
+        # Said out loud rather than implied: a source search that finds nothing is
+        # not proof the phrase was never ingested, only that it is not in reachable
+        # material.
+        "excludes": "ignored",
+    }
+
+
 @router.get("/tags", tags=["knowledge"])
 async def list_knowledge_tags(
     request: Request,

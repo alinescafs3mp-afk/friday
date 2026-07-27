@@ -24,6 +24,7 @@ from jericho.storage._base import (
     utc_now,
     validate_user_id,
 )
+from jericho.storage._knowledge import _fts_terms
 
 
 class IntakeMixin(StorageShared):
@@ -81,6 +82,67 @@ class IntakeMixin(StorageShared):
                     ) from None
                 return self._raw_from_row(existing)
             raise
+
+    def search_raw_objects(self, user_id: str, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Full-text search over SOURCE text, obeying the Inbox verdict.
+
+        `raw_objects` holds the original ingested characters; the Knowledge Object
+        holds a normalised, often summarised version. Measured on the owner's
+        database, 93% of ingested characters lived only in the former and no index
+        covered them, so an exact phrase from a PDF was unfindable once the review
+        step had condensed it.
+
+        **IGNORED material is not reachable here.** DATA_LIFECYCLE §3 makes
+        "игнорировать" a verdict: the Knowledge Object is soft-deleted and the
+        material leaves retrieval, while the Raw Object survives *for provenance*.
+        Returning its text to a search would reverse 65 explicit decisions on this
+        very database — the same class of resurrection already fixed three times
+        (the startup migration re-linking ignored rows, the vault keeping plaintext
+        of soft-deleted objects, and three review-gate bypasses).
+
+        Soft-deleted raw objects are excluded for the same reason. `pending`,
+        `classified` and `archived` ARE reachable: pending is material awaiting a
+        decision, and archived is Inbox tidying that explicitly leaves the object
+        alone.
+
+        The test is ``NOT EXISTS ... status='ignored'``, not a join on the current
+        status, because one Raw Object can carry SEVERAL Inbox rows — `ingest_text`
+        returns the existing raw object on an idempotent replay while still creating
+        a review row. A join then produced the object once per row and let it
+        through whenever any one of them was not the rejection. Any rejection hides
+        it; that is the direction to be wrong in.
+        """
+        text = " ".join((query or "").split()).strip()
+        if not text or not self._fts_available:
+            return []
+        terms = _fts_terms(text)
+        if not terms:
+            return []
+        match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+        try:
+            rows = self.execute(
+                """SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                          snippet(raw_fts, 0, '', '', '…', 24) AS excerpt,
+                          (SELECT i2.status FROM inbox i2 WHERE i2.raw_object_id=r.id
+                            ORDER BY i2.reviewed_at DESC, i2.created_at DESC LIMIT 1) AS inbox_status,
+                          (SELECT k.id FROM knowledge_objects k
+                            WHERE k.raw_object_id=r.id AND k.deleted_at IS NULL
+                            ORDER BY k.version DESC LIMIT 1) AS knowledge_object_id
+                   FROM raw_fts
+                   JOIN raw_objects r ON r.rowid=raw_fts.rowid
+                   WHERE r.user_id=? AND r.deleted_at IS NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM inbox i
+                          WHERE i.raw_object_id=r.id AND i.status='ignored'
+                     )
+                     AND raw_fts MATCH ?
+                   ORDER BY bm25(raw_fts) ASC, r.received_at DESC
+                   LIMIT ?""",
+                (user_id, match_query, max(1, min(limit, 100))),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(row) for row in rows]
 
     def get_raw_object(self, raw_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         if user_id is None:

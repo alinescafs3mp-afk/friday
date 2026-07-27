@@ -56,7 +56,7 @@ from jericho.storage.models import (
 # Named for the package, not this module: `__name__` here is "jericho.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("jericho.storage")
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -630,6 +630,9 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_raw ON knowledge_objects(raw_object_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_version
     ON knowledge_object_versions(knowledge_object_id, version);
 CREATE INDEX IF NOT EXISTS idx_inbox_user_status ON inbox(user_id, status, created_at DESC);
+-- Source search resolves each FTS hit to its inbox verdict; without this it is a
+-- scan of the whole inbox per hit.
+CREATE INDEX IF NOT EXISTS idx_inbox_raw_status ON inbox(raw_object_id, status);
 CREATE INDEX IF NOT EXISTS idx_inbox_user_action
     ON inbox(user_id, suggested_action, promotion_score DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entities_user_type ON entities(user_id, entity_type, normalized_name);
@@ -704,6 +707,34 @@ CREATE TRIGGER IF NOT EXISTS knowledge_objects_au AFTER UPDATE ON knowledge_obje
     VALUES ('delete', old.rowid, old.content, old.title, old.summary, old.tags_json);
     INSERT INTO knowledge_fts(rowid, content, title, summary, tags_json)
     VALUES (new.rowid, new.content, new.title, new.summary, new.tags_json);
+END;
+
+-- Source text, so an exact phrase from the original document is findable even when
+-- the Knowledge Object kept only a summary. Measured on the owner's database: 93%
+-- of ingested characters lived in `raw_objects` and no index covered them.
+--
+-- Reachability is decided by the INBOX VERDICT at query time, never here — see
+-- `search_raw_objects`. Indexing everything and filtering on read is deliberate:
+-- a verdict can be revised (an ignored item returned to pending), and an index
+-- that had silently dropped the row could not follow.
+CREATE VIRTUAL TABLE IF NOT EXISTS raw_fts USING fts5(
+    raw_content,
+    content=raw_objects,
+    content_rowid=rowid,
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS raw_objects_ai AFTER INSERT ON raw_objects BEGIN
+    INSERT INTO raw_fts(rowid, raw_content) VALUES (new.rowid, new.raw_content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS raw_objects_ad AFTER DELETE ON raw_objects BEGIN
+    INSERT INTO raw_fts(raw_fts, rowid, raw_content) VALUES ('delete', old.rowid, old.raw_content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS raw_objects_au AFTER UPDATE ON raw_objects BEGIN
+    INSERT INTO raw_fts(raw_fts, rowid, raw_content) VALUES ('delete', old.rowid, old.raw_content);
+    INSERT INTO raw_fts(rowid, raw_content) VALUES (new.rowid, new.raw_content);
 END;
 """
 _ENTITY_IDENTIFIER_RE = re.compile(r"^[A-Za-zА-ЯЁа-яё0-9][A-Za-zА-ЯЁа-яё0-9._+#/@:-]{1,63}$")

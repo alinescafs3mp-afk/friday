@@ -318,6 +318,39 @@ def _doctor(args: argparse.Namespace) -> int:
     return 0 if result.get("state") in {"ready", "attention"} else 1
 
 
+def _search_source(args: argparse.Namespace) -> int:
+    """Search the SOURCE text of ingested material, respecting the Inbox verdict."""
+    from jericho.config import ensure_runtime_dirs, load_settings
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    try:
+        user_id = args.user or LEGACY_OWNER_USER_ID
+        items = storage.search_raw_objects(user_id, args.query, limit=args.limit)
+        if args.json:
+            _json_print({"query": args.query, "items": items, "count": len(items)})
+            return 0
+        if not items:
+            print("Ничего не найдено в доступном исходном тексте.")
+            # A source search finding nothing is not proof the phrase was never
+            # ingested — only that it is not in material the reviewer kept.
+            print("Отклонённый в Inbox материал сюда не входит: это вердикт, а не фильтр.")
+            return 0
+        for item in items:
+            marker = "знание" if item.get("knowledge_object_id") else item.get("inbox_status") or "—"
+            print(f"[{marker}] {item.get('source')}: {item.get('source_ref') or item.get('id')}")
+            excerpt = str(item.get("excerpt") or "").replace("\n", " ")
+            if excerpt:
+                print(f"    …{excerpt}…")
+        print(f"\nНайдено: {len(items)}")
+        return 0
+    finally:
+        storage.close()
+
+
 def _events(args: argparse.Namespace) -> int:
     """What happened while nobody was watching."""
     from jericho.config import load_settings
@@ -941,6 +974,16 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("--limit", type=int, default=50, help="How many to show (newest first)")
     events.add_argument("--json", action="store_true", help="Machine-readable output")
     events.set_defaults(handler=_events)
+
+    source = sub.add_parser(
+        "search-source",
+        help="Search the original ingested text (not the knowledge derived from it)",
+    )
+    source.add_argument("query", help="Phrase to look for in source documents")
+    source.add_argument("--user", help="Target account (default: the owner)")
+    source.add_argument("--limit", type=int, default=20, help="How many sources to show")
+    source.add_argument("--json", action="store_true", help="Machine-readable output")
+    source.set_defaults(handler=_search_source)
 
     bootstrap = sub.add_parser(
         "eval-bootstrap",
