@@ -7,7 +7,9 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+from jericho.retrieval._keyboard import switched
 from jericho.telegram_bridge._base import (
+    BOT_COMMANDS,
     Any,
     BridgeShared,
     MediaTooLargeError,
@@ -18,6 +20,40 @@ from jericho.telegram_bridge._base import (
 
 
 class CommandsMixin(BridgeShared):
+    @staticmethod
+    def _read_command_layout(text: str) -> str:
+        """Recognise a command typed without switching the keyboard layout.
+
+        `/inbox` on a Russian layout comes out as «.штищч» — even the slash
+        changes, because that key writes a full stop there. So it does not look
+        like a command at all and is answered as a chat message, which for
+        `/inbox` or `/new` is a confusing non-answer rather than a small mistake.
+
+        Accepted only when the re-reading names a command that actually exists.
+        A message legitimately starting with a full stop flips to something
+        starting with a slash too, and «...ну ладно» must stay a message.
+
+        ONLY the command word is re-read; the argument is left exactly as typed.
+        Routing a message is one thing, rewriting its content is another — and
+        `/note` writes that content into the knowledge base, where a wrong guess
+        would be stored as the user's own words. If the argument was mistyped
+        too, the search path repairs it at query time and a note shows the user
+        their own text to resend.
+        """
+        if text.startswith("/") or not text:
+            return text
+        head = text.split(maxsplit=1)[0] if text.split() else ""
+        flipped = switched(head)
+        if not head or not flipped.startswith("/"):
+            return text
+        name = flipped.split("@", 1)[0].casefold().lstrip("/")
+        if name not in {command for command, _ in BOT_COMMANDS}:
+            return text
+        # The remainder is sliced, not re-joined: whitespace is part of the
+        # argument. A note sent from a phone is multi-line, and rebuilding it
+        # around a single space is the exact defect `_process_update` documents.
+        return flipped + text[len(head) :]
+
     async def _process_update(
         self,
         telegram: httpx.AsyncClient,
@@ -56,6 +92,7 @@ class CommandsMixin(BridgeShared):
         # fragment canonicalised as knowledge. "/note\nfoo" produced an empty
         # argument and the usage message. A multi-line note is the normal way to
         # send one from a phone.
+        text = self._read_command_layout(text)
         parts = text.split(maxsplit=1)
         command = parts[0].split("@", 1)[0].casefold() if text.startswith("/") else ""
         argument = parts[1].strip() if command and len(parts) > 1 else ""

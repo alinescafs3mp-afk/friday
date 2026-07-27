@@ -224,7 +224,7 @@ EXPECTED_COMMANDS = {
     "/why",
     "/work",
 }
-EXPECTED_BRIDGE_COUNT = 37
+EXPECTED_BRIDGE_COUNT = 38
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",
@@ -247,6 +247,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
     "_process_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None') -> 'None'",
     "_register_commands": "(self, telegram: 'httpx.AsyncClient') -> 'None'",
+    "_read_command_layout": "(text: 'str') -> 'str'",
     "_response_reply_markup": "(response: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "_select_media": "(message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'tuple[dict[str, Any] | None, str, str, str]'",
     "_send_browse": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
@@ -422,9 +423,19 @@ def test_a_multiline_command_keeps_its_whole_argument() -> None:
     # Over the AST, not the text: the explanatory comment in that module quotes the
     # old expression, and a substring search would match the very explanation.
     tree = ast.parse(Path(commands_module.__file__).read_text(encoding="utf-8"))
+    # Scoped to the parsing function rather than the whole module: sibling
+    # helpers legitimately split too (`_read_command_layout` reads the command
+    # word to recognise a wrong keyboard layout), and a module-wide count would
+    # turn every future helper into a false alarm while saying nothing about the
+    # defect it exists to catch.
+    parser = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_process_update"
+    )
     calls = [
         node.func.attr
-        for node in ast.walk(tree)
+        for node in ast.walk(parser)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     ]
     assert "partition" not in calls, (
