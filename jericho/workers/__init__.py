@@ -104,6 +104,16 @@ class WorkerSupervisor:
     def snapshot(self) -> dict[str, dict[str, Any]]:
         return {name: dict(state) for name, state in self._states.items()}
 
+    @property
+    def max_timeout_sec(self) -> float:
+        """The longest a single task may hold a thread. Shutdown's drain budget.
+
+        Derived rather than guessed: a constant shorter than this abandons work that
+        is still legitimately running, and one longer than it just delays a shutdown
+        that is already stuck.
+        """
+        return max((task.timeout_sec for task in self._tasks), default=0.0)
+
     def _publish(self, task: IntervalTask, **updates: Any) -> None:
         current = dict(self._states.get(task.name, {}))
         current.update(
@@ -934,6 +944,11 @@ class WorkersManager:
         # Drop expired single-use bridge nonces so the replay cache stays bounded.
         retention = max(60, self.settings.telegram_signature_max_age_sec * 4)
         await run_blocking(self.storage.prune_bridge_nonces, max_age_sec=retention)
+
+    @property
+    def max_timeout_sec(self) -> float:
+        """Longest per-task thread budget across the registered workers."""
+        return self.supervisor.max_timeout_sec
 
     async def start(self) -> None:
         if not self.settings.workers_enabled or self._run_task is not None:

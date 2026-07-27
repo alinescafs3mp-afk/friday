@@ -83,6 +83,7 @@ from jericho.storage.models import (
 )
 from jericho.web_surfer import WebSurfer
 from jericho.workers import IntervalTask, WorkersManager
+from jericho.workers._blocking import wait_until_idle
 
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
@@ -675,18 +676,35 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 await web_surfer.close()
                 # workers.stop() only cancels the asyncio tasks; a worker cancelled
                 # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
-                # still running on the default executor thread. Drain the executor so
-                # storage.close() cannot close a connection out from under an
-                # in-flight background DB operation (a torn transaction / use-after-
-                # close). wait_for bounds it (shutdown_default_executor's own timeout
-                # arg is 3.12+, but requires-python is >=3.11) so a stuck op cannot
-                # hang shutdown indefinitely.
+                # still running on the default executor thread.
+                #
+                # The drain is bounded by the WORKERS' own budget, not by a constant.
+                # A flat 30 s was shorter than what a worker is allowed to hold a
+                # thread for — `knowledge_dedup` scans for up to 600 s inside a 900 s
+                # tick — so shutdown routinely gave up while the work was legitimately
+                # still running. And `storage.close()` does not cover it either: it
+                # takes the write lock, while the read path deliberately takes no lock
+                # at all, so a thread halfway through a SELECT is invisible to it.
+                drain_budget = workers.max_timeout_sec + 30.0
+                stranded = await asyncio.to_thread(wait_until_idle, drain_budget)
+                if stranded:
+                    LOGGER.warning(
+                        "Shutting down with %s still executing after %.0fs; "
+                        "their connections will be closed underneath them",
+                        stranded,
+                        drain_budget,
+                    )
                 with suppress(Exception):
+                    # shutdown_default_executor's own timeout argument is 3.12+ and
+                    # requires-python is >=3.11, hence wait_for.
                     await asyncio.wait_for(
                         asyncio.get_running_loop().shutdown_default_executor(),
-                        timeout=30.0,
+                        timeout=max(30.0, drain_budget),
                     )
-                storage.close()
+                # `final=True`: anything that still outlives this gets a loud
+                # StorageClosedError rather than a fresh connection to a database
+                # whose process lease is about to be released.
+                storage.close(final=True)
                 LOGGER.info("Jericho API stopped")
 
     application = FastAPI(

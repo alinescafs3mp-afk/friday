@@ -76,6 +76,17 @@ class SourceReferenceConflictError(ValueError):
     """An immutable source reference was reused for different content."""
 
 
+class StorageClosedError(RuntimeError):
+    """A database operation was attempted after the process shut its storage down.
+
+    Loud on purpose. The ``conn`` property transparently reopens whenever the
+    generation moved, which is the contract ``restore_backup`` relies on — and it
+    meant a worker thread that outlived shutdown got a **brand new connection**
+    instead of an error, and went on writing after the process had already released
+    its ``backend.lock``. At that point a replacement backend may hold the lease.
+    """
+
+
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}$")
 CONVERSATION_MODES = {"dialogue", "knowledge_work", "research"}
 

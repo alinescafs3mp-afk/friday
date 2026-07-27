@@ -95,7 +95,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "claim_bridge_nonce": "(self, nonce: 'str') -> 'bool'",
     "claim_inbox_promotion": "(self, inbox_id: 'str', user_id: 'str', knowledge_object_id: 'str') -> 'bool'",
     "clear_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'bool'",
-    "close": "(self) -> 'None'",
+    "close": "(self, *, final: 'bool' = False) -> 'None'",
     "commit": "(self) -> 'None'",
     "conflict_pair_key": "(knowledge_a_id: 'str', knowledge_b_id: 'str') -> 'str'",
     "conn": "property",

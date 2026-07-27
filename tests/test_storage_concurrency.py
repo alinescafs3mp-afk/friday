@@ -436,3 +436,90 @@ def test_concurrent_entity_edits_all_survive(storage):
     assert int(storage.get_entity(entity.id, "owner")["version"]) == writers + 1
     versions = [int(row["version"]) for row in storage.list_entity_versions(entity.id, "owner")]
     assert sorted(versions) == list(range(1, writers + 2)), f"version history has holes: {versions}"
+
+
+def test_shutdown_waits_for_a_reader_and_then_refuses_to_reopen(settings, tmp_path):
+    """close() drained writers only, and then handed escapees a fresh connection.
+
+    Two separate holes, both reproduced. `close()` takes the write lock, but the
+    read path deliberately takes none — so a worker thread halfway through a SELECT
+    was invisible to it and `close()` returned in 0.00s while the work ran on. And
+    because the `conn` property transparently reopens whenever the generation moved
+    — the contract `restore_backup` depends on — that surviving thread's next call
+    got a **brand new connection**, silently, after the process had released its
+    `backend.lock`. A replacement backend may already hold the lease by then.
+
+    The drain is bounded by the workers' own budget rather than a constant: a flat
+    30s was shorter than what `knowledge_dedup` is allowed to hold a thread for
+    (600s inside a 900s tick), so shutdown gave up on work that was still legitimate.
+    """
+    import pytest
+
+    from jericho.storage import StorageClosedError
+    from jericho.workers._blocking import _tracked, snapshot, wait_until_idle
+
+    database = tmp_path / "shutdown.sqlite3"
+    store = JerichoStorage(replace(settings, database_path=database))
+    store.ensure_user("owner")
+
+    reading = threading.Event()
+    closed = threading.Event()
+    outcome: dict[str, object] = {}
+
+    def worker() -> None:
+        def work() -> None:
+            reading.set()
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                store.execute("SELECT COUNT(*) FROM knowledge_objects WHERE user_id=?", ("owner",))
+                time.sleep(0.005)
+
+        _tracked("knowledge_dedup", work)
+        # Untracked tail: a thread that slipped past the drain.
+        closed.wait(timeout=10)
+        try:
+            store.execute("SELECT 1")
+            outcome["reopened"] = True
+        except StorageClosedError:
+            outcome["reopened"] = False
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert reading.wait(timeout=5)
+    assert snapshot().get("knowledge_dedup") == 1
+
+    started = time.monotonic()
+    assert wait_until_idle(30.0) == {}, "the drain gave up while a reader was still running"
+    waited = time.monotonic() - started
+    store.close(final=True)
+    closed.set()
+    thread.join(timeout=15)
+
+    assert waited >= 0.5, f"the drain returned after {waited:.2f}s without waiting for the reader"
+    assert outcome["reopened"] is False, "a post-shutdown thread was handed a new connection"
+    with pytest.raises(StorageClosedError):
+        store.execute("SELECT 1")
+
+
+def test_a_plain_close_still_reopens_for_restore(settings, tmp_path):
+    """`final` must not break the contract restore_backup depends on."""
+    database = tmp_path / "reopen.sqlite3"
+    store = JerichoStorage(replace(settings, database_path=database))
+    try:
+        store.ensure_user("owner")
+        store.close()  # not final
+        assert store.get_user("owner") is not None  # transparently reopened
+    finally:
+        store.close(final=True)
+
+
+def test_the_drain_budget_comes_from_the_workers(settings, storage):
+    """A constant would be a guess; the worker's own timeout is the answer."""
+    from jericho.workers import WorkersManager
+
+    manager = WorkersManager(replace(settings, workers_enabled=True), storage, None, None)
+    manager.register_all()
+    assert manager.max_timeout_sec >= 900.0, (
+        "the drain budget must cover the longest task timeout, or shutdown abandons "
+        "work that is still legitimately running"
+    )

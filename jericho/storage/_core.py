@@ -16,6 +16,7 @@ from jericho.storage._base import (
     Any,
     Iterator,
     JerichoSettings,
+    StorageClosedError,
     StorageShared,
     UnsupportedSchemaVersionError,
     _snapshot,
@@ -63,6 +64,9 @@ class CoreMixin(StorageShared):
         self._init_lock = threading.Lock()
         self._schema_ready = False
         self._fts_available = True
+        # Set by close(final=True). Distinct from a plain close(), which must stay
+        # reopenable — restore_backup swaps the database file and then carries on.
+        self._shut_down = False
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -70,6 +74,12 @@ class CoreMixin(StorageShared):
         cached = getattr(local, "conn", None)
         if cached is not None and getattr(local, "generation", None) == self._generation:
             return cached
+        if self._shut_down:
+            # A thread that outlived shutdown asking for a connection is not a
+            # request to reopen the database; it is work that should have finished.
+            # Silently handing it a fresh connection is how writes escaped past the
+            # released process lease.
+            raise StorageClosedError("Storage is shut down; this connection will not be reopened")
         connection = self._open()
         with self._registry_lock:
             self._connections.append(connection)
@@ -640,7 +650,16 @@ class CoreMixin(StorageShared):
                     ),
                 )
 
-    def close(self) -> None:
+    def close(self, *, final: bool = False) -> None:
+        """Close every thread's connection. ``final`` makes the closure permanent.
+
+        ``final=False`` keeps the reopen-after-close contract that ``restore_backup``
+        depends on. ``final=True`` is process shutdown: any later access raises
+        ``StorageClosedError`` instead of quietly opening a new connection behind the
+        released ``backend.lock``.
+        """
+        if final:
+            self._shut_down = True
         # Shut down every thread's connection (not just the caller's), commit any
         # pending work, then invalidate the per-thread caches by bumping the
         # generation and re-arming the one-time schema init. This makes close()

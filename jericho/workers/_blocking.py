@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import threading
+import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -42,6 +43,24 @@ def in_flight(task_name: str) -> int:
 def snapshot() -> dict[str, int]:
     with _lock:
         return {name: count for name, count in _in_flight.items() if count}
+
+
+def wait_until_idle(timeout: float, *, poll_interval: float = 0.05) -> dict[str, int]:
+    """Block until no tracked blocking call remains, or ``timeout`` elapses.
+
+    Returns what is still running — empty when the drain succeeded. Shutdown needs
+    this because ``storage.close()`` only drains WRITERS: it takes the write lock,
+    and the read path deliberately takes no lock at all, so a worker thread halfway
+    through a ``SELECT`` is invisible to it. Bounding the wait by a flat constant is
+    equally wrong — the budget belongs to the worker, and ``knowledge_dedup`` alone
+    is allowed 600 seconds inside a 900-second tick.
+    """
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        remaining = snapshot()
+        if not remaining or time.monotonic() >= deadline:
+            return remaining
+        time.sleep(poll_interval)
 
 
 def _tracked(task_name: str, function: Callable[..., T], *args: Any, **kwargs: Any) -> T:
