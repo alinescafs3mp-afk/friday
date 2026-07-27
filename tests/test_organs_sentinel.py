@@ -32,9 +32,12 @@ def _sentinel_settings(*, quiet_start: int = 0, quiet_end: int = 0):
     )
 
 
-def _seed_telegram_user(storage, chat_id: str) -> str:
+def _seed_telegram_user(storage, chat_id: str, *, preset_key: str = "admin") -> str:
+    # Default `admin`, because host diagnostics are privileged: the audience is the
+    # accounts that hold `admin.diagnostics`, the same gate the HTTP read uses. The
+    # old default (`user`) is what let a guest read this machine's health.
     user_id = f"telegram:test:{chat_id}"
-    storage.ensure_user(user_id, source="telegram", metadata={"chat_id": chat_id})
+    storage.ensure_user(user_id, source="telegram", preset_key=preset_key, metadata={"chat_id": chat_id})
     return user_id
 
 
@@ -132,3 +135,75 @@ def test_registry_includes_sentinel_worker(settings):
     assert any(isinstance(o, SentinelOrgan) for o in registry.organs)
     ctx = ServiceContext(settings=settings, storage=None, kg=None, ingestion=None)
     assert any(w.name == "sentinel_watch" for w in registry.workers(ctx))
+
+
+# --- who may be told, and what may be said --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_guest_is_never_told_about_the_host(storage):
+    """Health of this machine is privileged; the push obeys the same gate as the read.
+
+    The scan fanned out to every *active* account, so anyone provisioned by
+    writing once in an allowlisted group — a `guest` — received the worker state,
+    the backup state and the secret-hygiene report of a machine that is not
+    theirs. Reading the identical report over HTTP requires `admin.diagnostics`.
+    """
+    from jericho.permissions import AuthorizationService
+
+    settings = _sentinel_settings()
+    owner = _seed_telegram_user(storage, "5001", preset_key="owner")
+    guest = _seed_telegram_user(storage, "5002", preset_key="guest")
+    _seed_degraded_worker(storage)
+
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=None,
+        auth=AuthorizationService(storage),
+    )
+    await scan_health(ctx)
+
+    recipients = {n["user_id"] for n in storage.list_pending_notifications(limit=100)}
+    assert owner in recipients
+    assert guest not in recipients
+
+
+def test_no_filesystem_path_is_transmitted():
+    """The secret-hygiene detail names a secret AND where it lives. Only one may travel.
+
+    `secret_exposed_in_file` formats as "<path> содержит значение <secret>", and
+    `secret_file_permissions` suggests `chmod 600 <path>`. Telegram is off this
+    machine; an on-disk location is exactly what must not go there. The alert
+    still fires — the path stays behind `jericho doctor` on the host.
+    """
+    exposed = _format_alert(
+        {
+            "severity": "error",
+            "title": "Секрет Jericho лежит в постороннем файле",
+            "detail": "/home/jericho/notes/todo.txt содержит значение JERICHO_TELEGRAM_BOT_TOKEN. "
+            "Удалите файл и перевыпустите этот секрет.",
+        }
+    )
+    assert "/home/jericho/notes/todo.txt" not in exposed
+    assert "JERICHO_TELEGRAM_BOT_TOKEN" in exposed  # which secret is still useful
+    assert "jericho doctor" in exposed
+
+    perms = _format_alert(
+        {
+            "severity": "warning",
+            "title": "Файл с секретами доступен другим пользователям",
+            "detail": "/home/jericho/.jericho/.env.local имеет права 644. Ожидается 600.",
+            "command": "chmod 600 /home/jericho/.jericho/.env.local",
+        }
+    )
+    assert ".env.local" not in perms
+    assert "chmod 600" in perms
+
+    # A URL is not an on-disk location and must survive intact, or the
+    # "vLLM unreachable" alert stops naming the endpoint it could not reach.
+    endpoint = _format_alert(
+        {"severity": "error", "title": "vLLM недоступен", "detail": "http://127.0.0.1:8001/v1 не отвечает"}
+    )
+    assert "http://127.0.0.1:8001/v1" in endpoint

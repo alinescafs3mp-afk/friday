@@ -614,7 +614,12 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             for capability in organs.capabilities():
                 auth_service.register_capability(capability)
             organ_ctx = ServiceContext(
-                settings=settings, storage=storage, kg=graph, ingestion=ingestion, llm=llm
+                settings=settings,
+                storage=storage,
+                kg=graph,
+                ingestion=ingestion,
+                llm=llm,
+                auth=auth_service,
             )
             organ_workers = [
                 IntervalTask(

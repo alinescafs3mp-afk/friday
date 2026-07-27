@@ -17,6 +17,7 @@ persistent fault never turns into a stream of pings.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -29,18 +30,54 @@ LOGGER = logging.getLogger(__name__)
 # guidance (e.g. database not initialised yet), not an operational fault.
 _ALERT_SEVERITIES = {"error", "warning"}
 
+# Reading host diagnostics over HTTP needs this capability; a push carries the
+# same material, so it answers to the same gate. Otherwise the outbound channel
+# is a way *around* the permission model instead of a use of it.
+_DIAGNOSTICS_CAPABILITY = "admin.diagnostics"
+# Fallback when no AuthorizationService was supplied (an organ context built by
+# hand, e.g. in a test). Deliberately narrower than the real check.
+_PRIVILEGED_PRESETS = {"owner", "admin"}
+
+# An absolute filesystem path: a root, at least one intermediate separator, then a
+# final segment. The lookbehind keeps a URL's path (`http://host:8001/v1`) intact —
+# what must never leave the machine is where things live on this disk. The
+# secret-hygiene report is the sharp case: its detail is literally
+# "<path> содержит значение <secret>", which names both a secret and its location.
+_ABSOLUTE_PATH_RE = re.compile(r"(?<![\w:/])(?:[A-Za-z]:[\\/]|/)(?:[^\s\\/]+[\\/])+[^\s\\/]*")
+_PATH_PLACEHOLDER = "‹путь скрыт›"
+
+
+def _without_paths(text: str) -> str:
+    """Strip on-disk locations from anything about to leave this machine."""
+    return _ABSOLUTE_PATH_RE.sub(_PATH_PLACEHOLDER, text)
+
 
 def _format_alert(action: dict) -> str:
     icon = "🚨" if str(action.get("severity")) == "error" else "⚠️"
     title = str(action.get("title") or "Проблема").strip()
-    detail = str(action.get("detail") or "").strip()
-    command = str(action.get("command") or "").strip()
+    detail = _without_paths(str(action.get("detail") or "").strip())
+    command = _without_paths(str(action.get("command") or "").strip())
     lines = [f"{icon} Jericho: {title}"]
     if detail:
         lines.append(detail)
     if command:
         lines.append(f"→ {command}")
+    if _PATH_PLACEHOLDER in detail or _PATH_PLACEHOLDER in command:
+        lines.append("Полные пути — на самой машине: `jericho doctor`.")
     return "\n".join(lines)
+
+
+def _may_see_diagnostics(ctx: ServiceContext, user_id: str) -> bool:
+    auth = ctx.auth
+    if auth is None:
+        preset = str((ctx.storage.get_user(user_id) or {}).get("preset_key") or "")
+        return preset in _PRIVILEGED_PRESETS
+    try:
+        actor = auth.actor_for_user(user_id, source="sentinel")
+        return bool(auth.authorize(actor, _DIAGNOSTICS_CAPABILITY).allowed)
+    except Exception:  # an unknown preset or a missing capability means "no"
+        LOGGER.debug("sentinel: cannot resolve diagnostics access for %s", user_id, exc_info=True)
+        return False
 
 
 async def scan_health(ctx: ServiceContext) -> None:
@@ -75,7 +112,16 @@ async def scan_health(ctx: ServiceContext) -> None:
 
     day = now.date().isoformat()
     enqueued = 0
+    audience = 0
     for user_id in ctx.storage.list_user_ids(active_only=True):
+        # Host health is privileged material. Fanning it out to every active
+        # account handed a guest — anyone who wrote once in an allowlisted group —
+        # the worker state, the backup state and the secret-hygiene report of a
+        # machine that is not theirs, while the same read over HTTP needs
+        # `admin.diagnostics`.
+        if not _may_see_diagnostics(ctx, user_id):
+            continue
+        audience += 1
         chat_id = resolve_chat_id(ctx.storage, user_id)
         if not chat_id:
             continue
@@ -97,6 +143,15 @@ async def scan_health(ctx: ServiceContext) -> None:
                 enqueued += 1
     if enqueued:
         LOGGER.info("Sentinel organ queued %d health alert(s)", enqueued)
+    elif not audience:
+        # Silence here would be indistinguishable from health. Say it out loud:
+        # the instance is unwell and there is nobody it is allowed to tell.
+        LOGGER.warning(
+            "sentinel: %d health alert(s) with no recipient — no active account holds %s "
+            "with a private Telegram chat on the allowlist",
+            len(alerts),
+            _DIAGNOSTICS_CAPABILITY,
+        )
 
 
 class SentinelOrgan(Organ):

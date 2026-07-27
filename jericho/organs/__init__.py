@@ -44,6 +44,10 @@ class ServiceContext:
     kg: Any
     ingestion: Any
     llm: Any = None
+    # An organ that pushes privileged material needs the same capability check the
+    # equivalent HTTP read performs; without it the outbound channel is a way
+    # around the permission model rather than a use of it.
+    auth: Any = None
 
 
 @dataclass(frozen=True)
