@@ -31,31 +31,41 @@ from jericho.knowledge_graph import KnowledgeGraph
 from jericho.storage.models import InboxStatus, KnowledgeObject, RawObject, new_id
 
 
-def _methods_emitted_by_the_extractor() -> set[str]:
-    """Every method literal the extractor can emit, read out of its own source.
+def _methods_produced_anywhere_in_ingestion() -> set[str]:
+    """Every entity-provenance method literal in the ingestion package.
 
     Walked rather than listed: a battery of sample texts only covers the patterns
-    someone remembered to write a sample for, and the whole point is to catch the
-    method nobody thought about.
+    someone remembered to write a sample for, and the point is to catch the method
+    nobody thought about. The walk covers the whole package, not just the regex
+    extractor — entities are also proposed by the local model, by the agent, and by
+    vision/transcript advice, and each of those is a `"method": "..."` literal.
     """
-    tree = ast.parse(Path(inspect.getfile(base)).read_text(encoding="utf-8"))
-    function = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "_extract_entities"
-    )
+    package = Path(inspect.getfile(base)).parent
     found: set[str] = set()
-    for node in ast.walk(function):
-        if not isinstance(node, ast.Call) or getattr(node.func, "id", "") != "add":
-            continue
-        # add(name, entity_type, confidence, method, **evidence)
-        if len(node.args) >= 4 and isinstance(node.args[3], ast.Constant):
-            found.add(str(node.args[3].value))
+    for source in sorted(package.glob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            # add(name, entity_type, confidence, method, **evidence)
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "add"
+                and len(node.args) >= 4
+                and isinstance(node.args[3], ast.Constant)
+            ):
+                found.add(str(node.args[3].value))
+            if isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values, strict=True):
+                    if (
+                        isinstance(key, ast.Constant)
+                        and key.value == "method"
+                        and isinstance(value, ast.Constant)
+                    ):
+                        found.add(str(value.value))
     return found
 
 
 def test_every_extraction_method_is_classified():
-    emitted = _methods_emitted_by_the_extractor()
+    emitted = _methods_produced_anywhere_in_ingestion()
     assert emitted, "the AST walk found no methods — it stopped matching the code"
     unclassified = emitted - DECLARED_ENTITY_METHODS - EVIDENCE_ONLY_ENTITY_METHODS
     assert not unclassified, (

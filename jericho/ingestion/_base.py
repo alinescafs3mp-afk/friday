@@ -662,13 +662,24 @@ DECLARED_ENTITY_METHODS = frozenset(
     }
 )
 
-# Shape alone: a capitalised bigram, a word after a preposition, punctuation between
-# capitals. Useful as a suggestion, never as a fact.
+# Shape alone, or a machine's opinion: a capitalised bigram, a word after a
+# preposition, punctuation between capitals, something a model proposed, something
+# read off an image or a transcript. Useful as a suggestion, never as a fact.
+#
+# The model-authored ones are already capped below the auto-create bar where they
+# are produced. They are listed here anyway, so the two sets together are the whole
+# inventory of how an entity can be proposed — and so that raising one of those caps
+# has to pass through this decision rather than around it.
 EVIDENCE_ONLY_ENTITY_METHODS = frozenset(
     {
+        "agent_proposal",
         "capitalized_person_name",
         "identifier_syntax",
+        "local_model_advice",
+        "local_vision_advice",
         "location_preposition",
+        "vision_ocr_advisory",
+        "voice_transcript_advisory",
     }
 )
 
