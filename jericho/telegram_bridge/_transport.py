@@ -52,6 +52,7 @@ class TransportMixin(BridgeShared):
         self._backend_url = config.backend_url.rstrip("/")
         # Last known failing/healthy state per loop, for transition detection.
         self._loop_failing: dict[str, bool] = {}
+        self._warned_no_signer = False
 
     async def run(self) -> None:
         install_secret_redaction(
@@ -107,6 +108,27 @@ class TransportMixin(BridgeShared):
             self._lease.release()
             LOGGER.info("Telegram bridge stopped")
 
+    def _signer_chat_id(self) -> str:
+        """The chat the bridge signs its OWN service calls as. Must be a person.
+
+        It used to be ``allowed_chat_ids[0]``, and the effective allowlist is
+        ``sorted()`` — so a single group in it lands a NEGATIVE id in position zero.
+        The backend's ``verify_bridge_request`` requires ``external_user_id.isdigit()``
+        and a leading minus fails that, so every signed service call was rejected:
+        the outbound queue **never drained** and no proactive notification ever
+        arrived, silently, for as long as the group stayed allowlisted.
+
+        Since 0.75.0 that rejection is also a 401 that spends the per-IP
+        auth-failure budget, once every poll interval — so the bridge eventually
+        rate-limited itself, and the owner shares the loopback address with it.
+
+        A group id is a room, not a person; only a positive id identifies a user.
+        """
+        for chat_id in self.config.allowed_chat_ids:
+            if chat_id > 0:
+                return str(chat_id)
+        return ""
+
     async def _journal_transition(
         self,
         backend: httpx.AsyncClient,
@@ -132,7 +154,7 @@ class TransportMixin(BridgeShared):
         self._loop_failing[loop_name] = failing
         if previous is None and not failing:
             return  # the first successful round after start is not a recovery
-        signer = str(self.config.allowed_chat_ids[0]) if self.config.allowed_chat_ids else ""
+        signer = self._signer_chat_id()
         if not signer:
             return
         payload: dict[str, Any] = {"loop": loop_name}
@@ -204,8 +226,18 @@ class TransportMixin(BridgeShared):
             await asyncio.sleep(max(2.0, float(self.config.outbound_poll_interval_sec)))
 
     async def _drain_outbound(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:
-        signer_chat = str(self.config.allowed_chat_ids[0]) if self.config.allowed_chat_ids else ""
+        signer_chat = self._signer_chat_id()
         if not signer_chat:
+            # Said once, loudly. Returning in silence every fifteen seconds is how
+            # a broken outbound channel looks exactly like a quiet one.
+            if not self._warned_no_signer:
+                self._warned_no_signer = True
+                LOGGER.error(
+                    "No private chat in the allowlist: the bridge cannot sign its own "
+                    "service calls, so proactive notifications will never be delivered. "
+                    "Add the owner's private chat id to JERICHO_TELEGRAM_ALLOWED_CHAT_IDS "
+                    "or JERICHO_TELEGRAM_OWNER_CHAT_IDS."
+                )
             return
         data = await self._backend_json(
             backend,

@@ -117,6 +117,9 @@ class _Bridge:
     from jericho.telegram_bridge import TelegramBridge
 
     _journal_transition = TelegramBridge._journal_transition
+    # Real method, not a stub: the signer choice is exactly what this file's
+    # "nothing is posted without a chat to sign as" test is about.
+    _signer_chat_id = TelegramBridge._signer_chat_id
 
     def __init__(self, allowed=(5001,)):
         self.posted: list[dict] = []

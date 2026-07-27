@@ -223,7 +223,7 @@ EXPECTED_COMMANDS = {
     "/tags",
     "/work",
 }
-EXPECTED_BRIDGE_COUNT = 35
+EXPECTED_BRIDGE_COUNT = 36
 EXPECTED_BRIDGE: dict[str, str] = {
     "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -463,3 +463,98 @@ def test_chunking_counts_the_units_telegram_counts() -> None:
     paragraphs = ("строка текста " * 20 + "\n") * 30
     assert all("\n" not in chunk.strip("\n") or True for chunk in split_for_telegram(paragraphs))
     assert all(utf16_length(chunk) <= TELEGRAM_TEXT_LIMIT for chunk in split_for_telegram(paragraphs))
+
+
+# --- the bridge's own service calls need a person to sign as ---------------
+
+
+def _bridge(tmp_path, allowed: list[int]):
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    return TelegramBridge(
+        TelegramConfig(
+            bot_token="1:aaa",
+            inbox_db_path=str(tmp_path / "telegram-inbox.sqlite3"),
+            bridge_secret="x" * 32,
+            allowed_chat_ids=allowed,
+        )
+    )
+
+
+def test_one_allowlisted_group_used_to_silence_every_notification(tmp_path) -> None:
+    """The signer was `allowed_chat_ids[0]`, and the effective allowlist is sorted().
+
+    A single group in it puts a NEGATIVE id at position zero. The backend's
+    `verify_bridge_request` requires `external_user_id.isdigit()`, which a leading
+    minus fails — so every signed service call was rejected, the outbound queue
+    never drained, and no reminder, digest or "on this day" was ever delivered.
+    Silently, for as long as the group stayed allowlisted.
+
+    Since 0.75.0 that rejection is also a 401 against the per-IP auth-failure
+    budget, once per poll interval, so the bridge eventually rate-limited itself —
+    and the owner shares the loopback address with it.
+    """
+    from jericho.security import sign_bridge_request, verify_bridge_request
+
+    # The order the config layer actually produces.
+    allowed = sorted([-1001234567890, 5001])
+    assert allowed[0] == -1001234567890
+    assert not str(allowed[0]).isdigit(), "the premise: a group id is not a valid signer"
+
+    bridge = _bridge(tmp_path, allowed)
+    try:
+        signer = bridge._signer_chat_id()  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+    assert signer == "5001"
+
+    # And the chosen signer really does pass the backend's check.
+    import time as _time
+    import uuid as _uuid
+
+    timestamp = int(_time.time())
+    nonce = _uuid.uuid4().hex
+    signature = sign_bridge_request(
+        "x" * 32,
+        timestamp=timestamp,
+        method="GET",
+        path="/api/notifications/pending",
+        external_user_id=signer,
+        chat_id=signer,
+        nonce=nonce,
+        body=b"",
+    )
+    verify_bridge_request(
+        "x" * 32,
+        timestamp=str(timestamp),
+        method="GET",
+        path="/api/notifications/pending",
+        external_user_id=signer,
+        chat_id=signer,
+        nonce=nonce,
+        signature=signature,
+        body=b"",
+        max_age_sec=300,
+    )
+
+
+def test_a_group_only_allowlist_says_so_instead_of_going_quiet(tmp_path, caplog) -> None:
+    """No private chat means no proactive delivery — that has to be audible.
+
+    Returning early every fifteen seconds makes a broken outbound channel look
+    exactly like a quiet one.
+    """
+    import asyncio
+    import logging
+
+    bridge = _bridge(tmp_path, [-1001234567890])
+    try:
+        assert bridge._signer_chat_id() == ""  # noqa: SLF001
+        with caplog.at_level(logging.ERROR, logger="jericho.telegram_bridge"):
+            asyncio.run(bridge._drain_outbound(None, None))  # noqa: SLF001
+            asyncio.run(bridge._drain_outbound(None, None))  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    complaints = [record for record in caplog.records if "cannot sign" in record.message]
+    assert len(complaints) == 1, "the warning must fire, and must not repeat every tick"
