@@ -414,7 +414,7 @@ def chunk_spans(text: str, *, max_chars: int, overlap_chars: int, max_chunks: in
 
     spans = _cut(max_chars)
     window = max_chars
-    while len(spans) > limit and window < len(body):
+    if len(spans) > limit:
         # Widen until it fits, instead of one pass followed by ``[:limit]``.
         #
         # The single pass was capped at ``max_chars * 4`` and sized by
@@ -426,17 +426,35 @@ def chunk_spans(text: str, *, max_chars: int, overlap_chars: int, max_chunks: in
         # itself capped. Nothing downstream could tell a truncated document from a
         # short one.
         #
-        # Doubling makes the window grow with the document — a 490 KB body settles
-        # at ~9.6 K per passage, which is still well inside an embedding model's
-        # context. Very large documents do end up with coarse passages, and coarse
-        # passages beat absent ones: the whole-object vector remains the floor, so
-        # chunking can still only add recall.
-        estimate = math.ceil(len(body) / limit) + bounded_overlap
-        # The estimate first (it is right whenever boundary snapping is mild, and
-        # keeps passages as fine as they used to be), then gentle geometric growth
-        # for the cases where snapping makes it optimistic.
-        window = min(len(body), estimate if estimate > window else math.ceil(window * 1.5))
-        spans = _cut(window)
+        # Growing geometrically and STOPPING there was the next defect: the jump
+        # lands wherever ×1.5 happens to land, and everything between the last
+        # window that did not fit and the one that did was never examined. Measured
+        # on a real 342-document archive: of the 22 documents that needed widening,
+        # passages came out 1.40× (median) to 1.84× larger than the smallest window
+        # that already fitted, wasting a median 31% of the passage budget — the
+        # 757 031-char object got 43 passages of 18 326 chars where 63 of ~12 588
+        # fit. Precisely the documents chunking exists for were split the worst.
+        #
+        # So: estimate first (right whenever boundary snapping is mild), doubling
+        # to find SOME window that fits, then a binary search back down to the
+        # smallest fitting one. Each probe is one O(len) cut and the search adds
+        # ~log2(len/max_chars) of them — a dozen linear passes on a megabyte body.
+        floor = window  # the widest window known NOT to fit
+        while len(spans) > limit and window < len(body):
+            estimate = math.ceil(len(body) / limit) + bounded_overlap
+            floor = window
+            window = min(len(body), estimate if estimate > window else window * 2)
+            spans = _cut(window)
+        # Span count is not strictly monotonic in the window (snapping makes it
+        # step), so the search only ever moves to a window it has SEEN fit; the
+        # result is the smallest fitting window on the probed path, and always fits.
+        while floor + 1 < window:
+            middle = (floor + window) // 2
+            candidate = _cut(middle)
+            if len(candidate) > limit:
+                floor = middle
+            else:
+                window, spans = middle, candidate
     if len(spans) > limit:
         spans = spans[:limit]
         # Unreachable while the loop above can widen, but if it ever is reached the
@@ -485,11 +503,19 @@ def chunk_scheme(settings: JerichoSettings) -> str:
 
     ``''`` means "not chunked" — exactly what every pre-0.41 row already stores, so
     turning chunking off re-indexes nothing that was never chunked.
+
+    The ALGORITHM is part of the fingerprint, not just the numbers: ``v2`` is the
+    binary-searched minimal window (documents over the passage budget get ~limit
+    fine passages instead of ~2/3 of the budget in coarse ones), and a ``v1`` row
+    for such a document describes spans a fresh index would no longer produce.
+    The bump is cheap where nothing changed: an unwidened document re-chunks to
+    byte-identical texts, and the indexer reuses their vectors by content hash
+    without asking the embeddings service for anything.
     """
     if settings.embeddings_chunk_chars <= 0:
         return ""
     return (
-        f"v1:{settings.embeddings_chunk_chars}"
+        f"v2:{settings.embeddings_chunk_chars}"
         f":{settings.embeddings_chunk_overlap_chars}"
         f":{settings.embeddings_chunk_max_per_object}"
     )

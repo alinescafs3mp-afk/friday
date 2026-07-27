@@ -297,6 +297,54 @@ async def test_chunking_is_inert_for_short_objects(storage, settings):
     assert fake.calls == [[knowledge_search_text(note)]]
 
 
+def test_widened_documents_use_the_passage_budget():
+    """A widened window must be the SMALLEST that fits, not wherever ×1.5 landed.
+
+    The growth loop found some window that fits and stopped there, never looking
+    at the gap between the last window that did not fit and the one that did.
+    Measured on a real 342-document archive: all 22 documents that needed widening
+    filled a median 44 of their 63 passage slots, with passages 1.40× (median) to
+    1.84× coarser than the smallest fitting window — precisely the long documents
+    chunking exists for were split the worst. The binary search back down fills
+    the budget: 63/63 slots, passage p50 4116 → 2932 chars on the same corpus.
+
+    The body here is IRREGULAR on purpose (random paragraph lengths): uniform
+    filler makes the one-shot estimate exact, never enters the growth loop, and
+    turns this test green on the broken code.
+    """
+    import random as _random
+
+    rng = _random.Random(2)
+    words = ["текст", "предложение", "данные", "система", "важно", "заметка", "отчёт"]
+    parts: list[str] = []
+    total = 0
+    while total < 300_000:
+        paragraph_length = rng.randint(400, 3200)
+        paragraph: list[str] = []
+        while sum(len(word) + 1 for word in paragraph) < paragraph_length:
+            paragraph.append(rng.choice(words))
+        parts.append(" ".join(paragraph))
+        total += len(parts[-1]) + 2
+    body = "\n\n".join(parts)[:300_000]
+
+    spans = chunk_spans(body, max_chars=1200, overlap_chars=200, max_chunks=63)
+    assert len(spans) <= 63
+    # The budget is actually used (the old code settled for ~50 of 63 here).
+    assert len(spans) >= 60, f"only {len(spans)} of 63 passage slots used"
+    # And passages stay near the finest achievable size, not a geometric overshoot
+    # of it: ceil(len/limit) + overlap is what a snap-free cut would need.
+    finest = math.ceil(len(body) / 63) + 200
+    sizes = sorted(end - start for start, end in spans)
+    assert sizes[len(sizes) // 2] <= finest * 1.15, (
+        f"median passage {sizes[len(sizes) // 2]} vs finest achievable ~{finest}"
+    )
+    # Full coverage is non-negotiable, whatever the window search does.
+    covered = bytearray(len(body))
+    for start, end in spans:
+        covered[start:end] = b"\x01" * (end - start)
+    assert 0 not in covered
+
+
 def test_chunk_settings_default_and_off_switch(settings):
     assert settings.embeddings_chunk_chars == 1200
     assert settings.embeddings_chunk_overlap_chars == 200
@@ -306,7 +354,7 @@ def test_chunk_settings_default_and_off_switch(settings):
     assert settings.embeddings_max_inputs_per_request == 64
     # '' is exactly what every pre-0.41 row stores, so switching off re-indexes nothing.
     assert chunk_scheme(dataclasses.replace(settings, embeddings_chunk_chars=0)) == ""
-    assert chunk_scheme(settings).startswith("v1:")
+    assert chunk_scheme(settings).startswith("v2:")
     # The tuning knobs stay internal; only the on/off state is exposed.
     exposed = settings.public_dict()["embeddings"]
     assert exposed["chunk_chars"] == 1200
