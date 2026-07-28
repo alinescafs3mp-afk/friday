@@ -319,7 +319,15 @@ def _sync_vault_page(vault: Any, storage: Any, objects: Sequence[dict[str, Any]]
     """
     links = storage.list_knowledge_entity_links_for([str(item.get("id") or "") for item in objects])
     for item in objects:
-        vault.sync_object({**item, "_entity_names": links.get(str(item.get("id") or ""), [])})
+        try:
+            vault.sync_object({**item, "_entity_names": links.get(str(item.get("id") or ""), [])})
+        except OSError:
+            # One unwritable note must not take the rest of the vault with it. The
+            # loop below this one paginates the whole tenant and ends in
+            # `prune_orphans`, so an exception here used to freeze every later
+            # object AND leave deleted notes on disk in plaintext indefinitely —
+            # the exact thing pruning exists to prevent.
+            LOGGER.warning("vault sync skipped one object", extra={"knowledge_object_id": item.get("id")})
 
 
 class WorkersManager:

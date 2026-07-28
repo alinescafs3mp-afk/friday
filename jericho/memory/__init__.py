@@ -27,10 +27,29 @@ _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 
+# NAME_MAX is 255 BYTES, not characters, and the slug is the only part of a
+# filename a person controls. A note is written through `tempfile.mkstemp` with
+# `prefix=".<stem>."` and `suffix=".tmp"`, so the name that actually has to fit is
+# the slug plus 28 bytes — and `mkstemp` raises OSError before the try block that
+# would clean up after it. 60 characters of an astral-plane title (emoji,
+# mathematical bold) is 240 bytes on its own, so a title a user can produce by
+# accident made every later object in the vault unwritable.
+_SLUG_BYTE_BUDGET = 200
+
+
+def _clip_bytes(value: str, limit: int) -> str:
+    """Clip to a UTF-8 byte budget without splitting a character in half."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= limit:
+        return value
+    return encoded[:limit].decode("utf-8", errors="ignore")
+
+
 def _safe_component(value: str, *, fallback: str = "unknown") -> str:
     """Return a cross-platform directory component without losing identity."""
     original = (value or fallback).strip()
-    slug = _SAFE_COMPONENT_RE.sub("-", original).strip(" .-")[:48] or fallback
+    slug = _SAFE_COMPONENT_RE.sub("-", original).strip(" .-")[:48]
+    slug = _clip_bytes(slug, _SLUG_BYTE_BUDGET).strip(" .-") or fallback
     digest = hashlib.sha256(original.encode("utf-8", errors="replace")).hexdigest()[:12]
     return f"{slug}--{digest}"
 
@@ -72,7 +91,9 @@ class MemoryVault:
         ko_id = str(ko.get("id") or "")
         title = str(ko.get("title") or "").strip()
         slug = _UNSAFE_FILENAME_RE.sub("-", title)
-        slug = re.sub(r"\s+", " ", slug).strip(" .-")[:60].strip(" .-")
+        slug = re.sub(r"\s+", " ", slug).strip(" .-")[:60]
+        # `[:60]` is the readability limit; the byte clip is the correctness one.
+        slug = _clip_bytes(slug, _SLUG_BYTE_BUDGET).strip(" .-")
         return user_dir / f"{slug or 'без-названия'}--{self._note_stem(ko_id)}.md"
 
     @staticmethod
