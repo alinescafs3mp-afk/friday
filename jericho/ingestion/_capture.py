@@ -169,16 +169,20 @@ class CaptureMixin(PipelineShared):
                     "extracted_entities": enrichment.entities,
                 }
 
-            # Strict review honours the prompt's "Inbox before canonical" invariant:
-            # heuristic auto-promotion of substantial material is downgraded to a
-            # pending Inbox suggestion instead of creating a canonical Knowledge
-            # Object without review. Explicit saves (/note, "запомни", force_knowledge)
-            # keep their direct promotion — the user already decided.
-            # ``force_review`` requests the downgrade per call regardless of intent:
-            # bulk imports are an explicit ACTION, but the user has not seen the
-            # individual items, so none may become canonical silently.
+            # «Inbox before canonical»: heuristic auto-promotion of substantial
+            # material is downgraded to a pending Inbox suggestion instead of
+            # creating a canonical Knowledge Object nobody has seen. Explicit saves
+            # (/note, «запомни», force_knowledge) keep their direct promotion — the
+            # user already decided. ``force_review`` requests the downgrade per call
+            # regardless of intent: a bulk import is one explicit ACTION, but the
+            # user has not read the individual items.
+            #
+            # For text the signals ARE the intent: they come from the person's own
+            # words or from a caller that said `force_knowledge`. The file path
+            # cannot use them (see `review_required`), which is why the decision
+            # itself lives there and only its input is computed here.
             explicit_intent = bool({"manual_promotion", "explicit_save"} & set(assessment.signals))
-            if force_review or (self.settings.ingestion_strict_review and not explicit_intent):
+            if self.review_required(force_review=force_review, explicit_intent=explicit_intent):
                 review_item = self._store_review_inbox(raw, assessment, enrichment)
                 return {
                     "promoted": False,

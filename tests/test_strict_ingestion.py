@@ -1,10 +1,14 @@
-"""Strict review mode honours the prompt's "Inbox before canonical" invariant.
+"""Review policy honours the prompt's "Inbox before canonical" invariant.
 
-By default, promote-class assessment creates a canonical Knowledge Object
-immediately. With JERICHO_INGESTION_STRICT_REVIEW=1, heuristic auto-promotion of
-substantial material is instead queued as a pending Inbox suggestion — but explicit
-saves (/note, "запомни", force_knowledge) still promote directly, since the user
-already decided. These tests pin both behaviours and the idempotent replay path.
+By default (`assessed`) a promote-class assessment creates a canonical Knowledge
+Object immediately. With `unless_explicit`, heuristic auto-promotion of substantial
+material is instead queued as a pending Inbox suggestion — but explicit saves
+(/note, "запомни", force_knowledge) still promote directly, since the user already
+decided. These tests pin both behaviours and the idempotent replay path.
+
+What the policy covers is tested in `test_review_gate_is_uniform.py`: this file is
+about the text path's own semantics, that one about the four entry points that
+used to answer this question differently from each other.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ _AUTO_PROMOTE_FACT = "Сервер Atlas работает на Ubuntu 24.04."
 
 
 def _strict(settings):
-    return dataclasses.replace(settings, ingestion_strict_review=True)
+    return dataclasses.replace(settings, ingestion_review_policy="unless_explicit")
 
 
 @pytest.mark.asyncio

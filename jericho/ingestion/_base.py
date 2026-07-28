@@ -874,6 +874,7 @@ class PipelineShared:
     _promotion_lock: threading.Lock
     _doc_extractor: DocumentExtractor
     assess_text: Callable[..., PromotionAssessment]
+    review_required: Callable[..., bool]
     _enrich: Callable[..., KnowledgeEnrichment]
     _apply_feedback_calibration: Callable[..., PromotionAssessment]
     _link_entities: Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]

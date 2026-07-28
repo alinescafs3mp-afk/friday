@@ -164,9 +164,12 @@ JERICHO_BACKUP_MIRROR_DIR=
 # Encrypt mirror copies (AES-256 via system openssl). Generate the key with
 # `jericho backup-keygen`; keep a copy of the key SEPARATE from the mirror.
 JERICHO_BACKUP_ENCRYPTION_KEY_FILE=
-# Strict "Inbox before canonical": route heuristic auto-promotion through review
-# instead of creating a Knowledge Object directly. Explicit saves still promote.
-JERICHO_INGESTION_STRICT_REVIEW=0
+# Что попадает в Inbox, прежде чем стать каноническим знанием:
+#   assessed        — решает классификатор (как было всегда)
+#   unless_explicit — прямо продвигается только явное сохранение (/note, «запомни»),
+#                     всё остальное, включая загруженные файлы, ждёт человека
+#   always          — не продвигается ничто
+JERICHO_INGESTION_REVIEW_POLICY=assessed
 # Max graph-traversal depth for relational queries (hard safety ceiling 4).
 JERICHO_GRAPH_MAX_DEPTH=2
 

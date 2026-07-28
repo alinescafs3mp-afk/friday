@@ -53,6 +53,9 @@ def test_the_removed_ones_are_gone_everywhere():
         "JERICHO_TELEMETRY_INTERVAL_SEC",
         "JERICHO_HEALTH_INTERVAL_SEC",
         "JERICHO_DEFAULT_CITY",
+        # Заменён на JERICHO_INGESTION_REVIEW_POLICY: булев рубильник описывал
+        # только текстовый путь, файлы его не читали вовсе.
+        "JERICHO_INGESTION_STRICT_REVIEW",
     )
     for path in (
         ROOT / ".env.example",

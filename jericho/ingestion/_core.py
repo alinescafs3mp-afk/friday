@@ -54,3 +54,32 @@ class CoreMixin(PipelineShared):
 
     def assess_text(self, content: str, *, force_knowledge: bool = False) -> PromotionAssessment:
         return _classifier.assess(content, force_knowledge=force_knowledge)
+
+    def review_required(self, *, force_review: bool, explicit_intent: bool) -> bool:
+        """Does this arrival wait for a person before becoming canonical knowledge?
+
+        ONE predicate for both paths. They used to decide separately, and the two
+        answers were not the same rule: the text path consulted the strict-review
+        setting, while `ingest_file` knew only about `force_review`, missing text
+        and vision. That is how 342 of 344 documents on the stand walked into
+        knowledge unseen while a pasted paragraph — the smaller commitment by far —
+        was the one being judged.
+
+        `force_review` is a floor, never a ceiling: a caller that asks for review
+        gets it under every policy. So bulk import, `/api/ingest/url` and the
+        importer organ are unaffected by whatever the owner chooses here.
+
+        `explicit_intent` is passed IN rather than read off the classifier's
+        signals, because `ingest_file` hands the classifier `force_knowledge=True`
+        to get a useful assessment of the extracted text — which stamps
+        `manual_promotion` on the result. Reading intent from that would let every
+        file declare its own exemption from the policy, from inside.
+        """
+        if force_review:
+            return True
+        policy = self.settings.ingestion_review_policy
+        if policy == "always":
+            return True
+        if policy == "unless_explicit":
+            return not explicit_intent
+        return False

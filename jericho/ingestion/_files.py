@@ -590,7 +590,17 @@ class FilesMixin(PipelineShared):
                     # none of them may become canonical without being seen. Same
                     # reasoning as the text path, which has carried this flag since
                     # strict review landed.
-                    needs_review = force_review or not extraction_succeeded or bool(vision)
+                    #
+                    # `explicit_intent=False`: choosing a file to upload is an
+                    # explicit ACTION, but it is not a statement about what is
+                    # inside — the person has not read the hundred pages either.
+                    # That asymmetry is the whole reason the policy exists, so a
+                    # file never exempts itself from it.
+                    needs_review = (
+                        self.review_required(force_review=force_review, explicit_intent=False)
+                        or not extraction_succeeded
+                        or bool(vision)
+                    )
                     if needs_review:
                         inbox_item = self._store_review_inbox(raw, assessment, file_enrichment)
                         promoted = {

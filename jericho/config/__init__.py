@@ -22,6 +22,20 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().casefold() not in {"", "0", "false", "no", "off"}
 
 
+def _choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """A setting whose values are a vocabulary, not a spectrum.
+
+    Raises on an unknown value rather than falling back to the default: a typo in
+    a policy name would otherwise silently restore the very behaviour the operator
+    was trying to change, and nothing about the running system would say so.
+    Same shape as the `JERICHO_PROFILE` check below.
+    """
+    value = (os.environ.get(name) or default).strip().casefold()
+    if value not in allowed:
+        raise ValueError(f"Unknown {name}={value!r}. Valid values: {', '.join(sorted(allowed))}")
+    return value
+
+
 def _int_env(name: str, default: int, *, minimum: int | None = None) -> int:
     try:
         value = int(os.environ.get(name, str(default)))
@@ -154,6 +168,21 @@ class RuntimeProfile:
     menu_visible: bool = False
     requires_experimental_opt_in: bool = True
 
+
+# Кто попадает в Inbox до того, как стать каноническим знанием.
+#
+# `assessed`       — решает классификатор: что он счёл достойным продвижения, то и
+#                    продвигается. Так система вела себя всегда.
+# `unless_explicit` — прямое продвижение остаётся только у явного намерения
+#                    (`/note`, «запомни», `force_knowledge`); всё остальное ждёт
+#                    решения человека. Загрузка файла — явное ДЕЙСТВИЕ, но не
+#                    высказывание о содержимом, поэтому файлы сюда тоже попадают.
+# `always`         — не продвигается ничто, включая явные сохранения.
+#
+# `force_review` у отдельного вызова — пол, а не альтернатива: политика может
+# только ДОБАВИТЬ ревью. Поэтому массовый импорт, `/api/ingest/url` и импортёр
+# остаются в Inbox при любой политике.
+REVIEW_POLICIES = ("assessed", "unless_explicit", "always")
 
 # These values intentionally match the known-good reference runtime profile.
 PROFILES: dict[str, RuntimeProfile] = {
@@ -310,7 +339,11 @@ class JerichoSettings:
     whisper_download_root: str
 
     purge_retention_days: int
-    ingestion_strict_review: bool
+    # Что попадает в ревью до того, как стать каноническим знанием. Перечисление,
+    # а не рубильник: булев `ingestion_strict_review` описывал только текстовый
+    # путь, файлы его не читали вовсе, и «строгий режим» на деле означал «строгий
+    # к набранному руками, любой к стостраничному docx».
+    ingestion_review_policy: str
     graph_max_depth: int
     # Ceiling on the lexical recall pool per search. Above it the fuzzy channel sees
     # only the most important/recent slice, and `strategy.lexical_pool_capped` says so.
@@ -452,7 +485,7 @@ class JerichoSettings:
             },
             "data": {
                 "purge_retention_days": self.purge_retention_days,
-                "ingestion_strict_review": self.ingestion_strict_review,
+                "ingestion_review_policy": self.ingestion_review_policy,
                 "backup_mirror_configured": self.backup_mirror_dir is not None,
                 "backup_encryption_configured": self.backup_encryption_key_file is not None,
             },
@@ -609,7 +642,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         whisper_download_root=os.environ.get("JERICHO_WHISPER_DOWNLOAD_ROOT", ""),
         purge_retention_days=_int_env("JERICHO_PURGE_RETENTION_DAYS", 30, minimum=0),
         backup_keep=_int_env("JERICHO_BACKUP_KEEP", 14, minimum=0),
-        ingestion_strict_review=_bool_env("JERICHO_INGESTION_STRICT_REVIEW", False),
+        ingestion_review_policy=_choice_env("JERICHO_INGESTION_REVIEW_POLICY", "assessed", REVIEW_POLICIES),
         graph_max_depth=_int_env("JERICHO_GRAPH_MAX_DEPTH", 2, minimum=1),
         retrieval_pool_max=_int_env("JERICHO_RETRIEVAL_POOL_MAX", 400, minimum=10),
         retrieval_dense_evidence_min=_float_env("JERICHO_RETRIEVAL_DENSE_EVIDENCE_MIN", 0.40, minimum=0.0),
