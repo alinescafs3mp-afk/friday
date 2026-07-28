@@ -346,3 +346,22 @@ def test_single_item_promotion_is_untouched(settings, storage):
     pipeline.classify_inbox_item("alice", inbox_id, InboxStatus.CLASSIFIED, promote=True, reviewed_by="alice")
 
     assert len(storage.list_knowledge_objects("alice")) == 1
+
+
+def test_office_lock_files_are_not_documents(tmp_path):
+    """`~$имя.docx` — замок открытого документа, а не документ.
+
+    То же расширение, десяток байт, не zip. По расширению неотличим, и в настоящем
+    импорте корпуса владельца таких приехало 39: каждый как отдельное поступление,
+    каждый с нечитаемым содержимым, каждый требующий решения человека. Найдено по
+    строкам «File is not a zip file» в логе живого импорта.
+    """
+    (tmp_path / "договор.docx").write_bytes(b"PK\x03\x04" + b"x" * 100)
+    (tmp_path / "~$говор.docx").write_bytes(b"\x00\x01binary lock")
+    (tmp_path / "~$чёт.xlsx").write_bytes(b"\x00\x01binary lock")
+
+    plan = plan_import(tmp_path, suffixes=[".docx", ".xlsx"], max_bytes=10_000_000)
+
+    names = {candidate.path.name for candidate in plan.candidates}
+    assert names == {"договор.docx"}, f"замки попали в импорт: {names}"
+    assert plan.skip_reasons().get("Office lock file") == 2

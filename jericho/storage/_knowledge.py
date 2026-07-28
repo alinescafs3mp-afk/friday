@@ -1837,7 +1837,21 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 
-    _LIFECYCLE_SQL = """SELECT k.*, u.retrieval_count, u.answer_count,
+    # `k.*` тянуло `content` КАЖДОГО объекта, а обход честно неограничен — он идёт
+    # по всему корпусу страницами до конца. Замерено на 5000 объектов по 3.5 КБ:
+    # 45 МБ пикового потребления на страницу из ПЯТИДЕСЯТИ строк, и дашборд делает
+    # два таких обхода на один рендер. На корпусе владельца (2107 документов,
+    # медиана 19 КБ) это сотни мегабайт на запрос.
+    #
+    # Вердикту тело не нужно вовсе: он читает оценки, счётчики использования,
+    # `content_type` и `metadata_json`. Интерфейс показывает `summary || content`
+    # обрезанными до 160 символов — им и отдаём срез, а не весь документ.
+    _LIFECYCLE_SQL = """SELECT k.id, k.user_id, k.title, k.knowledge_kind, k.content_type,
+                      k.metadata_json, k.importance, k.quality_score, k.promotion_score,
+                      k.lifecycle_stage, k.created_at, k.updated_at,
+                      substr(k.summary, 1, 400) AS summary,
+                      substr(k.content, 1, 400) AS content,
+                      u.retrieval_count, u.answer_count,
                       u.positive_feedback_count, u.negative_feedback_count,
                       u.last_retrieved_at, u.last_used_at, u.last_feedback_at
                FROM knowledge_objects k

@@ -177,3 +177,51 @@ def test_a_complete_listing_stays_quiet(storage, caplog):
     assert not [r for r in caplog.records if "entities" in r.getMessage()], (
         "полная выдача не должна жаловаться — иначе предупреждение станет фоном"
     )
+
+
+def test_the_lifecycle_walk_does_not_carry_document_bodies(storage):
+    """Обход честно неограничен — значит цена строки умножается на весь корпус.
+
+    Замерено на 3000 объектах по 19 КБ (медиана настоящего архива владельца):
+    `SELECT k.*` дал пик 37.7 МБ и 8.2 с, нужные колонки — 1.7 МБ и 3.0 с. Дашборд
+    делает ДВА таких обхода на один рендер, оба на event loop.
+
+    Вердикту тело не нужно вовсе, а интерфейс показывает 160 символов — тест
+    закрепляет, что выборка не тянет документ целиком.
+    """
+    storage.ensure_user("alice")
+    body = "тело документа " * 3000  # ~45 КБ
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id="alice",
+        source="test",
+        source_ref=new_id("src"),
+        raw_content=body,
+        content_type="text",
+        content_hash=hashlib.sha256(b"big").hexdigest(),
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id="alice",
+        raw_object_id=raw.id,
+        content=body,
+        content_type="text",
+        title="Большой",
+        importance=0.05,
+        quality_score=0.1,
+        promotion_score=0.1,
+    )
+    storage.store_knowledge_object(ko)
+    storage.execute("UPDATE knowledge_objects SET updated_at='2020-01-01T00:00:00Z' WHERE id=?", (ko.id,))
+    storage.commit()
+
+    candidates = storage.list_lifecycle_candidates("alice", days_threshold=1, limit=10)
+    assert candidates, "объект не попал в кандидаты — стенд собран неверно"
+    carried = candidates[0]["knowledge_object"]
+    assert len(str(carried.get("content") or "")) <= 400, (
+        f"обход тащит тело целиком: {len(str(carried.get('content')))} символов"
+    )
+    # То, на чём держится вердикт и что показывает интерфейс, — на месте.
+    for field in ("id", "title", "importance", "quality_score", "content_type", "metadata_json"):
+        assert field in carried, f"из выборки пропало поле {field}"

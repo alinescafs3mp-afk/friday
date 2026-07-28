@@ -51,6 +51,7 @@ EXCLUDED_DIR_NAMES = frozenset(
 
 SKIP_EMPTY = "empty file"
 SKIP_HIDDEN = "hidden"
+SKIP_OFFICE_LOCK = "Office lock file"
 SKIP_NOT_REGULAR = "not a regular file"
 SKIP_SUFFIX = "suffix not selected"
 SKIP_SYMLINK = "symlink"
@@ -164,6 +165,14 @@ def _consider(
 ) -> None:
     if not include_hidden and path.name.startswith("."):
         plan.skipped.append(Skipped(path, SKIP_HIDDEN))
+        return
+    # Word и Excel держат рядом с открытым документом файл-замок `~$имя.docx`: то же
+    # расширение, десяток байт, не zip. По расширению он неотличим от документа, и
+    # 39 таких файлов приехали в реальном импорте — каждый как «поступление», каждый
+    # с нечитаемым содержимым, каждый требующий решения человека. Это не документ и
+    # не выбор пользователя, а служебный мусор офисного пакета.
+    if path.name.startswith("~$"):
+        plan.skipped.append(Skipped(path, SKIP_OFFICE_LOCK))
         return
     if not follow_symlinks and path.is_symlink():
         plan.skipped.append(Skipped(path, SKIP_SYMLINK))
