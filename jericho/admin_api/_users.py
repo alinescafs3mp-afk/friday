@@ -20,6 +20,7 @@ from jericho.admin_api._deps import (
     _protect_owner_target,
     _request_json,
     _require,
+    _require_any,
     _require_delegable_capability,
     _require_delegable_preset,
     _services,
@@ -80,14 +81,39 @@ async def user_activity(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    """What this account wrote and uploaded, newest first, with a summary beside it."""
-    _require(request, "admin.all_data.read")
-    _audit_cross_tenant_read(request, "admin.user.activity.read", user_id, since=since, until=until)
+    """What this account wrote and uploaded, newest first, with a summary beside it.
+
+    Two levels reach this route. `admin.all_data.read` sees everything, content
+    included — that was the owner's decision. `admin.activity.read` sees when, how
+    much, from where and what became of it, and no text at all: the shape is the
+    same, the fields a person authored come back empty. Which one answered is
+    recorded, because otherwise the trail cannot tell «looked at the volume» from
+    «read the correspondence».
+    """
+    _, granted = _require_any(request, "admin.all_data.read", "admin.activity.read")
+    include_content = granted == "admin.all_data.read"
+    _audit_cross_tenant_read(
+        request,
+        "admin.user.activity.read",
+        user_id,
+        since=since,
+        until=until,
+        granted_by=granted,
+        content="full" if include_content else "redacted",
+    )
     storage = _services(request).storage
     return {
         "user_id": user_id,
+        "content": "full" if include_content else "redacted",
         "summary": storage.user_activity_summary(user_id, since=since, until=until),
-        "items": storage.user_activity(user_id, since=since, until=until, limit=limit, offset=offset),
+        "items": storage.user_activity(
+            user_id,
+            since=since,
+            until=until,
+            limit=limit,
+            offset=offset,
+            include_content=include_content,
+        ),
     }
 
 

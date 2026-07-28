@@ -183,6 +183,20 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("admin.backup.manage", "Create and verify backups", "admin", 3, ("admin",)),
     CapabilityDefinition("admin.export", "Export user data", "admin", 3, ("admin",)),
     CapabilityDefinition("admin.diagnostics", "Inspect system diagnostics", "admin", 2, ("admin",)),
+    # Кто, когда, сколько, откуда и что из этого стало знанием — без единой строки
+    # того, что человек написал. Уровень 2, а не 3: он намеренно НИЖЕ
+    # `admin.all_data.read`, и держатель одного не получает второго автоматически —
+    # проверка способностей сравнивает точный идентификатор, иерархии «старшая
+    # включает младшую» здесь нет. Обратная сторона того же устройства: способность
+    # раздаётся пресету `admin`, иначе полный администратор не смог бы делегировать
+    # то, чем сам не владеет, и уровень оказался бы некому выдать, кроме владельца.
+    CapabilityDefinition(
+        "admin.activity.read",
+        "See when and how much other accounts wrote, without reading it",
+        "admin",
+        2,
+        ("admin",),
+    ),
     CapabilityDefinition("admin.all_data.read", "Read data across users", "admin", 3, ("admin",)),
     CapabilityDefinition("admin.all_data.manage", "Modify data across users", "admin", 4, ("admin",)),
     CapabilityDefinition(

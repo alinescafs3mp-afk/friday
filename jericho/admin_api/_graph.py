@@ -115,6 +115,7 @@ async def graph(
     entity_id: str, request: Request, user_id: str, depth: int = Query(2, ge=0, le=5)
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.graph.read", user_id, entity_id=entity_id, depth=depth)
     return _services(request).kg.get_entity_graph(user_id, entity_id, depth)
 
 

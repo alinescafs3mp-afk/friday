@@ -166,17 +166,83 @@ async def test_it_never_returns_a_second_accounts_rows(kernel):
 
 
 @pytest.mark.asyncio
-async def test_the_admin_can_still_be_denied_by_an_explicit_override(kernel):
+async def test_denying_the_wide_capability_takes_away_the_content(kernel):
+    """Явный запрет обязан отнимать ровно то, что назван отнимать.
+
+    Раньше запрет `admin.all_data.read` закрывал инструмент целиком, потому что
+    это и был его гейт. Теперь гейт — нижняя способность, и запрет старшей
+    оставляет администратора с метаданными. Так и должно быть: способности здесь
+    сравниваются по точному идентификатору, и запрет одной никогда не значил
+    запрет другой. Но проверять надо не «инструмент доступен», а «написанного в
+    ответе больше нет» — иначе запрет превратился бы в косметику.
+    """
     runtime, auth, storage = kernel
     auth.deny_permission("boss", "admin.all_data.read")
+    boss = auth.actor_for_user("boss", source="test")
+    result = await runtime.execute("user_activity", {"person": "Иван"}, actor=boss)
+
+    assert result.success is True, result.error
+    assert result.data["content"] == "redacted"
+    body = " ".join(str(value) for item in result.data["items"] for value in item.values())
+    assert "склад" not in body and "Смета" not in body
+
+
+@pytest.mark.asyncio
+async def test_denying_both_levels_closes_the_tool(kernel):
+    runtime, auth, storage = kernel
+    auth.deny_permission("boss", "admin.all_data.read")
+    auth.deny_permission("boss", "admin.activity.read")
     boss = auth.actor_for_user("boss", source="test")
     result = await runtime.execute("user_activity", {"person": "Иван"}, actor=boss)
     assert result.success is False
 
 
 def test_a_settings_only_check_that_the_tool_is_declared(settings, storage):
-    """The capability on the spec is the gate; a typo there would open it to everyone."""
+    """The capability on the spec is the gate; a typo there would open it to everyone.
+
+    Deliberately the LOWER of the two levels. Gating on `admin.all_data.read` would
+    shut the metadata tier out of the agent entirely, so the disclosure decision
+    moved into the handler — which is why this pin is worth keeping: reading it as
+    «the gate is weaker now» without noticing where the content check went is
+    exactly the mistake that would open every body to the narrow level.
+    """
     auth = AuthorizationService(storage)
     kernel = ExecutionKernel(auth, replace(settings))
     spec = kernel._tools["user_activity"]  # noqa: SLF001
-    assert spec.security_id == "admin.all_data.read"
+    assert spec.security_id == "admin.activity.read"
+
+
+@pytest.mark.asyncio
+async def test_the_metadata_tier_reaches_the_tool_but_not_the_text(kernel):
+    """Инструмент — та поверхность, где различие теряется легче всего.
+
+    Гейт стоит на НИЖНЕЙ способности, иначе наблюдатель не смог бы позвать
+    инструмент вовсе. Значит редактирование обязано жить внутри обработчика: без
+    него один гейт молча выдал бы наблюдателю всё написанное — через агента,
+    в свободном тексте, где потом не разберёшь, откуда это взялось.
+    """
+    runtime, auth, storage = kernel
+    storage.ensure_user("watcher", preset_key="user")
+    auth.grant_permission("watcher", "admin.activity.read")
+    watcher = auth.actor_for_user("watcher", source="test")
+
+    result = await runtime.execute("user_activity", {"person": "Иван"}, actor=watcher)
+
+    assert result.success is True, result.error
+    assert result.data["content"] == "redacted"
+    assert result.data["summary"]["arrivals"] == 2, "объём активности наблюдателю виден"
+    body = " ".join(str(value) for item in result.data["items"] for value in item.values())
+    for secret in ("склад", "Смета", "ремонт"):
+        assert secret not in body, f"инструмент отдал наблюдателю {secret!r}"
+
+
+@pytest.mark.asyncio
+async def test_the_tool_lists_itself_for_the_metadata_tier(kernel):
+    """Если инструмента нет в списке, модель его не позовёт, и уровень мёртв."""
+    runtime, auth, storage = kernel
+    storage.ensure_user("watcher2", preset_key="user")
+    auth.grant_permission("watcher2", "admin.activity.read")
+    watcher = auth.actor_for_user("watcher2", source="test")
+
+    assert "user_activity" in runtime.get_tool_names(watcher)
+    assert "user_activity" not in runtime.get_tool_names(auth.actor_for_user("usr_ivan", source="test"))

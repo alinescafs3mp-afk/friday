@@ -617,14 +617,24 @@ class ExecutionKernel:
         """What one account wrote and uploaded — reachable by the name a person uses.
 
         The only tool that reads across accounts, so three things are non-negotiable.
-        The capability gate is `admin.all_data.read`, checked by `execute` like every
-        other tool. The read is written to the audit log against the account it was
-        about, not just the tool name. And the account it resolved to is returned in
-        the answer: `resolve_person` is tolerant of case endings, layout and typos, and
-        a tolerant match that is wrong must be visible to whoever reads the reply
-        rather than buried under a confident-sounding summary.
+        The gate is a capability checked by `execute` like every other tool. The read
+        is written to the audit log against the account it was about, not just the
+        tool name. And the account it resolved to is returned in the answer:
+        `resolve_person` is tolerant of case endings, layout and typos, and a tolerant
+        match that is wrong must be visible to whoever reads the reply rather than
+        buried under a confident-sounding summary.
+
+        The gate is the LOWER of the two levels, `admin.activity.read`, and the body
+        is disclosed only to an actor who also holds `admin.all_data.read`. Gating on
+        the higher one instead would have shut the metadata tier out of the tool
+        entirely; gating on the lower one without this second check would have handed
+        it every body through the agent, which is the one surface where the
+        distinction is easiest to lose.
         """
         storage, _, _, _ = self._require_services()
+        include_content = bool(
+            self.authorization and self.authorization.authorize(actor, "admin.all_data.read").allowed
+        )
         matches = resolve_person(storage.list_users(limit=5000), person)
         chosen = unambiguous(matches)
         if chosen is None:
@@ -647,14 +657,20 @@ class ExecutionKernel:
                     "match_method": chosen.method,
                     "since": since,
                     "until": until,
+                    "content": "full" if include_content else "redacted",
                 },
             )
         )
         return {
             "resolved": chosen.to_dict(),
+            "content": "full" if include_content else "redacted",
             "summary": storage.user_activity_summary(chosen.user_id, since=since, until=until),
             "items": storage.user_activity(
-                chosen.user_id, since=since, until=until, limit=max(1, min(int(limit), 200))
+                chosen.user_id,
+                since=since,
+                until=until,
+                limit=max(1, min(int(limit), 200)),
+                include_content=include_content,
             ),
         }
 
@@ -839,8 +855,9 @@ class ExecutionKernel:
             "user_activity",
             "Что конкретный пользователь писал и загружал и когда. Имя можно указывать "
             "как обычно — «Иван», «у Ивана», с опечаткой или в другой раскладке. "
-            "Требует прав администратора; чтение чужого аккаунта записывается в аудит.",
-            "admin.all_data.read",
+            "Требует прав администратора; чтение чужого аккаунта записывается в аудит. "
+            "Само написанное показывается только полному администратору.",
+            "admin.activity.read",
             {
                 "person": {"type": "string"},
                 "since": {"type": "string"},

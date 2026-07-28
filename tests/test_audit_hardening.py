@@ -9,6 +9,7 @@ one's own — not).
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
 import pytest
@@ -19,6 +20,79 @@ from jericho.server import create_app
 
 def _actions(storage) -> list[str]:
     return [row["action"] for row in storage.list_audit_log(None, limit=100)]
+
+
+def _seed_addressable_objects(storage, user_id: str) -> dict[str, str]:
+    """One real row per path placeholder, so `/graph/{entity_id}` can be requested.
+
+    Returns the mapping placeholder-name -> id. A placeholder with no entry makes
+    the walk report the route as unreachable rather than skip it quietly.
+    """
+    import hashlib
+    import pathlib
+
+    from jericho.storage.models import (
+        Entity,
+        EntityType,
+        KnowledgeObject,
+        Mission,
+        RawObject,
+        new_id,
+    )
+
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="test",
+        source_ref=new_id("src"),
+        raw_content="Материал для проверки аудита",
+        content_type="text",
+        content_hash=hashlib.sha256(b"audit-probe").hexdigest(),
+    )
+    storage.store_raw_object(raw)
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content="Материал для проверки аудита",
+        content_type="text",
+        title="Проба",
+    )
+    storage.store_knowledge_object(knowledge)
+    entity = Entity(id=new_id("ent"), user_id=user_id, name="Проба", entity_type=EntityType.CONCEPT)
+    storage.create_entity(entity)
+    conversation = storage.create_conversation(user_id, "Проба")
+
+    # A stored file, not just a raw row: `/files/{raw_id}/download` checks
+    # `content_type == "file"` and resolves `stored_path` under `files_dir`.
+    stored = pathlib.Path(storage.settings.files_dir) / user_id / "проба.txt"
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_text("байты", encoding="utf-8")
+    upload = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="upload",
+        source_ref=new_id("src"),
+        raw_content="байты",
+        content_type="file",
+        content_hash=hashlib.sha256(b"file-probe").hexdigest(),
+        # Absolute: `_safe_runtime_file` resolves the candidate on its own, so a
+        # relative path would resolve against the CWD and fall outside files_dir.
+        metadata_json={"filename": "проба.txt", "stored_path": str(stored)},
+    )
+    storage.store_raw_object(upload)
+
+    mission = Mission(id=new_id("mis"), user_id=user_id, goal="Проба")
+    storage.create_mission(mission)
+
+    return {
+        "user_id": user_id,
+        "raw_id": upload.id,
+        "knowledge_id": knowledge.id,
+        "entity_id": entity.id,
+        "mission_id": mission.id,
+        "conversation_id": str(conversation["id"] if isinstance(conversation, dict) else conversation.id),
+    }
 
 
 def test_audit_log_is_append_only_at_database_level(storage):
@@ -102,6 +176,13 @@ def test_every_admin_read_of_another_account_is_audited(settings):
     is the one thing the audit trail exists for. This walks the routes rather than
     naming them, so the next module extracted from admin_api cannot quietly repeat
     it.
+
+    Parameterised paths were skipped at first, on the reasoning that `{entity_id}`
+    cannot be requested literally. That exemption hid a real hole for months:
+    `GET /api/admin/graph/{entity_id}` returned another account's subgraph — the
+    names of their people, organisations and projects — with no row in the log.
+    The exemption is gone; the walk now seeds a real object for each placeholder
+    so the parameterised routes are actually exercised.
     """
     import inspect
 
@@ -131,28 +212,52 @@ def test_every_admin_read_of_another_account_is_audited(settings):
     with TestClient(app) as client:
         storage = app.state.storage
         storage.ensure_user("victim", preset_key="user")
+        placeholders = _seed_addressable_objects(storage, "victim")
         owner = {"Authorization": f"Bearer {settings.api_token}"}
 
         checked: list[str] = []
         unaudited: list[str] = []
+        unreachable: list[str] = []
 
         def audit_count() -> int:
             row = storage.execute("SELECT COUNT(*) AS c FROM audit_log").fetchone()
             return int(row["c"] if row else 0)
 
         for path, endpoint in _admin_get_routes(app):
-            if not path.startswith("/api/admin/") or "{" in path:
+            if not path.startswith("/api/admin/"):
                 continue
             if "user_id" not in inspect.signature(endpoint).parameters:
                 continue
 
+            concrete = path
+            missing = False
+            for name in re.findall(r"\{(\w+)\}", path):
+                if name not in placeholders:
+                    missing = True
+                    break
+                concrete = concrete.replace("{" + name + "}", placeholders[name])
+            if missing:
+                unreachable.append(path)
+                continue
+
             before = audit_count()
-            response = client.get(path, params={"user_id": "victim", "q": "проба"}, headers=owner)
+            response = client.get(concrete, params={"user_id": "victim", "q": "проба"}, headers=owner)
             if response.status_code >= 400:
-                continue  # a route needing more parameters is not this test's subject
+                # A route that could not be reached is not evidence of anything, so it
+                # is reported rather than skipped: silence here is what let the graph
+                # route sit unaudited.
+                unreachable.append(f"{path} -> {response.status_code}")
+                continue
             checked.append(path)
             if audit_count() == before:
                 unaudited.append(path)
 
     assert checked, "no admin GET with a user_id parameter was reachable — the walk is broken"
     assert not unaudited, f"these read another account without an audit row: {unaudited}"
+    assert any("{" in path for path in checked), (
+        "no parameterised route was exercised — the seeding broke and the exemption is back"
+    )
+    assert not unreachable, (
+        "these admin reads could not be exercised, so nothing is known about their auditing "
+        f"— seed an object for them or give them a reason to be here: {unreachable}"
+    )

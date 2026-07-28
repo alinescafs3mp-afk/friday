@@ -36,6 +36,28 @@ def _require(request: Request, capability: str):
     return actor
 
 
+def _require_any(request: Request, *capabilities: str) -> tuple[Any, str]:
+    """Allow the route if the actor holds ANY of these, and say which one did it.
+
+    Returned so the caller can vary what it discloses by the authority actually
+    used, and so the audit trail records the reason rather than only the fact —
+    «прочитал чужой аккаунт» and «посмотрел, сколько тот написал» are different
+    events and must not look identical in the log.
+
+    The capabilities are tried in the order given, so the widest one wins when an
+    actor holds several; that keeps a full administrator's view unchanged.
+    """
+    actor = request.state.actor
+    service = request.app.state.auth_service
+    for capability in capabilities:
+        if service.authorize(actor, capability).allowed:
+            return actor, capability
+    # Re-run the first one so the refusal is raised by the same code path (and with
+    # the same shape and audit behaviour) as every other denied admin call.
+    service.require(actor, capabilities[0])
+    raise AssertionError("unreachable: require() must have raised")  # pragma: no cover
+
+
 def _json_value(value: Any, default: Any) -> Any:
     if value in (None, ""):
         return default
