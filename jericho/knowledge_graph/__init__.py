@@ -325,6 +325,36 @@ class EntityResolver:
         unique: dict[str, EntityResolutionCandidate] = {item.pair_key: item for item in output}
         return sorted(unique.values(), key=lambda item: item.confidence, reverse=True)
 
+    def sweep_duplicates(
+        self,
+        user_id: str,
+        *,
+        min_confidence: float = 0.55,
+        max_pairs: int = 50_000,
+    ) -> dict[str, Any]:
+        """One budgeted tick, and a report that admits what it has not looked at yet.
+
+        `detect_duplicates` returns proposals; this returns the state of the walk.
+        The difference matters to the reader: an empty proposal list with
+        `keys_pending > 0` means «not looked at yet», and returning it as a bare
+        empty list is how a reviewer concludes there is nothing left to merge.
+        """
+        candidates, report = self.storage.sweep_entity_duplicates(
+            user_id,
+            min_confidence=max(0.0, min(1.0, min_confidence)),
+            max_pairs=max_pairs,
+        )
+        stored_suggested = 0
+        for candidate in candidates:
+            stored = self.storage.store_resolution_candidate(candidate)
+            if str(stored.status) in {ResolutionStatus.SUGGESTED.value, str(ResolutionStatus.SUGGESTED)}:
+                stored_suggested += 1
+        report["suggested"] = stored_suggested
+        report["pending_total"] = len(
+            self.storage.list_resolution_candidates(user_id, ResolutionStatus.SUGGESTED)
+        )
+        return report
+
     def get_pending_resolutions(self, user_id: str) -> list[dict[str, Any]]:
         pending = self.storage.list_resolution_candidates(user_id, ResolutionStatus.SUGGESTED)
         enriched: list[dict[str, Any]] = []

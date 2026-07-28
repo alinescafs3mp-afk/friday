@@ -1292,8 +1292,34 @@ class KnowledgeMixin(StorageShared):
         Name similarity is only one signal.  Shared Knowledge Objects and graph neighbours raise
         confidence, while compact identifiers never use fuzzy or prefix matching.  The method only
         creates review candidates; it never performs a merge.
-        """
 
+        One pass over the whole blocking-key space, bounded by the pair ceiling —
+        the behaviour this method has always had. `sweep_entity_duplicates` walks
+        the same space across several calls instead; both go through
+        `_duplicate_pass`, so the pair enumeration and the scoring cannot drift
+        apart between «everything at once» and «a bit at a time».
+        """
+        return self._duplicate_pass(user_id, min_confidence=min_confidence)[0]
+
+    def _duplicate_pass(
+        self,
+        user_id: str,
+        *,
+        min_confidence: float = 0.5,
+        after_key: tuple[int, list[str]] | None = None,
+        max_pairs: int | None = None,
+    ) -> tuple[list[EntityResolutionCandidate], dict[str, Any]]:
+        """The pass itself, optionally resuming and optionally bounded.
+
+        `after_key` is a position in the deterministic strongest-key-first ordering
+        of blocking keys, not a row id: what is being walked is the KEY space, and
+        a pair examined twice is harmless because `store_resolution_candidate`
+        upserts and never reopens a decision a human already made.
+
+        Returns the candidates and a report saying where it stopped and how much of
+        the space is left — which is the part that used to exist only as a log line.
+        """
+        pair_ceiling = _MAX_DUPLICATE_PAIRS if max_pairs is None else max(1, max_pairs)
         entities = self.list_entities(user_id, limit=5000)
         knowledge_by_entity: dict[str, set[str]] = {}
         for row in self.execute(
@@ -1369,9 +1395,27 @@ class KnowledgeMixin(StorageShared):
         ordered: list[tuple[int, int]] = []
         seen_pairs: set[tuple[int, int]] = set()
         truncated = False
-        for key in sorted(blocks, key=lambda item: (_KEY_RANK.get(item[0], len(_KEY_RANK)), item)):
-            if truncated:
+        ranked = sorted(
+            ((_KEY_RANK.get(key[0], len(_KEY_RANK)), list(key), key) for key in blocks),
+            key=lambda item: (item[0], item[1]),
+        )
+        resume_after = (after_key[0], after_key[1]) if after_key else None
+        remaining = [item for item in ranked if resume_after is None or (item[0], item[1]) > resume_after]
+        keys_total = len(ranked)
+        keys_done = 0
+        stopped_at: tuple[int, list[str]] | None = None
+        for rank, key_list, key in remaining:
+            # Бюджет проверяется МЕЖДУ ключами, а не внутри. Обрыв на середине
+            # перечисления одного ключа означал бы, что курсор встаёт за ключ,
+            # часть пар которого не рассматривалась, — и они не рассматривались бы
+            # уже никогда. Оракульный тест поймал ровно это: 362 потерянные пары.
+            # Ключ поэтому либо пройден целиком, либо не начат; цена — перебор
+            # может превысить бюджет на один блок.
+            if len(ordered) > pair_ceiling:
+                truncated = True
                 break
+            keys_done += 1
+            stopped_at = (rank, key_list)
             members = blocks[key]
             for position, left_index in enumerate(members):
                 for right_index in members[position + 1 :]:
@@ -1380,9 +1424,18 @@ class KnowledgeMixin(StorageShared):
                         continue
                     seen_pairs.add(pair)
                     ordered.append(pair)
-                if len(ordered) > _MAX_DUPLICATE_PAIRS:
-                    truncated = True
-                    break
+        report: dict[str, Any] = {
+            "entities": len(entities),
+            "pairs_examined": len(ordered),
+            "keys_total": keys_total,
+            "keys_examined": keys_done,
+            # Осталось необойдённым — то самое, что раньше существовало только
+            # строкой в логе. Пустой список предложений при `keys_pending > 0`
+            # означает «ещё не смотрели», а не «дубликатов нет».
+            "keys_pending": max(0, len(remaining) - keys_done),
+            "partial": truncated,
+            "stopped_at": list(stopped_at) if truncated and stopped_at else None,
+        }
         if truncated:
             # Said out loud. The scan is quadratic in entity count with several
             # SequenceMatcher calls per surviving pair; an exhaustive run over those
@@ -1528,7 +1581,68 @@ class KnowledgeMixin(StorageShared):
                 )
             )
         candidates.sort(key=lambda item: item.confidence, reverse=True)
-        return candidates
+        report["candidates"] = len(candidates)
+        return candidates, report
+
+    _SWEEP_KEY = "entity_dedup:cursor:"
+
+    def sweep_entity_duplicates(
+        self,
+        user_id: str,
+        *,
+        min_confidence: float = 0.5,
+        max_pairs: int = 50_000,
+    ) -> tuple[list[EntityResolutionCandidate], dict[str, Any]]:
+        """One tick of the sweep: resume, work within a budget, remember where to continue.
+
+        The ceiling used to mean «the rest was dropped», and the only trace was a
+        WARNING in the log — so the reviewer saw a short list of proposals and had
+        no way to tell it from «there is nothing more to merge». Measured: at 1000
+        entities sharing common words the ceiling already fires, and at 2000 the
+        full pass takes 137 s against the worker's 240 s timeout.
+
+        Now the ceiling means «continue next time». The cursor is a position in the
+        key ordering, kept in `runtime_kv` (no schema change — the table is core).
+
+        When the entity set changes, the key ordering changes with it, so a key that
+        sorts BEFORE the cursor is not seen until the sweep wraps. That is accepted
+        deliberately rather than papered over: the sweep always terminates, every
+        pair is examined within two full sweeps, and `sweeps` in the report says how
+        many have completed. Restarting on every edit would let an actively edited
+        graph never finish one.
+        """
+        state: dict[str, Any] = {}
+        try:
+            stored = self.kv_get(self._SWEEP_KEY + user_id)
+            state = json.loads(stored) if stored else {}
+        except (TypeError, ValueError):
+            # Битое состояние — это рескан, а не упавший тик. Тот же выбор, что в
+            # `dedup.py`: потерять позицию дешевле, чем остановить обход.
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        after_key = None
+        raw_cursor = state.get("after_key")
+        if isinstance(raw_cursor, list) and len(raw_cursor) == 2:
+            after_key = (int(raw_cursor[0]), [str(part) for part in raw_cursor[1]])
+
+        candidates, report = self._duplicate_pass(
+            user_id, min_confidence=min_confidence, after_key=after_key, max_pairs=max_pairs
+        )
+
+        sweeps = int(state.get("sweeps", 0) or 0)
+        if not report["partial"]:
+            # The space is walked out: start over next tick, and say a full sweep
+            # finished — that is the only moment «no duplicates» means it.
+            sweeps += 1
+        self.kv_set(
+            self._SWEEP_KEY + user_id,
+            json.dumps({"after_key": report["stopped_at"] if report["partial"] else None, "sweeps": sweeps}),
+        )
+        report["sweeps"] = sweeps
+        report["resumed"] = after_key is not None
+        report["complete"] = not report["partial"]
+        return candidates, report
 
     def record_knowledge_usage(
         self,

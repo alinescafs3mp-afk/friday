@@ -599,9 +599,22 @@ class WorkersManager:
         await self._for_each_user(self._entity_resolution)
 
     async def _entity_resolution(self, user_id: str) -> None:
-        candidates = await run_blocking(self.kg.resolver.detect_duplicates, user_id, min_confidence=0.60)
-        if candidates:
-            LOGGER.info("Suggested %d potential entity merges for tenant %s", len(candidates), user_id)
+        """Один бюджетный тик обхода, а не полный проход.
+
+        Полный проход по 2000 плотных сущностей замерен в 137 с при таймауте
+        воркера 240 с — то есть до отказа оставался один порядок роста графа.
+        Тик доходит до конца за несколько заходов и говорит, сколько осталось.
+        """
+        report = await run_blocking(self.kg.resolver.sweep_duplicates, user_id, min_confidence=0.60)
+        if report.get("suggested"):
+            LOGGER.info("Suggested %d potential entity merges for tenant %s", report["suggested"], user_id)
+        if report.get("partial"):
+            LOGGER.info(
+                "Entity duplicate sweep for tenant %s is %d/%d keys in; continuing next tick",
+                user_id,
+                report.get("keys_examined", 0),
+                report.get("keys_total", 0),
+            )
 
     async def _knowledge_quality_scan_all(self) -> None:
         await self._for_each_user(self._knowledge_quality_scan)

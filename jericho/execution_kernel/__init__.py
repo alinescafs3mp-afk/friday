@@ -597,8 +597,19 @@ class ExecutionKernel:
         _, kg, _, _ = self._require_services()
         # Off the event loop: the scan is quadratic in entity count and this is a
         # tool the agent calls mid-conversation.
-        candidates = await run_blocking(kg.resolver.detect_duplicates, actor.user_id)
-        return {"candidates": [item.to_row() for item in candidates], "count": len(candidates)}
+        #
+        # A budgeted tick, and the candidates come from the STORED table rather than
+        # from whatever this tick happened to reach. Otherwise an agent that ran the
+        # scan mid-sweep would report the slice it saw as the whole answer — and it
+        # answers in prose, where a caveat is easy to drop.
+        report = await run_blocking(kg.resolver.sweep_duplicates, actor.user_id)
+        pending = await run_blocking(kg.resolver.get_pending_resolutions, actor.user_id)
+        return {
+            "candidates": pending,
+            "count": len(pending),
+            "scan": report,
+            "complete": bool(report.get("complete")),
+        }
 
     async def _inbox_list(self, *, actor: ActorContext, status: str | None = None) -> dict[str, Any]:
         storage, _, _, _ = self._require_services()

@@ -230,10 +230,13 @@ async def entity_graph(
 @router.post("/resolutions/detect", tags=["knowledge-graph"])
 async def detect_duplicates(request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.read")
-    candidates = await run_blocking(
-        request.app.state.kg.resolver.detect_duplicates, actor.user_id, min_confidence=0.55
+    report = await run_blocking(
+        request.app.state.kg.resolver.sweep_duplicates, actor.user_id, min_confidence=0.55
     )
-    return {"items": [candidate.to_row() for candidate in candidates], "count": len(candidates)}
+    # Предложения — из таблицы, а не из того, до чего дошёл этот тик: список и
+    # `GET /resolutions/pending` обязаны говорить одно и то же.
+    pending = await run_blocking(request.app.state.kg.resolver.get_pending_resolutions, actor.user_id)
+    return {"items": pending, "count": len(pending), "scan": report}
 
 
 @router.get("/resolutions", tags=["knowledge-graph"])

@@ -216,16 +216,19 @@ async def detect_resolutions(request: Request) -> dict[str, Any]:
     user_id = str(body.get("user_id") or "")
     if not _services(request).storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="User not found")
-    candidates = _services(request).kg.resolver.detect_duplicates(user_id, min_confidence=0.55)
-    result = {"user_id": user_id, "suggested": [item.to_row() for item in candidates]}
-    _audit(
-        request,
-        "admin.entity_resolution.detect",
-        "user",
-        user_id,
-        after={"suggested_count": len(candidates)},
+    # Off the event loop, like the knowledge-duplicate route beside it. This one was
+    # synchronous inside an `async def`: on a large graph a manual scan froze every
+    # other request for the duration — measured at 137 s for 2000 entities.
+    #
+    # A budgeted tick, not a full pass, and the answer is the state of the walk.
+    # `detect_duplicates` returned the proposals it happened to reach before the
+    # pair ceiling, and the fact that it had stopped early existed only as a WARNING
+    # in the log — so a short list read as «nothing more to merge».
+    report = await asyncio.to_thread(
+        functools.partial(_services(request).kg.resolver.sweep_duplicates, user_id, min_confidence=0.55)
     )
-    return result
+    _audit(request, "admin.entity_resolution.detect", "user", user_id, after=report)
+    return {"user_id": user_id, **report}
 
 
 @router.post("/resolutions/{candidate_id}/accept")

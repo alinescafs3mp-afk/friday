@@ -1020,6 +1020,10 @@ class StorageShared:
     close: Callable[..., None]
     conn: Any
     ensure_user: Callable[..., dict[str, Any]]
+    # Курсор обхода дедупа сущностей живёт в runtime_kv — общая таблица, своя
+    # миксина. Объявлено здесь, как и остальные межмиксинные вызовы.
+    kv_get: Callable[..., str | None]
+    kv_set: Callable[..., None]
     get_user: Callable[..., dict[str, Any] | None]
     get_raw_object: Callable[..., Any]
     get_entity: Callable[..., dict[str, Any] | None]
