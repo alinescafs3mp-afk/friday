@@ -136,6 +136,7 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         )
 
     copied = skipped = failed = repaired = 0
+    leftovers: list[str] = []
     for manifest_path in sorted(settings.backups_dir.glob("*.manifest.json")):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -149,6 +150,18 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
             continue
         target = mirror_dir / (f"{database}.enc" if key_file else database)
         mirrored_manifest = mirror_dir / manifest_path.name
+        # Turning encryption ON does not remove what was mirrored before it. The
+        # target's NAME depends on the key, so the .enc copy lands BESIDE the old
+        # plaintext one rather than replacing it — and nothing ever deletes it: this
+        # module unlinks only its own temp file, and `prune_backups` walks
+        # `backups_dir`, never the mirror. The mirror is by design an external or
+        # synced volume that is not trusted, which is the whole reason to encrypt, so
+        # a readable database sitting there indefinitely is the thing encryption was
+        # turned on to prevent. Counted BEFORE the skip below, or the first encrypted
+        # run would report it once and never again.
+        if key_file is not None and (mirror_dir / database).exists():
+            leftovers.append(database)
+            LOGGER.warning("В зеркале осталась НЕзашифрованная копия %s — удалите её вручную", database)
         # A database and its manifest are ONE unit. Skipping on the database alone
         # meant that an interruption between `os.replace` and the manifest copy left
         # a manifest-less database as the durable state — and every later run saw
@@ -197,6 +210,10 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         "skipped_existing": skipped,
         "repaired": repaired,
         "failed": failed,
+        # Named for what an operator has to DO about it. `encrypted` is an echo of the
+        # configuration and stays true — this run did encrypt; it says nothing about
+        # what is already lying in the directory.
+        "plaintext_leftovers": sorted(leftovers),
         "same_device": same_device,
     }
     if copied or failed:

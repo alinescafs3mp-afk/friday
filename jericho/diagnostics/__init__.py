@@ -757,6 +757,16 @@ def collect_diagnostics(
                 f"{mirror.get('mirror_dir')} не смонтирован. Offsite-копии НЕ создаются; "
                 "локальные копии не защищают от отказа диска.",
             )
+        elif mirror.get("plaintext_leftovers"):
+            leftovers = mirror.get("plaintext_leftovers") or []
+            add_action(
+                "mirror_plaintext_leftovers",
+                "warning",
+                "В зеркале остались незашифрованные копии базы",
+                f"{len(leftovers)} шт. в {mirror.get('mirror_dir')}: шифрование включили позже, "
+                "и старые открытые копии остались рядом с новыми. Их не удаляет ни зеркало, ни "
+                "прореживание бэкапов — удалите вручную: " + ", ".join(str(name) for name in leftovers[:5]),
+            )
         elif mirror.get("failed"):
             add_action(
                 "mirror_failed",

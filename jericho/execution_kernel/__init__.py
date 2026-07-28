@@ -328,10 +328,11 @@ class ExecutionKernel:
         actor: ActorContext | None = None,
     ) -> ToolResult:
         actor = actor or current_actor()
+        details = self._audit_details(name, arguments)
         if self.authorization is None:
             # Fail closed: without an authorization service no capability can
             # be verified, so no tool may run — never the other way around.
-            await self._audit(actor, name, False, "no_authorization_service")
+            await self._audit(actor, name, False, "no_authorization_service", details=details)
             return ToolResult(name, False, error="Execution kernel has no authorization service")
         tool = self._tools.get(name)
         if not tool:
@@ -341,10 +342,10 @@ class ExecutionKernel:
         try:
             self.authorization.require(actor, tool.security_id)
         except AuthorizationError as exc:
-            await self._audit(actor, name, False, "authorization_denied")
+            await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error=str(exc))
         if name == "code_run" and not (self.settings and self.settings.code_execution_enabled):
-            await self._audit(actor, name, False, "disabled")
+            await self._audit(actor, name, False, "disabled", details=details)
             return ToolResult(name, False, error="Code execution is disabled by configuration")
 
         timeout = 30
@@ -353,20 +354,50 @@ class ExecutionKernel:
         try:
             async with asyncio.timeout(timeout):
                 data = await tool.handler(actor=actor, **(arguments or {}))
-            await self._audit(actor, name, True, "ok")
+            await self._audit(actor, name, True, "ok", details=details)
             return ToolResult(name, True, data=data)
         except TimeoutError:
-            await self._audit(actor, name, False, "timeout")
+            await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
         except (TypeError, ValueError) as exc:
-            await self._audit(actor, name, False, "invalid_arguments")
+            await self._audit(actor, name, False, "invalid_arguments", details=details)
             return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
         except Exception as exc:
             LOGGER.exception("Tool %s failed", name)
-            await self._audit(actor, name, False, type(exc).__name__)
+            await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
 
-    async def _audit(self, actor: ActorContext, tool_name: str, success: bool, reason: str) -> None:
+    @staticmethod
+    def _audit_details(tool_name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+        """What a tool invocation should leave behind besides its name.
+
+        `code_run` is the one tool whose whole point is executing text the caller
+        supplied, and the audit row recorded only that it ran — the code itself was
+        reachable only through the tool's own output, which is truncated. A fingerprint
+        closes that without putting a body in the log: the same `sha256` + `chars`
+        pairing `admin.knowledge.purge` already uses, and for the same reason —
+        `audit_log` is append-only at the database level and not even purge clears it,
+        so it must never hold content.
+        """
+        if tool_name != "code_run":
+            return {}
+        code = (arguments or {}).get("code")
+        if not isinstance(code, str):
+            return {}
+        return {
+            "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+            "code_chars": len(code),
+        }
+
+    async def _audit(
+        self,
+        actor: ActorContext,
+        tool_name: str,
+        success: bool,
+        reason: str,
+        *,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         if not self.storage:
             return
         self.storage.log_audit(
@@ -376,7 +407,12 @@ class ExecutionKernel:
                 action="tool.invoke",
                 target_type="tool",
                 target_id=tool_name,
-                after_json={"success": success, "reason": reason, "source": actor.source},
+                after_json={
+                    "success": success,
+                    "reason": reason,
+                    "source": actor.source,
+                    **(details or {}),
+                },
             )
         )
 

@@ -41,6 +41,11 @@ def _log_safe_host(url: str) -> str:
 
 _SEARCH_TIMEOUT = 15.0
 _FETCH_TIMEOUT = 20.0
+# Ceiling on ONE fetch including redirects and body streaming. Sized from the byte
+# limit rather than picked: 5 MiB in 60 s is ~87 KiB/s, slow enough that an honest
+# page on a poor link still arrives, fast enough that a drip feed does not sit
+# forever on one of twenty pooled connections.
+_FETCH_TOTAL_BUDGET = 60.0
 _DEFAULT_MAX_RESULTS = 5
 _DEFAULT_MAX_SOURCES = 3
 _MAX_REDIRECTS = 5
@@ -507,7 +512,15 @@ class WebSurfer:
     async def fetch(self, url: str, *, max_length: int = 50_000) -> FetchResult:
         requested = str(url or "").strip()
         try:
-            body, response, final_url = await self._request_bytes(requested)
+            # httpx timeouts are PER OPERATION: `read=20` means «no more than twenty
+            # seconds between chunks», not «no more than twenty seconds». A server
+            # dripping one byte every five seconds held the connection indefinitely —
+            # measured at 65 s and still open — and the 5 MiB ceiling does not help,
+            # because at that rate it would take years to reach. Agent calls are cut
+            # by the kernel's own 30-second timeout, but `POST /api/ingest/url` calls
+            # this directly and had no ceiling at all.
+            async with asyncio.timeout(_FETCH_TOTAL_BUDGET):
+                body, response, final_url = await self._request_bytes(requested)
             status = response.status_code
             if status < 200 or status >= 300:
                 return FetchResult(
@@ -555,7 +568,11 @@ class WebSurfer:
                 text_length=len(text),
                 status_code=status,
             )
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, TimeoutError):
+            # TimeoutError explicitly: it is NOT a subclass of httpx.TimeoutException,
+            # and `str(TimeoutError())` is the empty string — falling through to the
+            # generic handler would return a blank error, which `POST /api/ingest/url`
+            # then reports as «empty content» instead of a timeout.
             return FetchResult(requested, "", "", 0, error="Timeout")
         except UnsafeURLError as exc:
             return FetchResult(requested, "", "", 0, error=f"Blocked URL: {exc}")

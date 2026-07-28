@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -255,6 +256,17 @@ class LLMRouter:
         return self.settings.llm_timeout_sec
 
     @property
+    def total_budget_sec(self) -> float:
+        """Ceiling on ONE call, retries included — 1.5x a single attempt.
+
+        Not `MAX_RETRIES * timeout_sec`: that is the number this exists to cut. One
+        full attempt plus half of another leaves room for a real retry after a fast
+        failure (connection refused, HTTP 503) while refusing to spend three whole
+        timeouts on an endpoint that accepts the connection and then says nothing.
+        """
+        return max(30.0, self.timeout_sec * 1.5)
+
+    @property
     def max_tokens(self) -> int:
         return self.settings.llm_max_tokens
 
@@ -347,7 +359,21 @@ class LLMRouter:
         payload = self._prepare_payload(messages, temperature, max_tokens, tools, stream=False)
         last_error: Exception | None = None
 
+        # One budget for the whole series, not per attempt. Each attempt is allowed
+        # `timeout_sec`, so three of them plus backoff cost 3*240 + 6 = 726 seconds —
+        # and that is per CALL, while one user message makes several: measured, a
+        # slow-but-alive endpoint in research mode costs seven calls, 85 minutes, all
+        # of it holding one of four foreground slots. Nothing outside cuts it short:
+        # there is no request timeout on the server, and the Telegram bridge giving up
+        # after 270 seconds does not cancel the handler.
+        #
+        # The deadline stops a NEW attempt from starting, rather than interrupting one
+        # in flight — a request that is answering must not be killed mid-stream.
+        deadline = time.monotonic() + self.total_budget_sec
         for attempt in range(MAX_RETRIES):
+            if attempt and time.monotonic() >= deadline:
+                LOGGER.warning("LLM budget of %.0fs is spent; not retrying", self.total_budget_sec)
+                break
             try:
                 timeout = httpx.Timeout(self.timeout_sec, connect=15.0)
                 async with httpx.AsyncClient(

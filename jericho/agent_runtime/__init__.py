@@ -394,6 +394,14 @@ class AgentRuntime:
         if (
             self.settings.verify_answers
             and self.llm.enabled
+            and not response.get("llm_failed")
+            # Not the offline stub. Verification asks the model to judge an answer
+            # against the records — and against an unreachable model, the answer IS
+            # the text this runtime just printed, so the judge is being asked about
+            # its own caller. Measured: on a non-empty base the stub reaches 1265
+            # characters against a 300-character threshold, so a hung endpoint cost a
+            # second full retry budget — 726 seconds on top of 726, one message
+            # holding a foreground slot for 24 minutes.
             and len(content) >= self.settings.verify_min_answer_chars
         ):
             verification = await self._verify_response(
@@ -720,6 +728,7 @@ class AgentRuntime:
                     "content": self._offline_response(context),
                     "tools_used": tools_used,
                     "tool_evidence": tool_evidence,
+                    "llm_failed": True,
                 }
 
             raw_native_calls = result.get("tool_calls")
@@ -1184,7 +1193,7 @@ class AgentRuntime:
                 return {"content": result.get("content", ""), "tools_used": []}
             except Exception as exc:
                 LOGGER.error("LLM unavailable: %s", exc)
-        return {"content": self._offline_response(context), "tools_used": []}
+        return {"content": self._offline_response(context), "tools_used": [], "llm_failed": True}
 
     @staticmethod
     def _offline_response(context: AgentContext) -> str:
