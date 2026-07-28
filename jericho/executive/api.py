@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from jericho.admin_api._deps import _audit_cross_tenant_read
+from jericho.admin_api._deps import _audit, _audit_cross_tenant_read, _protect_owner_target
 from jericho.permissions import ActorContext
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
@@ -126,6 +126,11 @@ async def admin_get_mission(
     mission = executive.get_mission_view(mission_id, user_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
+    # Logged for the same reason the listing above it is: a mission carries the goal
+    # the user wrote and the text every step produced, so reading someone else's is
+    # reading their content. Only the listing was logged, so the endpoint that shows
+    # the actual material was the one that left no trace.
+    _audit_cross_tenant_read(request, "admin.missions.read", str(mission.get("user_id") or ""))
     return {"mission": mission}
 
 
@@ -136,8 +141,15 @@ async def admin_cancel_mission(mission_id: str, request: Request) -> dict[str, A
     owner = storage.get_mission(mission_id)
     if owner is None:
         raise HTTPException(status_code=404, detail="Mission not found")
+    target_user = str(owner["user_id"])
+    # Cancelling is a cross-tenant MUTATION and was neither guarded nor recorded: a
+    # delegated administrator could stop the owner's own missions, and nothing in the
+    # audit log said who did it. Every other admin route that touches another account
+    # passes through both of these.
+    _protect_owner_target(request, target_user)
     executive = request.app.state.executive
-    mission = await executive.cancel_mission(mission_id, owner["user_id"])
+    mission = await executive.cancel_mission(mission_id, target_user)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
+    _audit(request, "admin.mission.cancel", "mission", mission_id, after={"user_id": target_user})
     return {"mission": mission}
