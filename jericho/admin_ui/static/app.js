@@ -291,7 +291,7 @@ actions.createUser=async()=>{try{await api('/api/admin/users',{method:'POST',bod
 const ACTIVITY_PAGE = 50;
 const ACTIVITY_PERIODS = [['', 'Всё время'], ['7', '7 дней'], ['30', '30 дней'], ['90', '90 дней']];
 function activityWindow(days) { if (!days) return ''; const from = new Date(Date.now() - Number(days) * 864e5); return from.toISOString(); }
-function activityQuery(offset) { const parts = [`limit=${ACTIVITY_PAGE}`, `offset=${offset}`]; if (state.activitySince) parts.push('since=' + q(state.activitySince)); if (state.activityUntil) parts.push('until=' + q(state.activityUntil)); return parts.join('&'); }
+function activityQuery(offset) { const parts = [`limit=${ACTIVITY_PAGE}`, `offset=${offset}`, 'analysis=topics', 'analysis=rhythm', 'analysis=volume', 'analysis=change']; if (state.activitySince) parts.push('since=' + q(state.activitySince)); if (state.activityUntil) parts.push('until=' + q(state.activityUntil)); return parts.join('&'); }
 renderers.activity = async gen => {
   await loadUsers(gen);
   const target = selectedUser();
@@ -299,6 +299,7 @@ renderers.activity = async gen => {
   const data = await api(`/api/admin/users/${q(target)}/activity?${activityQuery(state.activityOffset)}`);
   if(gen!==renderGen)return;
   state.activity = data.items || []; state.activitySummary = data.summary || null;
+  state.activityAnalysis = data.analysis || null;
   const who = state.users.find(u => u.id === target) || {};
   const s = state.activitySummary || {};
   const found = state.activityFound;
@@ -320,6 +321,23 @@ renderers.activity = async gen => {
   // ниже потом не подставляла — в разметку уходил `${pager}`, то есть ИСХОДНИК
   // стрелочной функции. Две реализации одного пейджера ровно так и расходятся.
   const activityPager = pager('activityPage', state.activityOffset, state.activity.length, s.arrivals);
+  const an = state.activityAnalysis;
+  const countChips = (rows, key, label) => rows && rows.length ? rows.map(r => `<span class="badge">${esc(String(r[key]))}: ${r.count}</span>`).join(' ') : `<span class="muted">${label}</span>`;
+  const hours = an && an.by_hour ? an.by_hour : [];
+  const hourPeak = Math.max(1, ...hours.map(h => h.count));
+  const hourBars = hours.length ? hours.map(h => `<div class="kv"><div class="mono">${esc(h.hour)}:00</div><div><span class="badge ok">${h.count}</span> <span class="muted">${'▬'.repeat(Math.max(1, Math.round(h.count / hourPeak * 16)))}</span></div></div>`).join('') : empty('Нет данных');
+  const ch = an && an.change ? an.change : null;
+  const delta = !ch ? '' : !ch.available
+    ? `<div class="muted">Выберите период — сравнивать текущее окно не с чем.</div>`
+    : `<div class="kv"><div>Поступлений сейчас</div><div><b>${ch.arrivals_now}</b> против <b>${ch.arrivals_before}</b> за предыдущие столько же</div></div>`
+      + (ch.new_topics && ch.new_topics.length ? `<div class="kv"><div>Появилось</div><div>${ch.new_topics.map(t => `<span class="badge ok">${esc(t)}</span>`).join(' ')}</div></div>` : '')
+      + (ch.dropped_topics && ch.dropped_topics.length ? `<div class="kv"><div>Пропало</div><div>${ch.dropped_topics.map(t => `<span class="badge warn">${esc(t)}</span>`).join(' ')}</div></div>` : '')
+      + (ch.topics_redacted ? `<div class="muted mt8">Темы скрыты вашим уровнем доступа.</div>` : '');
+  const analysisBlock = !an ? '' : `
+<div class="grid two"><section class="card"><h2>О чём пишет</h2><div class="mt8">${an.topics_redacted ? '<span class="muted">Скрыто вашим уровнем доступа</span>' : countChips(an.topics, 'topic', 'Тем не найдено')}</div>${an.topics_total > (an.topics || []).length ? `<div class="muted mt8">Показано ${(an.topics || []).length} из ${an.topics_total}</div>` : ''}<div class="mt8">${an.topics_redacted ? '' : countChips(an.kinds, 'kind', '')}</div></section>
+<section class="card"><h2>Когда работает</h2>${hourBars}</section></div>
+<div class="grid two"><section class="card"><h2>Что изменилось</h2>${delta}</section>
+<section class="card"><h2>Объём</h2>${an.volume ? `<div class="kv"><div>Символов</div><div><b>${Number(an.volume.chars || 0).toLocaleString('ru')}</b></div></div><div class="kv"><div>Дней с активностью</div><div><b>${an.volume.active_days}</b></div></div><div class="kv"><div>Символов в активный день</div><div><b>${Number(an.volume.chars_per_active_day || 0).toLocaleString('ru')}</b></div></div>` : empty('Нет данных')}</section></div>`;
   setApp(gen,`
 <section class="card"><div class="toolbar"><h2 class="grow">Активность: ${esc(who.display_name || who.username || target)}</h2><span class="badge">${esc(target)}</span></div>
 <div class="toolbar"><input class="field grow" id="activityName" placeholder="Найти по имени — «Иван», «у Ивана», можно с опечаткой" ${chg('activityFind')}><span>${periodButtons}</span></div>
@@ -327,6 +345,7 @@ ${foundBlock}
 <div class="muted mt8">Первое поступление: ${fmtDate(s.first_at)} · последнее: ${fmtDate(s.last_at)}</div></section>
 <div class="grid stats">${cards}</div>
 <div class="grid two"><section class="card"><h2>Откуда приходило</h2><div class="mt8">${bySource}</div></section><section class="card"><h2>По дням</h2>${dayBars}</section></div>
+${analysisBlock}
 <section class="card"><div class="toolbar"><h2 class="grow">Что и когда</h2></div>${rows.length ? table(['Когда', 'Что', 'Название', 'Объём', 'Судьба', ''], rows) : empty('За выбранный период ничего нет')}${activityPager}</section>`);
 };
 actions.activityPeriod = async days => { state.activitySince = activityWindow(days); state.activityOffset = 0; await refresh() };

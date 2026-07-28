@@ -29,10 +29,33 @@ _PREVIEW_CHARS = 2000
 # clipped series makes the bars and the total disagree with nothing to show for it.
 _DAY_BUCKETS = 366
 
+# Which analyses `user_activity_analysis` knows how to run. An explicit vocabulary,
+# not a free-form string: it is passed through to the agent tool, and a model given
+# a free field invents plausible names and gets silence back.
+ANALYSES = ("topics", "rhythm", "volume", "change")
+
 
 def _preview(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
     return cleaned[:_PREVIEW_CHARS]
+
+
+def _previous_window(since: str, until: str | None) -> tuple[str, str]:
+    """The window of equal length immediately before this one.
+
+    «Что изменилось за месяц» is a comparison, and the thing being compared has to
+    be the same size — otherwise a 30-day window measured against 90 days of history
+    reports a collapse in activity that is only arithmetic.
+    """
+    from datetime import datetime
+
+    def parse(value: str) -> datetime:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    end = parse(until) if until else datetime.now(parse(since).tzinfo)
+    start = parse(since)
+    span = end - start
+    return (start - span).isoformat(), start.isoformat()
 
 
 class OversightMixin(StorageShared):
@@ -231,4 +254,209 @@ class OversightMixin(StorageShared):
             ),
             "pending_inbox": self._windowed_count("inbox", user_id, since, until, "status='pending'"),
             "messages": self._windowed_count("messages", user_id, since, until),
+        }
+
+    # ------------------------------------------------------------------
+    # «Запрошенный анализ»: не лента и не сводка, а ответ на вопрос о человеке
+    # ------------------------------------------------------------------
+
+    def _topics(self, where: str, params: list[Any], *, top: int) -> list[dict[str, Any]]:
+        """О чём этот человек пишет, по разметке, которая на его материале ЕСТЬ.
+
+        Источник — `inbox.suggested_tags_json`, а не `knowledge_objects.tags_json`.
+        Замерено на живой базе: теги Inbox стоят на 66 поступлениях из 66 (146
+        различных значений), а теги знаний — на одном объекте из шести. Анализ,
+        построенный на втором, был бы почти всегда пуст и читался бы как «человек
+        ни о чём не пишет», что неотличимо от «нам нечем это измерить».
+
+        Считается через `json_each` и складывается регистронезависимо той же
+        функцией, что и остальная группировка по тегам в проекте.
+        """
+        rows = self.execute(
+            f"""SELECT jericho_casefold(tag.value) AS topic, COUNT(*) AS count
+                FROM raw_objects r
+                JOIN inbox i ON i.raw_object_id=r.id AND i.user_id=r.user_id
+                JOIN json_each(i.suggested_tags_json) AS tag
+                WHERE {where} AND tag.value <> ''
+                GROUP BY topic ORDER BY count DESC, topic ASC LIMIT ?""",  # nosec B608
+            (*params, max(1, top)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _kinds(self, where: str, params: list[Any]) -> list[dict[str, Any]]:
+        """Что это за материал по типу, из метаданных поступления."""
+        rows = self.execute(
+            f"""SELECT COALESCE(json_extract(r.metadata_json, '$.knowledge_kind'), '') AS kind,
+                       COUNT(*) AS count
+                FROM raw_objects r WHERE {where}
+                GROUP BY kind ORDER BY count DESC, kind ASC""",  # nosec B608
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def user_activity_analysis(
+        self,
+        user_id: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        analyses: tuple[str, ...] | list[str] | None = None,
+        top: int = 10,
+        include_content: bool = True,
+    ) -> dict[str, Any]:
+        """Не «что он сделал», а «что из этого следует» — по запрошенному разрезу.
+
+        Лента отвечает на вопрос о событиях, сводка — о количествах. Оба
+        предполагают, что смотрящий сам сложит из них картину. Это не работает на
+        аккаунте с историей: 900 поступлений нельзя прочитать глазами.
+
+        Каждый разрез — ОДИН SQL с агрегатом, поэтому число здесь не может
+        оказаться длиной обрезанной выборки. Единственное место, где стоит
+        `LIMIT` — список тем, и он ограничивает то, что ПОКАЗАНО, а не то, что
+        посчитано: `topics_total` рядом говорит, сколько их всего.
+
+        `include_content=False` убирает всё, что НАЗЫВАЕТ предмет: темы и виды
+        материала. «Ритм» и «объём» остаются — когда человек работает и сколько
+        выдаёт, это про деятельность, а не про её содержание. Граница проведена
+        здесь, а не у вызывающих: список тем — сжатый пересказ написанного, и
+        два вызывающих, решающих это порознь, разойдутся при первом новом разрезе.
+        """
+        wanted = tuple(analyses) if analyses else ANALYSES
+        unknown = [name for name in wanted if name not in ANALYSES]
+        if unknown:
+            raise ValueError(f"Unknown analysis: {sorted(unknown)}. Valid: {list(ANALYSES)}")
+
+        where, params = self._arrival_window(user_id, since, until, alias="r")
+        result: dict[str, Any] = {
+            "user_id": user_id,
+            "since": since,
+            "until": until,
+            "analyses": list(wanted),
+        }
+
+        if "topics" in wanted:
+            distinct = self.execute(
+                f"""SELECT COUNT(DISTINCT jericho_casefold(tag.value)) AS total
+                    FROM raw_objects r
+                    JOIN inbox i ON i.raw_object_id=r.id AND i.user_id=r.user_id
+                    JOIN json_each(i.suggested_tags_json) AS tag
+                    WHERE {where} AND tag.value <> ''""",  # nosec B608
+                tuple(params),
+            ).fetchone()
+            result["topics"] = self._topics(where, params, top=top) if include_content else []
+            result["topics_total"] = int(distinct["total"] if distinct else 0) if include_content else 0
+            result["kinds"] = self._kinds(where, params) if include_content else []
+            result["topics_redacted"] = not include_content
+
+        if "rhythm" in wanted:
+            # Час берётся срезом строки, а не `strftime('%H')`: отметки пишутся в
+            # UTC со смещением +00:00, оба дают одно и то же, но срез не может
+            # молча сдвинуться, если однажды в базу попадёт местное время.
+            result["by_hour"] = [
+                dict(row)
+                for row in self.execute(
+                    f"""SELECT substr(r.received_at, 12, 2) AS hour, COUNT(*) AS count
+                        FROM raw_objects r WHERE {where}
+                        GROUP BY hour ORDER BY hour ASC""",  # nosec B608
+                    tuple(params),
+                ).fetchall()
+            ]
+            result["by_weekday"] = [
+                dict(row)
+                for row in self.execute(
+                    f"""SELECT CAST(strftime('%w', r.received_at) AS INTEGER) AS weekday,
+                               COUNT(*) AS count
+                        FROM raw_objects r WHERE {where}
+                        GROUP BY weekday ORDER BY weekday ASC""",  # nosec B608
+                    tuple(params),
+                ).fetchall()
+            ]
+
+        if "volume" in wanted:
+            row = self.execute(
+                f"""SELECT COUNT(*) AS arrivals,
+                           COALESCE(SUM(LENGTH(r.raw_content)), 0) AS chars,
+                           COALESCE(SUM(json_extract(r.metadata_json, '$.size_bytes')), 0) AS bytes,
+                           COUNT(DISTINCT substr(r.received_at, 1, 10)) AS active_days
+                    FROM raw_objects r WHERE {where}""",  # nosec B608
+                tuple(params),
+            ).fetchone()
+            volume = {key: int(row[key] or 0) for key in ("arrivals", "chars", "bytes", "active_days")}
+            volume["chars_per_active_day"] = (
+                round(volume["chars"] / volume["active_days"]) if volume["active_days"] else 0
+            )
+            result["volume"] = volume
+
+        if "change" in wanted:
+            result["change"] = self._change(user_id, since, until, top=top, include_content=include_content)
+
+        return result
+
+    def _change(
+        self,
+        user_id: str,
+        since: str | None,
+        until: str | None,
+        *,
+        top: int,
+        include_content: bool = True,
+    ) -> dict[str, Any]:
+        """Это окно против предыдущего такой же длины — одним запросом, не вычитанием.
+
+        Две отдельные выборки и вычитание в питоне дали бы тот же ответ и
+        разъехались бы при первой правке одной из них. `SUM(CASE …)` считает обе
+        половины по одному и тому же предикату по построению.
+        """
+        if not since:
+            # Без начала окна «изменилось» не с чем сравнивать. Отказ должен быть
+            # явным: пустой разрез читался бы как «ничего не изменилось».
+            return {"available": False, "reason": "since_required"}
+
+        previous_since, previous_until = _previous_window(since, until)
+        # ISO stamps compare as strings, so an open end is the string that sorts
+        # after every timestamp this schema can hold.
+        end = until or "9999"
+
+        totals = self.execute(
+            """SELECT SUM(CASE WHEN received_at >= ? THEN 1 ELSE 0 END) AS now,
+                      SUM(CASE WHEN received_at < ? THEN 1 ELSE 0 END) AS before
+               FROM raw_objects
+               WHERE user_id=? AND deleted_at IS NULL AND received_at >= ? AND received_at <= ?""",
+            (since, since, user_id, previous_since, end),
+        ).fetchone()
+
+        topics = (
+            [
+                dict(row)
+                for row in self.execute(
+                    """SELECT jericho_casefold(tag.value) AS topic,
+                          SUM(CASE WHEN r.received_at >= ? THEN 1 ELSE 0 END) AS now,
+                          SUM(CASE WHEN r.received_at < ? THEN 1 ELSE 0 END) AS before
+                   FROM raw_objects r
+                   JOIN inbox i ON i.raw_object_id=r.id AND i.user_id=r.user_id
+                   JOIN json_each(i.suggested_tags_json) AS tag
+                   WHERE r.user_id=? AND r.deleted_at IS NULL
+                     AND r.received_at >= ? AND r.received_at <= ? AND tag.value <> ''
+                   GROUP BY topic ORDER BY (now - before) DESC, topic ASC""",
+                    (since, since, user_id, previous_since, end),
+                ).fetchall()
+            ]
+            if include_content
+            else []
+        )
+
+        return {
+            "available": True,
+            "previous_since": previous_since,
+            "previous_until": previous_until,
+            # Сколько поступлений — про деятельность, не про предмет: остаётся
+            # обоим уровням.
+            "arrivals_now": int((totals["now"] if totals else 0) or 0),
+            "arrivals_before": int((totals["before"] if totals else 0) or 0),
+            "topics": topics[:top],
+            "topics_compared": len(topics),
+            "topics_redacted": not include_content,
+            # Появилось только сейчас — самое читаемое, что даёт эта пара окон.
+            "new_topics": [row["topic"] for row in topics if row["before"] == 0 and row["now"] > 0][:top],
+            "dropped_topics": [row["topic"] for row in topics if row["now"] == 0 and row["before"] > 0][:top],
         }

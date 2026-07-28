@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from jericho.people import resolve_person, unambiguous
 from jericho.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
+from jericho.storage._oversight import ANALYSES
 from jericho.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
 from jericho.workers._blocking import run_blocking
 
@@ -613,6 +614,8 @@ class ExecutionKernel:
         since: str | None = None,
         until: str | None = None,
         limit: int = 50,
+        analysis: list[str] | None = None,
+        top: int = 10,
     ) -> dict[str, Any]:
         """What one account wrote and uploaded — reachable by the name a person uses.
 
@@ -658,10 +661,11 @@ class ExecutionKernel:
                     "since": since,
                     "until": until,
                     "content": "full" if include_content else "redacted",
+                    "analysis": list(analysis) if analysis else None,
                 },
             )
         )
-        return {
+        answer: dict[str, Any] = {
             "resolved": chosen.to_dict(),
             "content": "full" if include_content else "redacted",
             "summary": storage.user_activity_summary(chosen.user_id, since=since, until=until),
@@ -673,6 +677,22 @@ class ExecutionKernel:
                 include_content=include_content,
             ),
         }
+        if analysis:
+            try:
+                answer["analysis"] = storage.user_activity_analysis(
+                    chosen.user_id,
+                    since=since,
+                    until=until,
+                    analyses=list(analysis),
+                    top=max(1, min(int(top), 50)),
+                    include_content=include_content,
+                )
+            except ValueError as exc:
+                # The schema constrains the enum, so this is reachable only if the
+                # vocabulary and the schema drift apart. Say which values exist
+                # rather than failing the whole call.
+                answer["analysis_error"] = str(exc)
+        return answer
 
     async def _code_run(self, *, actor: ActorContext, code: str) -> dict[str, Any]:
         del actor
@@ -863,6 +883,17 @@ class ExecutionKernel:
                 "since": {"type": "string"},
                 "until": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                # `additionalProperties: False` on the spec means an invented
+                # argument is rejected outright, so the vocabulary has to be
+                # declared — and declared as an enum, or the model fills the field
+                # with plausible analysis names that silently return nothing.
+                # `topics` = о чём пишет, `rhythm` = когда работает,
+                # `volume` = сколько, `change` = что изменилось (требует `since`).
+                "analysis": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(ANALYSES)},
+                },
+                "top": {"type": "integer", "minimum": 1, "maximum": 50},
             },
             ["person"],
         )

@@ -80,6 +80,8 @@ async def user_activity(
     until: str | None = Query(default=None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    analysis: list[str] = Query(default=[]),
+    top: int = Query(10, ge=1, le=50),
 ) -> dict[str, Any]:
     """What this account wrote and uploaded, newest first, with a summary beside it.
 
@@ -100,9 +102,10 @@ async def user_activity(
         until=until,
         granted_by=granted,
         content="full" if include_content else "redacted",
+        analysis=analysis or None,
     )
     storage = _services(request).storage
-    return {
+    payload: dict[str, Any] = {
         "user_id": user_id,
         "content": "full" if include_content else "redacted",
         "summary": storage.user_activity_summary(user_id, since=since, until=until),
@@ -115,6 +118,19 @@ async def user_activity(
             include_content=include_content,
         ),
     }
+    if analysis:
+        try:
+            payload["analysis"] = storage.user_activity_analysis(
+                user_id,
+                since=since,
+                until=until,
+                analyses=analysis,
+                top=top,
+                include_content=include_content,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return payload
 
 
 @router.post("/users")
