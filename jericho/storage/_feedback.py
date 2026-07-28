@@ -245,15 +245,14 @@ class FeedbackMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_feedback_state(
-        self,
+    @staticmethod
+    def _feedback_state_filter(
         user_id: str,
-        *,
-        target_type: str | None = None,
-        target_id: str | None = None,
-        feedback_type: str | None = None,
-        limit: int = 1000,
-    ) -> list[dict[str, Any]]:
+        target_type: str | None,
+        target_id: str | None,
+        feedback_type: str | None,
+    ) -> tuple[list[str], list[Any]]:
+        """Built once, so the count and the listing cannot answer different questions."""
         clauses = ["user_id=?"]
         params: list[Any] = [user_id]
         if target_type:
@@ -265,6 +264,44 @@ class FeedbackMixin(StorageShared):
         if feedback_type:
             clauses.append("feedback_type=?")
             params.append(feedback_type)
+        return clauses, params
+
+    def count_feedback_state(
+        self,
+        user_id: str,
+        *,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        feedback_type: str | None = None,
+        negative_only: bool = False,
+    ) -> int:
+        """How many rows the same filters select — the number a tile should show.
+
+        The dashboard used to draw `len(get_feedback_state(limit=5000))`, which on a
+        busy account is the cap rather than a count. `negative_only` mirrors the
+        python it replaces exactly: `score` is `REAL NOT NULL` with a CHECK between
+        -1 and 1, so `score < 0` and `float(score or 0) < 0` select the same rows.
+        """
+        clauses, params = self._feedback_state_filter(user_id, target_type, target_id, feedback_type)
+        if negative_only:
+            clauses.append("score < 0")
+        # ``clauses`` contains only fixed predicates; values remain bound.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count FROM feedback_state WHERE {' AND '.join(clauses)}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def get_feedback_state(
+        self,
+        user_id: str,
+        *,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        feedback_type: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        clauses, params = self._feedback_state_filter(user_id, target_type, target_id, feedback_type)
         params.append(max(1, min(int(limit), 5000)))
         # ``clauses`` contains only fixed predicates; values remain bound.
         query = f"""SELECT * FROM feedback_state WHERE {" AND ".join(clauses)}

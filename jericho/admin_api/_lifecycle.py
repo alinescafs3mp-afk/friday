@@ -133,15 +133,28 @@ async def lifecycle_candidates(
     user_id: str,
     days_threshold: int = Query(90, ge=1, le=36500),
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.lifecycle.read", user_id)
-    items = _services(request).storage.list_lifecycle_candidates(
+    storage = _services(request).storage
+    items = storage.list_lifecycle_candidates(
         user_id,
         days_threshold=days_threshold,
         limit=limit,
+        offset=offset,
     )
-    return {"user_id": user_id, "items": items, "count": len(items), "read_only": True}
+    return {
+        "user_id": user_id,
+        "items": items,
+        "count": len(items),
+        # This route's whole job is this list, so reporting its page length as the
+        # count was the least useful number it could have returned.
+        "total": storage.count_lifecycle_candidates(user_id, days_threshold=days_threshold),
+        "limit": limit,
+        "offset": offset,
+        "read_only": True,
+    }
 
 
 @router.post("/lifecycle/apply")

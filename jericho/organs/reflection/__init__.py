@@ -43,10 +43,14 @@ def build_reflection(storage, user_id: str) -> dict[str, Any]:
     """Deterministic snapshot of a tenant's knowledge state (no model needed)."""
     lifecycle = storage.get_lifecycle_stats(user_id)
     knowledge_total = storage.count_knowledge_objects(user_id)
-    pending_inbox = len(storage.list_inbox(user_id, InboxStatus.PENDING, limit=1000))
-    relation_candidates = len(storage.list_relation_candidates(user_id, limit=1000))
-    conflicts = len(storage.list_knowledge_conflicts(user_id, limit=1000))
-    aging = len(storage.list_lifecycle_candidates(user_id, days_threshold=90, limit=1000))
+    # Counted, not measured by the length of a page. These four go into a digest the
+    # owner reads as a statement of fact, and each used to saturate at its own limit —
+    # `aging` worst of all, because its listing filters after taking its rows, so the
+    # number settled BELOW the limit and could not be recognised as truncated.
+    pending_inbox = storage.count_inbox(user_id, InboxStatus.PENDING)
+    relation_candidates = storage.count_relation_candidates(user_id, status="suggested")
+    conflicts = storage.count_knowledge_conflicts(user_id, status="suggested")
+    aging = storage.count_lifecycle_candidates(user_id, days_threshold=90)
     top_tags = storage.list_knowledge_tags(user_id, limit=6)
 
     today = datetime.now(UTC).date()

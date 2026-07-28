@@ -49,8 +49,7 @@ async def knowledge_quality_dashboard(
            FROM knowledge_usage WHERE user_id=?""",
         (user_id,),
     ).fetchone()
-    feedback_state = state.storage.get_feedback_state(user_id, limit=5000)
-    classification = [item for item in feedback_state if item.get("feedback_type") == "classification"]
+
     # Counted, not measured by the length of a truncated page. Each of these tiles used
     # to be `len(list_...(limit=N))`, so a большой number was indistinguishable from the
     # cap — and the inbox one capped at 1000 while asking for 5000. The counters below
@@ -67,9 +66,16 @@ async def knowledge_quality_dashboard(
         "usage": dict(usage) if usage else {},
         "feedback": {
             "history": state.storage.get_feedback_stats(user_id),
-            "current_count": len(feedback_state),
-            "classification_current": len(classification),
-            "classification_negative": sum(1 for item in classification if float(item.get("score") or 0) < 0),
+            # Counted, not measured by the length of a page capped at 5000. `score` is
+            # REAL NOT NULL between -1 and 1, so the SQL predicate and the python it
+            # replaces select the same rows.
+            "current_count": state.storage.count_feedback_state(user_id),
+            "classification_current": state.storage.count_feedback_state(
+                user_id, feedback_type="classification"
+            ),
+            "classification_negative": state.storage.count_feedback_state(
+                user_id, feedback_type="classification", negative_only=True
+            ),
         },
         "review_pressure": {
             "pending_inbox": state.storage.count_inbox(user_id, InboxStatus.PENDING),

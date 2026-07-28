@@ -239,3 +239,90 @@ def test_the_lifecycle_count_does_not_go_through_a_page():
     assert "_lifecycle_candidates" in body
     assert "list_lifecycle_candidates" not in body, "the count is measuring a page again"
     assert "limit" not in body, "a count must not take a page size"
+
+
+# --- блок Feedback loop и дайджест рефлексии ------------------------------
+
+
+def _feedback(storage, user_id: str, target: str, *, kind: str, score: float) -> None:
+    from jericho.storage.models import FeedbackItem, FeedbackType
+
+    storage.store_feedback(
+        FeedbackItem(
+            id=new_id("fb"),
+            user_id=user_id,
+            target_type="classification" if kind == "classification" else "answer",
+            target_id=target,
+            feedback_type=(
+                FeedbackType.CLASSIFICATION if kind == "classification" else FeedbackType.ANSWER_USEFULNESS
+            ),
+            score=score,
+        )
+    )
+
+
+def test_the_feedback_tiles_count_rather_than_measure_a_page(storage):
+    storage.ensure_user("alice")
+    for index in range(7):
+        _feedback(storage, "alice", f"cls-{index}", kind="classification", score=1.0 if index % 2 else -1.0)
+    for index in range(4):
+        _feedback(storage, "alice", f"ans-{index}", kind="answer", score=1.0)
+
+    assert storage.count_feedback_state("alice") == 11
+    assert storage.count_feedback_state("alice", feedback_type="classification") == 7
+    negative = storage.count_feedback_state("alice", feedback_type="classification", negative_only=True)
+    assert negative == 4, "the negative filter does not select what the python did"
+
+
+def test_the_negative_filter_matches_the_python_it_replaced(storage):
+    """`score < 0` against `float(item.get("score") or 0) < 0` — including exact zero."""
+    storage.ensure_user("alice")
+    for index, score in enumerate((-1.0, -0.5, 0.0, 0.5, 1.0)):
+        _feedback(storage, "alice", f"cls-{index}", kind="classification", score=score)
+
+    rows = storage.get_feedback_state("alice", feedback_type="classification", limit=100)
+    by_python = sum(1 for item in rows if float(item.get("score") or 0) < 0)
+    by_sql = storage.count_feedback_state("alice", feedback_type="classification", negative_only=True)
+    assert by_sql == by_python == 2
+
+
+def test_the_reflection_digest_counts_instead_of_paging(storage):
+    """Four numbers the owner reads as fact; each used to stop at its own limit."""
+    import inspect
+
+    from jericho.organs import reflection
+
+    body = inspect.getsource(reflection.build_reflection)
+    for measured in (
+        "len(storage.list_inbox",
+        "len(storage.list_relation_candidates",
+        "len(storage.list_knowledge_conflicts",
+        "len(storage.list_lifecycle_candidates",
+    ):
+        assert measured not in body, f"{measured} still measures a page"
+    for counted in (
+        "count_inbox",
+        "count_relation_candidates",
+        "count_knowledge_conflicts",
+        "count_lifecycle_candidates",
+    ):
+        assert counted in body, f"{counted} is not used"
+
+
+def test_the_lifecycle_candidates_route_reports_a_total(settings, storage):
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        user_id = client.get("/api/admin/users", headers=owner).json()["items"][0]["id"]
+        for index in range(6):
+            _stale(storage, user_id, f"Устаревшая {index}", importance=0.1)
+
+        page = client.get(f"/api/admin/lifecycle/candidates?user_id={user_id}&limit=2", headers=owner).json()
+        assert page["count"] == 2
+        assert page["total"] == 6, f"the route reported {page['total']} for 6 candidates"
+        assert page["offset"] == 0
