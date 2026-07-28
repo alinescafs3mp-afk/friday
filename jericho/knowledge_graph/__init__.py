@@ -173,12 +173,9 @@ def _json_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _entity_terms(entity: dict[str, Any]) -> list[tuple[str, str]]:
-    """Return canonical name and aliases without broad or morphological matching."""
-    output = [(str(entity.get("name") or "").strip(), "canonical_name")]
-    output.extend(
-        (alias.strip(), "alias") for alias in _json_list(entity.get("aliases_json")) if alias.strip()
-    )
+def _build_entity_terms(name: str, aliases: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+    output = [(name.strip(), "canonical_name")]
+    output.extend((alias.strip(), "alias") for alias in aliases if alias.strip())
     unique: dict[str, tuple[str, str]] = {}
     for value, source in output:
         normalized = value.casefold()
@@ -187,12 +184,38 @@ def _entity_terms(entity: dict[str, Any]) -> list[tuple[str, str]]:
         current = unique.get(normalized)
         if current is None or source == "canonical_name":
             unique[normalized] = (value, source)
-    return sorted(unique.values(), key=lambda item: len(item[0]), reverse=True)
+    return tuple(sorted(unique.values(), key=lambda item: len(item[0]), reverse=True))
+
+
+@lru_cache(maxsize=8192)
+def _entity_terms_cached(name: str, aliases_json: str) -> tuple[tuple[str, str], ...]:
+    """Keyed by the stored strings themselves, so an edited entity gets a fresh key."""
+    return _build_entity_terms(name, tuple(_json_list(aliases_json)))
+
+
+def _entity_terms(entity: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Return canonical name and aliases without broad or morphological matching."""
+    name = str(entity.get("name") or "")
+    aliases = entity.get("aliases_json")
+    if isinstance(aliases, str):
+        # Every entity in the graph is walked on every query, and re-parsing the
+        # same alias JSON each time was the largest single cost in the graph
+        # channel: 20 of its 68 ms per query on the 342-document stand.
+        return _entity_terms_cached(name, aliases)
+    return _build_entity_terms(name, tuple(_json_list(aliases)))
+
+
+_TOKEN_RE = re.compile(r"(?u)\b[\w.+#/-]{2,}\b")
+
+
+@lru_cache(maxsize=8192)
+def _overlap_tokens(text: str) -> frozenset[str]:
+    return frozenset(_TOKEN_RE.findall(text.casefold()))
 
 
 def _token_overlap(query: str, value: str) -> float:
-    left = set(re.findall(r"(?u)\b[\w.+#/-]{2,}\b", query.casefold()))
-    right = set(re.findall(r"(?u)\b[\w.+#/-]{2,}\b", value.casefold()))
+    left = _overlap_tokens(query)
+    right = _overlap_tokens(value)
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)

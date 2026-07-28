@@ -824,6 +824,9 @@ class HybridSearcher:
         # vector cannot outlive its text. Bounded by entry count — this is a
         # personal corpus, and the alternative is a cache that grows with it.
         self._vector_cache: OrderedDict[tuple[str, str, str], dict[str, float]] = OrderedDict()
+        self._field_vector_cache: OrderedDict[tuple[str, str, str], tuple[dict[str, float], ...]] = (
+            OrderedDict()
+        )
 
     def _repair_query(self, user_id: str, clean_query: str) -> Repair | None:
         """Ask whether the question was typed the way it was meant.
@@ -1526,9 +1529,19 @@ class HybridSearcher:
     ) -> float:
         if not identifiers:
             return 1.0
-        tokens = {
-            token.casefold() for token in tokens_of(self._search_text(item) + " " + " ".join(entity_names))
-        }
+        text = self._search_text(item) + " " + " ".join(entity_names)
+        # Necessary condition first, at C speed. `tokens_of` only splits the text,
+        # strips trailing `.-` and folds ё — all of which leave every token a
+        # substring of the text folded the same way, so an identifier absent as a
+        # substring cannot be present as a token. Tokenizing every candidate body on
+        # every query was the single largest cost in a search: profiled on the
+        # 342-document stand, `_identifier_coverage` was 86% of the time inside
+        # `search` and 92% of everything the graph added to it, because a candidate
+        # pool of ~150 documents means ~150 full-body tokenizations per question.
+        folded = text.translate(_YO_FOLD).casefold()
+        if not any(identifier in folded for identifier in identifiers):
+            return 0.0
+        tokens = {token.casefold() for token in tokens_of(text)}
         return len(identifiers & tokens) / len(identifiers)
 
     def _entity_links_by_document(
@@ -1617,6 +1630,35 @@ class HybridSearcher:
         while len(self._vector_cache) > _VECTOR_CACHE_MAX:
             self._vector_cache.popitem(last=False)
         return vector
+
+    def _cached_field_vectors(self, item: dict[str, Any]) -> tuple[dict[str, float], ...]:
+        """Title, summary and tag vectors — row-derived, so they outlive one query.
+
+        `_field_scores` runs once per candidate, and three of its four vectors depend
+        only on the candidate's own row. On a ~150-document pool that was ~450 rebuilds
+        of the same short vectors per question, and `lexical_vector` was the largest
+        remaining cost in a search once `_identifier_coverage` stopped tokenizing
+        every body. The entities vector is deliberately NOT cached here: its input
+        comes from the link table, which changes without touching this row.
+        """
+        key = (
+            str(item.get("id") or ""),
+            str(item.get("version") or ""),
+            str(item.get("updated_at") or ""),
+        )
+        cached = self._field_vector_cache.get(key)
+        if cached is not None:
+            self._field_vector_cache.move_to_end(key)
+            return cached
+        vectors = (
+            lexical_vector(str(item.get("title") or "")),
+            lexical_vector(str(item.get("summary") or "")),
+            lexical_vector(" ".join(self._json_list(item.get("tags_json")))),
+        )
+        self._field_vector_cache[key] = vectors
+        while len(self._field_vector_cache) > _VECTOR_CACHE_MAX:
+            self._field_vector_cache.popitem(last=False)
+        return vectors
 
     def _lexical_rank(
         self,
@@ -1855,17 +1897,15 @@ class HybridSearcher:
         # candidate: on a 400-object pool that was 400 rebuilds of the same thing.
         vector = lexical_vector(query) if query_vector is None else query_vector
         query_folded = query.casefold()
-        title = str(item.get("title") or "")
-        summary = str(item.get("summary") or "")
-        tags = " ".join(self._json_list(item.get("tags_json")))
+        title_vector, summary_vector, tags_vector = self._cached_field_vectors(item)
         entities = " ".join(entity_names)
         exact_phrase = (
             1.0 if len(query_folded) >= 3 and query_folded in self._search_text(item).casefold() else 0.0
         )
         return {
-            "title": sparse_cosine(vector, lexical_vector(title)),
-            "summary": sparse_cosine(vector, lexical_vector(summary)),
-            "tags": sparse_cosine(vector, lexical_vector(tags)),
+            "title": sparse_cosine(vector, title_vector),
+            "summary": sparse_cosine(vector, summary_vector),
+            "tags": sparse_cosine(vector, tags_vector),
             "entities": sparse_cosine(vector, lexical_vector(entities)),
             "exact_phrase": exact_phrase,
         }
