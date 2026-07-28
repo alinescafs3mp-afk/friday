@@ -204,7 +204,7 @@ def test_the_audit_page_walks_a_fixed_snapshot(storage):
     # …and now the reading writes its own rows, as the real route does. Stamped a
     # second later because that is what a page turn is: `created_at` has one-second
     # resolution, so the anchor bounds everything after that second, not within it.
-    for index in range(5):
+    for _ in range(5):
         storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
