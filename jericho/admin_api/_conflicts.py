@@ -35,20 +35,31 @@ async def list_conflicts(
     user_id: str,
     status: str | None = "suggested",
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.conflicts.read", user_id)
+    storage = _services(request).storage
     try:
-        items = _services(request).storage.list_knowledge_conflicts(
+        items = storage.list_knowledge_conflicts(
             user_id,
             status=status or None,
             limit=limit,
+            offset=offset,
         )
+        total = storage.count_knowledge_conflicts(user_id, status=status or None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     for item in items:
         item["evidence"] = _json_value(item.get("evidence_json"), {})
-    return {"user_id": user_id, "items": items, "count": len(items)}
+    return {
+        "user_id": user_id,
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/conflicts/bulk-review")

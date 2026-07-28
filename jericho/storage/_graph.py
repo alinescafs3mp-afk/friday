@@ -115,14 +115,20 @@ class GraphMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_entities(
+    def _entity_filter(
         self,
         user_id: str,
-        entity_type: EntityType | None = None,
+        entity_type: EntityType | None,
         *,
-        limit: int = 100,
-        include_merged: bool = False,
-    ) -> list[dict[str, Any]]:
+        include_merged: bool,
+    ) -> tuple[str, list[Any]]:
+        """The WHERE clause and its parameters, shared by the listing and its count.
+
+        `deleted_at IS NULL AND canonical=1` is the pair most easily lost when a count
+        is written by hand: a plain `COUNT(*) FROM entities` also counts tombstones and
+        entities merged into another, so a pager built on it would never reach its own
+        last page.
+        """
         where = "user_id=?"
         params: list[Any] = [user_id]
         if not include_merged:
@@ -130,10 +136,42 @@ class GraphMixin(StorageShared):
         if entity_type:
             where += " AND entity_type=?"
             params.append(enum_value(entity_type))
-        params.append(max(1, min(limit, 5000)))
+        return where, params
+
+    def count_entities(
+        self,
+        user_id: str,
+        entity_type: EntityType | None = None,
+        *,
+        include_merged: bool = False,
+    ) -> int:
+        where, params = self._entity_filter(user_id, entity_type, include_merged=include_merged)
+        # ``where`` contains only fixed predicates; values remain bound.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count FROM entities WHERE {where}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_entities(
+        self,
+        user_id: str,
+        entity_type: EntityType | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_merged: bool = False,
+    ) -> list[dict[str, Any]]:
+        where, params = self._entity_filter(user_id, entity_type, include_merged=include_merged)
+        params.extend([max(1, min(limit, 5000)), max(0, offset)])
+        # `, id` is what makes paging honest: names are not unique — namesakes are
+        # normal for entities — and without a unique tail SQLite is free to order a
+        # group of equal names differently between two page requests, so rows
+        # duplicate on one boundary and vanish on another.
         # ``where`` contains only fixed predicates; values remain bound.
         rows = self.execute(
-            f"SELECT * FROM entities WHERE {where} ORDER BY name COLLATE NOCASE LIMIT ?",  # nosec B608
+            f"SELECT * FROM entities WHERE {where} "  # nosec B608
+            "ORDER BY name COLLATE NOCASE, id LIMIT ? OFFSET ?",
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -452,13 +490,16 @@ class GraphMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
-    def list_relation_candidates(
-        self,
-        user_id: str,
-        *,
-        status: str | None = "suggested",
-        limit: int = 200,
-    ) -> list[dict[str, Any]]:
+    # The two joins are FILTERS, not decoration: they are INNER, and matching
+    # `user_id` on both endpoints drops a candidate whose entity belongs to another
+    # account or no longer exists. A count that omits them counts rows the page
+    # never shows.
+    _RELATION_CANDIDATE_FROM = """FROM relation_candidates c
+                JOIN entities s ON s.id=c.source_entity_id AND s.user_id=c.user_id
+                JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id"""
+
+    @staticmethod
+    def _relation_candidate_filter(user_id: str, status: str | None) -> tuple[list[str], list[Any]]:
         clauses = ["c.user_id=?"]
         params: list[Any] = [user_id]
         if status:
@@ -466,15 +507,36 @@ class GraphMixin(StorageShared):
                 raise ValueError("Invalid relation candidate status")
             clauses.append("c.status=?")
             params.append(status)
-        params.append(max(1, min(int(limit), 5000)))
+        return clauses, params
+
+    def count_relation_candidates(self, user_id: str, *, status: str | None = "suggested") -> int:
+        clauses, params = self._relation_candidate_filter(user_id, status)
+        # ``clauses`` contains only fixed predicates; values remain bound.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count {self._RELATION_CANDIDATE_FROM} "  # nosec B608
+            f"WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_relation_candidates(
+        self,
+        user_id: str,
+        *,
+        status: str | None = "suggested",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        clauses, params = self._relation_candidate_filter(user_id, status)
+        params.extend([max(1, min(int(limit), 5000)), max(0, offset)])
+        # `, c.id` for the same reason as everywhere else here: `created_at` is written
+        # to second precision, so one extractor run stamps a whole batch identically.
         # ``clauses`` contains only fixed predicates; values remain bound.
         query = f"""SELECT c.*, s.name AS source_name, s.entity_type AS source_type,
                        t.name AS target_name, t.entity_type AS target_type
-                FROM relation_candidates c
-                JOIN entities s ON s.id=c.source_entity_id AND s.user_id=c.user_id
-                JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id
+                {self._RELATION_CANDIDATE_FROM}
                 WHERE {" AND ".join(clauses)}
-                ORDER BY c.confidence DESC, c.created_at DESC LIMIT ?"""  # nosec B608
+                ORDER BY c.confidence DESC, c.created_at DESC, c.id LIMIT ? OFFSET ?"""  # nosec B608
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 

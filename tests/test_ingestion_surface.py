@@ -100,7 +100,7 @@ def test_public_names_stay_importable() -> None:
     )
 
 
-EXPECTED_MEMBER_COUNT = 39
+EXPECTED_MEMBER_COUNT = 40
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_apply_feedback_calibration": "(self, user_id: 'str', assessment: 'PromotionAssessment') -> 'PromotionAssessment'",
     "_commit_staged_file": "(self, target: 'Path', staged: 'Path | None', digest: 'str') -> 'Path'",
@@ -139,5 +139,6 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "reenrich_knowledge": "(self, user_id: 'str', knowledge_object_id: 'str', *, apply: 'bool' = False, reviewed_by: 'str | None' = None) -> 'dict[str, Any]'",
     "return_knowledge_to_inbox": "(self, user_id: 'str', knowledge_object_id: 'str', *, reviewed_by: 'str', reason: 'str' = 'legacy quality review') -> 'dict[str, Any]'",
     "scan_legacy_low_quality": "(self, user_id: 'str', *, limit: 'int' = 250, threshold: 'float' = 0.48) -> 'list[dict[str, Any]]'",
+    "scan_legacy_quality_page": "(self, user_id: 'str', *, limit: 'int' = 250, offset: 'int' = 0, threshold: 'float' = 0.55, include_archived: 'bool' = False) -> 'tuple[list[dict[str, Any]], int]'",
     "scan_legacy_quality": "(self, user_id: 'str', *, limit: 'int' = 250, threshold: 'float' = 0.55, include_archived: 'bool' = False) -> 'list[dict[str, Any]]'",
 }

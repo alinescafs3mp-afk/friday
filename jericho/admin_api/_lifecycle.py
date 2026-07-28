@@ -32,21 +32,31 @@ async def preview_legacy_cleanup(
     request: Request,
     user_id: str,
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     include_archived: bool = False,
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.cleanup.read", user_id)
     if not _services(request).storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="User not found")
-    items = _services(request).ingestion.scan_legacy_quality(
+    # `scan_legacy_quality_page`, not `scan_legacy_quality`: the suspect predicate reads
+    # each object's content and metadata, so there is no SQL COUNT for it — the page and
+    # the total have to come from one and the same walk, or the pager lies. The visible
+    # consequence is that page one is now genuinely the riskiest, which the «риск»
+    # column always implied and the early-exit scan never delivered.
+    items, total = _services(request).ingestion.scan_legacy_quality_page(
         user_id,
         limit=limit,
+        offset=offset,
         include_archived=include_archived,
     )
     return {
         "user_id": user_id,
         "items": items,
         "count": len(items),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
         "safe_actions": ["return_to_inbox", "reclassify", "keep", "archive", "soft_delete"],
     }
 

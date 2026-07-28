@@ -191,6 +191,17 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def count_inbox(self, user_id: str, status: InboxStatus | None = None) -> int:
+        """The same two branches as the listing, so the total answers the same question."""
+        if status:
+            row = self.execute(
+                "SELECT COUNT(*) AS count FROM inbox WHERE user_id=? AND status=?",
+                (user_id, enum_value(status)),
+            ).fetchone()
+        else:
+            row = self.execute("SELECT COUNT(*) AS count FROM inbox WHERE user_id=?", (user_id,)).fetchone()
+        return int(row["count"] if row else 0)
+
     def list_inbox(
         self,
         user_id: str,
@@ -199,15 +210,19 @@ class IntakeMixin(StorageShared):
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        # `, rowid DESC` is what makes the offset trustworthy: `created_at` is written
+        # to second precision, and a bulk import stamps hundreds of rows identically —
+        # the docstring of `group_pending_inbox` names a real 187-file case. Without a
+        # unique tail, paging over such a batch duplicates and drops rows.
         if status:
             rows = self.execute(
                 """SELECT * FROM inbox WHERE user_id=? AND status=?
-                   ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+                   ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?""",
                 (user_id, enum_value(status), max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
         else:
             rows = self.execute(
-                "SELECT * FROM inbox WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM inbox WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 (user_id, max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
         return [dict(row) for row in rows]

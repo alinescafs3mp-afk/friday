@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 203
+EXPECTED_MEMBER_COUNT = 212
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -189,14 +189,14 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_container_entities": "(self, user_id: 'str', types: 'tuple[str, ...]') -> 'list[dict[str, Any]]'",
     "list_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False, limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_custom_presets": "(self) -> 'list[dict[str, Any]]'",
-    "list_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, limit: 'int' = 100, include_merged: 'bool' = False) -> 'list[dict[str, Any]]'",
+    "list_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, limit: 'int' = 100, offset: 'int' = 0, include_merged: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_entities_by_activity": "(self, user_id: 'str', *, types: 'tuple[str, ...] | None' = None, limit: 'int' = 5) -> 'list[dict[str, Any]]'",
     "list_entity_versions": "(self, entity_id: 'str', user_id: 'str') -> 'list[dict[str, Any]]'",
     "list_eval_cases": "(self, user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
     "list_events_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_inbox": "(self, user_id: 'str', status: 'InboxStatus | None' = None, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_inbox_detailed": "(self, user_id: 'str', status: 'InboxStatus | None' = None, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
-    "list_knowledge_conflicts": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200) -> 'list[dict[str, Any]]'",
+    "list_knowledge_conflicts": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_knowledge_entity_links_for": "(self, knowledge_ids: 'Sequence[str]') -> 'dict[str, list[str]]'",
     "list_knowledge_entity_links": "(self, user_id: 'str', *, entity_id: 'str | None' = None, knowledge_object_id: 'str | None' = None, status: 'str | None' = 'accepted', limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "list_knowledge_missing_embedding": "(self, model: 'str', *, limit: 'int' = 64, chunk_scheme: 'str' = '', chunk_threshold: 'int' = 0) -> 'list[dict[str, Any]]'",
@@ -212,7 +212,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_pending_notifications": "(self, *, limit: 'int' = 20, max_attempts: 'int' = 5) -> 'list[dict[str, Any]]'",
     "list_purgeable_knowledge": "(self, user_id: 'str | None' = None, *, older_than_days: 'int' = 30, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_recent_knowledge": "(self, user_id: 'str', *, since_iso: 'str', limit: 'int' = 10) -> 'list[dict[str, Any]]'",
-    "list_relation_candidates": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200) -> 'list[dict[str, Any]]'",
+    "list_relation_candidates": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_resolution_candidates": "(self, user_id: 'str', status: 'ResolutionStatus | None' = None) -> 'list[dict[str, Any]]'",
     "list_user_ids": "(self, *, active_only: 'bool' = True) -> 'list[str]'",
     "list_user_vectors_page": "(self, user_id: 'str', model: 'str', *, after: 'tuple[str, str] | None' = None, before: 'tuple[str, str] | None' = None, max_updated_at: 'str | None' = None, descending: 'bool' = False, limit: 'int' = 2048) -> 'list[tuple[str, str, bytes]]'",

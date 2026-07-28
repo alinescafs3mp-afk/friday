@@ -32,6 +32,7 @@ async def list_all_entities(
     user_id: str | None = None,
     entity_type: str | None = None,
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
@@ -45,8 +46,18 @@ async def list_all_entities(
     else:
         parsed_type = None
     _audit_cross_tenant_read(request, "admin.entities.read", target)
-    items = _services(request).storage.list_entities(target, parsed_type, limit=limit)
-    return {"user_id": target, "items": items, "count": len(items)}
+    storage = _services(request).storage
+    items = storage.list_entities(target, parsed_type, limit=limit, offset=offset)
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        # A real total, from the same filters — `count` is len(items) and on a full
+        # page equals the limit, which the screen could not tell from «that is all».
+        "total": storage.count_entities(target, parsed_type),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/entities")
@@ -113,20 +124,31 @@ async def list_relation_candidates(
     user_id: str,
     status: str | None = "suggested",
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.relations.read", user_id)
+    storage = _services(request).storage
     try:
-        items = _services(request).storage.list_relation_candidates(
+        items = storage.list_relation_candidates(
             user_id,
             status=status or None,
             limit=limit,
+            offset=offset,
         )
+        total = storage.count_relation_candidates(user_id, status=status or None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     for item in items:
         item["evidence"] = _json_value(item.get("evidence_json"), {})
-    return {"user_id": user_id, "items": items, "count": len(items)}
+    return {
+        "user_id": user_id,
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/relation-candidates/bulk-review")

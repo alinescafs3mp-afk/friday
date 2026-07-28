@@ -18,6 +18,23 @@ from jericho.ingestion._base import (
 )
 
 
+def _sort_by_risk(items: list[dict[str, Any]]) -> None:
+    """Riskiest first — with the object's id as the tail.
+
+    `risk_score` is a sum of a handful of fixed constants and `updated_at` is written
+    to second precision, so ties are the rule rather than the exception. Without a
+    unique tail the order inside a tie is whatever the SQL walk happened to produce,
+    which is exactly how a paged list duplicates one row and drops another.
+    """
+    items.sort(
+        key=lambda item: (
+            -float(item["risk_score"]),
+            str(item["knowledge_object"].get("updated_at", "")),
+            str(item["knowledge_object"].get("id", "")),
+        )
+    )
+
+
 class LegacyMixin(PipelineShared):
     def assess_existing_knowledge(
         self,
@@ -142,10 +159,51 @@ class LegacyMixin(PipelineShared):
             offset += len(batch)
             if len(batch) < 500:
                 break
-        output.sort(
-            key=lambda item: (-float(item["risk_score"]), str(item["knowledge_object"].get("updated_at", "")))
-        )
+        _sort_by_risk(output)
         return output[:hard_limit]
+
+    def scan_legacy_quality_page(
+        self,
+        user_id: str,
+        *,
+        limit: int = 250,
+        offset: int = 0,
+        threshold: float = 0.55,
+        include_archived: bool = False,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One page of the revision queue, and how many suspects there are in total.
+
+        A page, not a prefix. `scan_legacy_quality` stops as soon as it has collected
+        enough — walking objects in `importance` order and only THEN sorting by risk —
+        so what it returns has never actually been the global worst, however much the
+        screen's «риск» column implies it. Paging that honestly means finishing the
+        walk, which also makes page one what it always claimed to be.
+
+        The predicate cannot be pushed into SQL: `suspect` reads the object's content
+        and its metadata JSON. So the count and the page come from ONE python list —
+        they cannot disagree, which is the property a pager needs most.
+
+        The cost is a full pass per page request. The classifier is pure regex with no
+        model call, and the walk is already what the six-hourly worker does.
+        """
+        suspects: list[dict[str, Any]] = []
+        cursor = 0
+        while True:
+            batch = self.storage.list_knowledge_objects(user_id, limit=500, offset=cursor)
+            if not batch:
+                break
+            for item in batch:
+                if not include_archived and str(item.get("lifecycle_stage")) != LifecycleStage.ACTIVE.value:
+                    continue
+                result = self.assess_existing_knowledge(user_id, item, threshold=threshold)
+                if result["suspect"]:
+                    suspects.append(result)
+            cursor += len(batch)
+            if len(batch) < 500:
+                break
+        _sort_by_risk(suspects)
+        start = max(0, offset)
+        return suspects[start : start + max(1, limit)], len(suspects)
 
     def scan_legacy_low_quality(
         self,

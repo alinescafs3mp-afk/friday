@@ -23,6 +23,7 @@ playwright_api = pytest.importorskip("playwright.sync_api")
 
 PORT = 8791
 TOKEN = "T" * 48
+_APP = None  # set by the live_admin fixture: same process, same database
 
 
 def _seed(storage) -> None:
@@ -71,7 +72,9 @@ def live_admin(settings, tmp_path):
 
     from jericho.server import create_app
 
+    global _APP
     app = create_app(replace(settings, api_token=TOKEN, api_port=PORT))
+    _APP = app
     config = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -322,3 +325,71 @@ def test_an_abandoned_render_cannot_leave_its_data_behind_the_new_one(live_admin
     assert "Иван" in heading, f"the screen is not showing the account that was asked for: {heading}"
     assert state_leaked is False, "the abandoned render left another account's rows in state"
     assert "ЧУЖАЯЗАМЕТКА" not in modal_text, "the preview opened another account's material"
+
+
+def test_the_knowledge_list_pages_over_a_real_total(live_admin):
+    """The seven lists that used to say «список обрезан» now page over a real total.
+
+    Knowledge is the one to drive in a browser: its total is the one that had a wrong
+    counter sitting right next to the right one, and its filter chips are what make
+    the difference visible.
+    """
+    import hashlib
+
+    from playwright.sync_api import sync_playwright
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    with sync_playwright() as play:
+        try:
+            browser = play.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no chromium available: {exc}")
+        page = browser.new_page()
+        page.goto(f"{live_admin}/admin/", wait_until="networkidle")
+        page.evaluate("t => sessionStorage.setItem('jericho_api_token', t)", TOKEN)
+        page.reload(wait_until="networkidle")
+
+        # More objects than one page holds, so «Вперёд» has somewhere to go.
+        storage = page.evaluate("() => PAGE")  # the page size the client uses
+        total = int(storage) + 7
+        app_storage = None
+        for index in range(total):
+            content = f"Знание номер {index} про склад, смету и договор аренды"
+            raw = RawObject(
+                id=new_id("raw"),
+                user_id="usr_ivan",
+                source="test",
+                source_ref=new_id("src"),
+                raw_content=content,
+                content_type="text",
+                content_hash=hashlib.sha256(f"k{index}".encode()).hexdigest(),
+            )
+            app_storage = app_storage or _APP.state.storage
+            app_storage.store_raw_object(raw)
+            app_storage.store_knowledge_object(
+                KnowledgeObject(
+                    id=new_id("ko"),
+                    user_id="usr_ivan",
+                    raw_object_id=raw.id,
+                    content=content,
+                    content_type="text",
+                    title=f"Знание {index}",
+                )
+            )
+
+        page.evaluate("id => { state.userId = id }", "usr_ivan")
+        page.locator("#nav button", has_text="Знания").click()
+        page.wait_for_timeout(1200)
+
+        body = page.locator("#app").inner_text()
+        assert f" из {total}" in body.replace(" ", " "), f"the pager does not show a real total: {body[:300]}"
+
+        first_rows = page.locator("#app table tbody tr").count()
+        page.locator("#app button", has_text="Вперёд →").first.click()
+        page.wait_for_timeout(1200)
+        second = page.locator("#app").inner_text()
+        browser.close()
+
+    assert first_rows > 0
+    assert second != body, "«Вперёд» did not move the page"

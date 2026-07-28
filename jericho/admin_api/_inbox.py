@@ -96,7 +96,16 @@ async def list_all_inbox(
             }
         if item.get("knowledge_object_id"):
             item["knowledge_object"] = state.storage.get_knowledge_object(item["knowledge_object_id"], target)
-    return {"user_id": target, "items": items, "count": len(items)}
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        # Counted with the SAME status the listing used, after its validation —
+        # a bad status must still be a 400, not a silently unfiltered total.
+        "total": state.storage.count_inbox(target, status_enum),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/inbox/{inbox_id}/classify")

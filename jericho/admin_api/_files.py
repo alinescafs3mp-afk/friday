@@ -32,26 +32,41 @@ async def list_files(
     request: Request,
     user_id: str | None = None,
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.files.read", target)
-    rows = (
-        _services(request)
-        .storage.execute(
-            """SELECT id, user_id, source_ref, metadata_json, received_at, deleted_at
+    storage = _services(request).storage
+    # `, id DESC` because `received_at` is written to second precision, so one upload
+    # batch stamps every row identically and the order within it is not promised.
+    rows = storage.execute(
+        """SELECT id, user_id, source_ref, metadata_json, received_at, deleted_at
            FROM raw_objects WHERE user_id=? AND content_type='file'
-           ORDER BY received_at DESC LIMIT ?""",
-            (target, limit),
-        )
-        .fetchall()
-    )
+           ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?""",
+        (target, limit, offset),
+    ).fetchall()
+    # Deliberately WITHOUT `deleted_at IS NULL`, because the listing above is too:
+    # this admin view shows soft-deleted files on purpose, and the user-facing
+    # `GET /api/files` filters them. Copying the count from there would make the
+    # total SMALLER than the page and stop «Вперёд» early.
+    total_row = storage.execute(
+        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
+        (target,),
+    ).fetchone()
     items = []
     for row in rows:
         item = dict(row)
         item["metadata"] = _json_value(item.pop("metadata_json", "{}"), {})
         items.append(item)
-    return {"user_id": target, "items": items, "count": len(items)}
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        "total": int(total_row["count"] if total_row else 0),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/files/{raw_id}/download")

@@ -108,7 +108,7 @@ class MissionsMixin(StorageShared):
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.extend([max(1, min(limit, 5000)), max(0, offset)])
         rows = self.execute(
-            f"SELECT * FROM missions {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",  # nosec B608
+            f"SELECT * FROM missions {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]

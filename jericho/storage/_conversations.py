@@ -207,7 +207,7 @@ class ConversationsMixin(StorageShared):
         # ``archived_clause`` is selected solely by the boolean argument above.
         rows = self.execute(
             f"SELECT * FROM conversations WHERE user_id=?{archived_clause} "  # nosec B608
-            "ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
             (user_id, max(1, min(limit, 1000)), max(0, int(offset))),
         ).fetchall()
         return [dict(row) for row in rows]

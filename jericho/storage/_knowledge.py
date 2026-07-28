@@ -470,16 +470,22 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return {str(row["id"]) for row in rows}
 
-    def list_knowledge_objects(
+    def _knowledge_filter(
         self,
         user_id: str,
         *,
-        limit: int = 100,
-        offset: int = 0,
-        lifecycle_stage: str | None = None,
-        tag: str | None = None,
-        entity_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+        lifecycle_stage: str | None,
+        tag: str | None,
+        entity_id: str | None,
+    ) -> tuple[str, list[Any]]:
+        """The WHERE clause and its parameters, built ONCE for the list and its count.
+
+        Shared on purpose. `count_knowledge_objects` used to count every live object
+        of the account while the listing next to it was filtered by tag, lifecycle or
+        entity — so a pager built on that pair would have said «1-100 из 3000» over a
+        filtered set of twelve. A total that does not answer the same question as the
+        page is worse than no total: it makes «Вперёд» wrong in both directions.
+        """
         params: list[Any] = [user_id]
         where = "user_id=? AND deleted_at IS NULL"
         if lifecycle_stage:
@@ -502,6 +508,40 @@ class KnowledgeMixin(StorageShared):
                 " AND l.entity_id=? AND l.user_id=? AND l.status='accepted')"
             )
             params.extend([entity_id, user_id])
+        return where, params
+
+    def count_filtered_knowledge_objects(
+        self,
+        user_id: str,
+        *,
+        lifecycle_stage: str | None = None,
+        tag: str | None = None,
+        entity_id: str | None = None,
+    ) -> int:
+        """How many objects the SAME filters select — the total a page is a page of."""
+        where, params = self._knowledge_filter(
+            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id
+        )
+        # ``where`` contains only fixed clauses; all values remain bound parameters.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count FROM knowledge_objects WHERE {where}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_knowledge_objects(
+        self,
+        user_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        lifecycle_stage: str | None = None,
+        tag: str | None = None,
+        entity_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where, params = self._knowledge_filter(
+            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id
+        )
         params.extend([max(1, min(limit, 5000)), max(0, offset)])
         # ``where`` contains only fixed clauses; all values remain bound parameters.
         rows = self.execute(
@@ -1076,13 +1116,14 @@ class KnowledgeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else {}
 
-    def list_knowledge_conflicts(
-        self,
-        user_id: str,
-        *,
-        status: str | None = "suggested",
-        limit: int = 200,
-    ) -> list[dict[str, Any]]:
+    # Both joins are FILTERS: INNER, and matching `user_id` on each side drops a
+    # conflict whose object is gone or belongs elsewhere. The count uses the same FROM.
+    _CONFLICT_FROM = """FROM knowledge_conflicts c
+                JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
+                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id"""
+
+    @staticmethod
+    def _conflict_filter(user_id: str, status: str | None) -> tuple[list[str], list[Any]]:
         allowed = {"suggested", "confirmed", "dismissed", "resolved"}
         clauses = ["c.user_id=?"]
         params: list[Any] = [user_id]
@@ -1091,15 +1132,34 @@ class KnowledgeMixin(StorageShared):
                 raise ValueError("Invalid conflict status")
             clauses.append("c.status=?")
             params.append(status)
-        params.append(max(1, min(int(limit), 5000)))
+        return clauses, params
+
+    def count_knowledge_conflicts(self, user_id: str, *, status: str | None = "suggested") -> int:
+        clauses, params = self._conflict_filter(user_id, status)
+        # ``clauses`` contains only fixed predicates; values remain bound.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count {self._CONFLICT_FROM} "  # nosec B608
+            f"WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_knowledge_conflicts(
+        self,
+        user_id: str,
+        *,
+        status: str | None = "suggested",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        clauses, params = self._conflict_filter(user_id, status)
+        params.extend([max(1, min(int(limit), 5000)), max(0, offset)])
         # ``clauses`` contains only fixed predicates; values remain bound.
         query = f"""SELECT c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
                        b.title AS knowledge_b_title, b.summary AS knowledge_b_summary
-                FROM knowledge_conflicts c
-                JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
-                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
+                {self._CONFLICT_FROM}
                 WHERE {" AND ".join(clauses)}
-                ORDER BY c.confidence DESC, c.created_at DESC LIMIT ?"""  # nosec B608
+                ORDER BY c.confidence DESC, c.created_at DESC, c.id LIMIT ? OFFSET ?"""  # nosec B608
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 

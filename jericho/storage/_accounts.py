@@ -78,7 +78,7 @@ class AccountsMixin(StorageShared):
 
     def list_users(self, *, limit: int = 500, offset: int = 0) -> list[dict[str, Any]]:
         rows = self.execute(
-            "SELECT * FROM users ORDER BY last_seen_at DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM users ORDER BY last_seen_at DESC, id DESC LIMIT ? OFFSET ?",
             (max(1, min(limit, 5000)), max(0, offset)),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -318,12 +318,12 @@ class AccountsMixin(StorageShared):
     ) -> list[dict[str, Any]]:
         if user_id:
             rows = self.execute(
-                "SELECT * FROM audit_log WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM audit_log WHERE user_id=? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
                 (user_id, max(1, min(limit, 5000)), max(0, offset)),
             ).fetchall()
         else:
             rows = self.execute(
-                "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
                 (max(1, min(limit, 5000)), max(0, offset)),
             ).fetchall()
         return [dict(row) for row in rows]

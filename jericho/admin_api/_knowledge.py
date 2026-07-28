@@ -72,7 +72,8 @@ async def list_all_knowledge(
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.knowledge.read", target)
-    items = _services(request).storage.list_knowledge_objects(
+    storage = _services(request).storage
+    items = storage.list_knowledge_objects(
         target,
         limit=limit,
         offset=offset,
@@ -80,7 +81,20 @@ async def list_all_knowledge(
         tag=tag,
         entity_id=entity_id,
     )
-    return {"user_id": target, "items": items, "count": len(items)}
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        # `count_filtered_knowledge_objects`, NOT `count_knowledge_objects`: the latter
+        # counts every live object of the account and ignores tag, lifecycle and entity,
+        # so on a filtered view it would report thousands over a set of twelve and the
+        # pager would never reach its last page.
+        "total": storage.count_filtered_knowledge_objects(
+            target, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id
+        ),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/knowledge/tags")
