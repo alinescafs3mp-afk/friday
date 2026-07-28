@@ -128,6 +128,20 @@ def _blocking_keys(entity_type: str, variants: Sequence[str]) -> set[tuple[str, 
     return keys
 
 
+def _score_or(value: Any, default: float = 0.5) -> float:
+    """A stored score, clamped — where MISSING and ZERO are not the same thing.
+
+    `float(value or 0.5)` reads a stored 0.0 as 0.5 because zero is falsy, so the one
+    value that should weigh most toward lifecycle review was the one the scan skipped.
+    """
+    if value is None:
+        return default
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _lifecycle_protection_reasons(item: dict[str, Any], days_threshold: int) -> list[str]:
     """Why this object must not be archived automatically. Empty means it may be.
 
@@ -1633,9 +1647,12 @@ class KnowledgeMixin(StorageShared):
             if _lifecycle_protection_reasons(item, days):
                 continue
 
-            importance = max(0.0, min(1.0, float(item.get("importance") or 0.5)))
-            quality = max(0.0, min(1.0, float(item.get("quality_score") or 0.5)))
-            promotion = max(0.0, min(1.0, float(item.get("promotion_score") or 0.5)))
+            # `or 0.5` read a stored 0.0 as 0.5, because zero is falsy — so the one
+            # value that should weigh MOST toward review was the one value the scan
+            # ignored. Missing and zero are different things here.
+            importance = _score_or(item.get("importance"))
+            quality = _score_or(item.get("quality_score"))
+            promotion = _score_or(item.get("promotion_score"))
             retrievals = int(item.get("retrieval_count") or 0)
             answers = int(item.get("answer_count") or 0)
             negative = int(item.get("negative_feedback_count") or 0)

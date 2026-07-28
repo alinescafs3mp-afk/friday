@@ -288,7 +288,26 @@ class AdviceMixin(PipelineShared):
         if kind not in allowed_kinds:
             kind = str(baseline.get("knowledge_kind") or "note")[:40]
         baseline_importance = _coerce_score(baseline.get("importance"), default=0.5)
-        importance = _coerce_score(parsed.get("importance"), default=baseline_importance)
+        # Bounded to the deterministic baseline, the same way entity confidence is
+        # bounded to 0.79 below. `importance` is the ONLY machine score the model can
+        # write into a canonical object — quality_score and promotion_score stay
+        # deterministic — and this method's own docstring promises that deterministic
+        # scores remain authoritative.
+        #
+        # The direction that matters is DOWN. Upward the model adds nothing: the
+        # deterministic `_estimate_importance` is itself derived entirely from the
+        # text and already reaches 1.0 on a page written to do so. But its FLOOR is
+        # 0.22 + quality*0.28, and the model could write 0.0-0.21 — below anything the
+        # deterministic path can produce. Measured: a page scored 1.0 deterministically,
+        # advised to 0.01, became a lifecycle review candidate (risk 0.576) that it is
+        # not at 1.0.
+        importance = min(
+            baseline_importance + 0.15,
+            max(
+                baseline_importance - 0.15,
+                _coerce_score(parsed.get("importance"), default=baseline_importance),
+            ),
+        )
         advice_confidence = _coerce_score(parsed.get("confidence"), default=0.0)
         recommended_action = bounded_text(parsed.get("recommended_action"), 20).casefold()
         if recommended_action not in allowed_actions:
