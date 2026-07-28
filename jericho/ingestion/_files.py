@@ -48,7 +48,10 @@ class FilesMixin(PipelineShared):
         existing_ko = self.storage.get_knowledge_by_raw(existing_raw["id"], user_id)
         existing_inbox = self.storage.find_inbox_by_raw(existing_raw["id"], user_id)
         raw_metadata = _json_dict(existing_raw.get("metadata_json"))
-        action = str(raw_metadata.get("promotion_assessment", {}).get("action") or "unknown")
+        # `_json_dict` and not `.get(..., {})`: the block is provenance written by this
+        # pipeline, but a legacy row may hold anything, and a reader that assumes a
+        # dict turns a bad row into an unhandled AttributeError on every retry.
+        action = str(_json_dict(raw_metadata.get("promotion_assessment")).get("action") or "unknown")
         # In-progress means neither a KO nor an inbox item exists yet: files
         # routed inbox-first (vision/unextractable media) legitimately sit as a
         # pending inbox item without a KO and must replay, not error.

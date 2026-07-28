@@ -17,6 +17,7 @@ from jericho.ingestion._base import (
     _PROMOTION_POLICY_VERSION,
     _URL_RE,
     Any,
+    DECLARED_ENTITY_METHODS,
     EntityType,
     FeedbackType,
     InboxStatus,
@@ -60,19 +61,33 @@ _MAX_SUGGESTIONS = 30
 _MAX_SUGGESTIONS_PER_METHOD = 8
 
 
-def _capped_per_method(ordered: list[dict[str, Any]], *, per_method: int, total: int) -> list[dict[str, Any]]:
+def _capped_per_method(
+    ordered: list[dict[str, Any]],
+    *,
+    per_method: int,
+    total: int,
+    exempt: frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
     """Take the strongest `total`, letting no method contribute more than `per_method`.
 
     Input must already be sorted strongest-first; order is preserved, so the result
     still reads as a confidence ranking.
+
+    `exempt` methods are subject to `total` only. The per-method cap exists to stop a
+    NOISY rule from owning the reviewer's whole view; applying it to a rule that only
+    fires on an exact literal mention of an entity the user already has in their graph
+    means dropping confirmed links — silently, since nothing downstream reports them
+    as unresolved either. Those candidates all carry the same confidence, so which
+    ones survived was decided by the first letter of the entity's name.
     """
     seen: Counter[str] = Counter()
     kept: list[dict[str, Any]] = []
     for item in ordered:
         method = str(item.get("method") or "unknown")
-        if seen[method] >= per_method:
-            continue
-        seen[method] += 1
+        if method not in exempt:
+            if seen[method] >= per_method:
+                continue
+            seen[method] += 1
         kept.append(item)
         if len(kept) >= total:
             break
@@ -560,4 +575,9 @@ class AdviceMixin(PipelineShared):
             strongest.values(),
             key=lambda item: (-float(item.get("confidence", 0.0)), str(item.get("name", "")).casefold()),
         )
-        return _capped_per_method(ordered, per_method=_MAX_SUGGESTIONS_PER_METHOD, total=_MAX_SUGGESTIONS)
+        return _capped_per_method(
+            ordered,
+            per_method=_MAX_SUGGESTIONS_PER_METHOD,
+            total=_MAX_SUGGESTIONS,
+            exempt=DECLARED_ENTITY_METHODS,
+        )

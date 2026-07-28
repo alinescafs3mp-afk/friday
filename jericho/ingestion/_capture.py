@@ -24,7 +24,10 @@ class CaptureMixin(PipelineShared):
         existing_ko = self.storage.get_knowledge_by_raw(existing_raw["id"], user_id)
         existing_inbox = self.storage.find_inbox_by_raw(existing_raw["id"], user_id)
         raw_metadata = _json_dict(existing_raw.get("metadata_json"))
-        action = str(raw_metadata.get("promotion_assessment", {}).get("action") or "unknown")
+        # `_json_dict` and not `.get(..., {})`: the block is provenance written by this
+        # pipeline, but a legacy row may hold anything, and a reader that assumes a
+        # dict turns a bad row into an unhandled AttributeError on every retry.
+        action = str(_json_dict(raw_metadata.get("promotion_assessment")).get("action") or "unknown")
         # A committed ingestion always leaves a terminal artifact: a promote leaves a
         # Knowledge Object, unless strict-review downgraded it to a pending Inbox item.
         # Only the genuine in-progress state (neither artifact yet) is retryable.
@@ -102,11 +105,18 @@ class CaptureMixin(PipelineShared):
             content_type="text",
             content_hash=content_hash,
             metadata_json={
+                # The caller's metadata goes FIRST. It used to go last, so anything
+                # reaching `POST /api/ingest/text` could replace the pipeline's own
+                # `promotion_assessment` — the provenance block `_replay_text_source`
+                # reads back to decide whether an ingestion is still in flight. A
+                # non-dict value made every later ingest of the same source_ref raise
+                # AttributeError, and a forged `{"action": "promote"}` on transient
+                # content wedged that source_ref as "in progress" for good.
+                **(metadata or {}),
                 "promotion_assessment": assessment.to_dict(),
                 "classification": assessment.category,
                 "classification_confidence": assessment.confidence,
                 "classification_reason": assessment.reason,
-                **(metadata or {}),
             },
         )
 
