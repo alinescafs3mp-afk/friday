@@ -212,13 +212,24 @@ def _citation_sort_key(label: str) -> tuple[int, int]:
     return (1, 0)
 
 
-def _citation_notice(citations: list[dict[str, str]], answer_grounded: bool | None) -> str:
-    """User-facing source legend, or an honest note when a personal answer is ungrounded."""
+def _citation_notice(
+    citations: list[dict[str, str]], answer_grounded: bool | None, *, inferred: bool = False
+) -> str:
+    """User-facing source legend, or an honest note when a personal answer is ungrounded.
+
+    `inferred=True` — атрибуция не из метки модели, а из догадки: запись была
+    единственным сильным попаданием, и мы предположили, что ответ на ней. Подписать
+    это «Источники» значило бы утверждать то, чего никто не проверял, поэтому
+    формулировка другая. Отличие важно не косметически: та же атрибуция кормит
+    feedback и lifecycle, и человек, увидев «Источники», не станет перепроверять.
+    """
     labelled = [
         (f"[{item['label']}] {item['title']}" if item["label"] else item["title"])
         for item in citations
         if item.get("title")
     ]
+    if labelled and inferred:
+        return "📎 Вероятно, на основе: " + "; ".join(labelled) + " (модель не сослалась явно)"
     if labelled:
         return "📎 Источники: " + "; ".join(labelled)
     if answer_grounded is False:
@@ -418,6 +429,11 @@ class AgentRuntime:
             str(item) for item in response.get("knowledge_object_ids", []) if str(item).strip()
         ]
         attributed_knowledge_ids = list(dict.fromkeys([*cited_knowledge_ids, *tool_knowledge_ids]))[:12]
+        # Модель поставила метку сама или мы догадались за неё — разные утверждения,
+        # и подписывать их одинаково нельзя. «Источники» означает «ответ опирается
+        # на это»; при догадке известно лишь, что запись была единственной сильно
+        # подходящей, а воспользовалась ли ею модель — неизвестно.
+        attribution_inferred = False
         # A single very strong personal hit is a safe fallback for models that
         # omit the requested citation marker. Broadly attributing every
         # retrieved candidate would corrupt feedback and lifecycle signals.
@@ -429,6 +445,7 @@ class AgentRuntime:
             and context.knowledge_hits[0].get("id")
         ):
             attributed_knowledge_ids = [str(context.knowledge_hits[0]["id"])]
+            attribution_inferred = True
 
         # Surface the [K#] → Knowledge Object mapping so the user can see which of
         # their records an answer rests on, and honestly flag a personal-knowledge
@@ -441,7 +458,7 @@ class AgentRuntime:
             answer_grounded = False
         else:
             answer_grounded = None
-        citation_notice = _citation_notice(citations, answer_grounded)
+        citation_notice = _citation_notice(citations, answer_grounded, inferred=attribution_inferred)
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.

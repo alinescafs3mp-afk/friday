@@ -615,7 +615,16 @@ class ExecutionKernel:
         storage, _, _, _ = self._require_services()
         status_value = InboxStatus(status) if status else None
         items = storage.list_inbox(actor.user_id, status_value, limit=20)
-        return {"items": items, "count": len(items)}
+        # `count` — сколько ПОКАЗАНО, `total` — сколько есть. Возвращать длину среза
+        # под именем count значит сказать модели «у вас 20 входящих» при двухстах, а
+        # модель перескажет это человеку прозой, где оговорку уже не восстановить.
+        # Соседний инструмент в этом же файле решает ровно эту задачу явно.
+        return {
+            "items": items,
+            "count": len(items),
+            "total": storage.count_inbox(actor.user_id, status_value),
+            "truncated": len(items) < storage.count_inbox(actor.user_id, status_value),
+        }
 
     async def _user_activity(
         self,
@@ -653,6 +662,26 @@ class ExecutionKernel:
         chosen = unambiguous(matches)
         if chosen is None:
             # Nobody, or more than one. Either way the caller decides, not this tool.
+            #
+            # Recorded even so. The reply carries up to five accounts — id, display
+            # name, username — and returning early meant the account list of the
+            # machine could be enumerated by feeding ambiguous names, leaving no
+            # trace at all. The tool's own description promises that reading another
+            # account is written down; that promise has to hold on this branch too.
+            storage.log_audit(
+                AuditEntry(
+                    id=new_id("audit"),
+                    user_id=actor.user_id,
+                    action="tool.user_activity.unresolved",
+                    target_type="user",
+                    target_id="*",
+                    after_json={
+                        "asked_for": person[:200],
+                        "reason": "ambiguous" if matches else "not_found",
+                        "candidates": len(matches),
+                    },
+                )
+            )
             return {
                 "resolved": None,
                 "candidates": [match.to_dict() for match in matches[:5]],
@@ -924,7 +953,9 @@ class ExecutionKernel:
         )
         spec(
             "mission_propose",
-            "Предложить многошаговую миссию; она ждёт запуска пользователем, ничего не выполняя сама.",
+            "Предложить многошаговую миссию. Она не начинает выполняться по факту создания; "
+            "будет ли она запущена сама или дождётся решения пользователя, зависит от "
+            "настроек автономии — не обещай пользователю, что ничего не произойдёт без него.",
             "missions.create",
             {"goal": {"type": "string"}},
             ["goal"],
