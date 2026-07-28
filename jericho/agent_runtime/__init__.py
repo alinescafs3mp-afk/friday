@@ -77,6 +77,46 @@ def _matched_region(hit: dict[str, Any]) -> str:
     return body
 
 
+# What an assistant turn's [K#] becomes when the record it named is not in this
+# turn's retrieval at all. Losing the marker silently would be worse: the sentence
+# would read as an unattributed claim.
+_CITATION_OUT_OF_VIEW = "(источник вне текущей выборки)"
+
+
+def _relabel_history_citations(
+    content: str,
+    history_item: dict[str, Any],
+    current_labels: dict[str, str],
+) -> str:
+    """Rewrite an earlier turn's [K#] labels into this turn's numbering.
+
+    Labels are assigned per turn, by position in that turn's retrieval — so [K2] in
+    the answer three messages ago and [K2] in this turn's context are, in general,
+    different Knowledge Objects. The old answers stayed in the prompt verbatim, and
+    the model read them against the CURRENT legend: a claim the user had already been
+    shown, now attributed to somebody else's note. Each message carries the map that
+    was true when it was written, so the rewrite goes label → knowledge id → the label
+    that id holds now.
+    """
+    if "[K" not in content and "[k" not in content:
+        return content
+    try:
+        stored = json.loads(history_item.get("metadata_json") or "{}")
+    except (TypeError, ValueError):
+        stored = {}
+    written_with = stored.get("knowledge_citations") if isinstance(stored, dict) else None
+    if not isinstance(written_with, dict):
+        written_with = {}
+
+    def rewrite(match: re.Match[str]) -> str:
+        label = match.group(1).upper()
+        knowledge_id = written_with.get(label) or written_with.get(f"[{label}]")
+        current = current_labels.get(str(knowledge_id)) if knowledge_id else None
+        return f"[{current}]" if current else _CITATION_OUT_OF_VIEW
+
+    return _KNOWLEDGE_CITATION_RE.sub(rewrite, content)
+
+
 def _unknown_verdict(reason: str) -> dict[str, Any]:
     """Fail-closed verdict: a verifier that cannot vouch never reports success."""
     return {"status": VERDICT_UNKNOWN, "ok": False, "score": None, "issues": [reason]}
@@ -1093,10 +1133,15 @@ class AgentRuntime:
                 }
             )
 
+        current_labels = {kid: label for label, kid in context.knowledge_citations.items()}
         for history_item in context.conversation_history[-10:]:
             role = history_item.get("role")
-            if role in {"user", "assistant"}:
-                messages.append({"role": role, "content": history_item.get("content", "")})
+            if role not in {"user", "assistant"}:
+                continue
+            content = history_item.get("content", "")
+            if role == "assistant":
+                content = _relabel_history_citations(content, history_item, current_labels)
+            messages.append({"role": role, "content": content})
         if attachments:
             transient_excerpts: list[str] = []
             remaining = 24_000
