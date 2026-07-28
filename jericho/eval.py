@@ -124,7 +124,12 @@ async def _score_cases(
         retrieved = [str(hit.get("id")) for hit in result.get("results", []) if hit.get("id")]
         case_recall = recall_at_k(retrieved, expected, k)
         case_precision = precision_at_k(retrieved, expected, k)
-        case_rr = reciprocal_rank(retrieved, expected)
+        # Sliced to k, like recall and precision beside it. `limit=max(k, 20)` returns
+        # up to twenty results, so an unsliced MRR measured a window the caller never
+        # sees: a change moving an expected object from position 20 to position 12
+        # left the top ten byte-identical and still produced a material MRR delta,
+        # p = 0.0, and a `reorders_within_k` verdict about a reorder outside k.
+        case_rr = reciprocal_rank(retrieved[:k], expected)
         recall_sum += case_recall
         precision_sum += case_precision
         rr_sum += case_rr

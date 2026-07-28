@@ -772,3 +772,32 @@ def test_the_default_threshold_clears_the_measured_non_duplicate_ceiling():
         f"default {default} does not clear the measured non-duplicate ceiling "
         f"{_MEASURED_NON_DUPLICATE_CEILING}"
     )
+
+
+def test_an_ordinary_new_object_does_not_reopen_history(settings, storage):
+    """The below-watermark guard measured two different quantities as if they were one.
+
+    `swept_below` is counted against the watermark a run ENDS with; the guard counted
+    against the watermark the next run had already pushed up during its own incremental
+    tile. So a plain new object grew the count by exactly one and looked like a row that
+    had landed under the cursor — no clock step required. Measured on the 342-document
+    corpus, that spurious reopening re-probed all 343 objects and ran 117 992 cosine
+    comparisons in place of 343.
+    """
+    cfg = _dedup_settings(settings)
+    storage.ensure_user("alice")
+    for index, vector in enumerate(([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
+        _index(
+            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T{index}"), vector, "test-embed"
+        )
+    first = _run(storage, cfg)
+    assert first["objects_compared"] == 3
+    assert first["pending"] == 0, "history was not finished, so the guard is not even armed yet"
+
+    _index(storage, "alice", _store(storage, "alice", "Ещё один текст", "T3"), [0.0, 0.0, -1.0], "test-embed")
+    second = _run(storage, cfg)
+    assert second["objects_compared"] <= 2, (
+        f"a new object re-walked history: {second['objects_compared']} objects compared"
+    )
+    third = _run(storage, cfg, close=False)
+    assert third["objects_compared"] == 0, "the backfill was reopened and history is being re-walked"

@@ -481,6 +481,13 @@ def detect_near_duplicates(
             backfill_done=not top,
         )
 
+    # The watermark this run STARTED from. The guard below asks "did a row appear
+    # UNDER the cursor?", and `state.swept_below` was counted against this value — but
+    # the incremental sweep pushes the cursor up as it goes, so counting against the
+    # advanced one compared two different quantities. Every ordinary new object then
+    # made the count grow by exactly one and looked like a row that had landed below.
+    entry_watermark = state.watermark
+
     # Loaded BEFORE the sweep so settled pairs are dropped as they are found, never
     # occupying a slot a genuinely new duplicate could use.
     settled = storage.get_conflict_pair_statuses(user_id, NEAR_DUPLICATE_TYPE)
@@ -574,17 +581,21 @@ def detect_near_duplicates(
         # bound would hide it from probing forever. Cheap detection: remember how many
         # rows were below the watermark when history was finished, and reopen the
         # backfill if that number ever grows.
-        below_watermark = storage.count_user_vectors(user_id, model, before=state.watermark)
-        if state.swept_below is not None and below_watermark > state.swept_below:
+        at_entry = storage.count_user_vectors(user_id, model, before=entry_watermark)
+        if state.swept_below is not None and at_entry > state.swept_below:
             LOGGER.info(
                 "Near-duplicate scan for %s found %d row(s) below the watermark; reopening backfill",
                 user_id,
-                below_watermark - state.swept_below,
+                at_entry - state.swept_below,
             )
             state = replace(state, backfill=None, backfill_done=False, swept_below=None)
             reopened_backfill = True
         else:
-            state = replace(state, swept_below=below_watermark)
+            # Recorded against the watermark this run LEAVES, which is what the next
+            # run will enter with — so the two ends of the comparison always agree.
+            state = replace(
+                state, swept_below=storage.count_user_vectors(user_id, model, before=state.watermark)
+            )
     pending = 0 if state.backfill_done else storage.count_user_vectors(user_id, model, before=state.backfill)
     if probed == 0 and not complete:
         # Distinguishable from "nothing to do": a run that burned its whole budget and

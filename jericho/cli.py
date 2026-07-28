@@ -139,7 +139,7 @@ JERICHO_EMBEDDINGS_CHUNK_OVERLAP_CHARS=200
 JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST=64
 # Near-duplicate Knowledge Object detection (needs embeddings). Cosine >= this
 # flags a likely duplicate as a review-gated conflict; resolve = deprecate one.
-JERICHO_DEDUP_THRESHOLD=0.92
+JERICHO_DEDUP_THRESHOLD=0.95
 JERICHO_DEDUP_INTERVAL_SEC=21600
 # Retrieval-quality eval over the gold set: recall@k measured periodically,
 # regression vs the previous run logged. Curate cases in the admin Quality view.

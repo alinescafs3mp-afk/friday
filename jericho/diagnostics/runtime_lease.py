@@ -105,12 +105,18 @@ def inspect_process_lease(path: Path, *, protocol: str) -> dict[str, Any]:
 
     active: bool | None = None
     if sys.platform.startswith("linux"):
+        # `connect`, never `bind`. Binding is exactly how `ProcessLease` claims the
+        # anchor, so this "read-only" inspection took it for ~26 microseconds: two
+        # concurrent probes of an unheld lease each reported the other as active, and a
+        # probe landing inside a starting process's acquire window stole the anchor and
+        # made the backend or the Telegram bridge fail to start. For an abstract
+        # AF_UNIX datagram address, connect succeeds precisely when someone holds it.
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         try:
-            probe.bind(_linux_anchor_address(path))
-            active = False
-        except OSError:
+            probe.connect(_linux_anchor_address(path))
             active = True
+        except OSError:
+            active = False
         finally:
             probe.close()
     result["active"] = active
