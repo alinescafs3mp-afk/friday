@@ -332,8 +332,6 @@ class JerichoSettings:
 
     telegram_bridge_secret: str
     telegram_realm_id: str
-    telegram_bot_id: str
-    telegram_session_ttl_seconds: int
     telegram_user_rate_limit_per_minute: int
     telegram_global_rate_limit_per_minute: int
     telegram_allowed_chat_ids: list[int]
@@ -361,8 +359,6 @@ class JerichoSettings:
     executive_max_tasks_per_mission: int
     executive_task_tool_budget: int
     executive_tick_interval_sec: int
-    telemetry_interval_sec: int
-    health_interval_sec: int
     workers_enabled: bool
 
     reminders_enabled: bool
@@ -388,7 +384,6 @@ class JerichoSettings:
     brave_search_api_key: str
     tavily_api_key: str
     serper_api_key: str
-    default_city: str
     web_allow_private_networks: bool
     web_max_response_bytes: int
 
@@ -636,8 +631,6 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         cors_origins=cors_origins,
         telegram_bridge_secret=os.environ.get("JERICHO_TELEGRAM_BRIDGE_SECRET", ""),
         telegram_realm_id=os.environ.get("JERICHO_TELEGRAM_REALM_ID", "telegram"),
-        telegram_bot_id=os.environ.get("JERICHO_TELEGRAM_BOT_ID", ""),
-        telegram_session_ttl_seconds=_int_env("JERICHO_TELEGRAM_SESSION_TTL_SECONDS", 86400, minimum=60),
         telegram_user_rate_limit_per_minute=_int_env(
             "JERICHO_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE", 30, minimum=1
         ),
@@ -658,8 +651,6 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         executive_max_tasks_per_mission=_int_env("JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION", 12, minimum=1),
         executive_task_tool_budget=_int_env("JERICHO_EXECUTIVE_TASK_TOOL_BUDGET", 6, minimum=1),
         executive_tick_interval_sec=_int_env("JERICHO_EXECUTIVE_TICK_INTERVAL_SEC", 15, minimum=5),
-        telemetry_interval_sec=_int_env("JERICHO_TELEMETRY_INTERVAL_SEC", 120, minimum=15),
-        health_interval_sec=_int_env("JERICHO_HEALTH_INTERVAL_SEC", 300, minimum=15),
         workers_enabled=_bool_env("JERICHO_WORKERS_ENABLED", True),
         reminders_enabled=_bool_env("JERICHO_REMINDERS_ENABLED", True),
         reminders_lead_days=_int_env("JERICHO_REMINDERS_LEAD_DAYS", 1, minimum=0),
@@ -678,7 +669,6 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         brave_search_api_key=os.environ.get("JERICHO_BRAVE_SEARCH_API_KEY", ""),
         tavily_api_key=os.environ.get("JERICHO_TAVILY_API_KEY", ""),
         serper_api_key=os.environ.get("JERICHO_SERPER_API_KEY", ""),
-        default_city=os.environ.get("JERICHO_DEFAULT_CITY", ""),
         web_allow_private_networks=_bool_env("JERICHO_WEB_ALLOW_PRIVATE_NETWORKS", False),
         web_max_response_bytes=_int_env("JERICHO_WEB_MAX_RESPONSE_BYTES", 5 * 1024 * 1024, minimum=64 * 1024),
         max_upload_bytes=_int_env("JERICHO_MAX_UPLOAD_BYTES", 50 * 1024 * 1024, minimum=1024),
@@ -712,22 +702,6 @@ def ensure_runtime_dirs(settings: JerichoSettings) -> list[Path]:
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
     return paths
-
-
-# Settings `load_settings` parses and `.env.example` documents that no code reads.
-# Keeping the list explicit is the point: a new one has to be added here on purpose,
-# and `tests/test_inert_settings.py` fails when the set drifts either way.
-INERT_SETTINGS: dict[str, object] = {
-    "telegram_bot_id": "",
-    "telegram_session_ttl_seconds": 86400,
-    "telemetry_interval_sec": 120,
-    "health_interval_sec": 300,
-    "default_city": "",
-}
-
-
-def _is_set_away_from_default(settings: JerichoSettings, name: str) -> bool:
-    return getattr(settings, name, INERT_SETTINGS[name]) != INERT_SETTINGS[name]
 
 
 def validate_settings(settings: JerichoSettings, *, production: bool = False) -> list[str]:
@@ -782,16 +756,6 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
             valid_origin = False
         if not valid_origin:
             errors.append(f"Invalid CORS origin: {origin}")
-    inert = [name for name in INERT_SETTINGS if _is_set_away_from_default(settings, name)]
-    if inert:
-        # A documented knob that nothing reads is worse than a missing one: the
-        # operator believes they configured something. JERICHO_TELEGRAM_SESSION_TTL_SECONDS
-        # is the sharp one — it reads as a security control, and Telegram sessions
-        # do not expire on it because no code ever asks for the value.
-        warnings.append(
-            "these settings are parsed and documented but nothing reads them yet, "
-            f"so setting them changes nothing: {', '.join(sorted(inert))}"
-        )
     if settings.telegram_bridge_secret and not settings.telegram_effective_allowed_chat_ids:
         # A configured Telegram bridge with no allowlist would accept any chat.
         # Deny-by-default requires an explicit allowlist or owner chat; treat this
