@@ -153,20 +153,49 @@ class ConversationsMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else {}
 
+    def count_messages(self, conversation_id: str, *, user_id: str) -> int:
+        """How many messages the conversation holds — both conditions from the listing."""
+        row = self.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (conversation_id, user_id),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
     def get_conversation_messages(
         self,
         conversation_id: str,
         *,
         user_id: str,
         limit: int = 50,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
-        # Select newest N in a subquery, then restore chronological order.
+        """A window of the conversation, chronological, defaulting to the tail.
+
+        The old shape — newest N in a subquery, then `ORDER BY created_at ASC` around
+        it — did not restore chronological order at all when timestamps tie, and they
+        tie constantly: `created_at` is written to second precision, so a question and
+        its answer usually share one. An outer sort on an equal key preserves the inner
+        DESC order, so each pair came back ANSWER FIRST — measured as
+        `A09, A10, Q10, A11, Q11`, and with forty messages inside one second the whole
+        conversation came back reversed. That history also feeds the agent's prompt.
+
+        `rowid` is the tiebreaker, not `id`: ids are `uuid4().hex[:16]`, so ordering by
+        one is deterministic and chronologically meaningless. The neighbouring
+        `list_conversations` uses `, id DESC` because there the order inside a second
+        carries no meaning; here it does.
+
+        `offset` counts from the START of the conversation, like every other paged list,
+        so the same pager arithmetic applies. Omitting it keeps today's behaviour — the
+        last `limit` messages.
+        """
+        window = max(1, min(limit, 1000))
+        if offset is None:
+            total = self.count_messages(conversation_id, user_id=user_id)
+            offset = max(0, total - window)
         rows = self.execute(
-            """SELECT * FROM (
-                   SELECT * FROM messages WHERE conversation_id=? AND user_id=?
-                   ORDER BY created_at DESC LIMIT ?
-               ) ORDER BY created_at ASC""",
-            (conversation_id, user_id, max(1, min(limit, 1000))),
+            """SELECT * FROM messages WHERE conversation_id=? AND user_id=?
+               ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?""",
+            (conversation_id, user_id, window, max(0, offset)),
         ).fetchall()
         return [dict(row) for row in rows]
 

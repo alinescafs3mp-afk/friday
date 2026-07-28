@@ -27,7 +27,12 @@ router = APIRouter()
 
 
 @router.get("/quality")
-async def knowledge_quality_dashboard(request: Request, user_id: str) -> dict[str, Any]:
+async def knowledge_quality_dashboard(
+    request: Request,
+    user_id: str,
+    lifecycle_limit: int = Query(50, ge=1, le=500),
+    lifecycle_offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
     """One read-only view of the feedback loop and graph-review pressure."""
 
     _require(request, "admin.all_data.read")
@@ -46,8 +51,16 @@ async def knowledge_quality_dashboard(request: Request, user_id: str) -> dict[st
     ).fetchone()
     feedback_state = state.storage.get_feedback_state(user_id, limit=5000)
     classification = [item for item in feedback_state if item.get("feedback_type") == "classification"]
-    pending_inbox = state.storage.list_inbox(user_id, InboxStatus.PENDING, limit=5000)
-    lifecycle_candidates = state.storage.list_lifecycle_candidates(user_id, limit=500)
+    # Counted, not measured by the length of a truncated page. Each of these tiles used
+    # to be `len(list_...(limit=N))`, so a большой number was indistinguishable from the
+    # cap — and the inbox one capped at 1000 while asking for 5000. The counters below
+    # share their filters with the listings by construction, and they are also faster:
+    # the rows themselves are not needed to draw a number (measured 0.24 ms against
+    # 5.1 ms, 7.8 against 52.5, 12.6 against 51.3).
+    lifecycle_candidates = state.storage.list_lifecycle_candidates(
+        user_id, limit=lifecycle_limit, offset=lifecycle_offset
+    )
+    lifecycle_total = state.storage.count_lifecycle_candidates(user_id)
     return {
         "user_id": user_id,
         "graph": state.kg.get_stats(user_id),
@@ -59,12 +72,22 @@ async def knowledge_quality_dashboard(request: Request, user_id: str) -> dict[st
             "classification_negative": sum(1 for item in classification if float(item.get("score") or 0) < 0),
         },
         "review_pressure": {
-            "pending_inbox": len(pending_inbox),
-            "relation_candidates": len(state.storage.list_relation_candidates(user_id, limit=5000)),
-            "conflicts": len(state.storage.list_knowledge_conflicts(user_id, limit=5000)),
-            "lifecycle_candidates": len(lifecycle_candidates),
+            "pending_inbox": state.storage.count_inbox(user_id, InboxStatus.PENDING),
+            "relation_candidates": state.storage.count_relation_candidates(user_id, status="suggested"),
+            "conflicts": state.storage.count_knowledge_conflicts(user_id, status="suggested"),
+            # The dirtiest of the four, and not ordinary saturation: the listing takes
+            # 500 rows in `importance ASC` order and only THEN filters in python, so
+            # protected file-derived objects at importance 0 eat the limit first. The
+            # number therefore saturates BELOW the limit and looks like a real count —
+            # measured, 900 true candidates showed as 200.
+            "lifecycle_candidates": lifecycle_total,
         },
         "lifecycle_candidates": lifecycle_candidates,
+        # The table pages now, so «Выбрать все» stops reading as «все кандидаты»:
+        # «1-50 из 900» stands next to it.
+        "lifecycle_total": lifecycle_total,
+        "lifecycle_limit": lifecycle_limit,
+        "lifecycle_offset": lifecycle_offset,
     }
 
 

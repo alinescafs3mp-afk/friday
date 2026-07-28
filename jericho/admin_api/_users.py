@@ -43,7 +43,13 @@ async def list_users(
     users = state.storage.list_users(limit=limit, offset=offset)
     for user in users:
         user["permission_overrides"] = state.storage.get_permission_overrides(user["id"])
-    return {"items": users, "count": len(users)}
+    return {
+        "items": users,
+        "count": len(users),
+        "total": state.storage.count_users(),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/users/resolve")

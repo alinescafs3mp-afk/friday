@@ -68,7 +68,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 212
+EXPECTED_MEMBER_COUNT = 218
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -140,7 +140,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_chunk_spans": "(self, user_id: 'str', model: 'str', keys: 'Sequence[tuple[str, int]]') -> 'dict[tuple[str, int], tuple[int, int]]'",
     "get_conflict_pair_statuses": "(self, user_id: 'str', conflict_type: 'str') -> 'dict[str, str]'",
     "get_conversation": "(self, conversation_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
-    "get_conversation_messages": "(self, conversation_id: 'str', *, user_id: 'str', limit: 'int' = 50) -> 'list[dict[str, Any]]'",
+    "get_conversation_messages": "(self, conversation_id: 'str', *, user_id: 'str', limit: 'int' = 50, offset: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "get_current_feedback_stats": "(self, user_id: 'str', target_type: 'str | None' = None) -> 'dict[str, Any]'",
     "get_custom_preset": "(self, preset_key: 'str') -> 'dict[str, Any] | None'",
     "get_entity": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -184,7 +184,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "known_vocabulary": "(self, terms: 'Sequence[str]') -> 'set[str]'",
     "link_knowledge_entity": "(self, user_id: 'str', knowledge_object_id: 'str', entity_id: 'str', *, status: 'str' = 'accepted', confidence: 'float' = 1.0, evidence: 'dict[str, Any] | None' = None, reviewed_by: 'str | None' = None) -> 'dict[str, Any]'",
     "list_api_tokens": "(self, user_id: 'str | None' = None, *, include_revoked: 'bool' = False) -> 'list[dict[str, Any]]'",
-    "list_audit_log": "(self, user_id: 'str | None' = None, *, limit: 'int' = 100, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
+    "list_audit_log": "(self, user_id: 'str | None' = None, *, limit: 'int' = 100, offset: 'int' = 0, before: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "list_backups": "(self) -> 'list[dict[str, Any]]'",
     "list_container_entities": "(self, user_id: 'str', types: 'tuple[str, ...]') -> 'list[dict[str, Any]]'",
     "list_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False, limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
@@ -205,7 +205,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_knowledge_on_this_day": "(self, user_id: 'str', *, month_day: 'str', before_iso: 'str', limit: 'int' = 10) -> 'list[dict[str, Any]]'",
     "list_knowledge_tags": "(self, user_id: 'str', *, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_knowledge_versions": "(self, ko_id: 'str', user_id: 'str') -> 'list[dict[str, Any]]'",
-    "list_lifecycle_candidates": "(self, user_id: 'str', *, days_threshold: 'int' = 90, limit: 'int' = 500) -> 'list[dict[str, Any]]'",
+    "list_lifecycle_candidates": "(self, user_id: 'str', *, days_threshold: 'int' = 90, limit: 'int' = 500, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_merge_history": "(self, user_id: 'str', *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "list_missions": "(self, user_id: 'str | None' = None, *, status: 'MissionStatus | str | None' = None, statuses: 'Sequence[str] | None' = None, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_part_of_relations": "(self, user_id: 'str') -> 'list[dict[str, Any]]'",

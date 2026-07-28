@@ -162,9 +162,14 @@ async def apply_lifecycle_review(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Invalid lifecycle action")
     days = max(1, min(_parse_int(body.get("days_threshold", 90), field="days_threshold"), 36500))
     state = _services(request)
+    # The whole candidate set, walked once — not a 5000-row page of it. The old shape
+    # was safe only while the visible table was a prefix of that pool; now that the
+    # table pages, an id from a later page would have been rejected as
+    # `not_a_current_candidate` while being a perfectly current candidate. Measured on
+    # 50000 objects the pool truncated on its own: 8747 true, 2174 returned.
     candidates = {
         str(item["knowledge_object"]["id"]): item
-        for item in state.storage.list_lifecycle_candidates(user_id, days_threshold=days, limit=5000)
+        for item in state.storage.all_lifecycle_candidates(user_id, days_threshold=days)
     }
     changed: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []

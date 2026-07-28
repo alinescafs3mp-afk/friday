@@ -1674,23 +1674,7 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 
-    def list_lifecycle_candidates(
-        self,
-        user_id: str,
-        *,
-        days_threshold: int = 90,
-        limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        """Return explainable, review-only stale-knowledge candidates.
-
-        This intentionally does not mutate lifecycle or importance. Manually
-        reviewed, file-derived, recently used, or positively rated knowledge is
-        protected from automated suggestions.
-        """
-
-        days = max(1, min(int(days_threshold), 36500))
-        rows = self.execute(
-            """SELECT k.*, u.retrieval_count, u.answer_count,
+    _LIFECYCLE_SQL = """SELECT k.*, u.retrieval_count, u.answer_count,
                       u.positive_feedback_count, u.negative_feedback_count,
                       u.last_retrieved_at, u.last_used_at, u.last_feedback_at
                FROM knowledge_objects k
@@ -1698,15 +1682,57 @@ class KnowledgeMixin(StorageShared):
                  ON u.user_id=k.user_id AND u.knowledge_object_id=k.id
                WHERE k.user_id=? AND k.lifecycle_stage='active' AND k.deleted_at IS NULL
                  AND datetime(k.updated_at) < datetime('now', ?)
-               ORDER BY k.importance ASC, k.updated_at ASC LIMIT ?""",
-            (user_id, f"-{days} days", max(1, min(int(limit), 5000))),
-        ).fetchall()
-        output: list[dict[str, Any]] = []
-        for row in rows:
-            item = dict(row)
-            if _lifecycle_protection_reasons(item, days):
-                continue
+               ORDER BY k.importance ASC, k.updated_at ASC, k.id ASC LIMIT ? OFFSET ?"""
 
+    def _lifecycle_candidates(self, user_id: str, days: int) -> list[dict[str, Any]]:
+        """EVERY candidate, walked in full — the one list the count and the page share.
+
+        The SQL prefilter is exact but the verdict is not: protection reasons read the
+        object's metadata and the risk cutoff is arithmetic over its scores. Taking 500
+        rows and filtering afterwards made the reported number saturate BELOW the limit
+        and look like a real count — measured, 900 true candidates showed as 200,
+        because protected file-derived objects sit at importance 0 and `importance ASC`
+        feeds them first, eating the window.
+
+        The predicate could be expressed in SQL — it was verified to match by sets of
+        ids — but then there would be two implementations of one rule, and the second
+        would drift silently the first time a threshold moves. One walk cannot.
+        """
+        found: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            rows = self.execute(self._LIFECYCLE_SQL, (user_id, f"-{days} days", 500, offset)).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                verdict = self._lifecycle_verdict(dict(row), days)
+                if verdict:
+                    found.append(verdict)
+            offset += len(rows)
+            if len(rows) < 500:
+                break
+        found.sort(key=lambda item: (-item["risk_score"], str(item["knowledge_object"].get("id", ""))))
+        return found
+
+    def count_lifecycle_candidates(self, user_id: str, *, days_threshold: int = 90) -> int:
+        """How many there really are — the number the tile shows."""
+        return len(self._lifecycle_candidates(user_id, max(1, min(int(days_threshold), 36500))))
+
+    def all_lifecycle_candidates(self, user_id: str, *, days_threshold: int = 90) -> list[dict[str, Any]]:
+        """The whole candidate set, for callers that must not miss one.
+
+        `apply` validates `require_candidate` against this. It used to rebuild a
+        5000-row listing and look inside, which was safe only while the visible table
+        was a prefix of that pool — measured on 50000 objects the pool truncates on its
+        own (8747 true, 2174 returned), so a paged table would have had ids that the
+        guard rejected as `not_a_current_candidate` while being current.
+        """
+        return self._lifecycle_candidates(user_id, max(1, min(int(days_threshold), 36500)))
+
+    def _lifecycle_verdict(self, item: dict[str, Any], days: int) -> dict[str, Any] | None:
+        if _lifecycle_protection_reasons(item, days):
+            return None
+        if True:
             # `or 0.5` read a stored 0.0 as 0.5, because zero is falsy — so the one
             # value that should weigh MOST toward review was the one value the scan
             # ignored. Missing and zero are different things here.
@@ -1725,7 +1751,7 @@ class KnowledgeMixin(StorageShared):
                 + min(0.12, negative * 0.04)
             )
             if risk < 0.48:
-                continue
+                return None
             reasons = ["not updated within threshold"]
             if importance < 0.35:
                 reasons.append("low importance")
@@ -1737,17 +1763,33 @@ class KnowledgeMixin(StorageShared):
                 reasons.append("never used")
             if negative:
                 reasons.append("negative feedback")
-            output.append(
-                {
-                    "knowledge_object": item,
-                    "risk_score": round(min(1.0, risk), 4),
-                    "recommended_action": "review_for_archive" if risk >= 0.68 else "review_importance",
-                    "suggested_importance": round(max(0.1, importance - min(0.2, risk * 0.15)), 3),
-                    "reasons": reasons,
-                    "protected": False,
-                }
-            )
-        return sorted(output, key=lambda item: item["risk_score"], reverse=True)
+            return {
+                "knowledge_object": item,
+                "risk_score": round(min(1.0, risk), 4),
+                "recommended_action": "review_for_archive" if risk >= 0.68 else "review_importance",
+                "suggested_importance": round(max(0.1, importance - min(0.2, risk * 0.15)), 3),
+                "reasons": reasons,
+                "protected": False,
+            }
+        return None
+
+    def list_lifecycle_candidates(
+        self,
+        user_id: str,
+        *,
+        days_threshold: int = 90,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """One page of explainable, review-only stale-knowledge candidates.
+
+        Never mutates lifecycle or importance. Manually reviewed, file-derived,
+        recently used or positively rated knowledge is protected from suggestions.
+        """
+        days = max(1, min(int(days_threshold), 36500))
+        found = self._lifecycle_candidates(user_id, days)
+        start = max(0, offset)
+        return found[start : start + max(1, min(int(limit), 5000))]
 
     def archive_selected_knowledge(
         self, user_id: str, ids: Sequence[str], *, days_threshold: int = 90

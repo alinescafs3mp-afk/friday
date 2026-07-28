@@ -105,16 +105,23 @@ async def conversation_messages(
     request: Request,
     user_id: str,
     limit: int = Query(500, ge=1, le=1000),
+    offset: int | None = Query(default=None, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     if not _services(request).storage.get_conversation(conversation_id, user_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
     _audit_cross_tenant_read(request, "admin.messages.read", user_id, conversation_id=conversation_id)
     storage = _services(request).storage
+    # Without an offset the window is the tail, as before. `total` is what the modal
+    # lacked entirely: a 1200-message conversation returned 1000 rows and called that
+    # the count, with no way to tell that the beginning had been dropped.
+    total = storage.count_messages(conversation_id, user_id=user_id)
+    effective_offset = max(0, total - min(limit, 1000)) if offset is None else offset
     items = storage.get_conversation_messages(
         conversation_id,
         user_id=user_id,
         limit=limit,
+        offset=effective_offset,
     )
     # Surface the stored [K#] → Knowledge Object attribution as a resolved legend so
     # the inspector shows what each answer rested on (titles resolved once, cached).
@@ -145,4 +152,11 @@ async def conversation_messages(
             "verified": metadata.get("verified"),
             "citations": citations,
         }
-    return {"items": items, "count": len(items)}
+    return {
+        "conversation_id": conversation_id,
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "limit": limit,
+        "offset": effective_offset,
+    }

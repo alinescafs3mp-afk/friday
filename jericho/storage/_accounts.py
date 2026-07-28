@@ -76,6 +76,16 @@ class AccountsMixin(StorageShared):
         row = self.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
+    def count_users(self) -> int:
+        """How many accounts there are — the global account selector depends on it.
+
+        Without it the admin UI asked for the server's default page and had no way to
+        tell «500 accounts» from «500 and more», while the header dropdown it feeds is
+        the only way to reach an account at all.
+        """
+        row = self.execute("SELECT COUNT(*) AS count FROM users").fetchone()
+        return int(row["count"] if row else 0)
+
     def list_users(self, *, limit: int = 500, offset: int = 0) -> list[dict[str, Any]]:
         rows = self.execute(
             "SELECT * FROM users ORDER BY last_seen_at DESC, id DESC LIMIT ? OFFSET ?",
@@ -294,19 +304,36 @@ class AccountsMixin(StorageShared):
             )
         return entry
 
-    def count_audit_log(self, user_id: str | None = None) -> int:
+    def count_audit_log(self, user_id: str | None = None, *, before: str | None = None) -> int:
         """Total, so a page can say what it is a page OF.
 
-        Without it the client had only `len(items)`, which on a full page equals the
-        limit — indistinguishable from «that is all there is». The audit log grows
-        faster than anything else here, so it hit that first.
+        `before` is what makes paging this particular table honest. Reading the audit
+        log is itself an audited event, so every page turn inserts a row at the HEAD of
+        a `created_at DESC` listing and shifts the window under itself — measured, the
+        caption walked from «из 97» to «из 107» over eleven clicks, and from the seventh
+        page on each page repeated a row from the previous one. Anchoring both the page
+        and the count to the moment the first page was drawn removes the drift entirely:
+        the pager then walks a fixed snapshot.
+
+        `created_at` has one-second resolution, so the anchor bounds everything after
+        that second rather than after that instant. A page turn takes seconds, so the
+        drift this removes is the one that mattered; rows written inside the anchor's
+        own second still count.
         """
+        clauses = []
+        params: list[Any] = []
         if user_id:
-            row = self.execute(
-                "SELECT COUNT(*) AS count FROM audit_log WHERE user_id=?", (user_id,)
-            ).fetchone()
-        else:
-            row = self.execute("SELECT COUNT(*) AS count FROM audit_log").fetchone()
+            clauses.append("user_id=?")
+            params.append(user_id)
+        if before:
+            clauses.append("created_at<=?")
+            params.append(before)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        # ``where`` holds fixed predicates only; every value is bound.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count FROM audit_log{where}",
+            tuple(params),  # nosec B608
+        ).fetchone()
         return int(row["count"] if row else 0)
 
     def list_audit_log(
@@ -315,17 +342,26 @@ class AccountsMixin(StorageShared):
         *,
         limit: int = 100,
         offset: int = 0,
+        before: str | None = None,
     ) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
         if user_id:
-            rows = self.execute(
-                "SELECT * FROM audit_log WHERE user_id=? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
-                (user_id, max(1, min(limit, 5000)), max(0, offset)),
-            ).fetchall()
-        else:
-            rows = self.execute(
-                "SELECT * FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
-                (max(1, min(limit, 5000)), max(0, offset)),
-            ).fetchall()
+            clauses.append("user_id=?")
+            params.append(user_id)
+        if before:
+            # The anchor: rows written after the first page was drawn — including the
+            # rows this very reading writes — stay out of the walk.
+            clauses.append("created_at<=?")
+            params.append(before)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.extend([max(1, min(limit, 5000)), max(0, offset)])
+        # ``where`` holds fixed predicates only; every value is bound.
+        rows = self.execute(
+            f"SELECT * FROM audit_log{where} "  # nosec B608
+            "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            tuple(params),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def count_recent_audit(self, action: str, since: str, *, limit: int | None = None) -> int:

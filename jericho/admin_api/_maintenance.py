@@ -32,11 +32,16 @@ async def audit_log(
     user_id: str | None = None,
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
+    before: str | None = Query(default=None),
 ) -> dict[str, Any]:
     _require(request, "admin.audit.read")
     storage = _services(request).storage
-    items = storage.list_audit_log(user_id, limit=limit, offset=offset)
-    total = storage.count_audit_log(user_id)
+    # The client echoes back the `anchor` it got on page one, so every later page walks
+    # the same snapshot. Without it this list shifts under its own reader: each page
+    # turn writes an `admin.audit.read` row at the head of a newest-first listing.
+    items = storage.list_audit_log(user_id, limit=limit, offset=offset, before=before)
+    total = storage.count_audit_log(user_id, before=before)
+    anchor = before or (str(items[0].get("created_at")) if items else None)
     # Reading the audit trail is itself an auditable event (who inspected
     # whose history); a plain INSERT, so there is no recursion.
     _audit(
@@ -46,7 +51,14 @@ async def audit_log(
         user_id or "*",
         after={"limit": limit, "offset": offset, "returned": len(items)},
     )
-    return {"items": items, "count": len(items), "total": total, "limit": limit, "offset": offset}
+    return {
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "anchor": anchor,
+    }
 
 
 @router.get("/backups")
