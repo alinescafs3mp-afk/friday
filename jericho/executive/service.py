@@ -83,6 +83,10 @@ _MAX_TASKS_PER_TICK = 3
 # attempt counter the schema has no column for: seeing it again means twice.
 _INTERRUPTED_MARKER = "interrupted by tick budget"
 _PROPOSE_INBOX_THRESHOLD = 10
+# Long enough that a proposer which finds the same backlog cannot restart itself on
+# the next cognition tick, short enough that a genuinely growing queue still gets
+# attention the same day.
+_PROPOSE_COOLDOWN = timedelta(hours=6)
 _NON_TERMINAL_STATUSES = ("proposed", "ready", "running", "paused", "blocked")
 
 _TASK_SYSTEM_PROMPT = (
@@ -155,7 +159,25 @@ class ExecutiveService:
             created_by=created_by or origin_enum.value,
         )
         self.storage.create_mission(mission)
-        plan_title, tasks = await self.planner.plan(goal)
+        try:
+            plan_title, tasks = await self.planner.plan(goal)
+        except BaseException:
+            # BaseException, not Exception: the planner is awaited, so the realistic
+            # interruption is CancelledError — a worker tick running out of budget, or
+            # shutdown. The mission row is already committed, and a mission with no
+            # tasks is a zombie: `_pick_runnable` has nothing to run and `_finalize`
+            # needs a non-empty task list, so nothing ever moves it to a terminal
+            # status. With full autonomy it also holds one of the eight active slots,
+            # and either way it blocks `maybe_propose_from_backlog` forever, because
+            # `proposed` counts as non-terminal for the dedupe.
+            with suppress(Exception):
+                self.storage.update_mission_fields(
+                    mission_id,
+                    user_id,
+                    status=MissionStatus.FAILED.value,
+                    completed_at=utc_now(),
+                )
+            raise
         persisted = self.storage.set_mission_plan(
             mission_id,
             user_id,
@@ -648,8 +670,29 @@ class ExecutiveService:
         existing = self.storage.list_missions(user_id, statuses=list(_NON_TERMINAL_STATUSES), limit=50)
         if any(mission.get("origin") == MissionOrigin.WORKER.value for mission in existing):
             return None
-        pending = self.storage.list_inbox(user_id, status=InboxStatus.PENDING, limit=_PROPOSE_INBOX_THRESHOLD)
-        if len(pending) < _PROPOSE_INBOX_THRESHOLD:
+        # A cooldown on the LAST worker mission in any status, not just live ones. The
+        # dedupe above was the only limit, so under full autonomy a mission finished in
+        # a couple of runner ticks, the backlog condition was still true — a mission
+        # reads the Inbox, it does not clear it — and the next cognition tick started
+        # another. Upper bound was twelve an hour, each with its own planning and steps.
+        recent = self.storage.list_missions(user_id, limit=50)
+        for mission in recent:
+            if mission.get("origin") != MissionOrigin.WORKER.value:
+                continue
+            stamp = str(mission.get("completed_at") or mission.get("created_at") or "")
+            with suppress(ValueError):
+                if datetime.fromisoformat(stamp) > datetime.now(UTC) - _PROPOSE_COOLDOWN:
+                    return None
+            break
+        # The backlog is the USER's, not our own echo. Every produce step files its
+        # result back into this same Inbox (`_route_to_inbox`), and the planner
+        # guarantees at least one, so the queue grew by one per mission — the
+        # threshold could never fall on its own.
+        pending = self.storage.list_inbox_detailed(
+            user_id, status=InboxStatus.PENDING, limit=_PROPOSE_INBOX_THRESHOLD * 4
+        )
+        backlog = [item for item in pending if not str(item.get("source_ref") or "").startswith("mission:")]
+        if len(backlog) < _PROPOSE_INBOX_THRESHOLD:
             return None
         return await self.create_mission(
             user_id,
