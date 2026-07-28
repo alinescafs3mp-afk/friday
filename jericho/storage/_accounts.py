@@ -294,6 +294,21 @@ class AccountsMixin(StorageShared):
             )
         return entry
 
+    def count_audit_log(self, user_id: str | None = None) -> int:
+        """Total, so a page can say what it is a page OF.
+
+        Without it the client had only `len(items)`, which on a full page equals the
+        limit — indistinguishable from «that is all there is». The audit log grows
+        faster than anything else here, so it hit that first.
+        """
+        if user_id:
+            row = self.execute(
+                "SELECT COUNT(*) AS count FROM audit_log WHERE user_id=?", (user_id,)
+            ).fetchone()
+        else:
+            row = self.execute("SELECT COUNT(*) AS count FROM audit_log").fetchone()
+        return int(row["count"] if row else 0)
+
     def list_audit_log(
         self,
         user_id: str | None = None,

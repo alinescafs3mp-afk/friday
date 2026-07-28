@@ -34,7 +34,9 @@ async def audit_log(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     _require(request, "admin.audit.read")
-    items = _services(request).storage.list_audit_log(user_id, limit=limit, offset=offset)
+    storage = _services(request).storage
+    items = storage.list_audit_log(user_id, limit=limit, offset=offset)
+    total = storage.count_audit_log(user_id)
     # Reading the audit trail is itself an auditable event (who inspected
     # whose history); a plain INSERT, so there is no recursion.
     _audit(
@@ -44,7 +46,7 @@ async def audit_log(
         user_id or "*",
         after={"limit": limit, "offset": offset, "returned": len(items)},
     )
-    return {"items": items, "count": len(items)}
+    return {"items": items, "count": len(items), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/backups")

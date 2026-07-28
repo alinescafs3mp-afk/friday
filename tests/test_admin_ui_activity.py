@@ -155,3 +155,170 @@ def test_the_activity_screen_works_in_a_browser(live_admin):
         browser.close()
 
     assert not problems, "\n".join(problems)
+
+
+SLOW_AUDIT_FETCH = """
+window.__origFetch = window.fetch;
+window.fetch = (input, init) => {
+  const url = String((input && input.url) || input || '');
+  if (url.includes('/api/admin/audit')) {
+    return new Promise(resolve => setTimeout(() => resolve(window.__origFetch(input, init)), 2000));
+  }
+  return window.__origFetch(input, init);
+};
+"""
+
+
+def test_a_slow_section_cannot_paint_over_the_one_you_switched_to(live_admin):
+    """Navigation does not cancel a request that is already in flight.
+
+    Every renderer writes to `#app` AFTER its await, so a slow section landed on top
+    of whatever the user had moved to: the highlighted menu entry and the heading said
+    one thing and the table showed another. Reproduced deterministically by making one
+    endpoint answer two seconds late — the fix is a generation counter, so this test
+    fails the moment that check is removed.
+    """
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as play:
+        try:
+            browser = play.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no chromium available: {exc}")
+        page = browser.new_page()
+        page.goto(f"{live_admin}/admin/", wait_until="networkidle")
+        page.evaluate("t => sessionStorage.setItem('jericho_api_token', t)", TOKEN)
+        page.reload(wait_until="networkidle")
+        page.evaluate(SLOW_AUDIT_FETCH)
+
+        page.locator("#nav button", has_text="Аудит").click()
+        page.wait_for_timeout(150)
+        page.locator("#nav button", has_text="Обзор").click()
+        page.wait_for_timeout(3000)  # the audit answer lands inside this window
+
+        heading = page.locator("#pageTitle").inner_text()
+        body = page.locator("#app").inner_text()
+        browser.close()
+
+    assert heading == "Обзор"
+    assert "Состояние хранилища" in body, "the section the user chose is not the one on screen"
+    assert "Действие" not in body, "the abandoned section painted over the current one"
+
+
+def test_a_long_list_pages_instead_of_pretending_to_be_complete(live_admin):
+    """A page used to present itself as the whole set.
+
+    The response carries `count = len(items)`, which on a full page equals the limit —
+    indistinguishable from «that is all there is». The audit log is the fastest-growing
+    list here, so it hit that first; its route now returns a real `total`, and the
+    screen pages over it.
+    """
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as play:
+        try:
+            browser = play.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no chromium available: {exc}")
+        page = browser.new_page()
+        page.goto(f"{live_admin}/admin/", wait_until="networkidle")
+        page.evaluate("t => sessionStorage.setItem('jericho_api_token', t)", TOKEN)
+        page.reload(wait_until="networkidle")
+
+        # Enough audit rows to need a second page. Reading the audit log is itself
+        # audited, so simply asking for it repeatedly fills it.
+        for _ in range(130):
+            page.evaluate(
+                "t => fetch('/api/admin/audit?limit=1', {headers:{Authorization:'Bearer '+t}})", TOKEN
+            )
+        page.wait_for_timeout(1500)
+
+        page.locator("#nav button", has_text="Аудит").click()
+        page.wait_for_timeout(1200)
+        body = page.locator("#app").inner_text()
+        rows_first = page.locator("#app table tbody tr").count()
+
+        back = page.locator("#app button", has_text="← Назад").first
+        forward = page.locator("#app button", has_text="Вперёд →").first
+        first_page_state = (back.is_disabled(), forward.is_disabled())
+
+        forward.click()
+        page.wait_for_timeout(1200)
+        second_body = page.locator("#app").inner_text()
+        second_back_disabled = page.locator("#app button", has_text="← Назад").first.is_disabled()
+        browser.close()
+
+    assert rows_first > 0, "the audit list rendered nothing"
+    assert " из " in body, f"the pager does not say what the page is a page of: {body[:200]}"
+    assert first_page_state == (True, False), (
+        f"on the first page «Назад» must be off and «Вперёд» on, got {first_page_state}"
+    )
+    assert second_body != body, "«Вперёд» did not change the page"
+    assert second_back_disabled is False, "«Назад» stayed disabled on the second page"
+
+
+def test_an_abandoned_render_cannot_leave_its_data_behind_the_new_one(live_admin):
+    """The first fix guarded the paint and not the state — and that is worse.
+
+    Every renderer assigned `state.* = data.items` right after its await, BEFORE the
+    generation check. So an abandoned render left the NEW section's rows on screen with
+    the OLD section's data behind them, and the row buttons addressed that array BY
+    POSITION. Found adversarially and reproduced in Chromium: the Активность screen
+    showed one account's rows while «Показать» opened another account's material —
+    a cross-account disclosure on the one screen that reads across accounts.
+
+    Both halves are pinned here: the generation now guards the state write, and the
+    lookups go by identifier, so a disagreement says «не найдено» instead of handing
+    over somebody else's record.
+    """
+    from playwright.sync_api import sync_playwright
+
+    slow_anna = """
+    window.__origFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = String((input && input.url) || input || '');
+      if (url.includes('usr_anna/activity')) {
+        return new Promise(r => setTimeout(() => r(window.__origFetch(input, init)), 2500));
+      }
+      return window.__origFetch(input, init);
+    };
+    """
+
+    with sync_playwright() as play:
+        try:
+            browser = play.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no chromium available: {exc}")
+        page = browser.new_page()
+        page.goto(f"{live_admin}/admin/", wait_until="networkidle")
+        page.evaluate("t => sessionStorage.setItem('jericho_api_token', t)", TOKEN)
+        page.reload(wait_until="networkidle")
+
+        page.locator("#nav button", has_text="Активность").click()
+        page.wait_for_timeout(800)
+        page.evaluate(slow_anna)
+
+        # Ask for the slow account, then immediately for the fast one. Anna's answer
+        # lands last and must be discarded whole — rows AND state.
+        # `void`: without it evaluate awaits the promise, the first render finishes
+        # before the second starts, and there is no race to observe at all.
+        page.evaluate("void actions.activityPick('usr_anna')")
+        page.wait_for_timeout(200)
+        page.evaluate("void actions.activityPick('usr_ivan')")
+        page.wait_for_timeout(3500)
+
+        heading = page.locator("#app h2").first.inner_text()
+        state_leaked = page.evaluate(
+            "() => (state.activity||[]).some(r => String(r.preview||'').includes('ЧУЖАЯЗАМЕТКА'))"
+        )
+        show = page.locator("#app table tbody tr button", has_text="Показать").first
+        modal_text = ""
+        if show.count():
+            show.click()
+            page.wait_for_timeout(400)
+            modal_text = page.locator("#modalBody").inner_text()
+        browser.close()
+
+    assert "Иван" in heading, f"the screen is not showing the account that was asked for: {heading}"
+    assert state_leaked is False, "the abandoned render left another account's rows in state"
+    assert "ЧУЖАЯЗАМЕТКА" not in modal_text, "the preview opened another account's material"
