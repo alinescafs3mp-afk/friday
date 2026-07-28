@@ -231,7 +231,20 @@ class IntakeMixin(StorageShared):
     # taste: on a real import of 187 files, (extension x suggested_action) collapsed to
     # 16 groups with the largest holding 154, while `promotion_score` — what the Inbox
     # currently sorts by — had p25 = median = p75 = 0.90 and separated nothing.
-    INBOX_GROUP_AXES = ("extension", "directory", "source")
+    #
+    # `quality` добавлена потому, что она — единственный измеренный разделитель. На
+    # том же импорте из 66 файлов `quality_score` дал 0.13 у 36 нечитаемых, ровно
+    # 0.198 у семи base64-дампов и 0.88–0.996 у четырёх связных документов, тогда
+    # как `promotion_score` — то, из чего выводится совет, — стоял на 0.90 почти у
+    # всех. Признак существовал и не использовался ни в сортировке, ни в
+    # группировке, ни в совете; человеку осталось 65 решений руками.
+    INBOX_GROUP_AXES = ("extension", "directory", "source", "quality")
+
+    # Границы полос качества. Не квартили: полосы обязаны быть УСТОЙЧИВЫМИ, иначе
+    # «принять всё выше 0.75» означает разное на разных партиях, и решение,
+    # принятое вчера, нельзя повторить сегодня.
+    QUALITY_BANDS = ((0.25, "0.00–0.25 нечитаемое"), (0.50, "0.25–0.50 слабое"), (0.75, "0.50–0.75 среднее"))
+    QUALITY_TOP_BAND = "0.75–1.00 содержательное"
 
     def group_pending_inbox(
         self,
@@ -257,7 +270,7 @@ class IntakeMixin(StorageShared):
             raise ValueError(f"Unknown grouping axis: {by!r}")
         validate_user_id(user_id)
         rows = self.execute(
-            """SELECT i.id, i.suggested_action, r.source, r.content_type,
+            """SELECT i.id, i.suggested_action, i.quality_score, r.source, r.content_type,
                       json_extract(r.metadata_json, '$.import_source_path') AS import_path
                FROM inbox i
                JOIN raw_objects r ON r.id = i.raw_object_id AND r.user_id = i.user_id
@@ -267,6 +280,7 @@ class IntakeMixin(StorageShared):
         ).fetchall()
 
         groups: dict[str, dict[str, Any]] = {}
+        qualities: dict[str, list[float]] = {}
         for row in rows:
             key = self._inbox_group_key(dict(row), by)
             group = groups.setdefault(
@@ -276,16 +290,45 @@ class IntakeMixin(StorageShared):
             group["total"] += 1
             action = str(row["suggested_action"] or "unknown")
             group["actions"][action] = group["actions"].get(action, 0) + 1
+            # Отсутствие оценки приравнивается к худшей ОСОЗНАННО: неоценённое
+            # должно оседать к мусору, а не всплывать наверх. Форма записана явно,
+            # хотя `or 0.0` дал бы то же самое — подстановка здесь ноль, а не 0.5,
+            # как в том дефекте lifecycle-скана, где falsy-ноль действительно менял
+            # смысл. Явность оставлена, чтобы следующая правка подстановки не
+            # оказалась молчаливой.
+            score = row["quality_score"]
+            qualities.setdefault(key, []).append(float(score) if score is not None else 0.0)
             if len(group["inbox_ids"]) < max(1, min(int(limit_ids), 200)):
                 group["inbox_ids"].append(row["id"])
             else:
                 group["truncated"] = True
+
+        # Качество кладётся в КАЖДУЮ группу, а не только в разрез по качеству:
+        # именно оно отвечает на вопрос «это стоит смотреть или сносить», по какой
+        # бы оси ни резали. Без него колонка «что советует классификатор» на живом
+        # импорте показывала `promote: N` во всех группах — то есть ничего.
+        for key, group in groups.items():
+            scores = sorted(qualities.get(key) or [0.0])
+            group["quality_min"] = round(scores[0], 3)
+            group["quality_median"] = round(scores[len(scores) // 2], 3)
+            group["quality_max"] = round(scores[-1], 3)
+
         ordered = sorted(groups.values(), key=lambda item: (-item["total"], item["key"]))
         return ordered[: max(1, int(max_groups))]
+
+    @classmethod
+    def quality_band(cls, score: float | None) -> str:
+        value = float(score) if score is not None else 0.0
+        for edge, label in cls.QUALITY_BANDS:
+            if value < edge:
+                return label
+        return cls.QUALITY_TOP_BAND
 
     @staticmethod
     def _inbox_group_key(row: dict[str, Any], by: str) -> str:
         path = str(row.get("import_path") or "")
+        if by == "quality":
+            return IntakeMixin.quality_band(row.get("quality_score"))
         if by == "source":
             return str(row.get("source") or "unknown")
         if by == "directory":

@@ -138,7 +138,10 @@ def test_the_endpoint_returns_groups_and_the_available_axes(settings, seeded):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["axis"] == "directory"
-    assert set(body["axes"]) == {"extension", "directory", "source"}
+    # `quality` добавлена осознанно: на живом импорте это единственный признак,
+    # который разделил материал (0.13 нечитаемое / 0.198 дампы / 0.9+ тексты),
+    # тогда как совет классификатора стоял `promote` во всех группах.
+    assert set(body["axes"]) == {"extension", "directory", "source", "quality"}
     assert body["grouped"] == 8
 
 

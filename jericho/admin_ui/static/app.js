@@ -76,12 +76,18 @@ renderers.inbox=async gen=>{
   try{
     const gd=await api(`/api/admin/inbox/groups?user_id=${q(uid)}&by=${q(state.inboxAxis)}`);
     state.inboxGroups=gd.groups||[];
-    const axisTabs=(gd.axes||[]).map(a=>`<button class="btn small ${a===gd.axis?'primary':''}" ${call('groupInbox',a)}>${esc({extension:'по типу файла',directory:'по каталогу',source:'по источнику'}[a]||a)}</button>`).join(' ');
+    const axisTabs=(gd.axes||[]).map(a=>`<button class="btn small ${a===gd.axis?'primary':''}" ${call('groupInbox',a)}>${esc({extension:'по типу файла',directory:'по каталогу',source:'по источнику',quality:'по качеству разбора'}[a]||a)}</button>`).join(' ');
     const rows=state.inboxGroups.map(g=>{
       const acts=Object.entries(g.actions||{}).map(([k,v])=>`<span class="badge">${esc(k)} ${v}</span>`).join(' ');
+      // Качество — единственный измеренный разделитель: на живом импорте совет
+      // классификатора стоял `promote` во всех группах, а качество разложило
+      // нечитаемое (0.13), дампы (0.198) и связный текст (0.9+) по разным полкам.
+      const qm=Number(g.quality_median||0);
+      const qcls=qm<0.25?'danger':qm<0.5?'warn':'ok';
+      const qual=`<span class="badge ${qcls}">качество ${qm.toFixed(2)}</span> <span class="muted">${Number(g.quality_min||0).toFixed(2)}–${Number(g.quality_max||0).toFixed(2)}</span>`;
       const note=g.truncated?`<span class="muted">действие охватит ${g.inbox_ids.length} из ${g.total}</span>`:'';
-      return `<tr><td><b>${esc(g.key)}</b> ${note}</td><td>${g.total}</td><td>${acts}</td><td><button class="btn small" ${call('dismissGroup',g.key,'archived')}>В архив</button> <button class="btn small danger" ${call('dismissGroup',g.key,'ignored')}>Игнорировать</button></td></tr>`}).join('');
-    groupsBlock=state.inboxGroups.length?`<section class="card"><div class="toolbar"><h2 class="grow">Группы непроверенного (${gd.grouped})</h2>${axisTabs}</div><div class="notice">Групповое действие только отклоняет. Продвижение в знания — поштучно, через «Разобрать», где виден исходный текст.</div>${table(['Группа','Материалов','Что предлагает классификатор',''],rows)}</section>`:'';
+      return `<tr><td><b>${esc(g.key)}</b> ${note}</td><td>${g.total}</td><td>${qual}</td><td>${acts}</td><td><button class="btn small" ${call('dismissGroup',g.key,'archived')}>В архив</button> <button class="btn small danger" ${call('dismissGroup',g.key,'ignored')}>Игнорировать</button></td></tr>`}).join('');
+    groupsBlock=state.inboxGroups.length?`<section class="card"><div class="toolbar"><h2 class="grow">Группы непроверенного (${gd.grouped})</h2>${axisTabs}</div><div class="notice">Групповое действие только отклоняет. Продвижение в знания — поштучно, через «Разобрать», где виден исходный текст.</div>${table(['Группа','Материалов','Качество разбора','Что предлагает классификатор',''],rows)}</section>`:'';
   }catch(e){groupsBlock=`<div class="notice">Группировка недоступна: ${esc(e.message)}</div>`}
   const rows=state.inbox.map(i=>{
     const suggestion=i.suggestions||parse(i.suggestions_json,{});
