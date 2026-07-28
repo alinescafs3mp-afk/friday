@@ -1,0 +1,289 @@
+"""Досчёт эмбеддингов не должен убивать сервис, от которого сам зависит.
+
+Замерено на этой установке: индексация 342 документов пошла непрерывным потоком и
+через полтора часа nginx перед сервисом эмбеддингов начал отдавать 502. Сервис был
+жив и восстановился сразу — его завалили запросами.
+
+Причин было три, и каждая по отдельности достаточна.
+
+1. **`embed()` глотал любую ошибку в `return None`.** Отличить «перегружен» от
+   «сломан» вызывающий не мог, и повторял тот же объём.
+2. **Бюджет тика измерялся в ОБЪЕКТАХ.** «64 объекта» — это то 6 тысяч символов,
+   то два миллиона: заметка и стостраничный документ отличаются в сотни раз. На
+   настоящем корпусе пачка весила ~11 минут работы при таймауте задачи в 600 с,
+   то есть тик убивался на середине и вся его работа выбрасывалась.
+3. **Пауза считалась как `interval - elapsed`.** Для дешёвых задач это верно —
+   догнать расписание. Для тика на 11 минут при интервале в 2 это означало сон
+   ровно в одну секунду и немедленный второй круг. Непрерывная нагрузка.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+
+import httpx
+import pytest
+
+from jericho.retrieval import EmbeddingBackend, _retry_after_seconds
+
+
+def _backend(settings, monkeypatch, *, status: int = 200, raises: Exception | None = None):
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    backend = EmbeddingBackend(tuned)
+    calls: list[int] = []
+
+    class _Response:
+        def __init__(self) -> None:
+            self.status_code = status
+            self.headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError("boom", request=None, response=None)  # type: ignore[arg-type]
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]}]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            calls.append(1)
+            if raises is not None:
+                raise raises
+            return _Response()
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    return backend, calls
+
+
+# --- отступление при перегрузке ---------------------------------------------
+
+
+@pytest.mark.parametrize("status", [429, 502, 503, 504])
+def test_an_overloaded_service_makes_the_backend_stand_back(settings, monkeypatch, status):
+    backend, calls = _backend(settings, monkeypatch, status=status)
+
+    assert asyncio.run(backend.embed(["текст"])) is None
+    assert backend.cooling_down is True, f"{status} не перевёл бэкенд в паузу"
+
+    # Второй вызов даже не доходит до сети — в этом весь смысл.
+    assert asyncio.run(backend.embed(["ещё текст"])) is None
+    assert len(calls) == 1, "во время паузы бэкенд всё равно постучался в сервис"
+
+
+def test_a_timeout_counts_as_overload_not_as_breakage(settings, monkeypatch):
+    """Сервис принял запрос и не успел — повторять сразу значит добивать очередь."""
+    backend, calls = _backend(settings, monkeypatch, raises=httpx.ReadTimeout("slow"))
+
+    assert asyncio.run(backend.embed(["текст"])) is None
+    assert backend.cooling_down is True
+
+
+def test_an_ordinary_error_does_not_trigger_backoff(settings, monkeypatch):
+    """Отличать «перегружен» от «сломан» — вся суть; иначе пауза станет вечной."""
+    backend, calls = _backend(settings, monkeypatch, raises=ValueError("bad payload"))
+
+    assert asyncio.run(backend.embed(["текст"])) is None
+    assert backend.cooling_down is False
+
+
+def test_the_pause_grows_while_refusals_continue(settings, monkeypatch):
+    backend, _ = _backend(settings, monkeypatch, status=503)
+    waits = []
+    for _ in range(4):
+        backend._cooldown_until = 0.0  # снять паузу, оставив её длину
+        asyncio.run(backend.embed(["текст"]))
+        waits.append(backend._cooldown_sec)
+
+    assert waits == sorted(waits) and waits[-1] > waits[0], f"пауза не растёт: {waits}"
+    assert waits[-1] <= EmbeddingBackend._COOLDOWN_MAX_SEC
+
+
+def test_success_clears_the_pause(settings, monkeypatch):
+    backend, _ = _backend(settings, monkeypatch, status=200)
+    backend._cooldown_sec = 60.0
+    backend._cooldown_until = time.monotonic() - 1  # пауза истекла, длина помнится
+
+    assert asyncio.run(backend.embed(["текст"])) is not None
+    assert backend._cooldown_sec == 0.0, "после успеха следующая пауза стартовала бы с 60 с"
+
+
+def test_a_retry_after_header_is_honoured(settings, monkeypatch):
+    assert _retry_after_seconds("30") == 30.0
+    assert _retry_after_seconds("Wed, 21 Oct 2026 07:28:00 GMT") is None, (
+        "форма-дата должна игнорироваться, а не разбираться наугад"
+    )
+    assert _retry_after_seconds("") is None
+    assert _retry_after_seconds("-5") is None
+
+
+# --- бюджет тика и отдых -----------------------------------------------------
+
+
+def test_the_tick_budget_is_measured_in_characters(settings):
+    """Ровно тот дефект: «64 объекта» — это и 6 тысяч символов, и два миллиона."""
+    import dataclasses
+
+    tuned = dataclasses.replace(settings, embeddings_index_char_budget=50_000)
+    assert tuned.embeddings_index_char_budget == 50_000
+    # Настройка обязана быть видимой снаружи, иначе оператор не сможет обменять
+    # скорость индексации на здоровье сервиса.
+    assert "index_char_budget" in tuned.public_dict()["embeddings"]
+    assert "index_rest_ratio" in tuned.public_dict()["embeddings"]
+
+
+def test_the_counter_and_the_listing_share_one_condition(storage, settings):
+    """Прогресс «осталось N» обязан считаться тем же правилом, что и выборка."""
+    import hashlib
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("alice")
+    for index in range(7):
+        text = f"Достаточно длинный документ номер {index} " * 20
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=text,
+            content_type="text",
+            content_hash=hashlib.sha256(f"{index}".encode()).hexdigest(),
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=text,
+                content_type="text",
+                title=f"Документ {index}",
+            )
+        )
+
+    total = storage.count_knowledge_missing_embedding("m", chunk_scheme="v2", chunk_threshold=1000)
+    listed = storage.list_knowledge_missing_embedding(
+        "m", limit=1000, chunk_scheme="v2", chunk_threshold=1000
+    )
+    assert total == len(listed) == 7, f"счёт {total} против выборки {len(listed)}"
+
+    # Страница меньше набора — счётчик обязан остаться полным.
+    page = storage.list_knowledge_missing_embedding("m", limit=3, chunk_scheme="v2", chunk_threshold=1000)
+    assert len(page) == 3
+    assert storage.count_knowledge_missing_embedding("m", chunk_scheme="v2", chunk_threshold=1000) == 7
+
+
+@pytest.mark.asyncio
+async def test_a_loaded_tick_earns_a_rest_and_the_next_one_is_skipped(settings, storage, monkeypatch):
+    """Темп проверяется здесь, потому что в общей фикстуре он выключен.
+
+    Ровно то поведение, которого не было: планировщик считает паузу как
+    `interval - elapsed`, поэтому тик на одиннадцать минут при интервале в две
+    спал СЕКУНДУ и уходил на второй круг. Непрерывная нагрузка на чужой сервис.
+    """
+    import dataclasses
+
+    from jericho.workers import WorkersManager
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="m",
+        embeddings_index_rest_ratio=2.0,
+    )
+
+    class _SlowBackend:
+        remote_enabled = True
+        cooling_down = False
+        calls = 0
+
+        def cooldown_remaining(self) -> float:
+            return 0.0
+
+        async def embed(self, texts):
+            type(self).calls += 1
+            # Дольше порога, за которым тик считается нагрузкой.
+            await asyncio.sleep(1.1)
+            return [[0.1, 0.2] for _ in texts]
+
+    manager = WorkersManager(tuned, storage, None, None, embeddings=_SlowBackend())
+
+    import hashlib
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("alice")
+    for index in range(2):
+        text = f"Документ {index} " * 50
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=text,
+            content_type="text",
+            content_hash=hashlib.sha256(f"r{index}".encode()).hexdigest(),
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=text,
+                content_type="text",
+                title=f"Док {index}",
+            )
+        )
+
+    await manager._embeddings_index_all()  # noqa: SLF001
+    assert _SlowBackend.calls > 0, "первый тик не сделал ни одного запроса — стенд собран неверно"
+    after_first = _SlowBackend.calls
+
+    # Второй тик сразу же обязан быть пустым: сервис только что держали больше секунды.
+    await manager._embeddings_index_all()  # noqa: SLF001
+    assert _SlowBackend.calls == after_first, "тик пошёл на второй круг, не дав сервису передышки"
+
+
+@pytest.mark.asyncio
+async def test_a_cooling_backend_stops_the_tick_entirely(settings, storage):
+    """Пока бэкенд отступает, воркер не должен даже собирать пачку."""
+    import dataclasses
+
+    from jericho.workers import WorkersManager
+
+    tuned = dataclasses.replace(
+        settings, embeddings_enabled=True, embeddings_base_url="http://x/v1", embeddings_model="m"
+    )
+
+    class _Cooling:
+        remote_enabled = True
+        cooling_down = True
+        calls = 0
+
+        def cooldown_remaining(self) -> float:
+            return 42.0
+
+        async def embed(self, texts):  # pragma: no cover — не должно вызываться
+            type(self).calls += 1
+            return None
+
+    manager = WorkersManager(tuned, storage, None, None, embeddings=_Cooling())
+    storage.ensure_user("alice")
+    await manager._embeddings_index_all()  # noqa: SLF001
+    assert _Cooling.calls == 0

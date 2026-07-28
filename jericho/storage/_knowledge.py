@@ -1731,24 +1731,60 @@ class KnowledgeMixin(StorageShared):
         against ``knowledge_embeddings``, so ``limit`` keeps counting objects.
         """
         bounded = max(1, min(int(limit), 1000))
+        # Хвост — `rowid`, а НЕ `id`: идентификаторы здесь `uuid4`, и хвост по ним
+        # делает порядок СЛУЧАЙНЫМ между прогонами. Само по себе это было бы
+        # безобидно, но бюджет тика режет пачку, и тогда случайным становится
+        # её состав. `rowid` — порядок вставки: устойчивый и осмысленный.
+        where, params = self._missing_embedding_filter(model, chunk_scheme, chunk_threshold)
         rows = self.execute(
             """SELECT k.id AS id, k.user_id AS user_id, k.version AS version,
                       k.title AS title, k.summary AS summary, k.content AS content,
                       k.tags_json AS tags_json, k.knowledge_kind AS knowledge_kind
                FROM knowledge_objects k
                LEFT JOIN knowledge_embeddings e ON e.knowledge_object_id = k.id
-               WHERE k.deleted_at IS NULL
+               WHERE """
+            + where
+            + """
+               ORDER BY k.updated_at DESC, k.rowid DESC
+               LIMIT ?""",  # nosec B608
+            (*params, bounded),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _missing_embedding_filter(
+        model: str, chunk_scheme: str, chunk_threshold: int
+    ) -> tuple[str, tuple[Any, ...]]:
+        """Условие «вектор отсутствует, чужой или устарел» — одно на выборку и счёт."""
+        return (
+            """k.deleted_at IS NULL
                  AND (e.knowledge_object_id IS NULL
                       OR e.model != ?
                       OR e.source_version != k.version
                       OR (e.chunk_scheme != ? AND """
             + _SEARCH_TEXT_LEN_SQL
-            + """ > ?))
-               ORDER BY k.updated_at DESC
-               LIMIT ?""",
-            (model, chunk_scheme, max(0, int(chunk_threshold)), bounded),
-        ).fetchall()
-        return [dict(row) for row in rows]
+            + """ > ?))""",
+            (model, chunk_scheme, max(0, int(chunk_threshold))),
+        )
+
+    def count_knowledge_missing_embedding(
+        self, model: str, *, chunk_scheme: str = "", chunk_threshold: int = 0
+    ) -> int:
+        """Сколько объектов ещё ждут вектора.
+
+        На корпусе в тысячи документов индексация идёт часами, и это единственное
+        число, отличающее «работает» от «встало». Считается ТЕМ ЖЕ условием, что и
+        выборка, иначе прогресс начнёт врать при первой правке порога чанкования.
+        """
+        where, params = self._missing_embedding_filter(model, chunk_scheme, chunk_threshold)
+        row = self.execute(
+            """SELECT COUNT(*) AS count FROM knowledge_objects k
+               LEFT JOIN knowledge_embeddings e ON e.knowledge_object_id = k.id
+               WHERE """
+            + where,  # nosec B608
+            params,
+        ).fetchone()
+        return int(row["count"] if row else 0)
 
     def get_user_chunk_embeddings(
         self,

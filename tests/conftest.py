@@ -18,6 +18,12 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JERICHO_EMBEDDINGS_ENABLED", "0")
     monkeypatch.setenv("JERICHO_WORKERS_ENABLED", "0")
     monkeypatch.setenv("JERICHO_CODE_EXECUTION_ENABLED", "0")
+    # Темп индексации существует, чтобы не насыщать ЧУЖОЙ сервис эмбеддингов. В
+    # тестах бэкенд подставной и отвечает мгновенно, насыщать нечего — а под
+    # нагрузкой полного прогона тик изредка переваливал за порог работы, назначал
+    # отдых, и следующий вызов в том же тесте становился пустым. Тест мигал.
+    # Сам темп проверяется явно в tests/test_embeddings_backpressure.py.
+    monkeypatch.setenv("JERICHO_EMBEDDINGS_INDEX_REST_RATIO", "0")
     monkeypatch.setenv("JERICHO_API_HOST", "127.0.0.1")
     monkeypatch.setenv("JERICHO_API_PORT", "8000")
     monkeypatch.setenv("JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK", "1")

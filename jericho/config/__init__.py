@@ -294,6 +294,12 @@ class JerichoSettings:
     embeddings_model: str
     embeddings_index_batch: int
     embeddings_index_interval_sec: float
+    # Потолок ОДНОГО тика в символах и доля времени на отдых после него.
+    # «Объектов за тик» ничего не ограничивает: заметка и стостраничный документ
+    # отличаются в сотни раз, и та же пачка из 64 штук весит то 6 тысяч символов,
+    # то два миллиона.
+    embeddings_index_char_budget: int
+    embeddings_index_rest_ratio: float
     embeddings_recall_candidates: int
     # Guard on the pure-Python dense-recall scan: cap how many (newest) vectors
     # are scored per query so latency stays bounded on a large corpus (0 = no cap).
@@ -472,6 +478,8 @@ class JerichoSettings:
                 "auth": bool(self.embeddings_api_key),
                 "model": self.embeddings_model,
                 "index_batch": self.embeddings_index_batch,
+                "index_char_budget": self.embeddings_index_char_budget,
+                "index_rest_ratio": self.embeddings_index_rest_ratio,
                 "index_interval_sec": self.embeddings_index_interval_sec,
                 "recall_candidates": self.embeddings_recall_candidates,
                 # Whether passage-level recall is on at all; the tuning knobs stay
@@ -599,6 +607,8 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ),
         embeddings_model=os.environ.get("JERICHO_EMBEDDINGS_MODEL", ""),
         embeddings_index_batch=_int_env("JERICHO_EMBEDDINGS_INDEX_BATCH", 64, minimum=1),
+        embeddings_index_char_budget=_int_env("JERICHO_EMBEDDINGS_INDEX_CHAR_BUDGET", 200_000, minimum=1000),
+        embeddings_index_rest_ratio=_float_env("JERICHO_EMBEDDINGS_INDEX_REST_RATIO", 1.0, minimum=0.0),
         embeddings_index_interval_sec=_float_env("JERICHO_EMBEDDINGS_INDEX_INTERVAL_SEC", 120.0, minimum=5.0),
         embeddings_recall_candidates=_int_env("JERICHO_EMBEDDINGS_RECALL_CANDIDATES", 40, minimum=1),
         embeddings_dense_max_objects=_int_env("JERICHO_EMBEDDINGS_DENSE_MAX_OBJECTS", 5000, minimum=0),

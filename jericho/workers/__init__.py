@@ -72,6 +72,10 @@ _EMBED_REQUEST_MAX_CHARS = 40_000
 # and a test that never crosses a boundary passes on the broken code too.
 _VAULT_PAGE = 250
 
+# Ниже этого тик не считается нагрузкой и отдыха не назначает: пауза защищает
+# внешний сервис, а не расписание.
+_EMBED_REST_MIN_WORK_SEC = 1.0
+
 
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
@@ -351,6 +355,8 @@ class WorkersManager:
         self.llm = llm
         self.executive = executive
         self.embeddings = embeddings
+        # Монотонная отметка «не раньше»: см. _embeddings_index_all.
+        self._embeddings_rest_until = 0.0
         # Organ-contributed periodic tasks (JOP). Registered after the built-ins
         # so an organ can never shadow a core worker's name silently.
         self._extra_workers: tuple[IntervalTask, ...] = tuple(extra_workers)
@@ -862,6 +868,20 @@ class WorkersManager:
         """
         if self.embeddings is None or not getattr(self.embeddings, "remote_enabled", False):
             return
+        # Отдых пропорционально сделанной работе. Планировщик считает паузу как
+        # `interval - elapsed`, что для дешёвых задач правильно, а здесь
+        # вырождается: тик на 11 минут при интервале 2 минуты спит РОВНО СЕКУНДУ и
+        # уходит на второй круг. Получается непрерывная нагрузка на чужой сервис,
+        # и ровно она положила прокси перед эмбеддингами через полтора часа.
+        now = time.monotonic()
+        if now < self._embeddings_rest_until:
+            return
+        if getattr(self.embeddings, "cooling_down", False):
+            LOGGER.info(
+                "embeddings index skipped: backend is cooling down for %.0fs",
+                self.embeddings.cooldown_remaining(),
+            )
+            return
         model = self.settings.embeddings_model
         batch = self.settings.embeddings_index_batch
         scheme = chunk_scheme(self.settings)
@@ -888,6 +908,8 @@ class WorkersManager:
         # Keeping an object's inputs together means a failed request loses that object
         # and not the whole batch.
         plans: list[dict[str, Any]] = []
+        char_budget = max(1000, int(self.settings.embeddings_index_char_budget))
+        tick_chars = 0
         for row in rows:
             units = knowledge_chunk_units(
                 row,
@@ -904,6 +926,14 @@ class WorkersManager:
             # the log as "backend returned no usable vectors" rather than as too long.
             doc_text = knowledge_search_text(row)[:_DOC_VECTOR_MAX_CHARS]
             plans.append({"row": row, "doc_text": doc_text, "units": units})
+            # Бюджет тика — в СИМВОЛАХ, а не в объектах. «64 объекта» ничего не
+            # ограничивает: заметка и стостраничный docx отличаются в триста раз, и
+            # на настоящем корпусе владельца та же пачка из 64 штук весит ~1.9 млн
+            # символов, то есть примерно 11 минут работы при таймауте задачи в 600 с.
+            # Тик убивался на середине, и вся сделанная в нём работа выбрасывалась.
+            tick_chars += len(doc_text) + sum(len(unit[2]) for unit in units)
+            if tick_chars >= char_budget:
+                break
 
         for plan in plans:
             texts = [plan["doc_text"], *(unit[2] for unit in plan["units"])]
@@ -940,12 +970,50 @@ class WorkersManager:
             groups.append(current)
 
         indexed = 0
+        # Считается время СЕТЕВОЙ работы, а не всего тика. Разбор на чанки, выборка
+        # из базы и попадания в кэш переиспользования занимают время, но чужой сервис
+        # ими не нагружается, и отдыхать из-за медленной базы не от чего. Побочно это
+        # убирает недетерминированность: с подставным бэкендом, отвечающим мгновенно,
+        # сетевое время равно нулю и отдых не назначается вовсе.
+        service_started = time.monotonic()
         for group in groups:
             if not await self._embed_group(group, model, scheme):
                 continue
             indexed += len(group)
+        elapsed = max(0.0, time.monotonic() - service_started)
+
+        # Отдых назначается ПОСЛЕ работы и по её фактической длительности, а не по
+        # плановой: скорость чужого сервиса нам неизвестна и меняется. Коэффициент 1.0
+        # означает «работать не больше половины времени», и он же — единственная
+        # величина, которой оператор может обменять скорость индексации на здоровье
+        # сервиса, ничего не зная про символы в секунду.
+        # Порог обязателен, и он не про тесты. Отдых существует, чтобы не насыщать
+        # чужой сервис; тик, уложившийся в миллисекунды, ничего не насытил — там
+        # либо нечего было делать, либо вектора пришли из кэша переиспользования.
+        # Без порога любая пауза, пусть и микроскопическая, превращает «догнать
+        # отставание за несколько тиков подряд» в невозможное.
+        rest = 0.0
+        if elapsed >= _EMBED_REST_MIN_WORK_SEC:
+            rest = elapsed * max(0.0, float(self.settings.embeddings_index_rest_ratio))
+            self._embeddings_rest_until = time.monotonic() + rest
+
         if indexed:
-            LOGGER.info("embeddings index updated %d objects", indexed)
+            remaining = await run_blocking(
+                self.storage.count_knowledge_missing_embedding,
+                model,
+                chunk_scheme=scheme,
+                chunk_threshold=self.settings.embeddings_chunk_chars,
+            )
+            # Прогресс говорится вслух: на корпусе в тысячи документов индексация
+            # идёт часами, и «сколько ещё» — единственный способ отличить «работает»
+            # от «встало». Раньше в логе была только строка про обновлённые объекты.
+            LOGGER.info(
+                "embeddings index updated %d objects in %.1fs, %d left, resting %.0fs",
+                indexed,
+                elapsed,
+                remaining,
+                rest,
+            )
 
     async def _embed_in_volume_slices(self, texts: list[str]) -> list[list[float]] | None:
         """Embed in slices small enough to answer inside the request timeout.

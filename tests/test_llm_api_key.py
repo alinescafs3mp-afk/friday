@@ -61,6 +61,11 @@ async def test_embedding_backend_sends_bearer_header(settings, monkeypatch):
     captured: dict = {}
 
     class _FakeResp:
+        # У настоящего ответа httpx это есть всегда; бэкенд смотрит на код,
+        # чтобы отличить перегрузку сервиса от поломки и отступить.
+        status_code = 200
+        headers: dict[str, str] = {}
+
         def raise_for_status(self) -> None:
             pass
 
@@ -99,6 +104,11 @@ async def test_embedding_backend_no_header_without_key(settings, monkeypatch):
     captured: dict = {}
 
     class _FakeResp:
+        # У настоящего ответа httpx это есть всегда; бэкенд смотрит на код,
+        # чтобы отличить перегрузку сервиса от поломки и отступить.
+        status_code = 200
+        headers: dict[str, str] = {}
+
         def raise_for_status(self) -> None:
             pass
 

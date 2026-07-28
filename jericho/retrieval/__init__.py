@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import re
+import time
 from collections import Counter, OrderedDict
 from collections.abc import Sequence
 from contextlib import suppress
@@ -703,9 +704,60 @@ def dense_scores(
     return _dense_scores_python(query_vector, stored, query_dim)
 
 
+def _retry_after_seconds(value: str | None) -> float | None:
+    """`Retry-After` в секундах, если сервис его прислал.
+
+    Только числовая форма: HTTP допускает и дату, но она требует разбора часового
+    пояса и рассинхронизации часов, а цена ошибки — либо мгновенный повтор, либо
+    часовая пауза. Непонятное значение лучше проигнорировать и взять свою выдержку.
+    """
+    if not value:
+        return None
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
 class EmbeddingBackend:
+    # Пауза после отказа перегруженного сервиса: удваивается, пока отказы идут,
+    # и сбрасывается первым успехом. Потолок — чтобы после длинной аварии
+    # индексация вернулась за минуту, а не через час.
+    _COOLDOWN_START_SEC = 5.0
+    _COOLDOWN_MAX_SEC = 300.0
+    # Коды, означающие «слишком много» или «я не справляюсь». 502/503/504 — это
+    # обычно прокси перед сервисом: сам сервис жив, а очередь перед ним переполнена.
+    _OVERLOAD_STATUSES = frozenset({429, 500, 502, 503, 504})
+
     def __init__(self, settings: JerichoSettings) -> None:
         self.settings = settings
+        # Монотонные часы: системное время может прыгнуть, и пауза станет вечной.
+        self._cooldown_until = 0.0
+        self._cooldown_sec = 0.0
+
+    @property
+    def cooling_down(self) -> bool:
+        return time.monotonic() < self._cooldown_until
+
+    def cooldown_remaining(self) -> float:
+        return max(0.0, self._cooldown_until - time.monotonic())
+
+    def _enter_cooldown(self, retry_after: float | None = None) -> None:
+        if retry_after and retry_after > 0:
+            wait = min(float(retry_after), self._COOLDOWN_MAX_SEC)
+        else:
+            previous = self._cooldown_sec or self._COOLDOWN_START_SEC / 2
+            wait = min(previous * 2, self._COOLDOWN_MAX_SEC)
+        self._cooldown_sec = wait
+        self._cooldown_until = time.monotonic() + wait
+        LOGGER.warning(
+            "embeddings backend is overloaded; backing off for %.0fs before the next request", wait
+        )
+
+    def _clear_cooldown(self) -> None:
+        self._cooldown_sec = 0.0
+        self._cooldown_until = 0.0
 
     @property
     def remote_enabled(self) -> bool:
@@ -717,6 +769,11 @@ class EmbeddingBackend:
 
     async def embed(self, texts: list[str]) -> list[list[float]] | None:
         if not self.remote_enabled or not texts:
+            return None
+        if self.cooling_down:
+            # Отказ, не ожидание: подождать здесь значило бы держать вызывающего
+            # (в том числе поисковый запрос человека) ради фоновой индексации.
+            # Пусть каждый сам решит, что делать; воркер просто вернётся позже.
             return None
         try:
             # The operator's configured patience, exactly as the LLM client uses it.
@@ -742,13 +799,28 @@ class EmbeddingBackend:
                     f"{self.settings.embeddings_base_url}/embeddings",
                     json={"model": self.settings.embeddings_model, "input": texts},
                 )
+                if response.status_code in self._OVERLOAD_STATUSES:
+                    # Отличать «перегружен» от «сломан» обязательно: раньше сюда
+                    # приходило `raise_for_status()` и всё падало в общий `except`,
+                    # после которого воркер повторял ТОТ ЖЕ объём через секунду.
+                    # Замерено на этой установке: nginx перед сервисом эмбеддингов
+                    # начал отдавать 502 через полтора часа непрерывной индексации.
+                    self._enter_cooldown(_retry_after_seconds(response.headers.get("retry-after")))
+                    return None
                 response.raise_for_status()
                 payload = response.json()
+        except httpx.TimeoutException:
+            # Таймаут при живом соединении — тоже сигнал перегрузки, а не поломки:
+            # сервис принял запрос и не успел. Повторять сразу — добивать очередь.
+            self._enter_cooldown()
+            LOGGER.warning("embeddings backend timed out; treating as overload")
+            return None
         except Exception:
             # Chunking multiplies how often this path runs (more inputs, bigger
             # requests), so the failure must stop being completely silent.
             LOGGER.warning("embeddings backend request failed", exc_info=True)
             return None
+        self._clear_cooldown()
         items = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(items, list) or len(items) != len(texts):
             return None

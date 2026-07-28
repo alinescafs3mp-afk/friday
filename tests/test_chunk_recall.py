@@ -704,7 +704,21 @@ async def test_chunking_never_evicts_a_doc_only_object_from_recall(storage, sett
     )
     for index in range(8):
         _make_ko(storage, "alice", _long_import(sections=12), title=f"Импорт {index}", summary="Длинный")
-    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_all()  # noqa: SLF001
+    # Досчёт до конца, а не одним тиком: бюджет тика теперь измеряется в СИМВОЛАХ,
+    # и восемь длинных импортов его выбирают, оставляя короткую заметку следующему
+    # проходу. Это и есть нужное поведение — тик перестал быть неограниченным, —
+    # поэтому стенд обязан дособрать индекс ровно так, как это делает воркер.
+    manager = WorkersManager(tuned, storage, None, None, embeddings=fake)
+    for _ in range(20):
+        await manager._embeddings_index_all()  # noqa: SLF001
+        if not storage.count_knowledge_missing_embedding(
+            tuned.embeddings_model,
+            chunk_scheme=chunk_scheme(tuned),
+            chunk_threshold=tuned.embeddings_chunk_chars,
+        ):
+            break
+    else:  # pragma: no cover
+        raise AssertionError("индекс не сошёлся за 20 тиков")
 
     plain = await HybridSearcher(storage, fake, chunk_recall=False)._dense_recall(  # noqa: SLF001
         "alice", QUERY, {}
