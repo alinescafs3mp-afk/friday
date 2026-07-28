@@ -315,8 +315,11 @@ renderers.activity = async gen => {
   const peak = Math.max(1, ...byDay.map(d => d.count));
   const dayBars = byDay.length ? byDay.slice().reverse().map(d => `<div class="kv"><div class="mono">${esc(d.day)}</div><div><span class="badge ok">${d.count}</span> <span class="muted">${'▬'.repeat(Math.max(1, Math.round(d.count / peak * 20)))}</span></div></div>`).join('') : empty('Нет активности за период');
   const rows = state.activity.map((item, index) => `<tr><td class="mono">${fmtDate(item.at)}</td><td><span class="badge ${item.activity === 'upload' ? 'warn' : 'ok'}">${item.activity === 'upload' ? 'загрузил' : 'написал'}</span><div class="muted">${esc(item.source)}</div></td><td><b>${esc(short(item.title || '—', 70))}</b>${item.filename ? `<div class="mono">${esc(item.filename)}</div>` : ''}</td><td>${item.size_bytes ? Number(item.size_bytes).toLocaleString('ru') + ' Б' : `${Number(item.content_chars || 0).toLocaleString('ru')} симв.`}</td><td>${item.knowledge_object_id ? `<span class="badge ok">в знаниях</span>` : item.inbox_status ? `<span class="badge">${esc(item.inbox_status)}</span>` : '<span class="muted">—</span>'}</td><td><button class="btn small" ${call('activityPreview', item.raw_object_id)}>Показать</button></td></tr>`);
-  const from = state.activityOffset + 1, to = state.activityOffset + state.activity.length;
-  const activityPager = `<div class="toolbar"><button class="btn small" ${call('activityPage', -1)} ${state.activityOffset === 0 ? 'disabled' : ''}>← Раньше</button><span class="muted">${state.activity.length ? `${from}–${to}` : '0'} из ${Number(s.arrivals || 0).toLocaleString('ru')}</span><button class="btn small" ${call('activityPage', 1)} ${to >= Number(s.arrivals || 0) ? 'disabled' : ''}>Позже →</button></div>`;
+  // Общий `pager`, а не своя копия: этот экран писался первым, до появления
+  // хелпера, и его собственный пейджер собирался в переменную, которую строка
+  // ниже потом не подставляла — в разметку уходил `${pager}`, то есть ИСХОДНИК
+  // стрелочной функции. Две реализации одного пейджера ровно так и расходятся.
+  const activityPager = pager('activityPage', state.activityOffset, state.activity.length, s.arrivals);
   setApp(gen,`
 <section class="card"><div class="toolbar"><h2 class="grow">Активность: ${esc(who.display_name || who.username || target)}</h2><span class="badge">${esc(target)}</span></div>
 <div class="toolbar"><input class="field grow" id="activityName" placeholder="Найти по имени — «Иван», «у Ивана», можно с опечаткой" ${chg('activityFind')}><span>${periodButtons}</span></div>
@@ -324,7 +327,7 @@ ${foundBlock}
 <div class="muted mt8">Первое поступление: ${fmtDate(s.first_at)} · последнее: ${fmtDate(s.last_at)}</div></section>
 <div class="grid stats">${cards}</div>
 <div class="grid two"><section class="card"><h2>Откуда приходило</h2><div class="mt8">${bySource}</div></section><section class="card"><h2>По дням</h2>${dayBars}</section></div>
-<section class="card"><div class="toolbar"><h2 class="grow">Что и когда</h2></div>${rows.length ? table(['Когда', 'Что', 'Название', 'Объём', 'Судьба', ''], rows) : empty('За выбранный период ничего нет')}${pager}</section>`);
+<section class="card"><div class="toolbar"><h2 class="grow">Что и когда</h2></div>${rows.length ? table(['Когда', 'Что', 'Название', 'Объём', 'Судьба', ''], rows) : empty('За выбранный период ничего нет')}${activityPager}</section>`);
 };
 actions.activityPeriod = async days => { state.activitySince = activityWindow(days); state.activityOffset = 0; await refresh() };
 actions.activityPage = async direction => { const next = state.activityOffset + direction * ACTIVITY_PAGE; state.activityOffset = Math.max(0, next); await refresh() };

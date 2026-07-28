@@ -545,7 +545,7 @@ class KnowledgeMixin(StorageShared):
         params.extend([max(1, min(limit, 5000)), max(0, offset)])
         # ``where`` contains only fixed clauses; all values remain bound parameters.
         rows = self.execute(
-            f"SELECT * FROM knowledge_objects WHERE {where} ORDER BY importance DESC, updated_at DESC LIMIT ? OFFSET ?",  # nosec B608
+            f"SELECT * FROM knowledge_objects WHERE {where} ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?",  # nosec B608
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]

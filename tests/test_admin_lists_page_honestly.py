@@ -264,11 +264,13 @@ def test_every_paged_listing_orders_by_something_unique():
     That freedom cannot be provoked deterministically in a test, so the property is
     pinned in the source instead: every paged ORDER BY ends in a unique column.
 
-    Knowledge is the deliberate exception. `tests/test_storage_surface.py` pins its
-    query plan to `idx_knowledge_user_importance` with no TEMP B-TREE, and a third
-    sort column is not in that index — adding one would trade a measured 90 ms at
-    10k objects for a boundary case. Fixing it properly needs a new index, which is
-    its own decision.
+    Knowledge used to be exempt: its plan is pinned to an index, and the third sort
+    key was not in that index. The exemption rested on a wrong measurement — «90 ms
+    at 10k» was the cost on the FIRST page, where SQLite in fact only re-sorts
+    within equal-prefix groups (+0…8 ms). The real cost showed up at depth, where
+    partial sorting defeats index offset-skipping: 9.9 ms → 145.2 ms at offset 4000
+    on a batch-imported corpus. `idx_knowledge_pool_order` carries the tail, so the
+    query is both stable and faster than before, and the exemption is gone.
     """
     import pathlib
     import re
@@ -285,6 +287,5 @@ def test_every_paged_listing_orders_by_something_unique():
         (name, clause)
         for name, clause in paged
         if not re.search(r"\b(id|rowid)\b\s*(ASC|DESC)?\s*$", clause.strip().rstrip(","))
-        and "importance DESC" not in clause
     ]
     assert not unstable, f"paged queries without a unique sort tail: {unstable}"

@@ -622,6 +622,29 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_user_quality
 -- every caller filters on it, which also makes it serve `count_knowledge_objects`.
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_importance
     ON knowledge_objects(user_id, importance DESC, updated_at DESC) WHERE deleted_at IS NULL;
+-- Тот же порядок плюс уникальный хвост. `importance` и `updated_at` пишутся с
+-- точностью до секунды, и один импорт ставит сотням строк один и тот же ключ —
+-- без хвоста SQLite вправе вернуть их в разном порядке двум соседним запросам,
+-- то есть строка задваивается на одной границе страницы и пропадает на другой.
+--
+-- Раньше это считалось неисправимым: добавить `id DESC` в ORDER BY при СТАРОМ
+-- индексе стоило 90 мс на 10k. Замер показал, что оценка была неверной по месту.
+-- SQLite не пересортировывает весь пул, он даёт `USE TEMP B-TREE FOR LAST TERM
+-- OF ORDER BY`, и на первой странице это +0…8 мс. Настоящая цена — на глубоких
+-- страницах: досортировка ломает пропуск офсета по индексу, и SQLite тащит в
+-- сортировщик все пропускаемые строки целиком (`SELECT *`). Замер 10k, пачечный
+-- импорт, offset 4000: 9.9 мс → 145.2 мс. А офсетные проходы по всему пулу
+-- реальны — `ingestion/_legacy.py` листает его батчами по 500.
+--
+-- С этим индексом хвост бесплатен и вдобавок ускоряет прежний запрос: тот же
+-- offset 4000 даёт 5.4 мс. Старый трёхколоночный индекс остаётся строгим
+-- префиксом этого; удалить его можно только кодом миграции (CORE_INDEX_SCHEMA
+-- умеет лишь CREATE), поэтому он живёт дальше и стоит одну запись на вставку.
+-- Имя намеренно НЕ начинается с `idx_knowledge_user_importance`: тест, который
+-- закрепляет план, проверяет вхождение подстроки, и любое имя с этим префиксом
+-- проходило бы его вхолостую — даже когда план уже переехал на другой индекс.
+CREATE INDEX IF NOT EXISTS idx_knowledge_pool_order
+    ON knowledge_objects(user_id, importance DESC, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
 -- Dense recall caps its scan to the newest N objects, and the sort key lives on the
 -- joined table, so the LIMIT could not short-circuit: every vector BLOB of the tenant
 -- was read into a temp b-tree first. Measured at 10k vectors: 469 ms.

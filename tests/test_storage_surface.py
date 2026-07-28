@@ -16,6 +16,7 @@ Update EXPECTED only when deliberately adding or removing a method.
 from __future__ import annotations
 
 import inspect
+import re
 
 from jericho.storage import JerichoStorage
 
@@ -68,7 +69,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 220
+EXPECTED_MEMBER_COUNT = 222
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -275,6 +276,34 @@ def _plan(storage, sql: str, params: tuple) -> list[str]:
     return [str(row["detail"]) for row in storage.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()]
 
 
+def _index_names(plan: list[str]) -> set[str]:
+    """Every index the plan actually names, so a prefix cannot pass for the whole."""
+    return set(re.findall(r"USING (?:COVERING )?INDEX (\w+)", " ".join(plan)))
+
+
+def _captured_sql(storage, call) -> tuple[str, tuple]:
+    """Run a storage method and return the last SQL it executed, verbatim.
+
+    Lets a plan test pin what the code runs instead of a copy that silently
+    stops matching it.
+    """
+    seen: list[tuple[str, tuple]] = []
+    original = storage.execute
+
+    def recording(sql: str, params: tuple | dict | None = None):
+        seen.append((sql, tuple(params or ())))
+        return original(sql, params)
+
+    storage.execute = recording  # type: ignore[method-assign]
+    try:
+        call()
+    finally:
+        del storage.execute
+    selects = [pair for pair in seen if pair[0].lstrip().upper().startswith("SELECT")]
+    assert selects, "метод не выполнил ни одного SELECT — нечего закреплять"
+    return selects[-1]
+
+
 def test_the_hot_read_paths_are_index_ordered(storage):
     """A sort the index cannot serve is a temp b-tree over the whole tenant.
 
@@ -317,14 +346,16 @@ def test_the_hot_read_paths_are_index_ordered(storage):
     # at the scale this test exists for. The plan under default assumptions is the
     # one that matters.
 
-    pool = _plan(
-        storage,
-        "SELECT * FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL "
-        "ORDER BY importance DESC, updated_at DESC LIMIT ? OFFSET ?",
-        ("owner", 400, 0),
-    )
+    # The SQL is taken FROM the method, not retyped here. A hardcoded copy keeps
+    # passing after the real query changes — it would have gone on pinning a plan
+    # for a query nobody runs when `id DESC` was added to the ORDER BY.
+    sql, params = _captured_sql(storage, lambda: storage.list_knowledge_objects("owner", limit=400))
+    pool = _plan(storage, sql, params)
     assert not [line for line in pool if "TEMP B-TREE" in line], pool
-    assert any("idx_knowledge_user_importance" in line for line in pool), pool
+    # Exact name, not a substring: `idx_knowledge_user_importance` is a prefix of
+    # every index that could replace it, so `in line` passes vacuously on the very
+    # change this assertion exists to notice.
+    assert _index_names(pool) == {"idx_knowledge_pool_order"}, pool
 
     vectors = _plan(
         storage,
