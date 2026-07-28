@@ -604,9 +604,14 @@ def _add_secret_hygiene_actions(add_action: Any, settings: JerichoSettings) -> N
     with, so a hit means that file contains this bot token, not something shaped like
     one. Paths are reported; values never are.
     """
+    from jericho.config import local_env_file_path
     from jericho.secret_hygiene import scan
 
-    protected = [path for path in (settings.backup_encryption_key_file,) if path]
+    # The env file is protected by PATH now, not by name: skipping every file called
+    # `.env` anywhere in the tree hid copies of live credentials in other projects,
+    # and passing the real one here is also what gets its permissions checked — that
+    # check ran over `protected` only, which used to be empty by default.
+    protected = [path for path in (settings.backup_encryption_key_file, local_env_file_path()) if path]
     roots = [settings.home, Path.home()]
     try:
         report = scan(roots, protected=protected)

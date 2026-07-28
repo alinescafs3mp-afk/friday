@@ -55,14 +55,24 @@ def _int_list_env(name: str) -> list[int]:
     return result
 
 
+def local_env_file_path(path: str | Path | None = None) -> Path:
+    """The file this process is configured from: explicit, then JERICHO_ENV_FILE, then ./.env.local.
+
+    Public because more than one caller has to know WHICH file that is. The secret
+    scanner in particular used to skip anything merely NAMED `.env` or `.env.local`
+    anywhere in the tree, so a copy of a live token in some unrelated project's `.env`
+    was invisible while the same token in `env.txt` beside it was reported.
+    """
+    if path is not None:
+        return Path(path).expanduser()
+    if os.environ.get("JERICHO_ENV_FILE"):
+        return Path(os.environ["JERICHO_ENV_FILE"]).expanduser()
+    return Path.cwd() / ".env.local"
+
+
 def load_local_env_file(path: str | Path | None = None) -> list[str]:
     """Load ``KEY=value`` pairs without overwriting the process environment."""
-    if path is not None:
-        target = Path(path)
-    elif os.environ.get("JERICHO_ENV_FILE"):
-        target = Path(os.environ["JERICHO_ENV_FILE"])
-    else:
-        target = Path.cwd() / ".env.local"
+    target = local_env_file_path(path)
     if not target.is_file():
         return []
 

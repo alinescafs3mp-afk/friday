@@ -61,11 +61,51 @@ def test_files_without_the_secret_are_not_reported(tree):
 
 
 def test_the_env_file_is_where_secrets_belong(tmp_path):
-    """Reporting the configuration file itself would make the check unusable."""
-    (tmp_path / ".env.local").write_text(f"JERICHO_TELEGRAM_BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+    """Reporting the configuration file itself would make the check unusable.
 
-    report = scan([tmp_path], secrets={"JERICHO_TELEGRAM_BOT_TOKEN": TOKEN})
+    Identified by PATH, not by name. Skipping every file called `.env` or `.env.local`
+    anywhere in the tree was blindness exactly where credentials live — see the test
+    below, where an unrelated project's `.env` holds a copy of the live token.
+    """
+    env_file = tmp_path / ".env.local"
+    env_file.write_text(f"JERICHO_TELEGRAM_BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+
+    report = scan([tmp_path], secrets={"JERICHO_TELEGRAM_BOT_TOKEN": TOKEN}, protected=[env_file])
     assert report.exposures == []
+
+
+def test_someone_elses_env_file_is_an_exposure(tmp_path):
+    """The one file that is allowed to hold the token is the one this process reads."""
+    env_file = tmp_path / ".env.local"
+    env_file.write_text(f"JERICHO_TELEGRAM_BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+    elsewhere = tmp_path / "projects" / "site"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / ".env").write_text(f"BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+
+    report = scan([tmp_path], secrets={"JERICHO_TELEGRAM_BOT_TOKEN": TOKEN}, protected=[env_file])
+    reported = {exposure.path for exposure in report.exposures}
+    assert elsewhere / ".env" in reported, "a copy of the live token in another project went unseen"
+    assert env_file not in reported
+
+
+def test_a_copy_of_the_backup_key_is_found_by_its_value(tmp_path):
+    """The key is configured as a PATH, so its value was never among the searched secrets.
+
+    `named_secrets` only collects variables whose NAME carries TOKEN/SECRET/API_KEY/
+    PASSWORD, and the setting is JERICHO_BACKUP_ENCRYPTION_KEY_FILE. The scanner knew
+    where the key was and checked its permissions, while a loose copy of the key itself
+    was invisible — and `jericho keygen` advises making that copy.
+    """
+    key_file = tmp_path / "backup.key"
+    key_material = "k" * 44
+    key_file.write_text(key_material, encoding="utf-8")
+    copy = tmp_path / "docs" / "ключ-на-всякий-случай.txt"
+    copy.parent.mkdir(parents=True)
+    copy.write_text(key_material, encoding="utf-8")
+
+    report = scan([tmp_path], secrets={}, protected=[key_file])
+    assert copy in {exposure.path for exposure in report.exposures}
+    assert key_file not in {exposure.path for exposure in report.exposures}
 
 
 def test_a_backup_of_the_env_file_is_still_an_extra_copy(tmp_path):

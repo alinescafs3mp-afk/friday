@@ -56,12 +56,13 @@ SKIP_DIRECTORIES = frozenset(
 )
 
 
-# The file the process was configured from is where these values belong. Named by
-# convention because nothing hands the path down: `load_local_env_file` reads
-# JERICHO_ENV_FILE or ./.env.local and keeps neither. Backups of it (`.env.local.bak.*`)
-# are deliberately NOT covered — an extra copy of a live credential is exactly the thing
-# worth reporting.
-ENV_FILE_NAMES = frozenset({".env.local", ".env"})
+# The file the process was configured from is where these values belong — and it is
+# resolved, not guessed by name. Skipping every file NAMED `.env` or `.env.local`
+# anywhere in the tree was blindness precisely where credentials live: a copy of a live
+# token in some unrelated project's `.env` went unreported while the same token in
+# `env.txt` beside it was reported. Backups of the real env file (`.env.local.bak.*`)
+# are deliberately NOT covered either — an extra copy of a live credential is exactly
+# the thing worth reporting.
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,23 @@ def scan(
         if mode & 0o077:
             report.loose_permissions.append((path, mode))
 
+    # A protected file's CONTENTS are a secret too, and the most sensitive one here:
+    # `named_secrets` only collects environment variables whose NAME carries
+    # TOKEN/SECRET/API_KEY/PASSWORD, and the backup encryption key is configured as
+    # JERICHO_BACKUP_ENCRYPTION_KEY_FILE — a path. So the scanner knew where the key
+    # was and checked its permissions, while a 0644 copy of the key itself beside it
+    # was invisible. `jericho keygen` advises making that copy.
+    values = dict(values)
+    for path in protected_paths:
+        try:
+            if path.stat().st_size > MAX_FILE_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            continue
+        if len(text) >= MIN_SECRET_LENGTH and text not in values.values():
+            values[f"содержимое {path.name}"] = text
+
     if not values:
         return report
 
@@ -173,7 +191,7 @@ def scan(
             stat = path.stat()
             if not path.is_file() or path.is_symlink() or stat.st_size > MAX_FILE_BYTES:
                 continue
-            if path.resolve() in protected_paths or path.name in ENV_FILE_NAMES:
+            if path.resolve() in protected_paths:
                 continue
             blob = path.read_bytes()
         except OSError:

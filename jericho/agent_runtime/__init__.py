@@ -1150,10 +1150,18 @@ class AgentRuntime:
                 "Сейчас LLM недоступна, поэтому я не буду додумывать личные факты."
             )
         if context.knowledge_hits:
+            # No `[K#]` markers. They are the citation vocabulary, and the whole point
+            # of a citation is that the model CHOSE it: the shared post-processing in
+            # `chat()` parsed these as real citations, so a stub printed when the model
+            # was unreachable came back as a grounded, cited answer — answer_grounded
+            # true, a «📎 Источники» legend of five labels, five rows in knowledge_usage
+            # — without the model having generated one word. With the LLM switched off
+            # instead, `knowledge_citations` was empty and the same text carrying
+            # [K1]..[K5] was captioned «no explicit references to your records».
             lines = [
-                f"- [K{index}] {item.get('title', 'Без названия')}: "
+                f"- {item.get('title', 'Без названия')}: "
                 f"{(item.get('summary') or item.get('content') or '')[:220]}"
-                for index, item in enumerate(context.knowledge_hits[:5], start=1)
+                for item in context.knowledge_hits[:5]
             ]
             prefix = (
                 "Нашёл в личной базе:\n\n"
