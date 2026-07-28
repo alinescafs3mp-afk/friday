@@ -423,6 +423,13 @@ class JerichoSettings:
             },
             "embeddings": {
                 "enabled": self.embeddings_enabled,
+                # What the retrieval backend will actually do, which is not the same
+                # thing: `EmbeddingBackend.remote_enabled` needs a base URL and a model
+                # name too, and publishing the raw flag reported a working semantic
+                # search to an operator who had none.
+                "effective": bool(
+                    self.embeddings_enabled and self.embeddings_base_url and self.embeddings_model
+                ),
                 "base_url": self.embeddings_base_url,
                 "auth": bool(self.embeddings_api_key),
                 "model": self.embeddings_model,
@@ -697,6 +704,22 @@ def ensure_runtime_dirs(settings: JerichoSettings) -> list[Path]:
     return paths
 
 
+# Settings `load_settings` parses and `.env.example` documents that no code reads.
+# Keeping the list explicit is the point: a new one has to be added here on purpose,
+# and `tests/test_inert_settings.py` fails when the set drifts either way.
+INERT_SETTINGS: dict[str, object] = {
+    "telegram_bot_id": "",
+    "telegram_session_ttl_seconds": 86400,
+    "telemetry_interval_sec": 120,
+    "health_interval_sec": 300,
+    "default_city": "",
+}
+
+
+def _is_set_away_from_default(settings: JerichoSettings, name: str) -> bool:
+    return getattr(settings, name, INERT_SETTINGS[name]) != INERT_SETTINGS[name]
+
+
 def validate_settings(settings: JerichoSettings, *, production: bool = False) -> list[str]:
     """Return actionable configuration problems; raise only at the caller's boundary."""
     errors: list[str] = []
@@ -749,6 +772,16 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
             valid_origin = False
         if not valid_origin:
             errors.append(f"Invalid CORS origin: {origin}")
+    inert = [name for name in INERT_SETTINGS if _is_set_away_from_default(settings, name)]
+    if inert:
+        # A documented knob that nothing reads is worse than a missing one: the
+        # operator believes they configured something. JERICHO_TELEGRAM_SESSION_TTL_SECONDS
+        # is the sharp one — it reads as a security control, and Telegram sessions
+        # do not expire on it because no code ever asks for the value.
+        warnings.append(
+            "these settings are parsed and documented but nothing reads them yet, "
+            f"so setting them changes nothing: {', '.join(sorted(inert))}"
+        )
     if settings.telegram_bridge_secret and not settings.telegram_effective_allowed_chat_ids:
         # A configured Telegram bridge with no allowlist would accept any chat.
         # Deny-by-default requires an explicit allowlist or owner chat; treat this
@@ -776,6 +809,19 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
         elif scheme not in {"http", "https"}:
             errors.append("JERICHO_TELEGRAM_PROXY must be an http:// or https:// URL")
     if settings.embeddings_enabled:
+        if not settings.embeddings_model.strip():
+            # Not a preference — a contradiction. `EmbeddingBackend.remote_enabled`
+            # requires the model name, so this configuration turns semantic search
+            # into a complete no-op while every indicator reports it working:
+            # `public_dict` published `enabled: true`, and `model-check` probed with
+            # `embeddings_model or llm_model`, so it hit a real endpoint with the
+            # CHAT model and reported green dimensions. Both shipped templates leave
+            # the key empty, so this is the state an operator lands in by following
+            # the instructions.
+            errors.append(
+                "JERICHO_EMBEDDINGS_ENABLED is on but JERICHO_EMBEDDINGS_MODEL is empty: "
+                "dense recall would be silently disabled — set the model or turn embeddings off"
+            )
         try:
             import numpy  # noqa: F401
         except ImportError:

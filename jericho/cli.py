@@ -119,6 +119,8 @@ JERICHO_VERIFY_ANSWERS=1
 # Semantic search: point at a SEPARATE local OpenAI-compatible /embeddings service
 # (the chat vLLM above does not serve embeddings). Leave disabled to run on
 # lexical+FTS+graph retrieval only. EMBEDDINGS_API_KEY defaults to LLM_API_KEY.
+# Turning this on WITHOUT a model name below disables dense recall entirely;
+# startup validation refuses that combination rather than reporting it as working.
 JERICHO_EMBEDDINGS_ENABLED=0
 JERICHO_EMBEDDINGS_BASE_URL=http://127.0.0.1:8002/v1
 JERICHO_EMBEDDINGS_API_KEY=

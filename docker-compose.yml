@@ -1,11 +1,25 @@
 name: jericho
 
+# Everything a person may configure arrives through `env_file: .env` on the two
+# services below — see the comment there. This map is NOT that list: it is the
+# short list of keys the CONTAINER owns and a host `.env` must never win, because
+# they name paths that only exist inside it or that the volume map provides.
 x-backend-environment: &backend-environment
   JERICHO_HOME: /runtime
   JERICHO_DATA_DIR: /runtime/data
   JERICHO_CACHE_DIR: /runtime/cache
   JERICHO_LOG_DIR: /runtime/logs
   JERICHO_MODEL_ROOT: /runtime/models
+  JERICHO_STATE_DIR: /runtime/data/state
+  JERICHO_DATABASE_PATH: /runtime/data/state/jericho.sqlite3
+  JERICHO_FILES_DIR: /runtime/data/files
+  JERICHO_MEMORY_VAULT_DIR: /runtime/data/memory-vault
+  JERICHO_BACKUPS_DIR: /runtime/data/backups
+  JERICHO_EXPORTS_DIR: /runtime/data/exports
+  JERICHO_WHISPER_DOWNLOAD_ROOT: /runtime/cache/whisper
+  # The container has no `.env` of its own (both are in .dockerignore) and must not
+  # go looking for one on a path inherited from the host.
+  JERICHO_ENV_FILE: ""
   JERICHO_PROFILE: ${JERICHO_PROFILE:-qwen36-vl}
   JERICHO_LLM_BASE_URL: ${JERICHO_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}
   JERICHO_LLM_MODEL: ${JERICHO_LLM_MODEL:-dispatcher}
@@ -152,6 +166,15 @@ services:
       - /tmp:size=256m,noexec,nosuid,nodev
     ports:
       - "${JERICHO_API_BIND_ADDRESS:-127.0.0.1}:${JERICHO_API_PORT:-8000}:${JERICHO_API_PORT:-8000}"
+    env_file:
+      - path: .env
+        required: false
+    # `.env` reaches the containers here, not through the map above. Compose reads
+    # `.env` for `${...}` interpolation only, so every setting the operator wrote in
+    # the file README tells them to copy was silently discarded on the Docker path —
+    # JERICHO_TELEGRAM_PROXY among them, which is the whole point of the setting when
+    # Telegram is only reachable through a tunnel. Keys in `environment:` still win,
+    # so the container-owned paths above cannot be overridden from the host.
     environment: *backend-environment
     security_opt:
       - no-new-privileges:true
@@ -179,6 +202,15 @@ services:
     tmpfs:
       - /tmp:size=128m,noexec,nosuid,nodev
     command: ["jericho", "telegram-bridge"]
+    # `.env` reaches the containers here, not through the map above. Compose reads
+    # `.env` for `${...}` interpolation only, so every setting the operator wrote in
+    # the file README tells them to copy was silently discarded on the Docker path —
+    # JERICHO_TELEGRAM_PROXY among them, which is the whole point of the setting when
+    # Telegram is only reachable through a tunnel. Keys in `environment:` still win,
+    # so the container-owned paths above cannot be overridden from the host.
+    env_file:
+      - path: .env
+        required: false
     environment:
       <<: *backend-environment
       JERICHO_BACKEND_URL: http://backend:${JERICHO_API_PORT:-8000}

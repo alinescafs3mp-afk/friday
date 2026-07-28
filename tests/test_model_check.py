@@ -127,14 +127,26 @@ def test_unparseable_structured_output_fails(settings, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "enabled,dimensions,expected_ok", [(False, None, True), (True, 1024, True), (True, None, False)]
+    "enabled,model,dimensions,expected_ok",
+    [
+        (False, "", None, True),
+        (True, "bge-m3", 1024, True),
+        (True, "bge-m3", None, False),
+        # Enabled with no model name: `EmbeddingBackend.remote_enabled` is False, so
+        # not one embeddings request is ever sent. The probe used to substitute the
+        # CHAT model here, hit a real endpoint with it, and report green dimensions
+        # for a channel that did not exist.
+        (True, "", 1024, False),
+    ],
 )
-def test_embeddings_probe_reflects_configuration(settings, monkeypatch, enabled, dimensions, expected_ok):
+def test_embeddings_probe_reflects_configuration(
+    settings, monkeypatch, enabled, model, dimensions, expected_ok
+):
     """Disabled is a legitimate state — it is reported, not failed. Enabled but absent
     is a real fault: dense recall silently degrades to lexical-only search."""
     import dataclasses
 
-    settings = dataclasses.replace(settings, embeddings_enabled=enabled)
+    settings = dataclasses.replace(settings, embeddings_enabled=enabled, embeddings_model=model)
     _endpoint(monkeypatch, json_content='{"kind":"note"}', embeddings=dimensions)
     report = check_model(settings)
 
@@ -211,7 +223,12 @@ def test_a_service_that_answers_one_input_but_rejects_the_batch_fails_the_check(
     """
     import dataclasses
 
-    settings = dataclasses.replace(settings, embeddings_enabled=True, embeddings_max_inputs_per_request=64)
+    settings = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_model="bge-m3",
+        embeddings_max_inputs_per_request=64,
+    )
     _batched_endpoint(monkeypatch, max_batch=32)
 
     report = check_model(settings)
@@ -227,7 +244,12 @@ def test_a_service_that_answers_one_input_but_rejects_the_batch_fails_the_check(
 def test_a_batch_within_the_limit_passes(settings, monkeypatch):
     import dataclasses
 
-    settings = dataclasses.replace(settings, embeddings_enabled=True, embeddings_max_inputs_per_request=32)
+    settings = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_model="bge-m3",
+        embeddings_max_inputs_per_request=32,
+    )
     _batched_endpoint(monkeypatch, max_batch=32)
 
     report = check_model(settings)
@@ -289,7 +311,11 @@ def test_the_check_authenticates_exactly_as_the_backend_does(settings, monkeypat
     monkeypatch.setattr(httpx, "Client", lambda *a, **k: original(*a, **{**k, "transport": transport}))
 
     configured = dataclasses.replace(
-        settings, embeddings_enabled=True, embeddings_api_key="", llm_api_key="llm-only"
+        settings,
+        embeddings_enabled=True,
+        embeddings_model="bge-m3",
+        embeddings_api_key="",
+        llm_api_key="llm-only",
     )
     check_model(configured)
 

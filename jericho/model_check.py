@@ -130,7 +130,11 @@ def _probe_embedding_batch(
             f"{settings.embeddings_base_url.rstrip('/')}/embeddings",
             headers=_headers(settings.embeddings_api_key),
             json={
-                "model": settings.embeddings_model or settings.llm_model,
+                # The runtime never substitutes the chat model, so neither may the
+                # probe: with the embeddings model unset this used to POST the chat
+                # model to a real endpoint and report green while `remote_enabled`
+                # was False and not one embeddings request was ever sent.
+                "model": settings.embeddings_model,
                 "input": [f"проверка {index}" for index in range(size)],
             },
         )
@@ -267,13 +271,23 @@ def check_model(settings: JerichoSettings, *, timeout: float = 60.0) -> ModelRep
         # 5. Embeddings are a SEPARATE service. Without them dense recall is off and
         #    search falls back to lexical only, which measurably loses cross-script
         #    matches (a Cyrillic query against a Latin name).
-        if settings.embeddings_enabled:
+        if settings.embeddings_enabled and not settings.embeddings_model.strip():
+            report.probes.append(
+                Probe(
+                    "embeddings",
+                    False,
+                    "JERICHO_EMBEDDINGS_MODEL is empty: dense recall is off despite "
+                    "JERICHO_EMBEDDINGS_ENABLED=1",
+                    0.0,
+                )
+            )
+        elif settings.embeddings_enabled:
             started = time.monotonic()
             try:
                 response = client.post(
                     f"{settings.embeddings_base_url.rstrip('/')}/embeddings",
                     headers=_headers(settings.embeddings_api_key),
-                    json={"model": settings.embeddings_model or model, "input": "проверка"},
+                    json={"model": settings.embeddings_model, "input": "проверка"},
                 )
                 elapsed = time.monotonic() - started
                 if response.status_code == 200:
