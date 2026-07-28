@@ -111,6 +111,14 @@ def verify_bridge_request(
         nonce=nonce,
         body=body,
     )
-    if not signature or not hmac.compare_digest(expected, signature.casefold()):
+    # Bytes, not str. `hmac.compare_digest` raises TypeError when either str argument
+    # holds a character above U+00FF — and a header value may: both HTTP parsers uvicorn
+    # can use accept obs-text bytes (0x80-0xFF), which decode to exactly that range. The
+    # TypeError escaped the middleware's handlers, so an unauthenticated caller got a 500
+    # with a traceback instead of a 401, the attempt was never written to the audit log,
+    # and it never counted against the failed-authentication budget that produces a 429.
+    if not signature or not hmac.compare_digest(
+        expected.encode("ascii"), signature.casefold().encode("utf-8")
+    ):
         raise ValueError("Invalid bridge signature")
     return SignedBridgeIdentity(external_user_id, chat_id, parsed_timestamp, nonce)

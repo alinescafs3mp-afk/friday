@@ -146,6 +146,33 @@ async def _collect_bounded_process_output(
     return bytes(stdout), bytes(stderr), limit_exceeded.is_set(), terminated_for_limit
 
 
+def _count_user_tasks() -> int:
+    """How many TASKS the real UID already owns — what RLIMIT_NPROC actually counts.
+
+    Threads, not processes: Linux checks this limit in `copy_process`, so every thread
+    counts. Measured here, 114 processes were 200-odd tasks, and a ceiling computed from
+    the process count refused the executor's very first fork.
+
+    Counted in the PARENT on purpose. `preexec_fn` runs between fork and exec, where
+    doing this much work is a bad idea; the number only has to be close enough to leave
+    the executor headroom, and it is captured before the child exists.
+    """
+    uid = os.getuid()
+    count = 0
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return 1 << 20  # not Linux, or /proc not mounted: stay out of the way
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        with suppress(OSError):
+            if os.stat(f"/proc/{entry}").st_uid != uid:
+                continue
+            count += len(os.listdir(f"/proc/{entry}/task"))
+    return max(count, 1)
+
+
 @dataclass
 class ToolSpec:
     name: str
@@ -561,7 +588,20 @@ class ExecutionKernel:
             if os.name == "posix":
                 import resource
 
+                # Every rlimit on Linux is PER PROCESS and is inherited by children as
+                # their OWN budget, so the 512 MiB ceiling below multiplied by the number
+                # of forks: measured, four forks held 1037 MiB while each reported an
+                # address-space limit of exactly 512 MiB. RLIMIT_NPROC is what makes the
+                # per-process limits add up to a total, because it is checked at fork
+                # time against the real UID's whole task count — so the ceiling has to
+                # be relative to what that count already is, or the executor could not
+                # start at all. Twenty-four is room for a helper process and its
+                # threads, not for a bomb.
+                nproc_ceiling = _count_user_tasks() + 24
+
                 def _limit_resources() -> None:
+                    with suppress(ValueError, OSError):
+                        resource.setrlimit(resource.RLIMIT_NPROC, (nproc_ceiling, nproc_ceiling))
                     resource.setrlimit(
                         resource.RLIMIT_CPU,
                         (

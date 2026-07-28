@@ -153,8 +153,13 @@ class _PinnedPublicNetworkBackend(httpcore.AsyncNetworkBackend):
     ) -> httpcore.AsyncNetworkStream:
         addresses = await asyncio.to_thread(_resolve_addresses, host, port)
         if not self._allow_private_networks and any(_is_forbidden_ip(address) for address in addresses):
-            rendered = ", ".join(str(address) for address in addresses)
-            raise UnsafeURLError(f"Non-public destination is blocked at connect time: {rendered}")
+            # Same reasoning as `validate_public_url`: the addresses reach the log only.
+            LOGGER.debug(
+                "Blocked non-public destination at connect time for %s: %s",
+                host,
+                [str(address) for address in addresses],
+            )
+            raise UnsafeURLError("Non-public destination is blocked at connect time")
 
         last_error: Exception | None = None
         for address in addresses:
@@ -262,8 +267,16 @@ def validate_public_url(url: str, *, allow_private_networks: bool = False) -> st
     port = parsed.port or (443 if parsed.scheme.casefold() == "https" else 80)
     addresses = _resolve_addresses(hostname, port)
     if not allow_private_networks and any(_is_forbidden_ip(address) for address in addresses):
-        rendered = ", ".join(sorted(str(address) for address in addresses))
-        raise UnsafeURLError(f"Non-public destination is blocked: {rendered}")
+        # The addresses go to the debug log, not into the error. `FetchResult.error`
+        # is returned verbatim by the tool and by `POST /api/ingest/url`'s 422, which
+        # turned a blocked fetch into an oracle: guess a name, read back the internal
+        # address it resolves to.
+        LOGGER.debug(
+            "Blocked non-public destination for %s: %s",
+            hostname,
+            [str(address) for address in addresses],
+        )
+        raise UnsafeURLError("Non-public destination is blocked")
 
     normalized_path = parsed.path or "/"
     return urllib.parse.urlunsplit(
@@ -505,15 +518,22 @@ class WebSurfer:
                     status_code=status,
                     error=f"HTTP {status}",
                 )
-            content_type = response.headers.get("content-type", "").split(";", 1)[0].casefold()
-            if content_type and not any(content_type == allowed for allowed in _ALLOWED_CONTENT_TYPES):
+            # `.strip()` because "text/html ; charset=utf-8" is legal and used to be
+            # rejected as `"text/html "`. And no `content_type and`: an allowlist that
+            # only applies when the server chose to declare a type is not an allowlist.
+            # A response with no Content-Type at all skipped the check entirely, so
+            # arbitrary bytes were decoded with errors="replace" and stored as the text
+            # of a Raw Object — the same bytes are refused the moment the server labels
+            # them application/octet-stream.
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+            if content_type not in _ALLOWED_CONTENT_TYPES:
                 return FetchResult(
                     url=final_url,
                     title="",
                     text="",
                     text_length=0,
                     status_code=status,
-                    error=f"Unsupported content type: {content_type}",
+                    error=f"Unsupported content type: {content_type or 'missing'}",
                 )
             encoding = response.encoding or "utf-8"
             raw_text = body.decode(encoding, errors="replace")

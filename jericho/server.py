@@ -509,7 +509,13 @@ async def _authenticate(request: Request) -> ActorContext:
 
     if bearer:
         # The configured owner token stays the all-capability owner (back-compat).
-        if settings.api_token and hmac.compare_digest(bearer, settings.api_token):
+        # Bytes for the same reason as the bridge signature: an Authorization header
+        # carrying an obs-text byte made `compare_digest` raise TypeError, and an
+        # unauthenticated request answered 500 instead of 401 — unaudited, and outside
+        # the failed-authentication budget.
+        if settings.api_token and hmac.compare_digest(
+            bearer.encode("utf-8"), settings.api_token.encode("utf-8")
+        ):
             user = state.storage.ensure_user(
                 LEGACY_OWNER_USER_ID,
                 source="api-token",
