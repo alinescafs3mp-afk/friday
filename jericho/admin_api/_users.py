@@ -27,6 +27,7 @@ from jericho.admin_api._deps import (
     secrets,
     validate_user_id,
 )
+from jericho.people import resolve_person, unambiguous
 
 router = APIRouter()
 
@@ -43,6 +44,45 @@ async def list_users(
     for user in users:
         user["permission_overrides"] = state.storage.get_permission_overrides(user["id"])
     return {"items": users, "count": len(users)}
+
+
+@router.get("/users/resolve")
+async def resolve_user_name(request: Request, name: str = Query(min_length=1)) -> dict[str, Any]:
+    """Which account is being called `name`? Every candidate, with how it matched.
+
+    Deliberately returns the whole ranked list and an explicit `unambiguous` flag
+    rather than a winner: the caller is about to read one person's material, and two
+    accounts answering to the same name must reach them as a question.
+    """
+    _require(request, "admin.users.read")
+    rows = _services(request).storage.list_users(limit=5000)
+    matches = resolve_person(rows, name)
+    winner = unambiguous(matches)
+    return {
+        "query": name,
+        "matches": [match.to_dict() for match in matches],
+        "unambiguous": winner.to_dict() if winner else None,
+    }
+
+
+@router.get("/users/{user_id}/activity")
+async def user_activity(
+    user_id: str,
+    request: Request,
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """What this account wrote and uploaded, newest first, with a summary beside it."""
+    _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.user.activity.read", user_id, since=since, until=until)
+    storage = _services(request).storage
+    return {
+        "user_id": user_id,
+        "summary": storage.user_activity_summary(user_id, since=since, until=until),
+        "items": storage.user_activity(user_id, since=since, until=until, limit=limit, offset=offset),
+    }
 
 
 @router.post("/users")

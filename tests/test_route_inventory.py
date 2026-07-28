@@ -26,11 +26,11 @@ from __future__ import annotations
 from jericho.server import create_app
 
 # Bumped deliberately when an endpoint is added or removed, never to make a test pass.
-EXPECTED_OPERATIONS = 138
+EXPECTED_OPERATIONS = 140
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 71,
+    "/api/admin": 73,
     "/api/kg": 14,
     "/api/missions": 4,
 }

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from jericho.people import resolve_person, unambiguous
 from jericho.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
 from jericho.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
 from jericho.workers._blocking import run_blocking
@@ -264,6 +265,7 @@ class ExecutionKernel:
             "kg_stats": self._kg_stats,
             "resolve_duplicates": self._resolve_duplicates,
             "inbox_list": self._inbox_list,
+            "user_activity": self._user_activity,
             "code_run": self._code_run,
         }
         for name, handler in handlers.items():
@@ -567,6 +569,59 @@ class ExecutionKernel:
         items = storage.list_inbox(actor.user_id, status_value, limit=20)
         return {"items": items, "count": len(items)}
 
+    async def _user_activity(
+        self,
+        *,
+        actor: ActorContext,
+        person: str,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """What one account wrote and uploaded — reachable by the name a person uses.
+
+        The only tool that reads across accounts, so three things are non-negotiable.
+        The capability gate is `admin.all_data.read`, checked by `execute` like every
+        other tool. The read is written to the audit log against the account it was
+        about, not just the tool name. And the account it resolved to is returned in
+        the answer: `resolve_person` is tolerant of case endings, layout and typos, and
+        a tolerant match that is wrong must be visible to whoever reads the reply
+        rather than buried under a confident-sounding summary.
+        """
+        storage, _, _, _ = self._require_services()
+        matches = resolve_person(storage.list_users(limit=5000), person)
+        chosen = unambiguous(matches)
+        if chosen is None:
+            # Nobody, or more than one. Either way the caller decides, not this tool.
+            return {
+                "resolved": None,
+                "candidates": [match.to_dict() for match in matches[:5]],
+                "reason": "ambiguous" if matches else "not_found",
+            }
+
+        storage.log_audit(
+            AuditEntry(
+                id=new_id("audit"),
+                user_id=actor.user_id,
+                action="tool.user_activity",
+                target_type="user",
+                target_id=chosen.user_id,
+                after_json={
+                    "asked_for": person[:200],
+                    "match_method": chosen.method,
+                    "since": since,
+                    "until": until,
+                },
+            )
+        )
+        return {
+            "resolved": chosen.to_dict(),
+            "summary": storage.user_activity_summary(chosen.user_id, since=since, until=until),
+            "items": storage.user_activity(
+                chosen.user_id, since=since, until=until, limit=max(1, min(int(limit), 200))
+            ),
+        }
+
     async def _code_run(self, *, actor: ActorContext, code: str) -> dict[str, Any]:
         del actor
         settings = self.settings
@@ -743,6 +798,20 @@ class ExecutionKernel:
             "kg.merge",
             {},
             [],
+        )
+        spec(
+            "user_activity",
+            "Что конкретный пользователь писал и загружал и когда. Имя можно указывать "
+            "как обычно — «Иван», «у Ивана», с опечаткой или в другой раскладке. "
+            "Требует прав администратора; чтение чужого аккаунта записывается в аудит.",
+            "admin.all_data.read",
+            {
+                "person": {"type": "string"},
+                "since": {"type": "string"},
+                "until": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
+            ["person"],
         )
         spec(
             "inbox_list",

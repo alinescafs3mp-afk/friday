@@ -32,6 +32,7 @@ from jericho.storage._intake import IntakeMixin
 from jericho.storage._knowledge import KnowledgeMixin
 from jericho.storage._maintenance import MaintenanceMixin
 from jericho.storage._missions import MissionsMixin
+from jericho.storage._oversight import OversightMixin
 from jericho.storage._runtime import RuntimeMixin
 from jericho.storage._vectors import VectorsMixin
 
@@ -61,6 +62,7 @@ class JerichoStorage(
     KnowledgeMixin,
     MaintenanceMixin,
     MissionsMixin,
+    OversightMixin,
     RuntimeMixin,
     VectorsMixin,
 ):
