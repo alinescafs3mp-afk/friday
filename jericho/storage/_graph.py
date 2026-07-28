@@ -8,6 +8,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 from __future__ import annotations
 
 from jericho.storage._base import (
+    LOGGER,
     Any,
     Entity,
     EntityResolutionCandidate,
@@ -163,7 +164,8 @@ class GraphMixin(StorageShared):
         include_merged: bool = False,
     ) -> list[dict[str, Any]]:
         where, params = self._entity_filter(user_id, entity_type, include_merged=include_merged)
-        params.extend([max(1, min(limit, 5000)), max(0, offset)])
+        bounded = max(1, min(limit, 5000))
+        params.extend([bounded, max(0, offset)])
         # `, id` is what makes paging honest: names are not unique — namesakes are
         # normal for entities — and without a unique tail SQLite is free to order a
         # group of equal names differently between two page requests, so rows
@@ -174,6 +176,25 @@ class GraphMixin(StorageShared):
             "ORDER BY name COLLATE NOCASE, id LIMIT ? OFFSET ?",
             tuple(params),
         ).fetchall()
+        if len(rows) == bounded and offset <= 0:
+            # Обрез был ТИХИМ, и это худший из возможных способов не справиться.
+            # Проверено исполнением на 8001 сущности: прямой поиск по имени находит
+            # запись, а `search_entities` и `match_mentions` возвращают ноль — они
+            # строят своё представление из этого списка. Отрезается всегда один и
+            # тот же хвост (`ORDER BY name`), то есть конец алфавита исчезает из
+            # графа навсегда и молча.
+            #
+            # Настоящее лечение — не поднять потолок, а перестать строить работу с
+            # графом на полной выборке; пока этого нет, обрез обязан быть слышен.
+            total = self.count_entities(user_id, entity_type)
+            if total > bounded:
+                LOGGER.warning(
+                    "list_entities returned %d of %d entities for tenant %s — the tail is "
+                    "invisible to entity matching and graph expansion",
+                    bounded,
+                    total,
+                    user_id,
+                )
         return [dict(row) for row in rows]
 
     def find_entity_by_name(self, user_id: str, name: str) -> dict[str, Any] | None:
@@ -676,19 +697,46 @@ class GraphMixin(StorageShared):
         self,
         user_id: str,
         status: ResolutionStatus | None = None,
+        *,
+        limit: int = 500,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """Кандидатуры на слияние — страницей, а не всей таблицей.
+
+        Лимита не было вовсе: ни параметра, ни клампа. Фоновый обход дедупа копит
+        кандидатуры сам, и на 5000 сущностях один проход дал 4012 строк — все они
+        поднимались в память и уходили в ответ восьмимегабайтным JSON. Хвост
+        `created_at, id` обязателен по той же причине, что и везде здесь: уверенность
+        и отметка времени у пачки совпадают, и без него страницы разъезжаются.
+        """
+        bounded = max(1, min(int(limit), 1000))
         if status:
             rows = self.execute(
                 """SELECT * FROM entity_resolution_candidates WHERE user_id=? AND status=?
-                   ORDER BY confidence DESC, created_at DESC""",
-                (user_id, enum_value(status)),
+                   ORDER BY confidence DESC, created_at DESC, id DESC LIMIT ? OFFSET ?""",
+                (user_id, enum_value(status), bounded, max(0, offset)),
             ).fetchall()
         else:
             rows = self.execute(
-                "SELECT * FROM entity_resolution_candidates WHERE user_id=? ORDER BY confidence DESC, created_at DESC",
-                (user_id,),
+                """SELECT * FROM entity_resolution_candidates WHERE user_id=?
+                   ORDER BY confidence DESC, created_at DESC, id DESC LIMIT ? OFFSET ?""",
+                (user_id, bounded, max(0, offset)),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def count_resolution_candidates(self, user_id: str, status: ResolutionStatus | None = None) -> int:
+        """Сколько их всего — чтобы страница не выдавалась за полный объём."""
+        if status:
+            row = self.execute(
+                "SELECT COUNT(*) AS count FROM entity_resolution_candidates WHERE user_id=? AND status=?",
+                (user_id, enum_value(status)),
+            ).fetchone()
+        else:
+            row = self.execute(
+                "SELECT COUNT(*) AS count FROM entity_resolution_candidates WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        return int(row["count"] if row else 0)
 
     def resolve_candidate(
         self,

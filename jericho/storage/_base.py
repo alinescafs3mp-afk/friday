@@ -671,6 +671,21 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_pool_order
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_created
     ON knowledge_objects(user_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_raw ON knowledge_objects(raw_object_id);
+-- Запасной путь `get_entity_knowledge` ищет объекты по прямой колонке `entity_id`,
+-- когда у сущности нет принятых связей. Индекса на неё не было, поэтому запрос
+-- сканировал ВСЕ объекты арендатора, вытаскивая `content` каждого. Замерено на
+-- 5000 сущностей и 5000 объектов: 58.4 мс на вызов, а `GET /kg/resolutions/pending`
+-- зовёт его дважды на кандидата — 317.5 секунды на ответ, из них 99.6% здесь.
+-- Ровно этот путь чаще всего и берётся: кандидаты на слияние — свежие тонкие
+-- сущности, у которых принятых связей ещё нет.
+-- Колонки сортировки входят в индекс НАМЕРЕННО, и это не украшение: с индексом
+-- только по (user_id, entity_id) план не менялся вовсе — SQLite предпочитал
+-- `idx_knowledge_user_importance`, потому что тот обслуживает ORDER BY, и
+-- продолжал сканировать всего арендатора. Замерено: 51.7 мс против 39.2 мс, то
+-- есть индекс просто не использовался. С сортировкой внутри — **0.13 мс**.
+CREATE INDEX IF NOT EXISTS idx_knowledge_user_entity
+    ON knowledge_objects(user_id, entity_id, importance DESC, updated_at DESC)
+    WHERE entity_id IS NOT NULL AND deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_version
     ON knowledge_object_versions(knowledge_object_id, version);
 CREATE INDEX IF NOT EXISTS idx_inbox_user_status ON inbox(user_id, status, created_at DESC);

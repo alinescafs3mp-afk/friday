@@ -246,8 +246,10 @@ async def list_resolutions(request: Request, status: str | None = None) -> dict[
         parsed = ResolutionStatus(status) if status else None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid resolution status") from exc
-    items = request.app.state.storage.list_resolution_candidates(actor.user_id, parsed)
-    return {"items": items, "count": len(items)}
+    storage = request.app.state.storage
+    items = await run_blocking(storage.list_resolution_candidates, actor.user_id, parsed)
+    total = await run_blocking(storage.count_resolution_candidates, actor.user_id, parsed)
+    return {"items": items, "count": len(items), "total": total}
 
 
 @router.get("/resolutions/pending", tags=["knowledge-graph"])
@@ -255,8 +257,14 @@ async def pending_resolutions(request: Request) -> dict[str, Any]:
     # Enriched with both entities' names and link/relation counts so review
     # surfaces (e.g. the Telegram /merges flow) can show a human-readable pair.
     actor = _require(request, "kg.read")
-    items = request.app.state.kg.resolver.get_pending_resolutions(actor.user_id)
-    return {"items": items, "count": len(items)}
+    # Off the event loop: enrichment is six queries per candidate, and the whole
+    # request measured 317 seconds at 5000 entities — synchronously, inside an
+    # `async def`, so nothing else was served for its duration.
+    items = await run_blocking(request.app.state.kg.resolver.get_pending_resolutions, actor.user_id)
+    total = await run_blocking(
+        request.app.state.storage.count_resolution_candidates, actor.user_id, ResolutionStatus.SUGGESTED
+    )
+    return {"items": items, "count": len(items), "total": total}
 
 
 @router.post("/resolutions/{candidate_id}/accept", tags=["knowledge-graph"])

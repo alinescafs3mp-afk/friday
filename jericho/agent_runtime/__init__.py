@@ -588,7 +588,10 @@ class AgentRuntime:
             )
 
         context.kb_size = self.storage.count_knowledge_objects(user_id)
-        context.entity_count = len(self.storage.list_entities(user_id, limit=5000))
+        # Это число уходит в метаданные ответа и показывается человеку. Длина
+        # выборки с потолком 5000 застывала бы на пяти тысячах у любого графа
+        # большего размера.
+        context.entity_count = self.storage.count_entities(user_id)
         if kg:
             try:
                 stats = kg.get_stats(user_id)

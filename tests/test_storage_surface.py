@@ -69,7 +69,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 235
+EXPECTED_MEMBER_COUNT = 237
 EXPECTED_SIGNATURES: dict[str, str] = {
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
@@ -214,7 +214,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_purgeable_knowledge": "(self, user_id: 'str | None' = None, *, older_than_days: 'int' = 30, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_recent_knowledge": "(self, user_id: 'str', *, since_iso: 'str', limit: 'int' = 10) -> 'list[dict[str, Any]]'",
     "list_relation_candidates": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
-    "list_resolution_candidates": "(self, user_id: 'str', status: 'ResolutionStatus | None' = None) -> 'list[dict[str, Any]]'",
+    "list_resolution_candidates": "(self, user_id: 'str', status: 'ResolutionStatus | None' = None, *, limit: 'int' = 500, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_user_ids": "(self, *, active_only: 'bool' = True) -> 'list[str]'",
     "list_user_vectors_page": "(self, user_id: 'str', model: 'str', *, after: 'tuple[str, str] | None' = None, before: 'tuple[str, str] | None' = None, max_updated_at: 'str | None' = None, descending: 'bool' = False, limit: 'int' = 2048) -> 'list[tuple[str, str, bytes]]'",
     "list_users": "(self, *, limit: 'int' = 500, offset: 'int' = 0) -> 'list[dict[str, Any]]'",

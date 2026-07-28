@@ -630,6 +630,19 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def count_recent_knowledge(self, user_id: str, *, since_iso: str) -> int:
+        """Сколько создано с этого момента — счётом, а не длиной страницы.
+
+        `list_recent_knowledge` зажат потолком 200, и профиль человека показывал
+        ровно 200 «за 30 дней» всякому, кто перешагнул этот рубеж.
+        """
+        row = self.execute(
+            "SELECT COUNT(*) AS count FROM knowledge_objects"
+            " WHERE user_id=? AND deleted_at IS NULL AND created_at >= ?",
+            (user_id, since_iso),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
     def list_knowledge_on_this_day(
         self, user_id: str, *, month_day: str, before_iso: str, limit: int = 10
     ) -> list[dict[str, Any]]:
