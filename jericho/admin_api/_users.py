@@ -133,6 +133,68 @@ async def user_activity(
     return payload
 
 
+@router.get("/identities")
+async def list_identities(request: Request, user_id: str | None = None) -> dict[str, Any]:
+    """Какие способы входа ведут в какой аккаунт.
+
+    Аудируется как кросс-аккаунтное чтение: это не содержимое, но «какой телеграм
+    принадлежит вот этому человеку» — персональные данные, и связь между номером и
+    аккаунтом узнаётся именно здесь.
+    """
+    _require(request, "admin.users.read")
+    _audit_cross_tenant_read(request, "admin.identities.read", user_id)
+    items = _services(request).storage.list_identities(user_id)
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/identities")
+async def link_identity(request: Request) -> dict[str, Any]:
+    """Привязать способ входа к аккаунту — например свой Telegram к аккаунту владельца.
+
+    Требует `admin.users.manage`, а не `admin.users.read`: это выдача доступа ко
+    всем данным аккаунта тому, кто войдёт этой личностью. Ошибиться здесь — то же
+    самое, что отдать чужому человеку весь свой архив, поэтому связь заводится
+    только явно и только этим маршрутом, и целевой аккаунт защищён теми же
+    правилами делегирования, что и смена пресета.
+    """
+    actor = _require(request, "admin.users.manage")
+    body = await _request_json(request)
+    source = str(body.get("source") or "").strip()
+    external_id = str(body.get("external_id") or "").strip()
+    target = str(body.get("user_id") or "").strip()
+    if not source or not external_id or not target:
+        raise HTTPException(status_code=400, detail="source, external_id and user_id are required")
+    _protect_owner_target(request, target)
+    state = _services(request)
+    before = state.storage.resolve_identity(source, external_id)
+    try:
+        link = state.storage.link_identity(source, external_id, target, linked_by=actor.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(
+        request,
+        "admin.identity.link",
+        "user",
+        target,
+        before={"user_id": before} if before else None,
+        after=link,
+    )
+    return {"identity": link}
+
+
+@router.delete("/identities/{source}/{external_id}")
+async def unlink_identity(source: str, external_id: str, request: Request) -> dict[str, Any]:
+    _require(request, "admin.users.manage")
+    state = _services(request)
+    target = state.storage.resolve_identity(source, external_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Identity is not linked")
+    _protect_owner_target(request, target)
+    state.storage.unlink_identity(source, external_id)
+    _audit(request, "admin.identity.unlink", "user", target, before={"source": source})
+    return {"status": "unlinked"}
+
+
 @router.post("/users")
 async def create_user(request: Request) -> dict[str, Any]:
     actor = _require(request, "admin.users.manage")

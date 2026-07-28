@@ -461,7 +461,14 @@ async def _authenticate(request: Request) -> ActorContext:
             )
             if part.strip()
         )
-        user_id = _telegram_user_id(settings, identity.external_user_id)
+        # Кем вошли и чьи это данные — разные вопросы. Если владелец явно связал этот
+        # телеграм со своим аккаунтом, арендатор берётся ОТТУДА; иначе всё как было —
+        # производный идентификатор и автопровижн. Без связи вопрос из телеграма
+        # искал в аккаунте, у которого нет ни одного документа, и получал честное
+        # «ничего не нашлось» о корпусе, лежащем рядом под другим арендатором.
+        derived_id = _telegram_user_id(settings, identity.external_user_id)
+        linked_id = state.storage.resolve_identity("telegram", identity.external_user_id)
+        user_id = linked_id or derived_id
         existing = state.storage.get_user(user_id)
         # Allowlisting a GROUP chat handed an account with the full 'user' preset to
         # every participant who wrote in it. Tenant isolation keeps the owner's
@@ -487,15 +494,28 @@ async def _authenticate(request: Request) -> ActorContext:
         metadata: dict[str, Any] = {"language_code": telegram_user.get("language_code")}
         if in_private_chat:
             metadata["chat_id"] = identity.chat_id
-        state.storage.ensure_user(
-            user_id,
-            source="telegram",
-            external_id=identity.external_user_id,
-            display_name=display_name,
-            username=str(telegram_user.get("username") or ""),
-            preset_key=preset_for_new_account,
-            metadata=metadata,
-        )
+        if linked_id:
+            # Аккаунт уже существует и принадлежит человеку, а не этому каналу.
+            # `ensure_user` переписал бы `source` на 'telegram' и `external_id` на
+            # номер чата — то есть владелец, вошедший через бота, перестал бы
+            # выглядеть владельцем в списке аккаунтов. Из телеграма сюда приходит
+            # ровно одна полезная вещь — `chat_id`, куда доставляют проактивные
+            # органы; её и записываем, остальное аккаунта не касается.
+            # `source=""` обязателен: значение по умолчанию — 'local', а в UPDATE стоит
+            # `CASE WHEN excluded.source<>''`, то есть дефолт молча переписал бы
+            # 'api-token' владельца. Пустая строка — единственный способ сказать
+            # «не трогай это поле». `preset_key` в UPDATE не участвует вовсе.
+            state.storage.ensure_user(user_id, source="", metadata=metadata)
+        else:
+            state.storage.ensure_user(
+                user_id,
+                source="telegram",
+                external_id=identity.external_user_id,
+                display_name=display_name,
+                username=str(telegram_user.get("username") or ""),
+                preset_key=preset_for_new_account,
+                metadata=metadata,
+            )
         user = state.storage.get_user(user_id) or existing or {}
         if user.get("status") != "active":
             raise AuthenticationError("User account is disabled")

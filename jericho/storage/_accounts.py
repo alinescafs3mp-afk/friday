@@ -76,6 +76,71 @@ class AccountsMixin(StorageShared):
         row = self.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
+    # --- личность против арендатора -------------------------------------
+
+    def resolve_identity(self, source: str, external_id: str) -> str | None:
+        """Чей это аккаунт, если вошли ВОТ ЭТОЙ личностью. None — связи нет.
+
+        Возвращается `None`, а не выдуманный идентификатор: «связи нет» и «связь
+        ведёт в аккаунт X» — разные ответы, и вызывающий обязан различать их сам.
+        Молчаливая подстановка производного идентификатора здесь и была бы тем
+        самым слиянием двух понятий, ради разделения которых таблица заведена.
+        """
+        row = self.execute(
+            "SELECT user_id FROM user_identities WHERE source=? AND external_id=?",
+            (str(source), str(external_id)),
+        ).fetchone()
+        return str(row["user_id"]) if row else None
+
+    def link_identity(
+        self, source: str, external_id: str, user_id: str, *, linked_by: str = ""
+    ) -> dict[str, Any]:
+        """Привязать личность к аккаунту. Аккаунт обязан существовать.
+
+        Перепривязка разрешена (владелец сменил телеграм) и делается заменой строки:
+        одна личность в один момент времени принадлежит ровно одному арендатору,
+        иначе «чьи это данные» перестаёт иметь ответ.
+        """
+        user_id = validate_user_id(user_id)
+        if not self.get_user(user_id):
+            raise ValueError(f"Unknown account: {user_id}")
+        if not str(external_id).strip():
+            raise ValueError("external_id is required")
+        now = utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                """INSERT INTO user_identities(source, external_id, user_id, linked_by, created_at)
+                   VALUES(?, ?, ?, ?, ?)
+                   ON CONFLICT(source, external_id) DO UPDATE SET
+                     user_id=excluded.user_id, linked_by=excluded.linked_by, created_at=excluded.created_at""",
+                (str(source), str(external_id), user_id, str(linked_by), now),
+            )
+        return {
+            "source": str(source),
+            "external_id": str(external_id),
+            "user_id": user_id,
+            "linked_by": str(linked_by),
+            "created_at": now,
+        }
+
+    def unlink_identity(self, source: str, external_id: str) -> bool:
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM user_identities WHERE source=? AND external_id=?",
+                (str(source), str(external_id)),
+            )
+        return cursor.rowcount > 0
+
+    def list_identities(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        if user_id:
+            rows = self.execute(
+                "SELECT * FROM user_identities WHERE user_id=? ORDER BY source, external_id",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = self.execute("SELECT * FROM user_identities ORDER BY source, external_id").fetchall()
+        return [dict(row) for row in rows]
+
     def count_users(self) -> int:
         """How many accounts there are — the global account selector depends on it.
 

@@ -149,6 +149,25 @@ CREATE TABLE IF NOT EXISTS users (
     last_seen_at TEXT NOT NULL
 );
 
+-- Кем человек ВОШЁЛ против того, ЧЬИ это данные. До этой таблицы одно было равно
+-- другому: телеграм-аккаунт получал идентификатор `telegram:{realm}:{id}`, и он же
+-- служил арендатором. Следствие было незаметным и полным: владелец, импортировавший
+-- корпус через CLI, и он же, спрашивающий в телеграме, — два РАЗНЫХ арендатора.
+-- Поиск ограничен арендатором, поэтому вопрос из телеграма физически не мог найти
+-- собственные документы владельца, и система честно отвечала «ничего не нашлось».
+--
+-- Связь заводится ЯВНО. Автоматически привязывать входящую личность к существующему
+-- аккаунту нельзя ни по имени, ни по номеру: это выдача доступа к чужим данным тому,
+-- кто всего лишь написал боту.
+CREATE TABLE IF NOT EXISTS user_identities (
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    linked_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (source, external_id)
+);
+
 CREATE TABLE IF NOT EXISTS custom_presets (
     preset_key TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -608,6 +627,7 @@ CREATE TABLE IF NOT EXISTS eval_cases (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_source_external ON users(source, external_id);
+CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id);
 CREATE INDEX IF NOT EXISTS idx_raw_objects_user_received ON raw_objects(user_id, received_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_source_ref
     ON raw_objects(user_id, source, source_ref) WHERE source_ref <> '';

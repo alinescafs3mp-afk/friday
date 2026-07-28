@@ -595,6 +595,8 @@ class MaintenanceMixin(StorageShared):
         if not user:
             raise ValueError("User not found")
         table_queries = {
+            # Персональные данные: какими способами человек входит в этот аккаунт.
+            "user_identities": ("SELECT * FROM user_identities WHERE user_id=?", (user_id,)),
             "raw_objects": ("SELECT * FROM raw_objects WHERE user_id=?", (user_id,)),
             "knowledge_objects": ("SELECT * FROM knowledge_objects WHERE user_id=?", (user_id,)),
             "inbox": ("SELECT * FROM inbox WHERE user_id=?", (user_id,)),
