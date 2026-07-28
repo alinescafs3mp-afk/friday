@@ -1,6 +1,6 @@
 'use strict';
-const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:''};
-const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
+const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null};
+const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const q=v=>encodeURIComponent(v??'').replace(/'/g,'%27').replace(/%20/g,'+');
 const fmtDate=v=>v?new Date(v).toLocaleString('ru-RU'):'—';
@@ -238,6 +238,69 @@ actions.permissionDialog=id=>{const u=state.users.find(item=>item.id===id);if(!u
 actions.setOverride=async(id,cap,effect)=>{try{await api(`/api/admin/users/${q(id)}/permissions/${q(cap)}`,{method:'PUT',body:JSON.stringify({effect})});toast('Override сохранён');await loadUsers()}catch(e){toast(e.message,true)}};
 actions.createUserDialog=()=>openModal('Новый пользователь',`<div class="form"><label>ID<input id="newUserId" placeholder="local:alice"></label><label>Отображаемое имя<input id="newUserName"></label><label>Пресет<select id="newUserPreset" class="field">${state.presets.map(p=>`<option value="${esc(p.preset_key)}">${esc(p.name||p.preset_key)}</option>`).join('')}</select></label></div>`,`<button class="btn" ${call('closeModal')}>Отмена</button><button class="btn primary" ${call('createUser')}>Создать</button>`);
 actions.createUser=async()=>{try{await api('/api/admin/users',{method:'POST',body:JSON.stringify({id:document.getElementById('newUserId').value,display_name:document.getElementById('newUserName').value,preset_key:document.getElementById('newUserPreset').value})});closeModal();toast('Пользователь создан');await loadUsers();refresh()}catch(e){toast(e.message,true)}};
+// --- Активность: что и когда конкретный человек писал и загружал ---------
+// The one screen that reads across accounts, so it says out loud whose account it
+// is showing and how that account was chosen — a name typed as «Ивану» resolves
+// through case endings, layout and transliteration, and a tolerant match that
+// landed on the wrong person has to be visible rather than implied.
+const ACTIVITY_PAGE = 50;
+const ACTIVITY_PERIODS = [['', 'Всё время'], ['7', '7 дней'], ['30', '30 дней'], ['90', '90 дней']];
+function activityWindow(days) { if (!days) return ''; const from = new Date(Date.now() - Number(days) * 864e5); return from.toISOString(); }
+function activityQuery(offset) { const parts = [`limit=${ACTIVITY_PAGE}`, `offset=${offset}`]; if (state.activitySince) parts.push('since=' + q(state.activitySince)); if (state.activityUntil) parts.push('until=' + q(state.activityUntil)); return parts.join('&'); }
+renderers.activity = async () => {
+  await loadUsers();
+  const target = selectedUser();
+  if (!target) { document.getElementById('app').innerHTML = `<section class="card">${empty('Нет ни одного аккаунта')}</section>`; return; }
+  const data = await api(`/api/admin/users/${q(target)}/activity?${activityQuery(state.activityOffset)}`);
+  state.activity = data.items || []; state.activitySummary = data.summary || null;
+  const who = state.users.find(u => u.id === target) || {};
+  const s = state.activitySummary || {};
+  const found = state.activityFound;
+  const foundBlock = !found ? '' : found.unambiguous
+    ? `<div class="notice">Найден: <b>${esc(found.unambiguous.display_name || found.unambiguous.user_id)}</b> — совпадение <span class="mono">${esc(found.unambiguous.method)}</span>${found.unambiguous.method === 'exact' ? '' : ' (не точное написание — проверьте, тот ли это человек)'}</div>`
+    : found.matches.length
+      ? `<div class="notice"><b>Под это имя подходят несколько аккаунтов.</b> Выберите нужный: ${found.matches.map(m => `<button class="btn small" ${call('activityPick', m.user_id)}>${esc(m.display_name || m.user_id)} <span class="muted">${esc(m.method)}</span></button>`).join(' ')}</div>`
+      : `<div class="notice">Никто не найден по этому имени.</div>`;
+  const periodButtons = ACTIVITY_PERIODS.map(([days, label]) => `<button class="btn small ${(state.activitySince === activityWindow(days)) ? 'primary' : ''}" ${call('activityPeriod', days)}>${label}</button>`).join(' ');
+  const cards = [['Поступлений', s.arrivals], ['Знаний', s.knowledge_objects], ['В Inbox', s.pending_inbox], ['Сообщений', s.messages]]
+    .map(([l, v]) => `<div class="card stat"><div class="value">${Number(v || 0).toLocaleString('ru')}</div><div class="label">${l}</div></div>`).join('');
+  const bySource = (s.by_source || []).map(r => `<span class="badge">${esc(r.source)}: ${r.count}</span>`).join(' ') || '<span class="muted">—</span>';
+  const byDay = (s.by_day || []).slice(0, 14);
+  const peak = Math.max(1, ...byDay.map(d => d.count));
+  const dayBars = byDay.length ? byDay.slice().reverse().map(d => `<div class="kv"><div class="mono">${esc(d.day)}</div><div><span class="badge ok">${d.count}</span> <span class="muted">${'▬'.repeat(Math.max(1, Math.round(d.count / peak * 20)))}</span></div></div>`).join('') : empty('Нет активности за период');
+  const rows = state.activity.map((item, index) => `<tr><td class="mono">${fmtDate(item.at)}</td><td><span class="badge ${item.activity === 'upload' ? 'warn' : 'ok'}">${item.activity === 'upload' ? 'загрузил' : 'написал'}</span><div class="muted">${esc(item.source)}</div></td><td><b>${esc(short(item.title || '—', 70))}</b>${item.filename ? `<div class="mono">${esc(item.filename)}</div>` : ''}</td><td>${item.size_bytes ? Number(item.size_bytes).toLocaleString('ru') + ' Б' : `${Number(item.content_chars || 0).toLocaleString('ru')} симв.`}</td><td>${item.knowledge_object_id ? `<span class="badge ok">в знаниях</span>` : item.inbox_status ? `<span class="badge">${esc(item.inbox_status)}</span>` : '<span class="muted">—</span>'}</td><td><button class="btn small" ${call('activityPreview', index)}>Показать</button></td></tr>`);
+  const from = state.activityOffset + 1, to = state.activityOffset + state.activity.length;
+  const pager = `<div class="toolbar"><button class="btn small" ${call('activityPage', -1)} ${state.activityOffset === 0 ? 'disabled' : ''}>← Раньше</button><span class="muted">${state.activity.length ? `${from}–${to}` : '0'} из ${Number(s.arrivals || 0).toLocaleString('ru')}</span><button class="btn small" ${call('activityPage', 1)} ${to >= Number(s.arrivals || 0) ? 'disabled' : ''}>Позже →</button></div>`;
+  document.getElementById('app').innerHTML = `
+<section class="card"><div class="toolbar"><h2 class="grow">Активность: ${esc(who.display_name || who.username || target)}</h2><span class="badge">${esc(target)}</span></div>
+<div class="toolbar"><input class="field grow" id="activityName" placeholder="Найти по имени — «Иван», «у Ивана», можно с опечаткой" ${chg('activityFind')}><span>${periodButtons}</span></div>
+${foundBlock}
+<div class="muted mt8">Первое поступление: ${fmtDate(s.first_at)} · последнее: ${fmtDate(s.last_at)}</div></section>
+<div class="grid stats">${cards}</div>
+<div class="grid two"><section class="card"><h2>Откуда приходило</h2><div class="mt8">${bySource}</div></section><section class="card"><h2>По дням</h2>${dayBars}</section></div>
+<section class="card"><div class="toolbar"><h2 class="grow">Что и когда</h2></div>${rows.length ? table(['Когда', 'Что', 'Название', 'Объём', 'Судьба', ''], rows) : empty('За выбранный период ничего нет')}${pager}</section>`;
+};
+actions.activityPeriod = async days => { state.activitySince = activityWindow(days); state.activityOffset = 0; await refresh() };
+actions.activityPage = async direction => { const next = state.activityOffset + direction * ACTIVITY_PAGE; state.activityOffset = Math.max(0, next); await refresh() };
+actions.activityPick = async userId => { state.userId = userId; state.activityFound = null; state.activityOffset = 0; const select = document.getElementById('userSelect'); if (select) select.value = userId; await refresh() };
+actions.activityFind = async name => {
+  name = String(name || '').trim();
+  if (!name) { state.activityFound = null; await refresh(); return }
+  try {
+    const found = await api(`/api/admin/users/resolve?name=${q(name)}`);
+    state.activityFound = found;
+    // A single clear match jumps straight to that account; anything else is shown
+    // as a question, because picking one of two people here shows the wrong person.
+    if (found.unambiguous) { state.userId = found.unambiguous.user_id; state.activityOffset = 0; const select = document.getElementById('userSelect'); if (select) select.value = state.userId }
+    await refresh();
+  } catch (e) { toast(e.message, true) }
+};
+actions.activityPreview = index => {
+  const item = state.activity[index];
+  if (!item) return;
+  openModal(item.title || 'Материал', `<div class="kv"><div>Когда</div><div>${fmtDate(item.at)}</div><div>Как</div><div>${esc(item.activity)} / ${esc(item.source)}</div>${item.filename ? `<div>Файл</div><div class="mono">${esc(item.filename)}</div>` : ''}<div>Объём</div><div>${Number(item.content_chars || 0).toLocaleString('ru')} символов</div><div>Судьба</div><div>${item.knowledge_object_id ? 'в знаниях' : item.inbox_status ? esc(item.inbox_status) : '—'}</div></div><div class="pre prewrap mt12">${esc(item.preview)}${item.content_chars > item.preview.length ? '\n\n…' : ''}</div>`);
+};
+
 renderers.conversations=async()=>{const uid=selectedUser();const data=await api(`/api/admin/conversations?user_id=${q(uid)}&include_archived=true`);const rows=(data.items||[]).map(c=>`<tr><td><b>${esc(c.title||'Диалог')}</b><div class="mono">${esc(c.id)}</div></td><td><span class="badge">${esc(modeName(c.mode))}</span></td><td>${fmtDate(c.created_at)}</td><td>${fmtDate(c.updated_at)}</td><td><span class="badge ${c.is_archived?'warn':'ok'}">${c.is_archived?'archived':'active'}</span></td><td><button class="btn small" ${call('showConversation',c.id)}>Сообщения</button> <button class="btn small" ${call('archiveConversation',c.id,!c.is_archived)}>${c.is_archived?'Разархивировать':'Архивировать'}</button> <button class="btn small" ${call('deleteConversation',c.id)}>Удалить</button></td></tr>`);document.getElementById('app').innerHTML=`<section class="card"><h2>Диалоги пользователя</h2><div class="notice">Режим сохраняется для каждого диалога отдельно. Telegram-команды /chat, /work и /research переключают его явно.</div>${rows.length?table(['Диалог','Режим','Создан','Обновлён','Статус',''],rows):empty('Диалогов пока нет')}</section>`};
 actions.showConversation=async id=>{try{const d=await api(`/api/admin/conversations/${q(id)}/messages?user_id=${q(selectedUser())}&limit=1000`);openModal('История диалога',`<div class="grid">${(d.items||[]).map(m=>{const ins=m.insights||{};const cites=(ins.citations||[]).filter(c=>c.title||c.label);const legend=cites.length?`<div class="mono mt6">📎 Источники: ${cites.map(c=>`${c.label?`[${esc(c.label)}] `:''}${esc(c.title||c.knowledge_id)}`).join('; ')}</div>`:'';const grounded=ins.answer_grounded===false?` <span class="badge warn">без ссылок</span>`:(ins.answer_grounded===true?` <span class="badge ok">с источниками</span>`:'');const vs=ins.verification_status;const ver=vs&&vs!=='skipped'?` <span class="badge ${vs==='passed'?'ok':vs==='failed'?'bad':'warn'}">${esc(vs)}</span>`:'';return `<div class="card"><span class="badge">${esc(m.role)}</span>${grounded}${ver} <span class="muted">${fmtDate(m.created_at)}</span><div class="mt8 prewrap">${esc(m.content)}</div>${legend}</div>`}).join('')||empty('Сообщений нет')}</div>`,`<button class="btn" ${call('closeModal')}>Закрыть</button>`)}catch(e){toast(e.message,true)}};
 actions.archiveConversation=async(id,archived)=>{try{await api(`/api/admin/conversations/${q(id)}/archive?user_id=${q(selectedUser())}`,{method:'POST',body:JSON.stringify({archived})});toast(archived?'Диалог архивирован':'Диалог разархивирован');refresh()}catch(e){toast(e.message,true)}};
