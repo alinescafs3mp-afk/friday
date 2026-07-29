@@ -316,8 +316,15 @@ def knowledge_search_text(item: dict[str, Any]) -> str:
 # Mirrors the indexer's own ceilings (`_DOC_VECTOR_MAX_CHARS` / `_EMBED_REQUEST_MAX_CHARS`
 # in jericho/workers): one candidate never exceeds what an embeddings service accepts,
 # and one request stays inside the measured ~2800 chars/s throughput.
-_POOL_TEXT_MAX_CHARS = 20_000
-_POOL_REQUEST_MAX_CHARS = 40_000
+#
+# «Отражают потолки индексатора» — так тут было написано, и это перестало быть правдой,
+# когда пределы сервиса замерили: у индексатора 10 000 на вход и 30 000 на запрос, а
+# здесь стояло вдвое больше. То есть путь, по которому идёт ЖИВОЙ запрос человека
+# (фолбэк, когда индекса ещё нет), гарантированно упирался в оба отказа по длине —
+# и по входу, и по запросу — а лечатся они делением и укорачиванием, каждое из которых
+# стоит лишнего обращения к сервису. Числа приведены к замеренным.
+_POOL_TEXT_MAX_CHARS = 10_000
+_POOL_REQUEST_MAX_CHARS = 30_000
 # A raw cosine below this is noise, not evidence — the floor for the
 # `insufficient_evidence` gate. MEASURED against the production model
 # (qwen3-embedding-0.6b, dim 1024) at the operating point that matters, a short
@@ -774,6 +781,11 @@ def _input_too_long(body: str) -> bool:
         or "character limit" in text
         or "request_too_large" in text
         or "character request limit" in text
+        # «16384-token request limit» — это не «token limit»: между словами затесалось
+        # `request`. На живом сервисе выручает поле `code`, но полагаться на него одно
+        # значит зависеть от того, что сервис его пришлёт. Признак должен узнавать и
+        # саму формулировку.
+        or "token request limit" in text
     )
 
 
@@ -841,7 +853,13 @@ class EmbeddingBackend:
         )
 
     async def embed(
-        self, texts: list[str], *, budget_sec: float | None = None, _shortened: bool = False
+        self,
+        texts: list[str],
+        *,
+        budget_sec: float | None = None,
+        _shortened: bool = False,
+        _deadline: float | None = None,
+        _nested: bool = False,
     ) -> list[list[float]] | None:
         if not self.remote_enabled or not texts:
             return None
@@ -850,6 +868,19 @@ class EmbeddingBackend:
             # (в том числе поисковый запрос человека) ради фоновой индексации.
             # Пусть каждый сам решит, что делать; воркер просто вернётся позже.
             return None
+        # Бюджет — СРОК на всю операцию, а не терпение на каждый запрос. Разница
+        # появилась вместе с делением слишком большого запроса: половины считались
+        # отдельными вызовами и каждая получала полный бюджет заново, так что пачка,
+        # поделённая до одиночных входов, имела право занять время, умноженное на
+        # размер дерева деления. Живой запрос человека, у которого бюджет 4 секунды
+        # ровно затем, чтобы он не ждал, мог держать его минутами.
+        if _deadline is None and budget_sec is not None:
+            _deadline = time.monotonic() + float(budget_sec)
+        if _deadline is not None:
+            remaining = _deadline - time.monotonic()
+            if remaining <= 0:
+                LOGGER.warning("embeddings budget of %.1fs is spent; giving up", budget_sec or 0.0)
+                return None
         try:
             # The operator's configured patience, exactly as the LLM client uses it.
             # This used to be `min(llm_timeout_sec, 60.0)` — a hard ceiling that
@@ -873,7 +904,12 @@ class EmbeddingBackend:
             # помещаются вместе с LLM), и одна короткая строка занимает ~70 секунд.
             # Без отдельного бюджета человек ждал 40 секунд, чтобы получить в конце
             # «модель недоступна» — при том что LLM отвечала за две.
-            timeout = httpx.Timeout(budget_sec or self.settings.llm_timeout_sec, connect=10.0)
+            patience = (
+                max(1.0, _deadline - time.monotonic())
+                if _deadline is not None
+                else self.settings.llm_timeout_sec
+            )
+            timeout = httpx.Timeout(patience, connect=10.0)
             key = self.settings.embeddings_api_key
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=headers) as client:
@@ -900,12 +936,18 @@ class EmbeddingBackend:
                             "embeddings request too large for %d inputs; splitting in two", len(texts)
                         )
                         middle = len(texts) // 2
-                        first = await self.embed(texts[:middle], budget_sec=budget_sec)
+                        # Половины наследуют СРОК, а не бюджет: иначе каждая начинала
+                        # отсчёт заново. И помечаются вложенными — успех половины не
+                        # должен обнулять лестницу отступления, пока вся операция ещё
+                        # может закончиться отказом.
+                        first = await self.embed(texts[:middle], _deadline=_deadline, _nested=True)
                         if first is None:
                             return None
-                        second = await self.embed(texts[middle:], budget_sec=budget_sec)
+                        second = await self.embed(texts[middle:], _deadline=_deadline, _nested=True)
                         if second is None:
                             return None
+                        if not _nested:
+                            self._clear_cooldown()
                         return first + second
                     if not _shortened:
                         # Сообщение сервиса — В ЖУРНАЛ. Пределов у него несколько, и
@@ -919,8 +961,9 @@ class EmbeddingBackend:
                         )
                         return await self.embed(
                             [text[: max(1, len(text) // 2)] for text in texts],
-                            budget_sec=budget_sec,
+                            _deadline=_deadline,
                             _shortened=True,
+                            _nested=_nested,
                         )
                     return None
                 if response.status_code in self._OVERLOAD_STATUSES:
@@ -944,7 +987,12 @@ class EmbeddingBackend:
             # requests), so the failure must stop being completely silent.
             LOGGER.warning("embeddings backend request failed", exc_info=True)
             return None
-        self._clear_cooldown()
+        # Лестницу отступления обнуляет только УСПЕХ ЦЕЛОЙ операции. Половина внутри
+        # деления этого не делает: одна операция стала давать оба исхода сразу, и
+        # успешная половина сбрасывала рост паузы ровно у тех запросов, которые чаще
+        # всего и перегружают сервис, — у слишком больших.
+        if not _nested:
+            self._clear_cooldown()
         items = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(items, list) or len(items) != len(texts):
             return None

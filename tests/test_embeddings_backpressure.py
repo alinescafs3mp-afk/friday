@@ -329,7 +329,11 @@ async def test_a_live_query_does_not_wait_as_long_as_the_indexer(settings, monke
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
 
     await backend.embed(["запрос человека"], budget_sec=tuned.retrieval_dense_query_budget_sec)
-    assert seen[-1] == 3.0, f"живой запрос ждал по таймауту индексации: {seen[-1]}"
+    # Ровного равенства здесь больше нет и быть не должно: бюджет стал СРОКОМ на всю
+    # операцию, а не терпением на каждый запрос, поэтому терпение запроса равно
+    # остатку срока. Разница появилась вместе с делением слишком большого запроса:
+    # половины считались отдельными вызовами и каждая получала полный бюджет заново.
+    assert 2.5 <= seen[-1] <= 3.0, f"живой запрос ждал по таймауту индексации: {seen[-1]}"
 
     backend._cooldown_until = 0.0
     await backend.embed(["фоновая пачка"])
@@ -823,3 +827,156 @@ def test_a_long_document_gets_more_passages_rather_than_wider_ones(settings, sto
     assert units[-1][1] >= len(body) - tuned.embeddings_chunk_chars, "хвост документа не покрыт"
     # И объект по-прежнему помещается в один запрос вместе со своим общим вектором.
     assert len(units) + 1 <= tuned.embeddings_max_inputs_per_request
+
+
+@pytest.mark.asyncio
+async def test_the_budget_is_a_deadline_for_the_whole_operation_not_per_request(settings, monkeypatch):
+    """Деление запроса не должно умножать время, которое вызывающий согласился ждать.
+
+    `budget_sec` превращался в таймаут ОДНОГО обращения. Пока запрос был один, это
+    совпадало со сроком. С делением слишком большого запроса пополам половины стали
+    отдельными вызовами, и каждая получала полный бюджет заново: пачка, поделённая до
+    одиночных входов, имела право занять время, умноженное на размер дерева деления.
+
+    Бьёт это по живому запросу человека: ему бюджет в 4 секунды дан ровно затем, чтобы
+    он не ждал, — а фолбэк по пулу мог держать его минутами.
+    """
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+        llm_timeout_sec=240.0,
+    )
+    backend = EmbeddingBackend(tuned)
+    patiences: list[float] = []
+    # Тело ровно то, что отдаёт живой сервис, — вместе с полем code.
+    REFUSAL = (
+        '{"error":{"message":"input exceeds the 16384-token request limit",'
+        '"type":"invalid_request_error","param":"input","code":"request_too_many_tokens"}}'
+    )
+
+    class _Response:
+        def __init__(self, inputs: list[str]) -> None:
+            self.too_big = len(inputs) > 1
+            self.status_code = 400 if self.too_big else 200
+            self.headers: dict[str, str] = {}
+            self.text = REFUSAL if self.too_big else ""
+            self._inputs = inputs
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]} for _ in self._inputs]}
+
+    class _Client:
+        def __init__(self, *args, timeout=None, **kwargs) -> None:
+            patiences.append(float(timeout.read if hasattr(timeout, "read") else timeout))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            return _Response(list(kwargs["json"]["input"]))
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    # Восемь входов делятся до одиночных: дерево из пятнадцати обращений.
+    assert await backend.embed([f"текст {index}" for index in range(8)], budget_sec=5.0) is not None
+
+    assert len(patiences) > 8, f"деления не произошло, проверять нечего: {len(patiences)} обращений"
+    # Ни одно обращение внутри дерева не имеет права просить БОЛЬШЕ исходного бюджета,
+    # и терпение обязано убывать, а не начинаться заново.
+    assert max(patiences) <= 5.0, (
+        f"обращение внутри деления получило больше исходного бюджета: {max(patiences):.2f} с. "
+        "Значит бюджет снова стал терпением на запрос, а не сроком на операцию"
+    )
+    assert patiences[-1] <= patiences[0], "терпение не убывает — срок не наследуется половинами"
+
+
+@pytest.mark.asyncio
+async def test_a_spent_budget_stops_the_split_instead_of_running_on(settings, monkeypatch):
+    """Исчерпанный срок обязан прекращать работу, а не только сокращать таймаут."""
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    backend = EmbeddingBackend(tuned)
+    calls: list[int] = []
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            calls.append(1)
+            raise AssertionError("к сервису не должны были обратиться: срок исчерпан")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    assert await backend.embed(["текст"], _deadline=time.monotonic() - 1.0) is None
+    assert not calls, "исчерпанный срок не остановил обращение к сервису"
+
+
+def test_a_successful_half_does_not_reset_the_backoff_ladder(settings, monkeypatch):
+    """Успех половины внутри деления не обнуляет рост паузы.
+
+    Рост паузы держится на том, что `_cooldown_sec` переживает отказы, а успех его
+    обнуляет. С делением одна логическая операция стала давать ОБА исхода сразу:
+    половина успела, половина получила 502. Если успех половины сбрасывает лестницу,
+    пауза навсегда остаётся на своём полу — и это ровно у тех запросов, которые чаще
+    всего и перегружают сервис, у слишком больших.
+    """
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    backend = EmbeddingBackend(tuned)
+    backend._cooldown_sec = 40.0  # лестница уже выросла за прошлые отказы
+
+    class _Response:
+        def __init__(self, inputs: list[str]) -> None:
+            self.status_code = 200
+            self.headers: dict[str, str] = {}
+            self.text = ""
+            self._inputs = inputs
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]} for _ in self._inputs]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            return _Response(list(kwargs["json"]["input"]))
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    # Вложенный вызов — это и есть половина внутри деления.
+    assert asyncio.run(backend.embed(["половина"], _nested=True)) is not None
+    assert backend._cooldown_sec == 40.0, (
+        "успешная половина обнулила лестницу отступления — следующая пауза начнётся "
+        "с пола, сколько бы сервис ни отказывал"
+    )
+
+    # А успех ЦЕЛОЙ операции лестницу обнуляет, как и раньше.
+    assert asyncio.run(backend.embed(["целая операция"])) is not None
+    assert backend._cooldown_sec == 0.0, "успех целой операции обязан сбрасывать паузу"
