@@ -1752,7 +1752,9 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(
             """SELECT k.id AS id, k.user_id AS user_id, k.version AS version,
                       k.title AS title, k.summary AS summary, k.content AS content,
-                      k.tags_json AS tags_json, k.knowledge_kind AS knowledge_kind
+                      k.tags_json AS tags_json, k.knowledge_kind AS knowledge_kind,
+                      (e.knowledge_object_id IS NOT NULL
+                       AND COALESCE(e.content_hash, '') = '') AS forced
                FROM knowledge_objects k
                LEFT JOIN knowledge_embeddings e ON e.knowledge_object_id = k.id
                WHERE """

@@ -142,10 +142,16 @@ class FilesMixin(PipelineShared):
                     {"role": "user", "content": prompt_parts},
                 ],
                 temperature=0.0,
-                max_tokens=1_800,
+                # Тот же бюджет, что у совета по Inbox, и по той же причине: до JSON
+                # рассуждающая модель думает, и замеренная потребность — 2516–3616
+                # токенов. Здесь стоял литерал 1800, то есть разбор скана обрывался
+                # по бюджету, а сообщение при этом советовало поднять настройку,
+                # которая на этот путь не влияла. Одна ручка на оба пути честнее
+                # двух чисел, из которых одно спрятано в коде.
+                max_tokens=self.settings.cognition_max_tokens,
                 priority="foreground",
             )
-            parsed = _parse_model_response(response)
+            parsed = _parse_model_response(response, what="Vision extraction")
         except Exception as exc:
             LOGGER.info("Local vision extraction failed for %s: %s", filename, exc)
             return {

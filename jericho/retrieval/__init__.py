@@ -807,9 +807,10 @@ class EmbeddingBackend:
             #
             # Measured on the installed service: **768 characters/second**, not the
             # 2800 the request-size cap was calibrated against. A full-size request
-            # (`_EMBED_REQUEST_MAX_CHARS`, 40000) therefore takes **51.6 seconds**
-            # against that 60-second ceiling — eight seconds of margin, which one
-            # busy moment eats. The whole batch then fails, and the objects in it
+            # (`_EMBED_REQUEST_MAX_CHARS`, 30000 since the token limits were measured)
+            # therefore takes **39 seconds** against that 60-second ceiling — and it
+            # was 51.6 at the old 40000, eight seconds of margin that one busy moment
+            # ate. The whole batch then fails, and the objects in it
             # keep no vector.
             #
             # Not hypothetical: the owner's log holds **83 failed embedding requests

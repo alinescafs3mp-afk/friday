@@ -810,7 +810,7 @@ def _json_list(value: Any) -> list[Any]:
     return []
 
 
-def _parse_model_response(response: dict[str, Any]) -> dict[str, Any]:
+def _parse_model_response(response: dict[str, Any], *, what: str = "Model advice") -> dict[str, Any]:
     """Разобрать ответ модели, СНАЧАЛА проверив, дописан ли он до конца.
 
     Обрыв по бюджету и мусор вместо JSON — разные беды с разными лечениями, а
@@ -820,6 +820,13 @@ def _parse_model_response(response: dict[str, Any]) -> dict[str, Any]:
     2516–3616 токенов, из них большая часть уходит на рассуждение перед ответом, а
     потолок стоял в 512. Ответ обрывался посреди мысли, фигурной скобки в нём не
     было ни одной, и запись в журнале уводила от настоящей причины — настройки.
+
+    `what` называет вызывающего, потому что их двое: совет по Inbox и разбор скана
+    зрением. Первая версия говорила «Model advice» обоим и советовала поднять
+    JERICHO_COGNITION_MAX_TOKENS — на пути зрения это была ложная подсказка, пока
+    тот путь просил бюджет литералом. Теперь оба берут бюджет из одной настройки,
+    и подсказка верна для обоих; имя вызывающего остаётся, чтобы в журнале было
+    видно, ЧТО именно оборвалось.
     """
 
     finish = str(response.get("finish_reason") or "")
@@ -827,7 +834,7 @@ def _parse_model_response(response: dict[str, Any]) -> dict[str, Any]:
     if finish == "length":
         used = (response.get("usage") or {}).get("completion_tokens")
         raise ValueError(
-            "Model advice was cut off by the token budget"
+            f"{what} was cut off by the token budget"
             f"{f' after {used} tokens' if used else ''}"
             " — raise JERICHO_COGNITION_MAX_TOKENS"
         )

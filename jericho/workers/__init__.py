@@ -53,10 +53,13 @@ _ADVICE_ENDPOINT_DOWN_AFTER = 3
 # next to a passage (default 1200) and far below what an embeddings service will refuse.
 # Потолок, который сервис эмбеддингов кладёт на ОДИН вход. Замерено на живом
 # эндпоинте: 40 000 символов дают `400 an input exceeds the 32768-character limit`,
-# и падает весь запрос целиком, а не один вход. Сегодня `_DOC_VECTOR_MAX_CHARS`
-# ниже этой границы, то есть дефекта нет — но `_EMBED_REQUEST_MAX_CHARS` (40 000)
-# выше неё, и человек, решивший, что раз пачке можно 40к, то и одному входу можно,
-# получит молчаливо неиндексируемые документы.
+# и падает весь запрос целиком, а не один вход.
+#
+# Здесь стояло предупреждение, что `_EMBED_REQUEST_MAX_CHARS` (40 000) выше этой
+# границы и потому заманчив как образец для потолка одного входа. Оно протухло в
+# тот же вечер: бюджет запроса стал 30 000, то есть НИЖЕ 32 768. Ловушки больше
+# нет, но и ориентироваться на знаки не стоит — сервис считает токены, и оба
+# настоящих предела (8192 на вход, 16384 на запрос) описаны ниже.
 _EMBED_INPUT_MAX_CHARS = 32_768
 
 # Замерено на настоящем корпусе владельца против живого эндпоинта: настоящий предел
@@ -1056,9 +1059,21 @@ class WorkersManager:
         # Second lookup, by TEXT rather than by object: a vector for this exact text
         # may already exist under a different object. Costs one indexed query and
         # saves the model an entire re-embedding when a folder is imported twice.
+        #
+        # Но НЕ для объектов, помеченных на принудительный пересчёт. Поиск по хэшу
+        # идёт по всей таблице, без арендатора, — в этом его польза при повторном
+        # импорте и в этом же беда: `reindex-embeddings --user X` стирает хэши только
+        # у X, а тот же текст у другого арендатора остаётся с прежним, возможно
+        # негодным, вектором. Индексатор находил его, HTTP-вызова не делал и
+        # переписывал строку как свежую. Пересчёт отчитывался об успехе, ничего не
+        # пересчитав, — и вектор после этого выглядел честным.
+        #
+        # Признак принудительной пометки — пустой `content_hash` у собственной строки
+        # объекта; после первой же успешной записи он исчезает сам.
+        forced = {str(plan["row"]["id"]) for plan in plans if plan["row"].get("forced")}
         shared = await run_blocking(
             self.storage.get_vectors_by_content_hash,
-            [digest for plan in plans for digest in plan["hashes"]],
+            [digest for plan in plans if str(plan["row"]["id"]) not in forced for digest in plan["hashes"]],
             model,
         )
         groups: list[list[dict[str, Any]]] = []

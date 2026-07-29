@@ -232,3 +232,87 @@ def test_passage_vectors_are_marked_with_their_object(storage):
         "вектор пассажа остался в кэше переиспользования и вернётся вместо пересчёта"
     )
     assert storage.count_knowledge_chunk_embeddings("alice") == 1, "пассаж удалён, а должен был остаться"
+
+
+@pytest.mark.asyncio
+async def test_a_per_tenant_reindex_is_not_served_from_another_tenants_vector(storage, settings):
+    """`--user X` обязан ПЕРЕСЧИТАТЬ, а не взять тот же текст у соседа.
+
+    Поиск по хэшу идёт по всей таблице без фильтра арендатора — в этом его польза
+    при повторном импорте. Но пометка с `--user` стирает хэши только у своего
+    арендатора, и тот же документ у другого остаётся с прежним вектором. Индексатор
+    находил его, HTTP-вызова не делал и переписывал строку как свежую: пересчёт
+    отчитывался об успехе, ничего не пересчитав, и вектор после этого выглядел
+    честным. Найдено состязательным ревью, воспроизведено на одноразовой базе.
+
+    Проверяется поведение индексатора, а не хранилища: именно он решает, спрашивать
+    ли кэш.
+    """
+    import dataclasses
+
+    from jericho.workers import WorkersManager
+
+    class _CountingEmbeddings:
+        def __init__(self, tuned) -> None:
+            self.settings = tuned
+            self.remote_enabled = True
+            self.cooling_down = False
+            self.calls = 0
+
+        async def embed(self, texts, *, budget_sec=None):
+            self.calls += 1
+            return [[0.5, 0.5] for _ in texts]
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://127.0.0.1:9999/v1",
+        embeddings_model="test-embed",
+        embeddings_chunk_chars=0,
+    )
+    storage.ensure_user("alice")
+    storage.ensure_user("bob")
+    # Один и тот же текст у двух арендаторов — на настоящем архиве это обычное дело.
+    alice_id = _make(storage, "alice", 0)
+    bob_id = _make(storage, "bob", 0)
+    record = storage.get_knowledge_object(alice_id)
+    assert record is not None
+    assert str(record["content"]) == str((storage.get_knowledge_object(bob_id) or {})["content"]), (
+        "проба построена неверно: у арендаторов разный текст, и общего хэша не будет"
+    )
+
+    # Вектор соседа надо записать под ТЕМ хэшем, который считает индексатор: он
+    # хэширует `knowledge_search_text(...)`, а не голое тело. Первая версия этой
+    # пробы хэшировала тело, хэши не совпадали, кэш не срабатывал никогда — и тест
+    # был зелёным на сломанном коде. Проверено подменой поведения.
+    import hashlib as _hl
+
+    from jericho.retrieval import knowledge_search_text
+    from jericho.workers import _DOC_VECTOR_MAX_CHARS
+
+    bob_row = storage.get_knowledge_object(bob_id)
+    assert bob_row is not None
+    doc_text = knowledge_search_text(bob_row)[:_DOC_VECTOR_MAX_CHARS]
+    storage.upsert_knowledge_embeddings(
+        [
+            {
+                "knowledge_object_id": bob_id,
+                "user_id": "bob",
+                "model": "test-embed",
+                "dim": 2,
+                "source_version": bob_row["version"],
+                "content_hash": _hl.sha256(doc_text.encode("utf-8")).hexdigest(),
+                "vector": pack_vector([0.9, 0.1]),
+            }
+        ]
+    )
+
+    storage.mark_embeddings_stale(user_id="alice")
+
+    fake = _CountingEmbeddings(tuned)
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_pass()  # noqa: SLF001
+
+    assert fake.calls > 0, (
+        "индексатор не обратился к сервису — вектор взят у другого арендатора, "
+        "и принудительный пересчёт ничего не пересчитал"
+    )
