@@ -29,6 +29,7 @@ from jericho.admin_api._deps import (
     asyncio,
     purge_knowledge,
 )
+from jericho.storage.models import EntityType
 
 router = APIRouter()
 
@@ -249,6 +250,124 @@ async def create_knowledge_entity_link(knowledge_id: str, request: Request) -> d
         after=link,
     )
     return {"link": link}
+
+
+@router.get("/knowledge/{knowledge_id}/entity-suggestions")
+async def list_entity_suggestions(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
+    """Какие сущности этот документ предлагает, но которых в графе ещё нет.
+
+    Считается ПО ЗАПРОСУ из текста самого объекта, а не хранится: кандидаты нигде и
+    не сохранялись (в метаданных лежало только их число), а вычисление из текущего
+    текста заодно не устаревает после правки документа.
+
+    Почему это вообще понадобилось. Сущность создаётся автоматически только при
+    уверенности ≥ 0.88, а два метода, дающие на реальном корпусе владельца почти всё
+    (`capitalized_person_name` — 5797 кандидатов, `identifier_syntax` — 3907), стоят
+    на 0.76 и 0.75. Порог поднят намеренно: в v0.99.0 замерили, что из 28
+    автопринятых связей 26 давал `identifier_syntax` и вещами была четверть. То есть
+    опускать порог нельзя, а другого пути кандидату в граф не было вовсе — и цепочка
+    «извлекли → человек подтвердил → нашлась связь» была разомкнута на первом звене.
+    """
+    _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.entity_suggestions.read", user_id)
+    state = _services(request)
+    knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
+    if not knowledge or knowledge.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Knowledge object not found")
+
+    content = str(knowledge.get("content") or knowledge.get("summary") or "")
+    suggestions = await asyncio.to_thread(
+        state.ingestion._entity_suggestions,  # noqa: SLF001
+        user_id,
+        content,
+    )
+    # Уже связанное не предлагается второй раз — ни принятое, ни отклонённое:
+    # предложить снова то, что человек отверг, значит просить решение дважды.
+    decided = {
+        str(row.get("entity_id"))
+        for row in state.storage.list_knowledge_entity_links(
+            user_id, knowledge_object_id=knowledge_id, status=None, limit=500
+        )
+    }
+    pending = [item for item in suggestions if str(item.get("entity_id") or "") not in decided]
+    return {
+        "knowledge_object_id": knowledge_id,
+        "items": pending,
+        "count": len(pending),
+        "decided": len(decided),
+    }
+
+
+@router.post("/knowledge/{knowledge_id}/entities")
+async def accept_entity_suggestion(knowledge_id: str, request: Request) -> dict[str, Any]:
+    """Подтвердить предложенную сущность целиком — как предложена.
+
+    Создаёт узел, если его ещё нет, ставит УТВЕРЖДЁННУЮ связь с этим документом и
+    пересчитывает предложения связей сущность↔сущность: подтверждение человеком —
+    самый качественный сигнал в системе, и ради него весь путь и существует.
+
+    Имя и тип берутся из тела запроса, а не из повторного разбора текста: между
+    показом и нажатием документ мог измениться, и подтверждать надо ровно то, что
+    человек видел.
+    """
+    actor = _require(request, "admin.all_data.manage")
+    body = await _request_json(request)
+    user_id = str(body.get("user_id") or "")
+    name = str(body.get("name") or "").strip()
+    entity_type = str(body.get("entity_type") or EntityType.OTHER.value).strip()
+    if not user_id or not name:
+        raise HTTPException(status_code=400, detail="user_id and name are required")
+    try:
+        parsed_type = EntityType(entity_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unknown entity_type: {entity_type}") from exc
+
+    state = _services(request)
+    knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
+    if not knowledge or knowledge.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Knowledge object not found")
+
+    # Существующий узел переиспользуется: подтверждение одного и того же имени в двух
+    # документах не должно плодить двойников, которые потом придётся сливать вручную.
+    entity = state.storage.find_entity_by_name(user_id, name)
+    created = False
+    if not entity:
+        entity = state.kg.create_entity(
+            user_id,
+            name,
+            parsed_type,
+            metadata={"origin": "human_review", "accepted_by": actor.user_id},
+        )
+        created = True
+
+    link = state.kg.link_knowledge_to_entity(
+        knowledge_id,
+        str(entity["id"]),
+        user_id,
+        confidence=1.0,
+        evidence={"method": "human_review", "accepted_by": actor.user_id},
+        status="accepted",
+        reviewed_by=actor.user_id,
+    )
+    _audit(
+        request,
+        "admin.entity_suggestion.accept",
+        "entity",
+        str(entity["id"]),
+        after={
+            "name": name,
+            "entity_type": parsed_type.value,
+            "knowledge_object_id": knowledge_id,
+            "entity_created": created,
+        },
+    )
+    relations = await asyncio.to_thread(state.kg.suggest_relations_for_knowledge, user_id, knowledge_id)
+    return {
+        "entity": entity,
+        "entity_created": created,
+        "link": link,
+        "relation_candidates": relations,
+    }
 
 
 @router.patch("/entity-links/{link_id}")
