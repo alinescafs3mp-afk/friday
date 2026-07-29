@@ -1048,6 +1048,8 @@ class HybridSearcher:
         pool_max: int = 400,
         dense_evidence_min: float = _DENSE_EVIDENCE_MIN_DEFAULT,
         channel_weights: Mapping[str, float] | None = None,
+        reranker: Any = None,
+        rerank_top: int = 0,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
@@ -1077,6 +1079,11 @@ class HybridSearcher:
         # них меняет не только вес, но и отбор кандидатов и гейт доказательств (см.
         # `ENTANGLED_SIGNALS`). Здесь вес именно ИЗМЕНЯЕТСЯ, а не выключается, поэтому
         # шов законен: отбор и гейт остаются прежними.
+        # Переранжирование локальной моделью. Выключено, пока `rerank_top` не задан:
+        # шаг стоит ~8 секунд против 1.58 у самого поиска, и место ему там, где человек
+        # ждёт ОТВЕТ, а не список. Подробности и замеры — в `_rerank.py`.
+        self._reranker = reranker
+        self._rerank_top = max(0, int(rerank_top))
         self._channel_weights = dict(_CHANNEL_WEIGHTS)
         for name, value in (channel_weights or {}).items():
             if name not in _CHANNEL_WEIGHTS:
@@ -1534,9 +1541,15 @@ class HybridSearcher:
             return None
 
         ordered = sorted(candidate_map, key=lambda document_id: final_scores[document_id], reverse=True)
+        # При включённом переранжировании собирается ГЛУБЖЕ запрошенного: смысл шага в
+        # том, чтобы поднять отвечающий документ с двенадцатого места на второе, а для
+        # этого его надо сначала собрать. Замерено, ради чего: точность выдачи плоская
+        # по глубине (35.9% в пятёрке против 35.2% в двадцатке), то есть отвечающие
+        # разбросаны по списку.
+        collect = max(limit, self._rerank_top) if self._reranker is not None else limit
         results: list[dict[str, Any]] = []
         for document_id in ordered:
-            if len(results) >= limit:
+            if len(results) >= collect:
                 break
             item = self.storage.get_knowledge_object(document_id, user_id)
             if not item or item.get("deleted_at"):
@@ -1563,6 +1576,17 @@ class HybridSearcher:
             if entities:
                 item["_entities"] = entities
             results.append(item)
+
+        reranked_count = 0
+        if self._reranker is not None and self._rerank_top > 0 and len(results) > limit:
+            reordered = await self._reranker(clean_query, results[: self._rerank_top])
+            if reordered is not None and len(reordered) == len(results[: self._rerank_top]):
+                # Порядок меняется, состав — нет: хвост за `rerank_top` остаётся на
+                # месте. Проверка длины не формальность: потеря объекта выглядела бы
+                # как «поиск ничего не нашёл», а не как сбой модели.
+                results = reordered + results[self._rerank_top :]
+                reranked_count = len(reordered)
+        results = results[:limit]
 
         # Resolve the winning passage's offsets so the answer can quote what actually
         # matched. Without this, a document recalled semantically at section 7 would
@@ -1621,6 +1645,10 @@ class HybridSearcher:
             "feedback": True,
             "graph": bool(kg),
         }
+        if reranked_count:
+            # Видно в explain-трейсе: порядок выдачи решала не только формула, и
+            # человек, разбирающий «почему это первым», должен об этом знать.
+            strategy["reranked"] = reranked_count
         if repair is not None:
             # Said out loud, always: the answer is about a different string than
             # the one the user typed, and a reader who is not told that has no way
