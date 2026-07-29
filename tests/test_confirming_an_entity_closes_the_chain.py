@@ -163,3 +163,19 @@ def test_confirming_is_written_to_the_audit_log(instance):
     )
     actions = [row["action"] for row in storage.list_audit_log(None, limit=50)]
     assert "admin.entity_suggestion.accept" in actions
+
+
+def test_candidates_come_back_strongest_first(instance):
+    """На живом документе из 23 кандидатов годными были единицы.
+
+    `location_preposition` (0.77) принимает «в Наставлении» и «в Курсе» за места, и
+    в списке, где годное перемешано с шумом, человек бросает разбор. Порядок по
+    уверенности ставит объявленные методы (0.89–0.93) наверх и не стоит ничего.
+    """
+    client, owner, user_id, ko_id, _ = instance
+    items = client.get(
+        f"/api/admin/knowledge/{ko_id}/entity-suggestions?user_id={user_id}", headers=owner
+    ).json()["items"]
+
+    scores = [float(item.get("confidence") or 0) for item in items]
+    assert scores == sorted(scores, reverse=True), f"порядок не по уверенности: {scores}"

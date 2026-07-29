@@ -290,6 +290,12 @@ async def list_entity_suggestions(knowledge_id: str, request: Request, user_id: 
         )
     }
     pending = [item for item in suggestions if str(item.get("entity_id") or "") not in decided]
+    # По убыванию уверенности: на живом документе из 23 кандидатов годными были
+    # единицы, а `location_preposition` (0.77) исправно принимает «в Наставлении» и
+    # «в Курсе» за места. Разбирать список, где годное перемешано с шумом, человек
+    # бросит на третьем экране — а порядок по уверенности ставит объявленные методы
+    # (0.89–0.93) наверх бесплатно.
+    pending.sort(key=lambda item: (-float(item.get("confidence") or 0.0), str(item.get("name") or "")))
     return {
         "knowledge_object_id": knowledge_id,
         "items": pending,
