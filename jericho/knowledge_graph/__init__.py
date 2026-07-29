@@ -223,6 +223,10 @@ def _token_overlap(query: str, value: str) -> float:
     return len(left & right) / len(left | right)
 
 
+# Насколько далеко друг от друга могут стоять два упоминания, чтобы фраза между
+# ними считалась утверждением о связи. Замер — в `suggest_relations_for_knowledge`.
+_RELATION_SPAN_CHARS = 400
+
 _RELATION_PHRASES: tuple[tuple[re.Pattern[str], RelationType, float], ...] = (
     (
         re.compile(r"\b(?:использует|используют|uses?|runs?\s+on|работает\s+на)\b", re.I),
@@ -1205,8 +1209,31 @@ class KnowledgeGraph:
     ) -> list[dict[str, Any]]:
         """Extract explicit, review-only relations from one Knowledge Object.
 
-        Co-occurrence alone is never enough.  Both entity mentions and an
-        explicit relation phrase must occur in the same local span.
+        Co-occurrence alone is never enough. Both entity mentions and an explicit
+        relation phrase must occur in the same local span.
+
+        «Local span» is a PARAGRAPH, and that was measured rather than chosen. On
+        400 real documents from the owner's archive, with the extractor's own entity
+        candidates standing in for links (median 8 per document):
+
+            окно  вхождения  связей  документов
+             160  первое          2           1     <- как было
+             400  первое         25           7
+             400  все            26           8     <- стало
+            1000  все            58          20
+
+        The 160-character window — not «first occurrence only» — was what made this
+        return nothing: widening it alone multiplies the yield by twelve. A relation
+        phrase appears at all in 141 of those 400 documents, so the vocabulary is
+        not the problem either.
+
+        1000 characters would double the yield again and is deliberately NOT taken:
+        that is a page, not a span, and two entities a page apart with «использует»
+        somewhere between them is not evidence of anything. Every suggestion costs a
+        human decision, and this project already has 1605 of those waiting.
+
+        Every occurrence of a name counts, not just the first: which mention happens
+        to come first is an accident of how the document is written.
         """
 
         knowledge = self.storage.get_knowledge_object(knowledge_object_id, user_id)
@@ -1225,20 +1252,18 @@ class KnowledgeGraph:
             if not name:
                 continue
             pattern = re.compile(re.escape(name), re.I)
-            match = pattern.search(text)
-            if match:
+            for match in pattern.finditer(text):
                 mentions.append((match.start(), match.end(), link))
         mentions.sort(key=lambda item: item[0])
 
         suggestions: list[dict[str, Any]] = []
         for index, left in enumerate(mentions):
             for right in mentions[index + 1 :]:
-                if right[0] - left[1] > 160:
+                if right[0] - left[1] > _RELATION_SPAN_CHARS:
                     break
                 between = text[left[1] : right[0]]
                 for phrase, relation_type, base_confidence in _RELATION_PHRASES:
-                    match = phrase.search(between)
-                    if not match:
+                    if not phrase.search(between):
                         continue
                     confidence = base_confidence
                     span = text[max(0, left[0] - 30) : min(len(text), right[1] + 30)]

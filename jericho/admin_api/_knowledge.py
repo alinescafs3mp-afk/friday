@@ -26,6 +26,7 @@ from jericho.admin_api._deps import (
     _require,
     _services,
     _target_user,
+    asyncio,
     purge_knowledge,
 )
 
@@ -274,7 +275,23 @@ async def review_knowledge_entity_link(link_id: str, request: Request) -> dict[s
         link_id,
         after=link,
     )
-    return {"link": link}
+    # Утверждение связи человеком — самый качественный сигнал в системе, и он был
+    # единственным, который в граф не возвращался. Предложения связей считались
+    # ровно один раз, при рождении объекта, по тем связям, что автомат успел принять
+    # сам; всё, что подтвердил владелец при разборе, для поиска связей не
+    # существовало никогда. Второго шанса не было предусмотрено.
+    #
+    # Пересчёт идёт off-loop и только на принятии: отклонение связи новых
+    # предложений не рождает, а `store_relation_candidate` идемпотентен и не
+    # переоткрывает то, что человек уже отверг.
+    relations: list[dict[str, Any]] = []
+    if status == "accepted":
+        relations = await asyncio.to_thread(
+            _services(request).kg.suggest_relations_for_knowledge,
+            user_id,
+            str(link.get("knowledge_object_id") or ""),
+        )
+    return {"link": link, "relation_candidates": relations}
 
 
 @router.patch("/knowledge/{knowledge_id}")
