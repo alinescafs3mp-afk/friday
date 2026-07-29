@@ -68,7 +68,7 @@ class _FakeEmbeddings:
         self.remote_enabled = True
         self.calls: list[list[str]] = []
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, budget_sec=None):
         self.calls.append(list(texts))
         return [_concept_vector(text) for text in texts]
 

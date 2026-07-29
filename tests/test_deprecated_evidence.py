@@ -46,7 +46,7 @@ class _FakeTopicEmbeddings:
         self.settings = settings
         self.remote_enabled = True
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, budget_sec=None):
         return [_topic_vector(text) for text in texts]
 
 

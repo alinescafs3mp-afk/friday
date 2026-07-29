@@ -767,7 +767,7 @@ class EmbeddingBackend:
             and self.settings.embeddings_model
         )
 
-    async def embed(self, texts: list[str]) -> list[list[float]] | None:
+    async def embed(self, texts: list[str], *, budget_sec: float | None = None) -> list[list[float]] | None:
         if not self.remote_enabled or not texts:
             return None
         if self.cooling_down:
@@ -791,7 +791,13 @@ class EmbeddingBackend:
             # between 00:00 and 03:00** on one night, indexing a single large
             # document, before it finally got through. Their `llm_timeout_sec` was
             # 240 the entire time.
-            timeout = httpx.Timeout(self.settings.llm_timeout_sec, connect=10.0)
+            # Фоновой индексации нужен щедрый таймаут: она может ждать сколько угодно,
+            # её никто не читает. Живому запросу человека — нет: он сидит и смотрит.
+            # На этой установке эмбеддинги считаются на процессоре (в видеопамять не
+            # помещаются вместе с LLM), и одна короткая строка занимает ~70 секунд.
+            # Без отдельного бюджета человек ждал 40 секунд, чтобы получить в конце
+            # «модель недоступна» — при том что LLM отвечала за две.
+            timeout = httpx.Timeout(budget_sec or self.settings.llm_timeout_sec, connect=10.0)
             key = self.settings.embeddings_api_key
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=headers) as client:
@@ -1788,7 +1794,12 @@ class HybridSearcher:
         re-ranking the existing pool by embedding the candidate texts directly.
         """
         assert self.embeddings is not None
-        query_vectors = await self.embeddings.embed([query])
+        # Плотный канал — улучшение, а не условие ответа: лексика и граф уже дали
+        # результат, и ждать ради добавки дольше, чем человек готов ждать весь ответ,
+        # значит менять полезное на бесполезное.
+        query_vectors = await self.embeddings.embed(
+            [query], budget_sec=self.embeddings.settings.retrieval_dense_query_budget_sec
+        )
         if not query_vectors:
             return {}
         query_vector = query_vectors[0]

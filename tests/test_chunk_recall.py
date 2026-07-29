@@ -76,7 +76,7 @@ class _FakeTopicEmbeddings:
         self.remote_enabled = True
         self.calls: list[list[str]] = []
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, budget_sec=None):
         batch = list(texts)
         self.calls.append(batch)
         return [_topic_vector(text) for text in batch]
@@ -653,7 +653,7 @@ class _CappedEmbeddings(_FakeTopicEmbeddings):
         super().__init__(settings)
         self._cap = cap
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, budget_sec=None):
         batch = list(texts)
         self.calls.append(batch)
         if len(batch) > self._cap:
@@ -881,7 +881,7 @@ async def test_the_pool_fallback_bounds_what_it_sends(storage, settings):
             self.remote_enabled = True
             self.requests: list[list[str]] = []
 
-        async def embed(self, texts):
+        async def embed(self, texts, *, budget_sec=None):
             self.requests.append(list(texts))
             return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
 

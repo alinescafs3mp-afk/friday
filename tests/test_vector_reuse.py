@@ -116,7 +116,7 @@ async def test_the_indexer_does_not_pay_twice_for_the_same_text(settings, storag
     class _CountingBackend:
         remote_enabled = True
 
-        async def embed(self, texts):
+        async def embed(self, texts, *, budget_sec=None):
             calls.append(list(texts))
             return [[0.1, 0.2, 0.3] for _ in texts]
 

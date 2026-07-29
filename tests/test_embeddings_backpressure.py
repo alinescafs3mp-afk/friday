@@ -215,7 +215,7 @@ async def test_a_loaded_tick_earns_a_rest_and_the_next_one_is_skipped(settings, 
         def cooldown_remaining(self) -> float:
             return 0.0
 
-        async def embed(self, texts):
+        async def embed(self, texts, *, budget_sec=None):
             type(self).calls += 1
             # Дольше порога, за которым тик считается нагрузкой.
             await asyncio.sleep(1.1)
@@ -279,7 +279,7 @@ async def test_a_cooling_backend_stops_the_tick_entirely(settings, storage):
         def cooldown_remaining(self) -> float:
             return 42.0
 
-        async def embed(self, texts):  # pragma: no cover — не должно вызываться
+        async def embed(self, texts, *, budget_sec=None):  # pragma: no cover — не должно вызываться
             type(self).calls += 1
             return None
 
@@ -287,3 +287,50 @@ async def test_a_cooling_backend_stops_the_tick_entirely(settings, storage):
     storage.ensure_user("alice")
     await manager._embeddings_index_all()  # noqa: SLF001
     assert _Cooling.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_a_live_query_does_not_wait_as_long_as_the_indexer(settings, monkeypatch):
+    """Плотный канал — улучшение, а не условие ответа.
+
+    На этой установке эмбеддинги считаются на процессоре: в видеопамять они не
+    помещаются вместе с LLM. Одна короткая строка занимает ~70 секунд. Замерено
+    сквозь весь путь: человек ждал 40 секунд и получал «модель недоступна» — при
+    том что LLM отвечала за две. Фоновой индексации щедрый таймаут нужен, живому
+    запросу — нет.
+    """
+    import dataclasses
+
+    import httpx
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="m",
+        llm_timeout_sec=240.0,
+        retrieval_dense_query_budget_sec=3.0,
+    )
+    backend = EmbeddingBackend(tuned)
+    seen: list[float] = []
+
+    class _Client:
+        def __init__(self, *args, timeout=None, **kwargs) -> None:
+            seen.append(float(timeout.read if hasattr(timeout, "read") else timeout))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    await backend.embed(["запрос человека"], budget_sec=tuned.retrieval_dense_query_budget_sec)
+    assert seen[-1] == 3.0, f"живой запрос ждал по таймауту индексации: {seen[-1]}"
+
+    backend._cooldown_until = 0.0
+    await backend.embed(["фоновая пачка"])
+    assert seen[-1] == 240.0, "фоновая индексация потеряла свой щедрый таймаут"

@@ -258,7 +258,7 @@ async def test_a_weak_dense_score_alone_is_not_evidence(storage):
             self.settings = settings
             self._similarity = similarity
 
-        async def embed(self, texts):
+        async def embed(self, texts, *, budget_sec=None):
             import math
 
             # Keyed on the TEXT, not its position: the query is embedded in its own

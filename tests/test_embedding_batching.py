@@ -33,7 +33,7 @@ class _Backend:
         self._fail_on = fail_on
         self._dimensions = dimensions
 
-    async def embed(self, texts: list[str]):
+    async def embed(self, texts: list[str], *, budget_sec=None):
         self.requests.append([len(text) for text in texts])
         if self._fail_on is not None and len(self.requests) == self._fail_on:
             return None

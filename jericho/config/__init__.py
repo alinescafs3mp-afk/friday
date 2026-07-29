@@ -298,6 +298,9 @@ class JerichoSettings:
     # «Объектов за тик» ничего не ограничивает: заметка и стостраничный документ
     # отличаются в сотни раз, и та же пачка из 64 штук весит то 6 тысяч символов,
     # то два миллиона.
+    # Сколько живой поиск готов ждать вектор запроса. Отдельно от таймаута
+    # фоновой индексации: та может ждать сколько угодно, человек — нет.
+    retrieval_dense_query_budget_sec: float
     embeddings_index_char_budget: int
     embeddings_index_rest_ratio: float
     embeddings_recall_candidates: int
@@ -607,6 +610,9 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ),
         embeddings_model=os.environ.get("JERICHO_EMBEDDINGS_MODEL", ""),
         embeddings_index_batch=_int_env("JERICHO_EMBEDDINGS_INDEX_BATCH", 64, minimum=1),
+        retrieval_dense_query_budget_sec=_float_env(
+            "JERICHO_RETRIEVAL_DENSE_QUERY_BUDGET_SEC", 4.0, minimum=0.5
+        ),
         embeddings_index_char_budget=_int_env("JERICHO_EMBEDDINGS_INDEX_CHAR_BUDGET", 200_000, minimum=1000),
         embeddings_index_rest_ratio=_float_env("JERICHO_EMBEDDINGS_INDEX_REST_RATIO", 1.0, minimum=0.0),
         embeddings_index_interval_sec=_float_env("JERICHO_EMBEDDINGS_INDEX_INTERVAL_SEC", 120.0, minimum=5.0),

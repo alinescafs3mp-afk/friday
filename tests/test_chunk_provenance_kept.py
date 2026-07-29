@@ -49,7 +49,7 @@ class _Backend:
     def __init__(self, settings):
         self.settings = settings
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, budget_sec=None):
         return [_vec(text) for text in texts]
 
 
@@ -202,7 +202,7 @@ async def test_provenance_survives_the_band_where_the_document_vector_wins(dense
         def __init__(self, settings):
             self.settings = settings
 
-        async def embed(self, texts):
+        async def embed(self, texts, *, budget_sec=None):
             return [query_vector for _ in texts]
 
     searcher = HybridSearcher(storage, _Fixed(dense_settings), record_usage=False)
