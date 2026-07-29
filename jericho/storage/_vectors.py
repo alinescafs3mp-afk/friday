@@ -312,6 +312,32 @@ class VectorsMixin(StorageShared):
                 (knowledge_object_id,),
             )
 
+    def mark_embeddings_stale(self, *, user_id: str | None = None) -> int:
+        """Пометить векторы устаревшими, НЕ удаляя их; вернуть число помеченных.
+
+        Нужно, когда вектора посчитаны верно по форме, но по неверному тексту, и
+        отличить такие от честных нельзя: хэш пишется от полного текста, а вектор
+        мог быть посчитан по укороченному. Ровно это и случилось — отказ сервиса по
+        длине лечился укорачиванием всех текстов пачки, и 32 из 50 проверенных
+        векторов описывали другой текст.
+
+        Пометка вместо удаления принципиальна. Устаревание определяется по
+        `source_version != k.version` (см. `_missing_embedding_filter`), поэтому
+        достаточно поставить в это поле значение, которым настоящая версия быть не
+        может. Вектор остаётся на месте и продолжает отвечать на поиск, пока
+        индексатор не заменит его правильным. Удаление оставило бы корпус без
+        плотного поиска на всё время пересчёта.
+        """
+        with self.transaction() as conn:
+            if user_id is None:
+                cursor = conn.execute("UPDATE knowledge_embeddings SET source_version=-1")
+            else:
+                cursor = conn.execute(
+                    "UPDATE knowledge_embeddings SET source_version=-1 WHERE user_id=?",
+                    (user_id,),
+                )
+            return int(cursor.rowcount or 0)
+
     def count_knowledge_embeddings(self, user_id: str | None = None) -> int:
         if user_id is None:
             row = self.execute("SELECT COUNT(*) AS n FROM knowledge_embeddings").fetchone()

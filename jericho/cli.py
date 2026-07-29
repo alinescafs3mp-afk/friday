@@ -685,6 +685,48 @@ def _import(args: argparse.Namespace) -> int:
     return 1 if counts["failed"] else 0
 
 
+def _reindex_embeddings(args: argparse.Namespace) -> int:
+    """Заставить индексатор пересчитать вектора, не оставляя поиск без них.
+
+    Понадобилось потому, что вектор, посчитанный по неверному тексту, в базе
+    неотличим от honest: хэш пишется от полного текста. Когда такое обнаружено —
+    заменой лечения на отказ по длине, сменой модели, правкой потолков — нужен
+    способ сказать «пересчитай всё», и он не должен требовать ни остановки
+    сервиса, ни ручного удаления строк.
+
+    Работает пометкой, а не удалением: старый вектор продолжает отвечать на поиск,
+    пока индексатор не заменит его. Поэтому команда безопасна на живой системе —
+    худшее, что она делает, это работа для видеокарты.
+    """
+
+    if not args.yes:
+        print(
+            "Команда пометит вектора устаревшими, и фоновый индексатор пересчитает их заново. "
+            "Поиск продолжит работать на прежних векторах до замены. Повторите с --yes.",
+            file=sys.stderr,
+        )
+        return 2
+
+    from jericho.config import ensure_runtime_dirs, load_settings
+    from jericho.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    try:
+        marked = storage.mark_embeddings_stale(user_id=args.user)
+        storage.record_event(
+            "embeddings.reindex_requested",
+            {"marked": marked, "user_id": args.user or "*"},
+        )
+    finally:
+        storage.close()
+    scope = f"арендатора {args.user}" if args.user else "всех арендаторов"
+    print(f"Помечено устаревшими векторов {scope}: {marked}.")
+    print("Пересчёт идёт фоновым индексатором; следите за `jericho status` или журналом.")
+    return 0
+
+
 def _purge(args: argparse.Namespace) -> int:
     """Irreversibly hard-delete soft-deleted knowledge while the backend is stopped."""
 
@@ -1045,6 +1087,14 @@ def build_parser() -> argparse.ArgumentParser:
     purge.add_argument("--limit", type=int, default=200, help="Maximum objects to purge in one run")
     purge.add_argument("--yes", action="store_true", help="Confirm irreversible destruction")
     purge.set_defaults(handler=_purge)
+
+    reindex = sub.add_parser(
+        "reindex-embeddings",
+        help="Mark stored vectors stale so the indexer recomputes them (search keeps working)",
+    )
+    reindex.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    reindex.add_argument("--yes", action="store_true", help="Confirm the recomputation")
+    reindex.set_defaults(handler=_reindex_embeddings)
 
     mint = sub.add_parser("mint-token", help="Issue a scoped API token for an account/preset")
     mint.add_argument("--user", required=True, help="Account id the token authenticates as")
