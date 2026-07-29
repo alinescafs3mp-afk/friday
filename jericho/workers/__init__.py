@@ -12,6 +12,7 @@ import functools
 import hashlib
 import json
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
@@ -992,11 +993,39 @@ class WorkersManager:
         char_budget = max(1000, int(self.settings.embeddings_index_char_budget))
         tick_chars = 0
         for row in rows:
+            # Сколько пассажей дать ЭТОМУ объекту. Потолок из настроек — не про длину
+            # текста, а про число входов; при нехватке пассажей `chunk_spans` не режет
+            # документ, а РАСШИРЯЕТ окно, чтобы покрыть его целиком. Для очень длинных
+            # документов окно вырастает выше того, что сервис принимает одним входом,
+            # и дальше происходит тихая беда: запрос отвергают, длину режут вдвое, и
+            # половина пассажа в свой вектор не попадает.
+            #
+            # Замерено на корпусе владельца: 569 пассажей из 13 840 (4.1%) шире
+            # 10 000 знаков, все — у ДЕВЯТИ объектов из 1086, самый широкий 22 012.
+            # То есть беда узкая, но бьёт по самым содержательным документам, и
+            # ровно по тем, ради которых разбиение на пассажи и делалось.
+            #
+            # Лечение — дать столько пассажей, чтобы окно осталось в безопасных
+            # границах, а не сужать покрытие. Верхняя граница прежняя: входы одного
+            # объекта обязаны поместиться в один запрос.
+            # Считать надо по тому, что реально уедет ОДНИМ входом, а не по ширине
+            # окна: к куску тела приписывается шапка объекта, окна перекрываются, а
+            # хвостовой огрызок подклеивается к предыдущему. Три надбавки, каждая
+            # маленькая, и вместе они переносят вход через предел — первая версия
+            # этого расчёта промахнулась ровно на них, на 111 знаков.
+            overhead = (
+                self.settings.embeddings_chunk_overlap_chars
+                + max(120, self.settings.embeddings_chunk_chars // 6)
+                + self.settings.embeddings_chunk_chars // 4
+            )
+            target = max(1, _DOC_VECTOR_MAX_CHARS - overhead)
+            needed = math.ceil(len(str(row.get("content") or "")) / target)
+            object_chunks = max(1, min(max(max_chunks, needed), cap - 1))
             units = knowledge_chunk_units(
                 row,
                 max_chars=self.settings.embeddings_chunk_chars,
                 overlap_chars=self.settings.embeddings_chunk_overlap_chars,
-                max_chunks=max_chunks,
+                max_chunks=object_chunks,
             )
             # Bounded before it is sent. The whole-object vector is a COARSE signal —
             # passage vectors carry the detail — but it goes as one input, and a large

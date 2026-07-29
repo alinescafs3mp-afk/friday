@@ -741,3 +741,85 @@ def test_the_character_request_limit_is_recognised_as_a_length_refusal():
     # Чужие беды по-прежнему не лечатся укорачиванием текста.
     assert not _input_too_long('{"error":{"message":"model not found"}}')
     assert not _input_too_long('{"error":{"message":"invalid input format"}}')
+
+
+def test_a_long_document_gets_more_passages_rather_than_wider_ones(settings, storage):
+    """Расширение окна не должно переезжать предел одного входа.
+
+    `chunk_spans` при нехватке пассажей не режет документ, а РАСШИРЯЕТ окно, чтобы
+    покрыть его целиком — и это правильно, покрытие важнее. Но потолок числа пассажей
+    (64) выведен из числа ВХОДОВ в запрос, а не из длины текста, и на очень длинном
+    документе окно вырастало выше того, что сервис принимает одним входом.
+
+    Дальше беда тихая: запрос отвергается по длине, длина режется вдвое, и половина
+    пассажа в свой вектор не попадает. Ни в базе, ни в логе объект от честного не
+    отличается.
+
+    Замерено на корпусе владельца 2026-07-29: 569 пассажей из 13 840 шире 10 000
+    знаков, все у ДЕВЯТИ объектов из 1086, самый широкий 22 012 — то есть били по
+    самым содержательным документам, ровно тем, ради которых пассажи и придуманы.
+    """
+    import dataclasses
+
+    from jericho.retrieval import knowledge_chunk_units
+    from jericho.workers import _DOC_VECTOR_MAX_CHARS
+
+    # Документ, которому 64 пассажей не хватает: 64 x 10 000 = 640 000.
+    body = "Раздел о сроках поставки и порядке приёмки оборудования. " * 16_000
+    row = {
+        "id": "ko-long",
+        "title": "Длинный документ",
+        "summary": "сводка",
+        "content": body,
+        "tags_json": "[]",
+        "knowledge_kind": "document",
+    }
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_chunk_chars=1200,
+        embeddings_chunk_overlap_chars=200,
+        embeddings_chunk_max_per_object=64,
+        embeddings_max_inputs_per_request=256,
+    )
+
+    # Настройка «как есть»: окно раздувается выше безопасного предела.
+    naive = knowledge_chunk_units(
+        row,
+        max_chars=tuned.embeddings_chunk_chars,
+        overlap_chars=tuned.embeddings_chunk_overlap_chars,
+        max_chunks=64,
+    )
+    assert naive, "документ не разбился вовсе — проба ничего не проверяет"
+    assert max(len(text) for _, _, text in naive) > _DOC_VECTOR_MAX_CHARS, (
+        "проба построена неверно: при 64 пассажах вход и так остался в пределах"
+    )
+
+    # Столько пассажей, чтобы ВХОД остался безопасным — так считает индексатор.
+    # Считается по тексту, который реально уедет: кусок тела плюс шапка объекта,
+    # плюс перекрытие, плюс подклеенный хвостовой огрызок.
+    import math
+
+    overhead = (
+        tuned.embeddings_chunk_overlap_chars
+        + max(120, tuned.embeddings_chunk_chars // 6)
+        + tuned.embeddings_chunk_chars // 4
+    )
+    target = max(1, _DOC_VECTOR_MAX_CHARS - overhead)
+    needed = math.ceil(len(body) / target)
+    allowed = max(1, min(max(64, needed), tuned.embeddings_max_inputs_per_request - 1))
+    units = knowledge_chunk_units(
+        row,
+        max_chars=tuned.embeddings_chunk_chars,
+        overlap_chars=tuned.embeddings_chunk_overlap_chars,
+        max_chunks=allowed,
+    )
+    # Меряется ДЛИНА ВХОДА, а не ширина окна: отвергает сервис именно её.
+    widest = max(len(text) for _, _, text in units)
+    assert widest <= _DOC_VECTOR_MAX_CHARS, (
+        f"вход в {widest} знаков шире безопасного — его вектор посчитается "
+        "по половине текста, и отличить это будет невозможно"
+    )
+    # Покрытие не потеряно: пассажи по-прежнему доходят до конца тела.
+    assert units[-1][1] >= len(body) - tuned.embeddings_chunk_chars, "хвост документа не покрыт"
+    # И объект по-прежнему помещается в один запрос вместе со своим общим вектором.
+    assert len(units) + 1 <= tuned.embeddings_max_inputs_per_request
