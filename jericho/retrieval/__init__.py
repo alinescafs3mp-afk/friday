@@ -10,7 +10,7 @@ import math
 import re
 import time
 from collections import Counter, OrderedDict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
@@ -644,6 +644,18 @@ _CHUNK_CORROBORATION_K = 3
 
 # Signals whose weight can be zeroed WITHOUT changing anything else, so switching one
 # off and re-measuring the gold set answers "does this weight earn its place?".
+# Веса каналов в итоговом слиянии. Вынесены из выражения, чтобы их можно было
+# ЗАМЕРИТЬ: подобрать вес, не имея возможности его изменить, нельзя, а правка
+# исходника на каждую пробу означает, что каждый раз меряется другая программа.
+# Значения — ровно те, что стояли в выражении; менять их разрешено только замером
+# с отложенной половиной вопросов.
+_CHANNEL_WEIGHTS: dict[str, float] = {
+    "lexical": 0.19,
+    "field": 0.17,
+    "embedding": 0.17,
+    "graph": 0.16,
+}
+
 ABLATABLE_SIGNALS: tuple[str, ...] = (
     "feedback",
     "usage",
@@ -1035,6 +1047,7 @@ class HybridSearcher:
         ablate: Sequence[str] | None = None,
         pool_max: int = 400,
         dense_evidence_min: float = _DENSE_EVIDENCE_MIN_DEFAULT,
+        channel_weights: Mapping[str, float] | None = None,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
@@ -1054,6 +1067,21 @@ class HybridSearcher:
         # Names from ABLATABLE_SIGNALS whose weight is forced to zero for this
         # instance. Measurement only: a name can silence a weight, never raise it.
         self._ablate = frozenset(ablate or ())
+        # Веса четырёх каналов, участвующих в слиянии. Шов ТОЛЬКО ДЛЯ ЗАМЕРА, как и
+        # `ablate` рядом: наружу не выведен, из настроек не читается, по умолчанию —
+        # ровно те константы, что стояли в выражении. Нужен потому, что подобрать
+        # веса, не имея возможности их менять, нельзя, а править исходник на каждую
+        # пробу значит мерить каждый раз другую программу.
+        #
+        # Эти четыре в `ABLATABLE_SIGNALS` не входят и не могут: обнуление любого из
+        # них меняет не только вес, но и отбор кандидатов и гейт доказательств (см.
+        # `ENTANGLED_SIGNALS`). Здесь вес именно ИЗМЕНЯЕТСЯ, а не выключается, поэтому
+        # шов законен: отбор и гейт остаются прежними.
+        self._channel_weights = dict(_CHANNEL_WEIGHTS)
+        for name, value in (channel_weights or {}).items():
+            if name not in _CHANNEL_WEIGHTS:
+                raise ValueError(f"unknown channel weight: {name}")
+            self._channel_weights[name] = max(0.0, float(value))
         # Lexical vectors ACROSS requests, keyed by what makes one stale.
         #
         # `lexical_vector` runs once per candidate over that candidate's full body
@@ -1390,10 +1418,10 @@ class HybridSearcher:
             fts_bonus = w_fts_bonus if document_id in fts_ranking else 0.0
             base = (
                 rrf.get(document_id, 0.0)
-                + lexical * 0.19
-                + field * 0.17
-                + embedding * 0.17
-                + graph * 0.16
+                + lexical * self._channel_weights["lexical"]
+                + field * self._channel_weights["field"]
+                + embedding * self._channel_weights["embedding"]
+                + graph * self._channel_weights["graph"]
                 + importance * 0.035
                 + quality * 0.045
                 + promotion * 0.03
