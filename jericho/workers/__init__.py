@@ -50,6 +50,14 @@ _ADVICE_ENDPOINT_DOWN_AFTER = 3
 
 # Ceiling on the single input that carries an object's whole-document vector. Generous
 # next to a passage (default 1200) and far below what an embeddings service will refuse.
+# Потолок, который сервис эмбеддингов кладёт на ОДИН вход. Замерено на живом
+# эндпоинте: 40 000 символов дают `400 an input exceeds the 32768-character limit`,
+# и падает весь запрос целиком, а не один вход. Сегодня `_DOC_VECTOR_MAX_CHARS`
+# ниже этой границы, то есть дефекта нет — но `_EMBED_REQUEST_MAX_CHARS` (40 000)
+# выше неё, и человек, решивший, что раз пачке можно 40к, то и одному входу можно,
+# получит молчаливо неиндексируемые документы.
+_EMBED_INPUT_MAX_CHARS = 32_768
+
 _DOC_VECTOR_MAX_CHARS = 20_000
 
 # How much TEXT one embeddings request may carry. Batches were bounded by input COUNT
@@ -924,7 +932,7 @@ class WorkersManager:
             # Worse, the object's inputs travel in one request, so an oversized document
             # lost its passages too and ended up with NO vector at all — appearing in
             # the log as "backend returned no usable vectors" rather than as too long.
-            doc_text = knowledge_search_text(row)[:_DOC_VECTOR_MAX_CHARS]
+            doc_text = knowledge_search_text(row)[: min(_DOC_VECTOR_MAX_CHARS, _EMBED_INPUT_MAX_CHARS)]
             plans.append({"row": row, "doc_text": doc_text, "units": units})
             # Бюджет тика — в СИМВОЛАХ, а не в объектах. «64 объекта» ничего не
             # ограничивает: заметка и стостраничный docx отличаются в триста раз, и

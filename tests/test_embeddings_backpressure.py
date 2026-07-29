@@ -334,3 +334,26 @@ async def test_a_live_query_does_not_wait_as_long_as_the_indexer(settings, monke
     backend._cooldown_until = 0.0
     await backend.embed(["фоновая пачка"])
     assert seen[-1] == 240.0, "фоновая индексация потеряла свой щедрый таймаут"
+
+
+def test_no_single_input_can_exceed_what_the_service_accepts():
+    """Замерено на живом эндпоинте, а не предположено.
+
+    40 000 символов одним входом дают `400 an input exceeds the 32768-character
+    limit`, и падает ВЕСЬ запрос, а не один вход. Потолок пачки (40 000) выше
+    границы сервиса, и это ловушка: подняв потолок вектора документа «по аналогии»,
+    легко получить документы, которые молча перестанут индексироваться.
+    """
+    from jericho.workers import (
+        _DOC_VECTOR_MAX_CHARS,
+        _EMBED_INPUT_MAX_CHARS,
+        _EMBED_REQUEST_MAX_CHARS,
+    )
+
+    assert _DOC_VECTOR_MAX_CHARS <= _EMBED_INPUT_MAX_CHARS, (
+        "вектор документа одним входом превысит лимит сервиса — запрос будет падать целиком"
+    )
+    assert _EMBED_REQUEST_MAX_CHARS > _EMBED_INPUT_MAX_CHARS, (
+        "потолок пачки перестал быть суммой по входам — перечитайте комментарий, "
+        "он объясняет, почему эти два числа разные"
+    )
