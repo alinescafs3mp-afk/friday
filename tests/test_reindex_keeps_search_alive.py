@@ -316,3 +316,177 @@ async def test_a_per_tenant_reindex_is_not_served_from_another_tenants_vector(st
         "индексатор не обратился к сервису — вектор взят у другого арендатора, "
         "и принудительный пересчёт ничего не пересчитал"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_forced_object_is_not_served_by_a_neighbours_hash(storage, settings):
+    """Защита от кэша обязана стоять на ПРИМЕНЕНИИ, а не только на запросе.
+
+    Первая версия правки убирала дайджесты помеченных объектов из аргумента
+    `get_vectors_by_content_hash` — и этого мало. Ответ приходит плоским словарём
+    «дайджест → вектор», поэтому достаточно ОДНОГО непомеченного соседа по пачке с
+    тем же текстом, чтобы нужный дайджест туда попал; дальше помеченный объект
+    находит его и уходит без обращения к сервису. Пересчёт снова отчитывается об
+    успехе, ничего не пересчитав.
+
+    Найдено состязательным ревью, двумя независимыми срезами.
+    """
+    import dataclasses
+    import hashlib as _hl
+
+    from jericho.retrieval import knowledge_search_text
+    from jericho.workers import _DOC_VECTOR_MAX_CHARS, WorkersManager
+
+    class _CountingEmbeddings:
+        def __init__(self, tuned) -> None:
+            self.settings = tuned
+            self.remote_enabled = True
+            self.cooling_down = False
+            self.calls = 0
+
+        async def embed(self, texts, *, budget_sec=None):
+            self.calls += 1
+            return [[0.5, 0.5] for _ in texts]
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://127.0.0.1:9999/v1",
+        embeddings_model="test-embed",
+        embeddings_chunk_chars=0,
+    )
+    storage.ensure_user("alice")
+    storage.ensure_user("bob")
+    alice_id = _make(storage, "alice", 0)
+    bob_id = _make(storage, "bob", 0)
+
+    bob_row = storage.get_knowledge_object(bob_id)
+    assert bob_row is not None
+    doc_text = knowledge_search_text(bob_row)[:_DOC_VECTOR_MAX_CHARS]
+    digest = _hl.sha256(doc_text.encode("utf-8")).hexdigest()
+
+    # Сосед УСТАРЕЛ и потому сам попадёт в пачку — значит его дайджест уйдёт в запрос
+    # на законных основаниях, и `shared` наполнится, как ни фильтруй аргумент.
+    storage.upsert_knowledge_embeddings(
+        [
+            {
+                "knowledge_object_id": bob_id,
+                "user_id": "bob",
+                "model": "test-embed",
+                "dim": 2,
+                "source_version": 999,  # не равна версии объекта -> устарел
+                "content_hash": digest,
+                "vector": pack_vector([0.9, 0.1]),
+            }
+        ]
+    )
+    storage.mark_embeddings_stale(user_id="alice")
+
+    fake = _CountingEmbeddings(tuned)
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_pass()  # noqa: SLF001
+
+    alice_vectors = storage.get_reusable_vectors([alice_id], "test-embed").get(alice_id, {})
+    assert digest not in alice_vectors or fake.calls > 0, (
+        "помеченный объект получил вектор соседа по хэшу — пересчёт снова оказался "
+        "переписыванием номера версии"
+    )
+    assert fake.calls > 0, "к сервису не обратились вовсе: кэш перекрыл принудительный пересчёт"
+
+
+@pytest.mark.asyncio
+async def test_a_mark_arriving_mid_flight_is_not_erased_by_a_cached_write(storage, settings):
+    """Пометка, пришедшая пока пачка в сервисе, не должна затираться КЭШИРОВАННОЙ записью.
+
+    План строится ДО пометки, поэтому у него `forced` нулевой. Если его входы
+    разрешены из кэша, запись ставит настоящий `content_hash` и текущую версию — то
+    есть снимает пометку вектором, который никто не пересчитывал. Команда пересчёта
+    рассчитана на работу при живом сервисе, значит это не редкость: сегодня так
+    вышло трижды.
+
+    Важно, ЧТО именно проверяется. Объект, честно посчитанный сервисом в этом же
+    проходе, пометку снимать ВПРАВЕ — пересчёт ведь произошёл. Первая версия этого
+    теста требовала обратного и падала на здоровом коде; исправлена по сути, а не
+    подгонкой ожидания.
+    """
+    import dataclasses
+    import hashlib as _hl
+
+    from jericho.retrieval import knowledge_search_text
+    from jericho.workers import _DOC_VECTOR_MAX_CHARS, WorkersManager
+
+    class _MarkingEmbeddings:
+        """Помечает объекты РОВНО в тот момент, когда пачка ушла в сервис."""
+
+        def __init__(self, tuned, store) -> None:
+            self.settings = tuned
+            self.remote_enabled = True
+            self.cooling_down = False
+            self.calls = 0
+            self._store = store
+
+        async def embed(self, texts, *, budget_sec=None):
+            self.calls += 1
+            self._store.mark_embeddings_stale()
+            return [[0.5, 0.5] for _ in texts]
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://127.0.0.1:9999/v1",
+        embeddings_model="test-embed",
+        embeddings_chunk_chars=0,
+    )
+    storage.ensure_user("alice")
+    cached_id = _make(storage, "alice", 0)
+    # Объект БЕЗ вектора — он и уводит пачку в сервис, давая пометке прийти. `_make`
+    # для этого не годится: он сразу пишет вектор, и объект перестаёт быть missing.
+    fresh_raw = RawObject(
+        id=new_id("raw"),
+        user_id="alice",
+        source="test",
+        source_ref=new_id("src"),
+        raw_content="совсем другой документ про сроки и приёмку " * 20,
+        content_type="text",
+        content_hash=hashlib.sha256(b"fresh").hexdigest(),
+    )
+    storage.store_raw_object(fresh_raw)
+    storage.store_knowledge_object(
+        KnowledgeObject(
+            id=new_id("ko"),
+            user_id="alice",
+            raw_object_id=fresh_raw.id,
+            content=fresh_raw.raw_content,
+            content_type="text",
+            title="Свежий",
+            summary="сводка",
+        )
+    )
+
+    # Объект устарел по ВЕРСИИ, но текст не менялся, поэтому его собственный вектор
+    # переиспользуется целиком и к сервису за ним никто не пойдёт.
+    row = storage.get_knowledge_object(cached_id)
+    assert row is not None
+    digest = _hl.sha256(knowledge_search_text(row)[:_DOC_VECTOR_MAX_CHARS].encode("utf-8")).hexdigest()
+    storage.upsert_knowledge_embeddings(
+        [
+            {
+                "knowledge_object_id": cached_id,
+                "user_id": "alice",
+                "model": "test-embed",
+                "dim": 2,
+                "source_version": 999,  # не равна версии объекта -> устарел
+                "content_hash": digest,
+                "vector": pack_vector([0.9, 0.1]),
+            }
+        ]
+    )
+
+    fake = _MarkingEmbeddings(tuned, storage)
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_pass()  # noqa: SLF001
+    assert fake.calls > 0, "проба не сработала: сервис не звался, пометке неоткуда было прийти"
+
+    forced_now = storage.list_forced_embedding_ids([cached_id])
+    assert forced_now == [cached_id], (
+        "кэшированная запись стёрла пришедшую пометку — принудительный пересчёт "
+        "потерян молча, и вектор после этого выглядит честным"
+    )

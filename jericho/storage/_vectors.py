@@ -362,6 +362,29 @@ class VectorsMixin(StorageShared):
                     marked = int(cursor.rowcount or 0)
             return marked
 
+    def list_forced_embedding_ids(self, knowledge_object_ids: Sequence[str]) -> list[str]:
+        """Кто из этих объектов помечен на принудительный пересчёт ПРЯМО СЕЙЧАС.
+
+        Признак тот же, что и в выборке устаревших: собственная строка объекта есть, а
+        `content_hash` у неё пуст. Нужен потому, что пометка может прийти, пока пачка
+        находится в сервисе: план построен до неё, часть входов разрешена из кэша, и
+        запись такого плана стёрла бы пометку вектором, который никто не пересчитывал.
+        """
+        ordered = sorted({str(value) for value in knowledge_object_ids})
+        if not ordered:
+            return []
+        found: list[str] = []
+        for start in range(0, len(ordered), 400):
+            batch = ordered[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.execute(
+                "SELECT knowledge_object_id FROM knowledge_embeddings "  # nosec B608
+                f"WHERE knowledge_object_id IN ({placeholders}) AND COALESCE(content_hash, '') = ''",
+                tuple(batch),
+            ).fetchall()
+            found.extend(str(row["knowledge_object_id"]) for row in rows)
+        return found
+
     def count_knowledge_embeddings(self, user_id: str | None = None) -> int:
         if user_id is None:
             row = self.execute("SELECT COUNT(*) AS n FROM knowledge_embeddings").fetchone()

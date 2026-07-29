@@ -1082,7 +1082,18 @@ class WorkersManager:
         for plan in plans:
             texts = plan["texts"]
             hashes = plan["hashes"]
-            known = {**shared, **reusable.get(str(plan["row"]["id"]), {})}
+            # Помеченному на принудительный пересчёт кэш по хэшу не предлагается ВООБЩЕ.
+            # Убрать его дайджесты из ЗАПРОСА недостаточно, и это была моя ошибка:
+            # `shared` возвращается плоским словарём «дайджест -> вектор», и достаточно
+            # ОДНОГО непомеченного соседа по пачке с тем же текстом, чтобы тот же
+            # дайджест туда попал — а дальше помеченный объект находит его здесь и
+            # уходит без обращения к сервису. Пересчёт снова отчитывается об успехе,
+            # ничего не пересчитав. Найдено состязательным ревью, двумя срезами
+            # независимо. `reusable` для помеченного и так пуст (его собственный хэш
+            # стёрт), но полагаться на это нельзя — условие должно быть явным.
+            forced_plan = str(plan["row"]["id"]) in forced
+            known = {} if forced_plan else dict(shared)
+            known.update(reusable.get(str(plan["row"]["id"]), {}))
             # Same text, same model -> the stored vector is still exact; skip the call.
             plan["cached"] = {index: known[digest] for index, digest in enumerate(hashes) if digest in known}
             plan["missing"] = [index for index in range(len(texts)) if index not in plan["cached"]]
@@ -1195,10 +1206,33 @@ class WorkersManager:
                 return False
             vectors = returned
 
+        # Пометка могла прийти ПОКА пачка была в сервисе. План построен до неё, значит
+        # `forced` у него нулевой и часть входов разрешена из кэша; записать такой план
+        # означало бы стереть пометку вектором, который никто не пересчитывал. Ровно это
+        # и происходит, если запустить `reindex-embeddings` при работающем backend, —
+        # а команда именно на это и рассчитана. Проверка стоит здесь, а не блокировкой
+        # процесса: заставлять останавливать сервис ради пересчёта значит потерять то,
+        # ради чего команда сделана. Объект, помеченный на лету, просто пропускается и
+        # берётся следующим тиком — уже без кэша.
+        marked_now: set[str] = set()
+        if any(plan["cached"] for plan, _, _ in offsets):
+            marked_now = set(
+                await run_blocking(
+                    self.storage.list_forced_embedding_ids,
+                    [str(plan["row"]["id"]) for plan, _, _ in offsets],
+                )
+            )
+
         items: list[dict[str, Any]] = []
         chunks: dict[str, Sequence[dict[str, Any]]] = {}
         for plan, start, count in offsets:
             row = plan["row"]
+            if plan["cached"] and str(row["id"]) in marked_now:
+                LOGGER.info(
+                    "embeddings index skipped %s: marked for recomputation while its batch was in flight",
+                    row["id"],
+                )
+                continue
             resolved: dict[int, bytes] = dict(plan["cached"])
             dims: set[int] = set()
             broken = False
