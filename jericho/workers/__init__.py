@@ -867,6 +867,27 @@ class WorkersManager:
             await run_blocking(self.storage.record_event, "backup.pruned", pruned)
 
     async def _embeddings_index_all(self) -> None:
+        """Досчитывать, пока есть работа и не вышел бюджет ВРЕМЕНИ.
+
+        Бюджет в символах на проход остаётся — он бережёт один запрос от таймаута, —
+        но потолком тика он быть не может: 200 000 символов раз в две минуты это
+        1 700 символов в секунду, а сервис на видеокарте делает 211 000. Число,
+        выбранное под сервис на процессоре (768 симв/с), стало тормозом в сто раз:
+        корпус в 25 млн символов закрывался бы четыре часа вместо минут.
+
+        Время подстраивается само под любую скорость: медленный сервис успеет один
+        проход, быстрый — сотню. Отдых после тика по-прежнему считается по времени,
+        проведённому В сервисе, так что обратное давление не потеряно.
+        """
+        deadline = time.monotonic() + max(5.0, float(self.settings.embeddings_index_tick_budget_sec))
+        while True:
+            indexed = await self._embeddings_index_pass()
+            if not indexed or time.monotonic() >= deadline:
+                return
+            if getattr(self.embeddings, "cooling_down", False):
+                return
+
+    async def _embeddings_index_pass(self) -> int:
         """Embed a bounded batch of Knowledge Objects lacking a current vector.
 
         The batch spans all tenants: vectors depend only on object content, so the
@@ -875,7 +896,7 @@ class WorkersManager:
         batch to the next tick — nothing is dropped.
         """
         if self.embeddings is None or not getattr(self.embeddings, "remote_enabled", False):
-            return
+            return 0
         # Отдых пропорционально сделанной работе. Планировщик считает паузу как
         # `interval - elapsed`, что для дешёвых задач правильно, а здесь
         # вырождается: тик на 11 минут при интервале 2 минуты спит РОВНО СЕКУНДУ и
@@ -883,13 +904,13 @@ class WorkersManager:
         # и ровно она положила прокси перед эмбеддингами через полтора часа.
         now = time.monotonic()
         if now < self._embeddings_rest_until:
-            return
+            return 0
         if getattr(self.embeddings, "cooling_down", False):
             LOGGER.info(
                 "embeddings index skipped: backend is cooling down for %.0fs",
                 self.embeddings.cooldown_remaining(),
             )
-            return
+            return 0
         model = self.settings.embeddings_model
         batch = self.settings.embeddings_index_batch
         scheme = chunk_scheme(self.settings)
@@ -901,7 +922,7 @@ class WorkersManager:
             chunk_threshold=self.settings.embeddings_chunk_chars,
         )
         if not rows:
-            return
+            return 0
 
         cap = max(1, int(self.settings.embeddings_max_inputs_per_request))
         # An object is never split across requests, so its OWN input count must fit in
@@ -1022,6 +1043,7 @@ class WorkersManager:
                 remaining,
                 rest,
             )
+        return indexed
 
     async def _embed_in_volume_slices(self, texts: list[str]) -> list[list[float]] | None:
         """Embed in slices small enough to answer inside the request timeout.

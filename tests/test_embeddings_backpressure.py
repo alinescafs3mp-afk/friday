@@ -357,3 +357,80 @@ def test_no_single_input_can_exceed_what_the_service_accepts():
         "потолок пачки перестал быть суммой по входам — перечитайте комментарий, "
         "он объясняет, почему эти два числа разные"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_fast_service_is_not_throttled_by_a_character_budget(settings, storage):
+    """Потолок в символах бережёт ОДИН запрос, а не задаёт скорость индексации.
+
+    200 000 символов раз в две минуты — это 1 700 симв/с. Сервис на видеокарте
+    делает 211 000. Число, выбранное под сервис на процессоре (768 симв/с), стало
+    тормозом в сто раз: корпус в 25 млн символов закрывался бы четыре часа вместо
+    минут. Тик работает по бюджету ВРЕМЕНИ и подстраивается сам.
+    """
+    import dataclasses
+    import hashlib
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from jericho.workers import WorkersManager
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://x/v1",
+        embeddings_model="m",
+        embeddings_index_batch=2,
+        embeddings_index_char_budget=1000,
+        embeddings_index_tick_budget_sec=30.0,
+    )
+
+    class _Instant:
+        remote_enabled = True
+        cooling_down = False
+
+        def cooldown_remaining(self) -> float:
+            return 0.0
+
+        async def embed(self, texts, *, budget_sec=None):
+            return [[0.1, 0.2] for _ in texts]
+
+    storage.ensure_user("alice")
+    for index in range(12):
+        text = f"Документ номер {index} " * 40
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=text,
+            content_type="text",
+            content_hash=hashlib.sha256(f"r{index}".encode()).hexdigest(),
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=text,
+                content_type="text",
+                title=f"Док {index}",
+            )
+        )
+
+    manager = WorkersManager(tuned, storage, None, None, embeddings=_Instant())
+    await manager._embeddings_index_all()  # noqa: SLF001
+
+    # Считать ТЕМ ЖЕ предикатом, каким работал воркер: со схемой чанкования по
+    # умолчанию и своим порогом. С `chunk_scheme=""` счёт отвечает на другой
+    # вопрос, и тест «падает» на исправном коде — ровно та ошибка, что уже была
+    # сделана сегодня при оценке падежного правила.
+    from jericho.retrieval import chunk_scheme
+
+    left = storage.count_knowledge_missing_embedding(
+        "m", chunk_scheme=chunk_scheme(tuned), chunk_threshold=tuned.embeddings_chunk_chars
+    )
+    assert left == 0, (
+        f"одного тика не хватило на 12 документов при мгновенном сервисе: осталось {left} — "
+        "значит потолок в символах снова задаёт скорость вместо бюджета времени"
+    )
