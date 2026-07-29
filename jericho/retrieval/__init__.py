@@ -710,11 +710,20 @@ def _input_too_long(body: str) -> bool:
     По тексту, а не по коду: 400 отвечают и на неизвестную модель, и на кривой
     запрос, и укорачивать текст в этих случаях значило бы лечить чужую болезнь.
     Формулировки сервиса: «an input exceeds the 8192-token limit»,
-    «input_too_many_tokens», «exceeds the 32768-character limit».
+    «input_too_many_tokens», «exceeds the 32768-character limit», а для предела на
+    весь запрос — «input exceeds the 16384-token request limit» с кодом
+    `request_too_many_tokens` и «the 262144-character request limit» с кодом
+    `request_too_large`. Последний не подходил ни под один прежний признак:
+    «character request limit» — это не «character limit». Такой отказ уходил в общий
+    `except`, и пачка терялась целиком без внятной записи в журнале.
     """
     text = (body or "").casefold()
     return "input" in text and (
-        "token limit" in text or "too_many_tokens" in text or "character limit" in text
+        "token limit" in text
+        or "too_many_tokens" in text
+        or "character limit" in text
+        or "request_too_large" in text
+        or "character request limit" in text
     )
 
 
@@ -821,22 +830,40 @@ class EmbeddingBackend:
                     f"{self.settings.embeddings_base_url}/embeddings",
                     json={"model": self.settings.embeddings_model, "input": texts},
                 )
-                if response.status_code == 400 and _input_too_long(response.text) and not _shortened:
-                    # Один слишком длинный вход роняет ВЕСЬ запрос, а в нём вся пачка
-                    # объектов. Потолок в символах помогает, но подобран под ЭТОТ
-                    # корпус и эту модель: предел сервиса измеряется в токенах, и их
-                    # плотность зависит от текста. Поэтому кроме потолка — отступление
-                    # на самом отказе: укорачиваем вдвое и пробуем ещё раз.
+                if response.status_code == 400 and _input_too_long(response.text):
+                    # У сервиса ДВА предела: на один вход (8192 токена) и на весь
+                    # запрос (16384 токена). Лечение у них разное, и раньше было одно.
                     #
-                    # Резать безопасно потому, что длинным бывает только вектор
-                    # документа — он и так огрублённый сигнал по началу текста, а
-                    # пассажи короче предела на порядок.
-                    LOGGER.warning("embeddings input too long; retrying at half length")
-                    return await self.embed(
-                        [text[: max(1, len(text) // 2)] for text in texts],
-                        budget_sec=budget_sec,
-                        _shortened=True,
-                    )
+                    # Слишком большой ЗАПРОС лечится делением пополам: тексты целы,
+                    # платим лишним обращением. Прежний код вместо этого укорачивал
+                    # вдвое КАЖДЫЙ текст пачки — и объекты получали вектор по половине
+                    # своего содержимого, молча и без следа в базе. На корпусе
+                    # владельца это случилось 206 раз за один досчёт.
+                    #
+                    # Укорачивание остаётся, но только там, где выбора нет: один вход,
+                    # который сам по себе длиннее предела. Такой бывает только вектор
+                    # документа — огрублённый сигнал по началу текста, — а пассажи
+                    # короче предела на порядок.
+                    if len(texts) > 1:
+                        LOGGER.warning(
+                            "embeddings request too large for %d inputs; splitting in two", len(texts)
+                        )
+                        middle = len(texts) // 2
+                        first = await self.embed(texts[:middle], budget_sec=budget_sec)
+                        if first is None:
+                            return None
+                        second = await self.embed(texts[middle:], budget_sec=budget_sec)
+                        if second is None:
+                            return None
+                        return first + second
+                    if not _shortened:
+                        LOGGER.warning("embeddings input too long; retrying at half length")
+                        return await self.embed(
+                            [text[: max(1, len(text) // 2)] for text in texts],
+                            budget_sec=budget_sec,
+                            _shortened=True,
+                        )
+                    return None
                 if response.status_code in self._OVERLOAD_STATUSES:
                     # Отличать «перегружен» от «сломан» обязательно: раньше сюда
                     # приходило `raise_for_status()` и всё падало в общий `except`,

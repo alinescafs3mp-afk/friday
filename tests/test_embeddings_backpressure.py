@@ -353,9 +353,19 @@ def test_no_single_input_can_exceed_what_the_service_accepts():
     assert _DOC_VECTOR_MAX_CHARS <= _EMBED_INPUT_MAX_CHARS, (
         "вектор документа одним входом превысит лимит сервиса — запрос будет падать целиком"
     )
-    assert _EMBED_REQUEST_MAX_CHARS > _EMBED_INPUT_MAX_CHARS, (
-        "потолок пачки перестал быть суммой по входам — перечитайте комментарий, "
-        "он объясняет, почему эти два числа разные"
+    # Здесь раньше стояло `_EMBED_REQUEST_MAX_CHARS > _EMBED_INPUT_MAX_CHARS`, и это
+    # оказалось неверно измерено. Предел на вход в 32 768 ЗНАКОВ — не тот предел,
+    # который срабатывает: сервис считает ТОКЕНЫ, 8192 на вход и 16384 на запрос
+    # (замерено двоичным поиском 2026-07-29). В знаках при худшей плотности корпуса
+    # это 20 507 и 41 015, а безопасный бюджет запроса (30 000) законно оказывается
+    # МЕНЬШЕ знакового потолка входа, который просто не является узким местом.
+    #
+    # Держать надо то, что действительно обязано выполняться: в запрос обязан
+    # помещаться хотя бы один вектор документа целиком. Иначе объект не пролезет
+    # никогда — ни делением пачки, ни повтором.
+    assert _EMBED_REQUEST_MAX_CHARS >= _DOC_VECTOR_MAX_CHARS, (
+        "самый большой одиночный вход не помещается в запрос — такой объект "
+        "не проиндексируется ни при каком делении пачки"
     )
 
 
@@ -595,3 +605,139 @@ async def test_a_rest_inside_a_tick_is_waited_out_not_treated_as_the_end(storage
         "что отдых снова оборвал цикл вместо того, чтобы быть выдержанным"
     )
     assert fake.batches > 1, "работа уложилась в один запрос — тест не проверяет то, ради чего написан"
+
+
+# --- два предела сервиса, а не один ------------------------------------------
+
+
+def test_a_request_that_is_too_big_is_split_not_truncated(settings, monkeypatch):
+    """Слишком большой ЗАПРОС и слишком длинный ВХОД лечатся по-разному.
+
+    Замерено 2026-07-29 на живом сервисе: пределов два — 8192 токена на один вход и
+    16384 на весь запрос. Код знал про первый и лечил им оба: на любой отказ по длине
+    он укорачивал вдвое КАЖДЫЙ текст пачки. Для отказа по размеру запроса это лечение
+    ложное — тексты были в порядке, их было слишком много вместе. За один досчёт
+    корпуса так случилось 206 раз, и каждый раз десяток документов получал вектор по
+    половине своего содержимого. Молча: в базе такой вектор ничем не отличается от
+    честного.
+
+    Правильный ответ на большой запрос — поделить его. Платим лишним обращением,
+    сохраняем текст.
+    """
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    backend = EmbeddingBackend(tuned)
+    seen: list[list[str]] = []
+    REFUSAL = (
+        '{"error":{"message":"input exceeds the 16384-token request limit","code":"request_too_many_tokens"}}'
+    )
+
+    class _Response:
+        def __init__(self, inputs: list[str]) -> None:
+            # Отказ ровно тот, что даёт сервис: слишком много токенов В ЗАПРОСЕ.
+            self.too_big = len(inputs) > 2
+            self.status_code = 400 if self.too_big else 200
+            self.headers: dict[str, str] = {}
+            self.text = REFUSAL if self.too_big else ""
+            self._inputs = inputs
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]} for _ in self._inputs]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            inputs = list(kwargs["json"]["input"])
+            seen.append(inputs)
+            return _Response(inputs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    texts = [f"текст номер {index} " * 50 for index in range(8)]
+    result = asyncio.run(backend.embed(texts))
+
+    assert result is not None and len(result) == len(texts), "деление потеряло векторы"
+    accepted = [batch for batch in seen if len(batch) <= 2]
+    assert accepted, "запрос так и не был поделён"
+    # Главное: ни один текст не поехал в сервис укороченным.
+    original = set(texts)
+    for batch in seen:
+        for text in batch:
+            assert text in original, "текст был обрезан там, где надо было поделить пачку"
+
+
+def test_a_single_oversized_input_is_still_shortened(settings, monkeypatch):
+    """Один вход длиннее предела делить не на что — там укорачивание единственный ход."""
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    backend = EmbeddingBackend(tuned)
+    lengths: list[int] = []
+
+    class _Response:
+        def __init__(self, inputs: list[str]) -> None:
+            self.too_long = len(inputs[0]) > 500
+            self.status_code = 400 if self.too_long else 200
+            self.headers: dict[str, str] = {}
+            self.text = (
+                '{"error":{"message":"an input exceeds the 8192-token limit"}}' if self.too_long else ""
+            )
+            self._inputs = inputs
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]} for _ in self._inputs]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            inputs = list(kwargs["json"]["input"])
+            lengths.append(len(inputs[0]))
+            return _Response(inputs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    assert asyncio.run(backend.embed(["я" * 800])) is not None
+    assert lengths == [800, 400], f"один длинный вход должен укорачиваться вдвое, а не {lengths}"
+
+
+def test_the_character_request_limit_is_recognised_as_a_length_refusal():
+    """«character request limit» — это НЕ «character limit», и признак его не ловил.
+
+    Такой отказ уходил в общий `except`, и пачка терялась целиком: ни деления, ни
+    укорачивания, ни внятной записи — просто «embeddings backend request failed».
+    """
+    from jericho.retrieval import _input_too_long
+
+    assert _input_too_long(
+        '{"error":{"message":"input exceeds the 262144-character request limit","code":"request_too_large"}}'
+    )
+    assert _input_too_long(
+        '{"error":{"message":"input exceeds the 16384-token request limit","code":"request_too_many_tokens"}}'
+    )
+    assert _input_too_long('{"error":{"message":"an input exceeds the 8192-token limit"}}')
+    # Чужие беды по-прежнему не лечатся укорачиванием текста.
+    assert not _input_too_long('{"error":{"message":"model not found"}}')
+    assert not _input_too_long('{"error":{"message":"invalid input format"}}')
