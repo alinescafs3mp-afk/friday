@@ -494,3 +494,104 @@ async def test_an_oversized_input_is_shortened_instead_of_losing_the_batch(setti
 
     assert result is not None, "пачка потеряна вместо укорачивания слишком длинного входа"
     assert lengths == [10000, 5000], f"вход не был укорочен вдвое: {lengths}"
+
+
+# --- отдых внутри тика: пауза, а не выход ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_rest_inside_a_tick_is_waited_out_not_treated_as_the_end(storage, settings):
+    """Отдых после прохода не должен обрывать тик — иначе бюджет времени фиктивен.
+
+    Замерено на живом корпусе 2026-07-29: после перехода тика на бюджет ВРЕМЕНИ
+    (60 с вместо 200 000 символов) досчёт всё равно шёл со скоростью восьми объектов
+    за тик. Причина — во взаимодействии двух моих же правок, каждая из которых по
+    отдельности верна. Проход назначает отдых пропорционально времени в сервисе;
+    вход в проход этот отдых проверял и возвращал ноль; цикл тика трактовал ноль как
+    «работа кончилась» и выходил. Любой проход длиннее секунды — то есть любой
+    настоящий проход — обрывал тик на первом же круге, и шестидесятисекундный
+    бюджет тратился на два. 1343 документа при таком темпе закрывались бы четыре
+    часа вместо четырёх минут.
+
+    Отдых обязан остаться (он бережёт чужой сервис от насыщения), но выдерживать
+    его должен цикл, а не проверка на входе. Тест держит именно это различие:
+    проходов внутри одного тика должно быть много, и между ними должны быть паузы.
+    """
+    import dataclasses
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from jericho.workers import WorkersManager
+
+    class _SlowEmbeddings:
+        """Отвечает не мгновенно — иначе отдых не назначается и различать нечего."""
+
+        def __init__(self, tuned) -> None:
+            self.settings = tuned
+            self.remote_enabled = True
+            self.cooling_down = False
+            self.batches = 0
+
+        async def embed(self, texts, *, budget_sec=None):
+            self.batches += 1
+            await asyncio.sleep(0.03)
+            return [[1.0, 0.0] for _ in texts]
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://127.0.0.1:9999/v1",
+        embeddings_model="test-embed",
+        embeddings_index_batch=4,
+        embeddings_chunk_chars=0,
+        embeddings_index_tick_budget_sec=30.0,
+        # Общая настройка тестов гасит отдых (`JERICHO_EMBEDDINGS_INDEX_REST_RATIO=0`),
+        # чтобы прогоны не спали. Здесь отдых — предмет проверки, и его надо вернуть:
+        # без этой строки тест зелен и на сломанном коде, что я и увидел, проверив
+        # его подменой поведения. Пауза выходит в сотые доли секунды.
+        embeddings_index_rest_ratio=1.0,
+    )
+    storage.ensure_user("alice")
+    for index in range(24):
+        content = f"документ {index} " * 40
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("source"),
+            raw_content=content,
+            content_type="text",
+            content_hash=new_id("hash"),
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=content,
+                content_type="text",
+                title=f"K{index}",
+                summary="сводка",
+            )
+        )
+
+    fake = _SlowEmbeddings(tuned)
+    manager = WorkersManager(tuned, storage, None, None, embeddings=fake)
+    # Порог «работа была настоящей» опущен под скорость подставного бэкенда: смысл
+    # теста в поведении цикла при назначенном отдыхе, а не в величине порога.
+    monkeypatch_floor = 0.01
+    import jericho.workers as workers_module
+
+    original_floor = workers_module._EMBED_REST_MIN_WORK_SEC  # noqa: SLF001
+    workers_module._EMBED_REST_MIN_WORK_SEC = monkeypatch_floor  # noqa: SLF001
+    try:
+        await manager._embeddings_index_all()  # noqa: SLF001
+    finally:
+        workers_module._EMBED_REST_MIN_WORK_SEC = original_floor  # noqa: SLF001
+
+    left = storage.count_knowledge_missing_embedding("test-embed", chunk_scheme=None, chunk_threshold=0)
+    assert left == 0, (
+        f"тик закончился, не досчитав {left} из 24 объектов — при партии в 4 это значит, "
+        "что отдых снова оборвал цикл вместо того, чтобы быть выдержанным"
+    )
+    assert fake.batches > 1, "работа уложилась в один запрос — тест не проверяет то, ради чего написан"

@@ -379,6 +379,7 @@ class WorkersManager:
         self.embeddings = embeddings
         # Монотонная отметка «не раньше»: см. _embeddings_index_all.
         self._embeddings_rest_until = 0.0
+        self._embeddings_in_tick = False
         # Organ-contributed periodic tasks (JOP). Registered after the built-ins
         # so an organ can never shadow a core worker's name silently.
         self._extra_workers: tuple[IntervalTask, ...] = tuple(extra_workers)
@@ -894,12 +895,30 @@ class WorkersManager:
         проведённому В сервисе, так что обратное давление не потеряно.
         """
         deadline = time.monotonic() + max(5.0, float(self.settings.embeddings_index_tick_budget_sec))
+        try:
+            await self._embeddings_drain(deadline)
+        finally:
+            self._embeddings_in_tick = False
+
+    async def _embeddings_drain(self, deadline: float) -> None:
         while True:
             indexed = await self._embeddings_index_pass()
+            self._embeddings_in_tick = True
             if not indexed or time.monotonic() >= deadline:
                 return
             if getattr(self.embeddings, "cooling_down", False):
                 return
+            # Отдых ВЫДЕРЖИВАЕТСЯ здесь, а не обрывает тик. Проход назначает паузу
+            # пропорционально времени в сервисе, и проверка этой паузы на входе в
+            # следующий проход выходила боком: любой проход длиннее секунды ставил
+            # отдых, следующий проход возвращал ноль, и цикл заканчивался. Бюджет
+            # времени в 60 секунд тратился на ОДИН проход из восьми объектов —
+            # корпус закрывался бы четыре часа вместо минут.
+            rest = self._embeddings_rest_until - time.monotonic()
+            if rest > 0:
+                if time.monotonic() + rest >= deadline:
+                    return
+                await asyncio.sleep(rest)
 
     async def _embeddings_index_pass(self) -> int:
         """Embed a bounded batch of Knowledge Objects lacking a current vector.
@@ -917,7 +936,9 @@ class WorkersManager:
         # уходит на второй круг. Получается непрерывная нагрузка на чужой сервис,
         # и ровно она положила прокси перед эмбеддингами через полтора часа.
         now = time.monotonic()
-        if now < self._embeddings_rest_until:
+        if now < self._embeddings_rest_until and not self._embeddings_in_tick:
+            # Гейт стоит только на ВХОДЕ в тик: внутри тика паузу выдерживает цикл,
+            # а не обрывает её проверкой.
             return 0
         if getattr(self.embeddings, "cooling_down", False):
             LOGGER.info(
