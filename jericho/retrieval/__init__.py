@@ -857,7 +857,15 @@ class EmbeddingBackend:
                             return None
                         return first + second
                     if not _shortened:
-                        LOGGER.warning("embeddings input too long; retrying at half length")
+                        # Сообщение сервиса — В ЖУРНАЛ. Пределов у него несколько, и
+                        # запись «слишком длинно» не говорит, какой именно сработал:
+                        # разбираться приходится пробами вместо чтения. Тело ответа
+                        # короткое и содержит только числа предела.
+                        LOGGER.warning(
+                            "embeddings input too long (%d chars, service said: %s); retrying at half length",
+                            len(texts[0]),
+                            " ".join(response.text.split())[:200],
+                        )
                         return await self.embed(
                             [text[: max(1, len(text) // 2)] for text in texts],
                             budget_sec=budget_sec,
