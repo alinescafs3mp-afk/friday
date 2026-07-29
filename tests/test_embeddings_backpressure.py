@@ -434,3 +434,63 @@ async def test_a_fast_service_is_not_throttled_by_a_character_budget(settings, s
         f"одного тика не хватило на 12 документов при мгновенном сервисе: осталось {left} — "
         "значит потолок в символах снова задаёт скорость вместо бюджета времени"
     )
+
+
+def test_a_length_rejection_is_told_apart_from_other_bad_requests():
+    """Укорачивать текст на любом 400 значило бы лечить чужую болезнь."""
+    from jericho.retrieval import _input_too_long
+
+    assert _input_too_long('{"error":{"message":"an input exceeds the 8192-token limit"}}') is True
+    assert _input_too_long('{"error":{"code":"input_too_many_tokens"}}') is True
+    assert _input_too_long('{"error":{"message":"an input exceeds the 32768-character limit"}}') is True
+    assert _input_too_long('{"error":{"message":"model not found"}}') is False
+    assert _input_too_long("") is False
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_input_is_shortened_instead_of_losing_the_batch(settings, monkeypatch):
+    """Один негодный вход роняет ВЕСЬ запрос, а в нём вся пачка объектов.
+
+    Замерено на живом сервисе: при потолке 20 000 символов не проходили 17 длинных
+    документов из 40, и фоновая индексация стояла намертво, повторяя один и тот же
+    отказ каждые две минуты. Потолок опущен до замеренных 10 000, но одного числа
+    мало — предел сервиса в ТОКЕНАХ, а их плотность зависит от текста.
+    """
+    import dataclasses
+
+    import httpx
+
+    tuned = dataclasses.replace(
+        settings, embeddings_enabled=True, embeddings_base_url="http://x/v1", embeddings_model="m"
+    )
+    backend = EmbeddingBackend(tuned)
+    lengths: list[int] = []
+
+    class _Response:
+        def __init__(self, status: int) -> None:
+            self.status_code = status
+            self.headers: dict[str, str] = {}
+            self.text = '{"error":{"message":"an input exceeds the 8192-token limit"}}'
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]}]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, url, json=None):
+            size = len(json["input"][0])
+            lengths.append(size)
+            return _Response(400 if size > 5000 else 200)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    result = await backend.embed(["я" * 10000])
+
+    assert result is not None, "пачка потеряна вместо укорачивания слишком длинного входа"
+    assert lengths == [10000, 5000], f"вход не был укорочен вдвое: {lengths}"

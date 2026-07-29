@@ -704,6 +704,20 @@ def dense_scores(
     return _dense_scores_python(query_vector, stored, query_dim)
 
 
+def _input_too_long(body: str) -> bool:
+    """Отвергнут ли запрос именно за длину входа.
+
+    По тексту, а не по коду: 400 отвечают и на неизвестную модель, и на кривой
+    запрос, и укорачивать текст в этих случаях значило бы лечить чужую болезнь.
+    Формулировки сервиса: «an input exceeds the 8192-token limit»,
+    «input_too_many_tokens», «exceeds the 32768-character limit».
+    """
+    text = (body or "").casefold()
+    return "input" in text and (
+        "token limit" in text or "too_many_tokens" in text or "character limit" in text
+    )
+
+
 def _retry_after_seconds(value: str | None) -> float | None:
     """`Retry-After` в секундах, если сервис его прислал.
 
@@ -767,7 +781,9 @@ class EmbeddingBackend:
             and self.settings.embeddings_model
         )
 
-    async def embed(self, texts: list[str], *, budget_sec: float | None = None) -> list[list[float]] | None:
+    async def embed(
+        self, texts: list[str], *, budget_sec: float | None = None, _shortened: bool = False
+    ) -> list[list[float]] | None:
         if not self.remote_enabled or not texts:
             return None
         if self.cooling_down:
@@ -805,6 +821,22 @@ class EmbeddingBackend:
                     f"{self.settings.embeddings_base_url}/embeddings",
                     json={"model": self.settings.embeddings_model, "input": texts},
                 )
+                if response.status_code == 400 and _input_too_long(response.text) and not _shortened:
+                    # Один слишком длинный вход роняет ВЕСЬ запрос, а в нём вся пачка
+                    # объектов. Потолок в символах помогает, но подобран под ЭТОТ
+                    # корпус и эту модель: предел сервиса измеряется в токенах, и их
+                    # плотность зависит от текста. Поэтому кроме потолка — отступление
+                    # на самом отказе: укорачиваем вдвое и пробуем ещё раз.
+                    #
+                    # Резать безопасно потому, что длинным бывает только вектор
+                    # документа — он и так огрублённый сигнал по началу текста, а
+                    # пассажи короче предела на порядок.
+                    LOGGER.warning("embeddings input too long; retrying at half length")
+                    return await self.embed(
+                        [text[: max(1, len(text) // 2)] for text in texts],
+                        budget_sec=budget_sec,
+                        _shortened=True,
+                    )
                 if response.status_code in self._OVERLOAD_STATUSES:
                     # Отличать «перегружен» от «сломан» обязательно: раньше сюда
                     # приходило `raise_for_status()` и всё падало в общий `except`,
