@@ -530,7 +530,13 @@ class LLMRouter:
         Runtimes that ignore ``enable_thinking=False`` emit the monologue in ``content``
         itself, and vLLM leaves ``message.reasoning`` empty rather than separating it.
         Measured against the LAN endpoint: the reasoning is CLOSED by a literal
-        ``</think>`` with no opening tag, and the answer follows it. So the tag is the
+        ``</think>`` with no opening tag, and the answer follows it.
+
+        ⚠️ Перемерено 2026-07-30: НЫНЕШНИЙ рантайм этот флаг СОБЛЮДАЕТ. Через роутер
+        модель отвечает без монолога (совету по Inbox хватает 78–125 токенов), а тот же
+        запрос прямым обращением, без флага, тратит 2500–3600. Разбор ниже остаётся
+        защитой на случай рантайма без поддержки флага, но описывать сегодняшнее
+        поведение как «игнорирует» — неверно. So the tag is the
         only reliable boundary — the prose that precedes it is unstable, differing
         between two calls with identical parameters and temperature 0.
 
