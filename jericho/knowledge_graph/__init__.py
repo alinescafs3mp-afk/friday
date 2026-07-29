@@ -1261,6 +1261,16 @@ class KnowledgeGraph:
             for right in mentions[index + 1 :]:
                 if right[0] - left[1] > _RELATION_SPAN_CHARS:
                     break
+                if left[2]["entity_id"] == right[2]["entity_id"]:
+                    # Одна и та же сущность, упомянутая дважды. Стало возможным ровно
+                    # тогда, когда я разрешил считать ВСЕ вхождения имени: при одном
+                    # вхождении пара из двух упоминаний всегда была двумя разными
+                    # сущностями. «Атлас … использует … Атлас» — не связь, а
+                    # предложение про один объект, и хранилище справедливо отвечает
+                    # `Self-relation candidates are not allowed`, роняя весь разбор
+                    # документа пятисоткой. Найдено на массовом продвижении: одно
+                    # падение на сотню документов.
+                    continue
                 between = text[left[1] : right[0]]
                 for phrase, relation_type, base_confidence in _RELATION_PHRASES:
                     if not phrase.search(between):

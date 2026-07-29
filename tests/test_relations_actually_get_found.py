@@ -212,3 +212,19 @@ def test_rejecting_a_link_proposes_nothing(settings):
         )
         assert response.status_code == 200
         assert response.json()["relation_candidates"] == []
+
+
+def test_one_entity_mentioned_twice_is_not_a_relation_with_itself(storage, graph):
+    """Стало возможным ровно тогда, когда я разрешил считать все вхождения.
+
+    При одном вхождении пара из двух упоминаний всегда была двумя разными
+    сущностями. Со всеми вхождениями «Атлас … использует … Атлас» даёт пару из
+    одной и той же сущности, хранилище отвечает `Self-relation candidates are not
+    allowed`, и разбор ВСЕГО документа падает пятисоткой — документ не продвигается
+    вовсе. Найдено на массовом продвижении: одно падение на сотню документов.
+    """
+    text = "Сервис Атлас настроен. " + FILLER + " Поэтому Атлас использует Атлас для кэша."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "Атлас", status="accepted")
+
+    assert graph.suggest_relations_for_knowledge("alice", ko_id) == []
