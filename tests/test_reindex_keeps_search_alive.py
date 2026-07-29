@@ -155,3 +155,80 @@ def test_the_command_asks_before_it_makes_the_gpu_work(tmp_path, monkeypatch, co
         assert code == 0 and calls == [None]
     else:
         assert code == 2 and calls == [], "команда пересчитала корпус без подтверждения"
+
+
+def test_the_mark_defeats_the_reuse_cache_or_it_recomputes_nothing(storage):
+    """Пометка версии без стирания хэша — пересчёт, который ничего не пересчитывает.
+
+    Замерено на живом пересчёте 2026-07-29: 1208 объектов из 1537 «обновились» за
+    две минуты по нулю секунд на пачку. Переиспользование по хэшу текста вернуло те
+    же самые негодные вектора — по своим правилам совершенно верно: хэш писался от
+    полного текста, а вектор считался по укороченному, и различить их хранилище не
+    может. Команда отчиталась об успехе, индекс остался прежним.
+
+    Значит признак «этот вектор уже есть для такого текста» обязан исчезнуть вместе
+    с пометкой, иначе вся затея — переписывание номера версии.
+    """
+    import hashlib as _hashlib
+
+    storage.ensure_user("alice")
+    object_id = _make(storage, "alice", 0)
+    record = storage.get_knowledge_object(object_id)
+    assert record is not None
+    text_hash = _hashlib.sha256(str(record["content"]).encode()).hexdigest()
+
+    # До пометки текст узнаётся по хэшу — на этом и держится дешёвый переимпорт.
+    assert storage.get_vectors_by_content_hash([text_hash], "test-embed")
+
+    storage.mark_embeddings_stale()
+
+    assert not storage.get_vectors_by_content_hash([text_hash], "test-embed"), (
+        "хэш пережил пометку — индексатор возьмёт из кэша тот же негодный вектор"
+    )
+    assert not storage.get_reusable_vectors([object_id], "test-embed").get(object_id), (
+        "объект по-прежнему предъявляет свой прежний вектор как годный к переиспользованию"
+    )
+    # И при этом вектор никуда не делся: поиск продолжает отвечать.
+    assert storage.count_knowledge_embeddings("alice") == 1
+
+
+def test_passage_vectors_are_marked_with_their_object(storage):
+    """Чанки укорачивались в тех же пачках, значит и пересчитываться должны вместе."""
+    import hashlib as _hashlib
+
+    from jericho.dedup import pack_vector
+
+    storage.ensure_user("alice")
+    object_id = _make(storage, "alice", 0)
+    chunk_text = "кусок документа про сроки приёмки"
+    chunk_hash = _hashlib.sha256(chunk_text.encode()).hexdigest()
+    # Пассажи пишутся отдельным отображением, а не в общий список: они живут в своей
+    # таблице, и запись их как объектных векторов молча перезаписала бы объектный.
+    storage.upsert_knowledge_vectors(
+        [],
+        {
+            object_id: [
+                {
+                    "knowledge_object_id": object_id,
+                    "user_id": "alice",
+                    "model": "test-embed",
+                    "dim": 2,
+                    "source_version": 1,
+                    "content_hash": chunk_hash,
+                    "chunk_scheme": "v2",
+                    "chunk_index": 0,
+                    "start_char": 0,
+                    "end_char": len(chunk_text),
+                    "vector": pack_vector([0.3, 0.7]),
+                }
+            ]
+        },
+    )
+    assert storage.get_vectors_by_content_hash([chunk_hash], "test-embed")
+
+    storage.mark_embeddings_stale()
+
+    assert not storage.get_vectors_by_content_hash([chunk_hash], "test-embed"), (
+        "вектор пассажа остался в кэше переиспользования и вернётся вместо пересчёта"
+    )
+    assert storage.count_knowledge_chunk_embeddings("alice") == 1, "пассаж удалён, а должен был остаться"

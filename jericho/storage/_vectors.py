@@ -327,16 +327,34 @@ class VectorsMixin(StorageShared):
         может. Вектор остаётся на месте и продолжает отвечать на поиск, пока
         индексатор не заменит его правильным. Удаление оставило бы корпус без
         плотного поиска на всё время пересчёта.
+
+        Одной пометки версии НЕ ХВАТАЕТ, и это выяснилось на живом пересчёте: 1208
+        объектов из 1537 «пересчитались» за две минуты по нулю секунд на пачку.
+        Никакого пересчёта не было — сработало переиспользование по хэшу текста
+        (`get_vectors_by_content_hash`), и оно вернуло ТЕ ЖЕ негодные вектора. Так и
+        должно быть по его правилам: хэш писался от полного текста, вектор считался
+        по укороченному, и отличить одно от другого хранилище не может.
+
+        Поэтому хэш тоже стирается — в обеих таблицах. Пустой хэш не совпадёт ни с
+        одним настоящим, и обе дороги переиспользования закрыты, а вектор остаётся
+        на месте и отвечает на поиск. Чанки помечаются вместе с объектом: их тексты
+        укорачивались в тех же пачках.
         """
         with self.transaction() as conn:
-            if user_id is None:
-                cursor = conn.execute("UPDATE knowledge_embeddings SET source_version=-1")
-            else:
-                cursor = conn.execute(
-                    "UPDATE knowledge_embeddings SET source_version=-1 WHERE user_id=?",
-                    (user_id,),
-                )
-            return int(cursor.rowcount or 0)
+            marked = 0
+            for table in ("knowledge_embeddings", "knowledge_chunk_embeddings"):
+                if user_id is None:
+                    cursor = conn.execute(
+                        f"UPDATE {table} SET source_version=-1, content_hash=''"  # nosec B608
+                    )
+                else:
+                    cursor = conn.execute(
+                        f"UPDATE {table} SET source_version=-1, content_hash='' WHERE user_id=?",  # nosec B608
+                        (user_id,),
+                    )
+                if table == "knowledge_embeddings":
+                    marked = int(cursor.rowcount or 0)
+            return marked
 
     def count_knowledge_embeddings(self, user_id: str | None = None) -> int:
         if user_id is None:
