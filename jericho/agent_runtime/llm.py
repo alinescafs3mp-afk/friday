@@ -225,6 +225,21 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
             return None
 
 
+def _tools_unsupported(body: str) -> bool:
+    """Отвергает ли сервер именно ИНСТРУМЕНТЫ, а не запрос вообще.
+
+    Проверяется по тексту ошибки, а не по одному коду 400: тем же кодом отвечают на
+    слишком длинный контекст, неизвестную модель и кривые сообщения, и молча
+    выбрасывать инструменты в этих случаях значило бы лечить симптом чужой болезни.
+    Формулировка vLLM: «"auto" tool choice requires --enable-auto-tool-choice and
+    --tool-call-parser to be set».
+    """
+    text = (body or "").casefold()
+    return "tool" in text and (
+        "tool choice" in text or "tool_call_parser" in text or "tool-call-parser" in text
+    )
+
+
 class LLMRouter:
     """Routes foreground/background requests to an OpenAI-compatible vLLM API."""
 
@@ -232,6 +247,8 @@ class LLMRouter:
         self.settings = settings
         self._foreground_sem = asyncio.Semaphore(4)
         self._background_sem = asyncio.Semaphore(1)
+        # Помним отказ эндпоинта от инструментов, чтобы не платить за него каждый раз.
+        self._tools_refused = False
 
     @property
     def enabled(self) -> bool:
@@ -380,6 +397,34 @@ class LLMRouter:
                     timeout=timeout, trust_env=False, headers=self._auth_headers()
                 ) as client:
                     response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+                    if (
+                        response.status_code == 400
+                        and payload.get("tools")
+                        and _tools_unsupported(response.text)
+                    ):
+                        # Сервер не умеет вызов инструментов — это НЕ повод потерять ответ.
+                        # vLLM, запущенный без `--enable-auto-tool-choice` и
+                        # `--tool-call-parser`, отвергает ЛЮБОЙ запрос с `tools` четырёхсотым,
+                        # а агент шлёт их всегда. На этой установке из-за этого не работал
+                        # ни один вызов инструмента с самого начала, и человек видел
+                        # «LLM сейчас недоступна» вместо ответа: отказ в одной способности
+                        # выглядел как отказ модели целиком.
+                        #
+                        # Запоминаем на экземпляре, чтобы не платить отвергнутым запросом
+                        # за каждое сообщение, и говорим один раз вслух.
+                        if not self._tools_refused:
+                            self._tools_refused = True
+                            LOGGER.warning(
+                                "LLM endpoint refuses tool calls (start vLLM with "
+                                "--enable-auto-tool-choice and --tool-call-parser); "
+                                "continuing without tools"
+                            )
+                        payload = {
+                            key: value
+                            for key, value in payload.items()
+                            if key not in {"tools", "tool_choice"}
+                        }
+                        response = await client.post(f"{self.base_url}/chat/completions", json=payload)
                     response.raise_for_status()
                     data = response.json()
                 choices = data.get("choices") if isinstance(data, dict) else None

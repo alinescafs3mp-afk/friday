@@ -112,3 +112,27 @@ def test_the_mission_tool_does_not_promise_the_model_it_never_runs_itself():
         "обещание вернулось: при operator_full_autonomy миссия от агента создаётся "
         "сразу READY и подхватывается воркером mission_runner"
     )
+
+
+def test_a_server_without_tool_calling_still_answers():
+    """Отказ в ОДНОЙ способности не должен выглядеть как отказ модели целиком.
+
+    vLLM, запущенный без `--enable-auto-tool-choice` и `--tool-call-parser`,
+    отвергает любой запрос с `tools` четырёхсотым. Агент шлёт инструменты всегда,
+    поэтому на этой установке не работал ни один вызов с самого начала, а человек
+    видел «LLM сейчас недоступна» вместо ответа. Профиль, который Jericho сам
+    предлагает для запуска, эти флаги не выставляет.
+    """
+    from jericho.agent_runtime.llm import _tools_unsupported
+
+    vllm = (
+        '{"error":{"message":"\\"auto\\" tool choice requires --enable-auto-tool-choice '
+        'and --tool-call-parser to be set","type":"BadRequestError"}}'
+    )
+    assert _tools_unsupported(vllm) is True
+
+    # Другие четырёхсотые не должны молча лишать агента инструментов: это лечение
+    # симптома чужой болезни.
+    assert _tools_unsupported('{"error":{"message":"context length exceeded"}}') is False
+    assert _tools_unsupported('{"error":{"message":"model not found"}}') is False
+    assert _tools_unsupported("") is False
