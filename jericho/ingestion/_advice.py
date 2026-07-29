@@ -37,7 +37,7 @@ from jericho.ingestion._base import (
     _generate_title,
     _json_dict,
     _json_list,
-    _parse_model_json,
+    _parse_model_response,
     _sentences,
     json,
     normalize_entity_name,
@@ -258,7 +258,7 @@ class AdviceMixin(PipelineShared):
             priority="background",
             tools=[],
         )
-        parsed = _parse_model_json(str(response.get("content") or ""))
+        parsed = _parse_model_response(response)
 
         allowed_kinds = {
             "note",

@@ -810,6 +810,30 @@ def _json_list(value: Any) -> list[Any]:
     return []
 
 
+def _parse_model_response(response: dict[str, Any]) -> dict[str, Any]:
+    """Разобрать ответ модели, СНАЧАЛА проверив, дописан ли он до конца.
+
+    Обрыв по бюджету и мусор вместо JSON — разные беды с разными лечениями, а
+    сообщение было одно на двоих, и оно винило модель. На этой установке так
+    накопилось 249 сбоёв «Local model did not return a JSON object»: рассуждающей
+    модели нужно (замерено, 9 прогонов на документах в 1, 6 и 14 тысяч знаков)
+    2516–3616 токенов, из них большая часть уходит на рассуждение перед ответом, а
+    потолок стоял в 512. Ответ обрывался посреди мысли, фигурной скобки в нём не
+    было ни одной, и запись в журнале уводила от настоящей причины — настройки.
+    """
+
+    finish = str(response.get("finish_reason") or "")
+    text = str(response.get("content") or "")
+    if finish == "length":
+        used = (response.get("usage") or {}).get("completion_tokens")
+        raise ValueError(
+            "Model advice was cut off by the token budget"
+            f"{f' after {used} tokens' if used else ''}"
+            " — raise JERICHO_COGNITION_MAX_TOKENS"
+        )
+    return _parse_model_json(text)
+
+
 def _parse_model_json(value: str) -> dict[str, Any]:
     """Extract one bounded JSON object from a local-model response.
 
@@ -974,6 +998,7 @@ __all__ = [
     "_json_dict",
     "_json_list",
     "_parse_model_json",
+    "_parse_model_response",
     "_sentences",
     "_strip_save_prefix",
     "_trim_capture",

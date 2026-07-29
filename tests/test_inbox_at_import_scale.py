@@ -166,3 +166,47 @@ def test_the_route_offers_the_axis(settings):
             "0.00–0.25 нечитаемое",
             "0.75–1.00 содержательное",
         }
+
+
+def test_a_truncated_answer_says_so_instead_of_blaming_the_model():
+    """Обрыв по бюджету и мусор вместо JSON — разные беды; сообщение было одно.
+
+    Замерено на этой установке 2026-07-29: 249 сбоёв «Local model did not return a
+    JSON object» подряд. Модель была ни при чём — ей нужно 2516–3616 токенов
+    (9 прогонов на документах в 1, 6 и 14 тысяч знаков), потому что до JSON она
+    рассуждает, а потолок стоял 512. Ответ обрывался посреди мысли, фигурной скобки
+    в нём не оказывалось ни одной, и журнал уверенно указывал не туда — на формат
+    ответа вместо настройки. Диагноз обязан называть причину, которую можно устранить.
+    """
+    import pytest
+
+    from jericho.ingestion._base import _parse_model_response
+
+    with pytest.raises(ValueError, match="cut off by the token budget"):
+        _parse_model_response(
+            {
+                "content": "Сначала разберёмся, что это за документ и насколько он",
+                "finish_reason": "length",
+                "usage": {"completion_tokens": 512},
+            }
+        )
+
+    # Дописанный до конца ответ разбирается как раньше, а дописанный мусор
+    # по-прежнему винит модель — иначе новая ветка съела бы старую диагностику.
+    assert _parse_model_response({"content": '{"title": "Протокол"}', "finish_reason": "stop"}) == {
+        "title": "Протокол"
+    }
+    with pytest.raises(ValueError, match="did not return a JSON object"):
+        _parse_model_response({"content": "просто текст", "finish_reason": "stop"})
+
+
+def test_the_token_ceiling_admits_a_reasoning_model():
+    """Потолок — настройка, и его значение по умолчанию должно быть достижимым.
+
+    Числа из замера: максимум 3616 токенов на ответ. Значение по умолчанию обязано
+    быть выше, иначе установка с рассуждающей моделью не работает «из коробки» и
+    ломается молча — ошибкой разбора, а не отказом на старте.
+    """
+    from jericho.config import load_settings
+
+    assert load_settings().cognition_max_tokens >= 3616

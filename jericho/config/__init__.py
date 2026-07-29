@@ -703,7 +703,13 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         operator_full_autonomy=_bool_env("JERICHO_OPERATOR_FULL_AUTONOMY", False),
         cognition_enabled=_bool_env("JERICHO_COGNITION_ENABLED", True),
         cognition_interval_sec=_int_env("JERICHO_COGNITION_INTERVAL_SEC", 300, minimum=30),
-        cognition_max_tokens=_int_env("JERICHO_COGNITION_MAX_TOKENS", 512, minimum=64),
+        # 512 хватало модели, которая сразу пишет ответ, и не хватает ни одной
+        # рассуждающей: замерено на этой установке — совету по Inbox нужно
+        # 2516–3616 токенов (9 прогонов, документы в 1, 6 и 14 тысяч знаков),
+        # потому что до JSON модель думает. При потолке в 512 ответ обрывался
+        # всегда, и 249 разборов подряд закончились ошибкой. Потолок не тратится
+        # впустую: модель, которой хватает двухсот токенов, на них и остановится.
+        cognition_max_tokens=_int_env("JERICHO_COGNITION_MAX_TOKENS", 4096, minimum=64),
         executive_max_active_missions=_int_env("JERICHO_EXECUTIVE_MAX_ACTIVE_MISSIONS", 8, minimum=1),
         executive_max_tasks_per_mission=_int_env("JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION", 12, minimum=1),
         executive_task_tool_budget=_int_env("JERICHO_EXECUTIVE_TASK_TOOL_BUDGET", 6, minimum=1),

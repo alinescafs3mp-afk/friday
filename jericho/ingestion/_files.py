@@ -25,7 +25,7 @@ from jericho.ingestion._base import (
     _estimate_file_importance,
     _json_dict,
     _json_list,
-    _parse_model_json,
+    _parse_model_response,
     asyncio,
     base64,
     hashlib,
@@ -145,7 +145,7 @@ class FilesMixin(PipelineShared):
                 max_tokens=1_800,
                 priority="foreground",
             )
-            parsed = _parse_model_json(str(response.get("content") or ""))
+            parsed = _parse_model_response(response)
         except Exception as exc:
             LOGGER.info("Local vision extraction failed for %s: %s", filename, exc)
             return {
