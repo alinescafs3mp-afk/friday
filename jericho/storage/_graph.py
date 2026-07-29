@@ -139,6 +139,75 @@ class GraphMixin(StorageShared):
             params.append(enum_value(entity_type))
         return where, params
 
+    def graph_overview(self, user_id: str, *, limit: int = 120) -> dict[str, Any]:
+        """Связная картина графа целиком, а не окрестность одного узла.
+
+        Рисовать по `relations` бессмысленно: на живой установке их ноль и всегда
+        было ноль — связь сущность↔сущность появляется только после подтверждения
+        человеком. Зато `knowledge_entity_links` живут: две сущности, встреченные в
+        одном документе, — это наблюдаемый факт, а не догадка, и именно он даёт
+        связную картину на реальных данных.
+
+        Поэтому рёбер два вида, и они НЕ смешиваются: `relation` — утверждение,
+        которое кто-то подтвердил, `cooccurrence` — просто совместная встречаемость,
+        с числом общих документов. Показывать их одинаково значило бы выдавать
+        наблюдение за утверждение.
+
+        Узлы отбираются по числу связанных документов и ограничены `limit`; сколько
+        осталось за кадром, возвращается отдельно — картинка, молча показывающая
+        часть графа, хуже отсутствующей.
+        """
+        bounded = max(1, min(int(limit), 500))
+        rows = self.execute(
+            """SELECT e.id, e.name, e.entity_type, COUNT(l.knowledge_object_id) AS knowledge_count
+               FROM entities e
+               JOIN knowledge_entity_links l
+                 ON l.entity_id = e.id AND l.user_id = e.user_id AND l.status = 'accepted'
+               WHERE e.user_id = ? AND e.deleted_at IS NULL AND e.merged_into_id IS NULL
+               GROUP BY e.id
+               ORDER BY knowledge_count DESC, e.name COLLATE NOCASE, e.id
+               LIMIT ?""",
+            (user_id, bounded),
+        ).fetchall()
+        nodes = [dict(row) for row in rows]
+        ids = [str(node["id"]) for node in nodes]
+        if not ids:
+            return {"nodes": [], "edges": [], "shown": 0, "total": self.count_entities(user_id)}
+
+        placeholders = ",".join("?" * len(ids))
+        # Совместная встречаемость считается ТОЛЬКО между показанными узлами: ребро в
+        # невидимый узел рисовать некуда, а считать его в статистику — врать.
+        cooccurrence = self.execute(
+            f"""SELECT a.entity_id AS source, b.entity_id AS target,
+                       COUNT(DISTINCT a.knowledge_object_id) AS weight
+                FROM knowledge_entity_links a
+                JOIN knowledge_entity_links b
+                  ON b.knowledge_object_id = a.knowledge_object_id
+                 AND b.user_id = a.user_id AND b.entity_id > a.entity_id
+                WHERE a.user_id = ? AND a.status = 'accepted' AND b.status = 'accepted'
+                  AND a.entity_id IN ({placeholders}) AND b.entity_id IN ({placeholders})
+                GROUP BY a.entity_id, b.entity_id
+                ORDER BY weight DESC
+                LIMIT 800""",  # nosec B608
+            (user_id, *ids, *ids),
+        ).fetchall()
+        relations = self.execute(
+            f"""SELECT source_entity_id AS source, target_entity_id AS target, relation_type
+                FROM relations
+                WHERE user_id = ? AND source_entity_id IN ({placeholders})
+                  AND target_entity_id IN ({placeholders})
+                LIMIT 800""",  # nosec B608
+            (user_id, *ids, *ids),
+        ).fetchall()
+        edges = [{**dict(row), "kind": "cooccurrence"} for row in cooccurrence]
+        edges.extend({**dict(row), "kind": "relation", "weight": 1} for row in relations)
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "shown": len(nodes),
+            "total": self.count_entities(user_id),
+        }
+
     def count_entities(
         self,
         user_id: str,

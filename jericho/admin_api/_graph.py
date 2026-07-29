@@ -21,6 +21,8 @@ from jericho.admin_api._deps import (
     _require,
     _services,
     _target_user,
+    asyncio,
+    functools,
 )
 
 router = APIRouter()
@@ -108,6 +110,23 @@ async def delete_entity_admin(entity_id: str, request: Request, user_id: str) ->
         raise HTTPException(status_code=404, detail="Entity not found")
     _audit(request, "admin.entity.delete", "entity", entity_id, before=before)
     return {"status": "soft_deleted"}
+
+
+@router.get("/graph")
+async def graph_overview(
+    request: Request, user_id: str, limit: int = Query(120, ge=10, le=500)
+) -> dict[str, Any]:
+    """Связная картина графа целиком — то, что можно нарисовать.
+
+    Off the event loop: на большом графе это соединение таблицы связей с самой
+    собой, а соседний маршрут подграфа уже стоил пяти минут блокировки, когда
+    считался синхронно.
+    """
+    _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.graph.read", user_id, scope="overview")
+    return await asyncio.to_thread(
+        functools.partial(_services(request).storage.graph_overview, user_id, limit=limit)
+    )
 
 
 @router.get("/graph/{entity_id}")

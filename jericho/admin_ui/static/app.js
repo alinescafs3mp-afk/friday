@@ -224,14 +224,149 @@ actions.addEntityLinkDialog=async knowledgeId=>{try{const d=await api(`/api/admi
 actions.createEntityLink=async knowledgeId=>{try{await api(`/api/admin/knowledge/${q(knowledgeId)}/entity-links`,{method:'POST',body:JSON.stringify({user_id:selectedUser(),entity_id:document.getElementById('linkEntity').value,confidence:Number(document.getElementById('linkConfidence').value),status:'accepted',evidence:{source:'admin_ui'}})});toast('Связь добавлена');await actions.inspectKnowledge(knowledgeId)}catch(e){toast(e.message,true)}};
 actions.deleteKnowledge=async id=>{if(!confirm('Выполнить мягкое удаление объекта? Raw Object и история версий сохранятся.'))return;try{await api(`/api/admin/knowledge/${q(id)}?user_id=${q(selectedUser())}`,{method:'DELETE'});toast('Объект мягко удалён');refresh()}catch(e){toast(e.message,true)}};
 actions.runLifecycle=async()=>navigate('quality');
+// --- Визуализация графа: SVG и своя раскладка, без внешних зависимостей ----
+//
+// Библиотеку не тянем: интерфейс отдаётся локально и должен работать без сети, а на
+// сотнях узлов разница с библиотекой почти вся в интерактивности (перетаскивание,
+// зум, подсветка соседей) — она здесь и сделана.
+//
+// Рёбра ДВУХ РОДОВ и рисуются по-разному. `relation` — утверждение, которое кто-то
+// подтвердил, сплошной линией. `cooccurrence` — просто встретились в одном
+// документе, пунктиром, толщина по числу общих документов. Рисовать их одинаково
+// значило бы выдавать наблюдение за утверждение.
+const GRAPH_COLORS={person:'#e06c9f',organization:'#f4a261',project:'#7bc86c',collection:'#7bc86c',
+  location:'#61a5c2',event:'#c98bdb',concept:'#8ecae6',other:'#9aa5b1'};
+const GRAPH_W=1200, GRAPH_H=700;
+
+function graphLayout(nodes,edges){
+  // Стартовое положение по кругу, а не случайное: случайный старт даёт разную
+  // картинку при каждом открытии, и человек не узнаёт свой же граф.
+  const n=nodes.length;
+  nodes.forEach((node,i)=>{const a=2*Math.PI*i/Math.max(1,n);
+    node.x=GRAPH_W/2+Math.cos(a)*Math.min(GRAPH_W,GRAPH_H)*0.36;
+    node.y=GRAPH_H/2+Math.sin(a)*Math.min(GRAPH_W,GRAPH_H)*0.36;node.vx=0;node.vy=0});
+  const byId=new Map(nodes.map(x=>[x.id,x]));
+  const links=edges.map(e=>({s:byId.get(e.source),t:byId.get(e.target),w:Math.min(4,e.weight||1)})).filter(l=>l.s&&l.t);
+  for(let step=0;step<260;step++){
+    const cool=1-step/260;
+    for(let i=0;i<n;i++){const a=nodes[i];
+      for(let j=i+1;j<n;j++){const b=nodes[j];
+        let dx=a.x-b.x,dy=a.y-b.y;const d=Math.sqrt(dx*dx+dy*dy)||0.01;
+        const push=3000/(d*d);dx/=d;dy/=d;
+        a.vx+=dx*push;a.vy+=dy*push;b.vx-=dx*push;b.vy-=dy*push}}
+    for(const l of links){let dx=l.t.x-l.s.x,dy=l.t.y-l.s.y;
+      const d=Math.sqrt(dx*dx+dy*dy)||0.01;const pull=(d-110)*0.007*l.w;dx/=d;dy/=d;
+      l.s.vx+=dx*pull;l.s.vy+=dy*pull;l.t.vx-=dx*pull;l.t.vy-=dy*pull}
+    for(const node of nodes){node.vx+=(GRAPH_W/2-node.x)*0.0015;node.vy+=(GRAPH_H/2-node.y)*0.0015;
+      node.x+=node.vx*cool;node.y+=node.vy*cool;node.vx*=0.82;node.vy*=0.82;
+      node.x=Math.max(40,Math.min(GRAPH_W-40,node.x));node.y=Math.max(30,Math.min(GRAPH_H-30,node.y))}}
+  return nodes;
+}
+
+function graphMarkup(data){
+  const nodes=(data.nodes||[]).map(x=>({...x}));
+  if(!nodes.length)return empty('В графе пока нет подтверждённых связей с документами');
+  const edges=(data.edges||[]).filter(e=>e.source&&e.target);
+  graphLayout(nodes,edges);
+  state.graphNodes=nodes;state.graphEdges=edges;
+  const byId=new Map(nodes.map(x=>[x.id,x]));
+  const maxCount=Math.max(1,...nodes.map(x=>x.knowledge_count||0));
+  const lines=edges.map((e,i)=>{const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
+    const rel=e.kind==='relation';const w=rel?2.2:Math.min(3,0.6+(e.weight||1)*0.35);
+    return `<line data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"`
+      +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
+      +` stroke="${rel?'#4c9aff':'#5a6472'}" stroke-width="${w.toFixed(1)}"${rel?'':' stroke-dasharray="3 4"'}`
+      +` opacity="${rel?0.9:0.45}"><title>${esc(rel?String(e.relation_type||'подтверждённая связь'):'общих документов: '+e.weight)}</title></line>`}).join('');
+  const circles=nodes.map(node=>{const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
+    const kind=GRAPH_COLORS[node.entity_type]?node.entity_type:'other';
+    return `<g class="gnode" data-node="${esc(node.id)}">`
+      +`<circle cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${r.toFixed(1)}" class="gfill-${kind}" stroke="#0a0f18" stroke-width="1.5">`
+      +`<title>${esc(node.name)} — ${esc(node.entity_type)}, документов: ${node.knowledge_count}</title></circle>`
+      +`<text x="${node.x.toFixed(1)}" y="${(node.y-r-6).toFixed(1)}" text-anchor="middle" font-size="12" fill="#c9d1d9">${esc(short(node.name,24))}</text></g>`}).join('');
+  const legend=Object.entries({person:'человек',organization:'организация',project:'проект',
+    location:'место',event:'событие',concept:'понятие',other:'прочее'})
+    .map(([k,label])=>`<span class="badge gt-${k}">${label}</span>`).join(' ');
+  // Обрез называется вслух: картинка, молча показывающая часть графа, хуже отсутствующей.
+  const capped=(data.total||0)>(data.shown||0)
+    ? `<div class="notice">Показано ${data.shown} сущностей из ${data.total} — самые связанные с документами. Остальные не поместились, а не отсутствуют.</div>`:'';
+  return `${capped}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>
+    <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}">${lines}${circles}</svg>
+    <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — переставить, клик — подробности</div></div>`;
+}
+
+// Взаимодействие вешается ПОСЛЕ отрисовки: обработчики живут на контейнере, а не на
+// каждом узле, иначе их пришлось бы переставлять при каждой перерисовке.
+function bindGraph(){
+  const canvas=document.getElementById('graphCanvas'), svg=document.getElementById('graphSvg');
+  if(!canvas||!svg)return;
+  let view={x:0,y:0,k:1}, drag=null, moved=false;
+  const apply=()=>svg.setAttribute('viewBox',`${view.x} ${view.y} ${GRAPH_W/view.k} ${GRAPH_H/view.k}`);
+  const toSvg=event=>{const rect=canvas.getBoundingClientRect();
+    return {x:view.x+(event.clientX-rect.left)/rect.width*(GRAPH_W/view.k),
+            y:view.y+(event.clientY-rect.top)/rect.height*(GRAPH_H/view.k)}};
+  canvas.addEventListener('wheel',event=>{event.preventDefault();
+    const before=toSvg(event);
+    view.k=Math.max(0.35,Math.min(6,view.k*(event.deltaY<0?1.15:1/1.15)));
+    const after=toSvg(event);view.x+=before.x-after.x;view.y+=before.y-after.y;apply()},{passive:false});
+  canvas.addEventListener('pointerdown',event=>{
+    const group=event.target.closest('.gnode');moved=false;
+    drag=group?{node:group.dataset.node,group}:{pan:true,sx:event.clientX,sy:event.clientY,vx:view.x,vy:view.y};
+    canvas.classList.add('dragging');canvas.setPointerCapture(event.pointerId)});
+  canvas.addEventListener('pointermove',event=>{
+    if(!drag)return;moved=true;
+    if(drag.pan){const rect=canvas.getBoundingClientRect();
+      view.x=drag.vx-(event.clientX-drag.sx)/rect.width*(GRAPH_W/view.k);
+      view.y=drag.vy-(event.clientY-drag.sy)/rect.height*(GRAPH_H/view.k);apply();return}
+    const point=toSvg(event), node=(state.graphNodes||[]).find(n=>n.id===drag.node);
+    if(!node)return;node.x=point.x;node.y=point.y;
+    const circle=drag.group.querySelector('circle'), label=drag.group.querySelector('text');
+    circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);
+    label.setAttribute('x',point.x);label.setAttribute('y',point.y-Number(circle.getAttribute('r'))-6);
+    svg.querySelectorAll(`line[data-a="${CSS.escape(node.id)}"]`).forEach(line=>{
+      line.setAttribute('x1',point.x);line.setAttribute('y1',point.y)});
+    svg.querySelectorAll(`line[data-b="${CSS.escape(node.id)}"]`).forEach(line=>{
+      line.setAttribute('x2',point.x);line.setAttribute('y2',point.y)})});
+  canvas.addEventListener('pointerup',event=>{
+    const wasNode=drag&&drag.node;canvas.classList.remove('dragging');drag=null;
+    // Клик и перетаскивание различаются по факту движения — иначе любое смещение
+    // узла открывало бы карточку, и переставить его было бы нельзя.
+    if(wasNode&&!moved)actions.inspectEntityNode(wasNode)});
+  // Наведение подсвечивает соседей: на плотном графе это единственный способ
+  // разглядеть, с чем связан конкретный узел.
+  svg.addEventListener('pointerover',event=>{
+    const group=event.target.closest('.gnode');if(!group)return;
+    const id=group.dataset.node, near=new Set([id]);
+    svg.querySelectorAll('line').forEach(line=>{
+      if(line.dataset.a===id)near.add(line.dataset.b);
+      if(line.dataset.b===id)near.add(line.dataset.a)});
+    svg.querySelectorAll('.gnode').forEach(other=>other.classList.toggle('gdim',!near.has(other.dataset.node)));
+    svg.querySelectorAll('line').forEach(line=>
+      line.classList.toggle('gdim',line.dataset.a!==id&&line.dataset.b!==id))});
+  svg.addEventListener('pointerout',event=>{if(event.relatedTarget&&svg.contains(event.relatedTarget))return;
+    svg.querySelectorAll('.gdim').forEach(node=>node.classList.remove('gdim'))});
+}
+
+actions.inspectEntityNode=async id=>{
+  try{
+    const data=await api(`/api/admin/graph/${q(id)}?user_id=${q(selectedUser())}&depth=1`);
+    const node=(data.nodes||[]).find(n=>n.id===id)||(state.graphNodes||[]).find(n=>n.id===id)||{};
+    const near=(data.nodes||[]).filter(n=>n.id!==id);
+    openModal(`Сущность: ${node.name||id}`,
+      `<div class="kv"><div>Тип</div><div>${esc(node.entity_type||'—')}</div><div>Документов</div><div>${esc(String(node.knowledge_count??'—'))}</div><div>Идентификатор</div><div class="mono">${esc(id)}</div></div>
+       <h3>Соседи по подтверждённым связям (${near.length})</h3>
+       ${near.length?table(['Имя','Тип'],near.map(n=>`<tr><td>${esc(n.name)}</td><td>${esc(n.entity_type)}</td></tr>`)):empty('Подтверждённых связей сущность-сущность нет — они появляются после вашего подтверждения')}`);
+  }catch(e){toast(e.message,true)}
+};
+
 renderers.graph=async gen=>{
   const uid=selectedUser();
-  const [entities,resolutions,relations,conflicts,containers]=await Promise.all([
+  const [entities,resolutions,relations,conflicts,containers,overview]=await Promise.all([
     api(`/api/admin/entities?user_id=${q(uid)}&limit=${PAGE}&offset=${state.entitiesOffset}`),
     api(`/api/admin/resolutions?user_id=${q(uid)}&status=suggested`),
     api(`/api/admin/relation-candidates?user_id=${q(uid)}&status=suggested&limit=${PAGE}&offset=${state.relationsOffset}`),
     api(`/api/admin/conflicts?user_id=${q(uid)}&status=suggested&limit=${PAGE}&offset=${state.conflictsOffset}`),
-    api(`/api/admin/containers?user_id=${q(uid)}`)
+    api(`/api/admin/containers?user_id=${q(uid)}`),
+    api(`/api/admin/graph?user_id=${q(uid)}&limit=150`).catch(()=>({nodes:[],edges:[],shown:0,total:0}))
   ]);
   if(gen!==renderGen)return;
   state.entities=entities.items||[];state.resolutions=resolutions.items||[];state.relationCandidates=relations.items||[];state.conflicts=conflicts.items||[];state.containers=containers.items||[];
@@ -245,7 +380,8 @@ renderers.graph=async gen=>{
   const containerRows=[];
   const addLevel=(parentKey,depth)=>{(byParent[parentKey]||[]).forEach(c=>{containerRows.push(`<div class="toolbar">${'&nbsp;&nbsp;&nbsp;'.repeat(depth)}<span class="badge">${esc(kindLabel[c.entity_type]||c.entity_type)}</span><b>${esc(c.name)}</b><span class="muted">знаний: ${Number(c.knowledge_count||0)}</span><span class="grow"></span><button class="btn small" ${call('showContainerKnowledge',c.id,c.name)}>Знания</button> <button class="btn small" ${call('showGraph',c.id)}>Связи</button></div>`);addLevel(c.id,depth+1)})};
   addLevel('',0);
-  setApp(gen,`<div class="notice">Граф развивается через предложения: Jericho не объединяет сущности, не добавляет спорные связи и не объявляет факты устаревшими без явного решения. Массовые действия возвращают число применённых и пропущенных элементов, поэтому частичный сбой не теряется.</div><section class="card"><div class="toolbar"><h2 class="grow">Проекты и коллекции</h2><button class="btn primary" ${call('createContainerDialog')}>Новый контейнер</button><span class="badge">${containerRows.length}</span></div>${containerRows.join('')||empty('Контейнеров пока нет: создайте проект или коллекцию и привязывайте к ним знания через «Добавить связь».')}</section><section class="card"><div class="toolbar"><h2 class="grow">Предлагаемые связи</h2><button class="btn" ${call('selectAllGraph','relation',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','relation',false)}>Снять</button><button class="btn good" ${call('bulkReviewRelations','accepted')}>Принять выбранные</button><button class="btn danger" ${call('bulkReviewRelations','rejected')}>Отклонить выбранные</button><span class="badge">${lrows.length}</span></div>${lrows.length?table(['','Источник','Связь','Цель','Решение'],lrows):empty('Предложений связей нет')}${pager('relationsPage',state.relationsOffset,state.relationCandidates.length,relations.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Противоречия и дубликаты</h2><button class="btn" ${call('detectDuplicates2')}>Найти дубли</button><button class="btn" ${call('selectAllGraph','conflict',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','conflict',false)}>Снять</button><button class="btn good" ${call('bulkReviewConflicts','confirmed')}>Подтвердить выбранные</button><button class="btn danger" ${call('bulkReviewConflicts','dismissed')}>Отклонить выбранные</button><span class="badge">${crows.length}</span></div>${crows.length?table(['','Утверждение A','Тип','Утверждение B','Решение'],crows):empty('Потенциальных противоречий нет')}${pager('conflictsPage',state.conflictsOffset,state.conflicts.length,conflicts.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Entity Resolution</h2><button class="btn primary" ${call('detectDuplicates')}>Пересчитать кандидатов</button><span class="badge">${rrows.length}</span></div>${rrows.length?table(['Сущность A','Сущность B','Сигналы','Решение'],rrows):empty('Нерешённых предложений нет')}</section><section class="card"><div class="toolbar"><h2 class="grow">Сущности</h2><button class="btn primary" ${call('createEntityDialog')}>Новая сущность</button><span class="badge">${erows.length}</span></div>${erows.length?table(['Имя','Тип','Псевдонимы','Описание',''],erows):empty('Сущностей пока нет')}${pager('entitiesPage',state.entitiesOffset,state.entities.length,entities.total)}</section>`);
+  setApp(gen,`<section class="card"><div class="toolbar"><h2 class="grow">Картина графа</h2></div>${graphMarkup(overview)}</section><div class="notice">Граф развивается через предложения: Jericho не объединяет сущности, не добавляет спорные связи и не объявляет факты устаревшими без явного решения. Массовые действия возвращают число применённых и пропущенных элементов, поэтому частичный сбой не теряется.</div><section class="card"><div class="toolbar"><h2 class="grow">Проекты и коллекции</h2><button class="btn primary" ${call('createContainerDialog')}>Новый контейнер</button><span class="badge">${containerRows.length}</span></div>${containerRows.join('')||empty('Контейнеров пока нет: создайте проект или коллекцию и привязывайте к ним знания через «Добавить связь».')}</section><section class="card"><div class="toolbar"><h2 class="grow">Предлагаемые связи</h2><button class="btn" ${call('selectAllGraph','relation',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','relation',false)}>Снять</button><button class="btn good" ${call('bulkReviewRelations','accepted')}>Принять выбранные</button><button class="btn danger" ${call('bulkReviewRelations','rejected')}>Отклонить выбранные</button><span class="badge">${lrows.length}</span></div>${lrows.length?table(['','Источник','Связь','Цель','Решение'],lrows):empty('Предложений связей нет')}${pager('relationsPage',state.relationsOffset,state.relationCandidates.length,relations.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Противоречия и дубликаты</h2><button class="btn" ${call('detectDuplicates2')}>Найти дубли</button><button class="btn" ${call('selectAllGraph','conflict',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','conflict',false)}>Снять</button><button class="btn good" ${call('bulkReviewConflicts','confirmed')}>Подтвердить выбранные</button><button class="btn danger" ${call('bulkReviewConflicts','dismissed')}>Отклонить выбранные</button><span class="badge">${crows.length}</span></div>${crows.length?table(['','Утверждение A','Тип','Утверждение B','Решение'],crows):empty('Потенциальных противоречий нет')}${pager('conflictsPage',state.conflictsOffset,state.conflicts.length,conflicts.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Entity Resolution</h2><button class="btn primary" ${call('detectDuplicates')}>Пересчитать кандидатов</button><span class="badge">${rrows.length}</span></div>${rrows.length?table(['Сущность A','Сущность B','Сигналы','Решение'],rrows):empty('Нерешённых предложений нет')}</section><section class="card"><div class="toolbar"><h2 class="grow">Сущности</h2><button class="btn primary" ${call('createEntityDialog')}>Новая сущность</button><span class="badge">${erows.length}</span></div>${erows.length?table(['Имя','Тип','Псевдонимы','Описание',''],erows):empty('Сущностей пока нет')}${pager('entitiesPage',state.entitiesOffset,state.entities.length,entities.total)}</section>`);
+  bindGraph();
 };
 actions.detectDuplicates=async()=>{try{const d=await api('/api/admin/resolutions/detect',{method:'POST',body:JSON.stringify({user_id:selectedUser()})});toast(`Предложений найдено/обновлено: ${(d.suggested||[]).length}`);refresh()}catch(e){toast(e.message,true)}};
 actions.detectDuplicates2=async()=>{try{const d=await api('/api/admin/knowledge/detect-duplicates',{method:'POST',body:JSON.stringify({user_id:selectedUser()})});toast(d.reason?d.reason:`Дубликатов предложено: ${d.detected} (сравнено ${d.objects_compared} из ${d.objects_scanned}${d.pending?`, осталось ${d.pending}`:''})`);refresh()}catch(e){toast(e.message,true)}};
