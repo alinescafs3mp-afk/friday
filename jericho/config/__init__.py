@@ -364,6 +364,11 @@ class JerichoSettings:
     # Cosine below which a dense score is not treated as evidence. Model-dependent:
     # the shipped default is measured against qwen3-embedding-0.6b.
     retrieval_dense_evidence_min: float
+    rerank_base_url: str
+    rerank_model: str
+    rerank_api_key: str
+    rerank_timeout_sec: float
+    rerank_top: int
 
     api_host: str
     api_port: int
@@ -673,6 +678,22 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         # retrieval и §15 ARCHITECTURE. Число обязано совпадать в трёх местах (здесь,
         # там и в доках), и это стережёт тест.
         retrieval_dense_evidence_min=_float_env("JERICHO_RETRIEVAL_DENSE_EVIDENCE_MIN", 0.35, minimum=0.0),
+        # Отдельная модель-переранжировщик (cross-encoder). Выключена, пока не задан
+        # адрес: замерено, что упорядочивание внутри выдачи не несёт сигнала о
+        # полезности (точность плоская по глубине), а лучший имеющийся различитель
+        # даёт AUC 0.687 при нужных ~0.9. Подробности — в `retrieval/_rerank_backend.py`.
+        rerank_base_url=os.environ.get("JERICHO_RERANK_BASE_URL", "").strip(),
+        rerank_model=os.environ.get("JERICHO_RERANK_MODEL", "").strip(),
+        # Ключ падает обратно на ключ LLM — как у эмбеддингов, и по той же причине:
+        # на этой установке все три сервиса за одним ключом, а пустой ключ в проверке
+        # уже однажды увёл меня в ложный диагноз (401 приняли за требование сервиса).
+        rerank_api_key=(
+            os.environ.get("JERICHO_RERANK_API_KEY", "").strip()
+            or os.environ.get("JERICHO_LLM_API_KEY", "").strip()
+        ),
+        rerank_timeout_sec=_float_env("JERICHO_RERANK_TIMEOUT_SEC", 20.0, minimum=1.0),
+        # Сколько верхних кандидатов отдавать на переранжирование. 0 — выключено.
+        rerank_top=_int_env("JERICHO_RERANK_TOP", 0, minimum=0),
         api_host=os.environ.get("JERICHO_API_HOST", "127.0.0.1"),
         api_port=_int_env("JERICHO_API_PORT", 8000, minimum=1),
         api_token=os.environ.get("JERICHO_API_TOKEN", ""),

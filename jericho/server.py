@@ -74,6 +74,7 @@ from jericho.permissions import (
     bind_actor,
 )
 from jericho.retrieval import EmbeddingBackend, HybridSearcher
+from jericho.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 from jericho.security import verify_bridge_request
 from jericho.storage import init_storage, normalize_conversation_mode
 from jericho.storage.models import (
@@ -647,12 +648,22 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             auth_service = AuthorizationService(storage)
             llm = LLMRouter(settings)
             embeddings = EmbeddingBackend(settings)
+            # Переранжировщик подключается, только если настроен адрес И задана
+            # глубина: два условия, потому что поднять службу и забыть включить шаг —
+            # ровно та же ошибка, что включить шаг без службы, и обе молчаливые.
+            rerank_backend = RerankBackend(settings)
+            reranker = None
+            if rerank_backend.enabled and settings.rerank_top > 0:
+                reranker = functools.partial(rerank_with_backend, rerank_backend)
+                LOGGER.info("reranking enabled: model %s, top %d", settings.rerank_model, settings.rerank_top)
             searcher = HybridSearcher(
                 storage,
                 embeddings,
                 graph_max_depth=settings.graph_max_depth,
                 pool_max=settings.retrieval_pool_max,
                 dense_evidence_min=settings.retrieval_dense_evidence_min,
+                reranker=reranker,
+                rerank_top=settings.rerank_top,
             )
             graph = KnowledgeGraph(storage)
             ingestion = IngestionPipeline(settings, storage, graph, llm)
