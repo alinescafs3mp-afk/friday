@@ -205,7 +205,10 @@ def test_every_button_namespace_has_a_handler() -> None:
     )
 
 
-EXPECTED_CALLBACK_NAMESPACES = {"feedback", "inbox", "merge", "mission", "research", "work"}
+# `doc` добавлен осознанно: кнопка «открыть найденный документ целиком» под выдачей
+# поиска. До неё выдача была тупиком — заголовок и 160 знаков, а дальше ни id, ни
+# ссылки, ни номера, на который можно сослаться следующей репликой.
+EXPECTED_CALLBACK_NAMESPACES = {"doc", "feedback", "inbox", "merge", "mission", "research", "work"}
 EXPECTED_COMMANDS = {
     "/browse",
     "/chat",
@@ -224,7 +227,7 @@ EXPECTED_COMMANDS = {
     "/why",
     "/work",
 }
-EXPECTED_BRIDGE_COUNT = 38
+EXPECTED_BRIDGE_COUNT = 40
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",
@@ -236,7 +239,9 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_drain_outbound": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_extract_forward": "(message: 'dict[str, Any]') -> 'dict[str, Any]'",
     "_format_browse_results": "(header: 'str', items: 'list[Any]') -> 'str'",
+    "_format_full_document": "(document: 'Any') -> 'str'",
     "_format_mission_created": "(self, mission: 'dict[str, Any]') -> 'str'",
+    "_search_reply_markup": "(results: 'list[Any]') -> 'dict[str, Any] | None'",
     "_format_response_message": "(response: 'dict[str, Any]') -> 'str'",
     "_format_search_results": "(query: 'str', results: 'list[Any]') -> 'str'",
     "_get_updates": "(self, client: 'httpx.AsyncClient') -> 'list[dict[str, Any]]'",

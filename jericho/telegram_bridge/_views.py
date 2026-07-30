@@ -8,6 +8,7 @@ before and nothing outside the package moved.
 from __future__ import annotations
 
 from jericho.telegram_bridge._base import (
+    CALLBACK_TARGET_RE,
     Any,
     BridgeShared,
     httpx,
@@ -351,23 +352,92 @@ class ViewsMixin(BridgeShared):
                 "записям — возможно, материал ещё ждёт разбора в Inbox (/inbox).",
             )
             return
-        await self._send_message(telegram, chat_id, self._format_search_results(query, results))
+        await self._send_message(
+            telegram,
+            chat_id,
+            self._format_search_results(query, results),
+            reply_markup=self._search_reply_markup(results),
+        )
 
     @staticmethod
     def _format_search_results(query: str, results: list[Any]) -> str:
         lines = [f"Найдено по запросу «{query}»:"]
-        for item in results:
+        for position, item in enumerate(results, start=1):
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or "Без названия")[:120]
             kind = str(item.get("knowledge_kind") or "note")
             stage = str(item.get("lifecycle_stage") or "active")
             marker = "" if stage == "active" else f", {stage}"
-            lines.append(f"• {title} ({kind}{marker})")
+            # Номер, а не маркер списка: под сообщением идут кнопки с теми же номерами,
+            # и без нумерации человек не может сказать, какая кнопка чему соответствует.
+            lines.append(f"{position}. {title} ({kind}{marker})")
             snippet = str(item.get("summary") or item.get("content") or "").strip().replace("\n", " ")
             if snippet:
                 lines.append(f"  {snippet[:160]}")
+        if any(isinstance(item, dict) and item.get("id") for item in results):
+            lines.append("")
+            lines.append("Кнопкой ниже — открыть документ целиком.")
         return "\n".join(lines)
+
+    # Сколько знаков документа уходит в чат. Предел Telegram — 4096 на сообщение, и
+    # длинный текст `_send_message` режет сам; но резать НАДО и здесь, потому что в
+    # архиве владельца встречаются документы под восемьсот тысяч знаков, а это две
+    # сотни сообщений подряд. Лучше показать начало и честно сказать, сколько осталось.
+    _FULL_DOCUMENT_CHARS = 3_000
+
+    @classmethod
+    def _format_full_document(cls, document: Any) -> str:
+        item = document.get("knowledge_object") if isinstance(document, dict) else None
+        if not isinstance(item, dict):
+            item = document if isinstance(document, dict) else {}
+        title = str(item.get("title") or "Без названия")
+        body = str(item.get("content") or "").strip()
+        if not body:
+            body = str(item.get("summary") or "").strip()
+        lines = [title]
+        stage = str(item.get("lifecycle_stage") or "active")
+        if stage != "active":
+            lines.append(f"({stage})")
+        lines.append("")
+        if not body:
+            lines.append("У этой записи нет текста — только заголовок и метаданные.")
+            return "\n".join(lines)
+        lines.append(body[: cls._FULL_DOCUMENT_CHARS])
+        rest = len(body) - cls._FULL_DOCUMENT_CHARS
+        if rest > 0:
+            # Число, а не многоточие: человек должен понимать, четверть он увидел или
+            # девяносто девять сотых.
+            lines.append("")
+            lines.append(
+                f"…показано {cls._FULL_DOCUMENT_CHARS} знаков из {len(body)}. "
+                "Остальное — в админке, раздел «Объекты знаний»."
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _search_reply_markup(results: list[Any]) -> dict[str, Any] | None:
+        """Кнопки «открыть целиком» под выдачей поиска.
+
+        Без них найденное было ТУПИКОМ: приходил заголовок и 160 знаков, а дальше ни
+        id, ни ссылки, ни номера, на который можно сослаться следующей репликой.
+        Прочитать документ целиком было нельзя ничем, кроме ухода в админку и листания
+        полутора тысяч строк. При том что Telegram — основной интерфейс владельца.
+        """
+        buttons: list[dict[str, str]] = []
+        for position, item in enumerate(results, start=1):
+            if not isinstance(item, dict):
+                continue
+            knowledge_id = str(item.get("id") or "")
+            # Тот же формат, что у остальных обратных вызовов: три части через
+            # двоеточие, цель — только допустимые символы. Идентификаторы здесь
+            # `ko_<hex>`, то есть в 64 байта Telegram укладываются с запасом.
+            if knowledge_id and CALLBACK_TARGET_RE.fullmatch(knowledge_id):
+                buttons.append({"text": str(position), "callback_data": f"doc:show:{knowledge_id}"})
+        if not buttons:
+            return None
+        rows = [buttons[index : index + 4] for index in range(0, len(buttons), 4)]
+        return {"inline_keyboard": rows}
 
     def _format_mission_created(self, mission: dict[str, Any]) -> str:
         title = str(mission.get("title") or "Миссия")

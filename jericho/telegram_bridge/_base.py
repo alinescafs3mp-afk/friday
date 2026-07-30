@@ -201,6 +201,7 @@ class BridgeShared:
     _backend_json: Callable[..., Any]
     _extract_forward: Callable[..., Any]
     _file_url: Any
+    _format_full_document: Callable[..., Any]
     _format_mission_created: Callable[..., Any]
     _format_response_message: Callable[..., Any]
     _inbox: Any

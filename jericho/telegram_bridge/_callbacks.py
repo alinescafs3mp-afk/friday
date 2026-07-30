@@ -66,6 +66,26 @@ class CallbacksMixin(BridgeShared):
                     "Добавлено в знания" if action == "promote" else "Предложение проигнорировано",
                 )
                 clear_markup = True
+            elif family == "doc" and action == "show":
+                # Открыть найденный документ целиком. До этого выдача поиска была
+                # ТУПИКОМ: заголовок и 160 знаков, а дальше ни id, ни ссылки, ни
+                # номера, на который можно сослаться. Прочитать документ было нельзя
+                # ничем, кроме ухода в админку и листания полутора тысяч строк — при
+                # том что Telegram основной интерфейс владельца.
+                #
+                # Читается СВОЙ арендатор тем же маршрутом, что и весь мост, поэтому
+                # чужое сюда не попадает: `/api/knowledge/{id}` гейтится правами
+                # действующего аккаунта.
+                document = await self._backend_json(
+                    backend,
+                    "GET",
+                    f"/api/knowledge/{target_id}",
+                    None,
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(telegram, callback_id, "Открываю")
+                await self._send_message(telegram, chat_id, self._format_full_document(document))
             elif family == "feedback" and action in {"up", "down", "search_off"}:
                 if action == "search_off":
                     feedback_type, score = "search_quality", -1.0
