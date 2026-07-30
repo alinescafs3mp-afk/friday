@@ -334,12 +334,15 @@ class CommandsMixin(BridgeShared):
 
         try:
             document = await self._prepare_document(telegram, message, update)
-        except MediaTooLargeError:
+        except MediaTooLargeError as exc:
             await register_backend_user()
+            # The exception text names the ACTUAL ceiling (Telegram's 20 MB or the
+            # configured limit) — the sender's next step depends on which it was.
             await self._send_message(
                 telegram,
                 chat_id,
-                "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
+                str(exc)
+                or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
             )
             return
 

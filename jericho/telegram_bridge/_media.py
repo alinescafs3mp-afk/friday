@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from jericho.telegram_bridge._base import (
     _SINGLE_MEDIA_FIELDS,
+    BOT_API_DOWNLOAD_LIMIT_BYTES,
     Any,
     BridgeShared,
     MediaTooLargeError,
@@ -16,6 +17,17 @@ from jericho.telegram_bridge._base import (
     PermanentUpdateError,
     base64,
     httpx,
+)
+
+# `MediaTooLargeError` carries the text the user reads in the chat, so the reason
+# must be the true one: «настроенный предел» and «потолок Telegram» ask for
+# different next steps from the sender.
+_BOT_API_LIMIT_MESSAGE = (
+    "Telegram не отдаёт ботам файлы больше 20 МБ — файл не сохранён. "
+    "Сожмите его или разбейте на части и пришлите снова."
+)
+_CONFIGURED_LIMIT_MESSAGE = (
+    "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено."
 )
 
 
@@ -65,13 +77,29 @@ class MediaMixin(BridgeShared):
         if not descriptor:
             return None
         size = int(descriptor.get("file_size") or 0)
-        if size and size > self.config.max_document_bytes:
-            raise MediaTooLargeError("Telegram media exceeds configured size limit")
+        limit = min(self.config.max_document_bytes, BOT_API_DOWNLOAD_LIMIT_BYTES)
+        limit_message = (
+            _BOT_API_LIMIT_MESSAGE
+            if self.config.max_document_bytes >= BOT_API_DOWNLOAD_LIMIT_BYTES
+            else _CONFIGURED_LIMIT_MESSAGE
+        )
+        if size and size > limit:
+            raise MediaTooLargeError(limit_message)
         file_id = str(descriptor.get("file_id") or "")
         if not file_id:
             raise PermanentUpdateError("Telegram media has no file_id")
 
         response = await telegram.post(f"{self._api_url}/getFile", json={"file_id": file_id})
+        # Some descriptors carry no file_size, so the first time the ceiling can
+        # show up is `getFile` answering 400 «file is too big». That is permanent
+        # and the sender must hear the reason, not receive a dead-letter notice.
+        if response.status_code == 400:
+            try:
+                description = str(response.json().get("description") or "")
+            except ValueError:
+                description = ""
+            if "too big" in description.casefold():
+                raise MediaTooLargeError(_BOT_API_LIMIT_MESSAGE)
         response.raise_for_status()
         payload = response.json()
         file_path = str((payload.get("result") or {}).get("file_path") or "")
@@ -87,12 +115,12 @@ class MediaMixin(BridgeShared):
                     declared_length = int(content_length)
                 except ValueError:
                     declared_length = 0
-                if declared_length > self.config.max_document_bytes:
-                    raise MediaTooLargeError("Downloaded media exceeds configured size limit")
+                if declared_length > limit:
+                    raise MediaTooLargeError(limit_message)
             async for chunk in download.aiter_bytes():
                 downloaded += len(chunk)
-                if downloaded > self.config.max_document_bytes:
-                    raise MediaTooLargeError("Downloaded media exceeds configured size limit")
+                if downloaded > limit:
+                    raise MediaTooLargeError(limit_message)
                 chunks.append(chunk)
         content = b"".join(chunks)
         prepared: dict[str, Any] = {

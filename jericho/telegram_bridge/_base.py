@@ -31,6 +31,11 @@ from jericho.telemetry.logging import install_secret_redaction
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("jericho.telegram_bridge")
 API_BASE = "https://api.telegram.org"
+# `getFile` on api.telegram.org refuses to serve bots files above 20 MB — a
+# server-side ceiling no local setting can raise. `max_document_bytes` (wired
+# from the backend's upload limit, 50 MB) still applies where it is stricter;
+# downloads take the min of the two.
+BOT_API_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 POLL_TIMEOUT = 30
 BACKOFF_MAX = 60.0
 MAX_ATTEMPTS = 288

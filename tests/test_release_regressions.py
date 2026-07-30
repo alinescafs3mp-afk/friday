@@ -238,7 +238,7 @@ async def test_telegram_download_is_aborted_while_streaming_past_limit(tmp_path:
 
     try:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with pytest.raises(PermanentUpdateError, match="size limit"):
+            with pytest.raises(PermanentUpdateError, match="превышает допустимый размер"):
                 await bridge._prepare_document(  # noqa: SLF001
                     client,
                     {
@@ -319,6 +319,68 @@ async def test_oversized_voice_media_reports_too_large(tmp_path: Path):
                     client,
                     {"message_id": 1, "voice": {"file_id": "v", "file_size": 999}},
                     {"update_id": 2},
+                )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_document_between_20_and_50_mb_names_the_telegram_ceiling(tmp_path: Path):
+    """The backend accepts 50 MB, but `getFile` on api.telegram.org refuses bots
+    anything above 20 MB. A 25 MB document used to reach getFile and die as an
+    unexplained RuntimeError; the sender must instead hear WHOSE limit it hit."""
+    from jericho.telegram_bridge import MediaTooLargeError
+
+    bridge = _bridge(tmp_path, max_document_bytes=50 * 1024 * 1024)
+    requests_made: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_made.append(request.url.path)
+        return httpx.Response(200, json={"ok": True, "result": {"file_path": "d/big.pdf"}})
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(MediaTooLargeError, match="20 МБ"):
+                await bridge._prepare_document(  # noqa: SLF001
+                    client,
+                    {
+                        "message_id": 4,
+                        "document": {
+                            "file_id": "file-big",
+                            "file_name": "big.pdf",
+                            "file_size": 25 * 1024 * 1024,
+                        },
+                    },
+                    {"update_id": 10},
+                )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    # Known-oversized files are refused before any Telegram round-trip.
+    assert requests_made == []
+
+
+@pytest.mark.asyncio
+async def test_getfile_refusal_file_is_too_big_is_permanent_and_explained(tmp_path: Path):
+    """Descriptors may carry no file_size, so the ceiling can first appear as
+    getFile answering 400 «file is too big». That refusal is permanent: it must
+    not raise a retryable HTTP error, and the sender must hear the reason."""
+    from jericho.telegram_bridge import MediaTooLargeError
+
+    bridge = _bridge(tmp_path, max_document_bytes=50 * 1024 * 1024)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400, json={"ok": False, "error_code": 400, "description": "Bad Request: file is too big"}
+        )
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(MediaTooLargeError, match="20 МБ"):
+                await bridge._prepare_document(  # noqa: SLF001
+                    client,
+                    {"message_id": 5, "document": {"file_id": "file-nosize", "file_name": "big.doc"}},
+                    {"update_id": 12},
                 )
     finally:
         bridge._inbox.close()  # noqa: SLF001
