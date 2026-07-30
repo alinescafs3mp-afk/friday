@@ -125,6 +125,13 @@ def plan_import(
     The walk is sorted at every level so two runs over an unchanged tree produce the
     same order — which is what makes ``--limit`` a usable way to import a large tree in
     batches rather than a random sample.
+
+    ⚠️ `limit` здесь — потолок ПЛАНА, а не партии. Планирование ничего не знает о том,
+    что уже загружено (в этом его смысл: оно не трогает хранилище), поэтому одного
+    упорядоченного обхода для «партий» НЕ ХВАТАЕТ: второй запуск с тем же `--limit`
+    выберет ровно те же первые N файлов, все они отыграются как дубликаты, и прогресс
+    будет нулевым. Партии делает `run_import`, считая по ЗАГРУЖЕННЫМ, — см. его
+    параметр `stop_after`.
     """
     # Resolved, not just expanded: the stored path is provenance a reader consults
     # later, and a relative one is worthless once the working directory has moved.
@@ -204,6 +211,7 @@ async def run_import(
     plan: ImportPlan,
     *,
     on_progress: Callable[[int, int, Outcome], None] | None = None,
+    stop_after: int | None = None,
 ) -> list[Outcome]:
     """Ingest every candidate, one at a time, reporting what happened to each.
 
@@ -213,14 +221,26 @@ async def run_import(
     One file failing must not end the run — a corpus of real files will contain
     something unreadable, and losing the other 8999 to it would be absurd. Failures are
     collected and reported; re-running retries them and skips everything that landed.
+
+    `stop_after` считает ЗАГРУЖЕННЫЕ, а не просмотренные, и в этом вся разница. Партии
+    обещаны в докстринге `plan_import` и в руководстве оператора, но одним потолком
+    плана они не получались: второй запуск с тем же числом брал те же первые N файлов,
+    все они отыгрывались как дубликаты, и человек, следующий рецепту из OPERATIONS.md,
+    не продвигался дальше первой партии никогда. Дубликат — это признак, что здесь уже
+    были; он не должен занимать место в партии.
     """
     outcomes: list[Outcome] = []
     total = len(plan.candidates)
+    ingested = 0
     for index, candidate in enumerate(plan.candidates, start=1):
         outcome = await _ingest_one(pipeline, user_id, candidate)
         outcomes.append(outcome)
         if on_progress is not None:
             on_progress(index, total, outcome)
+        if outcome.status == "ingested":
+            ingested += 1
+            if stop_after is not None and ingested >= stop_after:
+                break
     return outcomes
 
 

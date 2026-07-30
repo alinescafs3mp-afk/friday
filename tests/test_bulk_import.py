@@ -365,3 +365,56 @@ def test_office_lock_files_are_not_documents(tmp_path):
     names = {candidate.path.name for candidate in plan.candidates}
     assert names == {"договор.docx"}, f"замки попали в импорт: {names}"
     assert plan.skip_reasons().get("Office lock file") == 2
+
+
+def test_a_batch_counts_what_was_imported_not_what_was_looked_at(settings, storage):
+    """`--limit` обязан РЕЗАТЬ дерево на партии, а не выбирать одну и ту же первую.
+
+    Обещание записано в двух местах — в докстринге `plan_import` и в руководстве
+    оператора («Обход упорядочен, поэтому --limit режет большое дерево на партии, а не
+    на случайную выборку»), — и не выполнялось. Планирование ничего не знает о том, что
+    уже загружено (в этом его смысл), поэтому одного упорядоченного обхода мало: второй
+    запуск брал те же первые N файлов, все они отыгрывались как дубликаты, и человек,
+    следующий рецепту, не продвигался никогда.
+
+    Найдено проверкой находки аудита, чей проверяющий когда-то умер на обрыве связи.
+    """
+    root = settings.state_dir.parent / "batched"
+    root.mkdir(parents=True, exist_ok=True)
+    for index in range(6):
+        (root / f"file{index}.md").write_text(
+            f"Содержательный документ номер {index}. " * 30, encoding="utf-8"
+        )
+    pipeline = _pipeline(settings, storage)
+
+    def batch():
+        plan = plan_import(root, max_bytes=settings.max_upload_bytes)
+        return summarise(asyncio.run(run_import(pipeline, "alice", plan, stop_after=2)))
+
+    first = batch()
+    assert first["ingested"] == 2, f"первая партия загрузила {first['ingested']}, а не 2"
+
+    second = batch()
+    assert second["ingested"] == 2, (
+        f"вторая партия загрузила {second['ingested']} — дубликаты заняли места в партии, и прогресса нет"
+    )
+
+    third = batch()
+    assert third["ingested"] == 2
+
+    fourth = batch()
+    assert fourth["ingested"] == 0, "дерево кончилось, а партия что-то загрузила"
+    pending = [item for item in pipeline.list_inbox("alice") if item["status"] == "pending"]
+    assert len(pending) == 6, f"за три партии по два загружено {len(pending)} из шести"
+
+
+def test_without_a_batch_limit_everything_lands_as_before(settings, storage):
+    """Партии — надстройка; поведение без `stop_after` меняться не должно."""
+    root = settings.state_dir.parent / "unbatched"
+    root.mkdir(parents=True, exist_ok=True)
+    for index in range(4):
+        (root / f"doc{index}.md").write_text(f"Документ {index}. " * 30, encoding="utf-8")
+    pipeline = _pipeline(settings, storage)
+
+    plan = plan_import(root, max_bytes=settings.max_upload_bytes)
+    assert summarise(asyncio.run(run_import(pipeline, "alice", plan)))["ingested"] == 4

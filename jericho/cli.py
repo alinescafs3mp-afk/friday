@@ -632,7 +632,11 @@ def _import(args: argparse.Namespace) -> int:
         suffixes=args.suffix,
         include_hidden=args.include_hidden,
         follow_symlinks=args.follow_symlinks,
-        limit=args.limit,
+        # План НЕ ограничивается числом партии: ограничение по плану даёт те же
+        # первые N файлов на каждом запуске. Партию отмеряет `run_import` по
+        # загруженным. Потолок плана оставлен щедрым, чтобы обход не был бесконечным
+        # на дереве, где почти всё уже загружено.
+        limit=(args.limit * 20 if args.limit else None),
     )
 
     megabytes = plan.total_bytes / (1024 * 1024)
@@ -666,7 +670,9 @@ def _import(args: argparse.Namespace) -> int:
                 print(f"  [{index}/{total}] {mark} {outcome.path.name}")
 
         try:
-            outcomes = asyncio.run(run_import(pipeline, user_id, plan, on_progress=progress))
+            outcomes = asyncio.run(
+                run_import(pipeline, user_id, plan, on_progress=progress, stop_after=args.limit)
+            )
         except KeyboardInterrupt:
             # Content-hash idempotency means a re-run resumes; say so rather than
             # leaving the user guessing whether they have to start over.
