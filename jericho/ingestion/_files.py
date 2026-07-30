@@ -661,6 +661,14 @@ class FilesMixin(PipelineShared):
                     "queued_for_review": not promoted["auto_classified"],
                     "raw_object_id": raw.id,
                     "stored_path": str(stored_path),
+                    # Сказанное вслух — обычно вопрос. Транскрипт нужен вызывающему
+                    # (чату), чтобы ответить на него СЕЙЧАС; файл при этом остаётся
+                    # материалом в Inbox, как и был.
+                    **(
+                        {"transcript_text": text_content}
+                        if transcription and transcription.get("text")
+                        else {}
+                    ),
                     "extraction": {
                         "success": extraction_succeeded,
                         "text_success": extraction.success,

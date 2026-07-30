@@ -244,3 +244,100 @@ async def test_long_audio_skipped_by_duration_guard(settings, storage, monkeypat
 
     assert calls == []  # guard skipped transcription before loading a huge file
     assert result["knowledge_object"] is None
+
+
+# --- голосовой вопрос отвечается СЕЙЧАС (проводка через /api/chat) -----------
+
+
+def test_ingest_file_returns_the_transcript_for_the_caller(settings, storage, monkeypatch):
+    """Чату нужен транскрипт, чтобы ответить на сказанное сразу; раньше он жил
+    только в raw_content инбокс-элемента."""
+    import asyncio
+
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    tuned = dataclasses.replace(settings, whisper_enabled=True)
+    pipeline = IngestionPipeline(tuned, storage, KnowledgeGraph(storage), None)
+
+    result = asyncio.run(
+        pipeline.ingest_file(
+            "alice",
+            None,
+            b"OggS-fake-voice-bytes",
+            filename="telegram-voice-51.oga",
+            mime_type="audio/ogg",
+            media_kind="voice",
+            metadata={"duration_sec": 4},
+            source_ref="telegram-file:51",
+        )
+    )
+    assert result["transcript_text"] == _VOICE_TEXT
+
+
+def test_a_short_voice_note_becomes_the_question_of_the_turn(settings, monkeypatch):
+    """Голосовое — обычно вопрос, произнесённый вслух. Раньше модель отвечала,
+    видя лишь имя .ogg-файла, а retrieval искал по «Загружен документ» — на
+    голос система не могла ответить по существу НИКОГДА."""
+    import base64
+
+    from fastapi.testclient import TestClient
+
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.server import create_app
+
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    tuned = dataclasses.replace(settings, whisper_enabled=True)
+    app = create_app(tuned)
+    headers = {"Authorization": f"Bearer {tuned.api_token}"}
+    payload = {
+        "document": {
+            "filename": "telegram-voice-77.oga",
+            "mime_type": "audio/ogg",
+            "content_base64": base64.b64encode(b"OggS-fake-voice").decode("ascii"),
+            "media_kind": "voice",
+            "duration": 4,
+        }
+    }
+    with TestClient(app) as client:
+        response = client.post("/api/chat", json=payload, headers=headers)
+        assert response.status_code == 200
+        conversation_id = response.json().get("conversation_id")
+        assert conversation_id
+        messages = app.state.storage.get_conversation_messages(conversation_id, user_id=LEGACY_OWNER_USER_ID)
+        user_turns = [m for m in messages if m.get("role") == "user"]
+        assert user_turns and user_turns[0]["content"] == _VOICE_TEXT, (
+            "текстом хода должно стать сказанное, а не имя файла"
+        )
+        # Файл по-прежнему inbox-first: ответ сейчас не отменяет разбора.
+        inbox = client.get("/api/inbox?status=pending", headers=headers).json()["items"]
+        assert inbox, "голосовой файл перестал попадать в Inbox"
+
+
+def test_a_long_voice_note_stays_a_document_upload(settings, monkeypatch):
+    """Длиннее трёх минут — диктовка, не вопрос: прежний путь с уведомлением."""
+    import base64
+
+    from fastapi.testclient import TestClient
+
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.server import create_app
+
+    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    tuned = dataclasses.replace(settings, whisper_enabled=True)
+    app = create_app(tuned)
+    headers = {"Authorization": f"Bearer {tuned.api_token}"}
+    payload = {
+        "document": {
+            "filename": "telegram-voice-78.oga",
+            "mime_type": "audio/ogg",
+            "content_base64": base64.b64encode(b"OggS-long-voice").decode("ascii"),
+            "media_kind": "voice",
+            "duration": 400,
+        }
+    }
+    with TestClient(app) as client:
+        response = client.post("/api/chat", json=payload, headers=headers)
+        assert response.status_code == 200
+        conversation_id = response.json().get("conversation_id")
+        messages = app.state.storage.get_conversation_messages(conversation_id, user_id=LEGACY_OWNER_USER_ID)
+        user_turns = [m for m in messages if m.get("role") == "user"]
+        assert user_turns and user_turns[0]["content"].startswith("Загружен документ")

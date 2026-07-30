@@ -275,6 +275,11 @@ def _is_loopback(value: str) -> bool:
 # Hostnames a local browser legitimately uses to reach a loopback-bound API.
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
 
+# Голос короче этого — вопрос, произнесённый вслух, и его транскрипт становится
+# текстом хода. Длиннее — диктовка: она остаётся материалом Inbox без ответа
+# по существу. Три минуты — щедрая верхняя граница устного вопроса.
+_VOICE_QUESTION_MAX_SEC = 180.0
+
 
 def _request_hostname(value: str) -> str | None:
     """Lowercase hostname from a ``Host`` header or an ``Origin`` URL."""
@@ -1190,9 +1195,40 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                             "knowledge_object_id": (file_ingestion.get("knowledge_object") or {}).get("id"),
                         }
                     )
+                # Голосовое сообщение — обычно ВОПРОС, произнесённый вслух.
+                # Транскрипт считался и раньше (файл ждёт разбора в Inbox), но ходу
+                # разговора не доставался: модель отвечала, видя лишь имя .ogg-файла,
+                # а retrieval искал по строке «Загружен документ». Короткий voice
+                # становится текстом хода: поиск идёт по сказанному, ответ приходит
+                # сразу. Файл по-прежнему inbox-first; второй раз транскрипт не
+                # ингестится (synthetic_document_notice). Длиннее трёх минут — это
+                # диктовка, не вопрос: ей достаточно прежнего пути.
+                transcript = str((file_ingestion or {}).get("transcript_text") or "").strip()
+                try:
+                    voice_duration = float(document.get("duration") or 0.0)
+                except (TypeError, ValueError):
+                    # Неразборчивая длительность от стороннего клиента — не повод
+                    # ронять запрос; считаем голос длинным и идём прежним путём.
+                    voice_duration = float("inf")
+                spoken_question = bool(
+                    transcript
+                    and str(document.get("media_kind") or "") == "voice"
+                    and voice_duration <= _VOICE_QUESTION_MAX_SEC
+                )
                 if not message:
-                    message = f"Загружен документ: {filename}"
+                    message = transcript[:2000] if spoken_question else f"Загружен документ: {filename}"
                     synthetic_document_notice = True
+                elif spoken_question:
+                    # Голос с подписью: подпись — вопрос человека, транскрипт — материал
+                    # текущего хода.
+                    attachments.append(
+                        {
+                            "filename": filename,
+                            "transient": True,
+                            "transient_text": transcript[:4000],
+                            "extraction_success": True,
+                        }
+                    )
 
             conversation_id = str(body.get("conversation_id") or "").strip() or None
             channel_chat_id = getattr(request.state, "bridge_chat_id", None)
