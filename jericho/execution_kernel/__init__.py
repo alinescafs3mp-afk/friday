@@ -492,9 +492,16 @@ class ExecutionKernel:
         # вопрос, — давало честное «ничего не нашлось» при существующих документах, и
         # 1537 честных векторов на этом пути не участвовали.
         rows: list[dict[str, Any]]
+        dropped = 0
         if self.searcher is not None:
             found = await self.searcher.search(actor.user_id, query, limit=limit)
             rows = list(found.get("results") or [])
+            strategy = found.get("strategy")
+            if isinstance(strategy, dict):
+                try:
+                    dropped = int(strategy.get("rerank_dropped") or 0)
+                except (TypeError, ValueError):
+                    dropped = 0
         else:
             rows = storage.search_knowledge(actor.user_id, query, limit=limit)
         results = [
@@ -508,7 +515,14 @@ class ExecutionKernel:
             }
             for row in rows
         ]
-        return {"count": len(results), "query": query, "results": results}
+        payload: dict[str, Any] = {"count": len(results), "query": query, "results": results}
+        if dropped:
+            # «В архиве этого нет» и «нашлось двадцать, ни одно не отвечает» — разные
+            # ответы, и модель без этого числа выдаёт первый в обоих случаях. Порог
+            # отбирает молча, и молчание здесь означало бы, что архив пуст по теме,
+            # хотя похожее в нём есть и человек его помнит.
+            payload["filtered_out"] = dropped
+        return payload
 
     async def _memory_save(
         self,
@@ -891,7 +905,14 @@ class ExecutionKernel:
 
         spec(
             "memory_search",
-            "Поиск по личной базе знаний.",
+            # Про `filtered_out` сказано ЗДЕСЬ, потому что это единственный текст об
+            # инструменте, который видит модель. Без пояснения `count: 0` рядом с
+            # `filtered_out: 20` она прочтёт как «в архиве пусто» — а это ровно
+            # противоположное: похожее есть, но отвечающего среди него нет.
+            "Поиск по личной базе знаний. Если в ответе есть filtered_out, столько "
+            "похожих записей нашлось и было отброшено как не отвечающие на вопрос: "
+            "материал в архиве есть, но ответа в нём нет — так и скажи, не выдавая "
+            "это за пустой архив.",
             "search.use",
             {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
             ["query"],

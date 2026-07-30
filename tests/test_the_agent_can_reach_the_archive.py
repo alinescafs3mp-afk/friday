@@ -163,3 +163,38 @@ def test_without_a_searcher_it_still_works(settings, storage):
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
     found = asyncio.run(kernel._memory_search(actor=actor, query="поверка", limit=5))  # noqa: SLF001
     assert found["count"] >= 0
+
+
+# --- «нашлось, но ни одно не отвечает» ----------------------------------------
+
+
+def _searcher_returning(rows, strategy):
+    class _Fake:
+        async def search(self, user_id, query, **kwargs):
+            return {"results": list(rows), "strategy": dict(strategy)}
+
+    return _Fake()
+
+
+def test_the_agent_learns_that_candidates_were_filtered_out(kernel, storage):
+    """«В архиве этого нет» и «нашлось двадцать, ни одно не о том» — разные ответы.
+
+    Порог переранжировщика отбирает молча. Без этого числа модель выдаёт первый ответ
+    в обоих случаях, хотя во втором похожее в архиве есть и человек его помнит.
+    """
+    kernel.searcher = _searcher_returning([], {"reranked": 20, "rerank_dropped": 20})
+
+    found = _search(kernel, storage, "alice", "поверка весов")
+
+    assert found["count"] == 0
+    assert found["filtered_out"] == 20
+
+
+def test_nothing_extra_is_said_when_nothing_was_filtered(kernel, storage):
+    """Пустой архив по теме — это по-прежнему просто ноль, без приписок."""
+    kernel.searcher = _searcher_returning([], {"reranked": 0})
+
+    found = _search(kernel, storage, "alice", "поверка весов")
+
+    assert found["count"] == 0
+    assert "filtered_out" not in found
