@@ -406,6 +406,25 @@ def _decode_worker_states(rows: list[dict[str, Any]]) -> dict[str, Any]:
                     stale.append(name)
             except ValueError:
                 stale.append(name)
+        elif not last_finished and status == "scheduled":
+            # Задача, НИ РАЗУ не отработавшая, была освобождена от проверки по
+            # построению: у неё нет `last_finished`, и она сидит в «scheduled». То есть
+            # чем дольше она мертва, тем надёжнее выглядит здоровой. На живой установке
+            # так и вышло: `chronicle` и `reflection` не дали ни одной записи за всё
+            # время жизни системы, а диагностика показывала «healthy».
+            #
+            # Судим по обещанному сроку: он в состоянии есть всегда. Просрочка больше
+            # чем на два с половиной интервала — то же правило, что и для отработавших.
+            promised = str(task.get("next_run_at") or "")
+            try:
+                due = datetime.fromisoformat(promised) if promised else None
+            except ValueError:
+                due = None
+            if due is not None:
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=UTC)
+                if now - due > timedelta(seconds=max(900.0, interval * 2.5)):
+                    stale.append(name)
         tasks[name] = task
     return {
         "state": "ready" if tasks else "no_history",

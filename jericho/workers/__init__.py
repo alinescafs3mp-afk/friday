@@ -260,17 +260,77 @@ class WorkerSupervisor:
             self._sink_queue = None
         LOGGER.info("Worker supervisor stopped")
 
+    @staticmethod
+    def _seconds_since(value: Any) -> float | None:
+        """Сколько прошло с записанного момента; None — если момента нет или он битый."""
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - moment).total_seconds()
+
+    def _initial_delay(self, task: IntervalTask) -> float:
+        """Сколько ждать до первого прогона С УЧЁТОМ того, когда задача шла в прошлый раз.
+
+        Расписание жило только в памяти процесса: задача с `run_immediately=False`
+        всегда спала полный интервал от МОМЕНТА СТАРТА. Значит суточная задача не
+        выполнялась НИ РАЗУ, если сервис перезапускают чаще раза в сутки.
+
+        Не гипотеза. На живой установке за всё время нет ни одной записи `chronicle` и
+        `reflection` в исходящих уведомлениях; `knowledge_quality_scan` (12 ч) последний
+        раз отработал за 4.5 суток и девять пропущенных окон до проверки, а у второго
+        арендатора не отрабатывал никогда. Тем же голоданием затронуты `retrieval_eval`
+        (сутки) и `knowledge_dedup` (6 часов).
+
+        Показательно, что `scheduled_backup` сделан иначе — с собственной отметкой
+        последнего запуска — и копии реально идут. Здесь то же самое, но общим местом:
+        фаза берётся из сохранённого состояния, а не начинается заново.
+        """
+        elapsed = self._seconds_since((self._states.get(task.name) or {}).get("last_finished_at"))
+        if elapsed is None:
+            # О задаче ничего не известно: первый запуск на этой установке. Ждём
+            # интервал, как и раньше, — так задумано, чтобы старт не бил залпом.
+            return task.interval_sec
+        # Долг по расписанию есть — идём сразу, но не залпом: небольшая задержка
+        # разводит задачи, проснувшиеся после одного перезапуска.
+        return max(0.0, task.interval_sec - elapsed)
+
+    def restore(self, states: dict[str, dict[str, Any]]) -> None:
+        """Поднять прошлое состояние задач ДО запуска цикла.
+
+        Без этого `self._states` пуст при старте, и происходят сразу две беды. Первая:
+        `_initial_delay` не знает, когда задача шла в прошлый раз, и всегда ждёт полный
+        интервал — суточная задача не выполняется никогда, если сервис перезапускают
+        чаще раза в сутки. Вторая: первый же `_publish` затирает записанную историю
+        (`last_success_at`, `last_finished_at`, число подряд идущих отказов), потому
+        что состояние пишется в хранилище ЦЕЛИКОМ, а не полями.
+        """
+        for name, state in states.items():
+            if isinstance(state, dict):
+                self._states[name] = dict(state)
+
     async def _run_task(self, task: IntervalTask) -> None:
         if not task.run_immediately:
+            delay = self._initial_delay(task)
             self._publish(
                 task,
                 status="scheduled",
-                next_run_at=(datetime.now(UTC) + timedelta(seconds=task.interval_sec)).isoformat(
-                    timespec="seconds"
+                next_run_at=(datetime.now(UTC) + timedelta(seconds=delay)).isoformat(timespec="seconds"),
+                # Счётчик отказов НЕ обнуляется: он жил только в памяти, и каждый
+                # перезапуск стирал историю падений. Задача с интервалом 12 часов,
+                # падающая каждый прогон, не могла добраться до порога деградации,
+                # если машину перезагружают ежедневно.
+                consecutive_failures=int(
+                    (self._states.get(task.name) or {}).get("consecutive_failures") or 0
                 ),
-                consecutive_failures=0,
             )
-            await asyncio.sleep(task.interval_sec)
+            if delay > 0:
+                await asyncio.sleep(delay)
         while self._running:
             started = time.monotonic()
             started_at = datetime.now(UTC)
@@ -1307,10 +1367,31 @@ class WorkersManager:
         """Longest per-task thread budget across the registered workers."""
         return self.supervisor.max_timeout_sec
 
+    def _load_worker_states(self) -> dict[str, dict[str, Any]]:
+        """Прошлое состояние задач из `runtime_kv`. Ошибка чтения не должна мешать старту."""
+        restored: dict[str, dict[str, Any]] = {}
+        try:
+            rows = self.storage.kv_list_prefix("workers:health:")
+        except Exception:  # noqa: BLE001 - состояние продвинутое, а не обязательное
+            return restored
+        for row in rows:
+            key = str(row.get("key") or "")
+            name = key.removeprefix("workers:health:")
+            if not name:
+                continue
+            try:
+                value = json.loads(str(row.get("value") or "{}"))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                restored[name] = value
+        return restored
+
     async def start(self) -> None:
         if not self.settings.workers_enabled or self._run_task is not None:
             return
         self.register_all()
+        self.supervisor.restore(self._load_worker_states())
         self._run_task = asyncio.create_task(self.supervisor.run(), name="jericho-workers")
 
     async def stop(self) -> None:
