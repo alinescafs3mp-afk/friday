@@ -765,9 +765,7 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
         while True:
             batch = [
                 row
-                for row in storage.knowledge_missing_document_date(
-                    user_id=args.user, limit=args.batch
-                )
+                for row in storage.knowledge_missing_document_date(user_id=args.user, limit=args.batch)
                 if str(row["id"]) not in seen
             ]
             if not batch:
