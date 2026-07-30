@@ -664,6 +664,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 dense_evidence_min=settings.retrieval_dense_evidence_min,
                 reranker=reranker,
                 rerank_top=settings.rerank_top,
+                rerank_confident_min=settings.rerank_confident_min,
             )
             graph = KnowledgeGraph(storage)
             ingestion = IngestionPipeline(settings, storage, graph, llm)

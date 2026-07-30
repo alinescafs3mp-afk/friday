@@ -131,3 +131,96 @@ def test_a_short_pool_still_goes_in_one_request(settings, monkeypatch):
 
     assert scores == [0.0, 0.01, 0.02]
     assert calls == [3]
+
+
+# --- число «похоже на ответ» --------------------------------------------------
+
+
+def _knowledge(storage, user_id: str, text: str) -> str:
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user(user_id)
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="test",
+        source_ref=new_id("src"),
+        raw_content=text,
+        content_type="text",
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=text,
+        title=text[:60],
+        summary=text[:120],
+    )
+    storage.store_knowledge_object(ko)
+    return ko.id
+
+
+async def _reranker(scores):
+    """Переранжировщик, раздающий заданные скоры по порядку прихода."""
+
+    async def call(query, items):
+        out = []
+        for index, item in enumerate(items):
+            copy = dict(item)
+            copy["_rerank_score"] = scores[index % len(scores)]
+            out.append(copy)
+        return out
+
+    return call
+
+
+async def test_the_count_of_answering_documents_is_about_what_is_shown(settings, storage):
+    """`rerank_confident` считается по показанному, а не по всему пулу.
+
+    Правило проекта: показанное число не должно быть длиной обрезанной страницы, но
+    и наоборот тоже — число рядом со списком обязано относиться К ЭТОМУ списку. Пул
+    здесь вдвое длиннее выдачи, и уверенных в нём больше, чем человек увидит.
+    """
+    from jericho.retrieval import HybridSearcher
+
+    for index in range(8):
+        _knowledge(storage, "owner", f"Договор поставки оборудования номер {index} на склад")
+
+    searcher = HybridSearcher(
+        storage,
+        None,
+        record_usage=False,
+        reranker=await _reranker([0.99, 0.99, 0.99, 0.001]),
+        rerank_top=8,
+        rerank_confident_min=0.10,
+    )
+    result = await searcher.search("owner", "договор поставки оборудования", limit=2)
+
+    assert result["strategy"]["reranked"] > 2, "пул должен быть глубже выдачи"
+    assert len(result["results"]) == 2
+    assert result["strategy"]["rerank_confident"] == 2, (
+        "посчитаны уверенные во всём пуле, а показаны только два — число врёт"
+    )
+
+
+async def test_a_pool_the_reranker_finds_nothing_in_says_so(settings, storage):
+    """Ноль — это ответ. Скор откалиброван, и «нашла пять, отвечает ни один» честнее
+    молчаливой пятёрки."""
+    from jericho.retrieval import HybridSearcher
+
+    for index in range(6):
+        _knowledge(storage, "owner", f"Договор поставки оборудования номер {index} на склад")
+
+    searcher = HybridSearcher(
+        storage,
+        None,
+        record_usage=False,
+        reranker=await _reranker([0.004]),
+        rerank_top=6,
+        rerank_confident_min=0.10,
+    )
+    result = await searcher.search("owner", "договор поставки оборудования", limit=3)
+
+    assert result["results"], "переранжирование не должно опустошать выдачу"
+    assert result["strategy"]["rerank_confident"] == 0

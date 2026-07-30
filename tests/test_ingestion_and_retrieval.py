@@ -373,3 +373,19 @@ def test_boundary_snapping_cannot_be_dragged_across_the_document():
     snippet = best_snippet("запрос конфиг", body, max_chars=300)
     assert len(snippet) <= 300 + 2
     assert "запрос" in snippet and "конфиг" in snippet, snippet
+
+
+def test_the_confident_threshold_is_configurable(settings):
+    """Порог «похоже на ответ» принадлежит МОДЕЛИ: у другой шкала будет другой.
+
+    Он ничего не отсекает — уходит числом в `strategy.rerank_confident`, чтобы система
+    могла сказать «нашла пять, отвечает похоже что один». Замер размена (порог почти
+    удваивает долю отвечающих, но стоит 16% вопросов, у которых ответ был) записан в
+    `_rerank_backend.py`.
+
+    Тест держит не число, а то, что настройка и константа не разъезжаются: импорт из
+    config в retrieval невозможен, там цикл, поэтому значение записано дважды.
+    """
+    from jericho.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
+
+    assert settings.rerank_confident_min == CONFIDENT_MIN_DEFAULT

@@ -19,6 +19,7 @@ import httpx
 from jericho.config import JerichoSettings
 from jericho.morphology import stem
 from jericho.retrieval._repair import _MIN_MEANINGFUL_TERM, Repair, repair_query
+from jericho.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
 
 try:  # optional acceleration (jericho[vectors]); pure-Python fallback below
     import numpy as _np
@@ -1068,6 +1069,7 @@ class HybridSearcher:
         channel_weights: Mapping[str, float] | None = None,
         reranker: Any = None,
         rerank_top: int = 0,
+        rerank_confident_min: float | None = None,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
@@ -1097,11 +1099,15 @@ class HybridSearcher:
         # них меняет не только вес, но и отбор кандидатов и гейт доказательств (см.
         # `ENTANGLED_SIGNALS`). Здесь вес именно ИЗМЕНЯЕТСЯ, а не выключается, поэтому
         # шов законен: отбор и гейт остаются прежними.
-        # Переранжирование локальной моделью. Выключено, пока `rerank_top` не задан:
-        # шаг стоит ~8 секунд против 1.58 у самого поиска, и место ему там, где человек
-        # ждёт ОТВЕТ, а не список. Подробности и замеры — в `_rerank.py`.
+        # Переранжирование отдельной моделью. Выключено, пока `rerank_top` не задан.
+        # Замеры — в `_rerank_backend.py`: внутри пула прежний порядок различал
+        # отвечающие документы на уровне монетки (AUC 0.512), cross-encoder даёт 0.754.
+        # Про чат-модель в этой роли и почему она не подошла — в `_rerank.py`.
         self._reranker = reranker
         self._rerank_top = max(0, int(rerank_top))
+        self._confident_min = (
+            CONFIDENT_MIN_DEFAULT if rerank_confident_min is None else float(rerank_confident_min)
+        )
         self._channel_weights = dict(_CHANNEL_WEIGHTS)
         for name, value in (channel_weights or {}).items():
             if name not in _CHANNEL_WEIGHTS:
@@ -1667,6 +1673,14 @@ class HybridSearcher:
             # Видно в explain-трейсе: порядок выдачи решала не только формула, и
             # человек, разбирающий «почему это первым», должен об этом знать.
             strategy["reranked"] = reranked_count
+            # Сколько из ПОКАЗАННОГО похоже на ответ. Скор cross-encoder откалиброван
+            # (замер — в `_rerank_backend`), и это единственное место, где система
+            # может сказать «нашла пять, но отвечает похоже что один». Считается по
+            # тому, что человек увидит, а не по всему переранжированному пулу: число
+            # рядом со списком обязано относиться к этому списку.
+            strategy["rerank_confident"] = sum(
+                1 for item in results if float(item.get("_rerank_score") or 0.0) >= self._confident_min
+            )
         if repair is not None:
             # Said out loud, always: the answer is about a different string than
             # the one the user typed, and a reader who is not told that has no way

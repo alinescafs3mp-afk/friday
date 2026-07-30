@@ -369,6 +369,7 @@ class JerichoSettings:
     rerank_api_key: str
     rerank_timeout_sec: float
     rerank_top: int
+    rerank_confident_min: float
 
     api_host: str
     api_port: int
@@ -697,6 +698,13 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         # Замер сделан на глубине 20 — на ней и стоит включать; клиент сам делит запрос
         # на части, потому что двадцать пар по 4000 знаков вдвое превышают предел службы.
         rerank_top=_int_env("JERICHO_RERANK_TOP", 0, minimum=0),
+        # Порог «похоже на ответ» по скору переранжировщика. НЕ режет выдачу: число
+        # уходит в `strategy.rerank_confident`, чтобы система могла сказать «нашла
+        # пять, отвечает похоже что один». Замер размена — в `_rerank_backend.py`.
+        # 0.10 обязано совпадать с `CONFIDENT_MIN_DEFAULT` в
+        # `retrieval/_rerank_backend.py` — импортировать оттуда нельзя, там цикл через
+        # пакет retrieval, поэтому расхождение стережёт тест.
+        rerank_confident_min=_float_env("JERICHO_RERANK_CONFIDENT_MIN", 0.10, minimum=0.0),
         api_host=os.environ.get("JERICHO_API_HOST", "127.0.0.1"),
         api_port=_int_env("JERICHO_API_PORT", 8000, minimum=1),
         api_token=os.environ.get("JERICHO_API_TOKEN", ""),

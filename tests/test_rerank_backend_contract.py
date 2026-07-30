@@ -164,9 +164,18 @@ def test_reordering_keeps_every_item_and_records_the_score(settings, monkeypatch
     assert sorted(item["id"] for item in result) == sorted(item["id"] for item in items)
 
 
-def test_a_threshold_demotes_but_never_drops(settings, monkeypatch):
-    """Порог опускает вниз, а не выбрасывает: гейт доказательств уже отработал, и
-    второе решение о том, что человеку не показывать, здесь принимать нечем."""
+def test_the_order_is_the_score_and_nothing_else(settings, monkeypatch):
+    """Здесь был параметр `min_score`, и он ДОКАЗУЕМО ничего не делал.
+
+    Он «опускал вниз» документы ниже порога, разбивая список на «выше» и «ниже» и
+    склеивая обратно. Список к тому моменту уже отсортирован по убыванию скора,
+    поэтому склейка возвращала ровно исходный порядок при ЛЮБОМ пороге. Параметр
+    читался как решение и был ничем — удалён; порог теперь считается там, где он
+    виден человеку (`strategy.rerank_confident`).
+
+    Проба держит инвариант, который от него оставался и был настоящим: состав не
+    меняется, порядок — строго по убыванию скора.
+    """
     _client(
         monkeypatch,
         {
@@ -177,12 +186,14 @@ def test_a_threshold_demotes_but_never_drops(settings, monkeypatch):
             ]
         },
     )
-    result = asyncio.run(
-        rerank_with_backend(RerankBackend(_tuned(settings)), "вопрос", _items(3), min_score=0.5)
-    )
+    items = _items(3)
+    result = asyncio.run(rerank_with_backend(RerankBackend(_tuned(settings)), "вопрос", items))
+
     assert result is not None
-    assert len(result) == 3, "порог выбросил документы вместо того, чтобы опустить их"
-    assert result[0]["id"] == "ko-1"
+    assert [item["id"] for item in result] == ["ko-1", "ko-0", "ko-2"]
+    assert sorted(item["id"] for item in result) == sorted(item["id"] for item in items)
+    scores = [item["_rerank_score"] for item in result]
+    assert scores == sorted(scores, reverse=True)
 
 
 def test_documents_are_bounded_before_they_are_sent(settings, monkeypatch):
