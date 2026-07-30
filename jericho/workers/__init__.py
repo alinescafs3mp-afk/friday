@@ -543,6 +543,15 @@ class WorkersManager:
             timeout_sec=max(60.0, min(600.0, self.settings.llm_timeout_sec * 2.0)),
         )
         self.supervisor.register(
+            "entity_mention_backfill",
+            self._entity_mention_backfill_all,
+            # Раз в четверть часа: обход возобновляемый и берёт по двести документов,
+            # так что архив в полторы тысячи закрывается за пару часов без нагрузки.
+            900.0,
+            run_immediately=False,
+            timeout_sec=300,
+        )
+        self.supervisor.register(
             "knowledge_dedup",
             self._knowledge_dedup_all,
             self.settings.dedup_interval_sec,
@@ -677,6 +686,26 @@ class WorkersManager:
         await run_blocking(
             self.storage.kv_set, f"eval:last_report:{user_id}", json.dumps(report, ensure_ascii=False)
         )
+
+    async def _entity_mention_backfill_all(self) -> None:
+        await self._for_each_user(self._entity_mention_backfill)
+
+    async def _entity_mention_backfill(self, user_id: str) -> None:
+        """Догнать старые документы уже существующими сущностями.
+
+        Связи ставятся только при разборе, поэтому сущность, родившаяся поздно, к
+        прежним документам не возвращается. Замерено на архиве владельца: 1173 пары
+        «имя в тексте, связи нет» на 645 документах — это и есть главная причина, по
+        которой граф не растёт.
+        """
+        report = await run_blocking(self.storage.backfill_entity_mentions, user_id)
+        if report.get("linked"):
+            LOGGER.info(
+                "entity mentions backfilled for %s: %d links over %d documents",
+                user_id,
+                int(report["linked"]),
+                int(report.get("scanned") or 0),
+            )
 
     async def _knowledge_dedup_all(self) -> None:
         # The tick budget is split across tenants, so no single scan can run the whole

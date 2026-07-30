@@ -267,6 +267,18 @@ def _fts_terms(text: str) -> list[str]:
     return list(dict.fromkeys(expanded))
 
 
+def _aliases_of(entity: dict[str, Any]) -> list[str]:
+    """Псевдонимы сущности из JSON-поля; битое значение — не повод падать в обходе."""
+    raw = entity.get("aliases_json")
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    try:
+        parsed = json.loads(str(raw or "[]"))
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
 class KnowledgeMixin(StorageShared):
     def get_knowledge_by_raw(self, raw_id: str, user_id: str) -> dict[str, Any] | None:
         # The LIVE Knowledge Object for a Raw Object: soft-deleted rows (e.g. a
@@ -1689,6 +1701,110 @@ class KnowledgeMixin(StorageShared):
         return candidates, report
 
     _SWEEP_KEY = "entity_dedup:cursor:"
+
+    _MENTION_SWEEP_KEY = "graph:mention_backfill:"
+
+    def backfill_entity_mentions(
+        self,
+        user_id: str,
+        *,
+        max_documents: int = 200,
+    ) -> dict[str, Any]:
+        """Догнать старые документы уже существующими сущностями.
+
+        Связи ставятся только в момент разбора документа. Значит сущность, родившаяся
+        на девятисотом документе, к первым восьмистам не возвращается НИКОГДА —
+        обратного прохода не было ни в API, ни в CLI.
+
+        Замерено на архиве владельца: **1173 пары (документ, сущность), где имя стоит
+        в тексте дословно, а связи нет**; затронуто 645 документов. Документов, где
+        встречается хотя бы одна известная сущность, — 710, а связи есть у 92.
+
+        Человеческого решения проход не требует: метод `existing_entity_exact_mention`
+        с уверенностью 0.97 уже входит в `DECLARED_ENTITY_METHODS`, то есть система и
+        так принимает его автоматически при разборе. Здесь ровно то же правило,
+        применённое задним числом.
+
+        ⚠️ Пара, по которой связь УЖЕ ЕСТЬ, пропускается в любом статусе. Это главное
+        ограничение прохода: `link_knowledge_entity` перезаписывает статус, и без
+        проверки обратный ход воскресил бы отклонённые человеком связи — тот самый
+        класс ошибок, который в этом проекте закрывали трижды.
+
+        Курсор в `runtime_kv`, как у `sweep_entity_duplicates`: обход возобновляемый и
+        ограниченный, потому что на большом архиве полный проход дорог.
+        """
+        entities = [item for item in self.list_entities(user_id, limit=2000) if not item.get("deleted_at")]
+        if not entities:
+            return {"linked": 0, "scanned": 0, "complete": True, "entities": 0}
+
+        patterns: list[tuple[str, Any]] = []
+        for entity in entities:
+            names = [entity.get("name", ""), *_aliases_of(entity)]
+            for candidate in names:
+                text = str(candidate).strip()
+                # Тот же порог и то же выражение с границами слов, что при разборе:
+                # правило должно быть ОДНО, иначе задним числом появятся связи,
+                # которых обычный путь не создал бы.
+                if len(text) < 3:
+                    continue
+                patterns.append(
+                    (str(entity["id"]), re.compile(rf"(?<![\w.]){re.escape(text)}(?![\w.])", re.I))
+                )
+        if not patterns:
+            return {"linked": 0, "scanned": 0, "complete": True, "entities": len(entities)}
+
+        cursor = 0
+        try:
+            stored = self.kv_get(self._MENTION_SWEEP_KEY + user_id)
+            cursor = int(json.loads(stored).get("rowid") or 0) if stored else 0
+        except (TypeError, ValueError, AttributeError):
+            cursor = 0
+
+        rows = self.execute(
+            """SELECT rowid AS position, id, content FROM knowledge_objects
+               WHERE user_id=? AND deleted_at IS NULL AND rowid > ?
+               ORDER BY rowid LIMIT ?""",
+            (user_id, cursor, max(1, min(int(max_documents), 2000))),
+        ).fetchall()
+        if not rows:
+            # Обход дошёл до конца — начинаем сначала на следующем тике.
+            self.kv_set(self._MENTION_SWEEP_KEY + user_id, json.dumps({"rowid": 0}))
+            return {"linked": 0, "scanned": 0, "complete": True, "entities": len(entities)}
+
+        linked = 0
+        last_position = cursor
+        for row in rows:
+            last_position = int(row["position"])
+            document_id = str(row["id"])
+            content = str(row["content"] or "")
+            if not content:
+                continue
+            known = {
+                str(link["entity_id"])
+                for link in self.list_knowledge_entity_links(
+                    user_id, knowledge_object_id=document_id, status=None
+                )
+            }
+            for entity_id, pattern in patterns:
+                if entity_id in known or not pattern.search(content):
+                    continue
+                self.link_knowledge_entity(
+                    user_id,
+                    document_id,
+                    entity_id,
+                    status="accepted",
+                    confidence=0.97,
+                    evidence={"method": "existing_entity_exact_mention", "source": "backfill"},
+                )
+                known.add(entity_id)
+                linked += 1
+        self.kv_set(self._MENTION_SWEEP_KEY + user_id, json.dumps({"rowid": last_position}))
+        return {
+            "linked": linked,
+            "scanned": len(rows),
+            "complete": False,
+            "entities": len(entities),
+        }
 
     def sweep_entity_duplicates(
         self,
