@@ -3,6 +3,8 @@ name = "jericho"
 version = "0.150.0"
 description = "Local-first personal Knowledge Operating System with a provenance-first knowledge graph."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.14,<5",
