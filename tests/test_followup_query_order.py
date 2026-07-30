@@ -97,3 +97,28 @@ def test_the_budget_is_still_a_ceiling():
     """Поднят — не снят: неограниченный список термов это другой дефект."""
     question = " ".join(f"слово{index}" for index in range(200))
     assert len(_fts_terms(question)) <= _FTS_TERM_BUDGET
+
+
+def test_a_possessive_followup_gets_the_previous_subject():
+    """«а его брат?» после вопроса о человеке — самый частый хвост разговора.
+
+    Притяжательных не было в списке признаков: вопрос уходил в поиск без
+    контекста предыдущего хода и находил чужое или ничего.
+    """
+    for question in ("а его брат?", "её телефон?", "а у него какое звание?"):
+        joined = AgentRuntime._contextualize_query(  # noqa: SLF001
+            question, [{"role": "user", "content": LONG_PREVIOUS}]
+        )
+        assert "\n" in joined, f"{question!r} не распознан как продолжение"
+        assert joined.startswith(question)
+
+
+def test_a_short_a_noun_question_is_a_followup_only_with_a_question_mark():
+    """«а брат?» — продолжение; «а Иван пришёл» — утверждение, и склеивать его
+    с прошлым ходом нельзя: вопросительный знак и есть различие."""
+    history = [{"role": "user", "content": LONG_PREVIOUS}]
+    followed = AgentRuntime._contextualize_query("а брат?", history)  # noqa: SLF001
+    assert "\n" in followed
+
+    statement = AgentRuntime._contextualize_query("а Иван пришёл", history)  # noqa: SLF001
+    assert statement == "а Иван пришёл"
