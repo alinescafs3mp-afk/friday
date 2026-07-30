@@ -271,15 +271,39 @@ class ViewsMixin(BridgeShared):
             external_user_id,
             str(chat_id),
         )
-        entities = found.get("items") if isinstance(found.get("items"), list) else []
-        entity = entities[0] if entities and isinstance(entities[0], dict) else None
-        if not entity:
+        raw_entities = found.get("items") if isinstance(found.get("items"), list) else []
+        entities = [item for item in raw_entities if isinstance(item, dict) and item.get("id")]
+        if not entities:
             await self._send_message(
                 telegram,
                 chat_id,
                 f"По запросу «{clean}» не нашлось ни тега, ни сущности. Список тегов: /tags",
             )
             return
+        if len(entities) > 1:
+            # Однофамильцы в таблицах личного состава гарантированы. Молчаливый
+            # выбор первого делал записи остальных несуществующими — та же жалоба
+            # «я же сохранял», которую уже лечили в поиске. Человек даже не знал,
+            # что выбор был.
+            rows = [
+                [
+                    {
+                        "text": (
+                            f"{str(item.get('name') or '—')[:40]} — {str(item.get('entity_type') or 'other')}"
+                        ),
+                        "callback_data": f"ent:browse:{item['id']}",
+                    }
+                ]
+                for item in entities[:5]
+            ]
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"«{clean}» совпадает с несколькими сущностями — выберите нужную:",
+                reply_markup={"inline_keyboard": rows},
+            )
+            return
+        entity = entities[0]
         entity_id = str(entity.get("id") or "")
         linked = await self._backend_json(
             backend,

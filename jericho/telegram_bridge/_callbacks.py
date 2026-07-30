@@ -66,10 +66,12 @@ class CallbacksMixin(BridgeShared):
 
         parts = data.split(":", 2)
         clear_markup = False
+        pressed_family = ""
         try:
             if len(parts) != 3:
                 raise PermanentUpdateError("Unknown callback action")
             family, action, target_id = parts
+            pressed_family = family
             if not CALLBACK_TARGET_RE.fullmatch(target_id):
                 raise PermanentUpdateError("Invalid callback target")
             if family == "inbox" and action in {"promote", "ignore"}:
@@ -181,6 +183,35 @@ class CallbacksMixin(BridgeShared):
                     "Миссия запущена" if action == "start" else "Миссия остановлена",
                 )
                 clear_markup = True
+            elif family == "ent" and action == "browse":
+                # Выбор из однофамильцев под /browse. Один вызов отдаёт и имя, и
+                # связанные записи — второй поход за знаниями не нужен.
+                data_entity = await self._backend_json(
+                    backend,
+                    "GET",
+                    f"/api/kg/entities/{target_id}",
+                    None,
+                    external_user_id,
+                    str(chat_id),
+                )
+                raw_entity = data_entity.get("entity")
+                entity: dict[str, Any] = raw_entity if isinstance(raw_entity, dict) else {}
+                raw_knowledge = data_entity.get("knowledge")
+                knowledge = raw_knowledge if isinstance(raw_knowledge, list) else []
+                name = str(entity.get("name") or "сущность")
+                await self._answer_callback(telegram, callback_id, "Показываю")
+                if knowledge:
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        self._format_browse_results(f"Записи «{name}»", knowledge[:8]),
+                    )
+                else:
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        f"«{name}» найдена, но подтверждённых записей у неё пока нет.",
+                    )
             elif family == "merge" and action in {"accept", "reject"}:
                 await self._backend_json(
                     backend,
@@ -206,7 +237,57 @@ class CallbacksMixin(BridgeShared):
             # A transport/backend outage is retryable. Keep the buttons visible
             # until the action succeeds or is known to be permanently invalid.
             if clear_markup:
-                await self._clear_inline_markup(telegram, chat_id, telegram_message_id)
+                await self._retire_markup_family(
+                    telegram, chat_id, telegram_message_id, message, pressed_family
+                )
+
+    async def _retire_markup_family(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        message_id: int,
+        message: dict[str, Any],
+        family: str,
+    ) -> None:
+        """Убрать отработавший ряд кнопок, не унося чужие.
+
+        Клавиатура ответа несёт до трёх НЕЗАВИСИМЫХ рядов (оценка, отправка в
+        Inbox, подтверждение знания), а очистка стирала их разом: 👍 уносил с
+        собой «✓ Подтвердить знание», и заметка зависала в pending, пока владелец
+        не вспомнит про /inbox. Ряды с кнопками нажатой семьи снимаются, остальные
+        перерисовываются на месте; без разобранной семьи (неизвестное действие)
+        поведение прежнее — снять всё.
+        """
+        remaining: list[Any] = []
+        raw_markup = message.get("reply_markup")
+        markup: dict[str, Any] = raw_markup if isinstance(raw_markup, dict) else {}
+        if family:
+            for row in markup.get("inline_keyboard") or []:
+                if not isinstance(row, list):
+                    continue
+                if any(
+                    str(button.get("callback_data") or "").startswith(f"{family}:")
+                    for button in row
+                    if isinstance(button, dict)
+                ):
+                    continue
+                remaining.append(row)
+        if not remaining:
+            await self._clear_inline_markup(client, chat_id, message_id)
+            return
+        try:
+            response = await client.post(
+                f"{self._api_url}/editMessageReplyMarkup",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "reply_markup": {"inline_keyboard": remaining},
+                },
+            )
+            response.raise_for_status()
+        except Exception:
+            # Косметика: действие уже выполнено, перерисовка не стоит ретрая.
+            LOGGER.debug("Could not edit Telegram inline keyboard", exc_info=True)
 
     @staticmethod
     def _response_reply_markup(response: dict[str, Any]) -> dict[str, Any] | None:

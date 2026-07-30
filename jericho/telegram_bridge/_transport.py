@@ -371,7 +371,9 @@ class TransportMixin(BridgeShared):
             json={
                 "offset": self._offset,
                 "timeout": POLL_TIMEOUT,
-                "allowed_updates": ["message", "callback_query"],
+                # edited_message принимается, чтобы честно ответить «правки не
+                # подхватываю» — иначе чат и база молча расходятся навсегда.
+                "allowed_updates": ["message", "edited_message", "callback_query"],
             },
         )
         response.raise_for_status()

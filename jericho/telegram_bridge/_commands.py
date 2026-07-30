@@ -67,6 +67,24 @@ class CommandsMixin(BridgeShared):
             await self._process_callback_query(telegram, backend, callback)
             return
 
+        edited = update.get("edited_message")
+        if isinstance(edited, dict):
+            # Правка сообщения НЕ подхватывается: заметка уже ушла в базу со старым
+            # текстом (идемпотентность держится за source_ref обновления), и молчание
+            # означало бы, что в чате один текст, а в архиве навсегда другой — и
+            # владелец об этом не знает.
+            raw_chat = edited.get("chat")
+            edited_chat: dict[str, Any] = raw_chat if isinstance(raw_chat, dict) else {}
+            edited_chat_id = int(edited_chat.get("id") or 0)
+            if edited_chat_id in self.config.allowed_chat_ids:
+                await self._send_message(
+                    telegram,
+                    edited_chat_id,
+                    "Правку сообщения я не подхватываю: сохранён исходный текст. "
+                    "Пришлите исправление новым сообщением (для заметок — /note).",
+                )
+            return
+
         message = update.get("message")
         if not isinstance(message, dict):
             return
@@ -192,6 +210,51 @@ class CommandsMixin(BridgeShared):
         if command == "/search":
             query = argument
             await self._send_search(telegram, backend, chat_id, external_user_id, user, query)
+            return
+        if command == "/source":
+            # Дословный поиск по ИСХОДНЫМ файлам. 93% загруженных знаков живут
+            # только в raw_objects, и когда ревью сжало документ до сводки, фраза
+            # из PDF была находима лишь с хоста через админку.
+            if not argument:
+                await self._send_message(telegram, chat_id, "Использование: /source <фраза из документа>")
+                return
+            from urllib.parse import quote
+
+            found = await self._backend_json(
+                backend,
+                "GET",
+                f"/api/knowledge/sources?q={quote(argument, safe='')}&limit=5",
+                None,
+                external_user_id,
+                str(chat_id),
+            )
+            raw_items = found.get("items") if isinstance(found.get("items"), list) else []
+            if not raw_items:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    f"Дословно «{argument}» в исходных файлах не нашлось. Это не значит, "
+                    "что фразы не было вовсе: отвергнутые в /inbox материалы не ищутся.",
+                )
+                return
+            lines = [f"Исходные файлы с «{argument}»:"]
+            buttons: list[dict[str, str]] = []
+            for index, item in enumerate(raw_items, start=1):
+                if not isinstance(item, dict):
+                    continue
+                label = str(item.get("source_ref") or item.get("source") or "без имени")[:80]
+                excerpt = str(item.get("excerpt") or "").replace("\n", " ").strip()[:160]
+                lines.append(f"{index}. {label}")
+                if excerpt:
+                    lines.append(f"   {excerpt}")
+                knowledge_id = str(item.get("knowledge_object_id") or "")
+                if knowledge_id:
+                    buttons.append({"text": str(index), "callback_data": f"doc:show:{knowledge_id}"})
+            markup = {"inline_keyboard": [buttons]} if buttons else None
+            if buttons:
+                lines.append("")
+                lines.append("Кнопкой ниже — открыть запись, выросшую из файла.")
+            await self._send_message(telegram, chat_id, "\n".join(lines), reply_markup=markup)
             return
         if command == "/new":
             reset_payload = {

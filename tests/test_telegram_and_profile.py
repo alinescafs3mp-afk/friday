@@ -283,7 +283,9 @@ async def test_telegram_polling_requests_callback_updates(tmp_path):
     try:
         assert await bridge._get_updates(telegram) == []
         payload = telegram.calls[-1][1]
-        assert payload["allowed_updates"] == ["message", "callback_query"]
+        # edited_message принимается, чтобы честно сказать «правки не подхватываю»
+        # — иначе чат и база молча расходятся навсегда.
+        assert payload["allowed_updates"] == ["message", "edited_message", "callback_query"]
     finally:
         bridge._inbox.close()
 
@@ -985,3 +987,187 @@ def test_the_file_fate_reaches_the_chat():
 
     plain = TelegramBridge._format_response_message({"message": "Ответ."})
     assert "стал знанием" not in plain and "/inbox" not in plain
+
+
+def _ux_bridge(tmp_path):
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    return TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_button_press_retires_only_its_row(tmp_path):
+    """Клавиатура ответа несёт до трёх НЕЗАВИСИМЫХ рядов, а очистка стирала все:
+    👍 уносил с собой «✓ Подтвердить знание», и заметка зависала в pending."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({"/api/feedback": {"feedback": {"id": "f1"}}})
+    markup = {
+        "inline_keyboard": [
+            [{"text": "👍", "callback_data": "feedback:up:msg_1"}],
+            [{"text": "✓ Подтвердить знание", "callback_data": "inbox:promote:in_1"}],
+        ]
+    }
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 51,
+                "callback_query": {
+                    "id": "cb-1",
+                    "from": {"id": 1001},
+                    "data": "feedback:up:msg_1",
+                    "message": {"message_id": 77, "chat": {"id": 5001}, "reply_markup": markup},
+                },
+            },
+            cached_response=None,
+        )
+        edits = [p for u, p in telegram.calls if u.endswith("/editMessageReplyMarkup")]
+        assert edits, "клавиатура не перерисована"
+        remaining = edits[-1]["reply_markup"]["inline_keyboard"]
+        flat = [b["callback_data"] for row in remaining for b in row]
+        assert flat == ["inbox:promote:in_1"], "чужой ряд кнопок унесло вместе с нажатым"
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_browse_with_namesakes_offers_a_choice(tmp_path):
+    """Однофамильцы гарантированы; молчаливый выбор первого делал записи
+    остальных несуществующими."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/entities": {
+                "items": [
+                    {"id": "ent_a", "name": "Тарасов И.И.", "entity_type": "person"},
+                    {"id": "ent_b", "name": "Тарасов П.С.", "entity_type": "person"},
+                ]
+            },
+            "/api/kg/entities/ent_b": {
+                "entity": {"id": "ent_b", "name": "Тарасов П.С."},
+                "knowledge": [{"id": "ko_1", "title": "Личное дело", "summary": "сводка"}],
+            },
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 52,
+                "message": {"message_id": 80, "chat": {"id": 5001}, "from": user, "text": "/browse Тарасов"},
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        chooser = sends[-1]
+        assert "несколькими сущностями" in chooser["text"]
+        buttons = [b["callback_data"] for row in chooser["reply_markup"]["inline_keyboard"] for b in row]
+        assert buttons == ["ent:browse:ent_a", "ent:browse:ent_b"]
+
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 53,
+                "callback_query": {
+                    "id": "cb-2",
+                    "from": user,
+                    "data": "ent:browse:ent_b",
+                    "message": {"message_id": 81, "chat": {"id": 5001}},
+                },
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert "Тарасов П.С." in sends[-1]["text"]
+        assert "Личное дело" in sends[-1]["text"]
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_source_command_searches_raw_files(tmp_path):
+    """93% загруженных знаков живут только в raw_objects; из Telegram provenance-поиск
+    был недостижим — только с хоста через админку."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/knowledge/sources": {
+                "items": [
+                    {
+                        "id": "raw_1",
+                        "source_ref": "приказ_112.docx",
+                        "excerpt": "…дословная фраза из документа…",
+                        "knowledge_object_id": "ko_9",
+                    }
+                ],
+                "count": 1,
+            }
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 54,
+                "message": {
+                    "message_id": 82,
+                    "chat": {"id": 5001},
+                    "from": user,
+                    "text": "/source дословная фраза",
+                },
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        text = sends[-1]["text"]
+        assert "приказ_112.docx" in text
+        assert "дословная фраза" in text
+        buttons = [b["callback_data"] for row in sends[-1]["reply_markup"]["inline_keyboard"] for b in row]
+        assert buttons == ["doc:show:ko_9"]
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_an_edited_message_gets_an_honest_answer(tmp_path):
+    """Правка сообщения не подхватывается — и раньше система просто не знала о ней:
+    в чате один текст, в базе навсегда другой."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 55,
+                "edited_message": {
+                    "message_id": 83,
+                    "chat": {"id": 5001},
+                    "from": {"id": 1001},
+                    "text": "/note дежурный — Сидоров",
+                },
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert sends and "не подхватываю" in sends[-1]["text"]
+        assert not backend.calls, "правка ушла в бекенд, хотя объявлена неподдержанной"
+    finally:
+        bridge._inbox.close()

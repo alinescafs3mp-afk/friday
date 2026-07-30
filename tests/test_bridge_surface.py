@@ -208,7 +208,9 @@ def test_every_button_namespace_has_a_handler() -> None:
 # `doc` добавлен осознанно: кнопка «открыть найденный документ целиком» под выдачей
 # поиска. До неё выдача была тупиком — заголовок и 160 знаков, а дальше ни id, ни
 # ссылки, ни номера, на который можно сослаться следующей репликой.
-EXPECTED_CALLBACK_NAMESPACES = {"doc", "feedback", "inbox", "merge", "mission", "research", "work"}
+# `ent` добавлен осознанно: выбор из однофамильцев под /browse — молчаливый выбор
+# первого совпадения делал записи остальных несуществующими.
+EXPECTED_CALLBACK_NAMESPACES = {"doc", "ent", "feedback", "inbox", "merge", "mission", "research", "work"}
 EXPECTED_COMMANDS = {
     "/browse",
     "/chat",
@@ -221,13 +223,16 @@ EXPECTED_COMMANDS = {
     "/note",
     "/research",
     "/search",
+    # /source — дословный provenance-поиск по исходным файлам: 93% загруженных
+    # знаков живут только в raw_objects и из Telegram были недостижимы.
+    "/source",
     "/start",
     "/status",
     "/tags",
     "/why",
     "/work",
 }
-EXPECTED_BRIDGE_COUNT = 40
+EXPECTED_BRIDGE_COUNT = 41
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",
