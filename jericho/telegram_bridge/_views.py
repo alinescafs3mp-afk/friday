@@ -345,6 +345,30 @@ class ViewsMixin(BridgeShared):
         )
         results = data.get("results") if isinstance(data.get("results"), list) else []
         if not results:
+            # «Ничего не нашлось» и «нашлось двадцать, но ни одно не о том» — разные
+            # ответы, и совет про Inbox верен только для первого. Во втором случае
+            # материал разобран и лежит в базе, а не ждёт разбора, и отправлять
+            # человека листать очередь значит посылать его не туда.
+            dropped = 0
+            strategy = data.get("strategy")
+            if isinstance(strategy, dict):
+                try:
+                    dropped = int(strategy.get("rerank_dropped") or 0)
+                except (TypeError, ValueError):
+                    dropped = 0
+            if dropped:
+                # Показать «хотя бы лучшего из отсеянных» — соблазн, и он замерен:
+                # среди вопросов, у которых порог срезал всё, лучший срезанный
+                # отвечает 1 раз из 8 (на отложенной половине — 0 из 4). То есть
+                # утешительный документ почти всегда не о том, а выглядит как ответ.
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    f"По запросу «{query}» нашлось {dropped}, но ни одна запись не похожа "
+                    "на ответ — показывать их значит выдать похожее за нужное. Спросите "
+                    "другими словами; в админке есть поиск по тексту, он ничего не отсеивает.",
+                )
+                return
             await self._send_message(
                 telegram,
                 chat_id,
@@ -361,24 +385,19 @@ class ViewsMixin(BridgeShared):
 
     @staticmethod
     def _format_search_results(query: str, results: list[Any], strategy: Any = None) -> str:
-        # «Похоже отвечают N» — не украшение. Скор переранжировщика откалиброван, и на
-        # вопросе, ответа на который в архиве нет, весь пул уходит ниже 0.01: без этой
-        # строки человек получает пять правдоподобных заголовков и никакого признака,
-        # что ни один из них не о том. Замер размена — в `retrieval/_rerank_backend.py`.
-        # Ноль говорится ВСЛУХ, а единственный отвечающий из пяти — тем более.
-        confident = None
-        if isinstance(strategy, dict) and "rerank_confident" in strategy:
+        # Сколько отсеяно — сказать вслух. Иначе повторяется давняя жалоба «он же точно
+        # про это, почему его нет»: документ снят ЗА ПОРОГ, а выглядит это как будто
+        # поиск его не нашёл. Показанное при этом ручается за себя — всё, что ниже
+        # порога, уже убрано, поэтому оговорки к самим строкам не нужно.
+        dropped = 0
+        if isinstance(strategy, dict):
             try:
-                confident = int(strategy["rerank_confident"])
+                dropped = int(strategy.get("rerank_dropped") or 0)
             except (TypeError, ValueError):
-                confident = None
+                dropped = 0
         header = f"Найдено по запросу «{query}»"
-        if confident is not None:
-            shown = sum(1 for item in results if isinstance(item, dict))
-            if confident == 0:
-                header += f" — {shown}, но ни один не похож на ответ"
-            elif confident < shown:
-                header += f" — {shown}, похоже отвечают {confident}"
+        if dropped:
+            header += f" (ещё {dropped} отсеяно как не отвечающие)"
         lines = [f"{header}:"]
         for position, item in enumerate(results, start=1):
             if not isinstance(item, dict):

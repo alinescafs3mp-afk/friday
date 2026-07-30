@@ -103,41 +103,27 @@ def test_the_payload_shape_from_the_api_is_accepted_either_way():
     assert "Внутри" in wrapped and "тело" in wrapped
 
 
-# --- «нашлось пять, отвечает ни один» -----------------------------------------
+# --- отсев по порогу называется вслух ----------------------------------------
 
 
-def test_a_pool_with_no_answer_says_so_out_loud():
-    """Пять правдоподобных заголовков и ни одного ответа — самый частый способ соврать.
+def test_the_filtered_out_are_counted_in_the_header():
+    """«Он же точно про это, почему его нет» — давняя жалоба этого проекта.
 
-    Скор переранжировщика откалиброван: на живом архиве вопрос, ответа на который в
-    нём нет, уводит ВЕСЬ пул ниже 0.01, а «график дежурств» даёт пять по 0.999. Без
-    этой строки человек видит одно и то же в обоих случаях.
+    Документ, снятый ЗА ПОРОГ, без этой строки неотличим от ненайденного.
     """
     text = TelegramBridge._format_search_results(
-        "поверка", _results(5), {"reranked": 20, "rerank_confident": 0}
+        "поверка", _results(3), {"reranked": 20, "rerank_dropped": 17}
     )
-    assert "ни один не похож на ответ" in text
-    assert "1. Рапорт номер 0" in text, "выдача не должна опустошаться — это подсказка, а не гейт"
+    assert "ещё 17 отсеяно" in text
+    assert "1. Рапорт номер 0" in text
 
 
-def test_a_partial_answer_is_counted():
-    text = TelegramBridge._format_search_results(
-        "поверка", _results(5), {"reranked": 20, "rerank_confident": 2}
-    )
-    assert "похоже отвечают 2" in text
+def test_nothing_is_said_when_nothing_was_filtered():
+    """Приписка про отсев при пустом отсеве — шум."""
+    text = TelegramBridge._format_search_results("поверка", _results(3), {"reranked": 20})
+    assert "отсеяно" not in text
 
 
-def test_nothing_is_promised_when_everything_answers():
-    """Когда отвечает всё показанное, приписка была бы шумом."""
-    text = TelegramBridge._format_search_results(
-        "поверка", _results(3), {"reranked": 20, "rerank_confident": 3}
-    )
-    assert "похоже отвечают" not in text
-    assert "ни один" not in text
-
-
-def test_without_a_reranker_the_line_does_not_appear():
-    """Выключенное переранжирование не должно рождать обещаний о качестве выдачи."""
-    text = TelegramBridge._format_search_results("поверка", _results(3), {"reranked": 0})
-    assert "похоже" not in text
-    assert "ни один" not in text
+def test_without_a_reranker_the_header_is_plain():
+    text = TelegramBridge._format_search_results("поверка", _results(3), None)
+    assert text.startswith("Найдено по запросу «поверка»:")

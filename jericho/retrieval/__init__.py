@@ -1188,11 +1188,20 @@ class HybridSearcher:
         explain: bool = False,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 100))
+        # Ширина отбора кандидатов считается от ГЛУБИНЫ ОТБОРА, а не от размера
+        # страницы. Раньше и то и другое росло от `limit`, и пул для переранжирования
+        # усыхал вместе со страницей: Telegram просит восемь — FTS приносил сорок
+        # кандидатов, админка просит двадцать — сотню, и это давали РАЗНЫЕ выдачи на
+        # один вопрос. Замерено: при `limit=8` порог оставлял пустыми 12 вопросов из
+        # 32, при `limit=20` — 10, разница целиком в составе пула. Собирать надо на ту
+        # глубину, на которой работает переранжировщик; урезание до страницы — шаг
+        # ПОСЛЕ, и он уже есть.
+        depth = max(limit, self._rerank_top) if self._reranker is not None else limit
         clean_query = " ".join((query or "").split()).strip()
         if not clean_query:
             return {"query": query, "results": [], "count": 0, "entity_matches": []}
 
-        fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=limit * 5)
+        fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=depth * 5)
         # Only when the question as typed matched nothing at all. A stuck keyboard
         # layout and a slipped finger produce strings the archive cannot match,
         # and both are ordinary human typing rather than nonsense — without this
@@ -1204,9 +1213,9 @@ class HybridSearcher:
             repair = self._repair_query(user_id, clean_query)
             if repair is not None:
                 clean_query = repair.query
-                fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=limit * 5)
+                fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=depth * 5)
         # Fuzzy matching needs a bounded recall pool even when FTS finds no exact token.
-        pool_limit = min(self._pool_max, max(limit * 10, 100))
+        pool_limit = min(self._pool_max, max(depth * 10, 100))
         recent_pool = self.storage.list_knowledge_objects(user_id, limit=pool_limit)
         candidate_map = {item["id"]: item for item in [*fts_candidates, *recent_pool]}
         candidates = list(candidate_map.values())
@@ -1237,7 +1246,7 @@ class HybridSearcher:
         if substantive and len(substantive) < len(tokens_of(clean_query)):
             evidence_ranking = {
                 str(item["id"])
-                for item in self.storage.search_knowledge(user_id, " ".join(substantive), limit=limit * 5)
+                for item in self.storage.search_knowledge(user_id, " ".join(substantive), limit=depth * 5)
             }
         else:
             # Nothing to strip, or nothing left after stripping: a question made of
@@ -1314,7 +1323,7 @@ class HybridSearcher:
                     seed_knowledge_ids=seed_ids,
                     entity_limit=8,
                     depth=graph_depth,
-                    knowledge_limit=max(limit * 6, 50),
+                    knowledge_limit=max(depth * 6, 50),
                 )
                 for candidate in graph_context.get("knowledge_candidates", []):
                     document_id = str(candidate.get("knowledge_object_id") or "")
@@ -1602,7 +1611,14 @@ class HybridSearcher:
             results.append(item)
 
         reranked_count = 0
-        if self._reranker is not None and self._rerank_top > 0 and len(results) > limit:
+        rerank_cut: set[str] = set()
+        rerank_scores: dict[str, float] = {}
+        # Условие «кандидатов больше запрошенного» здесь стояло, пока шаг только
+        # ПЕРЕСТАВЛЯЛ: переставлять пятёрку внутри пятёрки бессмысленно. С порогом у
+        # шага появилась вторая работа — отсев, — и нужен он как раз тогда, когда
+        # нашлось мало: три правдоподобных документа, ни один из которых не о том,
+        # выглядят убедительнее двадцати.
+        if self._reranker is not None and self._rerank_top > 0 and len(results) >= 2:
             reordered = await self._reranker(clean_query, results[: self._rerank_top])
             if reordered is not None and len(reordered) == len(results[: self._rerank_top]):
                 # Порядок меняется, состав — нет: хвост за `rerank_top` остаётся на
@@ -1610,6 +1626,32 @@ class HybridSearcher:
                 # как «поиск ничего не нашёл», а не как сбой модели.
                 results = reordered + results[self._rerank_top :]
                 reranked_count = len(reordered)
+                if self._confident_min > 0.0:
+                    # Отсев по откалиброванному скору. Замер размена — в
+                    # `_rerank_backend.py`: доля отвечающих среди показанного растёт
+                    # 43.5% → 78.6%, и на 6 безответных вопросах из 7 система начинает
+                    # верно молчать, ценой 4 вопросов из 25, у которых ответ был.
+                    # Размен принят владельцем осознанно.
+                    #
+                    # Режется ДО обрезки по limit, а не после: иначе отсев съедал бы
+                    # места в странице, и человек получал бы два документа там, где
+                    # прошедших порог восемь.
+                    #
+                    # Документы БЕЗ скора (хвост за `rerank_top`) не режутся: про них
+                    # ничего не измерено, и молчаливый отказ по отсутствию оценки — это
+                    # приписывание модели решения, которого она не принимала.
+                    kept: list[dict[str, Any]] = []
+                    for item in results:
+                        score = item.get("_rerank_score")
+                        if score is None:
+                            kept.append(item)
+                            continue
+                        rerank_scores[str(item["id"])] = float(score)
+                        if float(score) < self._confident_min:
+                            rerank_cut.add(str(item["id"]))
+                            continue
+                        kept.append(item)
+                    results = kept
         results = results[:limit]
 
         # Resolve the winning passage's offsets so the answer can quote what actually
@@ -1673,14 +1715,13 @@ class HybridSearcher:
             # Видно в explain-трейсе: порядок выдачи решала не только формула, и
             # человек, разбирающий «почему это первым», должен об этом знать.
             strategy["reranked"] = reranked_count
-            # Сколько из ПОКАЗАННОГО похоже на ответ. Скор cross-encoder откалиброван
-            # (замер — в `_rerank_backend`), и это единственное место, где система
-            # может сказать «нашла пять, но отвечает похоже что один». Считается по
-            # тому, что человек увидит, а не по всему переранжированному пулу: число
-            # рядом со списком обязано относиться к этому списку.
-            strategy["rerank_confident"] = sum(
-                1 for item in results if float(item.get("_rerank_score") or 0.0) >= self._confident_min
-            )
+            if rerank_cut:
+                # Сколько кандидатов отсеяно как не отвечающие. Число нужно ровно там,
+                # где выдача опустела: «ничего не нашлось» и «нашлось двадцать, но ни
+                # одно не о том» — разные ответы, и до этого поля они выглядели
+                # одинаково. Пустой результат на пустом архиве уже был отделён от
+                # пустого на большом (`lexical_pool_scanned`), это тот же долг.
+                strategy["rerank_dropped"] = len(rerank_cut)
         if repair is not None:
             # Said out loud, always: the answer is about a different string than
             # the one the user typed, and a reader who is not told that has no way
@@ -1738,6 +1779,12 @@ class HybridSearcher:
                         graph_scores.get(document_id, 0.0),
                     )
                 )
+                # Отсев переранжировщиком — такая же причина, как три остальные, и
+                # называется вслух по той же причине: без неё документ, снятый ЗА
+                # порог, лежал бы в трейсе как «не поместился в страницу», и вопрос
+                # «он же точно про это, почему его нет» снова остался бы без ответа.
+                if not reason and document_id in rerank_cut:
+                    reason = "rerank_below_threshold"
                 if reason:
                     status: str = "discarded"
                     entry_rank: int | None = None
@@ -1766,6 +1813,10 @@ class HybridSearcher:
                             if document_id in chunk_carried
                             else ("document" if document_id in chunk_provenance else "none")
                         ),
+                        # Скор переранжировщика — рядом с причиной отсева, иначе
+                        # «rerank_below_threshold» это ярлык без числа, и порог не с
+                        # чем сверить.
+                        "rerank_score": rerank_scores.get(document_id),
                         "components": components.get(document_id, {}),
                     }
                 )

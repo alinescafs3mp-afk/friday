@@ -133,7 +133,7 @@ def test_a_short_pool_still_goes_in_one_request(settings, monkeypatch):
     assert calls == [3]
 
 
-# --- число «похоже на ответ» --------------------------------------------------
+# --- порог отсекает ------------------------------------------------------------
 
 
 def _knowledge(storage, user_id: str, text: str) -> str:
@@ -161,66 +161,129 @@ def _knowledge(storage, user_id: str, text: str) -> str:
     return ko.id
 
 
-async def _reranker(scores):
+def _reranker(by_position):
     """Переранжировщик, раздающий заданные скоры по порядку прихода."""
 
     async def call(query, items):
         out = []
         for index, item in enumerate(items):
             copy = dict(item)
-            copy["_rerank_score"] = scores[index % len(scores)]
+            copy["_rerank_score"] = by_position[index % len(by_position)]
             out.append(copy)
         return out
 
     return call
 
 
-async def test_the_count_of_answering_documents_is_about_what_is_shown(settings, storage):
-    """`rerank_confident` считается по показанному, а не по всему пулу.
+def _searcher(storage, scores, **kwargs):
+    from jericho.retrieval import HybridSearcher
 
-    Правило проекта: показанное число не должно быть длиной обрезанной страницы, но
-    и наоборот тоже — число рядом со списком обязано относиться К ЭТОМУ списку. Пул
-    здесь вдвое длиннее выдачи, и уверенных в нём больше, чем человек увидит.
+    options = {"rerank_top": 20, "rerank_confident_min": 0.10}
+    options.update(kwargs)
+    return HybridSearcher(storage, None, record_usage=False, reranker=_reranker(scores), **options)
+
+
+def _corpus(storage, count=8):
+    for index in range(count):
+        _knowledge(storage, "owner", f"Договор поставки оборудования номер {index} на склад")
+
+
+async def test_documents_below_the_threshold_do_not_reach_the_page(settings, storage):
+    """Замер размена в `_rerank_backend`: доля отвечающих 43.5% -> 78.6%."""
+    _corpus(storage)
+    result = await _searcher(storage, [0.99, 0.99, 0.004]).search(
+        "owner", "договор поставки оборудования", limit=8
+    )
+
+    assert result["strategy"]["rerank_dropped"] > 0
+    assert all(item["_rerank_score"] >= 0.10 for item in result["results"])
+
+
+async def test_the_cut_happens_before_the_page_is_trimmed(settings, storage):
+    """Отсечь ПОСЛЕ обрезки значило бы отдать места страницы отвергнутым.
+
+    Здесь каждый третий кандидат негоден. Режем сначала — страница полная; режем
+    после — в ней остаются две строки из трёх.
     """
-    from jericho.retrieval import HybridSearcher
+    _corpus(storage, count=12)
+    result = await _searcher(storage, [0.99, 0.99, 0.004]).search(
+        "owner", "договор поставки оборудования", limit=3
+    )
 
-    for index in range(8):
+    assert len(result["results"]) == 3, "отсев съел места в странице"
+
+
+async def test_a_pool_with_no_answer_comes_back_empty_and_says_why(settings, storage):
+    """Пустая выдача обязана отличаться от пустого архива — иначе совет будет неверным."""
+    _corpus(storage)
+    result = await _searcher(storage, [0.004]).search("owner", "договор поставки оборудования")
+
+    assert result["results"] == []
+    assert result["strategy"]["rerank_dropped"] >= 2
+
+
+async def test_a_zero_threshold_keeps_everything(settings, storage):
+    """0 — это «не отсеивать»: скор не бывает отрицательным, порог перестаёт быть гейтом."""
+    _corpus(storage)
+    result = await _searcher(storage, [0.004], rerank_confident_min=0.0).search(
+        "owner", "договор поставки оборудования", limit=8
+    )
+
+    assert result["results"], "нулевой порог не должен ничего резать"
+    assert "rerank_dropped" not in result["strategy"]
+
+
+async def test_the_trace_names_the_threshold_as_the_reason(settings, storage):
+    """`rerank_below_threshold` — такая же названная причина, как три остальные.
+
+    Без неё снятый за порог документ лежал бы в трейсе как «не поместился в
+    страницу», и вопрос «он же точно про это» снова остался бы без ответа.
+    """
+    _corpus(storage)
+    result = await _searcher(storage, [0.99, 0.004]).search(
+        "owner", "договор поставки оборудования", limit=8, explain=True
+    )
+
+    cut = [row for row in result["trace"] if row.get("reason") == "rerank_below_threshold"]
+    assert cut, "отсев переранжировщиком не назван в трейсе"
+    assert all(row["rerank_score"] < 0.10 for row in cut), "причина названа, а число не показано"
+
+
+async def test_a_small_result_set_is_filtered_too(settings, storage):
+    """Отсев нужен ИМЕННО когда нашлось мало: три негодных убедительнее двадцати.
+
+    Раньше шаг запускался только при «кандидатов больше запрошенного» — потому что
+    только переставлял. С порогом у него вторая работа.
+    """
+    _corpus(storage, count=3)
+    result = await _searcher(storage, [0.004]).search("owner", "договор поставки оборудования", limit=10)
+
+    assert result["results"] == []
+    assert result["strategy"]["rerank_dropped"] == 3
+
+
+# --- размер страницы не должен менять, ЧТО найдено ----------------------------
+
+
+async def test_a_small_page_does_not_scan_less_of_the_archive(settings, storage):
+    """Один вопрос давал РАЗНЫЕ ответы в Telegram и в админке.
+
+    Ширина отбора кандидатов росла от размера страницы: FTS брал `limit × 5`, пул —
+    `limit × 10`. Telegram просит восемь, админка двадцать — и это разные пулы на один
+    вопрос. Замерено на корпусе владельца: при `limit=8` порог оставлял пустыми 12
+    вопросов из 32, при `limit=20` — 10, разница целиком в составе пула.
+
+    Собирать надо на глубину переранжирования; урезание до страницы — шаг ПОСЛЕ.
+    """
+    for index in range(150):
         _knowledge(storage, "owner", f"Договор поставки оборудования номер {index} на склад")
 
-    searcher = HybridSearcher(
-        storage,
-        None,
-        record_usage=False,
-        reranker=await _reranker([0.99, 0.99, 0.99, 0.001]),
-        rerank_top=8,
-        rerank_confident_min=0.10,
+    narrow = await _searcher(storage, [0.99]).search("owner", "договор поставки", limit=2)
+    wide = await _searcher(storage, [0.99]).search("owner", "договор поставки", limit=20)
+
+    assert narrow["strategy"].get("lexical_pool_scanned") == wide["strategy"].get("lexical_pool_scanned"), (
+        "узкая страница просмотрела меньше архива, чем широкая"
     )
-    result = await searcher.search("owner", "договор поставки оборудования", limit=2)
-
-    assert result["strategy"]["reranked"] > 2, "пул должен быть глубже выдачи"
-    assert len(result["results"]) == 2
-    assert result["strategy"]["rerank_confident"] == 2, (
-        "посчитаны уверенные во всём пуле, а показаны только два — число врёт"
+    assert not narrow["strategy"].get("lexical_pool_capped"), (
+        "пул упёрся в потолок только из-за размера страницы"
     )
-
-
-async def test_a_pool_the_reranker_finds_nothing_in_says_so(settings, storage):
-    """Ноль — это ответ. Скор откалиброван, и «нашла пять, отвечает ни один» честнее
-    молчаливой пятёрки."""
-    from jericho.retrieval import HybridSearcher
-
-    for index in range(6):
-        _knowledge(storage, "owner", f"Договор поставки оборудования номер {index} на склад")
-
-    searcher = HybridSearcher(
-        storage,
-        None,
-        record_usage=False,
-        reranker=await _reranker([0.004]),
-        rerank_top=6,
-        rerank_confident_min=0.10,
-    )
-    result = await searcher.search("owner", "договор поставки оборудования", limit=3)
-
-    assert result["results"], "переранжирование не должно опустошать выдачу"
-    assert result["strategy"]["rerank_confident"] == 0
