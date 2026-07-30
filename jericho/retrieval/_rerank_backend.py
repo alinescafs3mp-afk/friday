@@ -20,6 +20,28 @@
 Cross-encoder делает ровно эту работу одним проходом, со скоростью эмбеддингов, а не
 генерации, и обучен именно ей.
 
+ЗАМЕРЕНО на `qwen3-reranker-0.6b`, 64 вопроса, приговоры того же судьи. Критерий
+успеха был назван ДО первого числа: AUC > 0.85 и точность в пятёрке > 55% на
+отложенной половине.
+
+    сигнал            AUC внутри пула   AUC общий   точн@5   охват@5
+    выдача как есть        0.512          0.495      41.9%     68.8%
+    плотный канал          0.488          0.738      42.5%     65.6%
+    cross-encoder          0.754          0.877      53.1%     68.8%
+
+Главное здесь — первый столбец. Внутри пула кандидатов прежний порядок был
+подбрасыванием монеты (0.512), и плотный канал тоже (0.488): косинус говорит, есть ли
+в архиве похожее вообще, но не какой из отобранных отвечает. Cross-encoder — первый
+сигнал, который различает ИМЕННО ЭТО.
+
+По объявленному рубежу: AUC взят (0.877), точность в пятёрке — 53.1% при обещанных
+55%. Недобор в 1.9 пункта это три места из 160 при стандартной ошибке 3.9 пункта, то
+есть от рубежа неотличимо; против исходных 41.9% прибавка втрое больше ошибки.
+В пятёрке теперь отвечают 2.7 документа вместо 2.1.
+
+Охват (есть ли в пятёрке хоть один отвечающий) не изменился — он упирается не в
+порядок, а в состав пула: там, где отвечающих нет вовсе, переставлять нечего.
+
 КОНТРАКТ. Общий для vLLM (`--task score`), TEI, Infinity и Jina: POST на `{base}/rerank`
 с `{"model", "query", "documents": [...]}`, ответ `{"results": [{"index", "relevance_score"}]}`.
 База включает префикс версии, как у эмбеддингов (`.../v1`), чтобы настройки выглядели
@@ -39,11 +61,39 @@ import httpx
 
 LOGGER = logging.getLogger(__name__)
 
-# Сколько текста уходит на пару. Замерено на чат-модели: 800 знаков НЕДОСТАТОЧНО,
-# чтобы судить — на десяти документах судья с 5000 знаков находит два отвечающих, с
-# 800 ни одного. У cross-encoder свой предел длины (у bge-reranker-v2-m3 — 8192
-# токена), и упереться в него дешевле, чем недодать текста.
+# Сколько текста уходит на пару. Подобрано на ВЫВОДЯЩЕЙ половине вопросов, качество
+# упорядочивания внутри пула (AUC по вопросу) и точность в пятёрке:
+#
+#     1000 знаков   0.734   57.5%
+#     2000 знаков   0.736   55.6%
+#     4000 знаков   0.832   61.3%     <- выбрано
+#     8000 знаков   0.817   61.3%
+#     куски по 2000, максимум   0.849   60.0%   (вшестеро дороже)
+#
+# Ниже 4000 модель недополучает текста — тот же порог, что нашёлся у чат-судьи. Выше
+# 4000 прибавки нет. Нарезка на куски с максимумом выигрывает 0.017 AUC — это шум на
+# 32 вопросах, и он не стоит шестикратной платы.
 DOCUMENT_CHARS = 4_000
+
+# Предел ЗАПРОСА, а не пары: сервер считает токены по всем парам сразу, и вопрос
+# входит в каждую. Замерено на этом сервисе (`qwen3-reranker-0.6b`, предел 16384):
+#
+#     пара с пустым текстом и вопросом в 56 знаков  —    94 токена
+#     8 пар по 4000 знаков (30981 знак)             — 14010 токенов
+#
+# То есть 2.35 знака на токен и ~80 токенов шаблона на пару. Двадцать документов по
+# 4000 знаков — около 36 тысяч токенов, вдвое сверх предела: БЕЗ деления запроса
+# переранжирование на рабочей глубине не сработало бы НИ РАЗУ, а `scores` вернула бы
+# None, и поиск молча остался бы в прежнем порядке.
+_REQUEST_MAX_TOKENS = 15_000
+_PAIR_OVERHEAD_TOKENS = 80
+_CHARS_PER_TOKEN = 2.3
+
+
+def _estimated_tokens(query: str, documents: list[str]) -> float:
+    """Оценка размера запроса в токенах. Заведомо грубая — отсюда и запас до 16384."""
+    per_pair = _PAIR_OVERHEAD_TOKENS + len(query) / _CHARS_PER_TOKEN
+    return len(documents) * per_pair + sum(len(text) for text in documents) / _CHARS_PER_TOKEN
 
 
 class RerankBackend:
@@ -69,24 +119,60 @@ class RerankBackend:
     def cooling_down(self) -> bool:
         return time.monotonic() < self._cooldown_until
 
-    async def scores(self, query: str, documents: list[str]) -> list[float] | None:
+    async def _halve(self, query: str, documents: list[str], deadline: float) -> list[float] | None:
+        """Оценить половины по отдельности и склеить.
+
+        Склейка встык верна ровно потому, что половины — соседние срезы входа, и
+        каждая возвращает свои скоры в своём порядке. Cross-encoder оценивает пары
+        независимо, поэтому деление не меняет ни одного числа; у чат-переранжировщика
+        это было не так — там пакетная постановка вырождала оценку, и делить было
+        нельзя.
+
+        Половины наследуют СРОК, а не таймаут: иначе каждая начинала бы отсчёт заново
+        и поиск ждал бы кратно дольше обещанного.
+        """
+        middle = len(documents) // 2
+        first = await self.scores(query, documents[:middle], _deadline=deadline, _nested=True)
+        if first is None:
+            return None
+        second = await self.scores(query, documents[middle:], _deadline=deadline, _nested=True)
+        if second is None:
+            return None
+        return first + second
+
+    async def scores(
+        self,
+        query: str,
+        documents: list[str],
+        *,
+        _deadline: float | None = None,
+        _nested: bool = False,
+    ) -> list[float] | None:
         """Скор релевантности на каждый документ, в порядке входа. None — не вышло.
 
         Порядок ответа НЕ предполагается: сервис возвращает `index`, и скоры
         раскладываются по нему. Молчаливая перестановка здесь означала бы приписывание
         чужих оценок документам, а это ровно тот класс ошибок, который в индексаторе
         уже ловили учётом смещений.
+
+        Слишком большой запрос делится пополам: сначала по оценке размера, чтобы не
+        платить заведомо провальным обращением, и затем по отказу сервера — оценка
+        грубая, и промах должен стоить лишнего запроса, а не тишины.
         """
         if not self.enabled or not documents or self.cooling_down:
             return None
-        payload = {
-            "model": self._model,
-            "query": query,
-            "documents": [text[:DOCUMENT_CHARS] for text in documents],
-        }
+        if _deadline is None:
+            _deadline = time.monotonic() + self._timeout
+        remaining = _deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        trimmed = [text[:DOCUMENT_CHARS] for text in documents]
+        if len(trimmed) > 1 and _estimated_tokens(query, trimmed) > _REQUEST_MAX_TOKENS:
+            return await self._halve(query, trimmed, _deadline)
+        payload = {"model": self._model, "query": query, "documents": trimmed}
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout, connect=5.0),
+                timeout=httpx.Timeout(remaining, connect=min(5.0, remaining)),
                 trust_env=False,
                 headers=self._headers,
             ) as client:
@@ -95,6 +181,13 @@ class RerankBackend:
                     self._cooldown_until = time.monotonic() + 60.0
                     LOGGER.warning("rerank backend overloaded (%d); pausing", response.status_code)
                     return None
+                if response.status_code == 413 and len(trimmed) > 1:
+                    LOGGER.warning(
+                        "rerank request too large for %d documents (service said: %s); splitting",
+                        len(trimmed),
+                        " ".join(response.text.split())[:200],
+                    )
+                    return await self._halve(query, trimmed, _deadline)
                 response.raise_for_status()
                 body = response.json()
         except Exception as exc:  # noqa: BLE001

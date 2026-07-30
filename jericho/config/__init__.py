@@ -679,9 +679,10 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         # там и в доках), и это стережёт тест.
         retrieval_dense_evidence_min=_float_env("JERICHO_RETRIEVAL_DENSE_EVIDENCE_MIN", 0.35, minimum=0.0),
         # Отдельная модель-переранжировщик (cross-encoder). Выключена, пока не задан
-        # адрес: замерено, что упорядочивание внутри выдачи не несёт сигнала о
-        # полезности (точность плоская по глубине), а лучший имеющийся различитель
-        # даёт AUC 0.687 при нужных ~0.9. Подробности — в `retrieval/_rerank_backend.py`.
+        # адрес. Замерено, ЧТО она чинит: внутри пула кандидатов прежний порядок был
+        # подбрасыванием монеты (AUC 0.512), плотный канал тоже (0.488), cross-encoder
+        # даёт 0.754 на отложенной половине. Подробности — в
+        # `retrieval/_rerank_backend.py`.
         rerank_base_url=os.environ.get("JERICHO_RERANK_BASE_URL", "").strip(),
         rerank_model=os.environ.get("JERICHO_RERANK_MODEL", "").strip(),
         # Ключ падает обратно на ключ LLM — как у эмбеддингов, и по той же причине:
@@ -693,6 +694,8 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         ),
         rerank_timeout_sec=_float_env("JERICHO_RERANK_TIMEOUT_SEC", 20.0, minimum=1.0),
         # Сколько верхних кандидатов отдавать на переранжирование. 0 — выключено.
+        # Замер сделан на глубине 20 — на ней и стоит включать; клиент сам делит запрос
+        # на части, потому что двадцать пар по 4000 знаков вдвое превышают предел службы.
         rerank_top=_int_env("JERICHO_RERANK_TOP", 0, minimum=0),
         api_host=os.environ.get("JERICHO_API_HOST", "127.0.0.1"),
         api_port=_int_env("JERICHO_API_PORT", 8000, minimum=1),
