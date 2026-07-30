@@ -244,14 +244,27 @@ class CommandsMixin(BridgeShared):
             await self._send_missions(telegram, backend, chat_id, external_user_id, user)
             return
         if command == "/why":
-            data = await self._backend_json(
-                backend,
-                "GET",
-                "/api/conversations/channel/why",
-                None,
-                external_user_id,
-                str(chat_id),
-            )
+            try:
+                data = await self._backend_json(
+                    backend,
+                    "GET",
+                    "/api/conversations/channel/why",
+                    None,
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                # 404 «в этом канале ещё нет диалога/ответа» — не сбой, а честное
+                # «пока нечего объяснять». Раньше это уходило в dead-letter, и
+                # человек после /new получал «⚠️ сообщение отклонено» — текст,
+                # написанный для настоящих отказов.
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Пока нечего объяснять: в этом чате ещё не было ответа. "
+                    "Задайте вопрос — и /why покажет, как я его искал.",
+                )
+                return
             trace = data.get("trace") or []
             dropped = [item for item in trace if item.get("reason")]
             lines = [
@@ -260,7 +273,19 @@ class CommandsMixin(BridgeShared):
             ]
             citations = data.get("citations") or {}
             if citations:
-                lines.append("Источники: " + ", ".join(sorted(citations)))
+                # Названия записей есть в трейсе; голая метка «K2» бесполезна,
+                # когда сообщение с легендой 📎 уже уехало вверх по чату. Сортировка
+                # по (длина, метка) даёт числовой порядок: K1, K2, …, K10.
+                titles = {
+                    str(item.get("id") or ""): str(item.get("title") or "")
+                    for item in trace
+                    if isinstance(item, dict)
+                }
+                named = []
+                for label in sorted(citations, key=lambda mark: (len(mark), mark)):
+                    title = titles.get(str(citations.get(label) or ""), "")[:60]
+                    named.append(f"[{label}] {title}" if title else f"[{label}]")
+                lines.append("Источники: " + "; ".join(named))
             if dropped:
                 lines.append("")
                 lines.append("Отброшено при ранжировании:")

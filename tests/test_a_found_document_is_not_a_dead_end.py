@@ -103,6 +103,59 @@ def test_the_payload_shape_from_the_api_is_accepted_either_way():
     assert "Внутри" in wrapped and "тело" in wrapped
 
 
+def test_the_real_api_response_opens_as_a_document_not_a_blank(settings):
+    """Форматтер обязан понимать НАСТОЯЩИЙ ответ `GET /api/knowledge/{id}`.
+
+    Прежний тест кормил только выдуманные формы ({title,content} и
+    {knowledge_object:{…}}), а маршрут отвечает конвертом {"item": …}. Форматтер
+    искал не тот ключ и КАЖДЫЙ документ показывал как «Без названия … нет
+    текста» — кнопка «открыть целиком» не работала в бою ни разу, при зелёных
+    тестах. Поэтому здесь ответ берётся у настоящего маршрута, не из копии.
+    """
+    import hashlib
+
+    from fastapi.testclient import TestClient
+
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.server import create_app
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    body = "Тело приказа о поверке весового оборудования."
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=LEGACY_OWNER_USER_ID,
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=body,
+            content_type="text",
+            content_hash=hashlib.sha256(body.encode()).hexdigest(),
+        )
+        storage.store_raw_object(raw)
+        ko = KnowledgeObject(
+            id=new_id("ko"),
+            user_id=LEGACY_OWNER_USER_ID,
+            raw_object_id=raw.id,
+            content=body,
+            content_type="text",
+            title="Приказ о поверке",
+            summary="Сводка приказа",
+        )
+        storage.store_knowledge_object(ko)
+        response = client.get(
+            f"/api/knowledge/{ko.id}",
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        assert response.status_code == 200
+
+    text = TelegramBridge._format_full_document(response.json())
+    assert "Приказ о поверке" in text
+    assert "Тело приказа" in text
+    assert "нет текста" not in text
+
+
 # --- отсев по порогу называется вслух ----------------------------------------
 
 

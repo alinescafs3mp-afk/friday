@@ -425,9 +425,17 @@ class ViewsMixin(BridgeShared):
 
     @classmethod
     def _format_full_document(cls, document: Any) -> str:
-        item = document.get("knowledge_object") if isinstance(document, dict) else None
+        # `GET /api/knowledge/{id}` отвечает конвертом {"item": …, "versions": …,
+        # "entity_links": …} — сам объект лежит под "item". Прежний код искал ключ
+        # "knowledge_object", падал на весь конверт и КАЖДЫЙ документ показывал как
+        # «Без названия … нет текста»: у конверта нет ни title, ни content. Кнопка,
+        # ради которой найденное перестало быть тупиком, в бою не работала ни разу.
+        envelope = document if isinstance(document, dict) else {}
+        item = envelope.get("item")
         if not isinstance(item, dict):
-            item = document if isinstance(document, dict) else {}
+            item = envelope.get("knowledge_object")
+        if not isinstance(item, dict):
+            item = envelope
         title = str(item.get("title") or "Без названия")
         body = str(item.get("content") or "").strip()
         if not body:

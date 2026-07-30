@@ -843,3 +843,111 @@ async def test_dead_letter_notice_is_denied_for_unallowlisted_chat(tmp_path):
         assert not any(u.endswith("/sendMessage") for u, _ in telegram.calls)
     finally:
         bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_why_before_any_answer_explains_itself_instead_of_dead_letter(tmp_path):
+    """/why в чате без единого ответа упирается в 404 бекенда.
+
+    Раньше 404 превращался в PermanentUpdateError, обновление уходило в
+    dead-letter, и человек сразу после /new читал «⚠️ сообщение отклонено» —
+    текст, написанный для настоящих сбоев. «Ещё нечего объяснять» — не сбой.
+    """
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+        )
+    )
+    telegram = _FakeTelegramClient()
+
+    class _WhyMissingBackend(_FakeBackendClient):
+        async def request(self, method, url, *, content=None, headers=None):
+            from urllib.parse import urlsplit
+
+            if urlsplit(url).path == "/api/conversations/channel/why":
+                self.calls.append({"method": method, "path": urlsplit(url).path})
+                return _FakeResponse({"detail": "No conversation in this channel yet"}, status_code=404)
+            return await super().request(method, url, content=content, headers=headers)
+
+    backend = _WhyMissingBackend({})
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 41,
+                "message": {
+                    "message_id": 90,
+                    "chat": {"id": 5001},
+                    "from": {"id": 1001, "first_name": "Alice"},
+                    "text": "/why",
+                },
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert sends, "владелец остался без ответа"
+        assert "нечего объяснять" in sends[-1]["text"]
+        assert "отклонено" not in sends[-1]["text"]
+        assert bridge._inbox.stats().get("dead_letter", 0) == 0
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_why_names_its_sources_instead_of_bare_labels(tmp_path):
+    """«Источники: K1, K10, K2» бесполезны, когда легенда 📎 уехала вверх по чату."""
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+        )
+    )
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/conversations/channel/why": {
+                "search_query": "поверка",
+                "answer_mode": "personal_knowledge",
+                "knowledge_hits": 3,
+                "citations": {"K10": "ko_c", "K1": "ko_a", "K2": "ko_b"},
+                "trace": [
+                    {"id": "ko_a", "title": "Приказ о поверке"},
+                    {"id": "ko_b", "title": "Ведомость"},
+                    {"id": "ko_c", "title": "Рапорт"},
+                ],
+            }
+        }
+    )
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 42,
+                "message": {
+                    "message_id": 91,
+                    "chat": {"id": 5001},
+                    "from": {"id": 1001, "first_name": "Alice"},
+                    "text": "/why",
+                },
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        text = sends[-1]["text"]
+        assert "[K1] Приказ о поверке" in text
+        assert "[K2] Ведомость" in text
+        # Числовой порядок меток, не строковый: K10 стоит ПОСЛЕ K2.
+        assert text.index("[K2]") < text.index("[K10]")
+    finally:
+        bridge._inbox.close()
