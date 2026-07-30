@@ -1244,3 +1244,41 @@ def test_a_forwarded_header_cannot_claim_to_be_loopback(settings):
     # credential-less path for a request that arrived under any other name.
     with TestClient(app, client=("127.0.0.1", 5555), base_url="http://127.0.0.1:8000") as local:
         assert local.get("/api/me").status_code == 200
+
+
+def test_tls_pair_is_validated_as_a_pair(settings, tmp_path):
+    """Половина пары не служит; несуществующий файл уронил бы uvicorn на старте
+    невнятным исключением — говорим это на языке конфигурации."""
+    import dataclasses
+
+    from jericho.config import validate_settings
+
+    half = dataclasses.replace(settings, ssl_certfile="/x/cert.pem", ssl_keyfile="")
+    assert any("must be set together" in item for item in validate_settings(half))
+
+    missing = dataclasses.replace(
+        settings, ssl_certfile=str(tmp_path / "c.pem"), ssl_keyfile=str(tmp_path / "k.pem")
+    )
+    assert any("missing file" in item for item in validate_settings(missing))
+
+    cert = tmp_path / "c.pem"
+    key = tmp_path / "k.pem"
+    cert.write_text("cert")
+    key.write_text("key")
+    valid = dataclasses.replace(settings, ssl_certfile=str(cert), ssl_keyfile=str(key))
+    assert not [item for item in validate_settings(valid) if "SSL" in item]
+
+
+def test_a_bare_http_bind_beyond_loopback_is_a_warning_not_an_error(settings):
+    """Owner-токен и вся база ходят открытым текстом через проброшенный порт —
+    об этом надо говорить. Но ошибкой это быть НЕ может: живой экземпляр
+    владельца сегодня слушает 0.0.0.0 без TLS, и ошибка не дала бы ему встать."""
+    import dataclasses
+
+    from jericho.config import validate_settings
+
+    exposed = dataclasses.replace(settings, api_host="0.0.0.0", api_token="T" * 40)
+    problems = validate_settings(exposed)
+    warning = next((item for item in problems if "cleartext" in item), None)
+    assert warning is not None, "голый HTTP наружу остался незамеченным"
+    assert warning.startswith("warning:"), "это предупреждение обязано не блокировать старт"

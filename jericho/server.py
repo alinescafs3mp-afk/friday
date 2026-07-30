@@ -1454,4 +1454,8 @@ def run_server() -> None:
         proxy_headers=False,
         forwarded_allow_ips="",
         access_log=True,
+        # TLS, когда владелец положил пару файлов: без неё owner-токен и вся
+        # личная база ходят через проброшенный порт открытым текстом.
+        ssl_certfile=runtime_settings.ssl_certfile or None,
+        ssl_keyfile=runtime_settings.ssl_keyfile or None,
     )

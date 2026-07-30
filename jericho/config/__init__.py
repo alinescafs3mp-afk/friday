@@ -374,6 +374,11 @@ class JerichoSettings:
     api_host: str
     api_port: int
     api_token: str
+    # TLS собственными силами uvicorn. Оба пути или ни одного: владелец слушает
+    # 0.0.0.0 за пробросом, и без сертификата owner-токен и вся личная база
+    # ходят через интернет открытым текстом.
+    ssl_certfile: str
+    ssl_keyfile: str
     api_require_token_on_loopback: bool
     api_user_rate_limit_per_minute: int
     api_auth_failure_limit_per_minute: int
@@ -708,6 +713,8 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         # пакет retrieval, поэтому расхождение стережёт тест.
         rerank_confident_min=_float_env("JERICHO_RERANK_CONFIDENT_MIN", 0.10, minimum=0.0),
         api_host=os.environ.get("JERICHO_API_HOST", "127.0.0.1"),
+        ssl_certfile=os.environ.get("JERICHO_SSL_CERTFILE", "").strip(),
+        ssl_keyfile=os.environ.get("JERICHO_SSL_KEYFILE", "").strip(),
         api_port=_int_env("JERICHO_API_PORT", 8000, minimum=1),
         api_token=os.environ.get("JERICHO_API_TOKEN", ""),
         api_require_token_on_loopback=_bool_env("JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK", True),
@@ -916,6 +923,27 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
                 "semantic search is enabled without numpy: dense recall falls back to "
                 "pure Python and gets slow as the corpus grows — install 'jericho[vectors]'"
             )
+    if bool(settings.ssl_certfile) != bool(settings.ssl_keyfile):
+        errors.append(
+            "JERICHO_SSL_CERTFILE and JERICHO_SSL_KEYFILE must be set together — half a TLS pair cannot serve"
+        )
+    elif settings.ssl_certfile:
+        for label, candidate in (
+            ("JERICHO_SSL_CERTFILE", settings.ssl_certfile),
+            ("JERICHO_SSL_KEYFILE", settings.ssl_keyfile),
+        ):
+            if not Path(candidate).is_file():
+                errors.append(f"{label} points to a missing file: {candidate}")
+    elif not settings.is_loopback_bind and not settings.trust_proxy_headers:
+        # A warning, not an error: the live deployment binds 0.0.0.0 behind NAT
+        # today, and an error here would refuse to start it. But the fact stands —
+        # every request from outside carries the owner token and the archive's
+        # content in cleartext, and one passive interception is full access.
+        warnings.append(
+            "the API listens beyond loopback without TLS: the owner token and all "
+            "knowledge travel in cleartext — set JERICHO_SSL_CERTFILE/JERICHO_SSL_KEYFILE "
+            "(a self-signed pair is enough) or front it with a TLS proxy"
+        )
     if settings.rerank_top > 0 and not (settings.rerank_base_url.strip() and settings.rerank_model.strip()):
         # Same contradiction class as embeddings-without-model: `RerankBackend.enabled`
         # requires both, so this knob combination turns reranking AND the confidence
