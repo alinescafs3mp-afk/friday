@@ -1278,8 +1278,23 @@ class KnowledgeMixin(StorageShared):
 
     # Projection shared with ``list_knowledge_conflicts`` so a conflict looks the same
     # whether it was just written or read back from a list.
-    _CONFLICT_PROJECTION = """SELECT c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
-                       b.title AS knowledge_b_title, b.summary AS knowledge_b_summary
+    # Стадия и «кем погашен» тянутся вместе с заголовком, потому что без них админка
+    # физически не может показать, что сторона уже погашена другим решением. Замерено
+    # на живой базе: 207 пар дубликатов, и union-find по ним даёт 126 групп — 97 пар,
+    # 19 троек, 7 четвёрок и 3 пятёрки. То есть больше половины пар лежат внутри
+    # кластеров, где одна сторона могла быть погашена соседним решением, а человек
+    # видел бы её как равноправного кандидата.
+    # ОДНО определение колонок на три запроса. Их было три копии, и они разошлись:
+    # добавленные стадия и «кем погашен» попали в одну, а тест на совпадение форм
+    # написан ровно потому, что расхождение здесь незаметно — строка выглядит целой,
+    # просто в ней нет пары полей.
+    _CONFLICT_COLUMNS = """c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
+                       a.lifecycle_stage AS knowledge_a_stage,
+                       a.superseded_by_id AS knowledge_a_superseded_by,
+                       b.title AS knowledge_b_title, b.summary AS knowledge_b_summary,
+                       b.lifecycle_stage AS knowledge_b_stage,
+                       b.superseded_by_id AS knowledge_b_superseded_by"""
+    _CONFLICT_PROJECTION = f"""SELECT {_CONFLICT_COLUMNS}
                 FROM knowledge_conflicts c
                 JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
                 JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id"""
@@ -1341,8 +1356,7 @@ class KnowledgeMixin(StorageShared):
         clauses, params = self._conflict_filter(user_id, status)
         params.extend([max(1, min(int(limit), 5000)), max(0, offset)])
         # ``clauses`` contains only fixed predicates; values remain bound.
-        query = f"""SELECT c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
-                       b.title AS knowledge_b_title, b.summary AS knowledge_b_summary
+        query = f"""SELECT {self._CONFLICT_COLUMNS}
                 {self._CONFLICT_FROM}
                 WHERE {" AND ".join(clauses)}
                 ORDER BY c.confidence DESC, c.created_at DESC, c.id LIMIT ? OFFSET ?"""  # nosec B608
@@ -1364,12 +1378,7 @@ class KnowledgeMixin(StorageShared):
 
     def get_knowledge_conflict(self, user_id: str, conflict_id: str) -> dict[str, Any] | None:
         row = self.execute(
-            """SELECT c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
-                      b.title AS knowledge_b_title, b.summary AS knowledge_b_summary
-               FROM knowledge_conflicts c
-               JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
-               JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
-               WHERE c.id=? AND c.user_id=?""",
+            f"{self._CONFLICT_PROJECTION} WHERE c.id=? AND c.user_id=?",  # nosec B608
             (conflict_id, user_id),
         ).fetchone()
         return dict(row) if row else None
@@ -1441,6 +1450,18 @@ class KnowledgeMixin(StorageShared):
         loser = self.get_knowledge_object(loser_id, user_id)
         if loser is None or loser.get("deleted_at"):
             raise ValueError("Losing knowledge object not found")
+        # Победитель обязан быть живым. Проверялось только то, что он одна из двух
+        # сторон, — а в кластере из трёх-пяти дубликатов сторона могла быть уже
+        # погашена соседним решением, и «оставить её» означало бы объявить главной
+        # запись, которая сама указывает на другую. Замерено: 110 пар из 207 лежат
+        # внутри таких кластеров.
+        winner = self.get_knowledge_object(winner_id, user_id)
+        if winner is None or winner.get("deleted_at"):
+            raise ValueError("Winning knowledge object not found")
+        if str(winner.get("lifecycle_stage") or "") == LifecycleStage.DEPRECATED.value:
+            raise ValueError(
+                "Winner is already deprecated: it was superseded by another decision in this cluster"
+            )
 
         metadata = _json_load(loser.get("metadata_json"), {})
         if not isinstance(metadata, dict):

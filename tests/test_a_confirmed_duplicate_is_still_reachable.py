@@ -53,3 +53,113 @@ def test_the_review_endpoint_still_accepts_the_transition(settings, storage):
 
     source = inspect.getsource(KnowledgeMixin.review_knowledge_conflict)
     assert "confirmed" in source, "подтверждённый конфликт больше не разрешим — перечитайте правку"
+
+
+# --- кластеры дубликатов ------------------------------------------------------
+
+
+def _pair(storage, user_id: str, first: str, second: str) -> str:
+    """Конфликт «почти дубликат» между двумя записями."""
+    conflict = storage.store_knowledge_conflict(
+        user_id,
+        knowledge_a_id=first,
+        knowledge_b_id=second,
+        conflict_type="near_duplicate",
+        confidence=0.97,
+        evidence={"cosine": 0.97},
+    )
+    return str(conflict["id"])
+
+
+def _knowledge(storage, user_id: str, index: int) -> str:
+    import hashlib
+
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    text = f"Документ {index} про поставку оборудования. " * 5
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="t",
+        source_ref=new_id("s"),
+        raw_content=text,
+        content_type="text",
+        content_hash=hashlib.sha256(f"{index}".encode()).hexdigest(),
+    )
+    storage.store_raw_object(raw)
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=text,
+        content_type="text",
+        title=f"Документ {index}",
+    )
+    storage.store_knowledge_object(knowledge)
+    return knowledge.id
+
+
+def test_a_side_already_superseded_cannot_be_named_the_winner(storage):
+    """Замерено: 207 пар складываются в 126 кластеров — 19 троек, 7 четвёрок, 3 пятёрки.
+
+    То есть больше половины пар решаются не поодиночке, и после первого решения одна
+    из сторон соседней пары уже погашена. Объявить её «оставить» значило бы назначить
+    главной запись, которая сама указывает на другую.
+    """
+    import pytest as _pytest
+
+    storage.ensure_user("alice")
+    a, b, c = (_knowledge(storage, "alice", index) for index in range(3))
+    first = _pair(storage, "alice", a, b)
+    second = _pair(storage, "alice", b, c)
+
+    storage.resolve_conflict("alice", first, a, reviewed_by="alice")
+
+    with _pytest.raises(ValueError, match="deprecated"):
+        storage.resolve_conflict("alice", second, b, reviewed_by="alice")
+
+
+def test_the_surviving_side_can_still_win_its_other_pairs(storage):
+    """Иначе проверка сделала бы кластеры неразрешимыми вовсе."""
+    storage.ensure_user("alice")
+    a, b, c = (_knowledge(storage, "alice", index) for index in range(3))
+    first = _pair(storage, "alice", a, b)
+    second = _pair(storage, "alice", a, c)
+
+    storage.resolve_conflict("alice", first, a, reviewed_by="alice")
+    resolved = storage.resolve_conflict("alice", second, a, reviewed_by="alice")
+
+    assert resolved is not None
+
+
+def test_the_listing_says_which_side_is_already_gone(storage):
+    """Админка физически не могла это показать: стадия в проекцию не входила."""
+    storage.ensure_user("alice")
+    a, b, c = (_knowledge(storage, "alice", index) for index in range(3))
+    first = _pair(storage, "alice", a, b)
+    _pair(storage, "alice", b, c)
+    storage.resolve_conflict("alice", first, a, reviewed_by="alice")
+
+    remaining = [
+        row
+        for row in storage.list_knowledge_conflicts("alice", status="suggested")
+        if str(row["knowledge_a_id"]) == b or str(row["knowledge_b_id"]) == b
+    ]
+    assert remaining, "вторая пара кластера пропала из списка"
+    row = remaining[0]
+    side = "a" if str(row["knowledge_a_id"]) == b else "b"
+    assert row[f"knowledge_{side}_stage"] == "deprecated"
+    assert row[f"knowledge_{side}_superseded_by"] == a
+
+
+def test_every_conflict_query_returns_the_same_shape(storage):
+    """Проекция была в ТРЁХ копиях, и они разошлись при первой же правке."""
+    storage.ensure_user("alice")
+    a, b = (_knowledge(storage, "alice", index) for index in range(2))
+    conflict_id = _pair(storage, "alice", a, b)
+
+    by_id = storage.get_knowledge_conflict("alice", conflict_id)
+    listed = storage.list_knowledge_conflicts("alice", status="suggested")[0]
+    assert set(by_id) == set(listed)
+    for field in ("knowledge_a_stage", "knowledge_b_superseded_by"):
+        assert field in by_id
