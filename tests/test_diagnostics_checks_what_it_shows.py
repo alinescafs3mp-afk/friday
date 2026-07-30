@@ -67,6 +67,46 @@ def test_without_the_flag_nothing_is_probed(settings):
     result = collect_diagnostics(_tuned(settings), check_llm_port=False)
     assert "embeddings_endpoint" not in result
     assert "llm_endpoint" not in result
+    assert "rerank_endpoint" not in result
+
+
+def _with_rerank(settings, **overrides):
+    base = {
+        "rerank_base_url": "http://127.0.0.1:9/v1",
+        "rerank_model": "cross-encoder",
+        "rerank_top": 20,
+    }
+    return _tuned(settings, **{**base, **overrides})
+
+
+def test_a_dead_reranker_becomes_a_named_action(settings):
+    """Третья служба падает так же тихо, и откат стоит дороже всего.
+
+    Клиент переранжировщика по построению не роняет поиск: не ответила — выдача
+    остаётся в прежнем порядке. А прежний порядок замерен: внутри пула он различает
+    отвечающие документы на уровне монетки (AUC 0.512 против 0.754). Отказ службы
+    возвращает поиск ровно в ту точку, ради ухода из которой её подняли, и не меняет
+    при этом ни одного признака.
+    """
+    result = collect_diagnostics(_with_rerank(settings), check_llm_port=True)
+
+    assert "rerank_endpoint" in result, "переранжировщик не проверялся вовсе"
+    assert result["rerank_endpoint"]["reachable"] is False
+    keys = {str(item.get("code")) for item in result.get("actions", [])}
+    assert "start_rerank_runtime" in keys
+    action = next(item for item in result["actions"] if str(item.get("code")) == "start_rerank_runtime")
+    detail = str(action.get("detail") or "").casefold()
+    assert "порядк" in detail or "наверх" in detail, "не сказано, что именно перестаёт работать"
+    assert "не отличить" in detail or "не выгляд" in detail, "не сказано, что отказ незаметен"
+
+
+def test_a_reranker_left_off_is_not_reported_as_broken(settings):
+    """`rerank_top = 0` — это «выключено человеком», а не отказ."""
+    result = collect_diagnostics(_with_rerank(settings, rerank_top=0), check_llm_port=True)
+
+    assert "rerank_endpoint" not in result
+    keys = {str(item.get("code")) for item in result.get("actions", [])}
+    assert "start_rerank_runtime" not in keys
 
 
 def test_the_admin_screen_asks_for_live_checks(settings):

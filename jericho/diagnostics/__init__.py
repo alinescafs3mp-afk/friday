@@ -1043,6 +1043,41 @@ def collect_diagnostics(
                 "с уже сохранёнными.",
             )
 
+    if check_llm_port and settings.rerank_top > 0 and settings.rerank_base_url:
+        # Третья служба в том же положении, что и вторая, и падает так же тихо. Клиент
+        # переранжировщика по построению НЕ роняет поиск: не ответила — выдача остаётся
+        # в прежнем порядке. Замерено, чего это стоит: внутри пула прежний порядок
+        # различает отвечающие документы на уровне монетки (AUC 0.512) против 0.754 с
+        # переранжировщиком. То есть отказ службы откатывает поиск на ту самую точку,
+        # ради ухода из которой её и поднимали, и не меняет при этом НИ ОДНОГО признака.
+        rerank = _llm_endpoint_status(
+            settings.rerank_base_url,
+            settings.rerank_model,
+            api_key=settings.rerank_api_key,
+        )
+        result["rerank_endpoint"] = rerank
+        reachable = bool(rerank.get("reachable"))
+        model_served = rerank.get("model_served")
+        result["ok"] = result["ok"] and reachable and model_served is not False
+        if not reachable:
+            add_action(
+                "start_rerank_runtime",
+                "error",
+                "Переранжировщик недоступен — выдача снова в случайном порядке",
+                f"Не отвечает {settings.rerank_base_url}. Поиск продолжит находить те же "
+                "документы, но перестанет ставить отвечающие наверх, и по виду выдачи это "
+                "не отличить от обычного дня.",
+            )
+        elif model_served is False:
+            served = ", ".join(rerank.get("served_models") or []) or "—"
+            add_action(
+                "rerank_model_not_served",
+                "error",
+                "Переранжировщик не отдаёт настроенную модель",
+                f"Endpoint отвечает, но модели '{settings.rerank_model}' у него нет. "
+                f"Обслуживаются: {served}.",
+            )
+
     severities = {str(item.get("severity")) for item in actions}
     if not result["ok"] or "error" in severities:
         result["state"] = "degraded"
