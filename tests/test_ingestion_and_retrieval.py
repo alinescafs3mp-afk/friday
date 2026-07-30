@@ -96,66 +96,155 @@ def test_best_snippet_short_text_and_no_match_fallbacks():
     assert fallback.startswith("а") and fallback.endswith("…") and len(fallback) <= 101
 
 
-def _quadratic_best_snippet(query: str, text: str, max_chars: int) -> str:
-    """The original implementation, kept as an oracle for the linear rewrite.
+def _label_per_row_table() -> str:
+    """The live defect's shape: a field label repeated in EVERY row, the queried
+    surname in exactly one, deep inside. Synthetic — no owner data."""
+    rows = [f"Человек{i:02d} П.С. | личный номер АА-1{i:04d} | часть {i}" for i in range(50)]
+    rows[40] = "Тарасов П.С. | личный номер АА-77777 | часть 40"
+    return "\n".join(rows)
 
-    The edges use the production boundary snapping: this oracle exists to pin WHICH
-    WINDOW is chosen, and word-boundary trimming is a separate, deliberate change
-    (see `test_a_snippet_never_starts_or_ends_mid_word`). Reimplementing the snapping
-    here would make the oracle a copy of the code it checks; calling it keeps the
-    comparison about the window search, which is what the rewrite touched.
+
+def test_best_snippet_rare_surname_beats_field_label_repeated_per_row():
+    """Measured on the owner's live archive: the label «личный номер» matched in
+    all 58 rows, the surname in one, their contribution was equal, the window
+    drifted into the densest label cluster and the answer carried ANOTHER
+    PERSON's number — with grounding and citation checks honestly green."""
+    snippet = best_snippet("личный номер Тарасов", _label_per_row_table(), max_chars=520)
+
+    assert "Тарасов" in snippet and "АА-77777" in snippet
+    # Neighbouring records are NOT glued into the excerpt…
+    assert "АА-10039" not in snippet and "АА-10041" not in snippet
+    # …and the head of the table (the old winning cluster) is not shown either.
+    assert "АА-10000" not in snippet
+    # The rarest term is inside, so no missing-term note.
+    assert "\n[" not in snippet
+
+
+def test_best_snippet_declined_query_surname_finds_the_nominative_row():
+    """«личный номер Тарасова» must find the row that stores «Тарасов»: the stem
+    strips the case ending and is searched as a prefix substring."""
+    snippet = best_snippet("личный номер Тарасова", _label_per_row_table(), max_chars=520)
+
+    assert "Тарасов" in snippet and "АА-77777" in snippet
+
+
+def test_best_snippet_prepends_a_provable_header_and_shows_only_the_right_row():
+    """In a header-style table the label lives ONLY in the header. The header must
+    not win the window for itself (two label words would outscore the one-word
+    surname row); it is glued back under the winning row so the model can NAME
+    the column it reads — but only a provably digit-free first line qualifies."""
+    header = "Фамилия | Личный номер | Подразделение"
+    rows = [header] + [f"Человек{i:02d} | АА-1{i:04d} | часть {i}" for i in range(30)]
+    rows[20] = "Тарасов | АА-77777 | часть 20"
+    snippet = best_snippet("личный номер Тарасова", "\n".join(rows), max_chars=520)
+
+    assert "Тарасов" in snippet and "АА-77777" in snippet
+    assert "Фамилия" in snippet  # the header is shown…
+    assert "АА-10000" not in snippet  # …but no foreign rows,
+    assert "АА-10018" not in snippet and "АА-10020" not in snippet  # not even the neighbours
+    assert "\n[" not in snippet
+
+
+def test_best_snippet_does_not_glue_a_digit_bearing_first_row_as_a_header():
+    """A first table line with digits is somebody's record, not a header — gluing
+    it back in would recreate the very defect this code exists to fix."""
+    snippet = best_snippet("личный номер Тарасов", _label_per_row_table(), max_chars=520)
+
+    assert "АА-10000" not in snippet  # first row of the block stays out
+
+
+def test_best_snippet_notes_the_rarest_term_it_could_not_include():
+    """When the window that wins cannot contain the rarest matched term, the
+    excerpt must say so instead of silently presenting itself as complete."""
+    filler = "наполнитель прочего текста ради расстояния между кусками. " * 6
+    body = (
+        "дельта упомянута здесь один раз. "
+        + filler
+        + "альфа бета гамма стоят рядом. и снова альфа бета гамма стоят рядом."
+    )
+    snippet = best_snippet("альфа бета гамма дельта", body, max_chars=120)
+
+    core, _, note = snippet.rpartition("\n")
+    assert note.startswith("[слово «дельта»") and note.endswith("не попало]")
+    assert "дельта" not in core  # the note is truthful: the term is not in the window
+
+
+def _naive_select_window(
+    occurrences: list[tuple[int, str]],
+    weights: dict[str, float],
+    segments: list[tuple[int, int, bool]],
+    max_chars: int,
+) -> tuple[int, int, int]:
+    """Quadratic oracle for the linear two-pointer window search.
+
+    Same semantics, written the obvious way: for every candidate anchor, rescan
+    every occurrence inside the window. The linear rewrite exists because this
+    is O(matches²); the oracle exists to pin that the rewrite chooses the SAME
+    window — including the header-skip pass and the earliest-of-equals rule.
     """
-    from jericho.retrieval import _STOPWORDS, tokens_of
-
-    body = (text or "").strip()
-    if len(body) <= max_chars:
-        return body
-    query_tokens = {
-        token.casefold()
-        for token in tokens_of(query)
-        if len(token) > 1 and token.casefold() not in _STOPWORDS
-    }
-    if not query_tokens:
-        return body[:max_chars].rstrip() + "…"
-    lowered = body.casefold()
-    occurrences: list[tuple[int, str]] = []
-    for token in query_tokens:
-        start = 0
-        while True:
-            found = lowered.find(token, start)
-            if found < 0:
-                break
-            occurrences.append((found, token))
-            start = found + len(token)
-    if not occurrences:
-        return body[:max_chars].rstrip() + "…"
-    occurrences.sort()
-    best_pos, best_distinct = occurrences[0][0], -1
-    for pos, _ in occurrences:
-        covered = {tok for (position, tok) in occurrences if pos <= position < pos + max_chars}
-        if len(covered) > best_distinct:
-            best_distinct = len(covered)
-            best_pos = pos
-    from jericho.retrieval import _word_end, _word_start
-
-    start = _word_start(body, max(0, best_pos - 64))
-    end = _word_end(body, min(len(body), start + max_chars), floor=best_pos + 1)
-    snippet = body[start:end].strip()
-    return f"{'…' if start > 0 else ''}{snippet}{'…' if end < len(body) else ''}"
+    best_score = -1.0
+    best = (occurrences[0][0], 0, occurrences[0][0] + max_chars)
+    for skip_headers in (True, False):
+        for seg_lo, seg_hi, is_header in segments:
+            if skip_headers and is_header:
+                continue
+            for pos, _form in occurrences:
+                if not (seg_lo <= pos < seg_hi):
+                    continue
+                inside = {form for p, form in occurrences if pos <= p < min(pos + max_chars, seg_hi)}
+                score = sum(weights[form] for form in inside)
+                if score > best_score + 1e-12:
+                    best_score = score
+                    best = (pos, seg_lo, seg_hi)
+        if best_score >= 0.0:
+            break
+    return best
 
 
-def test_best_snippet_picks_the_same_window_as_the_original():
-    """The linear rewrite must be an optimisation, not a behaviour change."""
+def test_best_snippet_window_choice_matches_quadratic_oracle():
+    """The linear window search must equal the obvious quadratic one — on prose
+    (single segment) and on bar-tables (per-row segments, header skipped)."""
     import random
+    from collections import Counter
+
+    from jericho.retrieval import (
+        _STOPWORDS,
+        _record_line_segments,
+        _search_form,
+        _select_window,
+        tokens_of,
+    )
 
     words = ["сервис", "api", "данные", "запрос", "система", "модуль", "конфиг", "узел", "x"]
     query = "api сервис данные запрос конфиг"
-    for trial in range(120):
+    forms: dict[str, str] = {}
+    for token in tokens_of(query):
+        folded = token.casefold()
+        if len(token) > 1 and folded not in _STOPWORDS:
+            forms.setdefault(_search_form(folded), token)
+    for trial in range(150):
         random.seed(trial)
-        body = " ".join(random.choice(words) for _ in range(random.randint(1, 400)))
+        if trial % 3:
+            body = " ".join(random.choice(words) for _ in range(random.randint(1, 400)))
+        else:
+            rows = [" | ".join(random.choice(words) for _ in range(3)) for _ in range(random.randint(3, 40))]
+            body = "\n".join(rows)
         max_chars = random.choice([40, 120, 520, 600])
-        assert best_snippet(query, body, max_chars=max_chars) == _quadratic_best_snippet(
-            query, body, max_chars
+        lowered = body.casefold().replace("ё", "е")
+        occurrences: list[tuple[int, str]] = []
+        for form in forms:
+            start = 0
+            while (found := lowered.find(form, start)) >= 0:
+                occurrences.append((found, form))
+                start = found + len(form)
+        if not occurrences:
+            continue
+        occurrences.sort()
+        counts = Counter(form for _, form in occurrences)
+        weights = {form: 1.0 / count for form, count in counts.items()}
+        segments = _record_line_segments(body, occurrences)
+        assert _select_window(occurrences, weights, segments, max_chars) == _naive_select_window(
+            occurrences, weights, segments, max_chars
         ), f"diverged on trial {trial}"
 
 

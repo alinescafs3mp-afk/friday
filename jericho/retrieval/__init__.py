@@ -9,6 +9,7 @@ import logging
 import math
 import re
 import time
+from bisect import bisect_right
 from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
@@ -217,61 +218,227 @@ def _word_end(text: str, index: int, *, floor: int) -> int:
     return index
 
 
+# Extracted tables arrive as one record per line with cells joined by " | "
+# (docx tables, xlsx and csv/tsv in `jericho.documents` all render this shape).
+_RECORD_CELL_SEPARATOR = " | "
+# A query token found on this many distinct lines marks those lines as records
+# even without cell separators: a per-row field label repeats once per record.
+_RECORD_TOKEN_MIN_LINES = 4
+
+
+def _search_form(token: str) -> str:
+    """What is actually searched in the body for a query token.
+
+    «личный номер Иванова» names the row's owner in genitive while the table
+    stores «Иванов»: the surface form never matches as a substring. The Snowball
+    stem strips the case ending and stays a PREFIX of every inflected form, so
+    one substring search finds them all. Identifiers, Latin and short words come
+    back from `stem` unchanged, and a stem under 3 characters would match half
+    the alphabet, so it is not used as a search term.
+    """
+    folded = token.casefold().replace("ё", "е")
+    stemmed = stem(folded)
+    if stemmed != folded and folded.startswith(stemmed) and len(stemmed) >= 3:
+        return stemmed
+    return folded
+
+
+def _record_line_segments(body: str, occurrences: list[tuple[int, str]]) -> list[tuple[int, int, bool]]:
+    """Split ``body`` so that a snippet window cannot span two table records.
+
+    A line is a record when it carries the extractors' cell separator alongside
+    a neighbouring line that does too, or a query token that repeats across
+    ``_RECORD_TOKEN_MIN_LINES`` distinct lines — a per-row field label. Record
+    lines become their own segments; everything between them merges, so prose
+    keeps its cross-paragraph windows. Returns ascending ``(lo, hi, is_header)``
+    spans covering the body: a header is the digit-free first line of a bar-table
+    block — column names, not content, so it must not win the window for itself
+    (a two-word label in the header would outscore the queried person's row);
+    `best_snippet` glues it back under the winning row instead.
+    """
+    line_spans: list[tuple[int, int]] = []
+    cursor = 0
+    for line in body.split("\n"):
+        line_spans.append((cursor, cursor + len(line)))
+        cursor += len(line) + 1
+    if len(line_spans) < 3:
+        return [(0, len(body), False)]
+    has_bar = [_RECORD_CELL_SEPARATOR in body[lo:hi] for lo, hi in line_spans]
+    record = [
+        bar and ((index > 0 and has_bar[index - 1]) or (index + 1 < len(has_bar) and has_bar[index + 1]))
+        for index, bar in enumerate(has_bar)
+    ]
+    starts = [lo for lo, _ in line_spans]
+    lines_of_form: dict[str, set[int]] = {}
+    for position, form in occurrences:
+        lines_of_form.setdefault(form, set()).add(bisect_right(starts, position) - 1)
+    for indices in lines_of_form.values():
+        if len(indices) >= _RECORD_TOKEN_MIN_LINES:
+            for index in indices:
+                record[index] = True
+    if not any(record):
+        return [(0, len(body), False)]
+    is_header = [False] * len(line_spans)
+    index = 0
+    while index < len(has_bar):
+        if not has_bar[index]:
+            index += 1
+            continue
+        block_start = index
+        while index < len(has_bar) and has_bar[index]:
+            index += 1
+        first_lo, first_hi = line_spans[block_start]
+        if index - block_start >= 2 and not any(ch.isdigit() for ch in body[first_lo:first_hi]):
+            is_header[block_start] = True
+    segments: list[tuple[int, int, bool]] = []
+    cursor = 0
+    for index, (lo, hi) in enumerate(line_spans):
+        if not record[index]:
+            continue
+        if lo > cursor:
+            segments.append((cursor, lo, False))
+        segments.append((lo, hi, is_header[index]))
+        cursor = hi
+    if cursor < len(body):
+        segments.append((cursor, len(body), False))
+    return segments
+
+
+def _select_window(
+    occurrences: list[tuple[int, str]],
+    weights: dict[str, float],
+    segments: list[tuple[int, int, bool]],
+    max_chars: int,
+) -> tuple[int, int, int]:
+    """Position and segment of the best window: ``(best_pos, seg_lo, seg_hi)``.
+
+    A window's score is the sum of the rarity weights of the DISTINCT terms
+    inside it, and the window never leaves its segment. Header segments cannot
+    anchor a window (first pass skips them; the second pass only runs when
+    nothing matched outside headers). Two pointers over the sorted occurrences,
+    one segment at a time — the obvious rescan-per-candidate version is
+    quadratic in the number of matches, which grows with DOCUMENT SIZE, not
+    query length: measured at 0.31 s for 40 KB, 4.5 s for 162 KB and **115.7 s
+    for 812 KB**, all synchronous on the event loop, so one large document made
+    the whole backend unresponsive for two minutes.
+    """
+    best_score = -1.0
+    # Placeholder only: the fallback pass visits every occurrence, and any real
+    # candidate scores above -1, so the placeholder never survives the loop.
+    best = (occurrences[0][0], 0, occurrences[0][0] + max_chars)
+    total = len(occurrences)
+    for skip_headers in (True, False):
+        occ_index = 0
+        for seg_lo, seg_hi, is_header in segments:
+            while occ_index < total and occurrences[occ_index][0] < seg_lo:
+                occ_index += 1
+            left = occ_index
+            if left >= total or occurrences[left][0] >= seg_hi:
+                continue
+            bound = left
+            while bound < total and occurrences[bound][0] < seg_hi:
+                bound += 1
+            occ_index = bound
+            if skip_headers and is_header:
+                continue
+            counts: Counter[str] = Counter()
+            score = 0.0
+            right = left
+            for anchor in range(left, bound):
+                pos = occurrences[anchor][0]
+                if anchor > left:
+                    # The window held [anchor-1, right); drop the element leaving it.
+                    leaving = occurrences[anchor - 1][1]
+                    counts[leaving] -= 1
+                    if not counts[leaving]:
+                        del counts[leaving]
+                        score -= weights[leaving]
+                while right < bound and occurrences[right][0] < pos + max_chars:
+                    entering = occurrences[right][1]
+                    if not counts[entering]:
+                        score += weights[entering]
+                    counts[entering] += 1
+                    right += 1
+                # Strictly-greater keeps the EARLIEST of equal windows, as before;
+                # the epsilon keeps float drift from reordering true ties.
+                if score > best_score + 1e-12:
+                    best_score = score
+                    best = (pos, seg_lo, seg_hi)
+        if best_score >= 0.0:
+            break
+    return best
+
+
 def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
     """Return the passage of ``text`` most relevant to ``query`` (query-aware
     excerpting) so a reader — the LLM or the answer verifier — sees the region
     that actually matched, not the document head. Pure lexical scoring over the
     shared tokenizer (no model, no embedding); falls back to the head when the
     text is short or nothing matches.
+
+    Terms are weighted by rarity (1/occurrences) and windows stop at table-record
+    boundaries. Measured on the owner's live archive before that: a 520-char
+    window over a 58-row personnel table carried 9 rows — the column label
+    matched in every row, the queried surname in one, their contribution was
+    equal, and the answer came back with ANOTHER PERSON's number while grounding
+    and citation checks honestly passed (the number really was in the cited
+    document). Rarity makes the one-off surname outweigh the everywhere-label;
+    the segment boundary keeps neighbouring records out of the excerpt.
     """
     body = (text or "").strip()
     if len(body) <= max_chars:
         return body
-    query_tokens = {
-        token.casefold()
-        for token in tokens_of(query)
-        if len(token) > 1 and token.casefold() not in _STOPWORDS
-    }
-    if not query_tokens:
+    # form → the token as the user typed it, for the missing-term note.
+    forms: dict[str, str] = {}
+    for token in tokens_of(query):
+        folded = token.casefold()
+        if len(token) > 1 and folded not in _STOPWORDS:
+            forms.setdefault(_search_form(folded), token)
+    if not forms:
         return body[:max_chars].rstrip() + "…"
-    lowered = body.casefold()
+    lowered = body.casefold().replace("ё", "е")
     occurrences: list[tuple[int, str]] = []
-    for token in query_tokens:
+    first_pos: dict[str, int] = {}
+    for form in forms:
         start = 0
         while True:
-            found = lowered.find(token, start)
+            found = lowered.find(form, start)
             if found < 0:
                 break
-            occurrences.append((found, token))
-            start = found + len(token)
+            occurrences.append((found, form))
+            first_pos.setdefault(form, found)
+            start = found + len(form)
     if not occurrences:
         return body[:max_chars].rstrip() + "…"
     occurrences.sort()
-    # Pick the max_chars window that covers the most DISTINCT query tokens.
-    #
-    # Two pointers over the already-sorted occurrences, with a multiset of the
-    # tokens currently inside the window. The obvious version — rescanning
-    # `occurrences` for every candidate start — is quadratic in the number of
-    # matches, which is a function of DOCUMENT SIZE, not of query length: measured
-    # on this machine at 0.31 s for 40 KB, 4.5 s for 162 KB and **115.7 s for
-    # 812 KB**, all of it synchronous on the event loop, so one large document made
-    # the whole backend unresponsive for two minutes. Same window chosen, linear.
-    counts: Counter[str] = Counter()
-    right = 0
-    best_pos, best_distinct = occurrences[0][0], -1
-    for left, (pos, _) in enumerate(occurrences):
-        if left:
-            # The window held [left-1, right); drop the element leaving it.
-            leaving = occurrences[left - 1][1]
-            counts[leaving] -= 1
-            if not counts[leaving]:
-                del counts[leaving]
-        while right < len(occurrences) and occurrences[right][0] < pos + max_chars:
-            counts[occurrences[right][1]] += 1
-            right += 1
-        if len(counts) > best_distinct:
-            best_distinct = len(counts)
-            best_pos = pos
+    doc_counts = Counter(form for _, form in occurrences)
+    weights = {form: 1.0 / count for form, count in doc_counts.items()}
+    segments = _record_line_segments(body, occurrences)
+    best_pos, seg_lo, seg_hi = _select_window(occurrences, weights, segments, max_chars)
+
+    # A bar-table row shows values without their column names. The block's first
+    # line, when it is provably a header (no digits — data rows carry numbers and
+    # dates), is prepended so the model can NAME the field it reads instead of
+    # guessing among cells. A digit-bearing first line is somebody's record, and
+    # gluing it back in would recreate the defect this function exists to fix.
+    header_lo, header_hi = -1, -1
+    if (seg_lo, seg_hi) != (0, len(body)) and _RECORD_CELL_SEPARATOR in body[seg_lo:seg_hi]:
+        first_lo = seg_lo
+        cursor = seg_lo
+        while cursor > 0:
+            previous_hi = cursor - 1  # the newline before the current line
+            previous_lo = body.rfind("\n", 0, previous_hi) + 1
+            if _RECORD_CELL_SEPARATOR not in body[previous_lo:previous_hi]:
+                break
+            first_lo = previous_lo
+            cursor = previous_lo
+        line_end = body.find("\n", first_lo)
+        header = body[first_lo:line_end].strip() if first_lo != seg_lo and line_end >= 0 else ""
+        if header and not any(character.isdigit() for character in header) and len(header) <= max_chars // 3:
+            header_lo, header_hi = first_lo, line_end
+    header_text = body[header_lo:header_hi].strip() if header_lo >= 0 else ""
+    budget = max_chars - (len(header_text) + 1 if header_text else 0)
+
     # Snap both edges to word boundaries. Cutting at an arbitrary offset decapitates
     # whichever word straddles it, and the leading "…" makes the remainder look like
     # a whole word rather than a fragment. Measured on the owner's own document: the
@@ -280,12 +447,34 @@ def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
     # — the answer was present and the name of the application, Hiddify, was gone.
     # Names, products and identifiers are exactly the words an excerpt exists to
     # carry, and they sit at the edges as often as anywhere else.
-    start = _word_start(body, max(0, best_pos - 64))
-    end = _word_end(body, min(len(body), start + max_chars), floor=best_pos + 1)
+    start = _word_start(body, max(seg_lo, best_pos - 64))
+    end = _word_end(body, min(seg_hi, start + budget), floor=best_pos + 1)
     snippet = body[start:end].strip()
-    prefix = "…" if start > 0 else ""
-    suffix = "…" if end < len(body) else ""
-    return f"{prefix}{snippet}{suffix}"
+    if header_text:
+        between = body[header_hi:start]
+        joiner = "\n" if not between.strip() else "\n…\n"
+        prefix = "…" if header_lo > 0 else ""
+        result = f"{prefix}{header_text}{joiner}{snippet}"
+    else:
+        result = f"{'…' if start > 0 else ''}{snippet}"
+    if end < len(body):
+        result += "…"
+
+    # The rarest term the document DOES contain is the query's most specific
+    # anchor — usually the person or thing asked about. When constraints keep it
+    # out of the window, silence would present the excerpt as the best the
+    # document has; the live defect survived every check exactly that way.
+    rarest = min(doc_counts, key=lambda form: (doc_counts[form], first_pos[form], form))
+    covered = any(
+        (start <= position < end) or (header_lo >= 0 and header_lo <= position < header_hi)
+        for position, form in occurrences
+        if form == rarest
+    )
+    if not covered:
+        # 24-char cap keeps the whole note inside every caller's excerpt budget.
+        display = forms[rarest][:24]
+        result += f"\n[слово «{display}» из запроса есть в документе, но в эту выдержку не попало]"
+    return result
 
 
 def dense_cosine(left: list[float], right: list[float]) -> float:
