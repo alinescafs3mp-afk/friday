@@ -881,6 +881,9 @@ async def test_the_budget_is_a_deadline_for_the_whole_operation_not_per_request(
         async def __aexit__(self, *args) -> None: ...
 
         async def post(self, *args, **kwargs):
+            # Заглушка ТРАТИТ время: иначе срок не расходуется, и «унаследован» не
+            # отличить от «начат заново».
+            await asyncio.sleep(0.1)
             return _Response(list(kwargs["json"]["input"]))
 
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
@@ -888,13 +891,31 @@ async def test_the_budget_is_a_deadline_for_the_whole_operation_not_per_request(
     assert await backend.embed([f"текст {index}" for index in range(8)], budget_sec=5.0) is not None
 
     assert len(patiences) > 8, f"деления не произошло, проверять нечего: {len(patiences)} обращений"
-    # Ни одно обращение внутри дерева не имеет права просить БОЛЬШЕ исходного бюджета,
-    # и терпение обязано убывать, а не начинаться заново.
-    assert max(patiences) <= 5.0, (
-        f"обращение внутри деления получило больше исходного бюджета: {max(patiences):.2f} с. "
-        "Значит бюджет снова стал терпением на запрос, а не сроком на операцию"
+    # СТРОГИЕ неравенства, и это не придирка. Первая версия проверяла `max <= 5.0` и
+    # `patiences[-1] <= patiences[0]` — а на доисправленном коде каждое обращение
+    # получало РОВНО 5.0, поэтому обе проверки проходили на равенстве, и тест был
+    # зелёным на том самом поведении, которое описывает. Поймано состязательным ревью;
+    # моя собственная проверка подменой это пропустила, потому что подменяла аргументы
+    # рекурсии, но оставляла новый расчёт терпения — то есть проверяла гибрид, а не
+    # прежний код.
+    assert max(patiences) < 5.0, (
+        f"обращение получило ПОЛНЫЙ исходный бюджет ({max(patiences):.3f} с). Значит "
+        "бюджет снова стал терпением на запрос, а не сроком на операцию"
     )
-    assert patiences[-1] <= patiences[0], "терпение не убывает — срок не наследуется половинами"
+    assert patiences[-1] < patiences[0], (
+        f"терпение не убывает ({patiences[0]:.3f} -> {patiences[-1]:.3f}) — срок не наследуется половинами"
+    )
+    # И главное: срок должен ТРАТИТЬСЯ. Заглушка ниже спит на каждом обращении, поэтому
+    # к концу дерева терпение обязано заметно просесть. На прежнем коде оно не
+    # проседало вовсе — каждая половина начинала отсчёт заново.
+    #
+    # Сумму терпений проверять бессмысленно, и это стоило одной неверной пробы: терпение
+    # это ОСТАТОК срока на каждый запрос, и при быстрых ответах его сумма естественно
+    # равна числу запросов, умноженному на бюджет. Инвариант не в сумме, а в убывании.
+    assert patiences[0] - patiences[-1] >= 0.5, (
+        f"срок не расходуется: терпение прошло путь {patiences[0]:.2f} -> {patiences[-1]:.2f} "
+        f"за {len(patiences)} обращений, хотя каждое занимало время"
+    )
 
 
 @pytest.mark.asyncio
@@ -979,4 +1000,62 @@ def test_a_successful_half_does_not_reset_the_backoff_ladder(settings, monkeypat
 
     # А успех ЦЕЛОЙ операции лестницу обнуляет, как и раньше.
     assert asyncio.run(backend.embed(["целая операция"])) is not None
+    assert backend._cooldown_sec == 0.0, "успех целой операции обязан сбрасывать паузу"
+
+
+def test_a_nested_split_does_not_reset_the_backoff_either(settings, monkeypatch):
+    """Второй охранник лестницы — в ветке ДЕЛЕНИЯ, и он не был покрыт ничем.
+
+    Их два: один на обычном успехе, другой на успехе после деления. Первый тест
+    покрывал только обычный путь, и если сделать охранник в ветке деления
+    безусловным, весь файл остаётся зелёным. Указано состязательным ревью как
+    непокрытое место — до настоящего дефекта не дотягивает, но дыра в проверке
+    настоящая.
+    """
+    import dataclasses
+
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    backend = EmbeddingBackend(tuned)
+    backend._cooldown_sec = 40.0
+    REFUSAL = (
+        '{"error":{"message":"input exceeds the 16384-token request limit","code":"request_too_many_tokens"}}'
+    )
+
+    class _Response:
+        def __init__(self, inputs: list[str]) -> None:
+            self.too_big = len(inputs) > 1
+            self.status_code = 400 if self.too_big else 200
+            self.headers: dict[str, str] = {}
+            self.text = REFUSAL if self.too_big else ""
+            self._inputs = inputs
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]} for _ in self._inputs]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            return _Response(list(kwargs["json"]["input"]))
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    # Деление ВНУТРИ вложенного вызова: успех здесь лестницу трогать не должен.
+    assert asyncio.run(backend.embed(["а", "б", "в", "г"], _nested=True)) is not None
+    assert backend._cooldown_sec == 40.0, (
+        "успешное деление внутри вложенного вызова обнулило лестницу отступления"
+    )
+
+    # А то же деление на верхнем уровне — обнуляет, как и любой успех целой операции.
+    assert asyncio.run(backend.embed(["а", "б", "в", "г"])) is not None
     assert backend._cooldown_sec == 0.0, "успех целой операции обязан сбрасывать паузу"
