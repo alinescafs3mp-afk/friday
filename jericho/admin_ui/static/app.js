@@ -174,8 +174,9 @@ renderers.knowledge=async gen=>{
   const searchBar=`<div class="toolbar"><input id="knowledgeSearch" class="grow" placeholder="Поиск по заголовку, аннотации и имени файла" value="${esc(state.knowledgeQuery||'')}">`
     +`<button class="btn primary" ${call('searchKnowledge')}>Найти</button>`
     +(state.knowledgeQuery?`<button class="btn" ${call('clearKnowledgeSearch')}>Сбросить</button>`:'')
+    +`<button class="btn" ${call('sourceSearchDialog')}>Найти по тексту документов</button>`
     +`</div>`
-    +(state.knowledgeQuery?`<div class="notice">Найдено по «${esc(state.knowledgeQuery)}»: <b>${Number(data.total||0)}</b>. Это поиск по НАЗВАНИЯМ; чтобы искать по тексту документов, откройте «Поиск по тексту».</div>`:'');
+    +(state.knowledgeQuery?`<div class="notice">Найдено по «${esc(state.knowledgeQuery)}»: <b>${Number(data.total||0)}</b>. Это поиск по НАЗВАНИЯМ. Если помните фразу из самого документа — «Найти по тексту документов».</div>`:'');
   setApp(gen,`${filterNote}<section class="card"><div class="toolbar"><h2 class="grow">Объекты знаний</h2><button class="btn" ${call('ingestUrlDialog')}>Сохранить страницу по URL</button><button class="btn" ${call('bookmarkletDialog')}>Букмарклет</button><button class="btn" ${call('runLifecycle')}>Архивировать устаревшее</button><button class="btn" ${call('navigate','cleanup')}>Проверить старые данные</button><span class="badge">${rows.length}</span></div>${searchBar}${chips?`<div class="toolbar">${chips}</div>`:''}${rows.length?table(['Знание','Тип и lifecycle','Сигналы качества','Версия','Действия'],rows):empty(state.knowledgeTag?'По этому тегу записей нет':'База знаний пока пуста')}${pager('knowledgePage',state.knowledgeOffset,state.knowledge.length,data.total)}</section>`);
 };
 actions.ingestUrlDialog=(pref)=>openModal('Сохранить веб-страницу',`<div class="form"><div class="notice">Страница будет загружена (только публичные адреса), очищена и отправлена во входящие на проверку — как и любой материал, она станет знанием лишь после подтверждения.</div><label>URL<input id="ingestUrl" value="${esc(pref||'')}" placeholder="https://…"></label></div>`,`<button class="btn" ${call('closeModal')}>Отмена</button><button class="btn primary" ${call('ingestUrl')}>Загрузить в Inbox</button>`);
@@ -191,6 +192,34 @@ actions.bookmarkletDialog=()=>{
 actions.filterKnowledgeTag=tag=>{state.knowledgeTag=state.knowledgeTag===tag?'':tag;state.knowledgeOffset=0;refresh()};
 // Смена запроса ВСЕГДА сбрасывает смещение: иначе человек ищет и попадает на
 // четвёртую страницу нового набора, где обычно пусто, и решает, что не нашлось.
+// Дословный поиск по ИСХОДНОМУ тексту. Отдельной кнопкой, а не вторым режимом той же
+// строки, потому что это другой вопрос: там «как называется», здесь «где эта фраза».
+// Замерено: 93% загруженных знаков живут только в raw_objects, то есть точная фраза из
+// документа иначе не находится вовсе.
+actions.sourceSearchDialog=()=>openModal('Поиск по тексту документов',
+  `<div class="form"><div class="notice">Ищет дословно по исходному тексту загруженного материала — мимо ранжирования. Отклонённое во входящих сюда не входит: это решение, а не фильтр.</div>`
+  +`<label>Фраза<input id="sourceQuery" placeholder="например, номер приказа или фамилия"></label>`
+  +`<div id="sourceResults"></div></div>`,
+  `<button class="btn" ${call('closeModal')}>Закрыть</button><button class="btn primary" ${call('runSourceSearch')}>Найти</button>`);
+actions.runSourceSearch=async()=>{
+  const el=document.getElementById('sourceQuery');const text=el?el.value.trim():'';
+  const box=document.getElementById('sourceResults');if(!box)return;
+  if(!text){box.innerHTML=empty('Введите фразу');return}
+  box.innerHTML='<div class="muted">Ищу…</div>';
+  try{
+    const d=await api(`/api/admin/source-search?user_id=${q(selectedUser())}&q=${q(text)}&limit=25`);
+    const items=d.items||[];
+    if(!items.length){box.innerHTML=empty('Ничего не найдено в доступном исходном тексте');return}
+    box.innerHTML=`<div class="notice">Показано ${items.length} совпадений (не более 25). Это страница, а не полное число.</div>`
+      +table(['Материал','Где','Действие'],items.map(it=>{
+        const marker=it.knowledge_object_id?'знание':(it.inbox_status||'—');
+        const act=it.knowledge_object_id
+          ?`<button class="btn small primary" ${call('inspectKnowledge',it.knowledge_object_id)}>Инспекция</button>`
+          :'<span class="muted">ещё во входящих</span>';
+        return `<tr><td><div class="muted clip">…${esc(short(it.excerpt||'',220))}…</div><div class="mono">${esc(it.source_ref||it.id)}</div></td>`
+          +`<td><span class="badge">${esc(marker)}</span><div class="muted">${esc(it.source||'')}</div></td><td>${act}</td></tr>`}));
+  }catch(e){box.innerHTML=empty(e.message)}
+};
 actions.searchKnowledge=()=>{const el=document.getElementById('knowledgeSearch');state.knowledgeQuery=el?el.value.trim():'';state.knowledgeOffset=0;refresh()};
 actions.clearKnowledgeSearch=()=>{state.knowledgeQuery='';state.knowledgeOffset=0;refresh()};
 actions.inspectKnowledge=async id=>{

@@ -106,6 +106,45 @@ async def list_all_knowledge(
     }
 
 
+@router.get("/source-search")
+async def search_source_text(
+    request: Request,
+    q: str,
+    user_id: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Дословный поиск по ИСХОДНОМУ тексту материала — мимо ранжирования.
+
+    Существовал только в CLI (`jericho source`), то есть был недоступен человеку,
+    который живёт в админке и Telegram. А нужен он ровно тогда, когда подводит
+    ранжирование: замерено на корпусе владельца — из пяти выданных поиском документов
+    по существу отвечают два, и когда человек ПОМНИТ точную фразу, ему нужен не
+    смысловой поиск, а дословный.
+
+    Замерено там же: 93% загруженных знаков живут только в `raw_objects` — Knowledge
+    Object несёт нормализованную, часто сокращённую версию. То есть точная фраза из
+    PDF без этого пути не находилась вовсе.
+
+    Отклонённый в Inbox материал сюда НЕ входит, и это вердикт, а не фильтр: см.
+    `search_raw_objects`. Возврат его текста отменил бы решения человека — тот самый
+    класс воскрешения, который в этом проекте закрывали трижды.
+    """
+    _require(request, "admin.all_data.read")
+    target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.source.search", target)
+    items = _services(request).storage.search_raw_objects(target, q, limit=limit)
+    return {
+        "user_id": target,
+        "query": q,
+        "items": items,
+        # Здесь `count` — это ДЛИНА СТРАНИЦЫ, и так и подписано. Полного числа
+        # совпадений FTS не даёт без второго запроса, а показывать длину среза как
+        # «найдено всего» — ровно та ложь, которую в этом проекте уже ловили.
+        "count": len(items),
+        "limit": limit,
+    }
+
+
 @router.get("/knowledge/tags")
 async def list_all_knowledge_tags(
     request: Request,

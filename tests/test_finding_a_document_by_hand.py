@@ -176,3 +176,60 @@ def test_the_admin_route_passes_the_query_through(client, settings, storage):
     assert body["total"] == 6
     assert len(body["items"]) == 6
     assert all("Рапорт" in str(item["title"]) for item in body["items"])
+
+
+# --- дословный поиск по исходному тексту --------------------------------------
+
+
+def test_source_search_is_reachable_over_http(client, settings, storage):
+    """Он существовал только в CLI, то есть был недоступен человеку.
+
+    Замерено на корпусе владельца: 93% загруженных знаков живут только в
+    `raw_objects` — Knowledge Object несёт нормализованную, часто сокращённую версию.
+    Значит точная фраза из документа без этого пути не находилась вовсе, а нужна она
+    ровно тогда, когда подводит ранжирование (из пяти выданных отвечают два).
+    """
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    ingest = client.post(
+        "/api/ingest",
+        json={"content": "Приказ номер 447-К о поверке весового оборудования", "force_knowledge": True},
+        headers=headers,
+    )
+    assert ingest.status_code == 200, ingest.text
+    owner = str((ingest.json().get("knowledge_object") or {}).get("user_id") or "")
+
+    response = client.get(f"/api/admin/source-search?user_id={owner}&q=весового", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["items"], "дословная фраза из исходного текста не нашлась"
+    assert body["count"] == len(body["items"])
+
+
+def test_source_search_requires_the_admin_capability(client, settings):
+    """Он читает ИСХОДНЫЙ текст чужого арендатора — значит гейт тот же, что у остальных."""
+    response = client.get("/api/admin/source-search?q=что-нибудь")
+    assert response.status_code in (401, 403)
+
+
+def test_the_page_length_is_not_presented_as_a_total(client, settings, storage):
+    """Правило проекта: показанное число не может выдавать длину среза за полный объём.
+
+    FTS не отдаёт полного числа совпадений без второго запроса, поэтому поле честно
+    называется `count` и равно длине страницы — а интерфейс подписывает его как
+    «показано», а не «найдено всего».
+    """
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    owner = ""
+    for index in range(6):
+        ingest = client.post(
+            "/api/ingest",
+            json={"content": f"Ведомость расчёта номер {index} по объекту приёмки", "force_knowledge": True},
+            headers=headers,
+        )
+        owner = str((ingest.json().get("knowledge_object") or {}).get("user_id") or owner)
+
+    response = client.get(f"/api/admin/source-search?user_id={owner}&q=ведомость&limit=2", headers=headers)
+    body = response.json()
+    assert len(body["items"]) <= 2
+    assert body["count"] == len(body["items"]), "count разошёлся с длиной страницы"
+    assert body["limit"] == 2
