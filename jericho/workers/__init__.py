@@ -970,6 +970,24 @@ class WorkersManager:
                 "label": "scheduled",
             },
         )
+        # Оригиналы файлов: база уносит извлечённый текст, а PDF/сканы/фото/голос
+        # существовали в одном экземпляре на том же диске. Инкремент дёшев: файлы
+        # content-addressed и неизменяемы. Удаления НЕ распространяются.
+        from jericho.backup_files import backup_files_incremental
+
+        files_result = await run_blocking(
+            backup_files_incremental,
+            self.settings.files_dir,
+            self.settings.backups_dir / "files",
+        )
+        files_result["reported_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+        await run_blocking(
+            self.storage.kv_set,
+            "workers:last_files_backup",
+            json.dumps(files_result, ensure_ascii=False),
+        )
+        if files_result.get("copied") or files_result.get("failed"):
+            await run_blocking(self.storage.record_event, "backup.files", files_result)
         # A same-disk backup is not a real backup: mirror it offsite when
         # configured (encrypted when a key file is set).
         from jericho.backup_mirror import mirror_backups

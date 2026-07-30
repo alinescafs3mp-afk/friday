@@ -817,6 +817,40 @@ def collect_diagnostics(
             "jericho backup --label recovery",
         )
 
+    # Оригиналы файлов: бэкап базы уносит извлечённый текст, а PDF/сканы/фото/голос
+    # жили в одном экземпляре. Воркер пишет отчёт в `workers:last_files_backup`;
+    # молчащий или неполный отчёт — это документы без единой копии.
+    files_backup: dict[str, Any] = {}
+    if storage is not None:
+        raw_files_report = storage.kv_get("workers:last_files_backup")
+        if raw_files_report:
+            with suppress(TypeError, ValueError):
+                parsed = json.loads(raw_files_report)
+                if isinstance(parsed, dict):
+                    files_backup = parsed
+        files_present = False
+        with suppress(OSError):
+            files_present = any(path.is_file() for path in settings.files_dir.rglob("*"))
+        if files_present and not files_backup:
+            add_action(
+                "files_backup_never_ran",
+                "warning",
+                "Оригиналы файлов не имеют ни одной резервной копии",
+                "Бэкап базы уносит извлечённый текст, но сами PDF, сканы, фото и голосовые "
+                "существуют в одном экземпляре. Суточный воркер скопирует их в "
+                "backups/files/ при следующем прогоне; если строка не исчезнет — "
+                "проверьте журнал воркера.",
+            )
+        elif files_backup and not files_backup.get("complete", True):
+            add_action(
+                "files_backup_incomplete",
+                "warning",
+                "Бэкап оригиналов файлов не дошёл до конца",
+                f"Отложено {files_backup.get('pending', 0)}, ошибок {files_backup.get('failed', 0)} "
+                f"из {files_backup.get('total', 0)}. Остаток докопирует следующий суточный прогон; "
+                "повторяющиеся ошибки — повод посмотреть на диск.",
+            )
+
     # The mirror worker has always written its outcome to `workers:last_backup_mirror`
     # and nothing has ever read it. An offsite copy that stopped being made — an
     # unplugged disk, a failing copy — was therefore invisible everywhere: the report
@@ -979,6 +1013,7 @@ def collect_diagnostics(
         },
         "database": database,
         "backups": backups,
+        "files_backup": files_backup,
         "workers": workers,
         "backend_lease": backend_lease,
         "bridge_queue": bridge_queue,
