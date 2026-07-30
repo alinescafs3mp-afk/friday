@@ -460,7 +460,15 @@ class ExecutionKernel:
             "queued_for_review": mission.get("status") == "proposed",
         }
 
-    async def _memory_search(self, *, actor: ActorContext, query: str, limit: int = 10) -> dict[str, Any]:
+    async def _memory_search(
+        self,
+        *,
+        actor: ActorContext,
+        query: str,
+        limit: int = 10,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, Any]:
         """Поиск по своему архиву — ВЫДЕРЖКАМИ, а не телами документов.
 
         Инструмент отдавал строки целиком (`SELECT k.*`), и результат обрезался на
@@ -494,8 +502,11 @@ class ExecutionKernel:
         # 1537 честных векторов на этом пути не участвовали.
         rows: list[dict[str, Any]]
         dropped = 0
+        # Объявляется ДО ветвления: без поиска (ядро собирают и без него — тесты, CLI)
+        # ветка `else` не задаёт стратегию вовсе, и чтение ниже роняло весь инструмент.
+        strategy: Any = None
         if self.searcher is not None:
-            found = await self.searcher.search(actor.user_id, query, limit=limit)
+            found = await self.searcher.search(actor.user_id, query, limit=limit, since=since, until=until)
             rows = list(found.get("results") or [])
             strategy = found.get("strategy")
             if isinstance(strategy, dict):
@@ -517,6 +528,10 @@ class ExecutionKernel:
             for row in rows
         ]
         payload: dict[str, Any] = {"count": len(results), "query": query}
+        if isinstance(strategy, dict) and strategy.get("date_window_empty"):
+            # «В этот период ничего нет» и «в архиве нет ничего по теме» — разные
+            # ответы человеку, и без этой строки модель выдаёт второй в обоих случаях.
+            payload["empty_because"] = "date_window"
         if dropped:
             # «В архиве этого нет» и «нашлось двадцать, ни одно не отвечает» — разные
             # ответы, и модель без этого числа выдаёт первый в обоих случаях. Порог
@@ -1037,9 +1052,17 @@ class ExecutionKernel:
             "Поиск по личной базе знаний. Если в ответе есть filtered_out, столько "
             "похожих записей нашлось и было отброшено как не отвечающие на вопрос: "
             "материал в архиве есть, но ответа в нём нет — так и скажи, не выдавая "
-            "это за пустой архив.",
+            "это за пустой архив. since/until (ГГГГ-ММ-ДД) ограничивают выдачу периодом: "
+            "берётся собственная дата документа, а при её отсутствии — даты, упомянутые "
+            "в тексте. Если в ответе empty_because=date_window, то в архиве материал "
+            "есть, но не в этом периоде — скажи именно так.",
             "search.use",
-            {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+            {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                "since": {"type": "string", "description": "ГГГГ-ММ-ДД, начало периода"},
+                "until": {"type": "string", "description": "ГГГГ-ММ-ДД, конец периода"},
+            },
             ["query"],
         )
         spec(

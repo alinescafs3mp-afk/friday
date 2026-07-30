@@ -616,6 +616,48 @@ class KnowledgeMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
+    # Потолок множества окна. Выше него окно перестаёт быть окном: если под него
+    # подпадает двадцать тысяч объектов, это не «покажи за март», а весь архив, и
+    # честнее не строить множество вовсе, чем строить его усечённым и молча
+    # потерять часть (усечение уже ловили у `list_entities`).
+    _WINDOW_IDS_MAX = 20_000
+
+    def knowledge_ids_in_window(
+        self, user_id: str, *, since: str | None = None, until: str | None = None
+    ) -> set[str] | None:
+        """Идентификаторы объектов, попадающих в диапазон дат. None — окна нет.
+
+        Предикат берётся из `_knowledge_filter` — того же, что строит список и его
+        счётчик. Иметь два определения «попадает в период» значило бы, что поиск и
+        листинг однажды разойдутся, и разойдутся молча.
+
+        Смысл диапазона тот же, что в листинге: собственная дата документа ЛИБО
+        любая упомянутая в тексте. Возврат — множество, потому что фильтрация идёт
+        по кандидатам всех каналов сразу; None означает «фильтровать не по чему»,
+        а пустое множество — «в этот период нет ничего», и это разные ответы.
+        """
+        if not since and not until:
+            return None
+        where, params = self._knowledge_filter(
+            user_id,
+            lifecycle_stage=None,
+            tag=None,
+            entity_id=None,
+            since=since,
+            until=until,
+        )
+        rows = self.execute(
+            f"SELECT id FROM knowledge_objects WHERE {where} LIMIT ?",  # nosec B608 - предикат из общего построителя
+            (*params, self._WINDOW_IDS_MAX + 1),
+        ).fetchall()
+        if len(rows) > self._WINDOW_IDS_MAX:
+            LOGGER.info(
+                "Диапазон дат покрывает больше %d объектов — фильтр по нему не применяется",
+                self._WINDOW_IDS_MAX,
+            )
+            return None
+        return {str(row["id"]) for row in rows}
+
     def list_live_knowledge_ids(self, user_id: str) -> set[str]:
         """Every live object's id, in ONE snapshot.
 

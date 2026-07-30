@@ -1403,6 +1403,8 @@ class HybridSearcher:
         include_entities: bool = True,
         kg: Any = None,
         explain: bool = False,
+        since: str | None = None,
+        until: str | None = None,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 100))
         # Ширина отбора кандидатов считается от ГЛУБИНЫ ОТБОРА, а не от размера
@@ -1417,6 +1419,28 @@ class HybridSearcher:
         clean_query = " ".join((query or "").split()).strip()
         if not clean_query:
             return {"query": query, "results": [], "count": 0, "entity_matches": []}
+
+        # ЖЁСТКИЙ предфильтр по периоду — ДО отбора кандидатов, а не после.
+        #
+        # Фильтровать после ранжирования нельзя: пул собирается по релевантности, и
+        # если в него попали только документы вне окна, порог переранжировщика срежет
+        # их все и человек получит пустоту вместо «в этот период ничего нет». Разница
+        # между этими ответами — вся ценность вопроса «что было в марте».
+        #
+        # Множество строится один раз тем же предикатом, что и листинг («своя дата
+        # документа либо любая упомянутая»). None означает «окна не задано» или «окно
+        # шире, чем имеет смысл фильтровать»; пустое множество — «в периоде пусто».
+        window_ids = self.storage.knowledge_ids_in_window(user_id, since=since, until=until)
+        if window_ids is not None and not window_ids:
+            return {
+                "query": clean_query,
+                "results": [],
+                "count": 0,
+                "entity_matches": [],
+                # Сказано вслух: пусто ИМЕННО из-за периода, а не потому, что в архиве
+                # нет ничего по теме. Совет «загляните в Inbox» здесь был бы неверен.
+                "strategy": {"date_window": True, "date_window_empty": True},
+            }
 
         fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=depth * 5)
         # Only when the question as typed matched nothing at all. A stuck keyboard
@@ -1433,7 +1457,12 @@ class HybridSearcher:
                 fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=depth * 5)
         # Fuzzy matching needs a bounded recall pool even when FTS finds no exact token.
         pool_limit = min(self._pool_max, max(depth * 10, 100))
-        recent_pool = self.storage.list_knowledge_objects(user_id, limit=pool_limit)
+        # Пул тоже собирается ИЗ ОКНА, а не фильтруется после: он упорядочен по
+        # важности и свежести, и на узком периоде отфильтрованный «общий» пул дал бы
+        # ноль строк там, где в периоде документы есть.
+        recent_pool = self.storage.list_knowledge_objects(user_id, limit=pool_limit, since=since, until=until)
+        if window_ids is not None:
+            fts_candidates = [item for item in fts_candidates if str(item["id"]) in window_ids]
         candidate_map = {item["id"]: item for item in [*fts_candidates, *recent_pool]}
         candidates = list(candidate_map.values())
 
@@ -1481,7 +1510,9 @@ class HybridSearcher:
         chunk_provenance: dict[str, tuple[int, int]] = {}
         chunk_carried: set[str] = set()
         if self.embeddings and self.embeddings.remote_enabled:
-            embedding_scores = await self._dense_recall(user_id, clean_query, candidate_map, meta=dense_meta)
+            embedding_scores = await self._dense_recall(
+                user_id, clean_query, candidate_map, meta=dense_meta, window_ids=window_ids
+            )
             chunk_provenance = dict(dense_meta.get("chunk_provenance") or {})
             chunk_carried = set(dense_meta.get("chunk_carried") or set())
             if embedding_scores:
@@ -1545,6 +1576,10 @@ class HybridSearcher:
                 for candidate in graph_context.get("knowledge_candidates", []):
                     document_id = str(candidate.get("knowledge_object_id") or "")
                     if not document_id:
+                        continue
+                    if window_ids is not None and document_id not in window_ids:
+                        # Связь по графу — не основание вывести документ за границы
+                        # периода, заданного человеком.
                         continue
                     item = candidate_map.get(document_id) or self.storage.get_knowledge_object(
                         document_id,
@@ -1971,6 +2006,14 @@ class HybridSearcher:
                 strategy["lexical_pool_capped"] = True
                 strategy["lexical_pool_scanned"] = pool_limit
                 strategy["corpus_size"] = corpus_size
+        if since or until:
+            strategy["date_window"] = True
+            if since:
+                strategy["date_since"] = since
+            if until:
+                strategy["date_until"] = until
+            # Окно шире потолка — фильтра фактически не было, и молчать об этом нельзя.
+            strategy["date_window_applied"] = window_ids is not None
         response: dict[str, Any] = {
             "query": clean_query,
             "results": results,
@@ -2313,6 +2356,7 @@ class HybridSearcher:
         candidate_map: dict[str, dict[str, Any]],
         *,
         meta: dict[str, Any] | None = None,
+        window_ids: set[str] | None = None,
     ) -> dict[str, float]:
         """Corpus-wide dense recall over persisted vectors.
 
@@ -2453,6 +2497,11 @@ class HybridSearcher:
         promoted = list(dict.fromkeys(_ranked(doc_scores) + _ranked(combined)))
         for document_id in promoted:
             if document_id in candidate_map:
+                continue
+            # Окно периода действует и здесь: смысловая близость не отменяет
+            # заданных человеком границ, а вывод документа вне периода в кандидаты
+            # означал бы, что «жёсткий предфильтр» держится только на одном канале.
+            if window_ids is not None and document_id not in window_ids:
                 continue
             item = self.storage.get_knowledge_object(document_id, user_id)
             if item and not item.get("deleted_at"):

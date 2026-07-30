@@ -378,3 +378,85 @@ def test_the_backfill_terminates_when_files_carry_no_dates(settings, storage):
 
     # Пачка меньше числа объектов: прежний цикл на этом не остановился бы.
     assert _backfill_document_dates(argparse.Namespace(user=None, batch=2, limit=0)) == 0
+
+
+# --- ЖЁСТКИЙ предфильтр по периоду внутри поиска ------------------------------
+
+
+async def _search(storage, **kwargs):
+    from jericho.retrieval import HybridSearcher
+
+    return await HybridSearcher(storage, None, record_usage=False).search("alice", "документ", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_window_filters_the_search_itself(storage):
+    """Окно должно резать сам поиск, а не выдачу после него."""
+    storage.ensure_user("alice")
+    old = _with_own_date(storage, "alice", 10, "2019-04-01")
+    new = _with_own_date(storage, "alice", 11, "2025-04-01")
+
+    everything = await _search(storage)
+    assert {old, new} <= {item["id"] for item in everything["results"]}
+
+    windowed = await _search(storage, since="2019-01-01", until="2019-12-31")
+    ids = {item["id"] for item in windowed["results"]}
+    assert old in ids and new not in ids
+    assert windowed["strategy"]["date_window"] is True
+    assert windowed["strategy"]["date_window_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_empty_period_says_so_instead_of_looking_like_an_empty_archive(storage):
+    """«В этот период ничего» и «в архиве ничего по теме» — разные ответы, и совет
+    «загляните в Inbox» верен только для второго."""
+    storage.ensure_user("alice")
+    _with_own_date(storage, "alice", 12, "2025-04-01")
+
+    found = await _search(storage, since="1990-01-01", until="1990-12-31")
+
+    assert found["results"] == []
+    assert found["strategy"]["date_window_empty"] is True
+
+
+@pytest.mark.asyncio
+async def test_the_window_is_applied_before_ranking_not_after(storage):
+    """Ради этого предфильтр и стоит ПЕРЕД отбором.
+
+    Пул собирается по релевантности и ограничен по размеру. Если наполнить архив
+    документами вне окна, фильтрация ПОСЛЕ отбора вернула бы пустоту: в пул попали
+    бы только они. Документ внутри окна обязан найтись всё равно.
+    """
+    storage.ensure_user("alice")
+    for index in range(60):
+        _with_own_date(storage, "alice", 100 + index, "2025-01-15")
+    target = _with_own_date(storage, "alice", 200, "2018-06-01")
+
+    windowed = await _search(storage, since="2018-01-01", until="2018-12-31")
+
+    assert [item["id"] for item in windowed["results"]] == [target]
+
+
+@pytest.mark.asyncio
+async def test_the_window_ids_come_from_the_same_predicate_as_the_listing(storage):
+    """Два определения «попадает в период» однажды разойдутся, и разойдутся молча."""
+    storage.ensure_user("alice")
+    by_own = _with_own_date(storage, "alice", 300, "2022-03-10")
+    by_mention = _make(storage, "alice", 301, ["2022-03-11"])
+    _with_own_date(storage, "alice", 302, "2024-01-01")
+
+    listed = {
+        item["id"] for item in storage.list_knowledge_objects("alice", since="2022-01-01", until="2022-12-31")
+    }
+    window = storage.knowledge_ids_in_window("alice", since="2022-01-01", until="2022-12-31")
+
+    assert window == listed == {by_own, by_mention}
+
+
+def test_no_window_means_no_filtering(storage):
+    """Отсутствие окна и пустое окно — разные вещи: None против пустого множества."""
+    storage.ensure_user("alice")
+    _with_own_date(storage, "alice", 400, "2023-05-05")
+
+    assert storage.knowledge_ids_in_window("alice") is None
+    assert storage.knowledge_ids_in_window("alice", since="1990-01-01", until="1990-12-31") == set()
