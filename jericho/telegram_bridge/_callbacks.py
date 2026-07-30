@@ -17,6 +17,28 @@ from jericho.telegram_bridge._base import (
 )
 
 
+def _file_fate_line(file_ingestion: Any) -> str:
+    """Одна строка о судьбе присланного файла — стал знанием или ждёт разбора.
+
+    Бэкенд честно возвращал `file_ingestion` с каждым файлом, и ни бридж, ни
+    модель его не читали: владелец отправлял документ и не знал, попал тот в
+    знания или завис в Inbox — а это разные следующие шаги (спрашивать можно
+    сразу или сначала подтвердить в /inbox).
+    """
+    if not isinstance(file_ingestion, dict):
+        return ""
+    if file_ingestion.get("action") == "transient":
+        return "📄 Файл разобран, но по вашей просьбе НЕ сохранён."
+    if file_ingestion.get("promoted"):
+        return "✅ Файл стал знанием — можно спрашивать."
+    if file_ingestion.get("queued_for_review") or file_ingestion.get("inbox_id"):
+        line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
+        if file_ingestion.get("extraction_success") is False:
+            line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
+        return line
+    return ""
+
+
 class CallbacksMixin(BridgeShared):
     async def _process_callback_query(
         self,
@@ -234,6 +256,9 @@ class CallbacksMixin(BridgeShared):
             "research": "🔎 Исследование",
         }.get(mode)
         body = f"{prefix}\n\n{message}" if prefix else message
+        fate = _file_fate_line(response.get("file_ingestion"))
+        if fate:
+            body = f"{body}\n\n{fate}"
         caution = str(response.get("verification_caution") or "").strip()
         if caution:
             body = f"{body}\n\n{caution}"

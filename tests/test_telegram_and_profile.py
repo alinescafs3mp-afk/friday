@@ -951,3 +951,37 @@ async def test_why_names_its_sources_instead_of_bare_labels(tmp_path):
         assert text.index("[K2]") < text.index("[K10]")
     finally:
         bridge._inbox.close()
+
+
+def test_the_file_fate_reaches_the_chat():
+    """Бэкенд честно возвращал file_ingestion с каждым файлом — и ни бридж, ни
+    модель его не читали. Владелец отправлял документ и не знал, стал тот
+    знанием или завис в Inbox, а это разные следующие шаги."""
+    from jericho.telegram_bridge import TelegramBridge
+
+    promoted = TelegramBridge._format_response_message(
+        {"message": "Принял.", "file_ingestion": {"promoted": True}}
+    )
+    assert "стал знанием" in promoted
+
+    queued = TelegramBridge._format_response_message(
+        {
+            "message": "Принял.",
+            "file_ingestion": {
+                "promoted": False,
+                "queued_for_review": True,
+                "inbox_id": "in_1",
+                "extraction_success": False,
+            },
+        }
+    )
+    assert "/inbox" in queued
+    assert "не удалось" in queued  # нечитаемый файл называет себя
+
+    transient = TelegramBridge._format_response_message(
+        {"message": "Принял.", "file_ingestion": {"action": "transient", "promoted": False}}
+    )
+    assert "НЕ сохранён" in transient
+
+    plain = TelegramBridge._format_response_message({"message": "Ответ."})
+    assert "стал знанием" not in plain and "/inbox" not in plain
