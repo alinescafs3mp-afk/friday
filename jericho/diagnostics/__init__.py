@@ -917,6 +917,46 @@ def collect_diagnostics(
                 f"vLLM отвечает, но не отдаёт модель '{settings.llm_model}'. "
                 f"Проверьте JERICHO_LLM_MODEL и имя модели vLLM. Обслуживаются: {served}.",
             )
+    if check_llm_port and settings.embeddings_enabled and settings.embeddings_base_url:
+        # Сервис эмбеддингов проверяется ОТДЕЛЬНО от чат-модели, потому что падает он
+        # отдельно и молча. Замерено на этой установке: при мёртвом :8002 фоновая
+        # индексация завершается УСПЕШНО (backend возвращает None, исключения нет,
+        # `consecutive_failures` остаётся нулём, воркер считается здоровым), а поиск
+        # продолжает отвечать за прежние ~1.5 с — просто без семантического канала.
+        # Ни один индикатор при этом не меняется, и человек узнаёт об этом только по
+        # ухудшившимся ответам, то есть никогда.
+        #
+        # Проба та же, что у чат-модели: список моделей, а не генерация. Она не грузит
+        # видеокарту — важно, потому что на этой установке карта одна на три сервиса.
+        embeddings = _llm_endpoint_status(
+            settings.embeddings_base_url,
+            settings.embeddings_model,
+            api_key=settings.embeddings_api_key,
+        )
+        result["embeddings_endpoint"] = embeddings
+        reachable = bool(embeddings.get("reachable"))
+        model_served = embeddings.get("model_served")
+        result["ok"] = result["ok"] and reachable and model_served is not False
+        if not reachable:
+            add_action(
+                "start_embeddings_runtime",
+                "error",
+                "Сервис эмбеддингов недоступен — поиск работает без смысла",
+                f"Не отвечает {settings.embeddings_base_url}. Лексический и полнотекстовый "
+                "каналы продолжат отвечать, поэтому поиск НЕ выглядит сломанным — он просто "
+                "перестаёт находить по смыслу, а новые документы не попадают в индекс.",
+            )
+        elif model_served is False:
+            served = ", ".join(embeddings.get("served_models") or []) or "—"
+            add_action(
+                "embeddings_model_not_served",
+                "error",
+                "Сервис эмбеддингов не отдаёт настроенную модель",
+                f"Endpoint отвечает, но модели '{settings.embeddings_model}' у него нет. "
+                f"Обслуживаются: {served}. Вектора, посчитанные другой моделью, несравнимы "
+                "с уже сохранёнными.",
+            )
+
     severities = {str(item.get("severity")) for item in actions}
     if not result["ok"] or "error" in severities:
         result["state"] = "degraded"
