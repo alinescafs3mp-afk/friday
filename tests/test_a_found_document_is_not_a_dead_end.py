@@ -101,3 +101,43 @@ def test_the_payload_shape_from_the_api_is_accepted_either_way():
         {"knowledge_object": {"title": "Внутри", "content": "тело"}}
     )
     assert "Внутри" in wrapped and "тело" in wrapped
+
+
+# --- «нашлось пять, отвечает ни один» -----------------------------------------
+
+
+def test_a_pool_with_no_answer_says_so_out_loud():
+    """Пять правдоподобных заголовков и ни одного ответа — самый частый способ соврать.
+
+    Скор переранжировщика откалиброван: на живом архиве вопрос, ответа на который в
+    нём нет, уводит ВЕСЬ пул ниже 0.01, а «график дежурств» даёт пять по 0.999. Без
+    этой строки человек видит одно и то же в обоих случаях.
+    """
+    text = TelegramBridge._format_search_results(
+        "поверка", _results(5), {"reranked": 20, "rerank_confident": 0}
+    )
+    assert "ни один не похож на ответ" in text
+    assert "1. Рапорт номер 0" in text, "выдача не должна опустошаться — это подсказка, а не гейт"
+
+
+def test_a_partial_answer_is_counted():
+    text = TelegramBridge._format_search_results(
+        "поверка", _results(5), {"reranked": 20, "rerank_confident": 2}
+    )
+    assert "похоже отвечают 2" in text
+
+
+def test_nothing_is_promised_when_everything_answers():
+    """Когда отвечает всё показанное, приписка была бы шумом."""
+    text = TelegramBridge._format_search_results(
+        "поверка", _results(3), {"reranked": 20, "rerank_confident": 3}
+    )
+    assert "похоже отвечают" not in text
+    assert "ни один" not in text
+
+
+def test_without_a_reranker_the_line_does_not_appear():
+    """Выключенное переранжирование не должно рождать обещаний о качестве выдачи."""
+    text = TelegramBridge._format_search_results("поверка", _results(3), {"reranked": 0})
+    assert "похоже" not in text
+    assert "ни один" not in text

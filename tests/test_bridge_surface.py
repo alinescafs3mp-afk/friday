@@ -243,7 +243,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_format_mission_created": "(self, mission: 'dict[str, Any]') -> 'str'",
     "_search_reply_markup": "(results: 'list[Any]') -> 'dict[str, Any] | None'",
     "_format_response_message": "(response: 'dict[str, Any]') -> 'str'",
-    "_format_search_results": "(query: 'str', results: 'list[Any]') -> 'str'",
+    "_format_search_results": "(query: 'str', results: 'list[Any]', strategy: 'Any' = None) -> 'str'",
     "_get_updates": "(self, client: 'httpx.AsyncClient') -> 'list[dict[str, Any]]'",
     "_notify_dead_letter": "(self, telegram: 'httpx.AsyncClient', update: 'dict[str, Any]', *, permanent: 'bool') -> 'None'",
     "_outbound_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",

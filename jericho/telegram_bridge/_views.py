@@ -355,13 +355,31 @@ class ViewsMixin(BridgeShared):
         await self._send_message(
             telegram,
             chat_id,
-            self._format_search_results(query, results),
+            self._format_search_results(query, results, data.get("strategy")),
             reply_markup=self._search_reply_markup(results),
         )
 
     @staticmethod
-    def _format_search_results(query: str, results: list[Any]) -> str:
-        lines = [f"Найдено по запросу «{query}»:"]
+    def _format_search_results(query: str, results: list[Any], strategy: Any = None) -> str:
+        # «Похоже отвечают N» — не украшение. Скор переранжировщика откалиброван, и на
+        # вопросе, ответа на который в архиве нет, весь пул уходит ниже 0.01: без этой
+        # строки человек получает пять правдоподобных заголовков и никакого признака,
+        # что ни один из них не о том. Замер размена — в `retrieval/_rerank_backend.py`.
+        # Ноль говорится ВСЛУХ, а единственный отвечающий из пяти — тем более.
+        confident = None
+        if isinstance(strategy, dict) and "rerank_confident" in strategy:
+            try:
+                confident = int(strategy["rerank_confident"])
+            except (TypeError, ValueError):
+                confident = None
+        header = f"Найдено по запросу «{query}»"
+        if confident is not None:
+            shown = sum(1 for item in results if isinstance(item, dict))
+            if confident == 0:
+                header += f" — {shown}, но ни один не похож на ответ"
+            elif confident < shown:
+                header += f" — {shown}, похоже отвечают {confident}"
+        lines = [f"{header}:"]
         for position, item in enumerate(results, start=1):
             if not isinstance(item, dict):
                 continue
