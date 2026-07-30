@@ -211,6 +211,31 @@ def test_an_empty_corpus_does_not_divide_by_zero(settings, storage):
     assert "embeddings_coverage_low" not in {str(i.get("code")) for i in result["actions"]}
 
 
+def test_a_corpus_over_the_dense_scan_window_becomes_an_action(settings, storage):
+    """Скан плотного канала берёт только НОВЕЙШИЕ N строк, и переросший окно корпус
+    теряет из смыслового поиска старейшие документы. Признак жил лишь в
+    explain-трейсе отдельного запроса — доктор и sentinel его не видели, а на
+    корпусе владельца окно пассажей исчерпано уже сейчас."""
+    _corpus(storage, 12, indexed=12)
+    tuned = _tuned(settings, embeddings_dense_max_objects=10)
+    result = collect_diagnostics(tuned, storage=storage)
+
+    coverage = result.get("embeddings_index") or {}
+    assert coverage.get("dense_object_cap") == 10
+    action = next(
+        (item for item in result["actions"] if str(item.get("code")) == "dense_scan_window_near_cap"),
+        None,
+    )
+    assert action is not None, "переполненное окно скана не породило действия"
+    assert "не видит часть архива" in str(action.get("title") or "")
+
+
+def test_a_corpus_inside_the_window_is_silent_about_caps(settings, storage):
+    _corpus(storage, 12, indexed=12)
+    result = collect_diagnostics(_tuned(settings), storage=storage)
+    assert "dense_scan_window_near_cap" not in {str(i.get("code")) for i in result["actions"]}
+
+
 def test_a_full_disk_becomes_an_action_instead_of_a_number_in_a_dump(settings, monkeypatch):
     """При 99% занятости состояние оставалось «ready», а число лежало в байтах.
 

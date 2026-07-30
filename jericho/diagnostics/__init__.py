@@ -984,6 +984,34 @@ def collect_diagnostics(
                 "но найти по смыслу то, чего нет в индексе, нельзя. Обычно догоняется само; "
                 "если число не растёт — проверьте сервис эмбеддингов.",
             )
+        # Потолки плотного отбора. Скан на запросе берёт только НОВЕЙШИЕ N строк
+        # (окно по updated_at), и корпус, переросший окно, теряет из смыслового
+        # поиска ровно старейшие документы — молча: признак dense_chunks_capped
+        # жил только в explain-трейсе отдельного запроса, доктор и sentinel его не
+        # видели. На корпусе владельца окно пассажей исчерпано уже сейчас.
+        chunk_rows = int(embeddings_coverage.get("chunk_rows") or 0)
+        object_cap = max(0, int(settings.embeddings_dense_max_objects))
+        chunk_cap = object_cap * max(1, int(settings.embeddings_chunk_scan_multiplier))
+        if object_cap:
+            embeddings_coverage["dense_object_cap"] = object_cap
+            embeddings_coverage["dense_chunk_cap"] = chunk_cap
+            if chunk_rows >= chunk_cap * 0.85 or indexed >= object_cap * 0.85:
+                clipped = chunk_rows >= chunk_cap or indexed >= object_cap
+                add_action(
+                    "dense_scan_window_near_cap",
+                    "warning",
+                    (
+                        "Смысловой поиск уже не видит часть архива"
+                        if clipped
+                        else "Корпус приближается к окну плотного отбора"
+                    ),
+                    f"Пассажей {chunk_rows} при окне {chunk_cap}, объектных векторов "
+                    f"{indexed} при окне {object_cap}. Скан берёт новейшие строки; всё, "
+                    "что старше окна, выпадает из смыслового поиска без внешних признаков. "
+                    "Быстрое лечение — поднять JERICHO_EMBEDDINGS_DENSE_MAX_OBJECTS "
+                    "(цена: время каждого запроса растёт с окном); настоящее — "
+                    "резидентный индекс векторов, он в очереди работ.",
+                )
 
     # Свободное место. Тоже собиралось и лежало в байтах внутри дампа: при 99%
     # занятости состояние осталось бы «ready». А кончившееся место — это не медленная
