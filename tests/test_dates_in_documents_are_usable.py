@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -153,3 +154,185 @@ def test_the_route_rejects_a_malformed_date_instead_of_ignoring_it(settings):
         headers = {"Authorization": f"Bearer {settings.api_token}"}
         response = client.get("/api/admin/knowledge?user_id=alice&since=март", headers=headers)
         assert response.status_code == 422
+
+
+# --- СОБСТВЕННАЯ дата документа (из провенанса файла, не из текста) -----------
+
+
+def _docx_bytes(created: str | None, *, modified: str | None = None) -> bytes:
+    """Минимальный docx: только то, что читают извлекатель и core.xml."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+        )
+        archive.writestr(
+            "word/document.xml",
+            '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            "<w:body><w:p><w:r><w:t>Текст приказа о поверке оборудования.</w:t></w:r></w:p></w:body></w:document>",
+        )
+        parts = []
+        if created:
+            parts.append(f"<dcterms:created>{created}</dcterms:created>")
+        if modified:
+            parts.append(f"<dcterms:modified>{modified}</dcterms:modified>")
+        if parts:
+            archive.writestr(
+                "docProps/core.xml",
+                '<?xml version="1.0"?><cp:coreProperties '
+                'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+                'xmlns:dcterms="http://purl.org/dc/terms/">' + "".join(parts) + "</cp:coreProperties>",
+            )
+    return buffer.getvalue()
+
+
+def test_a_docx_carries_its_own_date_from_the_file_not_the_text():
+    """У владельца дата загрузки одна на весь архив — день импорта. Собственную
+    дату документа записал редактор при сохранении, и это не угадывание."""
+    from jericho.documents import DocumentExtractor
+
+    result = DocumentExtractor().extract(_docx_bytes("2023-04-12T08:30:00Z"), "приказ.docx", "")
+    assert result.metadata.get("document_date") == "2023-04-12"
+
+
+def test_modified_is_used_only_when_created_is_missing():
+    from jericho.documents import DocumentExtractor
+
+    extractor = DocumentExtractor()
+    only_modified = extractor.extract(_docx_bytes(None, modified="2021-09-01T10:00:00Z"), "a.docx", "")
+    assert only_modified.metadata.get("document_date") == "2021-09-01"
+
+    both = extractor.extract(
+        _docx_bytes("2019-02-03T10:00:00Z", modified="2024-01-01T10:00:00Z"), "b.docx", ""
+    )
+    assert both.metadata.get("document_date") == "2019-02-03", "создание важнее правки"
+
+
+def test_a_file_without_core_properties_gets_no_invented_date():
+    """Нет даты в файле — нет даты. Придумывать её значит вернуть ровно то
+    угадывание, от которого фильтр по упоминаниям уходил."""
+    from jericho.documents import DocumentExtractor
+
+    result = DocumentExtractor().extract(_docx_bytes(None), "без-даты.docx", "")
+    assert "document_date" not in result.metadata
+
+
+@pytest.mark.parametrize("bogus", ["0000-00-00T00:00:00Z", "9999-12-31T00:00:00Z", "мусор"])
+def test_implausible_dates_are_refused(bogus):
+    from jericho.documents import DocumentExtractor
+
+    result = DocumentExtractor().extract(_docx_bytes(bogus), "кривая.docx", "")
+    assert "document_date" not in result.metadata
+
+
+def _with_own_date(storage, user_id: str, index: int, document_date: str) -> str:
+    text = f"Документ {index}. " * 10
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="test",
+        source_ref=new_id("src"),
+        raw_content=text,
+        content_type="file",
+        content_hash=hashlib.sha256(f"own-{user_id}-{index}".encode()).hexdigest(),
+    )
+    storage.store_raw_object(raw)
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=text,
+        content_type="file",
+        title=f"Свой {index}",
+        metadata_json={"document_date": document_date},
+    )
+    storage.store_knowledge_object(knowledge)
+    return knowledge.id
+
+
+def test_a_period_finds_documents_by_their_own_date(storage):
+    """Документ 2023 года, не упоминающий дат в тексте, обязан находиться за 2023-й."""
+    storage.ensure_user("alice")
+    old = _with_own_date(storage, "alice", 1, "2023-03-15")
+    new = _with_own_date(storage, "alice", 2, "2025-06-01")
+
+    found = storage.list_knowledge_objects("alice", since="2023-01-01", until="2023-12-31")
+    ids = [item["id"] for item in found]
+    assert old in ids and new not in ids
+
+
+def test_own_date_and_mentions_both_count(storage):
+    """Дизъюнкция, а не замена: собственная дата есть не у всех, и сужение до неё
+    молча потеряло бы всё, что пришло текстом."""
+    storage.ensure_user("alice")
+    by_own = _with_own_date(storage, "alice", 3, "2024-05-05")
+    by_mention = _make(storage, "alice", 4, ["2024-05-06"])
+
+    found = storage.list_knowledge_objects("alice", since="2024-05-01", until="2024-05-31")
+    ids = {item["id"] for item in found}
+    assert {by_own, by_mention} <= ids
+
+    counted = storage.count_filtered_knowledge_objects("alice", since="2024-05-01", until="2024-05-31")
+    assert counted == len(ids), "счётчик разошёлся со страницей"
+
+
+def test_the_date_survives_a_failed_text_extraction():
+    """Дата снимается независимо от разбора текста — и это не мелочь: на корпусе
+    владельца 35 файлов не читаются вовсе, а их место в хронологии от этого не
+    исчезает. Здесь docx намеренно неполон (нет _rels), python-docx на нём
+    падает — дата обязана остаться."""
+    from jericho.documents import DocumentExtractor
+
+    result = DocumentExtractor().extract(_docx_bytes("2018-11-20T12:00:00Z"), "битый.docx", "")
+
+    assert result.success is False, "проба перестала проверять именно неудачный разбор"
+    assert result.metadata.get("document_date") == "2018-11-20"
+
+
+def test_the_backfill_reaches_objects_ingested_before_dates_were_captured(settings, storage, tmp_path):
+    """Дату начали снимать при приёме, а корпус загружен раньше: у владельца 1531
+    объект из 1537 «создан» в день импорта. Проход достаёт дату из файла, который
+    никуда не делся, и не создаёт версию — это дозапись провенанса, не правка."""
+    import argparse
+
+    from jericho.cli import _backfill_document_dates
+
+    storage.ensure_user("alice")
+    stored = settings.files_dir / "alice" / "old.docx"
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(_docx_bytes("2015-06-08T09:00:00Z"))
+
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id="alice",
+        source="upload",
+        source_ref=new_id("src"),
+        raw_content="Текст старого документа.",
+        content_type="file",
+        content_hash=hashlib.sha256(b"old").hexdigest(),
+        metadata_json={"stored_path": "alice/old.docx", "filename": "old.docx"},
+    )
+    storage.store_raw_object(raw)
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id="alice",
+        raw_object_id=raw.id,
+        content="Текст старого документа.",
+        content_type="file",
+        title="Старый",
+    )
+    storage.store_knowledge_object(knowledge)
+    before = storage.get_knowledge_object(knowledge.id, "alice")
+
+    assert _backfill_document_dates(argparse.Namespace(user=None, batch=50, limit=0)) == 0
+
+    after = storage.get_knowledge_object(knowledge.id, "alice")
+    assert json.loads(after["metadata_json"])["document_date"] == "2015-06-08"
+    assert after["version"] == before["version"], "проход создал версию, хотя знание не менялось"
+
+    # Идемпотентность: второй прогон не берёт объект снова.
+    assert storage.knowledge_missing_document_date(user_id="alice") == []

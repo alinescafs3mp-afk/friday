@@ -70,7 +70,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 
 
 # 244 → 245: dense_vector_signature — дешёвая подпись векторов для резидентного кэша.
-EXPECTED_MEMBER_COUNT = 245
+# 245 → 247: knowledge_missing_document_date + set_document_date — разовый проход,
+# достающий собственную дату документа из провенанса уже загруженных файлов.
+EXPECTED_MEMBER_COUNT = 247
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

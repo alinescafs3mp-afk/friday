@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import pathlib
 import secrets
 import sys
 import tempfile
@@ -733,6 +734,67 @@ def _reindex_embeddings(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backfill_document_dates(args: argparse.Namespace) -> int:
+    """Достать собственную дату документа у уже загруженных файлов.
+
+    Дату из провенанса файла (docProps/core.xml, /CreationDate) начали снимать
+    при приёме, а корпус загружен раньше: у владельца дата создания у 1531
+    объекта из 1537 — это день импорта, то есть хронологии архива не было вовсе.
+    Замер на его же файлах: 84% дают настоящую дату, разброс 2006-2026.
+
+    Безопасно на живой системе: читает файлы, пишет ОДНО поле метаданных и не
+    создаёт версий — это дозапись утраченного провенанса, а не правка знания.
+    Идемпотентно: объект с датой второй раз не берётся, поэтому прерванный
+    прогон продолжается повторным запуском.
+    """
+    from jericho.config import ensure_runtime_dirs, load_settings
+    from jericho.documents import _office_document_date, _pdf_document_date_from_bytes
+    from jericho.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    scanned = dated = missing = 0
+    try:
+        while True:
+            batch = storage.knowledge_missing_document_date(user_id=args.user, limit=args.batch)
+            if not batch:
+                break
+            for row in batch:
+                scanned += 1
+                raw_path = str(row.get("stored_path") or "")
+                path = pathlib.Path(raw_path)
+                if not path.is_absolute():
+                    path = settings.files_dir / path
+                try:
+                    content = path.read_bytes()
+                except OSError:
+                    missing += 1
+                    continue
+                if content[:2] == b"PK":
+                    found = _office_document_date(content)
+                elif content[:5] == b"%PDF-":
+                    found = _pdf_document_date_from_bytes(content)
+                else:
+                    found = None
+                if found and storage.set_document_date(str(row["id"]), str(row["user_id"]), found):
+                    dated += 1
+            if len(batch) < args.batch:
+                break
+            if args.limit and scanned >= args.limit:
+                break
+        storage.record_event(
+            "documents.dates_backfilled",
+            {"scanned": scanned, "dated": dated, "files_missing": missing},
+        )
+    finally:
+        storage.close()
+    print(f"Просмотрено объектов: {scanned}; проставлено дат: {dated}; файлов не найдено: {missing}.")
+    if scanned and not dated:
+        print("Ни одной даты: у этих форматов её нет в файле — это не ошибка, а отсутствие данных.")
+    return 0
+
+
 def _purge(args: argparse.Namespace) -> int:
     """Irreversibly hard-delete soft-deleted knowledge while the backend is stopped."""
 
@@ -1101,6 +1163,15 @@ def build_parser() -> argparse.ArgumentParser:
     reindex.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
     reindex.add_argument("--yes", action="store_true", help="Confirm the recomputation")
     reindex.set_defaults(handler=_reindex_embeddings)
+
+    backfill = sub.add_parser(
+        "backfill-document-dates",
+        help="Read each stored file's own date (Office/PDF metadata) into its Knowledge Object",
+    )
+    backfill.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    backfill.add_argument("--batch", type=int, default=200, help="Objects per pass (default: 200)")
+    backfill.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
+    backfill.set_defaults(handler=_backfill_document_dates)
 
     mint = sub.add_parser("mint-token", help="Issue a scoped API token for an account/preset")
     mint.add_argument("--user", required=True, help="Account id the token authenticates as")

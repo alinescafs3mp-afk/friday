@@ -21,8 +21,9 @@ import mimetypes
 import re
 import tarfile
 import zipfile
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -67,6 +68,89 @@ _MAX_OFFICE_EXPANDED_BYTES = 128 * 1024 * 1024
 _MAX_OFFICE_MEMBER_BYTES = 64 * 1024 * 1024
 _MAX_ZIP_RATIO = 500.0
 _MAX_TABULAR_ROWS = 100_000
+
+# Дата САМОГО документа, взятая из провенанса файла, а не угаданная из текста.
+#
+# Существующий фильтр по датам намеренно означает «документ УПОМИНАЕТ дату»:
+# документ называет несколько дат, и какая из них его собственная, текст не
+# говорит. Но у файла есть собственная дата, которую никто не выдумывал, — её
+# записал редактор при сохранении (docProps/core.xml у docx/xlsx, /CreationDate
+# у pdf). На архиве владельца это единственный способ отличить документ 2019
+# года от документа 2025-го: у всех 1537 объектов дата загрузки одна и та же —
+# день импорта.
+#
+# Берётся ТОЛЬКО из формата. Файловое mtime сюда не годится: копирование на
+# флешку переписывает его у всех файлов разом, и «дата документа» стала бы
+# датой копирования — то самое угадывание, от которого фильтр и уходил.
+_OFFICE_CORE_PROPERTIES = "docProps/core.xml"
+_CORE_DATE_RE = re.compile(
+    r"<(?:dcterms:)?(created|modified)[^>]*>([0-9]{4}-[0-9]{2}-[0-9]{2})", re.IGNORECASE
+)
+# 1900 — ниже этого у офисных файлов лежат только служебные нули и мусор
+# конвертеров; 2100 — потолок против «31.12.9999», который ставят генераторы.
+_DOCUMENT_DATE_MIN = "1900-01-01"
+_DOCUMENT_DATE_MAX = "2100-01-01"
+
+
+def _plausible_document_date(value: str) -> str | None:
+    """ISO-дата, если она вообще похожа на настоящую дату документа."""
+    candidate = (value or "").strip()[:10]
+    if len(candidate) != 10 or candidate[4] != "-" or candidate[7] != "-":
+        return None
+    if not (_DOCUMENT_DATE_MIN <= candidate < _DOCUMENT_DATE_MAX):
+        return None
+    try:
+        datetime.strptime(candidate, "%Y-%m-%d")  # noqa: DTZ007 - календарная дата без времени
+    except ValueError:
+        return None
+    return candidate
+
+
+def _office_document_date(content: bytes) -> str | None:
+    """`dcterms:created` из docProps/core.xml; при отсутствии — `modified`."""
+    with suppress(Exception):
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            if _OFFICE_CORE_PROPERTIES not in archive.namelist():
+                return None
+            with archive.open(_OFFICE_CORE_PROPERTIES) as handle:
+                # Ограничение чтения: core.xml — это килобайты, и раздутый член
+                # архива не должен превращаться в чтение сотен мегабайт.
+                raw = handle.read(64 * 1024).decode("utf-8", errors="replace")
+        found: dict[str, str] = {}
+        for match in _CORE_DATE_RE.finditer(raw):
+            found.setdefault(match.group(1).casefold(), match.group(2))
+        for key in ("created", "modified"):
+            candidate = _plausible_document_date(found.get(key, ""))
+            if candidate:
+                return candidate
+    return None
+
+
+# Форматы, у которых внутри zip лежит docProps/core.xml.
+_OFFICE_DATE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+
+
+def _pdf_document_date_from_bytes(content: bytes) -> str | None:
+    """Дата PDF по байтам — работает и для скана без текстового слоя."""
+    with suppress(Exception):
+        from pypdf import PdfReader
+
+        return _pdf_document_date(PdfReader(io.BytesIO(content), strict=False))
+    return None
+
+
+def _pdf_document_date(reader: Any) -> str | None:
+    """`/CreationDate` вида `D:20230412...` из метаданных PDF."""
+    with suppress(Exception):
+        info = reader.metadata or {}
+        for key in ("/CreationDate", "/ModDate"):
+            raw = str(info.get(key) or "")
+            digits = raw[2:10] if raw.startswith("D:") else raw[:8]
+            if len(digits) == 8 and digits.isdigit():
+                candidate = _plausible_document_date(f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}")
+                if candidate:
+                    return candidate
+    return None
 
 
 @dataclass(frozen=True)
@@ -240,6 +324,19 @@ class DocumentExtractor:
         if len(result.text) > self.max_text_chars:
             metadata["text_truncated"] = True
             metadata["original_text_chars"] = len(result.text)
+        # Собственная дата документа снимается ЗДЕСЬ, а не внутри разборщиков, и
+        # потому переживает неудачу разбора: скан без текстового слоя, битый docx
+        # и файл незнакомого генератора всё равно несут дату, которую записал
+        # редактор. На корпусе владельца 35 файлов не читаются вовсе — их место в
+        # хронологии от этого не исчезает.
+        if "document_date" not in metadata:
+            own_date = (
+                _pdf_document_date_from_bytes(content)
+                if ext == ".pdf" or detected_mime == "application/pdf"
+                else (_office_document_date(content) if ext in _OFFICE_DATE_EXTENSIONS else None)
+            )
+            if own_date:
+                metadata["document_date"] = own_date
         return DocumentResult(text, metadata, result.success, result.error)
 
     def extract_visual_assets(

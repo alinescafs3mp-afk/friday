@@ -135,6 +135,15 @@ class ReviewMixin(PipelineShared):
             ],
             metadata_json={
                 **enrichment.metadata,
+                # Дата документа взята из провенанса файла при приёме и живёт в
+                # метаданных raw. Обогащение считается заново по тексту и о ней не
+                # знает, поэтому при продвижении её надо перенести явно — иначе у
+                # продвинутого из Inbox документа даты не будет вовсе.
+                **(
+                    {"document_date": str(_json_dict(raw.get("metadata_json")).get("document_date"))}
+                    if _json_dict(raw.get("metadata_json")).get("document_date")
+                    else {}
+                ),
                 **suggested_metadata,
                 **(metadata or {}),
                 "manually_promoted_from_inbox": inbox_id,

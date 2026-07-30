@@ -390,6 +390,57 @@ class KnowledgeMixin(StorageShared):
             self._store_ko_version(conn, row)
         return obj
 
+    def knowledge_missing_document_date(
+        self, *, user_id: str | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """Объекты из файлов, у которых собственной даты документа ещё нет.
+
+        Нужен разовый проход: дату из провенанса файла начали снимать при приёме,
+        а корпус уже загружен — у владельца 1537 объектов с датой создания «день
+        импорта» и без собственной. Файлы лежат content-addressed и никуда не
+        делись, поэтому дату можно достать, не трогая сами документы.
+
+        Отдаётся только то, что нужно проходу: идентификатор, арендатор и путь к
+        файлу. Тела не читаются — обход по всему корпусу с `content` уже однажды
+        стоил 45 МБ на страницу из пятидесяти строк.
+        """
+        clauses = [
+            "k.deleted_at IS NULL",
+            "json_extract(k.metadata_json,'$.document_date') IS NULL",
+            "r.content_type='file'",
+            "json_extract(r.metadata_json,'$.stored_path') IS NOT NULL",
+        ]
+        params: list[Any] = []
+        if user_id:
+            clauses.append("k.user_id=?")
+            params.append(user_id)
+        params.append(max(1, min(int(limit), 5000)))
+        rows = self.execute(
+            "SELECT k.id AS id, k.user_id AS user_id, "
+            "json_extract(r.metadata_json,'$.stored_path') AS stored_path "
+            "FROM knowledge_objects k JOIN raw_objects r ON r.id=k.raw_object_id "
+            f"WHERE {' AND '.join(clauses)} ORDER BY k.rowid LIMIT ?",  # nosec B608 - фиксированные условия
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_document_date(self, ko_id: str, user_id: str, document_date: str) -> bool:
+        """Записать собственную дату документа в метаданные, не создавая версию.
+
+        Намеренно НЕ через `update_knowledge_fields`: это не правка знания, а
+        дозапись провенанса, который был утрачен при приёме. Версия здесь означала
+        бы, что человек что-то менял, и засорила бы историю правок на полутора
+        тысячах объектов разом.
+        """
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE knowledge_objects SET metadata_json="
+                "json_set(COALESCE(metadata_json,'{}'), '$.document_date', ?) "
+                "WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                (document_date, ko_id, user_id),
+            )
+        return bool(cursor.rowcount)
+
     def update_knowledge_fields(self, ko_id: str, user_id: str, **fields: Any) -> dict[str, Any] | None:
         """Merge ``fields`` into a Knowledge Object and version the result.
 
@@ -645,17 +696,38 @@ class KnowledgeMixin(StorageShared):
             # такая». Второго данные не дают: документ называет несколько дат, и какая
             # из них его собственная — неизвестно. Придумывать «главную» значило бы
             # угадывать за человека; упоминание проверяемо и честно.
-            where += (
-                " AND EXISTS (SELECT 1 FROM json_each(knowledge_objects.metadata_json, '$.dates')"
+            #
+            # С 0.151.0 к упоминаниям добавлена СОБСТВЕННАЯ дата документа, если она
+            # известна из провенанса файла (docProps/core.xml, /CreationDate). Это не
+            # угадывание: дату записал редактор при сохранении, а не мы вывели из
+            # текста. Условие — дизъюнкция: документ подходит, если в диапазон попала
+            # либо его собственная дата, либо любая упомянутая. Сужать до собственной
+            # нельзя — она есть далеко не у всех, и «покажи за март» молча потеряло бы
+            # всё, что пришло текстом.
+            document_date = (
+                "jericho_iso_date(json_extract(knowledge_objects.metadata_json,'$.document_date'))"
+            )
+            own: list[str] = [f"{document_date} IS NOT NULL"]
+            own_params: list[Any] = []
+            mentioned = (
+                " EXISTS (SELECT 1 FROM json_each(knowledge_objects.metadata_json, '$.dates')"
                 " WHERE jericho_iso_date(json_each.value) IS NOT NULL"
             )
+            mentioned_params: list[Any] = []
             if since:
-                where += " AND jericho_iso_date(json_each.value) >= ?"
-                params.append(since)
+                own.append(f"{document_date} >= ?")
+                own_params.append(since)
+                mentioned += " AND jericho_iso_date(json_each.value) >= ?"
+                mentioned_params.append(since)
             if until:
-                where += " AND jericho_iso_date(json_each.value) <= ?"
-                params.append(until)
-            where += ")"
+                own.append(f"{document_date} <= ?")
+                own_params.append(until)
+                mentioned += " AND jericho_iso_date(json_each.value) <= ?"
+                mentioned_params.append(until)
+            mentioned += ")"
+            where += f" AND (({' AND '.join(own)}) OR{mentioned})"
+            params.extend(own_params)
+            params.extend(mentioned_params)
         if entity_id:
             # Browse-by-entity/container: only reviewer-accepted links count.
             where += (

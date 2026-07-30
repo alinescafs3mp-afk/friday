@@ -437,6 +437,16 @@ class FilesMixin(PipelineShared):
             )
         )
         enrichment = self._enrich(text_content or filename, assessment, user_id=user_id)
+        # Дата документа едет В ОБОГАЩЕНИИ, а не только в метаданных raw: объект
+        # знаний собирается из `enrichment.metadata`, и метаданные raw в него не
+        # копируются — по-другому дата не пережила бы продвижение и фильтровать
+        # было бы нечего.
+        extracted_date = str((extraction.metadata or {}).get("document_date") or "")
+        if extracted_date:
+            enrichment = replace(
+                enrichment,
+                metadata={**enrichment.metadata, "document_date": extracted_date},
+            )
         if vision:
             # OCR text and model-proposed entities share the same uncertain visual
             # provenance. Even deterministic extraction over OCR output must stay
@@ -535,6 +545,12 @@ class FilesMixin(PipelineShared):
             "vision_used": bool(vision),
             "vision_review_required": bool(vision),
         }
+        # Дата САМОГО документа — из провенанса файла (docProps/core.xml, /CreationDate),
+        # а не угаданная из текста. У владельца дата загрузки одна на весь архив (день
+        # импорта), и без этой строки «покажи документы 2023 года» отвечать нечем.
+        document_date = str((extraction.metadata or {}).get("document_date") or "")
+        if document_date:
+            file_metadata["document_date"] = document_date
         if media_kind:
             file_metadata["media_kind"] = media_kind
         raw = RawObject(
