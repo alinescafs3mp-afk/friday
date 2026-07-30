@@ -478,6 +478,8 @@ class KnowledgeMixin(StorageShared):
         tag: str | None,
         entity_id: str | None,
         query: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> tuple[str, list[Any]]:
         """The WHERE clause and its parameters, built ONCE for the list and its count.
 
@@ -520,6 +522,28 @@ class KnowledgeMixin(StorageShared):
                 " LIKE jericho_casefold(?))"
             )
             params.extend([needle, needle, needle])
+        if since or until:
+            # «Покажи всё за март 2023» — первое, что спрашивают у архива за годы, и
+            # ответить было нечем. Работа при этом уже была сделана и потеряна: даты
+            # извлечены и лежат в метаданных у 630 объектов из 1537, в среднем по пять
+            # на документ, — и не использовались нигде, ни колонкой, ни индексом, ни
+            # параметром листинга.
+            #
+            # Условие «документ УПОМИНАЕТ дату в диапазоне», а не «дата документа
+            # такая». Второго данные не дают: документ называет несколько дат, и какая
+            # из них его собственная — неизвестно. Придумывать «главную» значило бы
+            # угадывать за человека; упоминание проверяемо и честно.
+            where += (
+                " AND EXISTS (SELECT 1 FROM json_each(knowledge_objects.metadata_json, '$.dates')"
+                " WHERE jericho_iso_date(json_each.value) IS NOT NULL"
+            )
+            if since:
+                where += " AND jericho_iso_date(json_each.value) >= ?"
+                params.append(since)
+            if until:
+                where += " AND jericho_iso_date(json_each.value) <= ?"
+                params.append(until)
+            where += ")"
         if entity_id:
             # Browse-by-entity/container: only reviewer-accepted links count.
             where += (
@@ -538,10 +562,18 @@ class KnowledgeMixin(StorageShared):
         tag: str | None = None,
         entity_id: str | None = None,
         query: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> int:
         """How many objects the SAME filters select — the total a page is a page of."""
         where, params = self._knowledge_filter(
-            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id, query=query
+            user_id,
+            lifecycle_stage=lifecycle_stage,
+            tag=tag,
+            entity_id=entity_id,
+            query=query,
+            since=since,
+            until=until,
         )
         # ``where`` contains only fixed clauses; all values remain bound parameters.
         row = self.execute(
@@ -560,9 +592,17 @@ class KnowledgeMixin(StorageShared):
         tag: str | None = None,
         entity_id: str | None = None,
         query: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> list[dict[str, Any]]:
         where, params = self._knowledge_filter(
-            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id, query=query
+            user_id,
+            lifecycle_stage=lifecycle_stage,
+            tag=tag,
+            entity_id=entity_id,
+            query=query,
+            since=since,
+            until=until,
         )
         params.extend([max(1, min(limit, 5000)), max(0, offset)])
         # ``where`` contains only fixed clauses; all values remain bound parameters.

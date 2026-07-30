@@ -74,6 +74,11 @@ async def list_all_knowledge(
     # тега стоят на 1524 из них. То есть и сортировка, и фильтр по тегу вырождены, и
     # остаётся листание полутора тысяч строк.
     q: str | None = Query(None, max_length=200),
+    # Диапазон дат, УПОМЯНУТЫХ в документе. Именно упомянутых: документ называет
+    # несколько дат, и какая из них его собственная — данные не говорят. Придумывать
+    # «главную» значило бы угадывать за человека.
+    since: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    until: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     limit: int = Query(200, ge=1, le=5000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
@@ -89,6 +94,8 @@ async def list_all_knowledge(
         tag=tag,
         entity_id=entity_id,
         query=q,
+        since=since,
+        until=until,
     )
     return {
         "user_id": target,
@@ -99,7 +106,13 @@ async def list_all_knowledge(
         # so on a filtered view it would report thousands over a set of twelve and the
         # pager would never reach its last page.
         "total": storage.count_filtered_knowledge_objects(
-            target, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id, query=q
+            target,
+            lifecycle_stage=lifecycle_stage,
+            tag=tag,
+            entity_id=entity_id,
+            query=q,
+            since=since,
+            until=until,
         ),
         "limit": limit,
         "offset": offset,

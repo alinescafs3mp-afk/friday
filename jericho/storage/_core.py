@@ -7,6 +7,9 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import re
+from datetime import date
+
 from jericho.storage._base import (
     CORE_INDEX_SCHEMA,
     CORE_TABLE_SCHEMA,
@@ -32,6 +35,44 @@ from jericho.storage._base import (
     time,
     utc_now,
 )
+
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
+
+
+def _iso_date(value: Any) -> str | None:
+    """Привести дату документа к `ГГГГ-ММ-ДД` или вернуть None.
+
+    Строки берутся из бумаги как есть, поэтому здесь три работы сразу: узнать форму,
+    отбросить не-даты и отбросить невозможные даты.
+
+    Замерено на архиве владельца (3180 значений у 630 объектов): 2537 в форме
+    дд.мм.гггг, 345 уже в ISO, 223 — это ВРЕМЯ («1:25»), остальное мусор, включая
+    «00.00.0000». Время и мусор обязаны отсеиваться здесь, а не попадать в диапазон
+    случайно: иначе фильтр «за март 2023» вернёт документы, в которых нет ни одной
+    мартовской даты, и человек перестанет ему верить.
+
+    Год ограничен снизу: «01.01.0001» — это не дата документа, а артефакт разбора.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    match = _ISO_DATE_RE.match(text)
+    if match:
+        year, month, day = (int(part) for part in match.groups())
+    else:
+        match = _DMY_DATE_RE.match(text)
+        if not match:
+            return None
+        day, month, year = (int(part) for part in match.groups())
+    if not (1900 <= year <= 2200 and 1 <= month <= 12 and 1 <= day <= 31):
+        return None
+    try:
+        date(year, month, day)
+    except ValueError:
+        # 31 февраля и подобное: строка выглядит датой, датой не являясь.
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
 
 
 class CoreMixin(StorageShared):
@@ -141,6 +182,18 @@ class CoreMixin(StorageShared):
                 "jericho_casefold",
                 1,
                 lambda value: str(value).casefold() if value is not None else None,
+                deterministic=True,
+            )
+            # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
+            # как они написаны в бумаге. Замерено на архиве владельца: 3180 значений у
+            # 630 объектов, из них 2537 в форме дд.мм.гггг, 345 в ISO, 223 — вообще
+            # время («1:25»), остальное мусор вроде «00.00.0000». Фильтровать по такому
+            # можно только приведя к одной форме, а приводить надо В SQL: иначе условие
+            # не построить, и работа остаётся лежать в JSON-блобе без применения.
+            conn.create_function(
+                "jericho_iso_date",
+                1,
+                _iso_date,
                 deterministic=True,
             )
             # Schema creation/migration/FTS is applied exactly once, by the first

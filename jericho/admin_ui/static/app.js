@@ -1,5 +1,5 @@
 'use strict';
-const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
+const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',knowledgeSince:'',knowledgeUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
 const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const q=v=>encodeURIComponent(v??'').replace(/'/g,'%27').replace(/%20/g,'+');
@@ -162,8 +162,11 @@ renderers.knowledge=async gen=>{
   // три на 1537 объектов, а два служебных тега стоят на 1524 из них. То есть и порядок,
   // и чипы тегов вырождены, и без поиска остаётся листание полутора тысяч строк.
   const search=state.knowledgeQuery?`&q=${q(state.knowledgeQuery)}`:'';
+  // Диапазон дат, УПОМЯНУТЫХ в документе. Тот же приём, что на экране «Активность»,
+  // где фильтр по периоду уже есть, — человеку не надо учить второй способ.
+  const period=(state.knowledgeSince?`&since=${q(state.knowledgeSince)}`:'')+(state.knowledgeUntil?`&until=${q(state.knowledgeUntil)}`:'');
   const [data,tagData]=await Promise.all([
-    api(`/api/admin/knowledge?user_id=${q(uid)}&limit=${PAGE}&offset=${state.knowledgeOffset}${tagFilter}${search}`),
+    api(`/api/admin/knowledge?user_id=${q(uid)}&limit=${PAGE}&offset=${state.knowledgeOffset}${tagFilter}${search}${period}`),
     api(`/api/admin/knowledge/tags?user_id=${q(uid)}&limit=40`)
   ]);if(gen!==renderGen)return;
   state.knowledge=data.items||[];
@@ -175,6 +178,13 @@ renderers.knowledge=async gen=>{
     +`<button class="btn primary" ${call('searchKnowledge')}>Найти</button>`
     +(state.knowledgeQuery?`<button class="btn" ${call('clearKnowledgeSearch')}>Сбросить</button>`:'')
     +`<button class="btn" ${call('sourceSearchDialog')}>Найти по тексту документов</button>`
+    +`</div>`
+    +`<div class="toolbar"><span class="muted">Даты в документе:</span>`
+    +`<input id="knowledgeSince" type="date" value="${esc(state.knowledgeSince||'')}">`
+    +`<span class="muted">—</span>`
+    +`<input id="knowledgeUntil" type="date" value="${esc(state.knowledgeUntil||'')}">`
+    +`<button class="btn" ${call('applyKnowledgePeriod')}>Применить</button>`
+    +((state.knowledgeSince||state.knowledgeUntil)?`<button class="btn" ${call('clearKnowledgePeriod')}>Снять</button>`:'')
     +`</div>`
     +(state.knowledgeQuery?`<div class="notice">Найдено по «${esc(state.knowledgeQuery)}»: <b>${Number(data.total||0)}</b>. Это поиск по НАЗВАНИЯМ. Если помните фразу из самого документа — «Найти по тексту документов».</div>`:'');
   setApp(gen,`${filterNote}<section class="card"><div class="toolbar"><h2 class="grow">Объекты знаний</h2><button class="btn" ${call('ingestUrlDialog')}>Сохранить страницу по URL</button><button class="btn" ${call('bookmarkletDialog')}>Букмарклет</button><button class="btn" ${call('runLifecycle')}>Архивировать устаревшее</button><button class="btn" ${call('navigate','cleanup')}>Проверить старые данные</button><span class="badge">${rows.length}</span></div>${searchBar}${chips?`<div class="toolbar">${chips}</div>`:''}${rows.length?table(['Знание','Тип и lifecycle','Сигналы качества','Версия','Действия'],rows):empty(state.knowledgeTag?'По этому тегу записей нет':'База знаний пока пуста')}${pager('knowledgePage',state.knowledgeOffset,state.knowledge.length,data.total)}</section>`);
@@ -221,6 +231,10 @@ actions.runSourceSearch=async()=>{
   }catch(e){box.innerHTML=empty(e.message)}
 };
 actions.searchKnowledge=()=>{const el=document.getElementById('knowledgeSearch');state.knowledgeQuery=el?el.value.trim():'';state.knowledgeOffset=0;refresh()};
+actions.applyKnowledgePeriod=()=>{
+  const a=document.getElementById('knowledgeSince'),b=document.getElementById('knowledgeUntil');
+  state.knowledgeSince=a?a.value:'';state.knowledgeUntil=b?b.value:'';state.knowledgeOffset=0;refresh()};
+actions.clearKnowledgePeriod=()=>{state.knowledgeSince='';state.knowledgeUntil='';state.knowledgeOffset=0;refresh()};
 actions.clearKnowledgeSearch=()=>{state.knowledgeQuery='';state.knowledgeOffset=0;refresh()};
 actions.inspectKnowledge=async id=>{
   try{
