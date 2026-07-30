@@ -22,7 +22,7 @@ identifiers = HybridSearcher._query_identifiers  # noqa: SLF001
 @pytest.mark.parametrize(
     "query",
     [
-        "график дежурств и т.д.",
+        "график отпусков и т.д.",
         "перечень имущества и т.п.",
         "и.о. начальника подписал",
         "cost centres e.g. logistics",
@@ -90,8 +90,8 @@ async def test_a_common_russian_phrase_no_longer_empties_the_answer(storage, set
     storage.store_knowledge_object(ko)
 
     searcher = HybridSearcher(storage, None, record_usage=False)
-    plain = await searcher.search("alice", "график дежурств", limit=5)
-    with_filler = await searcher.search("alice", "график дежурств и т.д.", limit=5)
+    plain = await searcher.search("alice", "график отпусков", limit=5)
+    with_filler = await searcher.search("alice", "график отпусков и т.д.", limit=5)
 
     assert [item["id"] for item in plain["results"]] == [ko.id]
     assert [item["id"] for item in with_filler["results"]] == [ko.id]

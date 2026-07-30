@@ -3,7 +3,7 @@
 Three failures look identical to a token matcher and are completely different
 things to the person typing:
 
-* the layout was never switched — «uhfabr lt;ehcnd» is «график дежурств»;
+* the layout was never switched — «uhfabr jngecrjd» is «график отпусков»;
 * a finger slipped — «график дужурств»;
 * the phone was in a pocket — «asdkjhqwe zxcmn».
 

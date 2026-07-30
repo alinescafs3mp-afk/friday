@@ -2,7 +2,7 @@
 
 Three inputs look identical to a token matcher and are three different things:
 
-* «uhfabr lt;ehcnd» — the layout was never switched; a real question;
+* «uhfabr jngecrjd» — the layout was never switched; a real question;
 * «график дужурста» — a finger slipped; a real question;
 * «asdkjhqwe zxcmn» — the phone was in a pocket; not a question.
 
@@ -69,8 +69,8 @@ def corpus(storage):
 
 @pytest.mark.asyncio
 async def test_a_query_typed_in_the_wrong_layout_finds_its_document(storage, corpus):
-    typed = "uhfabr lt;ehcnd"  # «график дежурств» with the layout stuck on English
-    assert switched(typed) == "график дежурств", "the premise"
+    typed = "uhfabr jngecrjd"  # «график отпусков» with the layout stuck on English
+    assert switched(typed) == "график отпусков", "the premise"
 
     searcher = HybridSearcher(storage, None, record_usage=False)
     result = await searcher.search("alice", typed, limit=5)
@@ -131,7 +131,7 @@ async def test_noise_that_collides_with_a_prefix_is_not_a_repair(storage, corpus
 async def test_a_question_that_works_is_never_rewritten(storage, corpus):
     """No repair on the happy path — and no extra queries paid for it."""
     searcher = HybridSearcher(storage, None, record_usage=False)
-    result = await searcher.search("alice", "график дежурств", limit=5)
+    result = await searcher.search("alice", "график отпусков", limit=5)
     assert corpus["duty"] in {item["id"] for item in result["results"]}
     assert "query_repaired" not in result["strategy"]
 

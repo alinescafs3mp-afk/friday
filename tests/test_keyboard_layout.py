@@ -18,9 +18,9 @@ from jericho.retrieval._keyboard import switched, to_english, to_russian
     ("typed", "meant"),
     [
         ("ghbdtn", "привет"),
-        ("uhfabr lt;ehcnd", "график дежурств"),
+        ("uhfabr jngecrjd", "график отпусков"),
         ("rjyabuehfwbz", "конфигурация"),
-        ("Ghbrfp j lt;ehcndt", "Приказ о дежурстве"),
+        ("Ghbrfp j jngecrf[", "Приказ о отпусках"),
         (",tp ,evfub", "без бумаги"),
         ("dtljvjcnm", "ведомость"),
     ],
@@ -37,7 +37,7 @@ def test_russian_keys_read_as_english(typed, meant):
 
 
 def test_the_transformation_is_reversible():
-    for text in ("график дежурств караула", "backup policy review", "Приказ №12"):
+    for text in ("график отпусков караула", "backup policy review", "Приказ №12"):
         assert to_english(to_russian(text)) == text or to_russian(to_english(text)) == text
 
 

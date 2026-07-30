@@ -64,8 +64,8 @@ def test_a_short_word_keeps_its_shape():
 def test_the_ranker_folds_both_sides():
     """The wiring, not the mechanism: a unit-tested stemmer nobody calls is a
     stemmer that does nothing. Both texts go through `lexical_vector`."""
-    query = lexical_vector("график дежурств караула")
-    inflected = lexical_vector("графику дежурства караулом")
+    query = lexical_vector("график отпусков караула")
+    inflected = lexical_vector("графику отпусков караулом")
     unrelated = lexical_vector("рецепт борща со свёклой")
 
     assert sparse_cosine(query, inflected) > 0.8, "the same words in another case"

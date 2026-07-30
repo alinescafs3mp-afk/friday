@@ -44,7 +44,7 @@ def test_the_argument_is_left_exactly_as_typed():
     text to resend.
     """
     assert read(".тщеу пароли роутера") == "/note пароли роутера"
-    assert read(".ыуфкср график дежурств") == "/search график дежурств"
+    assert read(".ыуфкср график отпусков") == "/search график отпусков"
 
 
 @pytest.mark.parametrize(

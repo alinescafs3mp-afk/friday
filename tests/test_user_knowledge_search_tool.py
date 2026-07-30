@@ -110,9 +110,7 @@ async def test_an_ordinary_account_cannot_read_anyone(kernel):
     runtime, auth, _ = kernel
     ivan = auth.actor_for_user("usr_ivan", source="test")
 
-    result = await runtime.execute(
-        "user_knowledge_search", {"person": "Анна", "query": "отпуск"}, actor=ivan
-    )
+    result = await runtime.execute("user_knowledge_search", {"person": "Анна", "query": "отпуск"}, actor=ivan)
 
     assert result.success is False
     assert "denied" in result.error.casefold() or "not allowed" in result.error.casefold()
