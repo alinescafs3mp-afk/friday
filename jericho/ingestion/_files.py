@@ -546,11 +546,19 @@ class FilesMixin(PipelineShared):
                 **(metadata or {}),
             },
         )
+        # Ни литерала «document», ни первой части mime-типа. Оба приписывались
+        # КАЖДОМУ файлу без анализа содержимого, и на архиве владельца дали по 1524
+        # объекта из 1537 — то есть тег, не сужающий ничего, у 99% записей. При этом
+        # «document» дублировал `knowledge_kind` (он и так 'document' у 1531 объекта),
+        # а `mime_type.split("/")[0]` для docx/doc/xlsx/pdf всегда «application».
+        #
+        # Показ сортирует по убыванию частоты, поэтому эти два вытесняли с экрана всё
+        # осмысленное: и чипы в админке, и `/tags` в Telegram возглавляли именно они.
+        # Показ теперь их отбрасывает (см. `list_knowledge_tags`), но плодить мусор в
+        # базе всё равно незачем.
         tags = sorted(
             set(
                 [
-                    "document",
-                    mime_type.split("/", 1)[0],
                     *([media_kind] if media_kind else []),
                     *enrichment.tags,
                 ]

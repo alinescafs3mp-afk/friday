@@ -572,12 +572,34 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    # Доля корпуса, выше которой тег перестаёт быть осью навигации. Замерено на архиве
+    # владельца: `document` и `application` стоят на 1524 объектах из 1537 — то есть
+    # 99%, и выбор такого тега не сужает НИЧЕГО. А показ отсортирован по убыванию
+    # частоты, значит на экран попадала строго худшая часть распределения: и чипы в
+    # админке, и `/tags` в Telegram возглавляли два тега, приписанные каждому файлу
+    # без анализа содержимого.
+    #
+    # Полезное при этом было и не показывалось: 903 тега из 1693 стоят на 2-77
+    # объектах, то есть сужают до пяти процентов базы и меньше.
+    #
+    # Половина, а не пятая часть: тег на четверти архива всё ещё сужает вчетверо и
+    # может быть осмысленным («рядовой» — 334 объекта из 1537). Отсекается только то,
+    # что не сужает по существу.
+    _TAG_NOISE_SHARE = 0.5
+    # Ниже этого числа объектов правило не применяется: на архиве из десяти записей
+    # любой тег покроет заметную долю, а листать десять можно и без осей.
+    _TAG_NOISE_MIN_CORPUS = 20
+
     def list_knowledge_tags(self, user_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
         """Distinct tags with usage counts for browse-by-tag surfaces.
 
         Tags are stored canonically (deduped, casefold-sorted) per object, so
         one json_each pass yields exact values; grouping is case-insensitive
         with the first-seen spelling kept for display.
+
+        Теги, стоящие больше чем на половине живого корпуса, не возвращаются: они не
+        сужают выбор и вытесняют с экрана то, что сужает. Порог применяется только к
+        заметному корпусу — см. константы выше.
         """
         rows = self.execute(
             "SELECT json_each.value AS tag, COUNT(*) AS count"
@@ -585,9 +607,16 @@ class KnowledgeMixin(StorageShared):
             " WHERE knowledge_objects.user_id=? AND knowledge_objects.deleted_at IS NULL"
             " GROUP BY jericho_casefold(json_each.value)"
             " ORDER BY count DESC, jericho_casefold(json_each.value) ASC LIMIT ?",
-            (user_id, max(1, min(int(limit), 1000))),
+            # С запасом: часть строк отсеется как шум, и без запаса страница вышла бы
+            # короче запрошенной ровно на число отсеянных.
+            (user_id, max(1, min(int(limit), 1000)) * 4),
         ).fetchall()
-        return [{"tag": str(row["tag"]), "count": int(row["count"])} for row in rows]
+        total = self.count_knowledge_objects(user_id)
+        ceiling = total * self._TAG_NOISE_SHARE if total >= self._TAG_NOISE_MIN_CORPUS else None
+        items: list[dict[str, Any]] = [{"tag": str(row["tag"]), "count": int(row["count"])} for row in rows]
+        if ceiling is not None:
+            items = [item for item in items if int(item["count"]) <= ceiling]
+        return items[: max(1, min(int(limit), 1000))]
 
     def list_container_entities(self, user_id: str, types: tuple[str, ...]) -> list[dict[str, Any]]:
         """Canonical container entities (projects/collections) with member counts."""
