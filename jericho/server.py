@@ -669,7 +669,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             ingestion = IngestionPipeline(settings, storage, graph, llm)
             web_surfer = WebSurfer(settings)
             kernel = ExecutionKernel(auth_service, settings)
-            kernel.bind_services(storage, graph, web_surfer, ingestion)
+            kernel.bind_services(storage, graph, web_surfer, ingestion, searcher=searcher)
             agent = AgentRuntime(settings, storage, llm, kernel)
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from jericho.people import resolve_person, unambiguous
 from jericho.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
+from jericho.retrieval import best_snippet
 from jericho.storage._oversight import ANALYSES
 from jericho.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
 from jericho.workers._blocking import run_blocking
@@ -225,6 +226,13 @@ class ToolResult:
         return f"Результат {self.tool_name}:\n{encoded}"
 
 
+# Длина выдержки в ответе инструмента. Десять результатов по 600 знаков — это 6 000
+# плюс обвязка, то есть половина бюджета в 12 000: остаётся место и на ответ модели, и
+# на второй вызов. Прежде сюда уходили тела документов, и одного среднего (16 565
+# знаков на этом архиве) хватало, чтобы переполнить бюджет целиком.
+_TOOL_EXCERPT_CHARS = 600
+
+
 class ExecutionKernel:
     """One immutable registry; user identity is supplied per invocation."""
 
@@ -240,6 +248,7 @@ class ExecutionKernel:
         self.web_surfer: WebSurfer | None = None
         self.ingestion: IngestionPipeline | None = None
         self.executive: ExecutiveService | None = None
+        self.searcher: Any = None
         self._tools: dict[str, ToolSpec] = {}
         self._register_specs()
 
@@ -249,11 +258,15 @@ class ExecutionKernel:
         kg: KnowledgeGraph,
         web_surfer: WebSurfer,
         ingestion: IngestionPipeline,
+        searcher: Any = None,
     ) -> None:
         self.storage = storage
         self.kg = kg
         self.web_surfer = web_surfer
         self.ingestion = ingestion
+        # Тот же гибридный поиск, что у контекстного пути. Ядро его не получало, и
+        # инструмент памяти работал на префиксном FTS: без эмбеддингов, без морфологии.
+        self.searcher = searcher
         handlers: dict[str, Handler] = {
             "memory_search": self._memory_search,
             "memory_save": self._memory_save,
@@ -447,10 +460,55 @@ class ExecutionKernel:
         }
 
     async def _memory_search(self, *, actor: ActorContext, query: str, limit: int = 10) -> dict[str, Any]:
-        storage, _, _, _ = self._require_services()
+        """Поиск по своему архиву — ВЫДЕРЖКАМИ, а не телами документов.
+
+        Инструмент отдавал строки целиком (`SELECT k.*`), и результат обрезался на
+        12 000 знаках в `to_llm_message`. Замерено на архиве владельца: средняя длина
+        документа 16 565 знаков, то есть ОДИН средний документ переполняет весь бюджет;
+        231 документ длиннее самого бюджета, самый длинный — 1.3 млн знаков. На
+        реальных запросах до модели доходил один результат из десяти, а поскольку
+        `results` шёл в ответе раньше `count`, обрезка съедала и счётчик — модель не
+        видела даже, сколько было найдено.
+
+        И обрезалась ГОЛОВА документа, а не совпавший фрагмент. Для контекстного пути
+        это чинили отдельно («Quote the passage that matched, not the top of the
+        document»); до инструмента памяти починка не дошла, поэтому агент, ища САМ,
+        снова получал титульную страницу.
+
+        Теперь: проекция полей плюс выдержка вокруг совпадения. Счётчик — ПЕРВЫМ
+        ключом, чтобы он пережил любую обрезку.
+        """
+        # Требуется ТОЛЬКО хранилище: поиск по своему архиву не зависит ни от веба, ни
+        # от конвейера приёма, и общий `_require_services` отказывал бы там, где
+        # отказывать не за что.
+        storage = self.storage
+        if storage is None:
+            raise RuntimeError("Execution kernel storage is not initialized")
         limit = max(1, min(int(limit), 50))
-        results = storage.search_knowledge(actor.user_id, query, limit=limit)
-        return {"query": query, "results": results, "count": len(results)}
+        # Гибридный поиск, если он выдан: у инструмента был свой, на FTS-префиксе и
+        # LIKE, без эмбеддингов и без морфологии. Замерено на живой базе: «поставка»
+        # находит 0 документов, «поставк» — 2; «отчет» — 13, «отчёт» — 3. То есть
+        # слово в именительном падеже — ровно так его напишет модель, переформулируя
+        # вопрос, — давало честное «ничего не нашлось» при существующих документах, и
+        # 1537 честных векторов на этом пути не участвовали.
+        rows: list[dict[str, Any]]
+        if self.searcher is not None:
+            found = await self.searcher.search(actor.user_id, query, limit=limit)
+            rows = list(found.get("results") or [])
+        else:
+            rows = storage.search_knowledge(actor.user_id, query, limit=limit)
+        results = [
+            {
+                "id": str(row.get("id") or ""),
+                "title": str(row.get("title") or "Без названия")[:200],
+                "kind": str(row.get("knowledge_kind") or "note"),
+                "updated_at": row.get("updated_at"),
+                # Выдержка вокруг совпадения, а не начало документа.
+                "excerpt": best_snippet(query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS),
+            }
+            for row in rows
+        ]
+        return {"count": len(results), "query": query, "results": results}
 
     async def _memory_save(
         self,
