@@ -317,6 +317,9 @@ class AgentContext:
     pending_conflicts: int = 0
     feedback_summary: dict[str, Any] = field(default_factory=dict)
     knowledge_citations: dict[str, str] = field(default_factory=dict)
+    # Сколько кандидатов срезал порог переранжировщика. «В архиве пусто» и
+    # «похожее есть, но не отвечает» — разные ответы человеку.
+    rerank_dropped: int = 0
 
 
 class AgentRuntime:
@@ -580,6 +583,12 @@ class AgentRuntime:
                 )
                 context.knowledge_hits = retrieval_result.get("results", [])
                 context.entity_hits = retrieval_result.get("entity_matches", [])
+                strategy = retrieval_result.get("strategy")
+                if isinstance(strategy, dict):
+                    try:
+                        context.rerank_dropped = int(strategy.get("rerank_dropped") or 0)
+                    except (TypeError, ValueError):
+                        context.rerank_dropped = 0
                 context.retrieval_trace = [
                     {
                         "id": str(item.get("id") or ""),
@@ -1005,6 +1014,16 @@ class AgentRuntime:
                 "Режим ответа: общий разговор. Не притягивай личную базу, если она не отвечает на вопрос."
             ),
         }[context.answer_mode]
+        if context.rerank_dropped and not context.knowledge_hits:
+            # Порог отбирает молча, и без этой строки модель говорит «в архиве
+            # ничего нет» там, где похожее нашлось, но по оценке не отвечает.
+            # Второе человек может проверить сам — /why и Inbox, — а первое
+            # заставляет его думать, что архив пуст по теме.
+            mode_guidance += (
+                f"\nПохожие записи в архиве НАШЛИСЬ ({context.rerank_dropped} шт.), но по оценке "
+                "ни одна не отвечает на вопрос — они отсеяны порогом уверенности. Скажи это прямо; "
+                "не говори «в архиве ничего нет»."
+            )
         messages.append(
             {
                 "role": "system",

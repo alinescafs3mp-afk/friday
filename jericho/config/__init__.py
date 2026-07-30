@@ -916,6 +916,15 @@ def validate_settings(settings: JerichoSettings, *, production: bool = False) ->
                 "semantic search is enabled without numpy: dense recall falls back to "
                 "pure Python and gets slow as the corpus grows — install 'jericho[vectors]'"
             )
+    if settings.rerank_top > 0 and not (settings.rerank_base_url.strip() and settings.rerank_model.strip()):
+        # Same contradiction class as embeddings-without-model: `RerankBackend.enabled`
+        # requires both, so this knob combination turns reranking AND the confidence
+        # cut-off built on it into a silent no-op while the setting says it is on.
+        errors.append(
+            "JERICHO_RERANK_TOP is set but JERICHO_RERANK_BASE_URL/JERICHO_RERANK_MODEL "
+            "are empty: reranking and the confidence cut-off would silently never run — "
+            "set both or set JERICHO_RERANK_TOP=0"
+        )
     if production and settings.code_execution_enabled:
         warnings.append("Host-side code execution is enabled; use a separate sandbox container")
     return errors + [f"warning: {item}" for item in warnings]

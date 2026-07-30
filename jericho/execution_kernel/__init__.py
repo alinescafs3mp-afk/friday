@@ -515,13 +515,18 @@ class ExecutionKernel:
             }
             for row in rows
         ]
-        payload: dict[str, Any] = {"count": len(results), "query": query, "results": results}
+        payload: dict[str, Any] = {"count": len(results), "query": query}
         if dropped:
             # «В архиве этого нет» и «нашлось двадцать, ни одно не отвечает» — разные
             # ответы, и модель без этого числа выдаёт первый в обоих случаях. Порог
             # отбирает молча, и молчание здесь означало бы, что архив пуст по теме,
             # хотя похожее в нём есть и человек его помнит.
+            #
+            # Стоит ДО results по той же причине, по которой count стоит первым:
+            # `to_llm_message` режет длинный ответ по хвосту, и счётчик, стоящий
+            # после выдержек, до модели не доживал.
             payload["filtered_out"] = dropped
+        payload["results"] = results
         return payload
 
     async def _memory_save(

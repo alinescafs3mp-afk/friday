@@ -1829,8 +1829,12 @@ class HybridSearcher:
         # ПЕРЕСТАВЛЯЛ: переставлять пятёрку внутри пятёрки бессмысленно. С порогом у
         # шага появилась вторая работа — отсев, — и нужен он как раз тогда, когда
         # нашлось мало: три правдоподобных документа, ни один из которых не о том,
-        # выглядят убедительнее двадцати.
-        if self._reranker is not None and self._rerank_top > 0 and len(results) >= 2:
+        # выглядят убедительнее двадцати. А убедительнее всего — ОДИН: без нижней
+        # границы в единицу единственный лексически задевший формулировку документ
+        # показывался вовсе без оценки, ровно там, где ложный ответ дороже всего.
+        # Без порога перестановка одного — пустой HTTP-вызов, и планка остаётся 2.
+        rerank_floor = 1 if self._confident_min > 0.0 else 2
+        if self._reranker is not None and self._rerank_top > 0 and len(results) >= rerank_floor:
             reordered = await self._reranker(clean_query, results[: self._rerank_top])
             if reordered is not None and len(reordered) == len(results[: self._rerank_top]):
                 # Порядок меняется, состав — нет: хвост за `rerank_top` остаётся на
@@ -1974,6 +1978,10 @@ class HybridSearcher:
             # below-limit, and discarded-with-reason) plus each one's signal
             # breakdown so an admin can see WHY the ranking came out this way.
             returned_ids = {item["id"] for item in results}
+            # Ранг возвращённого — его место на ФАКТИЧЕСКОЙ странице. Обход ниже
+            # идёт по до-реранковому `ordered`, и счётчик по нему нумеровал бы
+            # выдачу в порядке, которого человек не видит.
+            page_rank = {str(item["id"]): position for position, item in enumerate(results)}
             trace: list[dict[str, Any]] = []
             rank = 0
             trace_cap = max(limit * 3, 30)
@@ -2001,7 +2009,7 @@ class HybridSearcher:
                     status: str = "discarded"
                     entry_rank: int | None = None
                 elif document_id in returned_ids:
-                    status, entry_rank = "returned", rank
+                    status, entry_rank = "returned", page_rank.get(document_id, rank)
                     rank += 1
                 else:
                     status, entry_rank = "below_limit", None

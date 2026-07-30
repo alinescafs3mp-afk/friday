@@ -12,7 +12,6 @@ import asyncio
 import dataclasses
 
 import httpx
-import pytest
 
 from jericho.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 
@@ -205,8 +204,90 @@ def test_documents_are_bounded_before_they_are_sent(settings, monkeypatch):
     assert seen and all(len(text) <= DOCUMENT_CHARS for text in seen[0]["documents"])
 
 
-@pytest.mark.parametrize("count", [0, 1])
-def test_nothing_to_reorder_is_not_a_service_call(settings, monkeypatch, count):
+def test_nothing_to_reorder_is_not_a_service_call(settings, monkeypatch):
     calls = _client(monkeypatch, {"results": []})
-    assert asyncio.run(rerank_with_backend(RerankBackend(_tuned(settings)), "в", _items(count))) is None
+    assert asyncio.run(rerank_with_backend(RerankBackend(_tuned(settings)), "в", _items(0))) is None
     assert not calls
+
+
+def test_a_single_item_is_scored_for_the_threshold(settings, monkeypatch):
+    """Один кандидат не переставляется, но ОЦЕНИВАЕТСЯ.
+
+    Раньше гард `len < 2` оставлял единственный правдоподобный документ без
+    скора — и порог уверенности не применялся ровно там, где ложный ответ
+    убедительнее всего: одиночка не с чем сравнивать.
+    """
+    calls = _client(monkeypatch, {"results": [{"index": 0, "relevance_score": 0.03}]})
+    out = asyncio.run(rerank_with_backend(RerankBackend(_tuned(settings)), "в", _items(1)))
+
+    assert calls, "единственный кандидат остался без оценки"
+    assert out is not None and out[0]["_rerank_score"] == 0.03
+
+
+def _overflow_client(monkeypatch, *, first_status: int, first_text: str):
+    """Первый запрос отвечает отказом, последующие — честными скорами."""
+    calls: list[int] = []
+
+    class _Response:
+        def __init__(self, status: int, payload, text: str = "") -> None:
+            self.status_code = status
+            self._payload = payload
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError("boom", request=None, response=None)  # type: ignore[arg-type]
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, url, **kwargs):
+            documents = kwargs.get("json", {}).get("documents", [])
+            calls.append(len(documents))
+            if len(calls) == 1:
+                return _Response(first_status, {}, text=first_text)
+            return _Response(
+                200,
+                {"results": [{"index": index, "relevance_score": 0.5} for index in range(len(documents))]},
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    return calls
+
+
+def test_a_context_overflow_400_is_split_not_swallowed(settings, monkeypatch):
+    """vLLM отвечает на переполнение контекста не 413, а 400 с текстом про длину.
+
+    Раньше такой отказ падал в общий except → None: поиск молча оставался без
+    переранжирования и порога, а сервис при этом жив — промах грубой оценки
+    размера стоил не лишнего запроса, а тишины.
+    """
+    calls = _overflow_client(
+        monkeypatch,
+        first_status=400,
+        first_text=(
+            "This model's maximum context length is 16384 tokens. "
+            "However, you requested 20000 tokens in the input."
+        ),
+    )
+    scores = asyncio.run(RerankBackend(_tuned(settings)).scores("вопрос", ["тело"] * 4))
+
+    assert scores == [0.5, 0.5, 0.5, 0.5]
+    assert calls == [4, 2, 2], "переполнение не поделено пополам"
+
+
+def test_an_ordinary_400_is_still_a_refusal(settings, monkeypatch):
+    """400 без признака переполнения — настоящий отказ, делить его бессмысленно."""
+    calls = _overflow_client(monkeypatch, first_status=400, first_text="Bad Request: unknown model")
+    scores = asyncio.run(RerankBackend(_tuned(settings)).scores("вопрос", ["тело"] * 4))
+
+    assert scores is None
+    assert calls == [4], "обычный 400 не должен вызывать деление"

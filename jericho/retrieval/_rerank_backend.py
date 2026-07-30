@@ -216,6 +216,24 @@ class RerankBackend:
                         " ".join(response.text.split())[:200],
                     )
                     return await self._halve(query, trimmed, _deadline)
+                if response.status_code == 400 and len(trimmed) > 1:
+                    # vLLM-совместимые сервисы отвечают на переполнение контекста не
+                    # 413, а 400 с текстом про длину («This model's maximum context
+                    # length is …»). Без этой ветки промах оценки размера падал в
+                    # общий except → None → поиск молча оставался без переранжирования
+                    # и без порога, а сервис при этом жив.
+                    detail = " ".join(response.text.split())[:300]
+                    folded = detail.casefold()
+                    if any(
+                        marker in folded
+                        for marker in ("context length", "too long", "maximum context", "input length")
+                    ):
+                        LOGGER.warning(
+                            "rerank request over the context limit for %d documents (service said: %s); splitting",
+                            len(trimmed),
+                            detail[:200],
+                        )
+                        return await self._halve(query, trimmed, _deadline)
                 response.raise_for_status()
                 body = response.json()
         except Exception as exc:  # noqa: BLE001
@@ -270,8 +288,13 @@ async def rerank_with_backend(
 
     Отсечь по порогу по-настоящему было бы можно (скор откалиброван, см. ниже), но
     это решение принимает не эта функция: цена замерена и отдана человеку.
+
+    Единственный элемент не переставляется, но ОЦЕНИВАЕТСЯ: вызывающий с включённым
+    порогом решает по `_rerank_score`, показывать ли его вообще. Прежний гард
+    `len < 2` оставлял единственного кандидата без оценки — там, где ложный ответ
+    убедительнее всего.
     """
-    if len(items) < 2:
+    if not items:
         return None
     scores = await backend.scores(query, [_document_text(item) for item in items])
     if scores is None:

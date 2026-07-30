@@ -190,6 +190,61 @@ def test_the_agent_learns_that_candidates_were_filtered_out(kernel, storage):
     assert found["filtered_out"] == 20
 
 
+def test_the_filtered_out_counter_precedes_the_results(kernel, storage):
+    """`filtered_out` добавлялся ПОСЛЕ results — и обрезка длинного ответа съедала
+    его точно так же, как когда-то съедала count. Счётчики стоят до выдержек."""
+    rows = [{"id": f"ko_{index}", "title": "Док", "content": "тело"} for index in range(3)]
+    kernel.searcher = _searcher_returning(rows, {"reranked": 20, "rerank_dropped": 17})
+
+    found = _search(kernel, storage, "alice", "поверка весов")
+
+    keys = list(found)
+    assert keys.index("filtered_out") < keys.index("results"), "счётчик отсева позади выдержек"
+
+
+def test_the_chat_model_is_told_similar_records_were_cut(settings, storage):
+    """Главный путь чата: «в архиве пусто» и «похожее есть, но не отвечает» —
+    разные ответы человеку, и без этой строки модель выдаёт первый в обоих
+    случаях."""
+    from jericho.agent_runtime import AgentContext, AgentRuntime
+
+    runtime = AgentRuntime(settings, storage)
+    context = AgentContext(
+        conversation_id="conv",
+        user_id="alice",
+        answer_mode="personal_knowledge_missing",
+        rerank_dropped=5,
+    )
+    messages = runtime._build_initial_messages(context, "какой номер у Иванова?", None, tool_enabled=False)  # noqa: SLF001
+
+    joined = "\n".join(str(item.get("content")) for item in messages if item.get("role") == "system")
+    assert "отсеяны порогом" in joined
+    assert "5" in joined
+
+    silent = AgentContext(conversation_id="conv", user_id="alice", answer_mode="personal_knowledge_missing")
+    messages = runtime._build_initial_messages(silent, "какой номер у Иванова?", None, tool_enabled=False)  # noqa: SLF001
+    joined = "\n".join(str(item.get("content")) for item in messages if item.get("role") == "system")
+    assert "отсеяны порогом" not in joined
+
+
+def test_rerank_top_without_endpoint_is_a_config_error(settings):
+    """Включённый JERICHO_RERANK_TOP без адреса/модели — противоречие того же
+    класса, что эмбеддинги без модели: и переранжирование, и порог уверенности
+    молча не работают, пока настройка говорит «включено»."""
+    import dataclasses
+
+    from jericho.config import validate_settings
+
+    broken = dataclasses.replace(settings, rerank_top=20, rerank_base_url="", rerank_model="")
+    problems = validate_settings(broken)
+    assert any("JERICHO_RERANK_TOP" in item and "warning" not in item for item in problems)
+
+    configured = dataclasses.replace(
+        settings, rerank_top=20, rerank_base_url="http://rerank.invalid/v1", rerank_model="qwen3"
+    )
+    assert not any("JERICHO_RERANK_TOP" in item for item in validate_settings(configured))
+
+
 def test_nothing_extra_is_said_when_nothing_was_filtered(kernel, storage):
     """Пустой архив по теме — это по-прежнему просто ноль, без приписок."""
     kernel.searcher = _searcher_returning([], {"reranked": 0})

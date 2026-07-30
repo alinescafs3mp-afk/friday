@@ -262,6 +262,54 @@ async def test_a_small_result_set_is_filtered_too(settings, storage):
     assert result["strategy"]["rerank_dropped"] == 3
 
 
+async def test_a_single_candidate_is_scored_and_can_be_cut(settings, storage):
+    """Убедительнее всего ложный ответ в одиночку: сравнить не с чем.
+
+    Гард `>= 2` оставлял единственный лексически задевший вопрос документ вовсе
+    без оценки — он показывался как обычная находка ровно там, где порог нужнее
+    всего.
+    """
+    _corpus(storage, count=1)
+    result = await _searcher(storage, [0.004]).search("owner", "договор поставки оборудования", limit=8)
+
+    assert result["results"] == []
+    assert result["strategy"]["rerank_dropped"] == 1
+
+
+async def test_a_single_candidate_without_threshold_is_not_worth_a_call(settings, storage):
+    """Без порога перестановка одного — пустой вызов службы; планка остаётся 2."""
+    from jericho.retrieval import HybridSearcher
+
+    calls: list[int] = []
+
+    async def reranker(query, items):
+        calls.append(len(items))
+        return [dict(item) for item in items]
+
+    _corpus(storage, count=1)
+    searcher = HybridSearcher(
+        storage, None, record_usage=False, reranker=reranker, rerank_top=20, rerank_confident_min=0.0
+    )
+    result = await searcher.search("owner", "договор поставки оборудования", limit=8)
+
+    assert result["results"]
+    assert not calls
+
+
+async def test_the_trace_rank_matches_the_page_after_reranking(settings, storage):
+    """Обход трейса идёт по до-реранковому порядку кандидатов, а ранг обязан быть
+    местом на ФАКТИЧЕСКОЙ странице — иначе explain нумерует выдачу, которой
+    человек не видит."""
+    _corpus(storage, count=4)
+    result = await _searcher(storage, [0.2, 0.9, 0.5, 0.99]).search(
+        "owner", "договор поставки оборудования", limit=4, explain=True
+    )
+
+    page = [str(item["id"]) for item in result["results"]]
+    ranks = {row["id"]: row["rank"] for row in result["trace"] if row["status"] == "returned"}
+    assert [ranks[doc_id] for doc_id in page] == [0, 1, 2, 3]
+
+
 # --- размер страницы не должен менять, ЧТО найдено ----------------------------
 
 
