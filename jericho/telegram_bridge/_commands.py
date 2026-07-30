@@ -7,6 +7,9 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import re
+from datetime import date, timedelta
+
 from jericho.retrieval._keyboard import switched
 from jericho.telegram_bridge._base import (
     BOT_COMMANDS,
@@ -17,6 +20,65 @@ from jericho.telegram_bridge._base import (
     asyncio,
     httpx,
 )
+
+_MONTHS_RU = {
+    "янв": 1,
+    "фев": 2,
+    "мар": 3,
+    "апр": 4,
+    "мая": 5,
+    "май": 5,
+    "июн": 6,
+    "июл": 7,
+    "авг": 8,
+    "сен": 9,
+    "окт": 10,
+    "ноя": 11,
+    "дек": 12,
+}
+
+
+def parse_period(argument: str, *, today: date) -> tuple[str, str, str] | None:
+    """«март 2023», «2023», «2023-03», «неделя» → (с, по, как назвать). None — не разобрано.
+
+    Разбор намеренно узкий и предсказуемый: человек, чей запрос не поняли, должен
+    получить подсказку с примерами, а не молча чужой период. Угадывать «весной» или
+    «прошлым летом» — тот же класс ошибки, что придумывать дату документа.
+    """
+    text = " ".join((argument or "").split()).casefold().strip()
+    if not text or text in {"месяц", "за месяц"}:
+        start = today - timedelta(days=30)
+        return start.isoformat(), today.isoformat(), "за 30 дней"
+    if text in {"неделя", "за неделю"}:
+        start = today - timedelta(days=7)
+        return start.isoformat(), today.isoformat(), "за неделю"
+    if text in {"год", "за год"}:
+        start = today - timedelta(days=365)
+        return start.isoformat(), today.isoformat(), "за год"
+    if re.fullmatch(r"\d{4}", text):
+        return f"{text}-01-01", f"{text}-12-31", text
+    match = re.fullmatch(r"(\d{4})-(\d{2})", text)
+    if match:
+        year, month = int(match.group(1)), int(match.group(2))
+        if 1 <= month <= 12:
+            return _month_bounds(year, month)
+    match = re.fullmatch(r"([а-я]+)\s+(\d{4})", text)
+    if match:
+        month = next(
+            (number for prefix, number in _MONTHS_RU.items() if match.group(1).startswith(prefix)), 0
+        )
+        if month:
+            return _month_bounds(int(match.group(2)), month)
+    match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\s*(?:\.\.|—|-)\s*(\d{4}-\d{2}-\d{2})", text)
+    if match:
+        return match.group(1), match.group(2), f"{match.group(1)} — {match.group(2)}"
+    return None
+
+
+def _month_bounds(year: int, month: int) -> tuple[str, str, str]:
+    first = date(year, month, 1)
+    last = date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)
+    return first.isoformat(), last.isoformat(), f"{first:%m}.{year}"
 
 
 class CommandsMixin(BridgeShared):
@@ -210,6 +272,44 @@ class CommandsMixin(BridgeShared):
         if command == "/search":
             query = argument
             await self._send_search(telegram, backend, chat_id, external_user_id, user, query)
+            return
+        if command == "/timeline":
+            # Хроника архива в чате. Стала возможна только теперь: до появления
+            # собственной даты документа у всего корпуса была одна дата — день
+            # импорта, и лента показывала бы один день на полторы тысячи записей.
+            period = parse_period(argument, today=date.today())
+            if period is None:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Не понял период. Примеры: /timeline 2023, /timeline март 2023, "
+                    "/timeline 2023-03, /timeline 2020-01-01..2020-03-31, /timeline неделя. "
+                    "Без периода — за последние 30 дней.",
+                )
+                return
+            since, until, label = period
+            documents = await self._backend_json(
+                backend,
+                "GET",
+                f"/api/knowledge/by-date?since={since}&until={until}&limit=15",
+                None,
+                external_user_id,
+                str(chat_id),
+            )
+            events = await self._backend_json(
+                backend,
+                "GET",
+                f"/api/kg/timeline?start={since}&end={until}&limit=15",
+                None,
+                external_user_id,
+                str(chat_id),
+            )
+            await self._send_message(
+                telegram,
+                chat_id,
+                self._format_timeline(label, documents, events),
+                reply_markup=self._timeline_reply_markup(documents),
+            )
             return
         if command == "/source":
             # Дословный поиск по ИСХОДНЫМ файлам. 93% загруженных знаков живут

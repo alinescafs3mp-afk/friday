@@ -484,6 +484,61 @@ class ViewsMixin(BridgeShared):
             )
         return "\n".join(lines)
 
+    @classmethod
+    def _format_timeline(cls, label: str, documents: Any, events: Any) -> str:
+        """Хроника периода: чем датированы документы и что произошло.
+
+        Две ленты в одном ответе намеренно: события графа отвечают «что было», а
+        документы по своей дате — «чем это подтверждено». Порознь они уже
+        существовали (события — в графе, документы — нигде), и ни одна не отвечала
+        на вопрос «что у меня за март».
+        """
+        doc_items = documents.get("items") if isinstance(documents, dict) else None
+        event_items = events.get("items") if isinstance(events, dict) else None
+        doc_items = doc_items if isinstance(doc_items, list) else []
+        event_items = event_items if isinstance(event_items, list) else []
+        lines = [f"Хроника {label}:"]
+        if event_items:
+            lines.append("")
+            lines.append("События:")
+            for item in event_items[:10]:
+                if not isinstance(item, dict):
+                    continue
+                when = str(item.get("occurred_at") or "")[:10]
+                lines.append(f"• {when} — {str(item.get('name') or 'без названия')[:80]}")
+        if doc_items:
+            lines.append("")
+            lines.append("Документы по их собственной дате:")
+            for index, item in enumerate(doc_items[:10], start=1):
+                if not isinstance(item, dict):
+                    continue
+                when = str(item.get("document_date") or "")[:10]
+                lines.append(f"{index}. {when} — {str(item.get('title') or 'Без названия')[:80]}")
+        if not doc_items and not event_items:
+            # Пусто ИМЕННО в периоде — и это не то же самое, что пустой архив.
+            lines.append("")
+            lines.append(
+                "В этот период ничего не датировано. Собственная дата есть не у каждого "
+                "документа: она берётся из самого файла, и у части форматов её нет."
+            )
+            return "\n".join(lines)
+        if doc_items:
+            lines.append("")
+            lines.append("Кнопкой ниже — открыть документ целиком.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _timeline_reply_markup(documents: Any) -> dict[str, Any] | None:
+        items = documents.get("items") if isinstance(documents, dict) else None
+        if not isinstance(items, list):
+            return None
+        buttons = [
+            {"text": str(index), "callback_data": f"doc:show:{item['id']}"}
+            for index, item in enumerate(items[:10], start=1)
+            if isinstance(item, dict) and item.get("id") and CALLBACK_TARGET_RE.fullmatch(str(item["id"]))
+        ]
+        return {"inline_keyboard": [buttons]} if buttons else None
+
     @staticmethod
     def _search_reply_markup(results: list[Any]) -> dict[str, Any] | None:
         """Кнопки «открыть целиком» под выдачей поиска.

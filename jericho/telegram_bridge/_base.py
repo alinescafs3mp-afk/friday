@@ -50,6 +50,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("research", "многошаговое исследование"),
     ("search", "поиск по базе без ответа модели"),
     ("source", "дословный поиск по исходным файлам"),
+    ("timeline", "хроника периода: события и документы по их датам"),
     ("browse", "записи по тегу, проекту или сущности"),
     ("tags", "теги базы с количеством записей"),
     ("inbox", "разобрать ближайшие предложения"),
@@ -209,6 +210,8 @@ class BridgeShared:
     _file_url: Any
     _format_full_document: Callable[..., Any]
     _format_browse_results: Callable[..., Any]
+    _format_timeline: Callable[..., Any]
+    _timeline_reply_markup: Callable[..., Any]
     _format_mission_created: Callable[..., Any]
     _format_response_message: Callable[..., Any]
     _inbox: Any

@@ -79,6 +79,30 @@ async def list_knowledge_tags(
     return {"items": items, "count": len(items)}
 
 
+@router.get("/by-date", tags=["knowledge"])
+async def knowledge_by_own_date(
+    request: Request,
+    since: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    until: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    limit: int = Query(50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Документы, упорядоченные по СОБСТВЕННОЙ дате — материал для хроники.
+
+    Объявлен ДО `/{knowledge_id}`: литеральный сегмент, объявленный после
+    параметра пути, был бы перехвачен им и читался как идентификатор — эту
+    грабку в проекте уже ловили с `/tags`.
+
+    Берутся только объекты со своей датой из провенанса файла. Даты, упомянутые
+    в тексте, для хронологии не годятся: документ может назвать десяток чужих
+    дат, и поставить его в ленту по любой из них значит соврать о времени.
+    """
+    actor = _require(request, "knowledge.read")
+    items = request.app.state.storage.list_documents_by_own_date(
+        actor.user_id, since=since, until=until, limit=limit
+    )
+    return {"items": items, "count": len(items), "since": since, "until": until}
+
+
 @router.get("/{knowledge_id}", tags=["knowledge"])
 async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "knowledge.read")

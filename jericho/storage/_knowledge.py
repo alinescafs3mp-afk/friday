@@ -1009,6 +1009,44 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_documents_by_own_date(
+        self,
+        user_id: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Документы, упорядоченные по СОБСТВЕННОЙ дате, — материал для хроники.
+
+        Отдельный метод, а не `list_knowledge_objects` с окном: тот сортирует по
+        важности и свежести записи, а для ленты нужен порядок по дате документа.
+        Берутся только объекты, у которых своя дата есть: упомянутые в тексте даты
+        для хронологии не годятся — документ может называть десяток чужих дат, и
+        поставить его в ленту по любой из них значит соврать о времени.
+        """
+        clauses = [
+            "user_id=?",
+            "deleted_at IS NULL",
+            "jericho_iso_date(json_extract(metadata_json,'$.document_date')) IS NOT NULL",
+        ]
+        params: list[Any] = [user_id]
+        if since:
+            clauses.append("jericho_iso_date(json_extract(metadata_json,'$.document_date')) >= ?")
+            params.append(since)
+        if until:
+            clauses.append("jericho_iso_date(json_extract(metadata_json,'$.document_date')) <= ?")
+            params.append(until)
+        params.append(max(1, min(int(limit), 500)))
+        rows = self.execute(
+            "SELECT id, title, knowledge_kind, "
+            "jericho_iso_date(json_extract(metadata_json,'$.document_date')) AS document_date "
+            f"FROM knowledge_objects WHERE {' AND '.join(clauses)} "  # nosec B608 - фиксированные условия
+            "ORDER BY document_date DESC, rowid DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def count_recent_knowledge(self, user_id: str, *, since_iso: str) -> int:
         """Сколько создано с этого момента — счётом, а не длиной страницы.
 

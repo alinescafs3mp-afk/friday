@@ -28,7 +28,8 @@ from jericho.server import create_app
 # Bumped deliberately when an endpoint is added or removed, never to make a test pass.
 # 149 → 151: пакетное подтверждение сущностей — GET групп и POST решения
 # по группе (одно решение вместо 57 поштучных).
-EXPECTED_OPERATIONS = 151
+# 151 → 152: GET /api/knowledge/by-date — документы по собственной дате для хроники.
+EXPECTED_OPERATIONS = 152
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

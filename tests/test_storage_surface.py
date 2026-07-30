@@ -74,7 +74,10 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # достающий собственную дату документа из провенанса уже загруженных файлов.
 # 247 → 248: knowledge_ids_in_window — жёсткий предфильтр по периоду для поиска,
 # построенный ТЕМ ЖЕ предикатом, что список и его счётчик.
-EXPECTED_MEMBER_COUNT = 248
+# 248 → 249: list_documents_by_own_date — лента по СОБСТВЕННОЙ дате документа;
+# list_knowledge_objects сортирует по важности и свежести записи, для хроники
+# нужен порядок по дате самого документа.
+EXPECTED_MEMBER_COUNT = 249
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
