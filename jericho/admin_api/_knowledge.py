@@ -311,6 +311,41 @@ async def create_knowledge_entity_link(knowledge_id: str, request: Request) -> d
     return {"link": link}
 
 
+@router.get("/entity-suggestions/queue")
+async def entity_suggestion_queue(
+    request: Request,
+    user_id: str | None = None,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Документы, у которых остались неразобранные предложения сущностей.
+
+    Очереди не существовало, и это объясняет, почему экраном подтверждения не
+    воспользовались НИ РАЗУ: проверено по живой базе — ни одна из 109 сущностей и ни
+    одна из 226 связей не пришла от человека. Кандидаты считались по запросу и нигде
+    не хранились, поэтому их нельзя было ни посчитать, ни показать: ни плитки на
+    обзоре, ни очереди в разделе «Граф». Единственным входом было «открой конкретный
+    документ и нажми Инспекция» — то есть надо было заранее знать, куда идти.
+    """
+    _require(request, "admin.all_data.read")
+    target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.entity_suggestions.read", target)
+    items, total = _services(request).storage.list_documents_with_entity_suggestions(
+        target, limit=limit, offset=offset
+    )
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        "total": total,
+        # Честно: это ОЦЕНКА сверху. Предложение и связь — не одно и то же, и точный
+        # остаток требует пересчёта по тексту каждого документа.
+        "estimate": True,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.get("/knowledge/{knowledge_id}/entity-suggestions")
 async def list_entity_suggestions(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
     """Какие сущности этот документ предлагает, но которых в графе ещё нет.

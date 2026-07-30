@@ -69,8 +69,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     assert not duplicates, f"method defined in more than one base: {duplicates}"
 
 
-EXPECTED_MEMBER_COUNT = 243
+EXPECTED_MEMBER_COUNT = 244
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
     "relativize_stored_paths": "(self, files_root: 'str') -> 'dict[str, int]'",
     "backfill_entity_mentions": "(self, user_id: 'str', *, max_documents: 'int' = 200) -> 'dict[str, Any]'",

@@ -712,6 +712,68 @@ class KnowledgeMixin(StorageShared):
     # любой тег покроет заметную долю, а листать десять можно и без осей.
     _TAG_NOISE_MIN_CORPUS = 20
 
+    def list_documents_with_entity_suggestions(
+        self, user_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Документы, у которых остались неразобранные предложения сущностей.
+
+        Очереди кандидатов не существовало, и это была не мелочь: проверено по живой
+        базе — НИ ОДНА из 109 сущностей и НИ ОДНА из 226 связей не пришла от человека.
+        У всех сущностей в метаданных ключи автосоздания при импорте; ключа
+        `origin: human_review`, который ставит обработчик подтверждения, нет ни у одной.
+        В аудите нет ни одной записи `admin.entity_suggestion.accept`.
+
+        Причина не в том, что человек отказался, а в том, что предложить было негде:
+        кандидаты считаются ПО ЗАПРОСУ и нигде не хранятся, поэтому их нельзя было ни
+        посчитать, ни показать. На обзоре шесть плиток — знания, сущности, Inbox,
+        пользователи, диалоги, сообщения; числа кандидатов среди них нет. В разделе
+        «Граф» четыре очереди на проверку, и этой среди них тоже нет. Единственный вход
+        — открыть конкретный документ и нажать «Инспекция».
+
+        Число берётся из `entity_suggestion_count`, записанного при приёме (есть у 1532
+        объектов из 1537, всего 10 100 предложений, медиана 7 на документ), и
+        уменьшается на число уже решённых связей этого документа. Это ОЦЕНКА сверху, а
+        не точный остаток: предложение и связь — не одно и то же, и совпадение между
+        ними неполное. Точный ответ требует пересчёта по тексту, а он дорог; оценка
+        честно называется оценкой в интерфейсе.
+        """
+        rows = self.execute(
+            """SELECT k.id AS id, k.title AS title, k.updated_at AS updated_at,
+                      CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER)
+                        AS suggested,
+                      (SELECT COUNT(*) FROM knowledge_entity_links l
+                        WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id) AS decided
+               FROM knowledge_objects k
+               WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER) >
+                     (SELECT COUNT(*) FROM knowledge_entity_links l
+                       WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)
+               ORDER BY (CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER) -
+                        (SELECT COUNT(*) FROM knowledge_entity_links l
+                          WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)) DESC,
+                        k.rowid DESC
+               LIMIT ? OFFSET ?""",
+            (user_id, max(1, min(int(limit), 500)), max(0, offset)),
+        ).fetchall()
+        total = self.execute(
+            """SELECT COUNT(*) AS count FROM knowledge_objects k
+               WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER) >
+                     (SELECT COUNT(*) FROM knowledge_entity_links l
+                       WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)""",
+            (user_id,),
+        ).fetchone()
+        items = [
+            {
+                "id": str(row["id"]),
+                "title": str(row["title"] or "Без названия"),
+                "updated_at": row["updated_at"],
+                "pending": max(0, int(row["suggested"]) - int(row["decided"])),
+            }
+            for row in rows
+        ]
+        return items, int(total["count"] if total else 0)
+
     def list_knowledge_tags(self, user_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
         """Distinct tags with usage counts for browse-by-tag surfaces.
 
