@@ -267,6 +267,17 @@ def _fts_terms(text: str) -> list[str]:
     return list(dict.fromkeys(expanded))
 
 
+def _json_dict_safe(value: Any) -> dict[str, Any]:
+    """Словарь из поля, которое в снимке может быть и строкой, и словарём."""
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
+
+
 def _aliases_of(entity: dict[str, Any]) -> list[str]:
     """Псевдонимы сущности из JSON-поля; битое значение — не повод падать в обходе."""
     raw = entity.get("aliases_json")
@@ -423,6 +434,65 @@ class KnowledgeMixin(StorageShared):
             (ko_id, user_id),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # Поля, которые снимок возвращает. Всё остальное в строке — либо тождество
+    # (`id`, `user_id`, `raw_object_id`), либо счётчики жизненного цикла, которые
+    # откат менять не должен: возврат к прежнему ТЕКСТУ не отменяет того, что объект
+    # с тех пор архивировали или связывали с сущностью.
+    _RESTORABLE_FIELDS = (
+        "title",
+        "summary",
+        "content",
+        "content_type",
+        "tags_json",
+        "metadata_json",
+        "knowledge_kind",
+        "importance",
+    )
+
+    def restore_knowledge_version(
+        self, ko_id: str, user_id: str, version: int, *, reviewed_by: str | None = None
+    ) -> dict[str, Any] | None:
+        """Вернуть объект к состоянию из снимка. Это НОВАЯ версия, а не перемотка.
+
+        Версии писались и показывались, а вернуться к ним было нечем: поиск по всему
+        пакету (`restore|revert|rollback`) находил только восстановление БАЗЫ из
+        бэкапа. При этом машинерия уже была вся — снимок это готовая строка объекта.
+
+        Откат идёт через обычную правку, поэтому создаёт версию N+1 и ничего не
+        теряет: если человек откатился по ошибке, он может откатиться обратно. Именно
+        так, а не удалением версий: история — это то, ради чего она пишется.
+
+        Живая база показывает, насколько путь правки не хожен: 1538 строк версий на
+        1537 объектов, то есть за всё время отредактирован ровно один объект. Первая
+        же настоящая ошибка владельца упёрлась бы в отсутствие отката — а редактор
+        содержимого в админке это одна textarea с полным текстом документа, в среднем
+        на 16.5 тысяч знаков.
+        """
+        rows = [
+            row
+            for row in self.list_knowledge_versions(ko_id, user_id)
+            if int(row.get("version") or 0) == int(version)
+        ]
+        if not rows:
+            raise LookupError(f"Version {version} not found for {ko_id}")
+        try:
+            snapshot = json.loads(str(rows[0].get("snapshot_json") or "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Version snapshot is not readable") from exc
+        if not isinstance(snapshot, dict):
+            raise ValueError("Version snapshot is not an object")
+        fields = {name: snapshot[name] for name in self._RESTORABLE_FIELDS if name in snapshot}
+        if not fields:
+            raise ValueError("Version snapshot carries no restorable fields")
+        if reviewed_by:
+            # Кто откатил — в метаданные объекта, а не только в аудит: человек,
+            # открывший запись через полгода, должен видеть это на ней самой.
+            metadata = _json_dict_safe(fields.get("metadata_json"))
+            metadata["restored_from_version"] = int(version)
+            metadata["restored_by"] = str(reviewed_by)
+            fields["metadata_json"] = metadata
+        return self.update_knowledge_fields(ko_id, user_id, **fields)
 
     def diff_knowledge_versions(
         self,

@@ -518,6 +518,49 @@ async def update_knowledge(knowledge_id: str, request: Request) -> dict[str, Any
     return {"item": after}
 
 
+@router.post("/knowledge/{knowledge_id}/restore")
+async def restore_knowledge_version(knowledge_id: str, request: Request) -> dict[str, Any]:
+    """Вернуть объект к состоянию из снимка версии.
+
+    Версии писались и показывались, а вернуться к ним было нечем: поиск по пакету на
+    `restore|revert|rollback` находил только восстановление БАЗЫ из бэкапа. При этом
+    редактор содержимого в админке — одна textarea с полным текстом документа, в
+    среднем на 16.5 тысяч знаков, и первая же настоящая ошибка упиралась в тупик.
+
+    Откат создаёт НОВУЮ версию, а не перематывает историю: откатившийся по ошибке
+    может откатиться обратно.
+    """
+    _require(request, "admin.all_data.manage")
+    body = await _request_json(request)
+    target = str(body.get("user_id") or "")
+    try:
+        version = int(str(body.get("version")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="version must be an integer") from exc
+    state = _services(request)
+    before = state.storage.get_knowledge_object(knowledge_id, target)
+    if not before:
+        raise HTTPException(status_code=404, detail="Knowledge object not found")
+    actor = getattr(request.state, "actor", None)
+    try:
+        after = state.storage.restore_knowledge_version(
+            knowledge_id, target, version, reviewed_by=getattr(actor, "user_id", None)
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(
+        request,
+        "admin.knowledge.restore",
+        "knowledge_object",
+        knowledge_id,
+        before=_knowledge_fingerprint(before),
+        after={"restored_from_version": version, **(_knowledge_fingerprint(after) or {})},
+    )
+    return {"item": after, "restored_from_version": version}
+
+
 @router.delete("/knowledge/{knowledge_id}")
 async def delete_knowledge(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")

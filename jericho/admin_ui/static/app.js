@@ -240,6 +240,27 @@ actions.applyKnowledgePeriod=()=>{
   state.knowledgeSince=a?a.value:'';state.knowledgeUntil=b?b.value:'';state.knowledgeOffset=0;refresh()};
 actions.clearKnowledgePeriod=()=>{state.knowledgeSince='';state.knowledgeUntil='';state.knowledgeOffset=0;refresh()};
 actions.clearKnowledgeSearch=()=>{state.knowledgeQuery='';state.knowledgeOffset=0;refresh()};
+// История версий со СВОЕЙ кнопкой отката. Раньше версии показывались строкой JSON
+// внутри «Метаданные и история версий» — то есть их было видно и нельзя было ничего с
+// ними сделать. А редактор содержимого здесь это одна textarea с полным текстом
+// документа, в среднем на 16.5 тысяч знаков: первая же настоящая ошибка упиралась в
+// тупик.
+function versionRows(id,versions){
+  if(!versions.length)return empty('Правок не было');
+  return table(['Версия','Когда','Действие'],versions.map(v=>
+    `<tr><td><b>${Number(v.version)}</b></td><td class="muted">${fmtDate(v.created_at)}</td>`
+    +`<td><button class="btn small" ${call('restoreVersion',id,v.version)}>Вернуть это состояние</button></td></tr>`));
+}
+actions.restoreVersion=async(id,version)=>{
+  // Спрашиваем, потому что откат меняет содержимое документа. Но пугать не за что, и
+  // это сказано прямо: откат создаёт НОВУЮ версию, вернуться обратно можно.
+  if(!confirm(`Вернуть документ к версии ${version}? Текущее состояние останется в истории — откатиться обратно можно будет так же.`))return;
+  try{
+    await api(`/api/admin/knowledge/${q(id)}/restore`,{method:'POST',
+      body:JSON.stringify({user_id:selectedUser(),version:Number(version)})});
+    toast(`Возвращено к версии ${version}`);closeModal();refresh();
+  }catch(e){toast(e.message,true)}
+};
 actions.inspectKnowledge=async id=>{
   try{
     const d=await api(`/api/admin/knowledge/${q(id)}?user_id=${q(selectedUser())}`);
@@ -258,7 +279,7 @@ actions.inspectKnowledge=async id=>{
       :(suggRows.length?`<section class="card"><h3>Предложенные сущности (${suggRows.length})</h3><div class="notice">Подтверждение создаёт узел графа и утверждённую связь с этим документом, после чего пересчитываются связи сущность-сущность.</div>${table(['Имя','Тип','Уверенность',''],suggRows)}</section>`
       :`<section class="card"><h3>Предложенные сущности</h3>${empty('Все кандидаты уже разобраны')}</section>`);
     const linkRows=links.map(l=>`<tr><td><b>${esc(l.entity?.name||l.entity_name||l.entity_id)}</b><div class="muted">${esc(l.entity?.entity_type||l.entity_type||'')}</div></td><td><span class="badge ${l.status==='accepted'?'ok':(l.status==='rejected'?'bad':'warn')}">${esc(l.status)}</span></td><td>${Number(l.confidence||0).toFixed(2)}</td><td>${l.status!=='accepted'?`<button class="btn small good" ${call('reviewEntityLink',l.id,'accepted',k.id)}>Принять</button>`:''} ${l.status!=='rejected'?`<button class="btn small danger" ${call('reviewEntityLink',l.id,'rejected',k.id)}>Отклонить</button>`:''}</td></tr>`);
-    openModal(`Инспекция: ${k.title||k.id}`,`${suggBlock}<div class="grid two"><section class="card"><h3>Knowledge Object</h3><div class="kv"><div>Тип</div><div>${esc(k.knowledge_kind)}</div><div>Lifecycle</div><div>${esc(k.lifecycle_stage)}</div><div>Качество</div><div>${Number(k.quality_score??.5).toFixed(2)}</div><div>Promotion</div><div>${Number(k.promotion_score??.5).toFixed(2)}</div><div>Версия</div><div>${esc(k.version)}</div></div><h3 class="mt16">Summary</h3><div class="pre">${esc(k.summary||'')}</div></section><section class="card"><h3>Provenance / Raw Object</h3><div class="kv"><div>Источник</div><div>${esc(raw.source||'')}</div><div>Source ref</div><div class="mono">${esc(raw.source_ref||'')}</div><div>Raw ID</div><div class="mono">${esc(raw.id||'')}</div><div>Получен</div><div>${fmtDate(raw.received_at)}</div></div><div class="pre mt12">${esc(raw.raw_content||'')}</div></section></div><section class="card mt14"><h3>Связи с сущностями</h3>${linkRows.length?table(['Сущность','Статус','Уверенность','Решение'],linkRows):empty('Связей пока нет')}<div class="toolbar mt12"><button class="btn" ${call('addEntityLinkDialog',k.id)}>Добавить связь</button></div></section><section class="card mt14"><h3>Метаданные и история версий</h3><div class="pre">${esc(JSON.stringify({metadata:k.metadata,tags:k.tags,versions:(d.versions||[]).map(v=>({version:v.version,created_at:v.created_at}))},null,2))}</div></section>`,`${(d.versions||[]).length>1?`<button class="btn" ${call('showDiff',k.id)}>Изменения версий</button>`:''}<button class="btn" ${call('reenrichKnowledge',k.id,false)}>Предпросмотр enrichment</button><button class="btn" ${call('editKnowledge',k.id)}>Исправить</button><button class="btn" ${call('closeModal')}>Закрыть</button>`);
+    openModal(`Инспекция: ${k.title||k.id}`,`${suggBlock}<div class="grid two"><section class="card"><h3>Knowledge Object</h3><div class="kv"><div>Тип</div><div>${esc(k.knowledge_kind)}</div><div>Lifecycle</div><div>${esc(k.lifecycle_stage)}</div><div>Качество</div><div>${Number(k.quality_score??.5).toFixed(2)}</div><div>Promotion</div><div>${Number(k.promotion_score??.5).toFixed(2)}</div><div>Версия</div><div>${esc(k.version)}</div></div><h3 class="mt16">Summary</h3><div class="pre">${esc(k.summary||'')}</div></section><section class="card"><h3>Provenance / Raw Object</h3><div class="kv"><div>Источник</div><div>${esc(raw.source||'')}</div><div>Source ref</div><div class="mono">${esc(raw.source_ref||'')}</div><div>Raw ID</div><div class="mono">${esc(raw.id||'')}</div><div>Получен</div><div>${fmtDate(raw.received_at)}</div></div><div class="pre mt12">${esc(raw.raw_content||'')}</div></section></div><section class="card mt14"><h3>Связи с сущностями</h3>${linkRows.length?table(['Сущность','Статус','Уверенность','Решение'],linkRows):empty('Связей пока нет')}<div class="toolbar mt12"><button class="btn" ${call('addEntityLinkDialog',k.id)}>Добавить связь</button></div></section><section class="card mt14"><h3>История версий</h3>${versionRows(k.id,d.versions||[])}</section><section class="card mt14"><h3>Метаданные</h3><div class="pre">${esc(JSON.stringify({metadata:k.metadata,tags:k.tags},null,2))}</div></section>`,`${(d.versions||[]).length>1?`<button class="btn" ${call('showDiff',k.id)}>Изменения версий</button>`:''}<button class="btn" ${call('reenrichKnowledge',k.id,false)}>Предпросмотр enrichment</button><button class="btn" ${call('editKnowledge',k.id)}>Исправить</button><button class="btn" ${call('closeModal')}>Закрыть</button>`);
   }catch(e){toast(e.message,true)}
 };
 actions.acceptEntity=async(koId,name,entityType)=>{
