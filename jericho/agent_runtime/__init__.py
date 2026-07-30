@@ -215,6 +215,29 @@ def _citation_sort_key(label: str) -> tuple[int, int]:
     return (1, 0)
 
 
+def _citation_date(source: dict[str, Any] | None) -> str:
+    """Дата, которую честно показать рядом с источником.
+
+    Своя дата документа, если она известна из провенанса файла; иначе дата записи.
+    Порядок именно такой: у импортированного разом корпуса `updated_at` одинаков у
+    всего архива и о документе не говорит ничего, а собственную дату записал
+    редактор при сохранении.
+    """
+    if not source:
+        return ""
+    metadata = source.get("metadata_json")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = None
+    if isinstance(metadata, dict):
+        own = str(metadata.get("document_date") or "").strip()[:10]
+        if len(own) == 10:
+            return own
+    return str(source.get("updated_at") or "")[:10]
+
+
 def _citation_notice(
     citations: list[dict[str, str]], answer_grounded: bool | None, *, inferred: bool = False
 ) -> str:
@@ -226,11 +249,18 @@ def _citation_notice(
     формулировка другая. Отличие важно не косметически: та же атрибуция кормит
     feedback и lifecycle, и человек, увидев «Источники», не станет перепроверять.
     """
-    labelled = [
-        (f"[{item['label']}] {item['title']}" if item["label"] else item["title"])
-        for item in citations
-        if item.get("title")
-    ]
+    labelled = []
+    for item in citations:
+        if not item.get("title"):
+            continue
+        # Дата — часть ответа на вопрос «откуда это». Без неё человек не отличит
+        # позапрошлогоднюю редакцию от вчерашней и вынужден открывать запись, чтобы
+        # понять, стоит ли ей верить. Своя дата документа предпочтительнее даты
+        # записи: вторая у импортированного корпуса одна на весь архив.
+        text = f"[{item['label']}] {item['title']}" if item["label"] else str(item["title"])
+        if item.get("date"):
+            text += f" ({item['date']})"
+        labelled.append(text)
     if labelled and inferred:
         return "📎 Вероятно, на основе: " + "; ".join(labelled) + " (модель не сослалась явно)"
     if labelled:
@@ -915,18 +945,23 @@ class AgentRuntime:
         user_id: str,
     ) -> list[dict[str, str]]:
         """Map each attributed Knowledge Object to its [K#] label and title for the user."""
-        hit_titles = {
-            str(hit.get("id")): str(hit.get("title") or "") for hit in context.knowledge_hits if hit.get("id")
-        }
+        hits = {str(hit.get("id")): hit for hit in context.knowledge_hits if hit.get("id")}
         id_to_label = {kid: label for label, kid in context.knowledge_citations.items()}
         legend: list[dict[str, str]] = []
         for kid in attributed_ids:
-            title = hit_titles.get(kid, "")
-            if not title:
+            source = hits.get(kid)
+            if source is None:
                 # Tool-provided attributions are not in the retrieved hit set.
-                obj = self.storage.get_knowledge_object(kid, user_id)
-                title = str((obj or {}).get("title") or "")
-            legend.append({"label": id_to_label.get(kid, ""), "knowledge_id": kid, "title": title})
+                source = self.storage.get_knowledge_object(kid, user_id) or {}
+            title = str(source.get("title") or "")
+            legend.append(
+                {
+                    "label": id_to_label.get(kid, ""),
+                    "knowledge_id": kid,
+                    "title": title,
+                    "date": _citation_date(source),
+                }
+            )
         legend.sort(key=lambda item: _citation_sort_key(item["label"]))
         return legend
 

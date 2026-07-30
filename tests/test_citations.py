@@ -308,3 +308,53 @@ def test_citation_overlap_does_not_truncate_a_long_sentence():
     )
     without_support = citation_overlap(claim, {"K1": "ko_1"}, {"ko_1": filler + "ничего по теме"})
     assert with_support["min_overlap"] > without_support["min_overlap"] * 5
+
+
+# --- дата рядом с источником --------------------------------------------------
+
+
+def test_the_legend_carries_a_date_so_a_source_can_be_judged():
+    """Без даты человек не отличит позапрошлогоднюю редакцию от вчерашней и
+    вынужден открывать запись, чтобы понять, стоит ли ей верить."""
+    from jericho.agent_runtime import _citation_notice
+
+    notice = _citation_notice(
+        [{"label": "K1", "knowledge_id": "ko_1", "title": "Приказ о поверке", "date": "2023-04-12"}],
+        True,
+    )
+    assert "[K1] Приказ о поверке (2023-04-12)" in notice
+
+
+def test_a_source_without_a_date_is_shown_without_inventing_one():
+    from jericho.agent_runtime import _citation_notice
+
+    notice = _citation_notice([{"label": "K1", "knowledge_id": "ko_1", "title": "Заметка", "date": ""}], True)
+    assert "[K1] Заметка" in notice
+    assert "(" not in notice.split("Заметка")[1]
+
+
+def test_the_document_own_date_wins_over_the_import_date():
+    """У импортированного разом корпуса `updated_at` одинаков у всего архива и о
+    документе не говорит ничего; собственную дату записал редактор при сохранении."""
+    import json as jsonlib
+
+    from jericho.agent_runtime import _citation_date
+
+    imported = {
+        "updated_at": "2026-07-30T12:00:00+00:00",
+        "metadata_json": jsonlib.dumps({"document_date": "2015-06-08"}),
+    }
+    assert _citation_date(imported) == "2015-06-08"
+
+    without_own = {"updated_at": "2026-07-30T12:00:00+00:00", "metadata_json": "{}"}
+    assert _citation_date(without_own) == "2026-07-30"
+
+    assert _citation_date(None) == ""
+    assert _citation_date({"metadata_json": "не json"}) == ""
+
+
+def test_a_broken_metadata_blob_does_not_break_the_answer():
+    """Легенда — часть ответа человеку: испорченные метаданные не должны его ронять."""
+    from jericho.agent_runtime import _citation_date
+
+    assert _citation_date({"metadata_json": "{битый", "updated_at": "2024-01-02T03:04:05"}) == "2024-01-02"
