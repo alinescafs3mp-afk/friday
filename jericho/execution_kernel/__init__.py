@@ -280,6 +280,7 @@ class ExecutionKernel:
             "resolve_duplicates": self._resolve_duplicates,
             "inbox_list": self._inbox_list,
             "user_activity": self._user_activity,
+            "user_knowledge_search": self._user_knowledge_search,
             "code_run": self._code_run,
         }
         for name, handler in handlers.items():
@@ -811,6 +812,125 @@ class ExecutionKernel:
                 answer["analysis_error"] = str(exc)
         return answer
 
+    async def _user_knowledge_search(
+        self,
+        *,
+        actor: ActorContext,
+        person: str,
+        query: str,
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        """Ответить ПО СУЩЕСТВУ по корпусу названного человека, не сливая корпуса.
+
+        `user_activity` отвечает про объём и темы — «что прислал, когда, сколько».
+        На вопрос «что он писал про сроки поставки» она ответить не может, а
+        обычный поиск ограничен своим арендатором by design. Между ними была
+        дыра: старший, которому владелец разрешил видеть содержимое, читал чужое
+        только глазами, листая ленту активности.
+
+        Изоляция при этом НЕ снимается: арендатор остаётся параметром поиска, а
+        не исчезает из него. Меняется ровно одно — кто вправе назвать чужой
+        арендатор этим параметром, и это право проверяется здесь.
+
+        Гейт — ВЕРХНЕЕ право `admin.all_data.read`, в отличие от `user_activity`,
+        где нижнего хватает на метаданные: здесь метаданных не бывает, любой
+        результат — содержимое. Отказ обязан быть честным («объём вижу,
+        написанное — нет»), иначе он неотличим от «ничего не нашлось».
+
+        Аудит пишется на ЦЕЛЕВОЙ аккаунт и несёт сам вопрос: «кто-то читал
+        Иванова» без вопроса не даёт разобраться, что именно искали.
+        """
+        storage, _, _, _ = self._require_services()
+        if not (self.authorization and self.authorization.authorize(actor, "admin.all_data.read").allowed):
+            return {
+                "resolved": None,
+                "reason": "content_not_permitted",
+                "hint": (
+                    "Доступен объём и темы через user_activity; сам текст чужих записей "
+                    "требует прав полного администратора."
+                ),
+            }
+        clean_query = " ".join(str(query or "").split()).strip()
+        if not clean_query:
+            return {"resolved": None, "reason": "empty_query"}
+        matches = resolve_person(storage.list_users(limit=5000), person)
+        chosen = unambiguous(matches)
+        if chosen is None:
+            # Та же ветка, что у `user_activity`, и по той же причине: ответ несёт
+            # до пяти аккаунтов, поэтому перебор неоднозначных имён — это способ
+            # перечислить аккаунты машины, и он тоже обязан оставлять след.
+            storage.log_audit(
+                AuditEntry(
+                    id=new_id("audit"),
+                    user_id=actor.user_id,
+                    action="tool.user_knowledge_search.unresolved",
+                    target_type="user",
+                    target_id="*",
+                    after_json={
+                        "asked_for": person[:200],
+                        "reason": "ambiguous" if matches else "not_found",
+                        "candidates": len(matches),
+                    },
+                )
+            )
+            return {
+                "resolved": None,
+                "candidates": [match.to_dict() for match in matches[:5]],
+                "reason": "ambiguous" if matches else "not_found",
+            }
+
+        found = (
+            await self.searcher.search(chosen.user_id, clean_query, limit=max(1, min(int(limit), 20)))
+            if self.searcher is not None
+            else {"results": storage.search_knowledge(chosen.user_id, clean_query, limit=limit)}
+        )
+        rows = list(found.get("results") or [])
+        strategy = found.get("strategy")
+        dropped = 0
+        if isinstance(strategy, dict):
+            try:
+                dropped = int(strategy.get("rerank_dropped") or 0)
+            except (TypeError, ValueError):
+                dropped = 0
+        storage.log_audit(
+            AuditEntry(
+                id=new_id("audit"),
+                user_id=actor.user_id,
+                action="tool.user_knowledge_search",
+                target_type="user",
+                target_id=chosen.user_id,
+                after_json={
+                    "asked_for": person[:200],
+                    "match_method": chosen.method,
+                    # Вопрос, а не только факт чтения: без него запись в журнале не
+                    # позволяет понять, что именно искали в чужом корпусе.
+                    "query": clean_query[:500],
+                    "shown": len(rows),
+                    "filtered_out": dropped,
+                },
+            )
+        )
+        answer: dict[str, Any] = {
+            "resolved": chosen.to_dict(),
+            "count": len(rows),
+            "query": clean_query,
+        }
+        if dropped:
+            answer["filtered_out"] = dropped
+        answer["results"] = [
+            {
+                "id": str(row.get("id") or ""),
+                "title": str(row.get("title") or "Без названия")[:200],
+                "kind": str(row.get("knowledge_kind") or "note"),
+                "updated_at": row.get("updated_at"),
+                "excerpt": best_snippet(
+                    clean_query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS
+                ),
+            }
+            for row in rows
+        ]
+        return answer
+
     async def _code_run(self, *, actor: ActorContext, code: str) -> dict[str, Any]:
         del actor
         settings = self.settings
@@ -1020,6 +1140,24 @@ class ExecutionKernel:
                 "top": {"type": "integer", "minimum": 1, "maximum": 50},
             },
             ["person"],
+        )
+        spec(
+            "user_knowledge_search",
+            "Найти по существу в записях конкретного человека и ответить по ним. "
+            "Имя можно указывать как обычно — «Иван», «у Ивана», с опечаткой или в "
+            "другой раскладке. В отличие от user_activity показывает НАПИСАННОЕ, а не "
+            "объём, поэтому требует прав полного администратора; чтение чужого "
+            "аккаунта записывается в аудит вместе с самим вопросом. Если в ответе есть "
+            "filtered_out — столько записей нашлось, но по оценке они не отвечают.",
+            # Верхнее право, а не `admin.activity.read`: здесь любой результат —
+            # содержимое, метаданного уровня у этого инструмента не бывает.
+            "admin.all_data.read",
+            {
+                "person": {"type": "string"},
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            ["person", "query"],
         )
         spec(
             "inbox_list",
