@@ -49,6 +49,28 @@ def test_note_filename_carries_the_russian_title(vault):
     assert path.stem.rsplit("--", 1)[-1].isalnum()
 
 
+def test_an_unchanged_note_is_not_rewritten(vault):
+    """Цикл синхронизации рендерит ВЕСЬ корпус каждые 5 минут; mkstemp + fsync +
+    replace на каждую нетронутую заметку — это ~442 тысячи fsync и гигабайты
+    паразитной записи в сутки на корпусе, который никто не редактировал, на том
+    же диске, где живёт база. Неизменённая заметка не должна трогать диск."""
+    import os
+
+    first = vault.sync_object(_ko())
+    assert first is not None
+    before = os.stat(first)
+
+    second = vault.sync_object(_ko())
+    assert second == first
+    after = os.stat(first)
+    # os.replace даёт новый inode; неизменённый файл обязан сохранить прежний.
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+    changed = vault.sync_object(_ko(content="новое тело заметки"))
+    assert changed == first
+    assert os.stat(first).st_ino != before.st_ino, "изменённая заметка не переписана"
+
+
 def test_retitling_renames_the_note_instead_of_leaving_a_twin(vault):
     first = vault.sync_object(_ko())
     second = vault.sync_object(_ko(title="Аренда квартиры на Мира"))

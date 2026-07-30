@@ -137,6 +137,19 @@ class MemoryVault:
         filepath = self._note_path(user_dir, ko)
         content = self._render_markdown(ko)
 
+        # An unchanged note is not rewritten. The sync loop renders the WHOLE
+        # corpus every five minutes, and mkstemp + fsync + replace for every
+        # untouched note meant ~442 000 fsyncs and gigabytes of parasitic writes
+        # a day on a corpus nobody edited (1537 objects × 288 cycles) — on the
+        # single disk that also holds the database. Reading the file back is
+        # page-cache cheap, and equality means there is nothing to do at all:
+        # a retitled object lands on a DIFFERENT filename (the title is part of
+        # it), so the comparison never masks a rename.
+        if filepath.exists():
+            with suppress(OSError, UnicodeDecodeError):
+                if filepath.read_text(encoding="utf-8") == content:
+                    return filepath
+
         descriptor, temp_name = tempfile.mkstemp(
             prefix=f".{filepath.stem}.", suffix=".tmp", dir=str(user_dir)
         )
