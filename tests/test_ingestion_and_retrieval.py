@@ -153,6 +153,34 @@ def test_best_snippet_does_not_glue_a_digit_bearing_first_row_as_a_header():
     assert "АА-10000" not in snippet  # first row of the block stays out
 
 
+def test_best_snippet_ligatures_before_the_match_do_not_shift_the_window():
+    """casefold не сохраняет длину ('ﬁ' → 'fi', 'ß' → 'ss'), а pypdf отдаёт
+    лигатуры как есть. Позиции, найденные в свёрнутой строке, применялись как
+    индексы исходной — каждая лигатура до совпадения сдвигала окно на символ, и
+    выдержка приходила из СОСЕДНЕЙ записи, выглядя при этом валидной."""
+    from jericho.retrieval import _snippet_fold
+
+    prefix = "справка ﬁﬁﬁﬁﬁ о лигатурах в PDF. " * 20  # 100 лигатур до таблицы
+    body = prefix + "\n" + _label_per_row_table()
+
+    assert len(_snippet_fold(body)) == len(body)
+
+    snippet = best_snippet("личный номер Тарасов", body, max_chars=520)
+    assert "Тарасов" in snippet and "АА-77777" in snippet
+    assert "АА-10039" not in snippet and "АА-10041" not in snippet
+
+
+def test_best_snippet_a_two_row_table_still_separates_records():
+    """Таблица ровно из двух строк (или двухстрочный кусок большой таблицы,
+    вырезанный _matched_region) обходила сегментацию ранним выходом «меньше трёх
+    строк» — записи склеивались, и чужой номер возвращался в выдержку."""
+    body = "Человек01 П.С. | личный номер АА-11111 | часть 1\nТарасов П.С. | личный номер АА-77777 | часть 2"
+    snippet = best_snippet("личный номер Тарасов", body, max_chars=60)
+
+    assert "Тарасов" in snippet and "АА-77777" in snippet
+    assert "АА-11111" not in snippet
+
+
 def test_best_snippet_notes_the_rarest_term_it_could_not_include():
     """When the window that wins cannot contain the rarest matched term, the
     excerpt must say so instead of silently presenting itself as complete."""

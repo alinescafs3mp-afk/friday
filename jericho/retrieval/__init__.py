@@ -226,6 +226,26 @@ _RECORD_CELL_SEPARATOR = " | "
 _RECORD_TOKEN_MIN_LINES = 4
 
 
+def _snippet_fold(body: str) -> str:
+    """Case-fold ``body`` WITHOUT changing its length.
+
+    Snippet positions are found in the folded string and applied as indexes into
+    the original — and ``casefold`` is not length-preserving: 'ß' → 'ss',
+    'ﬁ' (U+FB01) → 'fi', and pypdf delivers ligatures as extracted. One expanded
+    character before the match shifts every later offset, and the excerpt then
+    comes from a NEIGHBOURING record while looking perfectly valid — the exact
+    defect class the record segmentation exists to prevent. The common case
+    (length preserved — Cyrillic and plain Latin) keeps the C-speed fold; a body
+    where lengths diverge folds per character, taking the first folded character
+    of a multi-character fold: a slightly weaker match beats a silently wrong
+    offset.
+    """
+    folded = body.casefold()
+    if len(folded) != len(body):
+        folded = "".join(character.casefold()[0] for character in body)
+    return folded.replace("ё", "е")
+
+
 def _search_form(token: str) -> str:
     """What is actually searched in the body for a query token.
 
@@ -261,7 +281,10 @@ def _record_line_segments(body: str, occurrences: list[tuple[int, str]]) -> list
     for line in body.split("\n"):
         line_spans.append((cursor, cursor + len(line)))
         cursor += len(line) + 1
-    if len(line_spans) < 3:
+    if len(line_spans) < 2:
+        # A single line cannot glue records. TWO lines can — a two-row table, or a
+        # two-line chunk that `_matched_region` cut out of a larger one — so the
+        # early exit stops exactly at one.
         return [(0, len(body), False)]
     has_bar = [_RECORD_CELL_SEPARATOR in body[lo:hi] for lo, hi in line_spans]
     record = [
@@ -396,7 +419,7 @@ def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
             forms.setdefault(_search_form(folded), token)
     if not forms:
         return body[:max_chars].rstrip() + "…"
-    lowered = body.casefold().replace("ё", "е")
+    lowered = _snippet_fold(body)
     occurrences: list[tuple[int, str]] = []
     first_pos: dict[str, int] = {}
     for form in forms:
