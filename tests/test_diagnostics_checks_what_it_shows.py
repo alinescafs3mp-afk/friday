@@ -296,3 +296,32 @@ def test_a_fresh_outbound_notification_is_not_an_alarm(settings, storage):
     storage.enqueue_notification("alice", "5001", "тело", kind="reminder", dedup_key="k2")
     result = collect_diagnostics(_tuned(settings), storage=storage)
     assert "outbound_queue_stalled" not in {str(i.get("code")) for i in result["actions"]}
+
+
+def test_versions_size_is_measured_and_growth_becomes_an_action(settings, storage):
+    """Версии хранят полный content в каждом снапшоте, DELETE не существует нигде:
+    рост был невидим, пока не смотреть на размер таблицы руками."""
+    from jericho.diagnostics import _add_versions_growth_action
+
+    storage.ensure_user("alice")
+    result = collect_diagnostics(_tuned(settings), storage=storage)
+    assert "versions_rows" in result["database"], "размер таблицы версий не собирается"
+    assert "versions_table_growing" not in {str(i.get("code")) for i in result["actions"]}
+
+    actions: list[dict] = []
+
+    def add_action(code, severity, title, detail, *args):
+        actions.append({"code": code, "detail": detail})
+
+    _add_versions_growth_action(
+        add_action,
+        {"versions_rows": 9000, "versions_bytes": 300 * 1_048_576, "counts": {"knowledge_objects": 1500}},
+    )
+    assert actions and actions[0]["code"] == "versions_table_growing"
+
+    actions.clear()
+    _add_versions_growth_action(
+        add_action,
+        {"versions_rows": 1500, "versions_bytes": 40 * 1_048_576, "counts": {"knowledge_objects": 1500}},
+    )
+    assert not actions, "обычная история правок не должна тревожить"

@@ -647,6 +647,29 @@ def _add_outbound_stall_action(add_action: Any, database: dict[str, Any]) -> Non
     )
 
 
+def _add_versions_growth_action(add_action: Any, database: dict[str, Any]) -> None:
+    """Версии хранят полный content в каждом снапшоте, и чистки нет нигде.
+
+    Массовое ре-обогащение добавляет копию корпуса в базу навсегда; растут и
+    сама база, и каждый из хранимых суточных бэкапов. Порог намеренно грубый:
+    в три раза больше снапшотов, чем объектов, или больше четверти гигабайта —
+    это уже не история правок, а второй корпус.
+    """
+    rows = int(database.get("versions_rows") or 0)
+    size = int(database.get("versions_bytes") or 0)
+    objects = int((database.get("counts") or {}).get("knowledge_objects") or 0)
+    if rows <= max(1000, objects * 3) and size <= 256 * 1024 * 1024:
+        return
+    add_action(
+        "versions_table_growing",
+        "warning",
+        "История версий разрослась",
+        f"Снапшотов {rows} ({size / 1_048_576:.0f} МБ) на {objects} объектов; каждый несёт "
+        "полный текст, чистки нет. База и все хранимые бэкапы растут кратно быстрее самого "
+        "знания. Лечение — ретеншн (N последних полных версий, старые сжимать), в очереди работ.",
+    )
+
+
 def _add_secret_hygiene_actions(add_action: Any, settings: JerichoSettings) -> None:
     """Report this instance's own credentials found outside the files meant to hold them.
 
@@ -745,6 +768,7 @@ def collect_diagnostics(
         _add_secret_hygiene_actions(add_action, settings)
     _add_inbox_backlog_action(add_action, database)
     _add_outbound_stall_action(add_action, database)
+    _add_versions_growth_action(add_action, database)
     database_state = str(database.get("state") or "")
     if database_state == "not_initialized":
         add_action(

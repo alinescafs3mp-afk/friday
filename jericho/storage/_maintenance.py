@@ -689,6 +689,14 @@ class MaintenanceMixin(StorageShared):
             "SELECT COUNT(*) AS count, MIN(created_at) AS oldest "
             "FROM outbound_notifications WHERE status='pending'"
         ).fetchone()
+        # Версии хранят ПОЛНЫЙ content в каждом снапшоте, чистки нет нигде:
+        # массовое ре-обогащение добавляет копию корпуса в базу навсегда и
+        # раздувает каждый из 14 суточных бэкапов. Пока рост хотя бы виден;
+        # ретеншн (N полных + сжатие старых) — отдельная работа.
+        versions = self.execute(
+            "SELECT COUNT(*) AS count, COALESCE(SUM(LENGTH(snapshot_json)), 0) AS bytes "
+            "FROM knowledge_object_versions"
+        ).fetchone()
         outbound_oldest_minutes: float | None = None
         if outbound and outbound["oldest"]:
             try:
@@ -710,5 +718,7 @@ class MaintenanceMixin(StorageShared):
             "inbox_oldest_pending_at": (str(backlog["oldest"]) if backlog and backlog["oldest"] else None),
             "outbound_pending": int(outbound["count"] if outbound else 0),
             "outbound_oldest_minutes": outbound_oldest_minutes,
+            "versions_rows": int(versions["count"] if versions else 0),
+            "versions_bytes": int(versions["bytes"] if versions else 0),
             "ok": integrity == "ok" and not foreign_keys,
         }
