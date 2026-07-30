@@ -917,6 +917,51 @@ def collect_diagnostics(
                 f"vLLM отвечает, но не отдаёт модель '{settings.llm_model}'. "
                 f"Проверьте JERICHO_LLM_MODEL и имя модели vLLM. Обслуживаются: {served}.",
             )
+    # Покрытие корпуса векторами. Число собиралось и НИ С ЧЕМ не сравнивалось: лежало
+    # в свёрнутом JSON-дампе рядом с числом объектов, и сопоставить их было некому.
+    # А расходятся они буднично — после смены модели, после правки разбиения на
+    # пассажи, после ночи с недоступным сервисом. Поиск при этом работает: просто
+    # часть архива в него не попадает, и узнать об этом можно только по ответам.
+    counts = (result.get("database") or {}).get("counts") or {}
+    live_objects = int(counts.get("knowledge_objects") or 0)
+    indexed = int(embeddings_coverage.get("indexed_objects") or 0)
+    if settings.embeddings_enabled and embeddings_coverage.get("available") and live_objects:
+        embeddings_coverage["expected_objects"] = live_objects
+        embeddings_coverage["coverage"] = round(indexed / live_objects, 4)
+        # Десятая часть — не придирка, а порог заметности: при таком разрыве плотный
+        # канал уже теряет документы, но система всё ещё выглядит здоровой.
+        if indexed < live_objects * 0.9:
+            add_action(
+                "embeddings_coverage_low",
+                "warning",
+                "Часть архива не попала в смысловой поиск",
+                f"Векторов {indexed} на {live_objects} объектов "
+                f"({indexed / live_objects:.0%}). Поиск работает и не выглядит сломанным, "
+                "но найти по смыслу то, чего нет в индексе, нельзя. Обычно догоняется само; "
+                "если число не растёт — проверьте сервис эмбеддингов.",
+            )
+
+    # Свободное место. Тоже собиралось и лежало в байтах внутри дампа: при 99%
+    # занятости состояние осталось бы «ready». А кончившееся место — это не медленная
+    # деградация, а мгновенная остановка записи, и SQLite отдаёт «disk I/O error»,
+    # который человеку ничего не объясняет.
+    disk = (result.get("runtime") or {}).get("disk") or {}
+    total_bytes = int(disk.get("total_bytes") or 0)
+    free_bytes = int(disk.get("free_bytes") or 0)
+    if total_bytes > 0:
+        free_share = free_bytes / total_bytes
+        disk["free_share"] = round(free_share, 4)
+        if free_share < 0.05 or free_bytes < 1_000_000_000:
+            add_action(
+                "disk_space_low",
+                "error" if free_share < 0.02 else "warning",
+                "Заканчивается место на диске",
+                f"Свободно {free_bytes / 1_000_000_000:.1f} ГБ из "
+                f"{total_bytes / 1_000_000_000:.1f} ({free_share:.0%}). "
+                "При нуле запись останавливается сразу: база отдаёт «disk I/O error», "
+                "и это выглядит как поломка, а не как кончившееся место.",
+            )
+
     if check_llm_port and settings.embeddings_enabled and settings.embeddings_base_url:
         # Сервис эмбеддингов проверяется ОТДЕЛЬНО от чат-модели, потому что падает он
         # отдельно и молча. Замерено на этой установке: при мёртвом :8002 фоновая

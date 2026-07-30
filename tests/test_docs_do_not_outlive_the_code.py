@@ -136,3 +136,40 @@ def test_a_server_without_tool_calling_still_answers():
     assert _tools_unsupported('{"error":{"message":"context length exceeded"}}') is False
     assert _tools_unsupported('{"error":{"message":"model not found"}}') is False
     assert _tools_unsupported("") is False
+
+
+def test_the_readme_lists_every_cli_command():
+    """Раздел CLI в README оформлен как исчерпывающий список — значит должен им быть.
+
+    Он разошёлся с парсером на ДЕСЯТЬ команд из 23, и молчал не о мелочах:
+    `search-source` (дословный поиск по исходному тексту — то, что нужно, когда
+    подводит ранжирование), `reindex-embeddings` (после смены модели эмбеддингов),
+    `tui` (самая уместная точка входа для не-разработчика), `up` и
+    `install-services` («как поднять это навсегда»).
+
+    Список подкоманд берётся из САМОГО парсера, а не переписывается сюда: копия
+    разошлась бы точно так же, просто позже.
+    """
+    import re
+    from pathlib import Path
+
+    from jericho.cli import build_parser
+
+    parser = build_parser()
+    names = sorted(
+        {
+            name
+            for action in parser._subparsers._group_actions  # noqa: SLF001
+            for name in action.choices
+        }
+        if parser._subparsers  # noqa: SLF001
+        else set()
+    )
+    assert names, "подкоманды не нашлись — проба сломана, а не README"
+
+    readme = Path("README.md").read_text(encoding="utf-8")
+    missing = [name for name in names if not re.search(rf"jericho {re.escape(name)}\b", readme)]
+    assert not missing, (
+        f"README не упоминает команды: {', '.join(missing)}. Раздел выдаёт себя за полный "
+        "перечень, поэтому умолчание читается как «такой команды нет»"
+    )
