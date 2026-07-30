@@ -7,6 +7,8 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from jericho.telegram_bridge._base import (
     API_BASE,
     BACKOFF_MAX,
@@ -84,6 +86,10 @@ class TransportMixin(BridgeShared):
         # Last known failing/healthy state per loop, for transition detection.
         self._loop_failing: dict[str, bool] = {}
         self._warned_no_signer = False
+        # Сторож backend: мост — первый, кто узнаёт о его смерти, и единственный,
+        # кто может об этом сказать (sentinel живёт ВНУТРИ backend и молчит с ним).
+        self._backend_down_since = 0.0
+        self._backend_down_warned_at = 0.0
 
     async def run(self) -> None:
         install_secret_redaction(
@@ -249,12 +255,88 @@ class TransportMixin(BridgeShared):
             try:
                 await self._drain_outbound(telegram, backend)
                 await self._journal_transition(backend, "outbound", failing=False)
+                await self._notify_backend_recovered(telegram)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 LOGGER.exception("Telegram bridge outbound loop failed")
                 await self._journal_transition(backend, "outbound", failing=True, error=exc)
+                await self._warn_owner_if_backend_down(telegram, backend)
             await asyncio.sleep(max(2.0, float(self.config.outbound_poll_interval_sec)))
+
+    # Сколько backend должен молчать, прежде чем мост скажет об этом владельцу.
+    # Меньше — и каждый рестарт супервизора (2 с) превращается в тревогу.
+    _BACKEND_DOWN_GRACE_SEC = 120.0
+    # Повтор тревоги по той же аварии — не чаще раза в сутки, как у sentinel.
+    _BACKEND_DOWN_REPEAT_SEC = 86_400.0
+
+    async def _warn_owner_if_backend_down(
+        self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient
+    ) -> None:
+        """Прямое sendMessage владельцу, минуя очередь уведомлений.
+
+        Вся самодиагностика (sentinel) исполняется внутри backend и доставляется
+        через очередь, которую разгребает этот же мост С backend-а — то есть о
+        смерти backend не могло сообщить НИЧТО: владелец узнавал по тишине бота
+        спустя часы. Мост опрашивает backend каждые 15 секунд, держит токен бота
+        и список чатов — он первый узнаёт и единственный может сказать.
+        """
+        try:
+            response = await backend.get(f"{self._backend_url}/health")
+            if int(response.status_code) < 500:
+                self._backend_down_since = 0.0
+                return
+        except Exception:  # noqa: BLE001 - недоступность и есть проверяемое состояние
+            pass
+        now = time.monotonic()
+        if not self._backend_down_since:
+            self._backend_down_since = now
+            return
+        if now - self._backend_down_since < self._BACKEND_DOWN_GRACE_SEC:
+            return
+        if (
+            self._backend_down_warned_at
+            and now - self._backend_down_warned_at < self._BACKEND_DOWN_REPEAT_SEC
+        ):
+            return
+        signer_chat = self._signer_chat_id()
+        if not signer_chat:
+            return
+        minutes = int((now - self._backend_down_since) / 60)
+        try:
+            answer = await telegram.post(
+                f"{self._api_url}/sendMessage",
+                json={
+                    "chat_id": int(signer_chat),
+                    "text": (
+                        f"⚠️ Backend Jericho не отвечает уже ~{minutes} мин. "
+                        "Бот принимает сообщения, но обработка стоит; они дойдут после "
+                        "восстановления. Проверьте процесс jericho up на хосте."
+                    ),
+                },
+            )
+            answer.raise_for_status()
+            self._backend_down_warned_at = now
+        except Exception:  # noqa: BLE001 - тревога не должна ронять цикл
+            LOGGER.warning("Could not warn the owner about the backend outage", exc_info=True)
+
+    async def _notify_backend_recovered(self, telegram: httpx.AsyncClient) -> None:
+        """Одно сообщение о восстановлении — тревога без отбоя учит игнорировать тревоги."""
+        self._backend_down_since = 0.0
+        if not self._backend_down_warned_at:
+            return
+        self._backend_down_warned_at = 0.0
+        signer_chat = self._signer_chat_id()
+        if not signer_chat:
+            return
+        with suppress(Exception):
+            await telegram.post(
+                f"{self._api_url}/sendMessage",
+                json={
+                    "chat_id": int(signer_chat),
+                    "text": "✅ Backend Jericho снова отвечает; накопившиеся сообщения обрабатываются.",
+                },
+            )
 
     async def _drain_outbound(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:
         signer_chat = self._signer_chat_id()

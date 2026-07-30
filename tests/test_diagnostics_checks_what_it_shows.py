@@ -265,3 +265,34 @@ def test_a_full_disk_becomes_an_action_instead_of_a_number_in_a_dump(settings, m
     assert "disk I/O error" in str(action.get("detail") or ""), (
         "не названо, КАК это будет выглядеть — иначе человек не свяжет одно с другим"
     )
+
+
+def test_a_stalled_outbound_queue_becomes_an_action(settings, storage):
+    """Очередь наполняет backend, а разгребает МОСТ: мёртвый мост backend видел
+    (count рос) и молчал. Возраст старейшего pending — признак, который видно."""
+    from datetime import UTC, datetime, timedelta
+
+    storage.ensure_user("alice")
+    stale = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO outbound_notifications(
+                   id, user_id, chat_id, kind, dedup_key, body, status, attempts, created_at)
+               VALUES('n_stale', 'alice', '5001', 'reminder', 'k1', 'тело', 'pending', 0, ?)""",
+            (stale,),
+        )
+    result = collect_diagnostics(_tuned(settings), storage=storage)
+
+    assert float(result["database"].get("outbound_oldest_minutes") or 0) > 60
+    action = next(
+        (item for item in result["actions"] if str(item.get("code")) == "outbound_queue_stalled"),
+        None,
+    )
+    assert action is not None, "застрявшая очередь не породила действия"
+
+
+def test_a_fresh_outbound_notification_is_not_an_alarm(settings, storage):
+    storage.ensure_user("alice")
+    storage.enqueue_notification("alice", "5001", "тело", kind="reminder", dedup_key="k2")
+    result = collect_diagnostics(_tuned(settings), storage=storage)
+    assert "outbound_queue_stalled" not in {str(i.get("code")) for i in result["actions"]}

@@ -1171,3 +1171,60 @@ async def test_an_edited_message_gets_an_honest_answer(tmp_path):
         assert not backend.calls, "правка ушла в бекенд, хотя объявлена неподдержанной"
     finally:
         bridge._inbox.close()
+
+
+class _DeadBackend:
+    async def get(self, url):
+        raise RuntimeError("connection refused")
+
+
+@pytest.mark.asyncio
+async def test_the_bridge_warns_the_owner_when_backend_is_down(tmp_path):
+    """Sentinel живёт ВНУТРИ backend и умирает вместе с ним: о падении не могло
+    сообщить ничто, владелец узнавал по тишине бота спустя часы. Мост опрашивает
+    backend каждые 15 секунд и держит токен бота — он первый узнаёт и
+    единственный может сказать."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    try:
+        await bridge._warn_owner_if_backend_down(telegram, _DeadBackend())
+        assert not [u for u, _ in telegram.calls if u.endswith("/sendMessage")], (
+            "тревога раньше грейс-периода: каждый рестарт супервизора стал бы тревогой"
+        )
+
+        bridge._backend_down_since -= 300  # авария длится уже пять минут
+        await bridge._warn_owner_if_backend_down(telegram, _DeadBackend())
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert sends and "не отвечает" in sends[-1]["text"]
+        assert sends[-1]["chat_id"] == 5001
+
+        await bridge._warn_owner_if_backend_down(telegram, _DeadBackend())
+        assert len([p for u, p in telegram.calls if u.endswith("/sendMessage")]) == 1, (
+            "повтор той же аварии должен молчать сутки"
+        )
+
+        await bridge._notify_backend_recovered(telegram)
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert "снова отвечает" in sends[-1]["text"], "тревога без отбоя учит игнорировать тревоги"
+        assert bridge._backend_down_warned_at == 0.0
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_a_living_backend_resets_the_watchdog(tmp_path):
+    """Сбой цикла может быть и на стороне Telegram: живой backend сбрасывает счёт."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+
+    class _LiveBackend:
+        async def get(self, url):
+            return _FakeResponse({"status": "ok"})
+
+    try:
+        bridge._backend_down_since = 1.0
+        await bridge._warn_owner_if_backend_down(telegram, _LiveBackend())
+        assert bridge._backend_down_since == 0.0
+        assert not [u for u, _ in telegram.calls if u.endswith("/sendMessage")]
+    finally:
+        bridge._inbox.close()

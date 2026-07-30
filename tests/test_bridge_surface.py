@@ -232,7 +232,9 @@ EXPECTED_COMMANDS = {
     "/why",
     "/work",
 }
-EXPECTED_BRIDGE_COUNT = 41
+# 41 → 43: сторож backend (+_warn_owner_if_backend_down, +_notify_backend_recovered)
+# — sentinel живёт внутри backend и о его смерти сообщить не мог никто, кроме моста.
+EXPECTED_BRIDGE_COUNT = 43
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",

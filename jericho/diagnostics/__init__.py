@@ -170,9 +170,21 @@ def _database_status(path: Path) -> dict[str, Any]:
             database["counts"] = counts
             if "outbound_notifications" in table_names:
                 pending_row = conn.execute(
-                    "SELECT COUNT(*) AS count FROM outbound_notifications WHERE status='pending'"
+                    "SELECT COUNT(*) AS count, MIN(created_at) AS oldest "
+                    "FROM outbound_notifications WHERE status='pending'"
                 ).fetchone()
                 database["outbound_pending"] = int(pending_row["count"] if pending_row else 0)
+                # Возраст важнее размера: очередь наполняет backend, а разгребает
+                # МОСТ. Мёртвый мост backend видел (count рос) и молчал — застрявшее
+                # уведомление неотличимо от только что положенного без отметки времени.
+                oldest_raw = pending_row["oldest"] if pending_row else None
+                if oldest_raw:
+                    with suppress(ValueError, TypeError):
+                        oldest_at = datetime.fromisoformat(str(oldest_raw))
+                        if oldest_at.tzinfo is None:
+                            oldest_at = oldest_at.replace(tzinfo=UTC)
+                        age_minutes = (datetime.now(UTC) - oldest_at).total_seconds() / 60
+                        database["outbound_oldest_minutes"] = round(age_minutes, 1)
             if "inbox" in table_names:
                 # A pending item is not knowledge yet — it cannot be found by search. So a
                 # backlog is not untidiness, it is material the owner imported and can no
@@ -616,6 +628,25 @@ def _add_inbox_backlog_action(add_action: Any, database: dict[str, Any]) -> None
     )
 
 
+def _add_outbound_stall_action(add_action: Any, database: dict[str, Any]) -> None:
+    """Возраст важнее размера: очередь наполняет backend, а разгребает МОСТ.
+
+    Мёртвый мост backend видел (count рос) и молчал — застрявшее уведомление
+    неотличимо от только что положенного, пока не смотреть на отметку времени.
+    """
+    age_minutes = float(database.get("outbound_oldest_minutes") or 0.0)
+    if age_minutes <= 30:
+        return
+    add_action(
+        "outbound_queue_stalled",
+        "warning",
+        "Мост не забирает уведомления",
+        f"Старейшее уведомление ждёт {age_minutes:.0f} мин при опросе раз в 15 с — "
+        "мост Telegram, вероятно, не работает. Напоминания и тревоги не доходят; "
+        "проверьте процесс telegram-bridge.",
+    )
+
+
 def _add_secret_hygiene_actions(add_action: Any, settings: JerichoSettings) -> None:
     """Report this instance's own credentials found outside the files meant to hold them.
 
@@ -713,6 +744,7 @@ def collect_diagnostics(
     if check_secrets:
         _add_secret_hygiene_actions(add_action, settings)
     _add_inbox_backlog_action(add_action, database)
+    _add_outbound_stall_action(add_action, database)
     database_state = str(database.get("state") or "")
     if database_state == "not_initialized":
         add_action(

@@ -681,6 +681,23 @@ class MaintenanceMixin(StorageShared):
         backlog = self.execute(
             "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM inbox WHERE status='pending'"
         ).fetchone()
+        # Возраст важнее размера и здесь тоже: очередь наполняет backend, а
+        # разгребает МОСТ. Мёртвый мост backend видел (count рос) и молчал —
+        # застрявшее уведомление неотличимо от только что положенного без
+        # отметки времени. Живой экземпляр ходит ЭТИМ путём, не `_database_status`.
+        outbound = self.execute(
+            "SELECT COUNT(*) AS count, MIN(created_at) AS oldest "
+            "FROM outbound_notifications WHERE status='pending'"
+        ).fetchone()
+        outbound_oldest_minutes: float | None = None
+        if outbound and outbound["oldest"]:
+            try:
+                oldest_at = datetime.fromisoformat(str(outbound["oldest"]))
+                if oldest_at.tzinfo is None:
+                    oldest_at = oldest_at.replace(tzinfo=UTC)
+                outbound_oldest_minutes = round((datetime.now(UTC) - oldest_at).total_seconds() / 60, 1)
+            except (TypeError, ValueError):
+                outbound_oldest_minutes = None
         return {
             "database_path": str(self._db_path),
             "database_size_bytes": self._db_path.stat().st_size if self._db_path.exists() else 0,
@@ -691,5 +708,7 @@ class MaintenanceMixin(StorageShared):
             "counts": counts,
             "inbox_pending": int(backlog["count"] if backlog else 0),
             "inbox_oldest_pending_at": (str(backlog["oldest"]) if backlog and backlog["oldest"] else None),
+            "outbound_pending": int(outbound["count"] if outbound else 0),
+            "outbound_oldest_minutes": outbound_oldest_minutes,
             "ok": integrity == "ok" and not foreign_keys,
         }
