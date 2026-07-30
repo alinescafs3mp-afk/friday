@@ -1,3 +1,3 @@
 """Jericho local-first Knowledge Operating System."""
 
-__version__ = "0.143.0"
+__version__ = "0.144.0"
