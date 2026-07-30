@@ -93,9 +93,8 @@ def _worker_state(**overrides):
 def test_a_worker_that_never_ran_is_not_reported_healthy(settings, storage):
     """Он был освобождён от проверки ПО ПОСТРОЕНИЮ: нет `last_finished`, статус
     «scheduled» — то есть чем дольше он мёртв, тем надёжнее выглядит здоровым."""
-    import json
-
     import dataclasses
+    import json
 
     from jericho.diagnostics import _worker_status
 
@@ -113,11 +112,10 @@ def test_a_worker_that_never_ran_is_not_reported_healthy(settings, storage):
 
 def test_a_worker_merely_waiting_its_turn_is_left_alone(settings, storage):
     """Просрочки нет — значит и жалобы быть не должно, иначе шум перекроет сигнал."""
+    import dataclasses
     import json
 
     from jericho.diagnostics import _worker_status
-
-    import dataclasses
 
     settings = dataclasses.replace(settings, workers_enabled=True)
     future = (datetime.now(UTC) + timedelta(seconds=3_600)).isoformat(timespec="seconds")

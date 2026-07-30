@@ -104,7 +104,7 @@ def test_an_existing_accepted_link_is_not_duplicated(storage):
 def test_aliases_count_as_mentions(storage):
     """Псевдоним — то же имя; при разборе он тоже срабатывает."""
     storage.ensure_user("alice")
-    document = _document(storage, "alice", 1, "Работы вёл КМК по договору.")
+    _document(storage, "alice", 1, "Работы вёл КМК по договору.")
     entity_id = _entity(storage, "alice", "Комбинат", aliases=["КМК"])
 
     assert storage.backfill_entity_mentions("alice")["linked"] == 1
