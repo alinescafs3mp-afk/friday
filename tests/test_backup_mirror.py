@@ -192,3 +192,79 @@ def test_a_manifest_less_mirror_copy_is_repaired_not_skipped_forever(settings, t
 
     # And a complete pair is still a no-op.
     assert mirror_backups(mirrored)["skipped_existing"] == 1
+
+
+# --- дерево оригиналов файлов едет в то же зеркало ----------------------------
+
+
+def _files_tree(settings) -> None:
+    tree = settings.backups_dir / "files" / "u1"
+    tree.mkdir(parents=True, exist_ok=True)
+    (tree / "doc.pdf").write_bytes(b"%PDF-original-bytes")
+
+
+def test_files_tree_mirrors_plain_and_is_idempotent(settings, tmp_path):
+    """mirror_backups ходит по манифестам БД — оригиналы документов оставались
+    без offsite-копии даже у того, кто зеркало включил."""
+    from jericho.backup_mirror import mirror_files_tree
+
+    mirrored = replace(settings, backup_mirror_dir=_mounted(tmp_path / "mirror"))
+    _files_tree(mirrored)
+
+    first = mirror_files_tree(mirrored)
+    assert first["enabled"] is True and first["copied"] == 1 and first["complete"] is True
+    copy = tmp_path / "mirror" / "files" / "u1" / "doc.pdf"
+    assert copy.read_bytes() == b"%PDF-original-bytes"
+
+    again = mirror_files_tree(mirrored)
+    assert again["copied"] == 0 and again["skipped_existing"] == 1
+
+    # Удаление источника копию не трогает: зеркало, повторяющее удаление, — не бэкап.
+    (mirrored.backups_dir / "files" / "u1" / "doc.pdf").unlink()
+    third = mirror_files_tree(mirrored)
+    assert copy.is_file()
+    assert third["complete"] is True
+
+
+def test_files_tree_mirrors_encrypted_with_roundtrip_verification(settings, tmp_path):
+    from jericho.backup_mirror import decrypt_file, mirror_files_tree
+
+    key_file = tmp_path / "backup.key"
+    key_file.write_text(secrets.token_hex(32) + "\n", encoding="utf-8")
+    mirrored = replace(
+        settings,
+        backup_mirror_dir=_mounted(tmp_path / "mirror"),
+        backup_encryption_key_file=key_file,
+    )
+    _files_tree(mirrored)
+
+    report = mirror_files_tree(mirrored)
+    assert report["copied"] == 1 and report["complete"] is True
+
+    encrypted = tmp_path / "mirror" / "files" / "u1" / "doc.pdf.enc"
+    assert encrypted.is_file()
+    assert encrypted.read_bytes() != b"%PDF-original-bytes"
+    restored = tmp_path / "restored.pdf"
+    decrypt_file(encrypted, restored, key_file)
+    assert restored.read_bytes() == b"%PDF-original-bytes"
+
+
+def test_files_tree_never_creates_the_mirror_mountpoint(settings, tmp_path):
+    """mkdir на неподключённом диске создаёт каталог В ТОЧКЕ МОНТИРОВАНИЯ и
+    рапортует успех — ту же ловушку уже ловили у баз."""
+    from jericho.backup_mirror import mirror_files_tree
+
+    mirrored = replace(settings, backup_mirror_dir=tmp_path / "unmounted" / "mirror")
+    _files_tree(mirrored)
+
+    report = mirror_files_tree(mirrored)
+    assert report["error"] == "mirror_dir_missing"
+    assert not (tmp_path / "unmounted").exists(), "зеркало создано на месте отсутствующего диска"
+
+
+def test_no_files_backup_yet_is_not_an_error(settings, tmp_path):
+    from jericho.backup_mirror import mirror_files_tree
+
+    mirrored = replace(settings, backup_mirror_dir=_mounted(tmp_path / "mirror"))
+    report = mirror_files_tree(mirrored)
+    assert report["state"] == "no_files_backup_yet" and report["complete"] is True

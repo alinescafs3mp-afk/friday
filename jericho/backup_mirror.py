@@ -225,3 +225,91 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
             mirror_dir,
         )
     return report
+
+
+def mirror_files_tree(settings: Any, *, budget_sec: float = 300.0) -> dict[str, Any]:
+    """Зеркалирование дерева оригиналов файлов (``backups/files/``). Идемпотентно.
+
+    `mirror_backups` ходит по манифестам БД, и дерево файлов в зеркало не ехало:
+    оригиналы документов — то, ради чего provenance строился, — оставались без
+    offsite-копии даже у того, кто зеркало включил. Файлы content-addressed и
+    неизменяемы, поэтому инкремент — «чего в зеркале нет»; удаления НЕ
+    распространяются. С ключом каждый файл шифруется той же схемой, что базы, и
+    проверяется расшифровкой; без ключа — копией и сверкой sha256.
+    """
+    mirror_dir: Path | None = settings.backup_mirror_dir
+    if mirror_dir is None:
+        return {"enabled": False}
+    source_root: Path = settings.backups_dir / "files"
+    if not source_root.is_dir():
+        # Файловый бэкап ещё не создавался — зеркалить нечего, и это не ошибка.
+        return {"enabled": True, "state": "no_files_backup_yet", "copied": 0, "failed": 0, "complete": True}
+    if not mirror_dir.is_dir():
+        # Ту же ловушку уже ловили у баз: mkdir на неподключённом диске создаёт
+        # каталог В ТОЧКЕ МОНТИРОВАНИЯ и рапортует успешное зеркало. Не создавать.
+        return {
+            "enabled": True,
+            "error": "mirror_dir_missing",
+            "mirror_dir": str(mirror_dir),
+            "copied": 0,
+            "failed": 0,
+            "complete": False,
+        }
+    key_file: Path | None = settings.backup_encryption_key_file
+    target_root = mirror_dir / "files"
+    import time
+
+    started = time.monotonic()
+    total = copied = skipped = failed = pending = 0
+    for source in sorted(source_root.rglob("*")):
+        if not source.is_file():
+            continue
+        total += 1
+        relative = source.relative_to(source_root)
+        target = target_root / (relative.parent / f"{relative.name}.enc" if key_file else relative)
+        if target.is_file():
+            skipped += 1
+            continue
+        if time.monotonic() - started > budget_sec:
+            pending += 1
+            continue
+        tmp = target.with_name(target.name + ".part")
+        try:
+            # Подкаталоги ВНУТРИ живого mirror_dir создавать безопасно: сама точка
+            # монтирования уже проверена выше.
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if key_file is not None:
+                encrypt_file(source, tmp, key_file)
+                _verify_encrypted_copy(tmp, key_file, _sha256(source))
+            else:
+                shutil.copy2(source, tmp)
+                if _sha256(tmp) != _sha256(source):
+                    raise BackupMirrorError(f"копия {relative} не совпала с оригиналом")
+            os.replace(tmp, target)
+            target.chmod(0o600)
+            copied += 1
+        except Exception:
+            failed += 1
+            tmp.unlink(missing_ok=True)
+            LOGGER.warning("Не удалось отзеркалировать файл %s", relative, exc_info=True)
+    report = {
+        "enabled": True,
+        "mirror_dir": str(mirror_dir),
+        "encrypted": key_file is not None,
+        "total": total,
+        "copied": copied,
+        "skipped_existing": skipped,
+        "failed": failed,
+        "pending": pending,
+        "complete": pending == 0 and failed == 0,
+    }
+    if copied or failed or pending:
+        LOGGER.info(
+            "Зеркалирование файлов: скопировано %d, пропущено %d, отложено %d, ошибок %d (%s)",
+            copied,
+            skipped,
+            pending,
+            failed,
+            mirror_dir,
+        )
+    return report

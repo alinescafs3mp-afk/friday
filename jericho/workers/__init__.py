@@ -1002,6 +1002,19 @@ class WorkersManager:
                 "workers:last_backup_mirror",
                 json.dumps(mirror, ensure_ascii=False),
             )
+            # Дерево оригиналов едет в то же зеркало: mirror_backups ходит по
+            # манифестам БД и файлы не видел — offsite-копии документов не было
+            # даже у включившего зеркало.
+            from jericho.backup_mirror import mirror_files_tree
+
+            files_mirror = await run_blocking(mirror_files_tree, self.settings)
+            if files_mirror.get("enabled"):
+                files_mirror["reported_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+                await run_blocking(
+                    self.storage.kv_set,
+                    "workers:last_files_mirror",
+                    json.dumps(files_mirror, ensure_ascii=False),
+                )
         # Prune AFTER mirroring, so an offsite copy of the oldest generation is made
         # before the local one goes. Retention is the missing half of a daily backup:
         # without it the disk fills, and it takes the live instance with it.
