@@ -346,6 +346,198 @@ async def entity_suggestion_queue(
     }
 
 
+@router.get("/entity-suggestions/groups")
+async def entity_suggestion_groups(
+    request: Request,
+    user_id: str | None = None,
+    scan: int = Query(60, ge=1, le=200),
+    min_docs: int = Query(2, ge=1),
+) -> dict[str, Any]:
+    """Кандидаты, сгруппированные «одна сущность × N документов».
+
+    Поштучный разбор не работает на объёме: 42 кандидата на документ (замер в
+    ARCHITECTURE §16), очередь нечитаема из-за КОЛИЧЕСТВА, а не из-за шума, и
+    граф фактически не растёт — воркер наполняет очередь быстрее, чем человек
+    разбирает её по одному. «Казань» в 57 документах — это ОДНО решение, а не 57.
+
+    Считается по запросу над первыми ``scan`` документами очереди (пересчёт
+    всего корпуса дорог и это записано рядом с очередью), поэтому ответ честно
+    несёт ``scanned_documents``: группы — это то, что видно в окне, а не весь
+    архив.
+    """
+    _require(request, "admin.all_data.read")
+    target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.entity_suggestions.read", target)
+    state = _services(request)
+    documents, _total = state.storage.list_documents_with_entity_suggestions(target, limit=scan, offset=0)
+
+    from jericho.storage import normalize_entity_name
+
+    groups: dict[str, dict[str, Any]] = {}
+    scanned = 0
+    for row in documents:
+        knowledge_id = str(row.get("id") or "")
+        knowledge = state.storage.get_knowledge_object(knowledge_id, target)
+        if not knowledge or knowledge.get("deleted_at"):
+            continue
+        scanned += 1
+        content = str(knowledge.get("content") or knowledge.get("summary") or "")
+        suggestions = await asyncio.to_thread(
+            state.ingestion._entity_suggestions,  # noqa: SLF001
+            target,
+            content,
+        )
+        decided = {
+            str(link.get("entity_id"))
+            for link in state.storage.list_knowledge_entity_links(
+                target, knowledge_object_id=knowledge_id, status=None, limit=500
+            )
+        }
+        for item in suggestions:
+            if str(item.get("entity_id") or "") in decided:
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            key = normalize_entity_name(name)
+            group = groups.setdefault(
+                key,
+                {
+                    "name": name,
+                    "entity_type": str(item.get("entity_type") or "other"),
+                    "method": str(item.get("method") or ""),
+                    "confidence_max": 0.0,
+                    "documents": [],
+                },
+            )
+            confidence = float(item.get("confidence") or 0.0)
+            if confidence > group["confidence_max"]:
+                group["confidence_max"] = round(confidence, 3)
+                # Показывается самая уверенная поверхностная форма и её метод:
+                # человек подтверждает то, что видит.
+                group["name"] = name
+                group["entity_type"] = str(item.get("entity_type") or "other")
+                group["method"] = str(item.get("method") or "")
+            if all(doc["id"] != knowledge_id for doc in group["documents"]):
+                group["documents"].append(
+                    {"id": knowledge_id, "title": str(knowledge.get("title") or "")[:120]}
+                )
+    ranked = [
+        {**group, "document_count": len(group["documents"])}
+        for group in groups.values()
+        if len(group["documents"]) >= min_docs
+    ]
+    ranked.sort(key=lambda g: (-g["document_count"], -g["confidence_max"], g["name"]))
+    return {
+        "user_id": target,
+        "groups": ranked,
+        "count": len(ranked),
+        "scanned_documents": scanned,
+        # Окно, а не архив: за пределами scan документов группы не считались.
+        "estimate": True,
+    }
+
+
+@router.post("/entity-suggestions/groups/decide")
+async def decide_entity_suggestion_group(request: Request) -> dict[str, Any]:
+    """Принять или отклонить группу целиком: одно решение вместо N.
+
+    Принятие переиспользует узел по имени (или создаёт с origin=human_review) и
+    ставит УТВЕРЖДЁННУЮ связь в каждый документ; отклонение пишет отклонённую
+    связь — «человек посмотрел и сказал нет» — и группа больше не предлагается.
+    Документ, у которого связь с этой сущностью УЖЕ есть (в любом статусе),
+    пропускается: перезапись воскресила бы решение, принятое раньше, — ровно та
+    грабля, которую ловил обратный проход по сущностям.
+    """
+    actor = _require(request, "admin.all_data.manage")
+    body = await _request_json(request)
+    user_id = str(body.get("user_id") or "")
+    name = str(body.get("name") or "").strip()
+    decision = str(body.get("decision") or "accept").strip()
+    entity_type = str(body.get("entity_type") or EntityType.OTHER.value).strip()
+    document_ids = [str(item) for item in (body.get("knowledge_object_ids") or []) if str(item)]
+    if not user_id or not name or not document_ids:
+        raise HTTPException(status_code=400, detail="user_id, name and knowledge_object_ids are required")
+    if decision not in {"accept", "reject"}:
+        raise HTTPException(status_code=400, detail="decision must be accept or reject")
+    if len(document_ids) > 200:
+        raise HTTPException(status_code=400, detail="at most 200 documents per decision")
+    try:
+        parsed_type = EntityType(entity_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unknown entity_type: {entity_type}") from exc
+
+    state = _services(request)
+    entity = state.storage.find_entity_by_name(user_id, name)
+    created = False
+    if not entity:
+        if decision == "reject":
+            # Отклонение группы без узла ничего не меняет в графе — и не должно
+            # СОЗДАВАТЬ узел ради записи отказа. Отказ хранится связями, а связи
+            # требуют узла; создать его и обвесить отказами значило бы засорить
+            # граф тем, что человек как раз отверг.
+            return {"entity": None, "decided": 0, "skipped_existing": 0, "decision": decision}
+        entity = state.kg.create_entity(
+            user_id,
+            name,
+            parsed_type,
+            metadata={"origin": "human_review", "accepted_by": actor.user_id},
+        )
+        created = True
+
+    decided = 0
+    skipped = 0
+    missing = 0
+    for knowledge_id in document_ids:
+        knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
+        if not knowledge or knowledge.get("deleted_at"):
+            missing += 1
+            continue
+        existing = state.storage.list_knowledge_entity_links(
+            user_id, knowledge_object_id=knowledge_id, status=None, limit=500
+        )
+        if any(str(link.get("entity_id")) == str(entity["id"]) for link in existing):
+            skipped += 1
+            continue
+        state.kg.link_knowledge_to_entity(
+            knowledge_id,
+            str(entity["id"]),
+            user_id,
+            confidence=1.0 if decision == "accept" else 0.0,
+            evidence={"method": "human_review_bulk", "accepted_by": actor.user_id},
+            status="accepted" if decision == "accept" else "rejected",
+            reviewed_by=actor.user_id,
+        )
+        decided += 1
+    _audit(
+        request,
+        f"admin.entity_suggestion.bulk_{decision}",
+        "entity",
+        str(entity["id"]),
+        after={
+            "name": name,
+            "entity_type": parsed_type.value,
+            "documents": decided,
+            "skipped_existing": skipped,
+            "missing": missing,
+            "entity_created": created,
+        },
+    )
+    if decision == "accept" and decided:
+        # Подтверждение человеком — самый качественный сигнал; пересчёт связей
+        # сущность↔сущность идёт off-loop по каждому затронутому документу.
+        for knowledge_id in document_ids:
+            await asyncio.to_thread(state.kg.suggest_relations_for_knowledge, user_id, knowledge_id)
+    return {
+        "entity": entity,
+        "entity_created": created,
+        "decided": decided,
+        "skipped_existing": skipped,
+        "missing": missing,
+        "decision": decision,
+    }
+
+
 @router.get("/knowledge/{knowledge_id}/entity-suggestions")
 async def list_entity_suggestions(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
     """Какие сущности этот документ предлагает, но которых в графе ещё нет.

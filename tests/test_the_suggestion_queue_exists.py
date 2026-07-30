@@ -142,3 +142,132 @@ def test_the_route_says_the_number_is_an_estimate(settings, storage):
         body = response.json()
         assert body["total"] == 1
         assert body["estimate"] is True
+
+
+# --- группы: одно решение вместо N -------------------------------------------
+
+
+def _document_with_text(storage, user_id: str, index: int, text: str) -> str:
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=user_id,
+        source="t",
+        source_ref=new_id("s"),
+        raw_content=text,
+        content_type="text",
+        content_hash=hashlib.sha256(f"g{index}".encode()).hexdigest(),
+    )
+    storage.store_raw_object(raw)
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=text,
+        content_type="text",
+        title=f"Групповой документ {index}",
+        metadata_json={"entity_suggestion_count": 3},
+    )
+    storage.store_knowledge_object(knowledge)
+    return knowledge.id
+
+
+def test_groups_collect_one_entity_across_documents(settings, storage):
+    """42 кандидата на документ делают поштучный разбор нечитаемым из-за объёма;
+    «Казань в 57 документах» — одно решение, а не 57."""
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    storage.ensure_user("alice")
+    _document_with_text(storage, "alice", 1, "Сервис ATLAS-01 обслуживает узел связи по графику.")
+    _document_with_text(storage, "alice", 2, "Регламентные работы сервиса ATLAS-01 завершены в срок.")
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get(
+            "/api/admin/entity-suggestions/groups?user_id=alice&min_docs=2",
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["estimate"] is True
+        assert body["scanned_documents"] == 2
+        group = next((g for g in body["groups"] if "ATLAS-01" in g["name"]), None)
+        assert group is not None, f"группа не собралась: {[g['name'] for g in body['groups']]}"
+        assert group["document_count"] == 2
+
+
+def test_group_accept_is_one_decision_for_every_document(settings, storage):
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    storage.ensure_user("alice")
+    first = _document_with_text(storage, "alice", 3, "Сервис ATLAS-02 обслуживает узел связи.")
+    second = _document_with_text(storage, "alice", 4, "Отчёт по сервису ATLAS-02 подписан.")
+
+    with TestClient(create_app(settings)) as client:
+        headers = {"Authorization": f"Bearer {settings.api_token}"}
+        decided = client.post(
+            "/api/admin/entity-suggestions/groups/decide",
+            json={
+                "user_id": "alice",
+                "name": "ATLAS-02",
+                "entity_type": "concept",
+                "decision": "accept",
+                "knowledge_object_ids": [first, second],
+            },
+            headers=headers,
+        )
+        assert decided.status_code == 200, decided.text
+        body = decided.json()
+        assert body["decided"] == 2 and body["entity_created"] is True
+
+        app_storage = client.app.state.storage
+        entity = app_storage.find_entity_by_name("alice", "ATLAS-02")
+        assert entity is not None
+        links = app_storage.list_knowledge_entity_links("alice", entity_id=str(entity["id"]))
+        assert len(links) == 2
+        assert all(link["status"] == "accepted" for link in links)
+
+        # Повтор той же группы ничего не перезаписывает: решённое решено.
+        replay = client.post(
+            "/api/admin/entity-suggestions/groups/decide",
+            json={
+                "user_id": "alice",
+                "name": "ATLAS-02",
+                "entity_type": "concept",
+                "decision": "accept",
+                "knowledge_object_ids": [first, second],
+            },
+            headers=headers,
+        )
+        assert replay.json()["decided"] == 0
+        assert replay.json()["skipped_existing"] == 2
+
+
+def test_group_reject_records_refusal_without_creating_a_node(settings, storage):
+    """Отклонение группы без узла не должно СОЗДАВАТЬ узел ради записи отказа."""
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    storage.ensure_user("alice")
+    first = _document_with_text(storage, "alice", 5, "В тексте встречается в Наставлении по связи.")
+
+    with TestClient(create_app(settings)) as client:
+        headers = {"Authorization": f"Bearer {settings.api_token}"}
+        rejected = client.post(
+            "/api/admin/entity-suggestions/groups/decide",
+            json={
+                "user_id": "alice",
+                "name": "Наставлении",
+                "entity_type": "location",
+                "decision": "reject",
+                "knowledge_object_ids": [first],
+            },
+            headers=headers,
+        )
+        assert rejected.status_code == 200, rejected.text
+        assert rejected.json()["entity"] is None
+        assert rejected.json()["decided"] == 0
+        assert client.app.state.storage.find_entity_by_name("alice", "Наставлении") is None

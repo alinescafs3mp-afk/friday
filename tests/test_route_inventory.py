@@ -26,11 +26,13 @@ from __future__ import annotations
 from jericho.server import create_app
 
 # Bumped deliberately when an endpoint is added or removed, never to make a test pass.
-EXPECTED_OPERATIONS = 149
+# 149 → 151: пакетное подтверждение сущностей — GET групп и POST решения
+# по группе (одно решение вместо 57 поштучных).
+EXPECTED_OPERATIONS = 151
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 81,
+    "/api/admin": 83,
     "/api/kg": 14,
     "/api/missions": 4,
 }
