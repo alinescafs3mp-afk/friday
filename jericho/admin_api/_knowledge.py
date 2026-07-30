@@ -68,6 +68,12 @@ async def list_all_knowledge(
     lifecycle_stage: str | None = None,
     tag: str | None = None,
     entity_id: str | None = None,
+    # Строка поиска по заголовку, сводке и имени файла. Без неё найти документ в
+    # админке нельзя: замерено на корпусе владельца — важность лежит в полосе
+    # 0.66..0.72, различных дней в `updated_at` три на 1537 объектов, а два служебных
+    # тега стоят на 1524 из них. То есть и сортировка, и фильтр по тегу вырождены, и
+    # остаётся листание полутора тысяч строк.
+    q: str | None = Query(None, max_length=200),
     limit: int = Query(200, ge=1, le=5000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
@@ -82,6 +88,7 @@ async def list_all_knowledge(
         lifecycle_stage=lifecycle_stage,
         tag=tag,
         entity_id=entity_id,
+        query=q,
     )
     return {
         "user_id": target,
@@ -92,7 +99,7 @@ async def list_all_knowledge(
         # so on a filtered view it would report thousands over a set of twelve and the
         # pager would never reach its last page.
         "total": storage.count_filtered_knowledge_objects(
-            target, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id
+            target, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id, query=q
         ),
         "limit": limit,
         "offset": offset,

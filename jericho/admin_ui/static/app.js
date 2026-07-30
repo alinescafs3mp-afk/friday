@@ -1,5 +1,5 @@
 'use strict';
-const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
+const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
 const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const q=v=>encodeURIComponent(v??'').replace(/'/g,'%27').replace(/%20/g,'+');
@@ -157,8 +157,13 @@ actions.bulkInbox=async(status,promote)=>{state.inboxOffset=0;const ids=[...docu
 renderers.knowledge=async gen=>{
   const uid=selectedUser();
   const tagFilter=state.knowledgeTag?`&tag=${q(state.knowledgeTag)}`:'';
+  // Строка поиска — единственный работающий способ найти документ руками. Замерено на
+  // настоящем корпусе: важность лежит в полосе 0.66..0.72, различных дней в updated_at
+  // три на 1537 объектов, а два служебных тега стоят на 1524 из них. То есть и порядок,
+  // и чипы тегов вырождены, и без поиска остаётся листание полутора тысяч строк.
+  const search=state.knowledgeQuery?`&q=${q(state.knowledgeQuery)}`:'';
   const [data,tagData]=await Promise.all([
-    api(`/api/admin/knowledge?user_id=${q(uid)}&limit=${PAGE}&offset=${state.knowledgeOffset}${tagFilter}`),
+    api(`/api/admin/knowledge?user_id=${q(uid)}&limit=${PAGE}&offset=${state.knowledgeOffset}${tagFilter}${search}`),
     api(`/api/admin/knowledge/tags?user_id=${q(uid)}&limit=40`)
   ]);if(gen!==renderGen)return;
   state.knowledge=data.items||[];
@@ -166,7 +171,12 @@ renderers.knowledge=async gen=>{
   const chips=tags.map(t=>`<button class="btn small${state.knowledgeTag===t.tag?' primary':''}" ${call('filterKnowledgeTag',t.tag)}>#${esc(t.tag)} · ${Number(t.count||0)}</button>`).join(' ');
   const rows=state.knowledge.map(k=>{const ktags=parse(k.tags_json,[]);return `<tr><td><b>${esc(k.title||'Без названия')}</b><div class="muted clip">${esc(short(k.summary||k.content,180))}</div><div>${ktags.slice(0,6).map(t=>`<span class="badge">${esc(t)}</span>`).join(' ')}</div><div class="mono">${esc(k.id)}</div></td><td><span class="badge">${esc(k.knowledge_kind||'note')}</span><div><span class="badge ${k.lifecycle_stage==='active'?'ok':'warn'}">${esc(k.lifecycle_stage)}</span></div></td><td><div>важность <b>${Number(k.importance||0).toFixed(2)}</b></div><div>качество <b>${Number(k.quality_score??.5).toFixed(2)}</b></div><div>promotion <b>${Number(k.promotion_score??.5).toFixed(2)}</b></div></td><td>v${esc(k.version)}<div class="muted">${fmtDate(k.updated_at)}</div></td><td><button class="btn small primary" ${call('inspectKnowledge',k.id)}>Инспекция</button> <button class="btn small" ${call('editKnowledge',k.id)}>Исправить</button> <button class="btn small danger" ${call('deleteKnowledge',k.id)}>Удалить</button></td></tr>`});
   const filterNote=state.knowledgeTag?`<div class="notice">Фильтр по тегу <b>#${esc(state.knowledgeTag)}</b> — нажмите тег ещё раз, чтобы снять.</div>`:'';
-  setApp(gen,`${filterNote}<section class="card"><div class="toolbar"><h2 class="grow">Объекты знаний</h2><button class="btn" ${call('ingestUrlDialog')}>Сохранить страницу по URL</button><button class="btn" ${call('bookmarkletDialog')}>Букмарклет</button><button class="btn" ${call('runLifecycle')}>Архивировать устаревшее</button><button class="btn" ${call('navigate','cleanup')}>Проверить старые данные</button><span class="badge">${rows.length}</span></div>${chips?`<div class="toolbar">${chips}</div>`:''}${rows.length?table(['Знание','Тип и lifecycle','Сигналы качества','Версия','Действия'],rows):empty(state.knowledgeTag?'По этому тегу записей нет':'База знаний пока пуста')}${pager('knowledgePage',state.knowledgeOffset,state.knowledge.length,data.total)}</section>`);
+  const searchBar=`<div class="toolbar"><input id="knowledgeSearch" class="grow" placeholder="Поиск по заголовку, аннотации и имени файла" value="${esc(state.knowledgeQuery||'')}">`
+    +`<button class="btn primary" ${call('searchKnowledge')}>Найти</button>`
+    +(state.knowledgeQuery?`<button class="btn" ${call('clearKnowledgeSearch')}>Сбросить</button>`:'')
+    +`</div>`
+    +(state.knowledgeQuery?`<div class="notice">Найдено по «${esc(state.knowledgeQuery)}»: <b>${Number(data.total||0)}</b>. Это поиск по НАЗВАНИЯМ; чтобы искать по тексту документов, откройте «Поиск по тексту».</div>`:'');
+  setApp(gen,`${filterNote}<section class="card"><div class="toolbar"><h2 class="grow">Объекты знаний</h2><button class="btn" ${call('ingestUrlDialog')}>Сохранить страницу по URL</button><button class="btn" ${call('bookmarkletDialog')}>Букмарклет</button><button class="btn" ${call('runLifecycle')}>Архивировать устаревшее</button><button class="btn" ${call('navigate','cleanup')}>Проверить старые данные</button><span class="badge">${rows.length}</span></div>${searchBar}${chips?`<div class="toolbar">${chips}</div>`:''}${rows.length?table(['Знание','Тип и lifecycle','Сигналы качества','Версия','Действия'],rows):empty(state.knowledgeTag?'По этому тегу записей нет':'База знаний пока пуста')}${pager('knowledgePage',state.knowledgeOffset,state.knowledge.length,data.total)}</section>`);
 };
 actions.ingestUrlDialog=(pref)=>openModal('Сохранить веб-страницу',`<div class="form"><div class="notice">Страница будет загружена (только публичные адреса), очищена и отправлена во входящие на проверку — как и любой материал, она станет знанием лишь после подтверждения.</div><label>URL<input id="ingestUrl" value="${esc(pref||'')}" placeholder="https://…"></label></div>`,`<button class="btn" ${call('closeModal')}>Отмена</button><button class="btn primary" ${call('ingestUrl')}>Загрузить в Inbox</button>`);
 actions.ingestUrl=async()=>{const url=document.getElementById('ingestUrl').value.trim();if(!url){toast('Укажите URL',true);return}try{const d=await api('/api/ingest/url',{method:'POST',body:JSON.stringify({url})});toast(`«${d.title||url}» сохранена во входящие`);closeModal();navigate('inbox')}catch(e){toast(e.message,true)}};
@@ -178,7 +188,11 @@ actions.bookmarkletDialog=()=>{
   const l=document.getElementById('bmLink');if(l)l.href=bm;
   const c=document.getElementById('bmCode');if(c){c.value=bm;c.addEventListener('focus',()=>c.select())}
 };
-actions.filterKnowledgeTag=tag=>{state.knowledgeTag=state.knowledgeTag===tag?'':tag;refresh()};
+actions.filterKnowledgeTag=tag=>{state.knowledgeTag=state.knowledgeTag===tag?'':tag;state.knowledgeOffset=0;refresh()};
+// Смена запроса ВСЕГДА сбрасывает смещение: иначе человек ищет и попадает на
+// четвёртую страницу нового набора, где обычно пусто, и решает, что не нашлось.
+actions.searchKnowledge=()=>{const el=document.getElementById('knowledgeSearch');state.knowledgeQuery=el?el.value.trim():'';state.knowledgeOffset=0;refresh()};
+actions.clearKnowledgeSearch=()=>{state.knowledgeQuery='';state.knowledgeOffset=0;refresh()};
 actions.inspectKnowledge=async id=>{
   try{
     const d=await api(`/api/admin/knowledge/${q(id)}?user_id=${q(selectedUser())}`);

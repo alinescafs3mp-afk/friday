@@ -477,6 +477,7 @@ class KnowledgeMixin(StorageShared):
         lifecycle_stage: str | None,
         tag: str | None,
         entity_id: str | None,
+        query: str | None = None,
     ) -> tuple[str, list[Any]]:
         """The WHERE clause and its parameters, built ONCE for the list and its count.
 
@@ -500,6 +501,25 @@ class KnowledgeMixin(StorageShared):
                 " WHERE jericho_casefold(json_each.value) = jericho_casefold(?))"
             )
             params.append(tag)
+        if query and query.strip():
+            # Подстрочный поиск по заголовку, сводке и имени файла — ровно то, чем
+            # человек ищет глазами. Замерено на корпусе владельца: 1265 различных
+            # заголовков на 1537 объектов, средняя длина 28.5 знака, то есть заголовки
+            # содержательны. А сортировка по важности вырождена (0.66..0.72 на весь
+            # архив, три различных дня в `updated_at`), поэтому листать бесполезно:
+            # без строки поиска найти документ руками нельзя вовсе.
+            #
+            # Именно ПОДСТРОЧНЫЙ, а не FTS: человек помнит обрывок («поверка вес»), и
+            # ему нужно совпадение по началу слова, а не по словоформе. Полнотекстовый
+            # поиск по телу живёт отдельно и решает другую задачу.
+            needle = f"%{query.strip()}%"
+            where += (
+                " AND (jericho_casefold(COALESCE(title,'')) LIKE jericho_casefold(?)"
+                " OR jericho_casefold(COALESCE(summary,'')) LIKE jericho_casefold(?)"
+                " OR jericho_casefold(COALESCE(json_extract(metadata_json,'$.filename'),''))"
+                " LIKE jericho_casefold(?))"
+            )
+            params.extend([needle, needle, needle])
         if entity_id:
             # Browse-by-entity/container: only reviewer-accepted links count.
             where += (
@@ -517,10 +537,11 @@ class KnowledgeMixin(StorageShared):
         lifecycle_stage: str | None = None,
         tag: str | None = None,
         entity_id: str | None = None,
+        query: str | None = None,
     ) -> int:
         """How many objects the SAME filters select — the total a page is a page of."""
         where, params = self._knowledge_filter(
-            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id
+            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id, query=query
         )
         # ``where`` contains only fixed clauses; all values remain bound parameters.
         row = self.execute(
@@ -538,9 +559,10 @@ class KnowledgeMixin(StorageShared):
         lifecycle_stage: str | None = None,
         tag: str | None = None,
         entity_id: str | None = None,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         where, params = self._knowledge_filter(
-            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id
+            user_id, lifecycle_stage=lifecycle_stage, tag=tag, entity_id=entity_id, query=query
         )
         params.extend([max(1, min(limit, 5000)), max(0, offset)])
         # ``where`` contains only fixed clauses; all values remain bound parameters.
