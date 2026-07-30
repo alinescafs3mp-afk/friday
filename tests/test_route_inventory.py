@@ -29,11 +29,13 @@ from jericho.server import create_app
 # 149 → 151: пакетное подтверждение сущностей — GET групп и POST решения
 # по группе (одно решение вместо 57 поштучных).
 # 151 → 152: GET /api/knowledge/by-date — документы по собственной дате для хроники.
-EXPECTED_OPERATIONS = 152
+# 152 → 153: GET /api/admin/knowledge/{id}/entity-mentions — позиции упоминаний
+# подтверждённых сущностей в тексте, для подсветки в инспекции.
+EXPECTED_OPERATIONS = 153
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 83,
+    "/api/admin": 84,
     "/api/kg": 14,
     "/api/missions": 4,
 }

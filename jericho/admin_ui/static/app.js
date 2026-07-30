@@ -269,6 +269,21 @@ actions.restoreVersion=async(id,version)=>{
     toast(`Возвращено к версии ${version}`);closeModal();refresh();
   }catch(e){toast(e.message,true)}
 };
+// Текст документа с подсветкой упоминаний. Куски экранируются ПООТДЕЛЬНОСТИ и
+// только потом склеиваются: собрать строку и экранировать целиком нельзя — тогда
+// вместе с текстом экранируется и сама разметка.
+function highlightMentions(text,spans){
+  const body=String(text||'');
+  const list=(spans||[]).filter(s=>Number.isInteger(s.start)&&Number.isInteger(s.end)&&s.end>s.start).sort((a,b)=>a.start-b.start);
+  let out='',cursor=0;
+  for(const span of list){
+    if(span.start<cursor)continue;
+    out+=esc(body.slice(cursor,span.start));
+    out+=`<mark title="${esc(span.name)}">${esc(body.slice(span.start,span.end))}</mark>`;
+    cursor=span.end;
+  }
+  return out+esc(body.slice(cursor));
+}
 actions.inspectKnowledge=async id=>{
   try{
     const d=await api(`/api/admin/knowledge/${q(id)}?user_id=${q(selectedUser())}`);
@@ -281,13 +296,18 @@ actions.inspectKnowledge=async id=>{
     // была разомкнута на первом звене.
     let sugg={items:[]};
     try{sugg=await api(`/api/admin/knowledge/${q(id)}/entity-suggestions?user_id=${q(selectedUser())}`)}catch(e){sugg={items:[],error:e.message}}
+    // Подсветка подтверждённых сущностей в самом тексте. Позиции считает сервер:
+    // там живёт свёртка, сохраняющая длину, и её тесты — на лигатурах смещения
+    // уже однажды уезжали на соседние слова.
+    let mentions={items:[]};
+    try{mentions=await api(`/api/admin/knowledge/${q(id)}/entity-mentions?user_id=${q(selectedUser())}`)}catch(e){mentions={items:[],error:e.message}}
     state.entitySuggestions=sugg.items||[];
     const suggRows=(sugg.items||[]).map(sg=>`<tr><td><b>${esc(sg.name)}</b><div class="muted">${esc(sg.method||'')}</div></td><td>${esc(sg.entity_type||'other')}</td><td>${Number(sg.confidence||0).toFixed(2)}</td><td><button class="btn small primary" ${call('acceptEntity',id,sg.name,sg.entity_type||'other')}>Подтвердить</button></td></tr>`);
     const suggBlock=sugg.error?`<div class="notice">Подсказки недоступны: ${esc(sugg.error)}</div>`
       :(suggRows.length?`<section class="card"><h3>Предложенные сущности (${suggRows.length})</h3><div class="notice">Подтверждение создаёт узел графа и утверждённую связь с этим документом, после чего пересчитываются связи сущность-сущность.</div>${table(['Имя','Тип','Уверенность',''],suggRows)}</section>`
       :`<section class="card"><h3>Предложенные сущности</h3>${empty('Все кандидаты уже разобраны')}</section>`);
     const linkRows=links.map(l=>`<tr><td><b>${esc(l.entity?.name||l.entity_name||l.entity_id)}</b><div class="muted">${esc(l.entity?.entity_type||l.entity_type||'')}</div></td><td><span class="badge ${l.status==='accepted'?'ok':(l.status==='rejected'?'bad':'warn')}">${esc(l.status)}</span></td><td>${Number(l.confidence||0).toFixed(2)}</td><td>${l.status!=='accepted'?`<button class="btn small good" ${call('reviewEntityLink',l.id,'accepted',k.id)}>Принять</button>`:''} ${l.status!=='rejected'?`<button class="btn small danger" ${call('reviewEntityLink',l.id,'rejected',k.id)}>Отклонить</button>`:''}</td></tr>`);
-    openModal(`Инспекция: ${k.title||k.id}`,`${suggBlock}<div class="grid two"><section class="card"><h3>Knowledge Object</h3><div class="kv"><div>Тип</div><div>${esc(k.knowledge_kind)}</div><div>Lifecycle</div><div>${esc(k.lifecycle_stage)}</div><div>Качество</div><div>${Number(k.quality_score??.5).toFixed(2)}</div><div>Promotion</div><div>${Number(k.promotion_score??.5).toFixed(2)}</div><div>Версия</div><div>${esc(k.version)}</div></div><h3 class="mt16">Summary</h3><div class="pre">${esc(k.summary||'')}</div></section><section class="card"><h3>Provenance / Raw Object</h3><div class="kv"><div>Источник</div><div>${esc(raw.source||'')}</div><div>Source ref</div><div class="mono">${esc(raw.source_ref||'')}</div><div>Raw ID</div><div class="mono">${esc(raw.id||'')}</div><div>Получен</div><div>${fmtDate(raw.received_at)}</div></div><div class="pre mt12">${esc(raw.raw_content||'')}</div></section></div><section class="card mt14"><h3>Связи с сущностями</h3>${linkRows.length?table(['Сущность','Статус','Уверенность','Решение'],linkRows):empty('Связей пока нет')}<div class="toolbar mt12"><button class="btn" ${call('addEntityLinkDialog',k.id)}>Добавить связь</button></div></section><section class="card mt14"><h3>История версий</h3>${versionRows(k.id,d.versions||[])}</section><section class="card mt14"><h3>Метаданные</h3><div class="pre">${esc(JSON.stringify({metadata:k.metadata,tags:k.tags},null,2))}</div></section>`,`${(d.versions||[]).length>1?`<button class="btn" ${call('showDiff',k.id)}>Изменения версий</button>`:''}<button class="btn" ${call('reenrichKnowledge',k.id,false)}>Предпросмотр enrichment</button><button class="btn" ${call('editKnowledge',k.id)}>Исправить</button><button class="btn" ${call('closeModal')}>Закрыть</button>`);
+    openModal(`Инспекция: ${k.title||k.id}`,`${suggBlock}<div class="grid two"><section class="card"><h3>Knowledge Object</h3><div class="kv"><div>Тип</div><div>${esc(k.knowledge_kind)}</div><div>Lifecycle</div><div>${esc(k.lifecycle_stage)}</div><div>Качество</div><div>${Number(k.quality_score??.5).toFixed(2)}</div><div>Promotion</div><div>${Number(k.promotion_score??.5).toFixed(2)}</div><div>Версия</div><div>${esc(k.version)}</div></div><h3 class="mt16">Summary</h3><div class="pre">${esc(k.summary||'')}</div></section><section class="card"><h3>Provenance / Raw Object</h3><div class="kv"><div>Источник</div><div>${esc(raw.source||'')}</div><div>Source ref</div><div class="mono">${esc(raw.source_ref||'')}</div><div>Raw ID</div><div class="mono">${esc(raw.id||'')}</div><div>Получен</div><div>${fmtDate(raw.received_at)}</div></div><div class="pre mt12">${esc(raw.raw_content||'')}</div></section></div><section class="card mt14"><div class="toolbar"><h3 class="grow">Текст с подсветкой сущностей</h3><span class="badge">${Number(mentions.count||0)}</span></div>${mentions.error?`<div class="notice">Подсветка недоступна: ${esc(mentions.error)}</div>`:((mentions.items||[]).length?`<div class="notice">Отмечены только ПОДТВЕРЖДЁННЫЕ сущности: предложенные не подсвечиваются, чтобы догадка не выглядела как решение человека.${mentions.truncated?' Показаны первые 500 упоминаний.':''}</div><div class="pre">${highlightMentions(k.content||'',mentions.items)}</div>`:empty('Подтверждённых сущностей в этом документе нет — подтвердите кандидатов выше, и они появятся в тексте'))}</section><section class="card mt14"><h3>Связи с сущностями</h3>${linkRows.length?table(['Сущность','Статус','Уверенность','Решение'],linkRows):empty('Связей пока нет')}<div class="toolbar mt12"><button class="btn" ${call('addEntityLinkDialog',k.id)}>Добавить связь</button></div></section><section class="card mt14"><h3>История версий</h3>${versionRows(k.id,d.versions||[])}</section><section class="card mt14"><h3>Метаданные</h3><div class="pre">${esc(JSON.stringify({metadata:k.metadata,tags:k.tags},null,2))}</div></section>`,`${(d.versions||[]).length>1?`<button class="btn" ${call('showDiff',k.id)}>Изменения версий</button>`:''}<button class="btn" ${call('reenrichKnowledge',k.id,false)}>Предпросмотр enrichment</button><button class="btn" ${call('editKnowledge',k.id)}>Исправить</button><button class="btn" ${call('closeModal')}>Закрыть</button>`);
   }catch(e){toast(e.message,true)}
 };
 actions.acceptEntity=async(koId,name,entityType)=>{

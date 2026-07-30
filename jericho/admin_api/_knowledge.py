@@ -29,6 +29,7 @@ from jericho.admin_api._deps import (
     asyncio,
     purge_knowledge,
 )
+from jericho.mentions import mention_spans
 from jericho.storage.models import EntityType
 
 router = APIRouter()
@@ -343,6 +344,46 @@ async def entity_suggestion_queue(
         "estimate": True,
         "limit": limit,
         "offset": offset,
+    }
+
+
+@router.get("/knowledge/{knowledge_id}/entity-mentions")
+async def knowledge_entity_mentions(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
+    """Где в тексте объекта упомянуты подтверждённые сущности — позициями.
+
+    Позиции нигде не хранятся, и это правильно: текст объекта можно править, а
+    сохранённое смещение пережило бы правку и указывало бы не туда. Считается по
+    запросу из текущего текста.
+
+    Берутся только ПОДТВЕРЖДЁННЫЕ связи: подсветить предложенное значило бы
+    показать догадку так же, как решение человека, — ровно тот класс подмены,
+    который проект уже чинил в легенде источников.
+    """
+    _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.knowledge.read", user_id)
+    state = _services(request)
+    knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
+    if not knowledge or knowledge.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Knowledge object not found")
+    links = state.storage.list_knowledge_entity_links(
+        user_id, knowledge_object_id=knowledge_id, status="accepted", limit=500
+    )
+    named: list[tuple[str, str]] = []
+    for link in links:
+        entity = link.get("entity") if isinstance(link.get("entity"), dict) else {}
+        name = str(entity.get("name") or link.get("entity_name") or "")
+        if name:
+            named.append((name, str(link.get("entity_id") or "")))
+    spans = mention_spans(str(knowledge.get("content") or ""), named)
+    return {
+        "knowledge_object_id": knowledge_id,
+        "items": [
+            {"start": item.start, "end": item.end, "name": item.name, "entity_id": item.entity_id}
+            for item in spans
+        ],
+        "count": len(spans),
+        # Обрезка называет себя: молчаливое усечение читалось бы как «больше нет».
+        "truncated": len(spans) >= 500,
     }
 
 
