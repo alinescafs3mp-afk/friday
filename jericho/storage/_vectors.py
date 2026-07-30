@@ -17,6 +17,33 @@ from jericho.storage._base import (
 
 
 class VectorsMixin(StorageShared):
+    def dense_vector_signature(self, user_id: str, model: str, dim: int) -> tuple[Any, ...]:
+        """Дешёвая подпись состояния векторов арендатора — для резидентного кэша.
+
+        Меняется от любого события, которое обязано его пересобрать: записи и
+        перезаписи векторов (счётчики и MAX(updated_at) обеих таблиц), удаления
+        строк (счётчики падают), мягкого удаления/восстановления объекта
+        (MAX(updated_at) объектов берётся по ВСЕМ строкам, живой счётчик — по
+        живым). Шесть скалярных подзапросов по индексированным колонкам.
+        """
+        row = self.execute(
+            """SELECT
+                 (SELECT COUNT(*) FROM knowledge_embeddings
+                   WHERE user_id=? AND model=? AND dim=?) AS doc_count,
+                 (SELECT COALESCE(MAX(updated_at), '') FROM knowledge_embeddings
+                   WHERE user_id=? AND model=? AND dim=?) AS doc_updated,
+                 (SELECT COUNT(*) FROM knowledge_chunk_embeddings
+                   WHERE user_id=? AND model=? AND dim=?) AS chunk_count,
+                 (SELECT COALESCE(MAX(updated_at), '') FROM knowledge_chunk_embeddings
+                   WHERE user_id=? AND model=? AND dim=?) AS chunk_updated,
+                 (SELECT COUNT(*) FROM knowledge_objects
+                   WHERE user_id=? AND deleted_at IS NULL) AS live_objects,
+                 (SELECT COALESCE(MAX(updated_at), '') FROM knowledge_objects
+                   WHERE user_id=?) AS objects_updated""",
+            (user_id, model, int(dim)) * 4 + (user_id, user_id),
+        ).fetchone()
+        return tuple(row)
+
     def get_user_embeddings(
         self, user_id: str, model: str, dim: int, *, limit: int | None = None
     ) -> list[tuple[str, bytes]]:

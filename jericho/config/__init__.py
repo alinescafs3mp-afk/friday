@@ -324,6 +324,9 @@ class JerichoSettings:
     # Row-level fuse over the (object-granular) dense cap, so one heavily chunked
     # corpus cannot blow up the scan even inside the object window.
     embeddings_chunk_scan_multiplier: int
+    # Резидентные матрицы векторов в памяти процесса: снимают окно «новейшие N»
+    # и чтение BLOB-ов на каждый запрос. Требует numpy; без него путь прежний.
+    embeddings_resident_cache: bool
     # Cap on how many texts go into a single embeddings HTTP request; chunking
     # multiplies inputs per object, and a real endpoint rejects an oversized batch.
     embeddings_max_inputs_per_request: int
@@ -645,6 +648,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         embeddings_chunk_max_per_object=_int_env("JERICHO_EMBEDDINGS_CHUNK_MAX_PER_OBJECT", 64, minimum=1),
         embeddings_chunk_blend=_float_env("JERICHO_EMBEDDINGS_CHUNK_BLEND", 0.25, minimum=0.0),
         embeddings_chunk_scan_multiplier=_int_env("JERICHO_EMBEDDINGS_CHUNK_SCAN_MULTIPLIER", 4, minimum=1),
+        embeddings_resident_cache=_bool_env("JERICHO_EMBEDDINGS_RESIDENT_CACHE", True),
         embeddings_max_inputs_per_request=_int_env(
             "JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST", 64, minimum=1
         ),

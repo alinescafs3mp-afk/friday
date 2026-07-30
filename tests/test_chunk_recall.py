@@ -530,8 +530,16 @@ def test_aggregation_ignores_keys_that_are_not_chunk_keys():
 
 @pytest.mark.asyncio
 async def test_chunk_scan_cap_is_object_granular_and_reported(storage, settings):
-    """A capped scan never covers a document only halfway."""
-    tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200, embeddings_dense_max_objects=1)
+    """A capped scan never covers a document only halfway.
+
+    Потолки — механика ЗАПАСНОГО пути (без numpy / с выключенным резидентным
+    кэшем), поэтому кэш здесь выключен явно; у кэшного пути свои тесты ниже."""
+    tuned = _embeddings_settings(
+        settings,
+        embeddings_chunk_chars=1200,
+        embeddings_dense_max_objects=1,
+        embeddings_resident_cache=False,
+    )
     fake = _FakeTopicEmbeddings(tuned)
     for index in range(3):
         _make_ko(storage, "alice", _long_import(sections=12), title=f"Импорт {index}", summary="Длинный")
@@ -556,7 +564,9 @@ async def test_chunk_scan_cap_is_object_granular_and_reported(storage, settings)
 @pytest.mark.asyncio
 async def test_numpy_and_python_agree_on_chunk_recall(storage, settings, monkeypatch):
     """The optional numpy extra must not rank differently from the pure-Python path."""
-    tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200)
+    # Кэш выключен: сравнивается именно пара реализаций dense_scores, а не
+    # кэш сам с собой (у модуля кэша собственный numpy, monkeypatch его не видит).
+    tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200, embeddings_resident_cache=False)
     fake = _FakeTopicEmbeddings(tuned)
     _make_ko(storage, "alice", _long_import(), title="Импорт", summary="Длинный импорт")
     await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_all()  # noqa: SLF001
@@ -906,3 +916,82 @@ async def test_the_pool_fallback_bounds_what_it_sends(storage, settings):
     for batch in pool_requests:
         assert sum(len(text) for text in batch) <= max(_POOL_REQUEST_MAX_CHARS, _POOL_TEXT_MAX_CHARS)
         assert all(len(text) <= _POOL_TEXT_MAX_CHARS for text in batch)
+
+
+# --- резидентные матрицы векторов (этап 2 потолков) ---------------------------
+
+
+@pytest.mark.asyncio
+async def test_resident_cache_scans_the_whole_corpus_without_caps(storage, settings):
+    """Окно «новейшие N» было предохранителем ЦЕНЫ скана BLOB-ов; у матрицы в
+    памяти этой цены нет, и потолок, вытесняющий старейшие документы из
+    смыслового поиска (на корпусе владельца он уже исчерпан), не нужен вовсе."""
+    tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200, embeddings_dense_max_objects=1)
+    fake = _FakeTopicEmbeddings(tuned)
+    for index in range(3):
+        _make_ko(storage, "alice", _long_import(sections=12), title=f"Импорт {index}", summary="Длинный")
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_all()  # noqa: SLF001
+
+    searcher = HybridSearcher(storage, fake)
+    meta: dict = {}
+    await searcher._dense_recall("alice", QUERY, {}, meta=meta)  # noqa: SLF001
+    assert meta["dense_scanned"] == 3, "окно «новейшие N» пережило резидентный кэш"
+    assert meta["dense_capped"] is False
+    assert meta["dense_chunks_capped"] is False
+    assert meta["dense_cache"] == "reloaded"
+
+    repeat: dict = {}
+    await searcher._dense_recall("alice", QUERY, {}, meta=repeat)  # noqa: SLF001
+    assert repeat["dense_cache"] == "hit", "повторный запрос снова собрал матрицу"
+
+
+@pytest.mark.asyncio
+async def test_resident_cache_is_an_optimisation_not_a_ranking_change(storage, settings):
+    """Кэш обязан выбирать те же скоры, что скан BLOB-ов, на одном корпусе
+    (потолки сняты в обоих путях, чтобы сравнивались реализации, а не окна)."""
+    tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200, embeddings_dense_max_objects=0)
+    fake = _FakeTopicEmbeddings(tuned)
+    for index in range(3):
+        _make_ko(storage, "alice", _long_import(sections=6), title=f"Импорт {index}", summary="Длинный")
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_all()  # noqa: SLF001
+
+    cached = await HybridSearcher(storage, fake)._dense_recall("alice", QUERY, {})  # noqa: SLF001
+    scan_settings = dataclasses.replace(tuned, embeddings_resident_cache=False)
+    scan_fake = _FakeTopicEmbeddings(scan_settings)
+    scanned = await HybridSearcher(storage, scan_fake)._dense_recall("alice", QUERY, {})  # noqa: SLF001
+
+    assert set(cached) == set(scanned)
+    for key, value in cached.items():
+        assert value == pytest.approx(scanned[key], abs=1e-4)
+
+
+@pytest.mark.asyncio
+async def test_resident_cache_reloads_on_change_and_respects_the_stale_window(storage, settings):
+    """Подпись таблиц пересобирает матрицу; внутри окна выдержки поиск живёт со
+    старой (во время массовой индексации пересборка на каждый запрос стоила бы
+    дороже поиска), и это честно видно в meta как stale."""
+    from jericho.retrieval._dense_cache import DenseVectorCache
+
+    tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200)
+    fake = _FakeTopicEmbeddings(tuned)
+    _make_ko(storage, "alice", _long_import(sections=6), title="Первый", summary="Длинный")
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_all()  # noqa: SLF001
+
+    searcher = HybridSearcher(storage, fake)
+    searcher._dense_cache = DenseVectorCache(min_reload_interval_sec=3600.0)  # noqa: SLF001
+    first: dict = {}
+    await searcher._dense_recall("alice", QUERY, {}, meta=first)  # noqa: SLF001
+    assert first["dense_scanned"] == 1
+
+    _make_ko(storage, "alice", _long_import(sections=6), title="Второй", summary="Длинный")
+    await WorkersManager(tuned, storage, None, None, embeddings=fake)._embeddings_index_all()  # noqa: SLF001
+
+    stale: dict = {}
+    await searcher._dense_recall("alice", QUERY, {}, meta=stale)  # noqa: SLF001
+    assert stale["dense_cache"] == "stale", "изменение подписи внутри окна обязано быть видно"
+    assert stale["dense_scanned"] == 1
+
+    searcher._dense_cache = DenseVectorCache(min_reload_interval_sec=0.0)  # noqa: SLF001
+    fresh: dict = {}
+    await searcher._dense_recall("alice", QUERY, {}, meta=fresh)  # noqa: SLF001
+    assert fresh["dense_scanned"] == 2, "нулевое окно выдержки обязано пересобрать сразу"

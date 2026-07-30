@@ -19,6 +19,7 @@ import httpx
 
 from jericho.config import JerichoSettings
 from jericho.morphology import stem
+from jericho.retrieval._dense_cache import DenseVectorCache, matrix_scores
 from jericho.retrieval._repair import _MIN_MEANINGFUL_TERM, Repair, repair_query
 from jericho.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
 
@@ -1320,6 +1321,10 @@ class HybridSearcher:
         self._confident_min = (
             CONFIDENT_MIN_DEFAULT if rerank_confident_min is None else float(rerank_confident_min)
         )
+        # Резидентные матрицы векторов (см. `_dense_cache`): снимают окно
+        # «новейшие N» и чтение BLOB-ов на каждый запрос. Без numpy кэш отвечает
+        # None, и плотный канал идёт прежним путём со сканом и потолками.
+        self._dense_cache = DenseVectorCache()
         self._channel_weights = dict(_CHANNEL_WEIGHTS)
         for name, value in (channel_weights or {}).items():
             if name not in _CHANNEL_WEIGHTS:
@@ -2334,51 +2339,86 @@ class HybridSearcher:
         settings = self.embeddings.settings
         model = settings.embeddings_model
         max_objects = int(settings.embeddings_dense_max_objects)
-        stored = self.storage.get_user_embeddings(user_id, model, query_dim, limit=(max_objects or None))
-        if meta is not None:
-            # Deliberately still counted in OBJECTS: the cap, its explain-trace flag
-            # and the operator-facing wording all keep the meaning they had.
-            meta["dense_scanned"] = len(stored)
-            meta["dense_capped"] = bool(max_objects) and len(stored) >= max_objects
-        doc_scores = {
-            document_id: score for score, document_id in dense_scores(query_vector, stored, query_dim)
-        }
 
-        chunk_scores: dict[str, float] = {}
-        provenance: dict[str, tuple[int, int]] = {}
-        chunk_rows: list[tuple[str, bytes]] = []
-        if settings.embeddings_chunk_chars > 0 and self._chunk_recall:
-            # Floored at one object's worth of chunks: the fuse exists to bound a
-            # heavily split corpus, never to scan a single document only halfway.
-            row_cap = max(
-                max_objects * max(1, int(settings.embeddings_chunk_scan_multiplier)),
-                int(settings.embeddings_chunk_max_per_object) if max_objects else 0,
-            )
-            # Over-fetch by one object's worth, then drop the trailing PARTIAL object:
-            # a plain LIMIT cuts at an arbitrary chunk index, which both hides the
-            # passage that answers the query and — because the corroboration term
-            # averages over however many chunks were scanned — hands the truncated
-            # document an undiscounted score it did not earn.
-            over_fetch = int(settings.embeddings_chunk_max_per_object)
-            fetched = self.storage.get_user_chunk_embeddings(
-                user_id,
-                model,
-                query_dim,
-                object_limit=(max_objects or None),
-                row_limit=(row_cap + over_fetch if row_cap else None),
-            )
-            chunk_rows = _trim_to_whole_objects(fetched, row_cap) if row_cap else fetched
+        cached = (
+            self._dense_cache.get(self.storage, user_id, model, query_dim)
+            if settings.embeddings_resident_cache
+            else None
+        )
+        if cached is not None:
+            # Резидентный путь: весь корпус, без окна «новейшие N» и без чтения
+            # BLOB-ов. Потолки существовали как предохранитель ЦЕНЫ скана; у
+            # матрицы в памяти этой цены нет, и окно, вытесняющее старейшие
+            # документы из смыслового поиска (на корпусе владельца оно уже
+            # исчерпано), не нужно вовсе.
+            doc_scores = {
+                document_id: score
+                for score, document_id in matrix_scores(
+                    query_vector, cached.doc_ids, cached.doc_matrix, cached.doc_norms
+                )
+            }
+            chunk_scores: dict[str, float] = {}
+            provenance: dict[str, tuple[int, int]] = {}
+            has_chunks = bool(cached.chunk_ids)
+            if settings.embeddings_chunk_chars > 0 and self._chunk_recall and has_chunks:
+                chunk_scores, provenance = aggregate_chunk_scores(
+                    matrix_scores(query_vector, cached.chunk_ids, cached.chunk_matrix, cached.chunk_norms),
+                    blend=float(settings.embeddings_chunk_blend),
+                )
             if meta is not None:
-                meta["dense_chunks_scanned"] = len(chunk_rows)
-                meta["dense_chunks_capped"] = bool(row_cap) and len(chunk_rows) < len(fetched)
-            chunk_scores, provenance = aggregate_chunk_scores(
-                dense_scores(query_vector, chunk_rows, query_dim),
-                blend=float(settings.embeddings_chunk_blend),
-            )
+                meta["dense_scanned"] = len(cached.doc_ids)
+                meta["dense_capped"] = False
+                meta["dense_chunks_scanned"] = len(cached.chunk_ids)
+                meta["dense_chunks_capped"] = False
+                meta["dense_cache"] = cached.state
+            if not cached.doc_ids and not cached.chunk_ids:
+                return await self._dense_recall_pool(query_vector, candidate_map)
+        else:
+            stored = self.storage.get_user_embeddings(user_id, model, query_dim, limit=(max_objects or None))
+            if meta is not None:
+                # Deliberately still counted in OBJECTS: the cap, its explain-trace flag
+                # and the operator-facing wording all keep the meaning they had.
+                meta["dense_scanned"] = len(stored)
+                meta["dense_capped"] = bool(max_objects) and len(stored) >= max_objects
+            doc_scores = {
+                document_id: score for score, document_id in dense_scores(query_vector, stored, query_dim)
+            }
 
-        if not stored and not chunk_rows:
-            # Nothing indexed yet: degrade to re-ranking the pool, exactly as before.
-            return await self._dense_recall_pool(query_vector, candidate_map)
+            chunk_scores = {}
+            provenance = {}
+            chunk_rows: list[tuple[str, bytes]] = []
+            if settings.embeddings_chunk_chars > 0 and self._chunk_recall:
+                # Floored at one object's worth of chunks: the fuse exists to bound a
+                # heavily split corpus, never to scan a single document only halfway.
+                row_cap = max(
+                    max_objects * max(1, int(settings.embeddings_chunk_scan_multiplier)),
+                    int(settings.embeddings_chunk_max_per_object) if max_objects else 0,
+                )
+                # Over-fetch by one object's worth, then drop the trailing PARTIAL object:
+                # a plain LIMIT cuts at an arbitrary chunk index, which both hides the
+                # passage that answers the query and — because the corroboration term
+                # averages over however many chunks were scanned — hands the truncated
+                # document an undiscounted score it did not earn.
+                over_fetch = int(settings.embeddings_chunk_max_per_object)
+                fetched = self.storage.get_user_chunk_embeddings(
+                    user_id,
+                    model,
+                    query_dim,
+                    object_limit=(max_objects or None),
+                    row_limit=(row_cap + over_fetch if row_cap else None),
+                )
+                chunk_rows = _trim_to_whole_objects(fetched, row_cap) if row_cap else fetched
+                if meta is not None:
+                    meta["dense_chunks_scanned"] = len(chunk_rows)
+                    meta["dense_chunks_capped"] = bool(row_cap) and len(chunk_rows) < len(fetched)
+                chunk_scores, provenance = aggregate_chunk_scores(
+                    dense_scores(query_vector, chunk_rows, query_dim),
+                    blend=float(settings.embeddings_chunk_blend),
+                )
+
+            if not stored and not chunk_rows:
+                # Nothing indexed yet: degrade to re-ranking the pool, exactly as before.
+                return await self._dense_recall_pool(query_vector, candidate_map)
 
         # The whole-object vector is the FLOOR: passage scores can only raise an
         # object, never lower it, so chunking cannot regress any existing result.

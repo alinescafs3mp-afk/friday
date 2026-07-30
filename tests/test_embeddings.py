@@ -218,7 +218,13 @@ def test_get_user_embeddings_respects_limit(storage):
 async def test_dense_recall_caps_the_scan_and_flags_it(storage, settings):
     # The pure-Python cosine scan is the retrieval scaling ceiling; the guard caps
     # how many vectors are scored and makes the truncation visible, not silent.
-    tuned = dataclasses.replace(_embeddings_settings(settings), embeddings_dense_max_objects=1)
+    # Потолки — механика запасного пути: резидентный кэш здесь выключен явно,
+    # у кэшного пути (без потолков вовсе) свои тесты в test_chunk_recall.
+    tuned = dataclasses.replace(
+        _embeddings_settings(settings),
+        embeddings_dense_max_objects=1,
+        embeddings_resident_cache=False,
+    )
     _index_ko(storage, "alice", "Мой пёс Рекс любит мяч", "Пёс")
     _index_ko(storage, "alice", "Портфель акций вырос", "Финансы")
 
