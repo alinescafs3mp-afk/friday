@@ -883,8 +883,11 @@ def collect_diagnostics(
             "warning",
             "Всплеск неудачных аутентификаций",
             f"{shown} провалов auth за 24 часа (порог {auth_failures['threshold']}). "
-            "Возможен брутфорс или злоупотребление токеном — проверьте "
-            "GET /api/admin/audit (action=auth.failed).",
+            "Возможен брутфорс или злоупотребление токеном. Смотреть: "
+            "GET /api/admin/audit?action=auth.failed — в поле after_json каждой записи "
+            "лежат метод и путь, рядом ip_address. Собственная массовая работа сюда "
+            "больше не попадает: придержанный по частоте вошедший пользователь "
+            "пишется отдельным действием request.throttled.",
             "jericho status",
         )
 

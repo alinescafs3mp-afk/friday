@@ -376,21 +376,37 @@ def _chat_request_fingerprint(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _audit_auth_failure(request: Request, reason: str, *, status: int) -> None:
-    """Durably record an auth/authorization failure at the HTTP boundary.
+def _audit_boundary_refusal(
+    request: Request,
+    reason: str,
+    *,
+    status: int,
+    action: str = "auth.failed",
+    actor: ActorContext | None = None,
+) -> None:
+    """Durably record a refusal at the HTTP boundary.
 
     Metadata only (reason code, status, method, path) — never the attempted
     secret — so a leaked token's abuse (or a brute-force) is forensically
     visible in the audit log. Best-effort: auditing a failure must never turn
     the failure response into a 500.
+
+    `action` РАЗДЕЛЯЕТ два разных события, которые раньше писались одинаково.
+    Замерено на живой базе: из 1302 записей `auth.failed` **1188** были
+    `rate_limited` от владельца, пачкой разбиравшего Inbox с ВЕРНЫМ токеном с
+    127.0.0.1. Троттлинг вошедшего пользователя — не отказ аутентификации, и
+    смешивание стоило дважды: диагностика постоянно кричала «возможен брутфорс»
+    (порог 60 за сутки), а три настоящих обращения с чужого адреса
+    203.0.113.20 в `/api/admin/users` и `/api/admin/knowledge` лежали под
+    этой лавиной невидимыми. Сигнал, который горит всегда, не читают.
     """
-    actor = getattr(request.state, "actor", None)
+    actor = actor or getattr(request.state, "actor", None)
     with suppress(Exception):
         request.app.state.storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
                 user_id=getattr(actor, "user_id", None) or "anonymous",
-                action="auth.failed",
+                action=action,
                 target_type="auth",
                 target_id=reason,
                 after_json={
@@ -403,6 +419,11 @@ def _audit_auth_failure(request: Request, reason: str, *, status: int) -> None:
                 request_id=getattr(request.state, "request_id", ""),
             )
         )
+
+
+def _audit_auth_failure(request: Request, reason: str, *, status: int) -> None:
+    """Отказ ИМЕННО аутентификации или авторизации — то, что считает диагностика."""
+    _audit_boundary_refusal(request, reason, status=status, action="auth.failed")
 
 
 async def _authenticate(request: Request) -> ActorContext:
@@ -815,7 +836,19 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         proposed = str(request.headers.get("x-request-id") or "")
         request.state.request_id = proposed if _REQUEST_ID_RE.fullmatch(proposed) else secrets.token_hex(12)
         request.state.client_ip = _client_ip(request, settings)
-        public = path == "/" or path == "/api/health" or path == "/admin" or path.startswith("/admin/")
+        # `/health` — публичный синоним `/api/health`. Не удобство: маршрута с таким
+        # именем не было, а проверка подлинности идёт РАНЬШЕ маршрутизации, поэтому
+        # обращение к нему возвращало 401 и писалось в журнал как отказ
+        # аутентификации. Замерено: 89 таких записей, все с 127.0.0.1 — собственный
+        # smoke-check рестарта, тот самый, что записан в runbook проекта. Ничего
+        # нового наружу не открывается: `/api/health` публичен ровно так же.
+        public = (
+            path == "/"
+            or path == "/api/health"
+            or path == "/health"
+            or path == "/admin"
+            or path.startswith("/admin/")
+        )
         if request.method == "OPTIONS" or public:
             response = await call_next(request)
         else:
@@ -863,6 +896,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             # auth-failure budget — a handler bug locked the owner out of their own
             # instance with 429. Route-raised exceptions belong to FastAPI's own
             # handlers (registered below) and to ServerErrorMiddleware.
+            actor = None
             try:
                 actor = await _authenticate(request)
                 await _enforce_rate_limit(request, actor)
@@ -880,7 +914,23 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 # checks such as rate limiting cannot accidentally surface as
                 # an internal server error.
                 if exc.status_code == 429:
-                    _audit_auth_failure(request, "rate_limited", status=429)
+                    # Сюда 429 приходит ТОЛЬКО из `_enforce_rate_limit`, а он вызван
+                    # строкой ниже `_authenticate`, то есть у запроса уже есть
+                    # действительный актор. `_authenticate` своих HTTPException не
+                    # бросает — только AuthenticationError и AuthorizationError,
+                    # перехваченные выше. Это придержанный СВОЙ, а не чужой.
+                    #
+                    # И записывается он ИМЕНЕМ: `request.state.actor` к этому моменту
+                    # ещё не привязан, поэтому событие уходило как `anonymous` — а
+                    # смысл записи ровно в том, что мы знаем, кого придержали. На
+                    # нескольких пользователях без имени она бесполезна.
+                    _audit_boundary_refusal(
+                        request,
+                        "rate_limited",
+                        status=429,
+                        action="request.throttled",
+                        actor=actor,
+                    )
                 response = JSONResponse(
                     {"detail": exc.detail},
                     status_code=exc.status_code,
@@ -947,6 +997,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
     async def root():
         return RedirectResponse("/admin/")
 
+    @application.get("/health", include_in_schema=False)
     @application.get("/api/health", tags=["system"])
     async def health(request: Request) -> dict[str, Any]:
         storage = getattr(request.app.state, "storage", None)
