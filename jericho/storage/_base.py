@@ -886,6 +886,32 @@ def _snapshot(row: dict[str, Any]) -> str:
     return json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
 
 
+# Сжатый снимок версии: магический префикс отличает наши байты от текста JSON.
+# Каждый снапшот несёт ПОЛНЫЙ content, чистки не существовало нигде — массовое
+# ре-обогащение добавляло копию корпуса в базу навсегда и раздувало каждый из
+# хранимых суточных бэкапов. Полными держатся N последних версий объекта
+# (откат и diff почти всегда к ним), старшие сжимаются zlib (~3-5x на русском
+# JSON); читатели распаковывают прозрачно, так что откат жив к ЛЮБОЙ версии.
+_SNAPSHOT_MAGIC = b"zKOV1"
+
+
+def pack_snapshot(text: str) -> bytes:
+    import zlib
+
+    return _SNAPSHOT_MAGIC + zlib.compress(text.encode("utf-8"), level=6)
+
+
+def unpack_snapshot(value: Any) -> str:
+    """Текст снимка из хранимого значения — сжатого или прежнего текстового."""
+    if isinstance(value, bytes):
+        if value.startswith(_SNAPSHOT_MAGIC):
+            import zlib
+
+            return zlib.decompress(value[len(_SNAPSHOT_MAGIC) :]).decode("utf-8")
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
+
+
 def _safe_filename(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
     return value.strip(".-")[:80] or "backup"

@@ -159,3 +159,53 @@ def test_the_route_refuses_a_missing_version(settings):
             headers=headers,
         )
         assert response.status_code == 404
+
+
+def test_old_snapshots_compress_in_place_and_undo_survives(storage):
+    """Каждый снапшот несёт полный content, и чистки не существовало нигде:
+    массовое ре-обогащение добавляло копию корпуса в базу навсегда. Полными
+    держатся 3 последних версии объекта, старшие сжимаются на месте при записи
+    новой — и откат обязан жить к ЛЮБОЙ версии, включая сжатую."""
+    ko_id = _make(storage)
+    for step in range(5):
+        storage.update_knowledge_fields(
+            ko_id, "alice", title=f"Правка {step}", content=f"Тело правки {step}. " * 30
+        )
+
+    rows = storage.execute(
+        """SELECT version, typeof(snapshot_json) AS kind FROM knowledge_object_versions
+           WHERE knowledge_object_id=? ORDER BY version""",
+        (ko_id,),
+    ).fetchall()
+    kinds = {int(row["version"]): str(row["kind"]) for row in rows}
+    newest = max(kinds)
+    assert kinds[newest] == "text" and kinds[newest - 1] == "text" and kinds[newest - 2] == "text", (
+        "свежие версии обязаны остаться полным текстом"
+    )
+    assert kinds[1] == "blob", "старшие версии не сжались"
+
+    # Единственный читатель таблицы отдаёт прежний текст для ЛЮБОЙ версии.
+    for item in storage.list_knowledge_versions(ko_id, "alice"):
+        snapshot = json.loads(str(item["snapshot_json"]))
+        assert "content" in snapshot
+
+    # Откат к самой старой (сжатой) версии возвращает её текст.
+    restored = storage.restore_knowledge_version(ko_id, "alice", 1)
+    assert restored["title"] == "Верный заголовок"
+    assert "Первоначальный текст" in restored["content"]
+
+
+def test_compression_actually_saves_space(storage):
+    """Сжатие, не экономящее байты, — переливание из пустого в порожнее."""
+    ko_id = _make(storage)
+    for step in range(5):
+        storage.update_knowledge_fields(
+            ko_id, "alice", content=("Однообразный русский текст правки. " * 200) + str(step)
+        )
+    row = storage.execute(
+        """SELECT LENGTH(snapshot_json) AS packed FROM knowledge_object_versions
+           WHERE knowledge_object_id=? AND version=1""",
+        (ko_id,),
+    ).fetchone()
+    original = len(json.dumps({"content": "Первоначальный текст документа про сроки приёмки. " * 5}))
+    assert int(row["packed"]) < original, "сжатый снимок не меньше даже усечённого оригинала"

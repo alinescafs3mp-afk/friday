@@ -29,9 +29,11 @@ from jericho.storage._base import (
     math,
     new_id,
     normalize_entity_name,
+    pack_snapshot,
     re,
     sqlite3,
     timedelta,
+    unpack_snapshot,
     utc_now,
 )
 
@@ -307,6 +309,12 @@ class KnowledgeMixin(StorageShared):
     def _ko_snapshot(obj: KnowledgeObject | dict[str, Any]) -> dict[str, Any]:
         return obj.to_row() if isinstance(obj, KnowledgeObject) else dict(obj)
 
+    # Сколько последних версий объекта хранится полным текстом. Откат и diff
+    # почти всегда смотрят на свежие; старшие сжимаются на месте, при записи
+    # НОВОЙ версии этого же объекта — локально, без глобального обхода, поэтому
+    # массовое ре-обогащение уплотняет свой хвост само по мере работы.
+    _VERSIONS_KEEP_FULL = 3
+
     def _store_ko_version(self, conn: sqlite3.Connection, row: dict[str, Any]) -> None:
         conn.execute(
             """INSERT OR IGNORE INTO knowledge_object_versions
@@ -321,6 +329,20 @@ class KnowledgeMixin(StorageShared):
                 utc_now(),
             ),
         )
+        # `typeof(...)='text'` отбирает ещё не сжатые; LIMIT -1 OFFSET N — все
+        # строки за пределами N новейших. В установившемся режиме здесь одна
+        # строка на правку.
+        stale = conn.execute(
+            """SELECT id, snapshot_json FROM knowledge_object_versions
+               WHERE knowledge_object_id=? AND user_id=? AND typeof(snapshot_json)='text'
+               ORDER BY version DESC LIMIT -1 OFFSET ?""",
+            (row["id"], row["user_id"], self._VERSIONS_KEEP_FULL),
+        ).fetchall()
+        for old in stale:
+            conn.execute(
+                "UPDATE knowledge_object_versions SET snapshot_json=? WHERE id=?",
+                (pack_snapshot(str(old["snapshot_json"])), old["id"]),
+            )
 
     def store_knowledge_object(self, obj: KnowledgeObject) -> KnowledgeObject:
         self.ensure_user(obj.user_id)
@@ -433,7 +455,15 @@ class KnowledgeMixin(StorageShared):
                WHERE knowledge_object_id=? AND user_id=? ORDER BY version DESC""",
             (ko_id, user_id),
         ).fetchall()
-        return [dict(row) for row in rows]
+        versions: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            # Снимок распаковывается в ЕДИНСТВЕННОМ читателе таблицы: restore,
+            # diff, admin API и его экран видят прежний текст независимо от
+            # того, сжат ли хвост версии на диске.
+            item["snapshot_json"] = unpack_snapshot(item.get("snapshot_json"))
+            versions.append(item)
+        return versions
 
     # Поля, которые снимок возвращает. Всё остальное в строке — либо тождество
     # (`id`, `user_id`, `raw_object_id`), либо счётчики жизненного цикла, которые

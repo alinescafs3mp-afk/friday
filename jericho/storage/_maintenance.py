@@ -28,6 +28,7 @@ from jericho.storage._base import (
     json,
     os,
     sqlite3,
+    unpack_snapshot,
     utc_now,
 )
 
@@ -641,7 +642,13 @@ class MaintenanceMixin(StorageShared):
             "user": user,
         }
         for key, (query, params) in table_queries.items():
-            payload[key] = [dict(row) for row in self.execute(query, params).fetchall()]
+            rows = [dict(row) for row in self.execute(query, params).fetchall()]
+            if key == "knowledge_object_versions":
+                # Сжатый хвост версий — байты; выгрузка обязана нести прежний
+                # текст, иначе json.dumps испортил бы снимки молча.
+                for row in rows:
+                    row["snapshot_json"] = unpack_snapshot(row.get("snapshot_json"))
+            payload[key] = rows
         self.settings.exports_dir.mkdir(parents=True, exist_ok=True)
         identity_hash = hashlib.sha256(user_id.encode("utf-8", errors="replace")).hexdigest()[:12]
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
