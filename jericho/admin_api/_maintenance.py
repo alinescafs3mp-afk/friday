@@ -22,6 +22,7 @@ from jericho.admin_api._deps import (
     _safe_runtime_file,
     _services,
 )
+from jericho.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -103,15 +104,44 @@ async def download_backup(filename: str, request: Request):
 
 @router.post("/exports")
 async def create_export(request: Request) -> dict[str, Any]:
+    """Архивная выгрузка аккаунта одним JSON.
+
+    ⚠️ Это АРХИВ, а не путь переезда, и ответ говорит это прямо. Формат
+    `jericho-user-export-v3` не читает ничто — ни Jericho, ни что-либо ещё: строка
+    встречается во всём коде дважды, там где пишется и в тесте. Импорта не
+    существует, `jericho import` — про документы, а не про выгрузку.
+
+    Замерено на архиве владельца: 150.8 МБ UTF-8 компактной сериализации (файл
+    пишется с отступами, то есть ещё в полтора-два раза больше), пик памяти 759 МБ при
+    3.9 ГБ доступных. В выгрузку НЕ входят оригиналы файлов (684 МБ) и вектора.
+
+    Настоящих способа переехать два, и оба названы в ответе: копия SQLite вместе с
+    каталогом файлов, либо `memory-vault` — 1539 заметок Markdown, которые читаются
+    чем угодно без Jericho.
+
+    Работа ушла с event loop: она синхронная и на секунды подвешивала весь сервер —
+    ни одного HTTP-запроса, ни одного сообщения в Telegram, пока строится словарь на
+    сотню миллионов знаков.
+    """
     _require(request, "admin.export")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or request.state.actor.user_id)
     try:
-        result = _services(request).storage.export_user(user_id)
+        result = await run_blocking(_services(request).storage.export_user, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     _audit(request, "admin.export.create", "user", user_id, after=result)
-    return {"export": result}
+    return {
+        "export": result,
+        # Честно о том, чем эта выгрузка НЕ является. Человек, который считает её
+        # способом переехать, узнает правду в худший момент — когда Jericho уже нет.
+        "readable_by": "archival JSON; no importer exists in Jericho or elsewhere",
+        "to_move_your_data": [
+            "скопируйте базу SQLite вместе с каталогом files/ — это полный перенос",
+            "memory-vault/ — заметки Markdown, читаются чем угодно и без Jericho",
+        ],
+        "not_included": ["оригиналы загруженных файлов", "векторы поиска"],
+    }
 
 
 @router.get("/exports/{filename}/download")
