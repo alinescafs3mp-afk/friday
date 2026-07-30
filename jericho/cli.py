@@ -755,12 +755,25 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
     ensure_runtime_dirs(settings)
     storage = init_storage(settings)
     scanned = dated = missing = 0
+    # Объект, у которого даты в файле НЕТ, остаётся в выборке «без даты» навсегда:
+    # без этого множества цикл брал бы одну и ту же пачку бесконечно, а первый
+    # прогон завершился лишь потому, что дательных объектов случайно хватило.
+    # Прогресс считается по НОВЫМ объектам, а не по проставленным датам: пачка,
+    # целиком состоящая из файлов без дат, — законный конец работы, а не тупик.
+    seen: set[str] = set()
     try:
         while True:
-            batch = storage.knowledge_missing_document_date(user_id=args.user, limit=args.batch)
+            batch = [
+                row
+                for row in storage.knowledge_missing_document_date(
+                    user_id=args.user, limit=args.batch
+                )
+                if str(row["id"]) not in seen
+            ]
             if not batch:
                 break
             for row in batch:
+                seen.add(str(row["id"]))
                 scanned += 1
                 raw_path = str(row.get("stored_path") or "")
                 path = pathlib.Path(raw_path)
@@ -779,8 +792,6 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
                     found = None
                 if found and storage.set_document_date(str(row["id"]), str(row["user_id"]), found):
                     dated += 1
-            if len(batch) < args.batch:
-                break
             if args.limit and scanned >= args.limit:
                 break
         storage.record_event(

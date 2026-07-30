@@ -336,3 +336,45 @@ def test_the_backfill_reaches_objects_ingested_before_dates_were_captured(settin
 
     # Идемпотентность: второй прогон не берёт объект снова.
     assert storage.knowledge_missing_document_date(user_id="alice") == []
+
+
+def test_the_backfill_terminates_when_files_carry_no_dates(settings, storage):
+    """Объект, у которого даты в файле нет, остаётся в выборке «без даты» навсегда.
+
+    Первый прогон на живом архиве завершился только потому, что дательных
+    объектов случайно хватило: пачка, целиком состоящая из файлов без дат,
+    возвращалась бы бесконечно. Здесь таких объектов больше, чем размер пачки.
+    """
+    import argparse
+
+    from jericho.cli import _backfill_document_dates
+
+    storage.ensure_user("alice")
+    for index in range(7):
+        stored = settings.files_dir / "alice" / f"nodate{index}.docx"
+        stored.parent.mkdir(parents=True, exist_ok=True)
+        stored.write_bytes(_docx_bytes(None))
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="upload",
+            source_ref=new_id("src"),
+            raw_content="Файл без даты.",
+            content_type="file",
+            content_hash=hashlib.sha256(f"nodate{index}".encode()).hexdigest(),
+            metadata_json={"stored_path": f"alice/nodate{index}.docx"},
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content="Файл без даты.",
+                content_type="file",
+                title=f"Без даты {index}",
+            )
+        )
+
+    # Пачка меньше числа объектов: прежний цикл на этом не остановился бы.
+    assert _backfill_document_dates(argparse.Namespace(user=None, batch=2, limit=0)) == 0
