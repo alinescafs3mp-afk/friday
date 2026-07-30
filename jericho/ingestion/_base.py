@@ -828,6 +828,21 @@ def _json_list(value: Any) -> list[Any]:
     return []
 
 
+def _storage_relative(root: Path, path: Path) -> str:
+    """Путь внутри хранилища относительно его корня; вне корня — как есть.
+
+    Отдельной функцией, потому что это единственное место, где решается, привязан ли
+    архив к машине. Абсолютный путь означает, что после переезда, смены JERICHO_HOME
+    или даже имени пользователя каждый файл отдаст 404.
+    """
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        # Файл вне хранилища — такого быть не должно, но подменять правду догадкой
+        # здесь нельзя: пусть останется абсолютным и будет видно.
+        return str(path)
+
+
 def _parse_model_response(response: dict[str, Any], *, what: str = "Model advice") -> dict[str, Any]:
     """Разобрать ответ модели, СНАЧАЛА проверив, дописан ли он до конца.
 
@@ -1027,6 +1042,7 @@ __all__ = [
     "_json_list",
     "_parse_model_json",
     "_parse_model_response",
+    "_storage_relative",
     "_sentences",
     "_strip_save_prefix",
     "_trim_capture",

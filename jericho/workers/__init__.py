@@ -1396,6 +1396,34 @@ class WorkersManager:
         """Longest per-task thread budget across the registered workers."""
         return self.supervisor.max_timeout_sec
 
+    _PATHS_RELATIVE_KEY = "maintenance:stored_paths_relative"
+
+    def _relativize_stored_paths_once(self) -> None:
+        """Один раз переписать абсолютные пути к файлам в относительные.
+
+        Абсолютный путь привязывает архив к машине: замерено — у всех 1671 документа
+        лежали абсолютные пути, и после переезда каждый файл отдавал бы 404,
+        неотличимый от «файла нет». Приём уже пишет относительные, но это спасает
+        только будущие документы; уже записанные надо починить.
+
+        Один раз, под отметкой: проход дешёвый, но бессмысленно гонять его каждый
+        старт, а отметка заодно говорит, что починка была.
+        """
+        try:
+            if self.storage.kv_get(self._PATHS_RELATIVE_KEY):
+                return
+            report = self.storage.relativize_stored_paths(str(self.settings.files_dir))
+            self.storage.kv_set(self._PATHS_RELATIVE_KEY, json.dumps(report, ensure_ascii=False))
+        except Exception:  # noqa: BLE001 - починка полезная, но не обязательная для старта
+            LOGGER.warning("stored path relativization skipped", exc_info=True)
+            return
+        if report.get("changed"):
+            LOGGER.info(
+                "stored paths made portable: %d of %d raw objects rewritten",
+                int(report["changed"]),
+                int(report.get("scanned") or 0),
+            )
+
     def _load_worker_states(self) -> dict[str, dict[str, Any]]:
         """Прошлое состояние задач из `runtime_kv`. Ошибка чтения не должна мешать старту."""
         restored: dict[str, dict[str, Any]] = {}
@@ -1420,6 +1448,7 @@ class WorkersManager:
         if not self.settings.workers_enabled or self._run_task is not None:
             return
         self.register_all()
+        self._relativize_stored_paths_once()
         self.supervisor.restore(self._load_worker_states())
         self._run_task = asyncio.create_task(self.supervisor.run(), name="jericho-workers")
 

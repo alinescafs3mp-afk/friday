@@ -133,8 +133,25 @@ def _json_load(value: Any, default: Any) -> Any:
 
 
 def _safe_owned_file(root: Path, candidate: str) -> Path:
+    """Файл внутри хранилища — по пути, записанному при приёме.
+
+    Путь принимается и АБСОЛЮТНЫЙ, и относительный корню. Записывались абсолютные, и
+    это ломало перенос: замерено на живой базе — у всех 1671 документа в метаданных
+    лежат абсолютные пути (3342 штуки, ни одного относительного), укоренённые в
+    прежнем каталоге. После переезда на другую машину, смены `JERICHO_HOME` или даже
+    имени пользователя сохранённый путь оказывается ВНЕ текущего хранилища, и каждый
+    файл отдаёт 404 — неотличимый от «файла нет».
+
+    Относительная ветка идёт первой: она и есть правильная форма, и на ней перенос
+    работает. Абсолютная оставлена для уже записанных строк — их 3342, и заставлять
+    человека править JSON в SQLite ради нашей же ошибки нельзя.
+    """
     root = root.resolve()
-    path = Path(candidate).resolve()
+    text = str(candidate or "")
+    if not text:
+        raise HTTPException(status_code=404, detail="File not found")
+    given = Path(text)
+    path = (root / given).resolve() if not given.is_absolute() else given.resolve()
     if path != root and root not in path.parents:
         raise HTTPException(status_code=404, detail="File not found")
     if not path.is_file():

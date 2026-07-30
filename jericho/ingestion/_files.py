@@ -26,6 +26,7 @@ from jericho.ingestion._base import (
     _json_dict,
     _json_list,
     _parse_model_response,
+    _storage_relative,
     asyncio,
     base64,
     hashlib,
@@ -523,7 +524,11 @@ class FilesMixin(PipelineShared):
             "mime_type": mime_type,
             "sha256": digest,
             "size_bytes": len(file_content),
-            "stored_path": str(target_path),
+            # ОТНОСИТЕЛЬНО хранилища, а не абсолютный. Абсолютный путь привязывает
+            # архив к машине: замерено — у всех 1671 документа лежали абсолютные пути,
+            # и после переезда каждый файл отдавал 404, неотличимый от «файла нет».
+            # Читатель принимает обе формы, поэтому уже записанные строки не ломаются.
+            "stored_path": _storage_relative(self.settings.files_dir, target_path),
             "extraction_success": extraction_succeeded,
             "text_extraction_success": bool(extraction.success),
             "extraction_error": extraction.error if not extraction.success else "",
@@ -816,12 +821,18 @@ class FilesMixin(PipelineShared):
             if staged is not None:
                 staged.unlink(missing_ok=True)
 
-    @staticmethod
-    def _validate_existing_file_source(existing: dict[str, Any], digest: str) -> None:
+    def _validate_existing_file_source(self, existing: dict[str, Any], digest: str) -> None:
         existing_metadata = _json_dict(existing.get("metadata_json"))
         existing_digest = str(existing_metadata.get("sha256") or existing.get("content_hash") or "")
         if not existing_digest:
-            stored_path = Path(str(existing_metadata.get("stored_path") or ""))
+            # Путь может быть и относительным (новая форма), и абсолютным (уже
+            # записанные строки). Проверять только абсолютную форму значило бы, что
+            # после перехода на относительные пути дедупликация молча перестаёт
+            # срабатывать и те же документы лягут в хранилище вторым экземпляром.
+            raw_path = str(existing_metadata.get("stored_path") or "")
+            stored_path = Path(raw_path)
+            if raw_path and not stored_path.is_absolute():
+                stored_path = self.settings.files_dir / stored_path
             if stored_path.is_file():
                 existing_digest = FilesMixin._file_sha256(stored_path)
         if not existing_digest or not hmac.compare_digest(existing_digest, digest):

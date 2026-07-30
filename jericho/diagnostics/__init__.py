@@ -767,6 +767,28 @@ def collect_diagnostics(
     # said the local backups were fine, which they were, and said nothing at all
     # about the copy that exists to survive the local disk dying.
     mirror = _mirror_status(settings, storage)
+    if not mirror.get("enabled") and database.get("exists"):
+        # ЕДИНСТВЕННОЕ состояние, о котором система молчала, — и самое опасное. Шесть
+        # тщательно написанных тревог ниже (каталог не смонтирован, тот же диск,
+        # копия устарела, копирование упало) начинаются с «если зеркало включено»,
+        # то есть срабатывают только у того, кто уже позаботился. Тому, кто не
+        # позаботился, не говорилось ничего.
+        #
+        # Замерено на живой машине: 1.3 ГБ данных, всё на одном разделе. Копии
+        # честные — 12 пар с манифестами, все контрольные суммы сошлись, — но это
+        # защита от повреждения базы, а не от гибели диска. Формулировка обязана
+        # называть именно эту разницу, иначе человек посмотрит на «Latest backup:
+        # verified» и успокоится.
+        add_action(
+            "backup_mirror_not_configured",
+            "warning",
+            "Копии есть, но все на одном диске",
+            "Резервные копии лежат рядом с базой, на том же разделе. Они спасут от "
+            "повреждения файла, но не от гибели диска: погибнет и база, и копии, и "
+            "оригиналы документов. Укажите JERICHO_BACKUP_MIRROR_DIR на внешний диск "
+            "или синхронизируемую папку.",
+            "jericho backup --label offsite",
+        )
     if mirror.get("enabled"):
         if mirror.get("error") == "mirror_dir_missing":
             add_action(

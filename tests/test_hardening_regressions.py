@@ -486,8 +486,11 @@ async def test_file_storage_keeps_colliding_tenant_slugs_in_separate_directories
 
     first_raw = storage.get_raw_object(first["raw_object_id"], "a:b")
     second_raw = storage.get_raw_object(second["raw_object_id"], "a_b")
-    first_path = Path(json.loads(first_raw["metadata_json"])["stored_path"])
-    second_path = Path(json.loads(second_raw["metadata_json"])["stored_path"])
+    # Путь теперь ОТНОСИТЕЛЬНЫЙ корню хранилища — абсолютный привязывал архив к
+    # машине. Проверка о разделении арендаторов от этого не меняется: она про
+    # РАЗНЫЕ каталоги, а не про форму записи.
+    first_path = settings.files_dir / json.loads(first_raw["metadata_json"])["stored_path"]
+    second_path = settings.files_dir / json.loads(second_raw["metadata_json"])["stored_path"]
     assert first_path != second_path
     assert first_path.parents[1] != second_path.parents[1]
     assert first_path.read_bytes() == second_path.read_bytes() == b"same bytes"
@@ -740,7 +743,9 @@ async def test_physical_upload_path_is_bounded_for_extreme_windows_filename(sett
         source_ref="long-name:1",
     )
     raw = storage.get_raw_object(result["raw_object_id"], "telegram:realm:123456789")
-    stored = Path(json.loads(raw["metadata_json"])["stored_path"])
+    # Путь теперь ОТНОСИТЕЛЬНЫЙ корню хранилища: абсолютный привязывал архив к
+    # машине, и после переезда каждый из 1671 файла отдавал 404.
+    stored = settings.files_dir / json.loads(raw["metadata_json"])["stored_path"]
     assert stored.is_file()
     assert len(stored.name) <= 81
     assert stored.name.endswith(".txt")

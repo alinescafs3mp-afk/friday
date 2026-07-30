@@ -121,7 +121,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_store_file": "(self, user_id: 'str', content: 'bytes', digest: 'str', filename: 'str') -> 'Path'",
     "_store_review_inbox": "(self, raw: 'RawObject', assessment: 'PromotionAssessment', enrichment: 'KnowledgeEnrichment') -> 'InboxItem'",
     "_transcribe_audio": "(self, content: 'bytes', *, filename: 'str', mime_type: 'str', metadata: 'dict[str, Any] | None') -> 'dict[str, Any] | None'",
-    "_validate_existing_file_source": "(existing: 'dict[str, Any]', digest: 'str') -> 'None'",
+    "_validate_existing_file_source": "(self, existing: 'dict[str, Any]', digest: 'str') -> 'None'",
     "advise_inbox_item": "(self, user_id: 'str', inbox_id: 'str', *, llm: 'LLMRouter', requested_by: 'str' = '', force: 'bool' = False) -> 'dict[str, Any]'",
     "apply_legacy_cleanup": "(self, user_id: 'str', knowledge_object_id: 'str', *, action: 'str', reviewed_by: 'str', reason: 'str' = 'legacy quality cleanup') -> 'dict[str, Any]'",
     "assess_existing_knowledge": "(self, user_id: 'str', knowledge: 'dict[str, Any] | str', *, threshold: 'float' = 0.55, include_suggestion: 'bool' = False) -> 'dict[str, Any]'",

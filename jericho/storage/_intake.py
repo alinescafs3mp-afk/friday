@@ -83,6 +83,54 @@ class IntakeMixin(StorageShared):
                 return self._raw_from_row(existing)
             raise
 
+    def relativize_stored_paths(self, files_root: str) -> dict[str, int]:
+        """Переписать абсолютные пути к файлам в относительные корню хранилища.
+
+        Абсолютный путь привязывает архив к машине. Замерено на архиве владельца: у
+        всех 1671 документа в метаданных лежали абсолютные пути (3342 штуки, ни одного
+        относительного), укоренённые в прежнем каталоге. После переезда, смены
+        `JERICHO_HOME` или даже имени пользователя каждый файл отдавал бы 404 —
+        неотличимый от «файла нет», то есть полный отказ, а не деградация.
+
+        Правка формы записи спасает только БУДУЩИЕ документы; этот проход чинит уже
+        записанные. Трогаются ровно те пути, что лежат ВНУТРИ текущего хранилища:
+        путь вне его — либо чужой, либо след прошлого переезда, и молча превращать
+        его в относительный значило бы соврать о том, где файл.
+        """
+        root = str(files_root).rstrip("/") + "/"
+        changed = 0
+        scanned = 0
+        with self.transaction() as conn:
+            rows = conn.execute(
+                "SELECT id, metadata_json FROM raw_objects WHERE metadata_json LIKE ?",
+                (f'%"{root[:-1]}%',),
+            ).fetchall()
+            for row in rows:
+                scanned += 1
+                try:
+                    metadata = json.loads(str(row["metadata_json"] or "{}"))
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(metadata, dict):
+                    continue
+                touched = False
+                for field in ("stored_path", "import_source_path"):
+                    value = str(metadata.get(field) or "")
+                    # `import_source_path` — это провенанс, откуда файл ПРИШЁЛ, а не
+                    # где он лежит. Его трогать нельзя: он и должен остаться таким,
+                    # каким был на исходной машине.
+                    if field != "stored_path" or not value.startswith(root):
+                        continue
+                    metadata[field] = value[len(root) :]
+                    touched = True
+                if touched:
+                    conn.execute(
+                        "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+                        (json.dumps(metadata, ensure_ascii=False, sort_keys=True), row["id"]),
+                    )
+                    changed += 1
+        return {"scanned": scanned, "changed": changed}
+
     def search_raw_objects(self, user_id: str, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
         """Full-text search over SOURCE text, obeying the Inbox verdict.
 
