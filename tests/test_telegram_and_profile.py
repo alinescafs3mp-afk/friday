@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 import time
@@ -768,6 +769,70 @@ async def test_bridge_drains_outbound_queue_and_rechecks_allowlist(tmp_path):
         assert ack["body"]["failed"] == ["n2"]
     finally:
         bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_a_voice_attachment_is_delivered_as_a_native_telegram_voice_message(tmp_path):
+    """The `speak` tool's clip must actually reach the user, not just exist on the
+    response dict. Mutation: stop calling `self._send_voice` inside
+    `_deliver_voice_reply` — this must go red on the missing `/sendVoice` call."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    audio_bytes = b"OggS-fake-opus-payload"
+    response = {
+        "message": "Привет!",
+        "voice": {
+            "kind": "voice",
+            "mime_type": "audio/ogg",
+            "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+            "duration_sec": 1.5,
+        },
+    }
+
+    await bridge._deliver_voice_reply(telegram, 5001, response)
+
+    voice_calls = [payload for url, payload in telegram.calls if url.endswith("/sendVoice")]
+    assert len(voice_calls) == 1
+    data, files = voice_calls[0]["data"], voice_calls[0]["files"]
+    assert data["chat_id"] == "5001"
+    filename, content, mime_type = files["voice"]
+    assert content == audio_bytes
+    assert mime_type == "audio/ogg"
+    assert filename.endswith(".ogg")
+
+
+@pytest.mark.asyncio
+async def test_no_voice_attachment_means_no_send_voice_call(tmp_path):
+    """A text-only turn (the common case: `speak` was never asked for) must not
+    produce a `sendVoice` call. Mutation: force `encoded` to a valid base64 value
+    regardless of `response["voice"]` — this must go red."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+
+    await bridge._deliver_voice_reply(telegram, 5001, {"message": "Привет!"})
+
+    assert not any(url.endswith("/sendVoice") for url, _ in telegram.calls)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_voice_delivery_does_not_break_the_turn(tmp_path, monkeypatch):
+    """`sendVoice` failing (rate limit, oversized clip, transient network error)
+    must not turn an already-successful text answer into an exception for the
+    caller. Mutation: remove the try/except around `self._send_voice` — this
+    must go red with a propagated exception."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("HTTP 429: rate limited")
+
+    monkeypatch.setattr(bridge, "_send_voice", _boom)
+
+    response = {
+        "message": "Привет!",
+        "voice": {"audio_base64": base64.b64encode(b"x").decode("ascii")},
+    }
+    await bridge._deliver_voice_reply(telegram, 5001, response)  # must not raise
 
 
 @pytest.mark.asyncio
