@@ -142,7 +142,14 @@ class ViewsMixin(BridgeShared):
             summary_b = str(item.get("knowledge_b_summary") or "").strip()[:280]
             kind = str(item.get("conflict_type") or "potential_contradiction")
             confidence = round(float(item.get("confidence") or 0.0) * 100)
+            triage = item.get("triage") if isinstance(item.get("triage"), dict) else {}
+            label_ru = str(triage.get("label_ru") or "").strip()
+            if not label_ru:
+                from jericho.conflict_triage import HINT_UNCERTAIN, hint_label_ru
+
+                label_ru = hint_label_ru(str(triage.get("hint") or HINT_UNCERTAIN))
             body = (
+                f"Метка: {label_ru}\n"
                 f"Тип: {kind} ({confidence}%).\n\n"
                 f"1. {title_a}"
                 + (f"\n{summary_a}" if summary_a else "")

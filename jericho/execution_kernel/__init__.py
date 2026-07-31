@@ -943,7 +943,13 @@ class ExecutionKernel:
         Two hundred suggested conflicts on the live install, and zero paths from
         chat until this tool and the matching /conflicts command. Portions only:
         nobody reviews two hundred in one reply.
+
+        Each item carries a ``triage`` hint (likely_duplicate /
+        likely_different_records / uncertain) computed from the same features as
+        the queue probe — a label for the reviewer, not an automatic decision.
         """
+        from jericho.conflict_triage import attach_conflict_hint
+
         storage, _, _, _ = self._require_services()
         page = max(1, min(int(limit), 10))
         items = await run_blocking(
@@ -954,25 +960,32 @@ class ExecutionKernel:
             offset=0,
         )
         total = await run_blocking(storage.count_knowledge_conflicts, actor.user_id, status="suggested")
-        compact: list[dict[str, Any]] = []
-        for item in items:
-            compact.append(
-                {
-                    "id": str(item.get("id") or ""),
-                    "conflict_type": str(item.get("conflict_type") or ""),
-                    "confidence": float(item.get("confidence") or 0.0),
-                    "a": {
-                        "id": str(item.get("knowledge_a_id") or ""),
-                        "title": str(item.get("knowledge_a_title") or "")[:200],
-                        "summary": str(item.get("knowledge_a_summary") or "")[:400],
-                    },
-                    "b": {
-                        "id": str(item.get("knowledge_b_id") or ""),
-                        "title": str(item.get("knowledge_b_title") or "")[:200],
-                        "summary": str(item.get("knowledge_b_summary") or "")[:400],
-                    },
-                }
-            )
+
+        def _compact_page() -> list[dict[str, Any]]:
+            compact: list[dict[str, Any]] = []
+            for item in items:
+                enriched = attach_conflict_hint(storage, actor.user_id, item)
+                compact.append(
+                    {
+                        "id": str(enriched.get("id") or ""),
+                        "conflict_type": str(enriched.get("conflict_type") or ""),
+                        "confidence": float(enriched.get("confidence") or 0.0),
+                        "triage": enriched.get("triage") or {},
+                        "a": {
+                            "id": str(enriched.get("knowledge_a_id") or ""),
+                            "title": str(enriched.get("knowledge_a_title") or "")[:200],
+                            "summary": str(enriched.get("knowledge_a_summary") or "")[:400],
+                        },
+                        "b": {
+                            "id": str(enriched.get("knowledge_b_id") or ""),
+                            "title": str(enriched.get("knowledge_b_title") or "")[:200],
+                            "summary": str(enriched.get("knowledge_b_summary") or "")[:400],
+                        },
+                    }
+                )
+            return compact
+
+        compact = await run_blocking(_compact_page)
         return {
             "count": len(compact),
             "total": total,

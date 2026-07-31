@@ -188,6 +188,12 @@ def watch_status(*, write_state: bool = True, git_ref: str = "origin/main") -> d
             "origin still has open tasks that worktree already marks done; "
             "dirty tree looks like unfinished push"
         )
+    elif must_work and dirty:
+        # Partial implement left the tree dirty — do not idle, do not re-plan
+        # from zero: finish the WIP, gate, push.
+        action = "continue_wip"
+        action_ids = must_work
+        reason = "open G-tasks and dirty worktree — finish in-flight work and push"
     elif must_work:
         action = "implement"
         action_ids = must_work

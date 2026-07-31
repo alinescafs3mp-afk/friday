@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Очередь конфликтов размечена подсказкой (#56)
+
+У каждой пары near-duplicate — triage: `likely_duplicate` / `likely_different_records`
+/ `uncertain` (Jaccard по стемам `content_tokens`, длины, доля data-diff). Только
+метка для разбора; `conflict_decide` по-прежнему только человек. Видно в
+`conflict_list`, `GET /api/kg/conflicts` и Telegram `/conflicts`.
+
 ### Английский detail= больше не доезжает до toast (#54)
 
 Все статические и f-string `HTTPException.detail` в `admin_api/` и `api/` — по-русски.

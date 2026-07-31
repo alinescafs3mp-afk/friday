@@ -361,12 +361,22 @@ async def list_own_conflicts(
         total = await run_blocking(storage.count_knowledge_conflicts, actor.user_id, status=status)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Review aid for the near-duplicate queue: same features as the live probe
+    # (Jaccard on content stems, length ratio, data-field share of the diff).
+    # Hint only — decide endpoints are unchanged.
+    from jericho.conflict_triage import attach_conflict_hint
+
+    def _with_hints() -> list[dict[str, Any]]:
+        return [attach_conflict_hint(storage, actor.user_id, item) for item in items]
+
+    annotated = await run_blocking(_with_hints)
     return {
-        "items": items,
-        "count": len(items),
+        "items": annotated,
+        "count": len(annotated),
         "total": total,
         "status": status,
-        "truncated": len(items) < total,
+        "truncated": len(annotated) < total,
     }
 
 
