@@ -47,6 +47,27 @@ def test_a_read_failure_degrades_to_no_preference_not_a_crash(settings, storage)
     assert agent._custom_instructions(new_id("user")) == ""
 
 
+def test_a_storage_error_outside_json_decoding_also_degrades_gracefully(settings, storage):
+    """The except clause used to list only (JSONDecodeError, TypeError,
+    AttributeError) — narrower than `_user_model_payload`'s broad `except
+    Exception`, despite this function's own docstring claiming to follow the
+    same rule. A `sqlite3.OperationalError` from a contended database (or any
+    other storage fault) is none of those three types, and with the narrow
+    clause it would propagate out of `_custom_instructions`, through
+    `_build_initial_messages` and `_agentic_loop`/`chat()` — none of which wrap
+    this call in a try/except — failing the entire chat turn over a style
+    preference that should have just been silently omitted."""
+    storage.ensure_user("alice")
+    agent = AgentRuntime(settings, storage)
+
+    def boom(_user_id):
+        raise RuntimeError("database is locked")
+
+    agent.storage.get_user = boom  # type: ignore[method-assign]
+
+    assert agent._custom_instructions("alice") == ""
+
+
 def test_custom_instructions_reach_the_actual_prompt_sent_to_the_model(settings, storage):
     """Two things must both hold, and the first one is the real bug this test
     caught before it shipped: the block that carries `context_payload` to the

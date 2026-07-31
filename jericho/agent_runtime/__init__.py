@@ -890,7 +890,21 @@ class AgentRuntime:
         # per-call budget spent again on every round instead of once for the turn.
         # Two calls' worth is enough room for one real round-trip plus one retry-like
         # follow-up; past that, the loop stops STARTING new calls (an in-flight one
-        # is never interrupted, same rule as the per-call budget it reuses).
+        # is never interrupted).
+        #
+        # This is wall clock from the moment the turn entered this loop, NOT the
+        # per-call budget's clock: `total_budget_sec` starts inside `_chat_impl`,
+        # i.e. only once `_foreground_sem` (four slots, shared by every concurrent
+        # chat in this process, llm.py) is already held, so it excludes queueing.
+        # This deadline does not — under heavy concurrent load, time spent blocked
+        # on that semaphore before the first call even starts counts against this
+        # budget too, so a fast, healthy endpoint's rounds can still get cut short
+        # if the process is busy. Left this way deliberately rather than threading
+        # queue-vs-generation timing back out of `LLMRouter`: under real contention,
+        # spending less budget per turn is arguably the right shape of degradation,
+        # not a bug — but it has NOT been measured against real concurrent load, so
+        # do not treat this as settled; a future pass with actual numbers should
+        # decide whether it needs the deeper fix.
         loop_budget_sec = self.llm.total_budget_sec * 2
         loop_deadline = time.monotonic() + loop_budget_sec
 
@@ -1106,7 +1120,8 @@ class AgentRuntime:
         try:
             user = self.storage.get_user(user_id)
             metadata = json.loads(str((user or {}).get("metadata_json") or "{}"))
-        except (json.JSONDecodeError, TypeError, AttributeError):
+        except Exception:
+            LOGGER.warning("Custom instructions read failed; answering without it", exc_info=True)
             return ""
         return (
             str(metadata.get("custom_instructions") or "").strip()[:500] if isinstance(metadata, dict) else ""

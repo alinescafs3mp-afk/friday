@@ -199,10 +199,16 @@ def scan(
             stat = path.stat()
             if not path.is_file() or path.is_symlink():
                 continue
+            # Checked before the size skip, not after: a protected file (the env
+            # file, the backup key) that also happens to be oversized was already
+            # counted once by the protected-paths loop above. Checking size first
+            # counted it a second time here whenever it also sat inside `roots` —
+            # the common case, since both protected files normally live under
+            # `settings.home`.
+            if path.resolve() in protected_paths:
+                continue
             if stat.st_size > MAX_FILE_BYTES:
                 report.oversized_skipped += 1
-                continue
-            if path.resolve() in protected_paths:
                 continue
             blob = path.read_bytes()
         except OSError:

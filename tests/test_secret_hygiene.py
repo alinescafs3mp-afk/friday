@@ -185,6 +185,19 @@ def test_large_files_are_skipped_rather_than_read(tmp_path):
     assert report.oversized_skipped == 1
 
 
+def test_an_oversized_protected_file_is_not_counted_twice(tmp_path):
+    """The protected-paths loop and the candidate-walk loop both see this file
+    when the protected file (the env file, the backup key) sits inside a scanned
+    root — the normal deployment layout. Each loop skipping it for size must not
+    both increment the same counter."""
+    protected = tmp_path / ".env.local"
+    protected.write_bytes(b"." * (MAX_FILE_BYTES + 1024))
+
+    report = scan([tmp_path], secrets={"T": TOKEN}, protected=[protected])
+
+    assert report.oversized_skipped == 1
+
+
 def test_an_unreadable_file_does_not_stop_the_scan(tree):
     blocked = tree / "blocked.txt"
     blocked.write_text(TOKEN, encoding="utf-8")

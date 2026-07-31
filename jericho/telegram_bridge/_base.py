@@ -229,6 +229,7 @@ class BridgeShared:
     _send_browse: Callable[..., Any]
     _send_inbox: Callable[..., Any]
     _send_conflicts: Callable[..., Any]
+    _send_history: Callable[..., Any]
     _send_merges: Callable[..., Any]
     _send_message: Callable[..., Any]
     _send_missions: Callable[..., Any]

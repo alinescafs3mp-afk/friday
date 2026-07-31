@@ -808,9 +808,7 @@ class ExecutionKernel:
                 "conversation_id": str(row.get("conversation_id") or ""),
                 "role": str(row.get("role") or ""),
                 "created_at": row.get("created_at"),
-                "excerpt": best_snippet(
-                    query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS
-                ),
+                "excerpt": best_snippet(query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS),
             }
             for row in rows
         ]
