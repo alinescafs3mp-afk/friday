@@ -1,5 +1,14 @@
 ## Unreleased
 
+### S8: graph expansion только для реляционных запросов (#63)
+
+Заранее объявленный замер на 12 обезличенных реляционных кейсах принят fail-closed:
+12 попаданий с графом против 10 без него, `net_gain=2`, без graph/reranker failures.
+Путь агента и `run_eval` теперь включают расширение одним классификатором только для
+измеренного relational-language режима; обычные запросы остаются без расширения.
+Классификатор дополнен измеренной формой сотрудничества. Публичный default поиска не
+изменён.
+
 ### G18: self-service /archive /delete /rename в Telegram (#66)
 
 G18a: Telegram /archive → POST /api/conversations/current/archive (sentinel

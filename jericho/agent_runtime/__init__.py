@@ -21,7 +21,7 @@ from jericho.config import JerichoSettings
 from jericho.execution_kernel import ExecutionKernel
 from jericho.knowledge_graph import build_user_model
 from jericho.permissions import ActorContext, AuthorizationService
-from jericho.retrieval import best_snippet
+from jericho.retrieval import best_snippet, is_relational_query
 from jericho.storage import JerichoStorage, normalize_conversation_mode
 from jericho.storage.models import FeedbackItem, FeedbackType, new_id
 
@@ -675,32 +675,12 @@ class AgentRuntime:
                     search_query,
                     limit=retrieval_limit,
                     kg=kg,
-                    # Граф ОСТАЁТСЯ ради упомянутых сущностей, но расширение по нему
-                    # выключено. Это главный путь: контекст собирается на каждое
-                    # сообщение, то есть через него идёт каждый вопрос владельца.
-                    #
-                    # Замер на золотом наборе живого архива (20 эталонов, три руки на
-                    # одном коде, критерий объявлен до запуска — чистый выигрыш >= 2):
-                    #
-                    #   kg + расширение     recall@10 0.1500  MRR 0.0813   <- было в бою
-                    #   kg без расширения   recall@10 0.3500  MRR 0.1530   <- стало
-                    #   без kg вовсе        recall@10 0.3500  MRR 0.1530
-                    #
-                    # То есть расширение УПОЛОВИНИВАЛО качество, а сущности для
-                    # контекста достаются бесплатно: вторая и третья руки совпали
-                    # кейс в кейс. Чистый счёт против боевого +4 при требуемых +2.
-                    #
-                    # Почему расширение вредит: со-встречаемость через документ-
-                    # концентратор. Штатное расписание на полсотни имён делает
-                    # «связанными» все пары этих людей, и они вытесняют настоящий
-                    # ответ из десятки. Замерено отдельно, что это не следствие
-                    # прохода правилом ФИО: без 4349 заведённых им людей канал вредил
-                    # СИЛЬНЕЕ (recall 0.1000, чистый счёт -5).
-                    #
-                    # Это не приговор графу целиком: мерено на вопросах «найди этот
-                    # документ», а реляционных эталонов у набора нет. Судьба канала —
-                    # задача #49.
-                    graph_expansion=False,
+                    # Обычный путь оставляет расширение выключенным: на 20
+                    # документных эталонах оно снижало recall@10 0.35 -> 0.15.
+                    # Отдельный заранее объявленный замер на 12 реляционных кейсах
+                    # дал ровно допустимый net_gain=2 без сбоев, поэтому расширение
+                    # включается только для измеренного relational-language класса.
+                    graph_expansion=is_relational_query(search_query),
                     # The reasons a candidate was DROPPED are computed on every
                     # query and thrown away unless asked for. Keeping a compact
                     # copy is what makes "я точно сохранял эту заметку" answerable

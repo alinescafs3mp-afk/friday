@@ -1,4 +1,4 @@
-"""Сбор контекста агентом идёт БЕЗ расширения по графу — и это замер, а не вкус.
+"""Сбор контекста включает граф только для измеренного реляционного режима.
 
 Путь, который здесь защищается, главный: `_prepare_context` собирает контекст на каждое
 сообщение, то есть через него проходит каждый вопрос владельца в Telegram. Долгое время
@@ -13,8 +13,10 @@
     kg без расширения   recall@10 0.3500  MRR 0.1530   <- стало
     без kg вовсе        recall@10 0.3500  MRR 0.1530
 
-Расширение уполовинивало качество. Вторая и третья руки совпали кейс в кейс, то есть
-упомянутые сущности для контекста достаются бесплатно — ради них `kg` и остаётся.
+Расширение уполовинивало качество обычного поиска. Отдельный замер на 12 заранее
+размеченных реляционных кейсах дал net_gain=2 без сбоев, поэтому граф включается
+только по реляционному классификатору. `kg` остаётся и при выключенном расширении:
+упомянутые сущности для контекста достаются бесплатно.
 
 Тест ПРОВОДОЧНЫЙ. Проверяется не то, что механизм умеет выключаться (это дело
 `retrieval`), а то, что боевой путь его действительно выключает. В этом проекте
@@ -70,3 +72,28 @@ async def test_context_retrieval_asks_for_no_graph_expansion(settings, storage):
         "расширение по графу вернулось в путь агента: замерено, что оно уполовинивает "
         "recall@10 (0.3500 -> 0.1500)"
     )
+
+
+@pytest.mark.asyncio
+async def test_context_retrieval_expands_graph_for_measured_relational_form(settings, storage):
+    """Мутация: заменить mode-dependent флаг на False — этот тест обязан упасть."""
+    from jericho.agent_runtime import AgentRuntime
+    from jericho.knowledge_graph import KnowledgeGraph
+
+    storage.ensure_user("alice")
+    agent = AgentRuntime(settings, storage)
+    spy = _SpySearcher()
+
+    await agent._prepare_context(
+        "alice",
+        "с кем работал Альфа",
+        "conv-test",
+        prior_history=[],
+        kg=KnowledgeGraph(storage),
+        searcher=spy,
+        ingestion_result=None,
+        interaction_mode="knowledge_work",
+    )
+
+    assert spy.calls
+    assert spy.calls[0].get("graph_expansion") is True

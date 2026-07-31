@@ -79,11 +79,19 @@ _YO_FOLD = str.maketrans({"ё": "е", "Ё": "Е"})
 
 
 _RELATIONAL_QUERY_RE = re.compile(
-    r"\b(?:связан\w*|завис\w*|участву\w*|работа\w*\s+над|относ\w*\s+к|"
+    r"\b(?:связан\w*|завис\w*|участву\w*|с\s+кем\s+работа\w*|работа\w*\s+над|относ\w*\s+к|"
     r"част\w*\s+(?:проекта|системы)|через\s+что|между\s+\w+\s+и\s+\w+|"
     r"related\s+to|depends?\s+on|works?\s+on|part\s+of|connected\s+to|between)\b",
     re.IGNORECASE,
 )
+
+
+def is_relational_query(query: str) -> bool:
+    """Return whether the measured relational graph path should be enabled."""
+
+    return _RELATIONAL_QUERY_RE.search(query) is not None
+
+
 _STOPWORDS = {
     "a",
     "an",
@@ -1550,7 +1558,7 @@ class HybridSearcher:
         # — see the gate below.
         graph_query_matched: set[str] = set()
         graph_evidence: dict[str, list[dict[str, Any]]] = {}
-        graph_depth = self._graph_max_depth if _RELATIONAL_QUERY_RE.search(clean_query) else 1
+        graph_depth = self._graph_max_depth if is_relational_query(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
         if kg and graph_expansion:
             # A seed has to be a real match. `_lexical_rank` returns EVERY candidate

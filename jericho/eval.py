@@ -114,6 +114,8 @@ async def _score_cases(
     """Score a gold set with one searcher. Extracted so an A/B measures both arms
     with byte-identical code — a difference in the numbers can only come from the
     searcher, never from the harness."""
+    from jericho.retrieval import is_relational_query
+
     per_case: list[dict[str, Any]] = []
     skipped_empty_expected = 0
     recall_sum = precision_sum = rr_sum = 0.0
@@ -125,13 +127,15 @@ async def _score_cases(
             # loss look like «the searcher» when the set itself had shrunk.
             skipped_empty_expected += 1
             continue
-        # `graph_expansion=False`: боевой путь агента (`_prepare_context`) выключил
-        # расширение по графу 2026-07-31 — замерено, что оно уполовинивало recall@10
-        # (0.35 -> 0.15). Без этого параметра здесь периодическая метрика качества
-        # (её же видит `jericho doctor`) продолжала бы мерить СТАРОЕ поведение и
-        # молча расходиться с тем, что владелец получает на самом деле.
+        query = str(case["query"])
+        # Метрика обязана повторять режим боевого пути: граф выключен для обычного
+        # запроса и включён только для измеренного relational-language класса.
         result = await searcher.search(
-            user_id, str(case["query"]), limit=max(k, 20), kg=kg, graph_expansion=False
+            user_id,
+            query,
+            limit=max(k, 20),
+            kg=kg,
+            graph_expansion=is_relational_query(query),
         )
         retrieved = [str(hit.get("id")) for hit in result.get("results", []) if hit.get("id")]
         case_recall = recall_at_k(retrieved, expected, k)
