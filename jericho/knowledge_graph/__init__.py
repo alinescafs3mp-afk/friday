@@ -1633,6 +1633,16 @@ class KnowledgeGraph:
         (`execution_kernel`) and the HTTP/Telegram `/profile` surface both call
         this, so they show exactly the same thing instead of two independently
         maintained versions of "what does this entity look like".
+
+        `event_time` keeps THREE distinct temporal facts apart, per spec v3 §4
+        ("distinguish when an event happened, when a source reported it, and
+        when Jericho learned it"): `occurred_at` (when the event itself took
+        place, `entity_time`/`set_event_time` — only ever set for `event`
+        entities) is a different fact from `profile.document_date_range`
+        (when the SOURCE documents were dated) and from each document's own
+        `created_at` (when Jericho ingested it). Conflating any two of these
+        is exactly the mistake `document_date` vs `updated_at` already
+        guards against elsewhere in this method.
         """
         knowledge_objects = self.get_entity_knowledge(entity_id, user_id, limit=knowledge_limit)
         return {
@@ -1640,6 +1650,7 @@ class KnowledgeGraph:
             "pending_relations_count": self.count_pending_relations(entity_id, user_id),
             "knowledge_objects": knowledge_objects,
             "profile": _entity_profile_summary(knowledge_objects),
+            "event_time": self.get_event_time(user_id, entity_id),
         }
 
     def review_knowledge_link(

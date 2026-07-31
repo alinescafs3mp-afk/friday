@@ -667,6 +667,48 @@ async def test_profile_command_shows_the_object_view(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_profile_command_shows_when_an_event_occurred(tmp_path):
+    """Спека v3 §4: occurred_at — отдельная строка от «даты документов», не
+    смешивается с ними. Мутация: убрать блок `if event_time:` в
+    `_send_entity_profile` — эта проба обязана покраснеть."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/entity-profile?name=%D0%A1%D0%BE%D0%B2%D0%B5%D1%89%D0%B0%D0%BD%D0%B8%D0%B5": {
+                "entity": {"id": "ent-1", "name": "Совещание"},
+                "relations": [],
+                "pending_relations_count": 0,
+                "knowledge_objects": [],
+                "profile": {"tags": [], "document_date_range": None, "documents_without_own_date": 0},
+                "event_time": {"occurred_at": "2026-05-10", "occurred_end": "2026-05-11"},
+            }
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "chat": {"id": 5001},
+                    "from": user,
+                    "text": "/profile Совещание",
+                },
+            },
+            cached_response=None,
+        )
+        sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+        text = str(sends[-1]["text"])
+        assert "Когда произошло: 2026-05-10 — 2026-05-11" in text
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_profile_command_reports_not_found_honestly(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()

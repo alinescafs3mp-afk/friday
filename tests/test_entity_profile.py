@@ -45,8 +45,10 @@ def _document(storage, user_id: str, text: str, *, tags: list[str], document_dat
     return ko.id
 
 
-def _linked_entity(storage, kg, user_id: str, name: str) -> str:
-    entity = Entity(id=new_id("ent"), user_id=user_id, name=name, entity_type=EntityType.PROJECT)
+def _linked_entity(
+    storage, kg, user_id: str, name: str, *, entity_type: EntityType = EntityType.PROJECT
+) -> str:
+    entity = Entity(id=new_id("ent"), user_id=user_id, name=name, entity_type=entity_type)
     storage.create_entity(entity)
     return entity.id
 
@@ -166,6 +168,44 @@ async def test_entity_profile_tags_do_not_leak_across_tenants(kernel):
     result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=bob)
 
     assert result.data["found"] is False, "чужая сущность не должна находиться по имени"
+
+
+@pytest.mark.asyncio
+async def test_entity_profile_shows_when_an_event_occurred(kernel):
+    """Спека v3 §4: три разных временных факта не должны путаться. `event_time`
+    (когда событие ПРОИЗОШЛО) — отдельно от `profile.document_date_range`
+    (когда написаны ДОКУМЕНТЫ о нём) и от `created_at` документа (когда
+    Jericho об этом УЗНАЛА).
+
+    Мутация: убрать `"event_time": self.get_event_time(...)` из entity_profile
+    — тест обязан покраснеть на отсутствующем ключе.
+    """
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Совещание", entity_type=EntityType.EVENT)
+    graph.set_event_time("alice", entity_id, "2026-05-10", occurred_end="2026-05-11")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Совещание"}, actor=actor)
+
+    event_time = result.data["event_time"]
+    assert event_time is not None
+    assert event_time["occurred_at"] == "2026-05-10"
+    assert event_time["occurred_end"] == "2026-05-11"
+
+
+@pytest.mark.asyncio
+async def test_entity_profile_event_time_is_none_for_non_event_entities(kernel):
+    """Проект/человек/организация не имеют occurred_at — поле должно быть None,
+    а не отсутствовать или падать."""
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Атлас", entity_type=EntityType.PROJECT)
+    ko = _document(storage, "alice", "Документ.", tags=[], document_date=None)
+    graph.link_knowledge_to_entity(ko, entity_id, "alice", status="accepted")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
+
+    assert result.data["event_time"] is None
 
 
 def test_http_entity_profile_by_name_matches_the_agent_tool_shape(settings):

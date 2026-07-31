@@ -400,6 +400,16 @@ class ViewsMixin(BridgeShared):
 
         entity_name = str(entity.get("name") or clean)
         lines = [f"📇 {entity_name}"]
+        event_time = data.get("event_time") if isinstance(data.get("event_time"), dict) else None
+        if event_time:
+            # Отдельная строка, не смешанная с "даты документов": occurred_at —
+            # когда СОБЫТИЕ произошло, а не когда о нём написали или когда мы
+            # об этом узнали (спека v3 §4, три разных факта).
+            occurred_at = str(event_time.get("occurred_at") or "")
+            occurred_end = str(event_time.get("occurred_end") or "")
+            if occurred_at:
+                when = f"{occurred_at} — {occurred_end}" if occurred_end else occurred_at
+                lines.append(f"Когда произошло: {when}")
         tags = profile.get("tags") or []
         if tags:
             lines.append("Теги: " + ", ".join(f"#{tag}" for tag in tags[:15]))
