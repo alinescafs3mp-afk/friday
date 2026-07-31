@@ -85,7 +85,10 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # по ним случайна. Второй существует ровно затем, чтобы проход не спорил с человеком —
 # `link_knowledge_entity` перезаписывает статус по ON CONFLICT, и без этой проверки
 # отклонённая владельцем связь молча вернулась бы в accepted.
-EXPECTED_MEMBER_COUNT = 255
+# 253 → 255: find_entities_by_normalized_names + iter_entities снимают потолок
+# полного списка для точного сопоставления и token-overlap обхода.
+# 255 → 256: list_entities_knowledge_refs пакетирует проекции текущего фронта BFS.
+EXPECTED_MEMBER_COUNT = 256
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -214,6 +217,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_custom_presets": "(self) -> 'list[dict[str, Any]]'",
     "list_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, limit: 'int' = 100, offset: 'int' = 0, include_merged: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_entities_by_activity": "(self, user_id: 'str', *, types: 'tuple[str, ...] | None' = None, limit: 'int' = 5) -> 'list[dict[str, Any]]'",
+    "list_entities_knowledge_refs": "(self, user_id: 'str', entity_ids: 'Sequence[str]', *, limit: 'int' = 50) -> 'dict[str, list[dict[str, Any]]]'",
     "list_entity_versions": "(self, entity_id: 'str', user_id: 'str') -> 'list[dict[str, Any]]'",
     "list_eval_cases": "(self, user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
     "list_events_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, limit: 'int' = 200) -> 'list[dict[str, Any]]'",

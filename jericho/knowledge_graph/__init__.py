@@ -803,15 +803,26 @@ class KnowledgeGraph:
 
         def get_entity_knowledge(entity_id: str) -> list[dict[str, Any]]:
             if entity_id not in entity_knowledge_cache:
-                # Projection, not full rows: the traversal reads the id, the link
-                # confidence and the two scores it sorts by, and nothing else — the
-                # document bodies it used to load were read from disk and discarded.
-                entity_knowledge_cache[entity_id] = self.storage.list_entity_knowledge_refs(
+                prefetch_entity_knowledge([entity_id])
+            return entity_knowledge_cache[entity_id]
+
+        def prefetch_entity_knowledge(entity_ids: list[str]) -> None:
+            missing = list(
+                dict.fromkeys(
+                    entity_id for entity_id in entity_ids if entity_id not in entity_knowledge_cache
+                )
+            )
+            if not missing:
+                return
+            # The traversal needs only this projection. Fetch a whole BFS frontier
+            # at once so graph width no longer becomes SQL query count.
+            entity_knowledge_cache.update(
+                self.storage.list_entities_knowledge_refs(
                     user_id,
-                    entity_id,
+                    missing,
                     limit=max(100, min(1000, knowledge_limit * 4)),
                 )
-            return entity_knowledge_cache[entity_id]
+            )
 
         def get_entity_relations(entity_id: str) -> list[dict[str, Any]]:
             if entity_id not in entity_relation_cache:
@@ -875,7 +886,18 @@ class KnowledgeGraph:
             )
             queue.append((neighbour_id, next_depth, next_path))
 
+        prefetched_depth: int | None = None
         while queue:
+            frontier_depth = queue[0][1]
+            if frontier_depth != prefetched_depth:
+                prefetch_entity_knowledge(
+                    [
+                        queued_entity_id
+                        for queued_entity_id, queued_depth, _path in queue
+                        if queued_depth == frontier_depth
+                    ]
+                )
+                prefetched_depth = frontier_depth
             entity_id, current_depth, path_ids = queue.popleft()
             entity = get_entity(entity_id)
             if not entity or entity.get("deleted_at"):

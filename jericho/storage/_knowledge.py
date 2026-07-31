@@ -1540,6 +1540,66 @@ class KnowledgeMixin(StorageShared):
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_entities_knowledge_refs(
+        self, user_id: str, entity_ids: Sequence[str], *, limit: int = 50
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return the per-entity ranking projection without an N+1 query loop.
+
+        This is intentionally equivalent to calling ``list_entity_knowledge_refs``
+        for each id: accepted links take precedence, the legacy direct entity link
+        is used only when none exist, and the limit applies independently to every
+        entity. Batches stay below SQLite's conservative parameter ceiling.
+        """
+        ordered_ids = list(dict.fromkeys(str(item) for item in entity_ids if item))
+        if not ordered_ids:
+            return {}
+        per_entity_limit = max(1, min(limit, 1000))
+        result: dict[str, list[dict[str, Any]]] = {entity_id: [] for entity_id in ordered_ids}
+
+        for start in range(0, len(ordered_ids), 400):
+            batch = ordered_ids[start : start + 400]
+            placeholders = ",".join("?" for _ in batch)
+            linked_rows = self.execute(
+                "WITH ranked AS ("  # nosec B608
+                " SELECT l.entity_id AS _entity_id, k.id, k.importance, k.quality_score,"
+                " l.confidence AS _link_confidence,"
+                " ROW_NUMBER() OVER (PARTITION BY l.entity_id"
+                " ORDER BY k.importance DESC, k.updated_at DESC) AS _rank"
+                " FROM knowledge_entity_links l"
+                " JOIN knowledge_objects k ON k.id=l.knowledge_object_id"
+                " WHERE l.user_id=? AND l.status='accepted' AND k.deleted_at IS NULL"
+                f" AND l.entity_id IN ({placeholders})"
+                ") SELECT _entity_id, id, importance, quality_score, _link_confidence"
+                " FROM ranked WHERE _rank<=? ORDER BY _entity_id, _rank",
+                (user_id, *batch, per_entity_limit),
+            ).fetchall()
+            for row in linked_rows:
+                item = dict(row)
+                entity_id = str(item.pop("_entity_id"))
+                result[entity_id].append(item)
+
+            fallback_ids = [entity_id for entity_id in batch if not result[entity_id]]
+            if not fallback_ids:
+                continue
+            fallback_placeholders = ",".join("?" for _ in fallback_ids)
+            fallback_rows = self.execute(
+                "WITH ranked AS ("  # nosec B608
+                " SELECT entity_id AS _entity_id, id, importance, quality_score,"
+                " 1.0 AS _link_confidence,"
+                " ROW_NUMBER() OVER (PARTITION BY entity_id"
+                " ORDER BY importance DESC, updated_at DESC) AS _rank"
+                " FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL"
+                f" AND entity_id IN ({fallback_placeholders})"
+                ") SELECT _entity_id, id, importance, quality_score, _link_confidence"
+                " FROM ranked WHERE _rank<=? ORDER BY _entity_id, _rank",
+                (user_id, *fallback_ids, per_entity_limit),
+            ).fetchall()
+            for row in fallback_rows:
+                item = dict(row)
+                entity_id = str(item.pop("_entity_id"))
+                result[entity_id].append(item)
+        return result
+
     def get_entity_knowledge(self, user_id: str, entity_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.execute(
             """SELECT k.*, l.confidence AS _link_confidence, l.evidence_json AS _link_evidence_json
