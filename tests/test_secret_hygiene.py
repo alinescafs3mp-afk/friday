@@ -170,13 +170,19 @@ def test_only_credential_shaped_variables_are_treated_as_secrets():
 
 
 def test_large_files_are_skipped_rather_than_read(tmp_path):
-    """Bounded by design: doctor is run when something is already wrong."""
+    """Bounded by design: doctor is run when something is already wrong.
+
+    But a skip that leaves no trace reads as coverage it never had: a big file
+    is not an unusual place for a leaked secret to end up (a config dump, a
+    log, an exported profile), and `report.clean` said nothing about it.
+    """
     big = tmp_path / "huge.bin"
     big.write_bytes(b"." * (MAX_FILE_BYTES + 1024) + TOKEN.encode())
 
     report = scan([tmp_path], secrets={"T": TOKEN})
     assert report.exposures == []
     assert report.files_scanned == 0
+    assert report.oversized_skipped == 1
 
 
 def test_an_unreadable_file_does_not_stop_the_scan(tree):
@@ -222,6 +228,44 @@ def test_a_failing_scan_never_breaks_diagnostics(settings, monkeypatch):
     monkeypatch.setattr("jericho.secret_hygiene.scan", explode)
     report = collect_diagnostics(settings, check_secrets=True)
     assert "actions" in report and isinstance(report["actions"], list)
+
+
+def test_an_incomplete_scan_says_so_instead_of_looking_clean(settings, monkeypatch):
+    """`clean` only speaks for files the scan actually opened. Skipped-for-size used
+    to leave no trace at all — a report with zero exposures and an incomplete scan
+    looked identical to a report with zero exposures and a complete one."""
+    from jericho.diagnostics import collect_diagnostics
+    from jericho.secret_hygiene import Report
+
+    def incomplete_scan(*_args, **_kwargs):
+        return Report(
+            exposures=[],
+            loose_permissions=[],
+            files_scanned=5,
+            stopped_early=False,
+            oversized_skipped=3,
+        )
+
+    monkeypatch.setattr("jericho.secret_hygiene.scan", incomplete_scan)
+
+    actions = collect_diagnostics(settings, check_secrets=True)["actions"]
+    warnings = [action for action in actions if action["code"] == "secret_scan_incomplete"]
+
+    assert warnings, "a scan that skipped files must say so, not just report clean"
+    assert "3" in warnings[0]["detail"]
+
+
+def test_a_complete_scan_says_nothing_about_completeness(settings, monkeypatch):
+    from jericho.diagnostics import collect_diagnostics
+    from jericho.secret_hygiene import Report
+
+    def complete_scan(*_args, **_kwargs):
+        return Report(exposures=[], loose_permissions=[], files_scanned=5, stopped_early=False)
+
+    monkeypatch.setattr("jericho.secret_hygiene.scan", complete_scan)
+
+    actions = collect_diagnostics(settings, check_secrets=True)["actions"]
+    assert not [action for action in actions if action["code"] == "secret_scan_incomplete"]
 
 
 def test_the_alert_reaches_sentinel_and_names_the_file(settings, tmp_path, monkeypatch):

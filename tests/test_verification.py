@@ -336,6 +336,7 @@ class _ToolThenAnswerLLM:
 
     enabled = True
     model = "verify-test"
+    total_budget_sec = 360.0
 
     def __init__(self, tool_name: str, answer: str, verdict: str):
         self._tool_name = tool_name

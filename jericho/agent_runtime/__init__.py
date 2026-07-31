@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -865,9 +866,23 @@ class AgentRuntime:
             context.interaction_mode,
             (_MAX_TOOL_CALLS, _MAX_TOOL_ROUNDS),
         )
+        # `LLMRouter.total_budget_sec` bounds retries within ONE call, not the turn:
+        # a slow-but-alive endpoint that never fails never triggers a retry, so
+        # nothing stopped `research` mode's 5 rounds plus the final synthesis call
+        # from each legitimately taking near the full timeout — 6 calls, ~24 minutes,
+        # measured, all of it holding one of four foreground slots. This is the same
+        # per-call budget spent again on every round instead of once for the turn.
+        # Two calls' worth is enough room for one real round-trip plus one retry-like
+        # follow-up; past that, the loop stops STARTING new calls (an in-flight one
+        # is never interrupted, same rule as the per-call budget it reuses).
+        loop_budget_sec = self.llm.total_budget_sec * 2
+        loop_deadline = time.monotonic() + loop_budget_sec
 
         for round_number in range(max_tool_rounds):
             if total_calls >= max_tool_calls:
+                break
+            if time.monotonic() >= loop_deadline:
+                LOGGER.warning("Agentic loop budget of %.0fs is spent; stopping early", loop_budget_sec)
                 break
             try:
                 result = await self.llm.chat(messages, tools=tools)

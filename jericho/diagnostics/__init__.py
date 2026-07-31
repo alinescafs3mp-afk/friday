@@ -678,7 +678,7 @@ def _add_secret_hygiene_actions(add_action: Any, settings: JerichoSettings) -> N
     one. Paths are reported; values never are.
     """
     from jericho.config import local_env_file_path
-    from jericho.secret_hygiene import scan
+    from jericho.secret_hygiene import MAX_FILE_BYTES, MAX_FILES, scan
 
     # The env file is protected by PATH now, not by name: skipping every file called
     # `.env` anywhere in the tree hid copies of live credentials in other projects,
@@ -707,6 +707,22 @@ def _add_secret_hygiene_actions(add_action: Any, settings: JerichoSettings) -> N
             f"{exposure.path} содержит значение {exposure.secret_name}"
             + (" и доступен на чтение другим пользователям" if exposure.world_readable else "")
             + ". Удалите файл и перевыпустите этот секрет.",
+        )
+    # `clean` only speaks for the files the scan actually opened. A large file is
+    # not an unusual place for a leaked secret (a config dump, a log, an exported
+    # profile) to end up, and until this counter existed that gap was invisible —
+    # `stopped_early` had the same problem for the file-count cap.
+    if report.oversized_skipped or report.stopped_early:
+        parts = []
+        if report.oversized_skipped:
+            parts.append(f"{report.oversized_skipped} файл(ов) крупнее {MAX_FILE_BYTES // (1 << 20)} МиБ")
+        if report.stopped_early:
+            parts.append(f"остановлено на пределе в {MAX_FILES} файлов")
+        add_action(
+            "secret_scan_incomplete",
+            "warning",
+            "Проверка секретов охватила не всё",
+            "Пропущено: " + ", ".join(parts) + ". Отсутствие находок для них не значит их отсутствие.",
         )
 
 

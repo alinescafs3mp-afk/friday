@@ -112,6 +112,94 @@ def test_a_call_stops_retrying_once_its_budget_is_spent(settings):
     assert LLMRouter(replace(settings, llm_timeout_sec=1.0)).total_budget_sec == 30.0
 
 
+class _SlowSteadyLLM:
+    """Never fails, never retries — just answers slowly, every single round.
+
+    `total_budget_sec` bounds retries inside ONE call and does nothing here: a
+    call that succeeds on the first attempt never enters that loop, no matter
+    how long it took. `enabled=True` is read by `AgentRuntime.chat` to choose
+    the tool loop over the offline stub; this test drives `_agentic_loop`
+    directly and does not need it, but a duck-typed stand-in for `LLMRouter`
+    should carry it anyway.
+    """
+
+    enabled = True
+
+    def __init__(self, clock: dict[str, float], step_sec: float, total_budget_sec: float) -> None:
+        self._clock = clock
+        self._step_sec = step_sec
+        self.total_budget_sec = total_budget_sec
+        self.calls = 0
+
+    async def chat(self, messages, *, temperature=None, max_tokens=None, tools=None):
+        self.calls += 1
+        self._clock["t"] += self._step_sec
+        if tools:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {"id": f"call_{self.calls}", "function": {"name": "noop_tool", "arguments": "{}"}}
+                ],
+            }
+        return {"content": "Итоговый ответ.", "tool_calls": None}
+
+
+class _NoopKernel:
+    async def execute(self, name, arguments, *, actor=None):
+        from jericho.execution_kernel import ToolResult
+
+        return ToolResult(name, True, data={})
+
+
+@pytest.mark.asyncio
+async def test_a_slow_but_alive_endpoint_cannot_hold_a_slot_for_every_round(settings, storage, monkeypatch):
+    """The finding this pins: a `research`-mode turn allows 5 tool rounds plus one
+    final synthesis call. None of them ever fails or retries — each just takes close
+    to the full timeout — so `total_budget_sec` (bounds retries within one call)
+    never engages, and nothing used to stop the SAME per-call budget from being
+    spent again on every round: 6 calls, ~24 minutes measured, all of it holding one
+    of four foreground concurrency slots.
+
+    The fix is a budget for the whole loop, not the call: two calls' worth of room,
+    checked before each new round is STARTED (an in-flight call is never cut off).
+    With `total_budget_sec=100s` here, the loop budget is `2*100=200s`; a round
+    that advances the clock by 90s each time is checked against the time spent by
+    PRIOR rounds, so rounds 0-2 all start (checks see t=0, 90, 180 — all under
+    200) and round 3's check sees t=270 and stops — two of `research` mode's 5
+    rounds never start. The mandatory final synthesis call still runs once more
+    after that, because it is the one call needed to hand back an answer at all
+    and is already bounded on its own by `total_budget_sec`.
+    """
+    import time as time_module
+
+    from jericho.agent_runtime import AgentContext, AgentRuntime
+    from jericho.permissions import ActorContext
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(time_module, "monotonic", lambda: clock["t"])
+
+    storage.ensure_user("alice")
+    llm = _SlowSteadyLLM(clock, step_sec=90.0, total_budget_sec=100.0)
+    agent = AgentRuntime(settings, storage, llm=llm, kernel=_NoopKernel())
+    actor = ActorContext(user_id="alice", preset_key="owner", source="api")
+    context = AgentContext(
+        conversation_id="conv-test",
+        user_id="alice",
+        conversation_history=[],
+        interaction_mode="research",
+    )
+
+    result = await agent._agentic_loop(
+        context, "вопрос", actor, tools=[{"type": "function"}], attachments=None
+    )
+
+    # 3 round-loop calls (checks at t=0, 90, 180 all under the 200s loop budget)
+    # + 1 final synthesis call. Without the fix this would run all 5 rounds plus
+    # the final call: 6.
+    assert llm.calls == 4, f"the loop spent {llm.calls} calls instead of stopping early"
+    assert result["content"] == "Итоговый ответ."
+
+
 @pytest.mark.asyncio
 async def test_an_offline_stub_is_not_sent_for_verification(settings, storage):
     """Verification against an unreachable model judges the runtime's own text.

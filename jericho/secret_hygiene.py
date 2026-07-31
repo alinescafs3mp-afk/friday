@@ -84,6 +84,11 @@ class Report:
     loose_permissions: list[tuple[Path, int]]
     files_scanned: int
     stopped_early: bool
+    # Files over `MAX_FILE_BYTES` that the scan never opened at all — silently,
+    # before this counter existed. A large file is not an unusual place for a
+    # secret to end up (a config dump, a log, an exported browser profile), and
+    # `exposures`/`clean` said nothing about the ones this number counts.
+    oversized_skipped: int = 0
 
     @property
     def clean(self) -> bool:
@@ -148,7 +153,9 @@ def scan(
     """
     values = secrets if secrets is not None else named_secrets()
     protected_paths = {path.expanduser().resolve() for path in protected if path}
-    report = Report(exposures=[], loose_permissions=[], files_scanned=0, stopped_early=False)
+    report = Report(
+        exposures=[], loose_permissions=[], files_scanned=0, stopped_early=False, oversized_skipped=0
+    )
 
     for path in protected_paths:
         try:
@@ -168,6 +175,7 @@ def scan(
     for path in protected_paths:
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
+                report.oversized_skipped += 1
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore").strip()
         except OSError:
@@ -189,7 +197,10 @@ def scan(
             break
         try:
             stat = path.stat()
-            if not path.is_file() or path.is_symlink() or stat.st_size > MAX_FILE_BYTES:
+            if not path.is_file() or path.is_symlink():
+                continue
+            if stat.st_size > MAX_FILE_BYTES:
+                report.oversized_skipped += 1
                 continue
             if path.resolve() in protected_paths:
                 continue
