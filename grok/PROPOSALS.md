@@ -380,3 +380,102 @@
 
 Результат: **9/10** meaningful (dummy W3C PDF 14 знаков — единственный FAIL; bitcoin, arxiv Attention, TraceMonkey, IRS W-4, css4.pub×2, orimi, learningcontainer, unec — OK; p95 разбора <0.5 с). Вердикт: **включить** pplication/pdf. Parse budget 8 с, тела ≤ web_max_response_bytes, empty/scanned → явный error.
 
+---
+
+## G23. Состязательный обзор голоса Jericho (af620c3 / faab13a / 11a35b2) — 2026-07-31
+
+- **Статус:** обзор завершён; **HIGH-находок нет** (свежий взгляд, код не мой).
+- **Охват:** jericho/tts.py, execution_kernel (ToolResult.attachment, _speak,
+  _audit_details), permissions (	ts.use), gent_runtime (oice_clip → oice),
+  	elegram_bridge (_send_voice, _deliver_voice_reply, три call site), тесты
+  	ests/test_tts.py + три delivery-теста в 	est_telegram_and_profile.py.
+- **Коммиты:** f620c3 (движок + speak), aab13a (Telegram delivery), 11a35b2 (тесты).
+
+### 1. 	ts.use — граница прав
+
+- **Вердикт:** не дефект. 
+isk_level=0, presets admin/moderator/user/guest — как
+  chat.use (permissions/__init__.py). Синтез локальный, чужие данные не читает
+  и не пишет. Сеть не покидает (в отличие от web.search/web.fetch с risk 1 и
+  без guest).
+- **Нагрузка:** ограничена уже существующими потолками — API/Telegram rate-limit
+  (server.py _enforce_rate_limit), tool-budget agentic loop (dialogue 4/2,
+  research 12/5), 	ts_max_chars (default 2000), timeout tool 30 с, флаг
+  JERICHO_TTS_ENABLED (default off). Отдельный rate-limit на speak не нужен
+  без замера реальной нагрузки; guest+speak не хуже guest+LLM по классу риска.
+- **Не меняю** risk/presets: тест 	est_guest_can_call_speak это уже контракт.
+
+### 2. ToolResult.attachment — канал мимо модели
+
+- **Вердикт:** утечки udio_base64 / _attachment в модель, audit и verification
+  **не нашёл**.
+- **Цепочка:**
+  - execute() pop _attachment из data до ToolResult (execution_kernel ~561–564).
+  - 	o_dict() / 	o_llm_message() поле ttachment не сериализуют (только
+    	ool/success/result/error).
+  - _agentic_loop кладёт clip в oice_clip, **не** в 	ool_evidence/messages
+    (комментарий ~879–881; evidence — 	o_llm_message() без base64).
+  - _audit_details для speak возвращает {} — в audit_log нет ни текста, ни
+    аудио (только success/reason/source). Это не «утечка в модель», а отсутствие
+    fingerprint (см. ниже, MEDIUM-предложение).
+  - store_message assistant metadata: 	ools_used (имена), без voice blob.
+  - /api/chat отдаёт oice в HTTP-ответе вызывающему (bridge/клиент) — это
+    delivery-канал, не контекст модели; idempotency/ackend_response_json хранят
+    тот же blob для replay — **намеренно** (без него Telegram retry потерял бы
+    голос).
+- **Закреплено тестами** (мутации в docstring): pop + to_llm_message, wiring
+  voice_clip, guest capability, delivery/swallow.
+
+### 3. _speak / del actor и общий _MODEL_CACHE
+
+- **Вердикт:** не утечка арендатора. Кэш ключ (voice, download_root) — публичные
+  веса Piper, не user content. del actor корректен: storage/kg не трогаются.
+  Тот же паттерн, что whisper._MODEL_CACHE. Voice берётся только из settings,
+  не из аргументов модели (лишние kwargs → TypeError → invalid_arguments).
+- **Надёжность (не security):** synthesize на shared engine без отдельного
+  inference-lock (lock только на load). Параллельные speak двух арендаторов —
+  теоретический риск битого PCM, не подмены чужого текста в чужой ответ
+  (буферы PCM на стеке вызова). Как у STT. **Не чиню без воспроизведения.**
+
+### 4. sanitize_text / max_chars и rate-limit
+
+- **Вердикт:** для текущего контура достаточно (см. п.1). Модель сама выбирает
+  	ext для speak; пользователь не бьёт TTS напрямую. Сценарий «забить CPU»
+  упирается в rate-limit чата и tool-budget раньше, чем в отдельный счётчик speak.
+- Мелочь (не HIGH): chars в ответе speak = len(text) до sanitize, а синтез
+  идёт по cleaned/truncated — косметика для модели, не security.
+
+### 5. _deliver_voice_reply глотает исключения
+
+- **Вердикт:** поведение **намеренное** (сбой голоса не должен ронять текст);
+  тесты pin'ят это. Систематический sendVoice fail виден только в
+  LOGGER.warning (+exc_info), **не** в doctor/sentinel/metrics.
+- **MEDIUM-предложение (не правка сейчас):** счётчик/флаг в diagnostics
+  (	ts_delivery_failures или last_error), без изменения best-effort семантики.
+  Цена — полдня; критерий — doctor показывает ненулевой счёт после N искусственных
+  fail в тесте моста.
+
+### 6. OGG/Opus через PyAV, граничные входы
+
+- **Вердикт:** пустой input после sanitize → ValueError → spoken=False
+  «nothing to speak» (не exception turn). Пустой PCM после synthesize (если piper
+  вернул 0 чанков) уйдёт в _encode_opus_ogg без явной проверки — на этой машине
+  v в venv нет (TTSUnavailable), CI не гоняет реальный encode. Риск — exception
+  → tool failed / degrade, не silent wrong delivery.
+- **LOW-предложение:** guard if not pcm: raise TTSUnavailable(...) + unit-тест
+  с fake engine; encode empty/short — только под jericho[voice] или с mock av.
+
+### Итог
+
+| Наводка | Класс | Действие |
+|---|---|---|
+| tts.use / guest / risk 0 | OK (контракт) | не трогать |
+| attachment leak в LLM/audit/verify | не подтверждено | — |
+| multi-tenant model cache | не data-leak | как whisper |
+| rate-limit speak | достаточно общих | без замера не ужесточать |
+| swallow sendVoice | intentional + soft gap | proposal metrics |
+| PyAV empty/short | low gap tests | proposal guard |
+
+**HIGH в стиле G17/G18/G21 (чужая кнопка, kind-mismatch, silent wrong tenant
+effect) — 0.** Код-правок по G23 нет: чинить «на всякий случай» без дефекта здесь
+запрещено. Результат обзора — эта запись.
