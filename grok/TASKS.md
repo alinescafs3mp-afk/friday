@@ -148,6 +148,107 @@ hits=6 — это не болтовня. Ночной провал был `gener
 
 ---
 
+# СРОЧНО (31 июля, ночь) — реальная дыра доступа, найдена разведкой и проверена мной лично
+
+## G11 (#57). Делегированный админ может писать/удалять/выгружать аккаунт ВЛАДЕЛЬЦА
+
+**Это не гипотеза.** Я проверил каждый файл лично, читал код построчно. Самое
+серьёзное — делегированный администратор (пресет `admin`, право `admin.export`,
+обычная делегируемая роль уровня 3, выдаётся владельцем как рядовая роль) может
+скачать **весь личный архив владельца** одним запросом: 150+ МБ, документы,
+переписка, сущности. Owner-проверки там нет вовсе.
+
+**Механизм, который должен защищать, уже есть и работает — просто не везде
+подключён.** `_protect_owner_target(request, user_id)`
+(`admin_api/_deps.py:174-181`): если целевой `user_id` принадлежит владельцу
+(`preset_key == "owner"` или легаси id), а актёр не владелец — 403. Используется в
+`_users.py`, `_conversations.py`, и ровно ОДИН раз в `_knowledge.py` (только
+`purge_knowledge_endpoint`, строка 907). Больше НИГДЕ, хотя `admin.all_data.manage`
+и `admin.export` — обычные делегируемые права, а не владельческие.
+
+**Прецедент в тесте, который уже был:** `tests/test_mission_oversight_boundaries.py`
+описывает этот же класс дыры, уже найденный и починенный для роутера миссий — «a
+delegated administrator could stop the owner's own missions… Token revocation was
+hardened against exactly this; missions were missed». Историю повторили — в шести
+файлах сразу.
+
+### Точный список маршрутов без защиты (проверено мной, файл:строка = где резолвится user_id)
+
+**`admin_api/_maintenance.py` — САМОЕ СЕРЬЁЗНОЕ, экспорт целого архива:**
+- `POST /exports` (:106) → `user_id = str(body.get("user_id") or request.state.actor.user_id)` (:128)
+
+**`admin_api/_knowledge.py` — `_protect_owner_target` уже импортирован (:25), не хватает вызова в:**
+- `PATCH /knowledge/{id}` (:787) — **переписывает title/content/summary владельца**
+- `POST /knowledge/{id}/restore` (:827)
+- `DELETE /knowledge/{id}` (:870)
+- `POST /knowledge/{id}/entities` (:672)
+- `PATCH /entity-links/{id}` (:744)
+- `POST /containers` (:158) — если принимает user_id, проверь
+- `POST /knowledge/{id}/reenrich` (:289) — если принимает user_id, проверь
+- `POST /entity-suggestions/groups/decide` (:520)
+
+**`admin_api/_graph.py` — импорта `_protect_owner_target` нет вовсе:**
+- `POST /entities` (:65), `PATCH /entities/{id}` (:86), `DELETE /entities/{id}` (:104)
+- `POST /relation-candidates/bulk-review` (:174), `POST /relation-candidates/{id}/review` (:224)
+
+**`admin_api/_lifecycle.py` — импорта нет:**
+- `POST /cleanup/legacy/apply` (:66) — `user_id = str(body.get("user_id") or "")` (:69), до 200 объектов, включая `soft_delete`
+- `POST /lifecycle/apply` (:172) — `user_id` на :177
+- `POST /lifecycle/deprecate` (:267) — `user_id` на :278
+
+**`admin_api/_conflicts.py` — импорта нет ВО ВСЁМ ФАЙЛЕ:**
+- `POST /conflicts/bulk-review` (:66), `POST /conflicts/{id}/review` (:118), `POST /conflicts/{id}/resolve` (:140)
+- `POST /knowledge/detect-duplicates` (:191) — через `_target_user`, там же добавить
+- `POST /resolutions/detect` (:213), `POST /resolutions/{id}/accept` (:235), `POST /resolutions/{id}/reject` (:253)
+- `POST /merges/{id}/undo` (:281) — твой же G6, свежая дыра в свежем коде
+
+**`admin_api/_inbox.py` — импорта нет:**
+- `POST /inbox/{id}/classify` (:112), `POST /inbox/bulk` (:145)
+- `POST /inbox/{id}/advise` (:231) — проверь, мутирует ли; если только читает LLM без записи — не нужно
+
+### Что НЕ трогать
+- `/api/kg.py` (не `admin_api/`) — self-service роутер, все операции идут по
+  `actor.user_id`, чужого `user_id` не принимает. Я проверил — не уязвим, не лезь.
+- READ-маршруты (`_require(request, "admin.*.read")`) — они уже покрыты
+  `_audit_cross_tenant_read`, это другая, работающая защита (видимость, не запись).
+  Владелец САМ решил, что делегированный админ видит всё чужое содержимое — это
+  заказанная фича (см. память `multiuser-isolation-and-oversight`), а не дыра.
+  Трогать только МУТИРУЮЩИЕ маршруты.
+
+### Как чинить
+Паттерн уже есть в проекте — скопируй из `admin_api/_users.py` или
+`purge_knowledge_endpoint` (`_knowledge.py:904-908`): resolve `user_id`, затем
+`_protect_owner_target(request, user_id)` СРАЗУ ПОСЛЕ резолва, ДО первого чтения
+или записи в хранилище. В файлах без импорта — добавь `_protect_owner_target` в
+`from jericho.admin_api._deps import (...)`.
+
+### Сторожевой тест — ОБЯЗАТЕЛЕН, и он важнее самих правок
+
+Точечные тесты на каждый маршрут — этого мало: следующий новый маршрут повторит
+дыру снова, ровно как повторилась дыра из `test_mission_oversight_boundaries.py`.
+Нужен **инвентарный** тест по образцу `test_route_inventory.py` /
+`test_audit_hardening.py`: обойти все POST/PATCH/DELETE маршруты `admin_api/`,
+которые принимают `user_id` (из тела или query) и требуют `admin.*.manage`/
+`admin.export` (не `.read`), засеять для каждого владельца + делегированного
+админа-неовнера, вызвать с `user_id=<владелец>` и проверить 403.
+
+Маршрут, недостижимый обходом (нестандартная сигнатура), обязан **сообщить о
+себе** явным списком «непроверено», а не молча выпасть — тот же урок, что уже
+был у `test_audit_hardening` с плейсхолдерами `{...}` в пути.
+
+**Мутация обязательна**: закомментируй один вызов `_protect_owner_target` —
+инвентарный тест обязан покраснеть ИМЕННО на этом маршруте, а не просто упасть
+где-то. Плюс отдельный юнит-тест на сам `POST /exports` — самый тяжёлый случай,
+проверь его руками, а не только инвентарём.
+
+### Приоритет
+
+Это выше всего остального в очереди. Гейт, коммит, пуш — как обычно, но эту
+задачу не делить на порции, доводи до конца одним заходом: половина защищённых
+маршрутов хуже, чем ни одного — создаёт ложное чувство, что дыра закрыта.
+
+---
+
 ## Общее
 
 - Гейт целиком до пуша, `git pull --rebase` перед ним — в `main` пишут трое.
