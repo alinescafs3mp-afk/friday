@@ -128,7 +128,7 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         "knowledge.edit", "Edit knowledge objects", "knowledge", 1, ("admin", "moderator", "user")
     ),
     CapabilityDefinition(
-        "knowledge.delete", "Soft-delete knowledge objects", "knowledge", 2, ("admin", "moderator")
+        "knowledge.delete", "Soft-delete knowledge objects", "knowledge", 2, ("admin", "moderator", "user")
     ),
     CapabilityDefinition("inbox.read", "Read the personal inbox", "inbox", 0, ("admin", "moderator", "user")),
     CapabilityDefinition(

@@ -232,9 +232,7 @@ async def test_concurrent_regenerate_does_not_call_agent_twice(settings):
 
             app.state.agent.chat = delayed_chat  # type: ignore[method-assign]
             payload = {"conversation_id": conversation_id}
-            first_task = asyncio.create_task(
-                client.post("/api/me/regenerate", json=payload, headers=headers)
-            )
+            first_task = asyncio.create_task(client.post("/api/me/regenerate", json=payload, headers=headers))
             await asyncio.wait_for(entered.wait(), timeout=2)
             second = await client.post("/api/me/regenerate", json=payload, headers=headers)
             assert second.status_code == 409, second.text

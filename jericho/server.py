@@ -1341,9 +1341,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                     result["conversation_id"],
                     mode=str(result.get("context", {}).get("interaction_mode") or "dialogue"),
                 )
-            if not state.storage.idempotency_complete(
-                actor.user_id, request_key, lease_token, result
-            ):
+            if not state.storage.idempotency_complete(actor.user_id, request_key, lease_token, result):
                 raise RuntimeError("Lost regenerate idempotency lease before response commit")
             return result
         except BaseException:

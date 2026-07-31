@@ -5,6 +5,56 @@
 
 ---
 
+# Новое (после G17) — G18: три готовых self-service ручки без команды в Telegram
+
+Отдельное исследование (не аудит кода на баги — сравнение с тем, что есть у
+любого мейнстримного ассистента) нашло: backend для управления разговором
+почти весь уже готов и self-service (гейт `conversations.manage`, уже выдан
+`user`-пресету), просто ни одна ручка не вызывается из Telegram — а это
+главный интерфейс проекта. Три штуки, каждая маленькая, независимая от других
+— бери в любом порядке, но не сразу все в один коммит, чтобы гейт между ними
+оставался зелёным для Sol.
+
+**Общий кусок для всех трёх:** резолв «текущего разговора этого чата» уже есть
+как паттерн — `GET /api/conversations/channel/why`
+(`jericho/api/conversations.py:32-50`) резолвит `channel`/`channel_id` в
+`conversation_id` через `state.storage.get_channel_session(actor.user_id,
+"telegram", channel_id)`. Команды ниже читают ЭТОТ conversation_id (текущий
+чат = текущий разговор), не принимают чужой id аргументом.
+
+## G18a. `/archive` — архивировать текущий разговор
+
+`POST /api/conversations/{id}/archive` уже существует (`conversations.py:149`,
+гейт `conversations.manage`, self-service). Команда без аргумента, обычный
+паттерн `_backend_json` + `_send_message` с подтверждением.
+
+## G18b. `/delete` — удалить текущий разговор (с подтверждением)
+
+`DELETE /api/conversations/{id}` уже существует (`conversations.py:160`, тот
+же гейт) — это HARD delete (сообщения, feedback, сама запись, каскадом в одной
+транзакции, `storage/_conversations.py:67-106`), не soft. Нужен шаг
+подтверждения — в кодовой базе уже есть паттерн Да/Нет inline-кнопок для
+`/merges` и разбора Inbox (`_commands.py`/`_views.py`, найди и повтори), не
+удаляй по одной команде без подтверждения.
+
+## G18c. `/rename текст` — переименовать текущий разговор
+
+Тут ручки ЕЩЁ НЕТ вообще, не только в Telegram — ни метода в хранилище, ни
+HTTP-маршрута. Добавь `ConversationsMixin.set_conversation_title(conversation_id,
+user_id, title)` в `storage/_conversations.py` (короткий, по образцу
+`set_conversation_mode`, тот же файл), `PATCH /api/conversations/{id}` с телом
+`{title}` в `jericho/api/conversations.py` (тот же гейт `conversations.manage`,
+образец — маршрут archive рядом), затем команду в Telegram.
+
+**Для всех трёх:** `BOT_COMMANDS`, `/help`, `tests/test_bridge_surface.py`
+(`EXPECTED_COMMANDS`/`EXPECTED_BRIDGE_COUNT`) и `tests/test_route_inventory.py`
+(`EXPECTED_OPERATIONS` — только у G18c новый HTTP-маршрут, у a/b маршруты уже
+есть). Тест на каждую: self-service (только свой `user_id`, чужой разговор не
+трогается — 404, не 403, тем же способом, что уже работает у archive/delete),
+мутация на сам факт вызова нужного storage-метода.
+
+---
+
 # G17: две находки состязательного ревью в /regenerate — **сделано**
 
 Я прогнал воркфлоу состязательного ревью по всему, что влилось в main сегодня —
