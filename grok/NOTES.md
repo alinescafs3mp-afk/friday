@@ -30,6 +30,20 @@
 4. Итеративный multi-hop research как сущность — брифинг Sol §D
 5. Запрещённый перенос: browser, packages, arbitrary FS, process mgmt, code.run
 
+## Вотчер задач (2026-07-31)
+
+Скрипт `grok/scan_open_tasks.py` — единственный источник «open/done» для
+периодического вотчера (не LLM-разбор заголовков).
+
+```
+python grok/scan_open_tasks.py --watch-status --json
+```
+
+- open = заголовок `## G\d+` без маркера `**сделано**` / `**закрыто**` / DONE / CLOSED
+- истина назначения = `origin/main`; локальный «сделано» при открытом origin и
+  грязном дереве → `finish_and_push` (не idle)
+- state: `grok/.task_watch_state.json` (в `.gitignore`, не коммитить)
+
 ## Минимальный порядок внедрения (если владелец возьмёт)
 
 1 → 2 → 7 (качество контекста research без сети-архитектуры)

@@ -56,3 +56,7 @@ id_rsa*
 # конкретной машины — на другой машине файл закоммитился бы.
 .claude/
 scratch*/
+
+# Grok task watcher local state (never commit)
+grok/.task_watch_state.json
+
