@@ -30,14 +30,16 @@
 4. Итеративный multi-hop research как сущность — брифинг Sol §D
 5. Запрещённый перенос: browser, packages, arbitrary FS, process mgmt, code.run
 
-## Вотчер задач (2026-07-31)
+## Вотчер задач / автопилот Grok (канон на 2026-07-31 вечер)
 
 Скрипт `grok/scan_open_tasks.py` — единственный источник «open/done» для
-периодического вотчера (не LLM-разбор заголовков). Автопилот: scheduler каждые
-3 минуты, durable; при action ≠ idle обязан довести до push в `main`.
+периодического вотчера (не LLM-разбор заголовков). При action ≠ idle —
+довести до gate + push в `main` (без force).
 
 ```
 python grok/scan_open_tasks.py --watch-status --json
+# или просто:
+python grok/scan_open_tasks.py
 ```
 
 | action | смысл |
@@ -47,8 +49,45 @@ python grok/scan_open_tasks.py --watch-status --json
 | `continue_wip` | open G + dirty — дожать WIP, не переписывать |
 | `finish_and_push` | origin open, local уже «сделано», dirty — push |
 
-- open = заголовок `## G\d+` без `**сделано**` / `**закрыто**` / DONE / CLOSED
+- open = заголовок `## G\d+` / `# … G\d+` без `**сделано**` / `**закрыто**` / DONE / CLOSED
 - state: `grok/.task_watch_state.json` (gitignore)
+- репо: `D:\jericho-src`, ветка `main`
+- закон: `grok/GROK.md` + `grok/TASKS.md`
+- gate до push: ruff / ruff format / mypy / bandit / node --check / pytest
+- мутация обязательна для новых тестов
+
+### Конфиг Grok Build scheduler (восстановить при «подними автопилот»)
+
+| поле | значение |
+|---|---|
+| interval | **2m** (было 3m; владелец: «давай каждые 2 минуты») |
+| durable | true |
+| foreground | false (background subagent) |
+| cwd / workdir | `D:\jericho-src` |
+| last known id | `019fb97cc529` (сессия 2026-07-31; id не переживает restart — создать заново) |
+
+Промпт (кратко, полный — в сессии scheduler):
+
+```
+Ты — Grok-исполнитель Jericho (D:\jericho-src). Закон: grok/GROK.md + grok/TASKS.md.
+1) cd D:\jericho-src; git pull --ff-only (или rebase если нужно)
+2) python grok/scan_open_tasks.py  → action + open_ids
+3) idle → ответь «idle» и выйди
+4) иначе: implement/continue/finish по action_ids из TASKS.md
+5) полный gate (§4 GROK.md), commit по-русски, push main (без --force)
+6) короткий отчёт: id, action, commit SHA или idle
+```
+
+На ночь 2026-07-31 watcher **выключен** (владелец: баиньки после G23).
+Утро: создать scheduler с interval `2m`, durable, промптом выше.
+
+### За сессию 2026-07-31 (Grok)
+
+| id | результат |
+|---|---|
+| G21 | `dismiss_notification` + kind=reminder; `f648010` |
+| G22 | PDF в web_fetch (замер 9/10); `0d8b39b` |
+| G23 | состязательный обзор TTS/speak/Telegram; HIGH=0; `dae85ea` |
 
 ## Минимальный порядок внедрения (если владелец возьмёт)
 
