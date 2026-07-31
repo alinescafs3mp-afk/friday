@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### G13/G14: авторегистрация — владелец видит новичка, `/start` честен (#60, #61)
+
+1. Первый self-register с preset `newcomer` ставит в outbound очередь
+   уведомление во все `telegram_owner_chat_ids` (kind `onboarding`,
+   dedup `onboarding:{user_id}:{owner_chat}`). Только identity, без текста
+   переписки; повторный `/api/me` не дублирует.
+2. `/start` для `newcomer` добавляет к прежнему приветствию строку про
+   режим (чат/файлы/веб — без миссий и кода). Owner/user/guest — байт в байт
+   как было.
+
+Тесты: `test_open_registration_notifies_owner_about_a_new_newcomer`,
+`test_start_newcomer_is_told_about_limited_access` (+ exact welcome на
+не-newcomer).
+
 ### G12: клэмп limit в user_knowledge_search и CancelledError в web research (#59)
 
 1. _user_knowledge_search: ветка без HybridSearcher передавала limit в

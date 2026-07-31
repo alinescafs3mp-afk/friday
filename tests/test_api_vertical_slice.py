@@ -897,3 +897,76 @@ def test_open_registration_never_downgrades_a_returning_newcomer(settings):
             for row in client.get("/api/admin/users", headers=owner).json()["items"]
         }
         assert presets["telegram:telegram:7777"] == "newcomer"
+
+
+def test_open_registration_notifies_owner_about_a_new_newcomer(settings):
+    """Self-registration must not be silent: the owner chat gets one outbound
+    notification naming the newcomer. Mutation this must catch: drop the
+    enqueue in server.py after ensure_user — this assertion goes red.
+    """
+    from jericho.server import create_app
+
+    owner_chat = 5001
+    scoped = replace(
+        settings,
+        telegram_allowed_chat_ids=[owner_chat],
+        telegram_owner_chat_ids=[owner_chat],
+        telegram_open_registration=True,
+    )
+    with TestClient(create_app(scoped)) as client:
+        storage = client.app.state.storage
+        response = _bridge_json(
+            client,
+            scoped,
+            "GET",
+            "/api/me",
+            {
+                "telegram_user": {
+                    "id": 7777,
+                    "first_name": "New",
+                    "last_name": "Comer",
+                    "username": "newcomer_bot",
+                }
+            },
+            user="7777",
+            chat="7777",
+        )
+        assert response.status_code == 200, response.text
+
+        rows = storage.execute(
+            "SELECT chat_id, body, kind, dedup_key FROM outbound_notifications WHERE kind='onboarding'"
+        ).fetchall()
+        assert len(rows) == 1, rows
+        row = dict(rows[0])
+        assert str(row["chat_id"]) == str(owner_chat)
+        assert row["dedup_key"] == f"onboarding:telegram:telegram:7777:{owner_chat}"
+        assert "самозарегистрировался" in row["body"]
+        assert "New Comer" in row["body"]
+        assert "newcomer_bot" in row["body"]
+        # Message content must never leak into the owner push.
+        assert "/api/me" not in row["body"]
+
+        # Returning newcomer: still one row (dedup + existing-is-not-None).
+        assert (
+            _bridge_json(
+                client,
+                scoped,
+                "GET",
+                "/api/me",
+                {
+                    "telegram_user": {
+                        "id": 7777,
+                        "first_name": "New",
+                        "last_name": "Comer",
+                        "username": "newcomer_bot",
+                    }
+                },
+                user="7777",
+                chat="7777",
+            ).status_code
+            == 200
+        )
+        again = storage.execute(
+            "SELECT COUNT(*) AS n FROM outbound_notifications WHERE kind='onboarding'"
+        ).fetchone()
+        assert int(again["n"]) == 1

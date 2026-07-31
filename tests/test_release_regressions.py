@@ -90,6 +90,18 @@ def test_dynamic_knowledge_context_is_never_elevated_to_system_role(settings, st
     assert "недоверенные данные" in system_text
 
 
+# Exact welcome for every non-newcomer /start. Keep this literal in lockstep
+# with telegram_bridge/_commands.py — the newcomer branch must append, never
+# rewrite, so an allowlisted user still sees this byte-for-byte.
+_START_WELCOME = (
+    "Привет! Я Jericho — локальная система личных знаний. Отправьте заметку, "
+    "вопрос, изображение, документ, голосовое, аудио или видео, геолокацию или "
+    "контакт. Аудио и видео сохраняются как есть (без расшифровки) и ждут вашего "
+    "решения в Inbox. Спорные знания и связи останутся на ваше подтверждение.\n\n"
+    "/help — команды"
+)
+
+
 @pytest.mark.asyncio
 async def test_start_registers_telegram_user_before_local_reply(tmp_path: Path):
     bridge = _bridge(tmp_path)
@@ -98,7 +110,7 @@ async def test_start_registers_telegram_user_before_local_reply(tmp_path: Path):
 
     async def backend_json(client, method, path, payload, external_user_id, chat_id):
         backend_calls.append((method, path, payload, external_user_id, chat_id))
-        return {"actor": {"user_id": "telegram:42"}}
+        return {"actor": {"user_id": "telegram:42", "preset_key": "user"}}
 
     async def send_message(client, chat_id, text):
         replies.append((chat_id, text))
@@ -133,6 +145,60 @@ async def test_start_registers_telegram_user_before_local_reply(tmp_path: Path):
         )
     ]
     assert replies and replies[0][0] == 42
+    # Non-newcomer keeps the historical welcome exactly (G14 boundary).
+    assert replies[0][1] == _START_WELCOME
+
+
+@pytest.mark.asyncio
+async def test_start_newcomer_is_told_about_limited_access(tmp_path: Path):
+    """Open-registration newcomer must learn the limits up front, not via a
+    later /mission refusal. Mutation: drop the newcomer branch in /start —
+    this assertion fails while the non-newcomer exact-text test still passes.
+    """
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123456:test-token",
+            bridge_secret="s" * 32,
+            allowed_chat_ids=[42, 5001],
+            inbox_db_path=str(tmp_path / "telegram-newcomer.sqlite3"),
+            open_registration=True,
+        )
+    )
+    replies: list[tuple[int, str]] = []
+
+    async def backend_json(client, method, path, payload, external_user_id, chat_id):
+        return {"actor": {"user_id": "telegram:telegram:7777", "preset_key": "newcomer"}}
+
+    async def send_message(client, chat_id, text):
+        replies.append((chat_id, text))
+
+    bridge._backend_json = backend_json  # type: ignore[method-assign]  # noqa: SLF001
+    bridge._send_message = send_message  # type: ignore[method-assign]  # noqa: SLF001
+    try:
+        await bridge._process_update(  # noqa: SLF001
+            None,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
+            {
+                "update_id": 101,
+                "message": {
+                    "message_id": 8,
+                    "chat": {"id": 7777, "type": "private"},
+                    "from": {"id": 7777, "first_name": "New"},
+                    "text": "/start",
+                },
+            },
+            cached_response=None,
+        )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert replies and replies[0][0] == 7777
+    text = replies[0][1]
+    assert text.startswith(_START_WELCOME)
+    assert text != _START_WELCOME
+    assert "новичка" in text.casefold() or "новичок" in text.casefold()
+    assert "мисси" in text.casefold()
+    assert "код" in text.casefold()
 
 
 def test_signed_get_with_json_body_registers_telegram_identity(settings):

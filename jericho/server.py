@@ -363,6 +363,50 @@ NEWCOMER_PRESET_CAPABILITIES = frozenset(
 )
 
 
+def _notify_owners_of_self_registration(
+    storage: Any,
+    settings: JerichoSettings,
+    *,
+    user_id: str,
+    display_name: str,
+    username: str,
+) -> None:
+    """Tell every configured owner chat that a stranger just self-registered.
+
+    Open registration admits private chats the owner never listed by id; without
+    this push the only way to notice is to open the admin user list. One row per
+    owner chat, deduped on the new account so a supervisor restart does not spam.
+    The body carries only identity (name/username/id) — never message content.
+    """
+    owner_chats = list(settings.telegram_owner_chat_ids or [])
+    if not owner_chats:
+        return
+    name = display_name.strip()
+    handle = username.strip().lstrip("@")
+    if name and handle:
+        who = f"{name} (@{handle})"
+    elif name:
+        who = name
+    elif handle:
+        who = f"@{handle}"
+    else:
+        who = user_id
+    body = f"Новый пользователь самозарегистрировался: {who}. Аккаунт {user_id}, preset newcomer."
+    # user_id column is FK to users(id). Owner chats from settings may never
+    # have a matching telegram-derived row, but LEGACY_OWNER_USER_ID is always
+    # provisioned at app boot. Dedup includes the owner chat so every owner
+    # chat gets one copy without colliding on (user_id, dedup_key), and a
+    # supervisor restart still cannot re-spam the same (newcomer, owner) pair.
+    for owner_chat_id in owner_chats:
+        storage.enqueue_notification(
+            LEGACY_OWNER_USER_ID,
+            str(owner_chat_id),
+            body,
+            kind="onboarding",
+            dedup_key=f"onboarding:{user_id}:{owner_chat_id}",
+        )
+
+
 def _ensure_newcomer_preset(auth_service: Any, storage: Any) -> str:
     """Idempotently create the 'newcomer' custom preset and return its key.
 
@@ -618,6 +662,18 @@ async def _authenticate(request: Request) -> ActorContext:
                 preset_key=preset_for_new_account,
                 metadata=metadata,
             )
+            # First-time self-registration only: existing was None, no identity
+            # link, and the account received the deliberately narrow newcomer
+            # preset (private chat admitted solely by open registration). A
+            # returning newcomer keeps existing set and never re-notifies.
+            if existing is None and preset_for_new_account == "newcomer":
+                _notify_owners_of_self_registration(
+                    state.storage,
+                    settings,
+                    user_id=user_id,
+                    display_name=display_name,
+                    username=str(telegram_user.get("username") or ""),
+                )
         user = state.storage.get_user(user_id) or existing or {}
         if user.get("status") != "active":
             raise AuthenticationError("User account is disabled")

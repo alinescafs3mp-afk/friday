@@ -185,11 +185,13 @@ class CommandsMixin(BridgeShared):
         command = parts[0].split("@", 1)[0].casefold() if text.startswith("/") else ""
         argument = parts[1].strip() if command and len(parts) > 1 else ""
 
-        async def register_backend_user() -> None:
+        async def register_backend_user() -> dict[str, Any]:
             # Registration is an authentication side effect on the backend.
             # Normal chat/status/reset requests already perform it, so probe
-            # only for bridge-local or unsupported messages.
-            await self._backend_json(
+            # only for bridge-local or unsupported messages. The /api/me payload
+            # is also the only place the bridge learns the account's preset, so
+            # /start can tell a newcomer what they can (and cannot) do.
+            data = await self._backend_json(
                 backend,
                 "GET",
                 "/api/me",
@@ -197,18 +199,30 @@ class CommandsMixin(BridgeShared):
                 external_user_id,
                 str(chat_id),
             )
+            return data if isinstance(data, dict) else {}
 
         if command == "/start":
-            await register_backend_user()
-            await self._send_message(
-                telegram,
-                chat_id,
+            me = await register_backend_user()
+            # Byte-stable welcome for every non-newcomer account: owner, guest,
+            # user, linked identity. Only the open-registration newcomer path
+            # appends the limitation note — so existing /start tests keep their
+            # exact text and a mutation that drops the branch turns red on the
+            # newcomer-specific assertion alone.
+            start_text = (
                 "Привет! Я Jericho — локальная система личных знаний. Отправьте заметку, "
                 "вопрос, изображение, документ, голосовое, аудио или видео, геолокацию или "
                 "контакт. Аудио и видео сохраняются как есть (без расшифровки) и ждут вашего "
                 "решения в Inbox. Спорные знания и связи останутся на ваше подтверждение.\n\n"
-                "/help — команды",
+                "/help — команды"
             )
+            actor = me.get("actor") if isinstance(me.get("actor"), dict) else {}
+            if str(actor.get("preset_key") or "") == "newcomer":
+                start_text = (
+                    f"{start_text}\n\n"
+                    "Сейчас у вас режим новичка: чат, файлы и веб-поиск доступны, "
+                    "миссии и выполнение кода — нет. Владелец может расширить доступ."
+                )
+            await self._send_message(telegram, chat_id, start_text)
             return
         if command == "/help":
             await register_backend_user()
