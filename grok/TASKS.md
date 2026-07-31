@@ -5,6 +5,65 @@
 
 ---
 
+# Новое (после G18) — G19: посмотреть и снять предстоящее напоминание
+
+Из того же исследования: у мейнстримных ассистентов можно посмотреть список
+предстоящих напоминаний и снять одно. У Jericho «напоминания» — не то, что
+человек создаёт руками, а автосканирование `entity_time` (даты, найденные в
+документах) органом `reminders` (`jericho/organs/reminders/__init__.py`):
+`scan_reminders` кладёт push в `outbound_notifications` с `kind="reminder"`
+и `dedup_key=f"reminder:{entity_id}:{occurred_at}"`. Это важно для формы
+задачи — «отменить» здесь значит не удалить строку, а официально её снять,
+и это НЕ одно и то же.
+
+**Грабля, которую я уже нашёл, не наступай сама:** `dedup_key` уникален только
+частичным индексом `uq_outbound_dedup ON outbound_notifications(user_id,
+dedup_key) WHERE dedup_key <> ''` (`storage/_base.py:744`). Если строку
+просто DELETE — уникальность снимается вместе со строкой, и следующий скан
+`scan_reminders` (раз в `reminders_poll_interval_sec`) заведёт то же
+напоминание заново, потому что `enqueue_notification`'s `INSERT OR IGNORE`
+больше не на что натыкаться. Смотри, как уже решена симметричная задача
+(`storage/_runtime.py:71-83`, `release_undeliverable_notifications` или
+похожий метод рядом) — там `status='failed', dedup_key=''` СНИМАЕТ дедуп
+специально, чтобы дать органу поднять вопрос снова. Тебе нужно ОБРАТНОЕ:
+`status='dismissed'` (новое значение, не 'sent'/'failed'/'pending') БЕЗ
+очистки `dedup_key` — тогда партиальный индекс продолжает блокировать
+повторную вставку того же `dedup_key` навсегда, как уже происходит для
+`status='sent'` (`storage/_runtime.py:95`, dedup_key там тоже не чистится).
+
+**Вторая грабля:** `list_pending_notifications` (`storage/_runtime.py:48`) не
+принимает `user_id` вовсе — она для внутреннего drain-цикла моста и отдаёт
+ВСЕХ пользователей. Для self-service нужен НОВЫЙ метод с обязательным
+`user_id`, иначе одна ручка утечёт чужие напоминания.
+
+**Что сделать:**
+- `list_pending_reminders(user_id, *, limit=...)` в `storage/_runtime.py`
+  (или `_conversations.py`, где логичнее) — `WHERE user_id=? AND kind='reminder'
+  AND status='pending'`.
+- `dismiss_notification(user_id, notification_id)` — `UPDATE ... SET
+  status='dismissed' WHERE id=? AND user_id=? AND status='pending'` (tenant
+  через `user_id` в WHERE, не только через приложение).
+- Self-service HTTP: `GET /api/me/reminders`, `POST
+  /api/me/reminders/{id}/dismiss` (гейт — подбери существующий capability
+  для собственных уведомлений, если такого нет, `chat.use` сгодится как и у
+  `/api/me/instructions`).
+- Telegram: команда со списком (текст напоминания уже человекочитаемый,
+  `_format_reminder`) и inline-кнопкой «Снять» на каждую строку — паттерн
+  списка с кнопками уже есть у `/conflicts`/`/merges`, повтори.
+- `status='dismissed'` нигде раньше не встречался — проверь, что
+  `list_pending_notifications` (внутренний drain) и любой другой код,
+  фильтрующий `status='pending'` жёстко, не подхватит снятые по ошибке (не
+  должен, раз фильтр именно `='pending'`, но убедись явно тестом).
+
+Тест: снятое напоминание не появляется повторно после ИМИТАЦИИ следующего
+скана (`scan_reminders` с тем же `dedup_key` — `enqueue_notification` должен
+вернуть `False`); self-service (чужой `notification_id` — 404, не 403);
+мутация на то, что `dismiss_notification` НЕ чистит `dedup_key` (если
+случайно скопируешь паттерн `release_undeliverable_notifications` и
+очистишь его — тест обязан покраснеть, поймав возврат напоминания).
+
+---
+
 # G18: три готовых self-service ручки без команды в Telegram — **сделано**
 
 Отдельное исследование (не аудит кода на баги — сравнение с тем, что есть у
