@@ -267,7 +267,8 @@ EXPECTED_COMMANDS = {
 # 51 → 53: /export + _send_document + _backend_text (G20).
 # 53 → 55: speak tool + _send_voice + _deliver_voice_reply (Jericho voice output).
 # 55 → 56: /profile — вид объекта (спека v3 §6), +_send_entity_profile.
-EXPECTED_BRIDGE_COUNT = 56
+# 56 → 57: lineage-подвал у doc:show (спека v3 §6), +_format_lineage_footer.
+EXPECTED_BRIDGE_COUNT = 57
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -281,6 +282,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_extract_forward": "(message: 'dict[str, Any]') -> 'dict[str, Any]'",
     "_format_browse_results": "(header: 'str', items: 'list[Any]') -> 'str'",
     "_format_full_document": "(document: 'Any') -> 'str'",
+    "_format_lineage_footer": "(envelope: 'dict[str, Any]') -> 'str'",
     "_format_mission_created": "(self, mission: 'dict[str, Any]') -> 'str'",
     "_format_response_message": "(response: 'dict[str, Any]') -> 'str'",
     "_format_search_results": "(query: 'str', results: 'list[Any]', strategy: 'Any' = None) -> 'str'",

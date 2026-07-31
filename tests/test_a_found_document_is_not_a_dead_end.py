@@ -156,6 +156,113 @@ def test_the_real_api_response_opens_as_a_document_not_a_blank(settings):
     assert "нет текста" not in text
 
 
+# --- lineage: откуда взялось и что от этого зависит (спека v3 §6) -----------
+
+
+def test_lineage_footer_shows_source_versions_links_and_usage():
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Приказ", "content": "Тело."},
+            "raw_source": {"source": "telegram", "received_at": "2026-05-01T10:00:00Z"},
+            "versions": [{"version": 1}, {"version": 2}],
+            "entity_links": [{"entity_name": "Атлас"}, {"entity_name": "Иванов"}],
+            "usage": {"retrieval_count": 5, "answer_count": 3},
+        }
+    )
+    assert "источник: telegram от 2026-05-01" in text
+    assert "версий: 2" in text
+    assert "связано сущностей: 2" in text
+    assert "использовано в ответах: 3" in text
+
+
+def test_lineage_footer_is_silent_when_nothing_is_known():
+    """Один документ без версий/связей/использования (обычный случай для
+    только что загруженного) не должен печатать пустую строку «📜 »."""
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Свежий", "content": "Тело."},
+            "raw_source": None,
+            "versions": [{"version": 1}],
+            "entity_links": [],
+            "usage": {"retrieval_count": 0, "answer_count": 0},
+        }
+    )
+    assert "📜" not in text
+
+
+def test_lineage_footer_omits_a_single_version_as_not_yet_a_history():
+    """Версия 1 — это состояние «ещё ни разу не менялось», не история правок."""
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Документ", "content": "Тело."},
+            "raw_source": {"source": "note"},
+            "versions": [{"version": 1}],
+            "entity_links": [],
+            "usage": {},
+        }
+    )
+    assert "версий:" not in text
+
+
+def test_the_real_lineage_from_the_api_shows_a_real_edit_and_a_real_link(settings):
+    """Тот же принцип, что у соседнего теста этой же функции: форматтер обязан
+    понимать НАСТОЯЩИЙ ответ `GET /api/knowledge/{id}`, не выдуманную форму —
+    здесь конкретно новые поля raw_source/usage, добавленные для lineage.
+    """
+    import hashlib
+
+    from fastapi.testclient import TestClient
+
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.server import create_app
+    from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+
+    body = "Тело приказа о поверке весового оборудования."
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        kg = app.state.kg
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=LEGACY_OWNER_USER_ID,
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=body,
+            content_type="text",
+            content_hash=hashlib.sha256(body.encode()).hexdigest(),
+        )
+        storage.store_raw_object(raw)
+        ko = KnowledgeObject(
+            id=new_id("ko"),
+            user_id=LEGACY_OWNER_USER_ID,
+            raw_object_id=raw.id,
+            content=body,
+            content_type="text",
+            title="Приказ о поверке",
+            summary="Сводка приказа",
+        )
+        storage.store_knowledge_object(ko)
+        storage.update_knowledge_fields(ko.id, LEGACY_OWNER_USER_ID, title="Приказ о поверке (уточнённый)")
+        entity = Entity(
+            id=new_id("ent"), user_id=LEGACY_OWNER_USER_ID, name="Комиссия", entity_type=EntityType.OTHER
+        )
+        storage.create_entity(entity)
+        kg.link_knowledge_to_entity(ko.id, entity.id, LEGACY_OWNER_USER_ID, status="accepted")
+        storage.record_knowledge_usage(LEGACY_OWNER_USER_ID, [ko.id], used_in_answer=True)
+
+        response = client.get(
+            f"/api/knowledge/{ko.id}",
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        assert response.status_code == 200
+
+    text = TelegramBridge._format_full_document(response.json())
+    assert "источник: test" in text
+    assert "версий: 2" in text
+    assert "связано сущностей: 1" in text
+    assert "использовано в ответах: 1" in text
+
+
 # --- отсев по порогу называется вслух ----------------------------------------
 
 

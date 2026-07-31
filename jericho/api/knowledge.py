@@ -105,18 +105,41 @@ async def knowledge_by_own_date(
 
 @router.get("/{knowledge_id}", tags=["knowledge"])
 async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
+    """`versions`/`entity_links` were already lineage's backward half; `raw_source`
+    and `usage` complete spec v3 §6 ("where a value came from... which objects
+    would be affected by a change") without a second endpoint or round trip —
+    a document view already has everything it needs to answer both.
+
+    `raw_source` deliberately excludes `raw_content` — this is provenance
+    metadata (where it came from, when, its hash), never the source text
+    itself, same boundary the citation/evidence surfaces already keep.
+    """
     actor = _require(request, "knowledge.read")
-    item = request.app.state.storage.get_knowledge_object(knowledge_id, actor.user_id)
+    storage = request.app.state.storage
+    item = storage.get_knowledge_object(knowledge_id, actor.user_id)
     if not item:
         raise HTTPException(status_code=404, detail="Объект знания не найден")
+    raw = storage.get_raw_object(str(item.get("raw_object_id") or ""), actor.user_id)
+    usage = storage.get_knowledge_usage(actor.user_id, [knowledge_id])
     return {
         "item": item,
-        "versions": request.app.state.storage.list_knowledge_versions(knowledge_id, actor.user_id),
-        "entity_links": request.app.state.storage.list_knowledge_entity_links(
+        "versions": storage.list_knowledge_versions(knowledge_id, actor.user_id),
+        "entity_links": storage.list_knowledge_entity_links(
             actor.user_id,
             knowledge_object_id=knowledge_id,
             status=None,
         ),
+        "raw_source": (
+            {
+                "source": raw.get("source"),
+                "source_ref": raw.get("source_ref"),
+                "content_hash": raw.get("content_hash"),
+                "received_at": raw.get("received_at"),
+            }
+            if raw
+            else None
+        ),
+        "usage": usage.get(knowledge_id) or {"retrieval_count": 0, "answer_count": 0, "last_used_at": None},
     }
 
 

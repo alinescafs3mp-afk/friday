@@ -776,7 +776,41 @@ class ViewsMixin(BridgeShared):
                 f"…показано {cls._FULL_DOCUMENT_CHARS} знаков из {len(body)}. "
                 "Остальное — в админке, раздел «Объекты знаний»."
             )
+        lineage = cls._format_lineage_footer(envelope)
+        if lineage:
+            lines.append("")
+            lines.append(lineage)
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_lineage_footer(envelope: dict[str, Any]) -> str:
+        """Спека v3 §6, обе половины «откуда взялось / что зависит», сжатые в
+        одну строку под уже открытым документом — не отдельная команда, не
+        второй запрос: `GET /api/knowledge/{id}` уже несёт `raw_source`,
+        `versions`, `entity_links` и `usage` в одном конверте.
+        """
+        parts: list[str] = []
+        raw_source = envelope.get("raw_source")
+        if isinstance(raw_source, dict) and raw_source.get("source"):
+            received = str(raw_source.get("received_at") or "")[:10]
+            source = str(raw_source.get("source") or "")
+            parts.append(f"источник: {source}" + (f" от {received}" if received else ""))
+        versions = envelope.get("versions")
+        version_count = len(versions) if isinstance(versions, list) else 0
+        if version_count > 1:
+            parts.append(f"версий: {version_count}")
+        entity_links = envelope.get("entity_links")
+        link_count = len(entity_links) if isinstance(entity_links, list) else 0
+        if link_count:
+            parts.append(f"связано сущностей: {link_count}")
+        usage = envelope.get("usage")
+        if isinstance(usage, dict):
+            answer_count = int(usage.get("answer_count") or 0)
+            if answer_count:
+                parts.append(f"использовано в ответах: {answer_count}")
+        if not parts:
+            return ""
+        return "📜 " + " · ".join(parts)
 
     @classmethod
     def _format_timeline(cls, label: str, documents: Any, events: Any) -> str:
