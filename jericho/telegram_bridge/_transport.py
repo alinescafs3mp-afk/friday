@@ -166,6 +166,30 @@ class TransportMixin(BridgeShared):
                 return str(chat_id)
         return ""
 
+    def _log_loop_failure(self, loop_name: str, error: BaseException) -> None:
+        """Трейсбек — ОДИН на эпизод недоступности, а не на каждую попытку.
+
+        Замерено на живом журнале: 6.43 МБ файла, из них 6.39 МБ (99.5%) — сцепленные
+        трейсбеки httpx по ~5 КБ каждый, 1368 штук у опроса и 70 у отправки. Причина
+        одна и та же на всех: `LOGGER.exception` стоял внутри цикла, у которого уже
+        есть экспоненциальный откат, — то есть печатался на каждой попытке
+        переподключения.
+
+        Под этим шумом похоронено то, что действительно стоит знать. Переходы
+        «сломалось/починилось» пишутся отдельно и в `runtime_events`: 300 падений
+        опроса против 299 восстановлений, суммарно 6 ч 13 мин недоступности за четверо
+        суток (6.42%), самый длинный обрыв — 49 минут 27 секунд. Ротация журналов
+        работает, но крутила почти исключительно этот шум.
+
+        Первая неудача эпизода печатается со стеком: он нужен, чтобы понять, ЧТО
+        сломалось. Дальнейшие — одной строкой с именем исключения: они говорят только
+        «всё ещё не работает», и это уже сказано.
+        """
+        if self._loop_failing.get(loop_name) is not True:
+            LOGGER.exception("Telegram bridge %s loop failed", loop_name)
+        else:
+            LOGGER.warning("Telegram bridge %s loop still failing: %s", loop_name, type(error).__name__)
+
     async def _journal_transition(
         self,
         backend: httpx.AsyncClient,
@@ -244,7 +268,7 @@ class TransportMixin(BridgeShared):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                LOGGER.exception("Telegram bridge poll loop failed")
+                self._log_loop_failure("poll", exc)
                 await self._journal_transition(backend, "poll", failing=True, error=exc)
                 await asyncio.sleep(backoff)
                 backoff = min(BACKOFF_MAX, backoff * 2)
@@ -259,7 +283,7 @@ class TransportMixin(BridgeShared):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                LOGGER.exception("Telegram bridge outbound loop failed")
+                self._log_loop_failure("outbound", exc)
                 await self._journal_transition(backend, "outbound", failing=True, error=exc)
                 await self._warn_owner_if_backend_down(telegram, backend)
             await asyncio.sleep(max(2.0, float(self.config.outbound_poll_interval_sec)))
