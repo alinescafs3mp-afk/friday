@@ -140,9 +140,7 @@ def test_list_and_dismiss_are_tenant_scoped(settings):
         assert storage.enqueue_notification(
             alice, "5001", "alice reminder", kind="reminder", dedup_key="rem:a"
         )
-        assert storage.enqueue_notification(
-            bob, "5002", "bob reminder", kind="reminder", dedup_key="rem:b"
-        )
+        assert storage.enqueue_notification(bob, "5002", "bob reminder", kind="reminder", dedup_key="rem:b")
         bob_id = storage.list_pending_reminders(bob)[0]["id"]
 
         response = _bridge_get(client, tuned, "/api/me/reminders", user="5001", chat="5001")
@@ -197,14 +195,11 @@ async def test_reminders_command_lists_and_dismiss_callback_hits_api(tmp_path):
             cached_response=None,
         )
         assert any(
-            call["method"] == "GET" and call["path"].startswith("/api/me/reminders")
-            for call in backend.calls
+            call["method"] == "GET" and call["path"].startswith("/api/me/reminders") for call in backend.calls
         ), backend.calls
         cards = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
         assert any(
-            (payload.get("reply_markup") or {})
-            .get("inline_keyboard", [[{}]])[0][0]
-            .get("callback_data")
+            (payload.get("reply_markup") or {}).get("inline_keyboard", [[{}]])[0][0].get("callback_data")
             == f"remind:dismiss:{notif_id}"
             for payload in cards
         ), cards

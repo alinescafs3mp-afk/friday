@@ -252,8 +252,7 @@ class ViewsMixin(BridgeShared):
         await self._send_message(
             telegram,
             chat_id,
-            f"Предстоящие напоминания: {len(items)}. "
-            "«Снять» отменяет одно; повторный скан его не вернёт.",
+            f"Предстоящие напоминания: {len(items)}. «Снять» отменяет одно; повторный скан его не вернёт.",
         )
         for item in items:
             if not isinstance(item, dict):
@@ -272,7 +271,6 @@ class ViewsMixin(BridgeShared):
                     ]
                 },
             )
-
 
     @staticmethod
     def _format_status(mode_label: str, data: dict[str, Any]) -> str:
