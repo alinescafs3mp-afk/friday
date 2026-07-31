@@ -48,14 +48,16 @@ Sol перед использованием проверяет размер, в�
 Для каждого кейса и каждого ожидаемого объекта нужны только обезличенные поля:
 
 - верхний уровень: `cases=20`, объект `settings`, массив `per_case` и объект `summary`;
-- `settings` содержит только фиксированные числовые/булевы параметры обеих рук и
-  `same_scratch_snapshot=true`; имя, путь и хеш снимка запрещены;
+- `settings` содержит ровно `k`, `pool_max`, `graph_expansion`,
+  `rerank_confident_min` и `same_scratch_snapshot=true`; имя модели, имя, путь и хеш
+  снимка запрещены;
 - каждая запись `per_case` содержит `case` и массив `expected`; `case` и `object` в
   `expected` — `sha256[:16]`, совпадающие с прежним следом;
 - каждый ожидаемый объект содержит объект `arms` с ключами `20` и `40`; у каждой руки
-  обязательны `pre_rerank_rank` (`integer|null`), `rerank_applied` (`boolean`),
-  `reranked_count` (`integer`), `post_rerank_rank` (`integer|null`), `rerank_score`
-  (`number|null`), `found_in_top10` (`boolean`) и `latency_ms` (`number`);
+  обязательны `pre_rerank_rank` (`integer|null`, 0-based), `rerank_applied` (`boolean`),
+  `reranked_count` (`integer`), `post_rerank_rank` (`integer|null`, 0-based),
+  `rerank_score` (`number|null`), `found_in_top10` (`boolean`) и `latency_ms`
+  (`number`);
 - итог пары: `win`, `loss`, `tie_hit` или `tie_miss` с точки зрения руки 40;
 - `summary` содержит только проверяемые числовые агрегаты, перечисленные ниже.
 
@@ -67,3 +69,10 @@ Sol перед использованием проверяет размер, в�
 Действуют все запреты предыдущего раздела. Дополнительно запрещены строки запросов к
 модели и ответы модели. Любое несовпадение множества хешей, настроек, scratch-снимка или
 числовых агрегатов закрывает вход fail-closed.
+
+`pre_rerank_rank` снимается отдельно внутри каждой настоящей руки с порядка элементов,
+переданного её callback reranker, до перестановки и порога. Копировать rank из третьей
+руки с `reranker=None` запрещено: в `HybridSearcher.search` сам `rerank_top` задаёт
+`depth`, а тот меняет ширину FTS, recent pool и графового пула ещё до reranker. Поэтому
+третья рука видит другой набор кандидатов и не может служить до-rerank trace для рук 20
+и 40.
