@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from jericho.agent_runtime.llm import LLMUnavailableError
 from jericho.storage.models import RawObject, new_id
 from jericho.workers import _ADVICE_ENDPOINT_DOWN_AFTER, WorkerBatchError, WorkersManager
 
@@ -58,7 +59,10 @@ class _Ingestion:
     async def advise_inbox_item(self, *_args, **_kwargs):
         self.attempts += 1
         if self._fail_all or self.attempts in self._fail:
-            raise RuntimeError("LLM transport error")
+            # Мёртвый канал теперь называет себя типом, а не текстом: советчик обязан
+            # отличать его от «модель ответила, но ответ не разобрался». См.
+            # tests/test_the_advice_worker_does_not_stall_on_one_item.py.
+            raise LLMUnavailableError("LLM transport error")
         return {"advice": "ok"}
 
 

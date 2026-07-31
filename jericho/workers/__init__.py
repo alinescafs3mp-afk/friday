@@ -47,7 +47,65 @@ class IntervalTask:
 # Consecutive per-item failures that mean the model endpoint is down rather than the
 # documents being bad. Three is enough to tell them apart without abandoning a batch
 # over one malformed item.
+#
+# Различать их обязательно, и в живом журнале видно, почему. Из 1188 неудач советчика
+# 1023 — «модель не вернула JSON» (беда объекта), 164 — обрыв связи (беда канала), а
+# считались они одинаково: три подряд любых, и в журнал шло «модель недоступна», хотя
+# модель отвечала. Ложный диагноз останавливал советы всему арендатору.
 _ADVICE_ENDPOINT_DOWN_AFTER = 3
+# Сколько раз пробовать один и тот же объект, прежде чем оставить его в покое.
+#
+# Памяти о неудачах не было вовсе, и очередь `pending` отсортирована по promotion_score:
+# объект, на котором совет не выходит, стоял в голове и брался КАЖДЫЙ тик. В журнале
+# живой установки одни и те же inbox_id падают 168, 156, 146, 138 и 138 раз, а всё, что
+# за ними, не получало совета никогда. Доказано тестом: пять тиков, пятнадцать
+# обращений — все на трёх падающих, до здорового не дошло ни одного.
+#
+# Объект при этом НЕ выбрасывается: он остаётся в очереди человека, просто без
+# машинного совета. Отметка живёт в `suggestions_json` рядом с самим советом и
+# обнуляется, как только совет получился.
+_ADVICE_ITEM_ATTEMPTS = 3
+
+
+def _advice_attempts(item: dict[str, Any]) -> int:
+    """Сколько раз совет по этому объекту уже не получился."""
+    raw = item.get("suggestions_json")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            return 0
+    if not isinstance(raw, dict):
+        return 0
+    try:
+        return int(raw.get("model_advice_failures") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_endpoint_failure(error: BaseException) -> bool:
+    """Отказал канал до модели, а не сам документ.
+
+    Разделение взято из живого журнала, а не придумано: 1023 неудачи из 1188 —
+    «модель не вернула JSON» и «ответ оборвался по бюджету токенов», то есть беда
+    КОНКРЕТНОГО объекта; 164 — `httpcore.ReadError`, `RemoteProtocolError` и
+    таймауты, то есть беда канала. Считать их вместе значит объявлять модель
+    недоступной, пока она отвечает.
+
+    Проверяется по дереву модулей исключения, а не по списку классов: httpx и
+    httpcore поднимают десяток разных типов, и перечислять их — заводить второй
+    список, который отстанет от библиотеки. Плюс `LLMUnavailableError`: роутер
+    отдаёт им «модель выключена», «в ответе нет вариантов» и «не вышло после всех
+    повторов» — это канал, но по типу исключения его иначе не отличить от беды
+    документа, потому что обычный RuntimeError означает и то и другое.
+    """
+    from jericho.agent_runtime.llm import LLMUnavailableError
+
+    if isinstance(error, LLMUnavailableError | TimeoutError | ConnectionError | OSError):
+        return True
+    module = type(error).__module__.split(".", 1)[0]
+    return module in {"httpx", "httpcore", "anyio", "ssl", "socket"}
+
 
 # Ceiling on the single input that carries an object's whole-document vector. Generous
 # next to a passage (default 1200) and far below what an embeddings service will refuse.
@@ -795,6 +853,32 @@ class WorkersManager:
     async def _inbox_model_advice_all(self) -> None:
         await self._for_each_user(self._inbox_model_advice)
 
+    def _remember_advice_failure(self, user_id: str, item: dict[str, Any]) -> None:
+        """Отметить на объекте, что совет по нему не получился.
+
+        Пишется через `update_inbox_suggestions`, а не через смену статуса: это
+        машинная отметка, и она не должна выглядеть решением человека — граница,
+        которую сам метод и охраняет.
+        """
+        inbox_id = str(item.get("id") or "")
+        if not inbox_id:
+            return
+        raw = item.get("suggestions_json")
+        if isinstance(raw, str):
+            try:
+                suggestions = json.loads(raw or "{}")
+            except (TypeError, ValueError):
+                suggestions = {}
+        else:
+            suggestions = dict(raw or {})
+        if not isinstance(suggestions, dict):
+            suggestions = {}
+        suggestions["model_advice_failures"] = _advice_attempts(item) + 1
+        with suppress(Exception):
+            # Отметка вспомогательная: если записать её не вышло, это не повод
+            # заваливать тик — в худшем случае объект будет опробован ещё раз.
+            self.storage.update_inbox_suggestions(inbox_id, user_id, suggestions=suggestions)
+
     async def _inbox_model_advice(self, user_id: str) -> None:
         """Add bounded local-model advice to a few pending items per cycle.
 
@@ -815,6 +899,11 @@ class WorkersManager:
             limit=50,
         )
         for item in pending:
+            if _advice_attempts(item) >= _ADVICE_ITEM_ATTEMPTS:
+                # Объект, на котором совет не выходит раз за разом, пропускается —
+                # см. `_ADVICE_ITEM_ATTEMPTS`. Он остаётся в очереди человека, просто
+                # без машинного совета.
+                continue
             try:
                 result = await self.ingestion.advise_inbox_item(
                     user_id,
@@ -824,14 +913,27 @@ class WorkersManager:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as error:
                 failures += 1
-                consecutive_failures += 1
-                LOGGER.exception(
-                    "Inbox model advice failed for tenant %s item %s",
-                    user_id,
-                    item.get("id"),
-                )
+                if _is_endpoint_failure(error):
+                    consecutive_failures += 1
+                    LOGGER.warning(
+                        "Inbox model advice: model endpoint failed for tenant %s item %s (%s)",
+                        user_id,
+                        item.get("id"),
+                        type(error).__name__,
+                    )
+                else:
+                    # Беда объекта, а не канала: счётчик недоступности не трогаем, а
+                    # неудачу запоминаем на самом объекте.
+                    consecutive_failures = 0
+                    LOGGER.warning(
+                        "Inbox model advice: item %s of tenant %s could not be advised (%s)",
+                        item.get("id"),
+                        user_id,
+                        error,
+                    )
+                    await run_blocking(self._remember_advice_failure, user_id, item)
                 if consecutive_failures >= _ADVICE_ENDPOINT_DOWN_AFTER:
                     # Isolated failures are per-item and worth stepping over; this many
                     # in a row is the endpoint, not the documents. Continuing would run

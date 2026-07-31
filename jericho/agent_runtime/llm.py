@@ -210,6 +210,20 @@ def _fit_messages_to_context(
     return result
 
 
+class LLMUnavailableError(RuntimeError):
+    """Отказал КАНАЛ до модели, а не конкретный запрос.
+
+    Различие нужно фоновым рабочим: советчик Inbox останавливает весь разбор
+    арендатора, решив, что модель недоступна, и в живом журнале он делал это на
+    ошибках разбора ответа — то есть при отвечающей модели. Считать «модель не
+    вернула JSON» и «соединение оборвалось» одним и тем же значит ставить ложный
+    диагноз; из 1188 неудач советчика 1023 были первого рода и 164 — второго.
+
+    Наследуется от RuntimeError, чтобы прежние обработчики продолжали ловить его
+    как раньше: тип уточняет причину, а не меняет контракт.
+    """
+
+
 def _retry_after_seconds(response: httpx.Response) -> float | None:
     value = response.headers.get("retry-after", "").strip()
     if not value:
@@ -305,7 +319,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not self.enabled:
-            raise RuntimeError("LLM is disabled")
+            raise LLMUnavailableError("LLM is disabled")
 
         sem = self._foreground_sem if priority == "foreground" else self._background_sem
         async with sem:
@@ -321,7 +335,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         if not self.enabled:
-            raise RuntimeError("LLM is disabled")
+            raise LLMUnavailableError("LLM is disabled")
 
         sem = self._foreground_sem if priority == "foreground" else self._background_sem
         async with sem:
@@ -429,7 +443,7 @@ class LLMRouter:
                     data = response.json()
                 choices = data.get("choices") if isinstance(data, dict) else None
                 if not isinstance(choices, list) or not choices:
-                    raise RuntimeError("LLM response has no choices")
+                    raise LLMUnavailableError("LLM response has no choices")
                 choice = choices[0] if isinstance(choices[0], dict) else {}
                 message_value = choice.get("message")
                 message: dict[str, Any] = message_value if isinstance(message_value, dict) else {}
@@ -470,7 +484,7 @@ class LLMRouter:
                 LOGGER.warning("LLM transport error, retrying in %.1fs", delay)
                 await asyncio.sleep(delay)
 
-        raise last_error or RuntimeError("LLM request failed after all retries")
+        raise last_error or LLMUnavailableError("LLM request failed after all retries")
 
     async def _stream_impl(
         self,
