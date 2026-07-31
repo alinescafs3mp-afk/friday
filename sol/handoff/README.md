@@ -76,3 +76,68 @@ Sol перед использованием проверяет размер, в�
 `depth`, а тот меняет ширину FTS, recent pool и графового пула ещё до reranker. Поэтому
 третья рука видит другой набор кандидатов и не может служить до-rerank trace для рук 20
 и 40.
+
+## S8 (#63): graph expansion на реляционных вопросах
+
+Исполнитель с доступом к живому экземпляру публикует файл строго по пути:
+
+`sol/handoff/s8/relational_graph_comparison_deidentified.json`
+
+Коммит должен содержать маркер `[handoff:sol:s8-relational]`. Файл не должен превышать
+256 КиБ. До запуска любой руки исполнитель вручную фиксирует ровно 12 реляционных
+кейсов на одной read-only scratch-копии живой базы. Выборка содержит не менее трёх
+кейсов каждого класса:
+
+- `single_entity_neighbours` — кто связан или работал с одной названной сущностью;
+- `pair_bridge` — через что две названные сущности пересекаются;
+- `collaborator_lookup` — с кем названная сущность работала.
+
+Для каждого кейса до запуска рук вручную отмечается от одного до пяти Knowledge Object,
+которые действительно служат доказательством запрошенной связи. Выбирать эталоны из
+результатов любой руки запрещено. Кейс считается найденным, если хотя бы один заранее
+отмеченный объект попал в top-10. Это единственный критерий выигрыша кейса.
+
+Обе руки запускаются на одном commit и одной scratch-копии с `record_usage=false`,
+`k=10`, `pool_max=400`, рабочими embeddings и reranker, `rerank_top=40`, тем же порогом,
+весами и `kg=state.kg`. Различаться может только `graph_expansion`: `false` в руке
+`off`, `true` в руке `on`. Порядок рук чередуется по кейсам. Любой сбой graph traversal
+или reranker аннулирует измерение, потому что молчаливый fallback подменяет сравниваемую
+руку.
+
+JSON содержит ровно верхние ключи `cases`, `settings`, `dataset`, `per_case`, `summary`:
+
+- `cases=12`;
+- `settings` содержит ровно `k=10`, `pool_max=400`, `rerank_top=40`,
+  `rerank_confident_min`, `record_usage=false` и `same_scratch_snapshot=true`;
+- `dataset` содержит ровно `selection_frozen_before_arms=true`,
+  `expected_labels_frozen_before_arms=true`, `direct_entity_relations` и числовые
+  `entities`, `knowledge_entity_links`; для этой постановки `direct_entity_relations`
+  обязан быть 0;
+- каждая запись `per_case` содержит `case` (`sha256[:16]`), `class` из трёх enum выше,
+  `relational_regex_match` (результат текущего `_RELATIONAL_QUERY_RE`), `first_arm`
+  (`off`/`on`), массив `expected` из уникальных `sha256[:16]`, объект `arms` и `outcome`;
+- каждая из рук `off`/`on` содержит `top10` из не более чем десяти уникальных
+  `sha256[:16]`, `found`, `expected_top10_count`, `best_expected_rank` (0-based либо
+  `null`), `latency_ms`, `graph_candidate_count`, `query_root_count`,
+  `implicit_relation_count`, `explicit_relation_count`, `graph_failed` и
+  `reranker_failed`;
+- `found`, `expected_top10_count` и `best_expected_rank` обязаны пересчитываться из
+  пересечения `expected` и `top10`; `outcome` — `win`, `loss`, `tie_hit` или `tie_miss`
+  с точки зрения руки `on`;
+- `summary` содержит ровно `hits_off`, `hits_on`, `wins`, `losses`, `tie_hit`,
+  `tie_miss`, `net_gain=wins-losses`, `p50_latency_ms_off`, `p50_latency_ms_on`,
+  `graph_failures`, `reranker_failures`, `regex_matched_cases` и объекты
+  `hits_off_by_class`, `hits_on_by_class` с тремя enum-ключами.
+
+Graph expansion проходит заранее объявленный критерий только при `net_gain >= 2` из
+12 и нуле сбоев. Задержка публикуется как цена, но не заменяет критерий качества.
+Покрытие `_RELATIONAL_QUERY_RE` оценивается отдельно: даже положительный общий результат
+не разрешает включать граф по regex, если выигрыши приходятся на кейсы, которые regex
+не распознаёт.
+
+В Git запрещены исходные запросы, имена сущностей и людей, названия или тексты
+документов, исходные object/entity/case/user/account id, пути, URL, имена моделей,
+токены, ключи, cookies и любые учётные данные. Разрешены только перечисленные enum,
+boolean, числа и `sha256[:16]`. Любое лишнее поле, несовпадение агрегатов, настроек,
+порядка рук или следов scratch-копии закрывает вход fail-closed; продуктовый код по
+такому файлу не меняется.
