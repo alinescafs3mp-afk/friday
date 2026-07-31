@@ -88,7 +88,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 253 → 255: find_entities_by_normalized_names + iter_entities снимают потолок
 # полного списка для точного сопоставления и token-overlap обхода.
 # 255 → 256: list_entities_knowledge_refs пакетирует проекции текущего фронта BFS.
-EXPECTED_MEMBER_COUNT = 256
+EXPECTED_MEMBER_COUNT = 258
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -233,6 +233,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_knowledge_tags": "(self, user_id: 'str', *, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_knowledge_versions": "(self, ko_id: 'str', user_id: 'str') -> 'list[dict[str, Any]]'",
     "list_lifecycle_candidates": "(self, user_id: 'str', *, days_threshold: 'int' = 90, limit: 'int' = 500, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
+    "get_merge_history": "(self, merge_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "list_merge_history": "(self, user_id: 'str', *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "list_missions": "(self, user_id: 'str | None' = None, *, status: 'MissionStatus | str | None' = None, statuses: 'Sequence[str] | None' = None, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_part_of_relations": "(self, user_id: 'str') -> 'list[dict[str, Any]]'",
@@ -247,6 +248,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "log_audit": "(self, entry: 'AuditEntry') -> 'AuditEntry'",
     "mark_notifications": "(self, sent_ids: 'Sequence[str]' = (), failed_ids: 'Sequence[str]' = (), *, max_attempts: 'int' = 5) -> 'None'",
     "merge_entities": "(self, user_id: 'str', source_id: 'str', target_id: 'str', *, merged_by: 'str | None' = None) -> 'dict[str, Any]'",
+    "unmerge_entities": "(self, user_id: 'str', merge_id: 'str', *, undone_by: 'str | None' = None) -> 'dict[str, Any]'",
     "optimize": "(self) -> 'None'",
     "prune_bridge_nonces": "(self, *, max_age_sec: 'int') -> 'int'",
     "prune_eval_cases": "(self, user_id: 'str', *, cap: 'int' = 200) -> 'dict[str, int]'",

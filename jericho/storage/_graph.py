@@ -960,6 +960,7 @@ class GraphMixin(StorageShared):
             if not source or not target or source.get("deleted_at") or target.get("deleted_at"):
                 raise ValueError("Both canonical entities must belong to the same user")
 
+            recorded_merge_id = ""
             source_aliases = _json_load(source.get("aliases_json"), [])
             target_aliases = _json_load(target.get("aliases_json"), [])
             aliases = {
@@ -982,21 +983,40 @@ class GraphMixin(StorageShared):
             )
             self._store_entity_version(conn, target_after)
 
-            source_links = conn.execute(
-                "SELECT * FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
-                (user_id, source_id),
-            ).fetchall()
-            for link_row in source_links:
-                link = dict(link_row)
+            # Record every transferred link BEFORE INSERT OR IGNORE collapses
+            # overlaps: a document already linked to the target would leave one
+            # row and no way to know the source also had it.
+            source_links = [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
+                    (user_id, source_id),
+                ).fetchall()
+            ]
+            target_ko_ids = {
+                str(row["knowledge_object_id"])
+                for row in conn.execute(
+                    "SELECT knowledge_object_id FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
+                    (user_id, target_id),
+                ).fetchall()
+            }
+            links_moved: list[dict[str, Any]] = []
+            links_suppressed: list[dict[str, Any]] = []
+            for link in source_links:
+                ko_id = str(link["knowledge_object_id"])
+                if ko_id in target_ko_ids:
+                    links_suppressed.append(link)
+                    continue
+                new_link_id = new_id("kel")
                 conn.execute(
-                    """INSERT OR IGNORE INTO knowledge_entity_links
+                    """INSERT INTO knowledge_entity_links
                        (id, user_id, knowledge_object_id, entity_id, status, confidence,
                         evidence_json, created_at, reviewed_at, reviewed_by)
                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        new_id("kel"),
+                        new_link_id,
                         user_id,
-                        link["knowledge_object_id"],
+                        ko_id,
                         target_id,
                         link["status"],
                         link["confidence"],
@@ -1006,22 +1026,33 @@ class GraphMixin(StorageShared):
                         link["reviewed_by"],
                     ),
                 )
+                links_moved.append({**link, "target_link_id": new_link_id})
             conn.execute(
                 "DELETE FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
                 (user_id, source_id),
             )
-            conn.execute(
-                "UPDATE knowledge_objects SET entity_id=?, updated_at=? WHERE user_id=? AND entity_id=?",
-                (target_id, now, user_id, source_id),
-            )
 
-            relations = conn.execute(
-                """SELECT * FROM relations WHERE user_id=? AND deleted_at IS NULL
-                   AND (source_entity_id=? OR target_entity_id=?)""",
-                (user_id, source_id, source_id),
+            primary_rows = conn.execute(
+                "SELECT id FROM knowledge_objects WHERE user_id=? AND entity_id=?",
+                (user_id, source_id),
             ).fetchall()
-            for relation_row in relations:
-                relation = dict(relation_row)
+            primary_moved = [str(row["id"]) for row in primary_rows]
+            if primary_moved:
+                conn.execute(
+                    "UPDATE knowledge_objects SET entity_id=?, updated_at=? WHERE user_id=? AND entity_id=?",
+                    (target_id, now, user_id, source_id),
+                )
+
+            relations = [
+                dict(row)
+                for row in conn.execute(
+                    """SELECT * FROM relations WHERE user_id=? AND deleted_at IS NULL
+                       AND (source_entity_id=? OR target_entity_id=?)""",
+                    (user_id, source_id, source_id),
+                ).fetchall()
+            ]
+            relations_transfer: list[dict[str, Any]] = []
+            for relation in relations:
                 conn.execute("DELETE FROM relations WHERE id=?", (relation["id"],))
                 new_source = (
                     target_id if relation["source_entity_id"] == source_id else relation["source_entity_id"]
@@ -1030,9 +1061,19 @@ class GraphMixin(StorageShared):
                     target_id if relation["target_entity_id"] == source_id else relation["target_entity_id"]
                 )
                 if new_source == new_target:
+                    relations_transfer.append({"original": relation, "fate": "self_loop_dropped"})
+                    continue
+                existing = conn.execute(
+                    """SELECT id FROM relations
+                       WHERE user_id=? AND source_entity_id=? AND target_entity_id=?
+                         AND relation_type=? AND deleted_at IS NULL LIMIT 1""",
+                    (user_id, new_source, new_target, relation["relation_type"]),
+                ).fetchone()
+                if existing:
+                    relations_transfer.append({"original": relation, "fate": "suppressed_duplicate"})
                     continue
                 conn.execute(
-                    """INSERT OR IGNORE INTO relations(id, user_id, source_entity_id, target_entity_id,
+                    """INSERT INTO relations(id, user_id, source_entity_id, target_entity_id,
                        relation_type, weight, metadata_json, created_at, deleted_at)
                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
                     (
@@ -1046,6 +1087,17 @@ class GraphMixin(StorageShared):
                         relation["created_at"],
                     ),
                 )
+                relations_transfer.append(
+                    {
+                        "original": relation,
+                        "fate": "moved",
+                        "rewritten": {
+                            "id": relation["id"],
+                            "source_entity_id": new_source,
+                            "target_entity_id": new_target,
+                        },
+                    }
+                )
 
             conn.execute(
                 """UPDATE entities SET merged_into_id=?, canonical=0, deleted_at=?, updated_at=?
@@ -1058,23 +1110,42 @@ class GraphMixin(StorageShared):
                      AND (entity_a_id=? OR entity_b_id=?)""",
                 (now, merged_by or user_id, user_id, source_id, source_id),
             )
+            transfer = {
+                "links_moved": links_moved,
+                "links_suppressed": links_suppressed,
+                "primary_moved": primary_moved,
+                "relations": relations_transfer,
+            }
+            merge_id = new_id("merge")
             conn.execute(
                 """INSERT INTO entity_merge_history(id, user_id, source_entity_id, target_entity_id,
-                   source_snapshot_json, target_before_json, target_after_json, merged_by, created_at)
-                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   source_snapshot_json, target_before_json, target_after_json, transfer_json,
+                   merged_by, created_at, undone_at, undone_by)
+                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)""",
                 (
-                    new_id("merge"),
+                    merge_id,
                     user_id,
                     source_id,
                     target_id,
                     _snapshot(source),
                     _snapshot(target),
                     _snapshot(target_after),
+                    json.dumps(transfer, ensure_ascii=False),
                     merged_by or user_id,
                     now,
                 ),
             )
-        return self.get_entity(target_id, user_id) or {}
+            recorded_merge_id = merge_id
+        result = self.get_entity(target_id, user_id) or {}
+        result["_merge_id"] = recorded_merge_id
+        return result
+
+    def get_merge_history(self, merge_id: str, user_id: str) -> dict[str, Any] | None:
+        row = self.execute(
+            "SELECT * FROM entity_merge_history WHERE id=? AND user_id=?",
+            (merge_id, user_id),
+        ).fetchone()
+        return dict(row) if row else None
 
     def list_merge_history(self, user_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.execute(
@@ -1082,3 +1153,221 @@ class GraphMixin(StorageShared):
             (user_id, max(1, min(limit, 1000))),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def unmerge_entities(
+        self,
+        user_id: str,
+        merge_id: str,
+        *,
+        undone_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Reverse one accepted merge using the transfer set recorded at merge time.
+
+        Snapshots alone are not enough: links moved with INSERT OR IGNORE, so a
+        document both sides already shared becomes a single target row and loses
+        its source origin. ``transfer_json`` records every moved, suppressed and
+        rewritten edge; without it undo would invent ownership.
+        """
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM entity_merge_history WHERE id=? AND user_id=?",
+                (merge_id, user_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Merge history entry not found")
+            history = dict(row)
+            if history.get("undone_at"):
+                raise ValueError("Merge has already been undone")
+            transfer = _json_load(history.get("transfer_json"), {})
+            if not isinstance(transfer, dict) or not transfer:
+                raise ValueError(
+                    "Merge has no transfer record and cannot be undone honestly "
+                    "(merged before transfer_json existed)"
+                )
+
+            source_id = str(history["source_entity_id"])
+            target_id = str(history["target_entity_id"])
+            source_snap = _json_load(history.get("source_snapshot_json"), {})
+            target_before = _json_load(history.get("target_before_json"), {})
+            if not source_snap or not target_before:
+                raise ValueError("Merge snapshots are incomplete")
+
+            source_now = self.get_entity(source_id, user_id)
+            target_now = self.get_entity(target_id, user_id)
+            if not source_now or not target_now:
+                raise ValueError("Merged entities are no longer present")
+            if str(source_now.get("merged_into_id") or "") != target_id:
+                raise ValueError("Source entity is no longer recorded as merged into this target")
+            if target_now.get("deleted_at"):
+                raise ValueError("Target entity has been deleted; refuse to unmerge onto a tombstone")
+
+            now = utc_now()
+
+            # 1. Restore source as a live canonical node from its pre-merge snapshot.
+            conn.execute(
+                """UPDATE entities SET name=?, normalized_name=?, entity_type=?, aliases_json=?,
+                   description=?, metadata_json=?, canonical=1, merged_into_id=NULL,
+                   version=?, updated_at=?, deleted_at=NULL
+                   WHERE id=? AND user_id=?""",
+                (
+                    source_snap.get("name") or source_now.get("name"),
+                    normalize_entity_name(str(source_snap.get("name") or source_now.get("name") or "")),
+                    source_snap.get("entity_type") or source_now.get("entity_type"),
+                    source_snap.get("aliases_json")
+                    if isinstance(source_snap.get("aliases_json"), str)
+                    else json.dumps(_json_load(source_snap.get("aliases_json"), []), ensure_ascii=False),
+                    source_snap.get("description") or "",
+                    source_snap.get("metadata_json")
+                    if isinstance(source_snap.get("metadata_json"), str)
+                    else json.dumps(_json_load(source_snap.get("metadata_json"), {}), ensure_ascii=False),
+                    int(source_snap.get("version") or source_now.get("version") or 1),
+                    now,
+                    source_id,
+                    user_id,
+                ),
+            )
+
+            # 2. Restore target aliases/description to the pre-merge state. Version
+            # advances: the undo is a new edit, not a silent rewrite of history.
+            restored_aliases = target_before.get("aliases_json")
+            if not isinstance(restored_aliases, str):
+                restored_aliases = json.dumps(_json_load(restored_aliases, []), ensure_ascii=False)
+            restored_meta = target_before.get("metadata_json")
+            if not isinstance(restored_meta, str):
+                restored_meta = json.dumps(_json_load(restored_meta, {}), ensure_ascii=False)
+            target_version = int(target_now.get("version") or 1) + 1
+            conn.execute(
+                """UPDATE entities SET aliases_json=?, description=?, metadata_json=?,
+                   version=?, updated_at=?
+                   WHERE id=? AND user_id=?""",
+                (
+                    restored_aliases,
+                    target_before.get("description") or "",
+                    restored_meta,
+                    target_version,
+                    now,
+                    target_id,
+                    user_id,
+                ),
+            )
+            target_restored = dict(target_now)
+            target_restored["aliases_json"] = restored_aliases
+            target_restored["description"] = target_before.get("description") or ""
+            target_restored["metadata_json"] = restored_meta
+            target_restored["version"] = target_version
+            target_restored["updated_at"] = now
+            self._store_entity_version(conn, target_restored)
+
+            # 3. Links that were newly created on the target for the source's
+            # exclusive documents: remove from target, put back on source.
+            for link in transfer.get("links_moved") or []:
+                if not isinstance(link, dict):
+                    continue
+                target_link_id = link.get("target_link_id")
+                if target_link_id:
+                    conn.execute(
+                        "DELETE FROM knowledge_entity_links WHERE id=? AND user_id=? AND entity_id=?",
+                        (target_link_id, user_id, target_id),
+                    )
+                else:
+                    conn.execute(
+                        """DELETE FROM knowledge_entity_links
+                           WHERE user_id=? AND entity_id=? AND knowledge_object_id=?""",
+                        (user_id, target_id, link.get("knowledge_object_id")),
+                    )
+                conn.execute(
+                    """INSERT OR IGNORE INTO knowledge_entity_links
+                       (id, user_id, knowledge_object_id, entity_id, status, confidence,
+                        evidence_json, created_at, reviewed_at, reviewed_by)
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        link.get("id") or new_id("kel"),
+                        user_id,
+                        link["knowledge_object_id"],
+                        source_id,
+                        link.get("status") or "accepted",
+                        link.get("confidence") if link.get("confidence") is not None else 1.0,
+                        link.get("evidence_json") or "{}",
+                        link.get("created_at") or now,
+                        link.get("reviewed_at"),
+                        link.get("reviewed_by"),
+                    ),
+                )
+
+            # 4. Overlapping documents: target kept its own row; only the source
+            # side is missing and must be restored from the recorded original.
+            for link in transfer.get("links_suppressed") or []:
+                if not isinstance(link, dict):
+                    continue
+                conn.execute(
+                    """INSERT OR IGNORE INTO knowledge_entity_links
+                       (id, user_id, knowledge_object_id, entity_id, status, confidence,
+                        evidence_json, created_at, reviewed_at, reviewed_by)
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        link.get("id") or new_id("kel"),
+                        user_id,
+                        link["knowledge_object_id"],
+                        source_id,
+                        link.get("status") or "accepted",
+                        link.get("confidence") if link.get("confidence") is not None else 1.0,
+                        link.get("evidence_json") or "{}",
+                        link.get("created_at") or now,
+                        link.get("reviewed_at"),
+                        link.get("reviewed_by"),
+                    ),
+                )
+
+            # 5. Primary knowledge_objects.entity_id pointer, if any.
+            for knowledge_id in transfer.get("primary_moved") or []:
+                conn.execute(
+                    """UPDATE knowledge_objects SET entity_id=?, updated_at=?
+                       WHERE id=? AND user_id=? AND entity_id=?""",
+                    (source_id, now, knowledge_id, user_id, target_id),
+                )
+
+            # 6. Relations: reverse each recorded fate.
+            for item in transfer.get("relations") or []:
+                if not isinstance(item, dict):
+                    continue
+                original = item.get("original") or {}
+                if not isinstance(original, dict) or not original.get("id"):
+                    continue
+                fate = str(item.get("fate") or "")
+                if fate == "moved":
+                    rewritten = item.get("rewritten") or {}
+                    conn.execute(
+                        "DELETE FROM relations WHERE id=? AND user_id=?",
+                        (rewritten.get("id") or original["id"], user_id),
+                    )
+                # self_loop_dropped / suppressed_duplicate: nothing on target to remove
+                conn.execute(
+                    """INSERT OR IGNORE INTO relations(id, user_id, source_entity_id, target_entity_id,
+                       relation_type, weight, metadata_json, created_at, deleted_at)
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+                    (
+                        original["id"],
+                        user_id,
+                        original["source_entity_id"],
+                        original["target_entity_id"],
+                        original["relation_type"],
+                        original.get("weight") if original.get("weight") is not None else 1.0,
+                        original.get("metadata_json") or "{}",
+                        original.get("created_at") or now,
+                    ),
+                )
+
+            conn.execute(
+                """UPDATE entity_merge_history SET undone_at=?, undone_by=?
+                   WHERE id=? AND user_id=? AND undone_at IS NULL""",
+                (now, undone_by or user_id, merge_id, user_id),
+            )
+
+        return {
+            "merge_id": merge_id,
+            "source_entity_id": source_id,
+            "target_entity_id": target_id,
+            "source": self.get_entity(source_id, user_id),
+            "target": self.get_entity(target_id, user_id),
+            "undone_at": now,
+        }

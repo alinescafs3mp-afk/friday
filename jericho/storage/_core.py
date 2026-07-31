@@ -417,6 +417,11 @@ class CoreMixin(StorageShared):
                 "quality_score": "REAL NOT NULL DEFAULT 0.0",
             },
             "entities": {"normalized_name": "TEXT NOT NULL DEFAULT ''"},
+            "entity_merge_history": {
+                "transfer_json": "TEXT NOT NULL DEFAULT '{}'",
+                "undone_at": "TEXT",
+                "undone_by": "TEXT",
+            },
             "entity_resolution_candidates": {
                 "pair_key": "TEXT NOT NULL DEFAULT ''",
                 "evidence_json": "TEXT NOT NULL DEFAULT '{}'",

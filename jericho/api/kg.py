@@ -299,6 +299,42 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
     return {"status": "rejected"}
 
 
+@router.get("/merges", tags=["knowledge-graph"])
+async def list_merges(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Accepted merges for the current tenant, newest first.
+
+    Each row carries a transfer set when the merge was recorded after #51;
+    those can be undone via POST /merges/{id}/undo. Older empty-transfer rows
+    are listed but refuse undo rather than inventing ownership.
+    """
+    actor = _require(request, "kg.read")
+    items = await run_blocking(request.app.state.storage.list_merge_history, actor.user_id, limit=limit)
+    for item in items:
+        item["undoable"] = bool(
+            item.get("transfer_json") and item["transfer_json"] not in ("{}", "")
+        ) and not item.get("undone_at")
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/merges/{merge_id}/undo", tags=["knowledge-graph"])
+async def undo_merge(merge_id: str, request: Request) -> dict[str, Any]:
+    actor = _require(request, "kg.merge")
+    try:
+        result = await run_blocking(
+            request.app.state.kg.resolver.unmerge,
+            actor.user_id,
+            merge_id,
+            undone_by=actor.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(request, "entity.unmerge", "merge", merge_id, after=result)
+    return {"result": result}
+
+
 @router.get("/conflicts", tags=["knowledge-graph"])
 async def list_own_conflicts(
     request: Request,

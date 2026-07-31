@@ -263,3 +263,34 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
         raise HTTPException(status_code=404, detail="Resolution candidate not found")
     _audit(request, "admin.entity.merge_rejected", "resolution", candidate_id)
     return {"status": "rejected"}
+
+
+@router.get("/merges")
+async def list_admin_merges(request: Request, user_id: str, limit: int = 50) -> dict[str, Any]:
+    _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.merges.read", user_id)
+    items = _services(request).storage.list_merge_history(user_id, limit=max(1, min(int(limit), 200)))
+    for item in items:
+        item["undoable"] = bool(
+            item.get("transfer_json") and item["transfer_json"] not in ("{}", "")
+        ) and not item.get("undone_at")
+    return {"user_id": user_id, "items": items, "count": len(items)}
+
+
+@router.post("/merges/{merge_id}/undo")
+async def undo_admin_merge(merge_id: str, request: Request) -> dict[str, Any]:
+    _require(request, "admin.all_data.manage")
+    body = await _request_json(request)
+    user_id = str(body.get("user_id") or "")
+    if not _services(request).storage.get_user(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        result = _services(request).kg.resolver.unmerge(
+            user_id,
+            merge_id,
+            undone_by=request.state.actor.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(request, "admin.entity.unmerge", "merge", merge_id, after=result)
+    return {"result": result}

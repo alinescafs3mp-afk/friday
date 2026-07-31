@@ -57,7 +57,7 @@ from jericho.storage.models import (
 # Named for the package, not this module: `__name__` here is "jericho.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("jericho.storage")
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -336,8 +336,15 @@ CREATE TABLE IF NOT EXISTS entity_merge_history (
     source_snapshot_json TEXT NOT NULL,
     target_before_json TEXT NOT NULL,
     target_after_json TEXT NOT NULL,
+    -- What the merge actually moved. Without this, INSERT OR IGNORE on links
+    -- makes overlapping documents unrecoverable: after the merge there is one
+    -- row and no way to know whose it was. Empty history on live installs when
+    -- this column shipped, so no backfill of old rows is required.
+    transfer_json TEXT NOT NULL DEFAULT '{}',
     merged_by TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    undone_at TEXT,
+    undone_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS feedback (

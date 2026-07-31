@@ -450,6 +450,7 @@ class ExecutionKernel:
             "conflict_list": self._conflict_list,
             "conflict_decide": self._conflict_decide,
             "entity_merge_decide": self._entity_merge_decide,
+            "entity_merge_undo": self._entity_merge_undo,
             "inbox_list": self._inbox_list,
             "user_activity": self._user_activity,
             "user_knowledge_search": self._user_knowledge_search,
@@ -1052,6 +1053,22 @@ class ExecutionKernel:
         )
         return {"status": "merged", "candidate_id": candidate_id, "result": merged}
 
+    async def _entity_merge_undo(
+        self,
+        *,
+        actor: ActorContext,
+        merge_id: str,
+    ) -> dict[str, Any]:
+        """Undo one accepted entity merge. Needs the transfer set written at merge time."""
+        _, kg, _, _ = self._require_services()
+        result = await run_blocking(
+            kg.resolver.unmerge,
+            actor.user_id,
+            merge_id,
+            undone_by=actor.user_id,
+        )
+        return {"status": "undone", "merge_id": merge_id, "result": result}
+
     async def _inbox_list(self, *, actor: ActorContext, status: str | None = None) -> dict[str, Any]:
         storage, _, _, _ = self._require_services()
         status_value = InboxStatus(status) if status else None
@@ -1531,6 +1548,17 @@ class ExecutionKernel:
                 },
             },
             ["candidate_id", "decision"],
+        )
+        spec(
+            "entity_merge_undo",
+            "Откатить одно уже принятое слияние сущностей по id записи истории. "
+            "Обе сущности и их связи с документами возвращаются к состоянию до "
+            "слияния, в том числе когда у них были общие документы. Список "
+            "недавних слияний — через HTTP /api/kg/merges или list_merge_history. "
+            "Повторный откат той же записи запрещён.",
+            "kg.merge",
+            {"merge_id": {"type": "string"}},
+            ["merge_id"],
         )
         spec(
             "user_activity",

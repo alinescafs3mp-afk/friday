@@ -35,12 +35,14 @@ from jericho.server import create_app
 # и лента окна; стоит ПЕРЕД /knowledge/{knowledge_id}, иначе будет проглочен.
 # 154 → 156: GET /api/kg/conflicts + POST /api/kg/conflicts/{id}/decide —
 # разбор конфликтов знаний из чата (Telegram /conflicts) и инструментов агента.
-EXPECTED_OPERATIONS = 156
+# 156 → 160: GET+POST /api/kg/merges[/{id}/undo] и /api/admin/merges[/{id}/undo] —
+# откат слияния сущностей (#51); transfer set пишется при merge.
+EXPECTED_OPERATIONS = 160
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 85,
-    "/api/kg": 16,
+    "/api/admin": 87,
+    "/api/kg": 18,
     "/api/missions": 4,
 }
 

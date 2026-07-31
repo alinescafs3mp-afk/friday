@@ -451,6 +451,7 @@ class EntityResolver:
             "source_entity_id": source_entity_id,
             "target_entity_id": target_entity_id,
             "merged_into": merged,
+            "merge_id": merged.get("_merge_id"),
         }
 
     def reject_resolution(self, candidate_id: str, user_id: str, *, resolved_by: str | None = None) -> bool:
@@ -462,6 +463,16 @@ class EntityResolver:
         ):
             raise ValueError("Resolution candidate not found")
         return True
+
+    def unmerge(
+        self,
+        user_id: str,
+        merge_id: str,
+        *,
+        undone_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Undo one accepted merge. Requires the transfer set recorded at merge time."""
+        return self.storage.unmerge_entities(user_id, merge_id, undone_by=undone_by or user_id)
 
 
 @lru_cache(maxsize=4096)
