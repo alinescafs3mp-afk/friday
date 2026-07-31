@@ -272,17 +272,24 @@ actions.restoreVersion=async(id,version)=>{
 // Текст документа с подсветкой упоминаний. Куски экранируются ПООТДЕЛЬНОСТИ и
 // только потом склеиваются: собрать строку и экранировать целиком нельзя — тогда
 // вместе с текстом экранируется и сама разметка.
+// Смещения приходят в КОДОВЫХ ТОЧКАХ — так их считает Python, — а строка в
+// JavaScript адресуется в единицах UTF-16. Один эмодзи или иероглиф вне BMP в
+// начале документа, и всякая подсветка после него уезжает на знак: на «Отчёт 😀
+// подписал Иванов» сервер отдаёт 17..23, а body.slice(17,23) даёт « Ивано».
+// Это тот же класс, который сам модуль позиций закрывает свёрткой, сохраняющей
+// длину, — только там граница Python↔Python, а здесь Python↔браузер, и единица
+// измерения меняется вместе с языком. Поэтому режем массив кодовых точек.
 function highlightMentions(text,spans){
-  const body=String(text||'');
+  const chars=[...String(text||'')];
   const list=(spans||[]).filter(s=>Number.isInteger(s.start)&&Number.isInteger(s.end)&&s.end>s.start).sort((a,b)=>a.start-b.start);
   let out='',cursor=0;
   for(const span of list){
     if(span.start<cursor)continue;
-    out+=esc(body.slice(cursor,span.start));
-    out+=`<mark title="${esc(span.name)}">${esc(body.slice(span.start,span.end))}</mark>`;
+    out+=esc(chars.slice(cursor,span.start).join(''));
+    out+=`<mark title="${esc(span.name)}">${esc(chars.slice(span.start,span.end).join(''))}</mark>`;
     cursor=span.end;
   }
-  return out+esc(body.slice(cursor));
+  return out+esc(chars.slice(cursor).join(''));
 }
 actions.inspectKnowledge=async id=>{
   try{

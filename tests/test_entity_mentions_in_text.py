@@ -13,6 +13,9 @@
 from __future__ import annotations
 
 import hashlib
+import pathlib
+
+import pytest
 
 from jericho.mentions import mention_spans
 from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
@@ -146,3 +149,92 @@ def test_reading_someone_elses_document_is_audited(settings, storage):
         assert response.status_code == 404
         actions = {str(row.get("action")) for row in app.state.storage.list_audit_log(limit=20)}
         assert "admin.knowledge.read" in actions, "чужое чтение не записано"
+
+
+def test_a_verb_from_the_same_root_is_not_a_mention():
+    """Правило «не больше трёх знаков» пропускало глаголы.
+
+    «Работа» подсвечивала «работать» (работ+ать), «Победа» — «победили» (побед+или),
+    и глагол показывался человеку так же, как подтверждённое им решение. Замена —
+    закрытый список дописок, выведенный из замера на живом корпусе.
+    """
+    assert _marked("Работа встала, надо работать дальше", [("Работа", "e1")]) == ["Работа"]
+    assert _marked("Победа близко, мы победили", [("Победа", "e1")]) == ["Победа"]
+    # Производное слово — тоже не упоминание: «Москвичи» это не «Москва».
+    assert _marked("Москва и Москвичи, поехал в Москву", [("Москва", "e1")]) == [
+        "Москва",
+        "Москву",
+    ]
+
+
+def test_an_adjective_from_a_place_name_is_a_mention_again():
+    """Обратная половина того же дефекта, и она стоила больше.
+
+    Замерено на 600 документах: 10.2% совпадений имеют дописку длиннее трёх знаков,
+    и почти всё это законные формы названий — «ского» 771 раз, «ской» 446, «ская»
+    369. Прежнее правило их молча выбрасывало.
+    """
+    assert _marked("Казань, Казанского района, в Казани", [("Казань", "e1")]) == [
+        "Казань",
+        "Казанского",
+        "Казани",
+    ]
+
+
+def test_the_cap_keeps_the_first_mentions_in_the_text_not_the_first_name_parsed():
+    """Подпись обещает «первые 500 упоминаний» — значит первые ПО ТЕКСТУ.
+
+    Обрезка стояла внутри разбора имён, отсортированных по длине, поэтому документ,
+    где одно имя встречается шестьсот раз, съедал весь запас: вторая подтверждённая
+    сущность не получала ни одной подсветки, хотя стояла первым словом документа.
+    """
+    from jericho.mentions import _MAX_SPANS
+
+    text = "Петров подписал. " + ("Иванов. " * (_MAX_SPANS + 100)) + " Петров снова."
+    spans = mention_spans(text, [("Петров", "e1"), ("Иванов", "e2")])
+    assert len(spans) == _MAX_SPANS
+    assert spans[0].name == "Петров", "первое слово документа осталось без подсветки"
+    # И порядок ответа — по тексту, а не по именам.
+    assert [span.start for span in spans] == sorted(span.start for span in spans)
+
+
+def test_the_browser_marks_the_same_word_the_server_pointed_at():
+    """Стык Python↔браузер: единица измерения меняется вместе с языком.
+
+    Смещения считаются в КОДОВЫХ ТОЧКАХ, а строка в JavaScript адресуется в
+    единицах UTF-16. Один эмодзи до упоминания — и разметка уезжает на знак:
+    сервер отдавал 17..23, а `body.slice(17,23)` давал « Ивано». Ни один тест на
+    стороне Python это поймать не мог: он режет ответ маршрута срезом Python и
+    поэтому всегда зелёный. Здесь запускается НАСТОЯЩАЯ функция из app.js.
+    """
+    import json
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node не установлен — проверить браузерную половину нечем")
+
+    text = "Отчёт 😀 подписал Иванов лично."
+    spans = mention_spans(text, [("Иванов", "e1")])
+    assert [text[s.start : s.end] for s in spans] == ["Иванов"], "сервер указал не на то слово"
+
+    source = pathlib.Path("jericho/admin_ui/static/app.js").read_text(encoding="utf-8")
+    body = re.search(r"function highlightMentions\(text,spans\)\{[\s\S]*?\n\}", source)
+    assert body, "highlightMentions не найдена в app.js — тест устарел вместе с кодом"
+    script = (
+        "const esc=v=>String(v??'').replace(/[&<>'\\\"]/g,c=>"
+        "({'&':'&amp;','<':'&lt;','>':'&gt;',\"'\":'&#39;','\\\"':'&quot;'}[c]));\n"
+        + body.group(0)
+        + "\nprocess.stdout.write(highlightMentions("
+        + json.dumps(text, ensure_ascii=False)
+        + ","
+        + json.dumps([{"start": s.start, "end": s.end, "name": s.name} for s in spans])
+        + "));"
+    )
+    rendered = subprocess.run(  # noqa: S603
+        [node, "-e", script], capture_output=True, text=True, timeout=30, check=True
+    ).stdout
+    marked = re.search(r"<mark[^>]*>(.*?)</mark>", rendered)
+    assert marked and marked.group(1) == "Иванов", f"браузер подсветил не то слово: {rendered}"
