@@ -503,7 +503,17 @@ class DocumentExtractor:
                         continue
                     if info.compress_size and info.file_size / max(1, info.compress_size) > _MAX_ZIP_RATIO:
                         continue
-                    data = archive.read(info, pwd=None)
+                    try:
+                        data = archive.read(info, pwd=None)
+                    except Exception:
+                        # A single corrupted media stream (bit flip, interrupted save,
+                        # adversarial upload) must not abort the whole document's
+                        # extraction — zipfile.read() can raise things well outside
+                        # the outer (OSError, BadZipFile, RuntimeError) tuple, e.g.
+                        # zlib.error on a broken deflate stream. Skip this image and
+                        # keep the others; found by adversarial review.
+                        LOGGER.debug("Office embedded image %r is corrupted", info.filename, exc_info=True)
+                        continue
                     if len(data) != info.file_size:
                         continue
                     output.append((data, info.filename))

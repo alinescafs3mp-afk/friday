@@ -39,6 +39,53 @@ def test_archive_limits_and_safe_preview():
     assert "size" in oversized.error.casefold() or "ratio" in oversized.error.casefold()
 
 
+def _office_zip_with_a_corrupted_image() -> bytes:
+    """A .docx-shaped zip whose FIRST embedded image has a broken deflate stream —
+    same length, same CRC/size fields, only the compressed payload flipped — so the
+    zip stays structurally valid and only `zlib.error` fires on decompression. The
+    second image is untouched, to prove one corrupt member doesn't take the rest
+    down with it."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", b"<xml>hello</xml>")
+        archive.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\n" + b"A" * 200)
+        archive.writestr("word/media/image2.png", b"\x89PNG\r\n\x1a\n" + b"B" * 200)
+
+    raw = bytearray(buffer.getvalue())
+    with zipfile.ZipFile(io.BytesIO(bytes(raw))) as archive:
+        info = archive.getinfo("word/media/image1.png")
+        offset = info.header_offset + 30 + len(info.filename.encode())
+        comp_size = info.compress_size
+    for index in range(offset, offset + comp_size):
+        raw[index] ^= 0xFF
+    return bytes(raw)
+
+
+def test_a_corrupted_embedded_image_does_not_crash_office_extraction():
+    """Found by adversarial review: a bit-corrupted embedded picture inside a real
+    .docx/.pptx/.xlsx (flaky transfer, interrupted save, or a torture-test upload)
+    raised `zlib.error` out of `_office_embedded_images` uncaught — not a subclass of
+    the `(OSError, zipfile.BadZipFile, RuntimeError)` tuple the function guarded
+    against. That propagated through ingestion, past `/api/chat`'s only
+    `except BaseException: raise`, into the Telegram bridge as a plain HTTP 500 that
+    is not a `PermanentUpdateError` — so the same corrupted file got retried
+    identically for up to a day (288 attempts) with no message to the user.
+
+    Mutation: narrow the inner `except Exception` in `_office_embedded_images` back
+    to `(OSError, zipfile.BadZipFile, RuntimeError)` — this test must go red with an
+    uncaught `zlib.error`.
+    """
+    from jericho.documents import DocumentExtractor
+
+    data = _office_zip_with_a_corrupted_image()
+    images = DocumentExtractor._office_embedded_images(data, max_candidates=5)
+
+    # The corrupted image is skipped; the healthy second one still comes through.
+    assert len(images) == 1
+    _, name = images[0]
+    assert name == "word/media/image2.png"
+
+
 def test_large_csv_is_streamed_into_a_bounded_result():
     extractor = DocumentExtractor(max_text_chars=10_000, max_input_bytes=4 * 1024 * 1024)
     content = ("name,value\n" + "alpha," + "x" * 80 + "\n") * 20_000
