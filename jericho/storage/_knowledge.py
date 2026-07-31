@@ -424,6 +424,51 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def knowledge_bodies_after(
+        self, *, after_rowid: int = 0, user_id: str | None = None, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """Тела знаний страницами по возрастанию `rowid` — для разовых проходов по корпусу.
+
+        Курсор именно по `rowid`, а не по `LIMIT/OFFSET`: страницы должны быть
+        непересекающимися и не терять строк, а `id` в этой схеме — `uuid4`, то есть
+        сортировка по нему случайна. Ту же ошибку уже ловили в проекте: хвост
+        сортировки по случайному идентификатору сделал недетерминированным состав
+        пачки, и тест замигал.
+
+        Тело здесь брать ПРИХОДИТСЯ — проход ищет в самом тексте, — поэтому страница
+        маленькая по умолчанию. Обход всего корпуса с `SELECT k.*` однажды стоил
+        45 МБ на пятьдесят строк; тут выбираются три поля из нужных, а не звёздочка.
+        """
+        clauses = ["deleted_at IS NULL", "rowid > ?"]
+        params: list[Any] = [max(0, int(after_rowid))]
+        if user_id:
+            clauses.append("user_id=?")
+            params.append(user_id)
+        params.append(max(1, min(int(limit), 1000)))
+        rows = self.execute(
+            "SELECT rowid AS rowid, id AS id, user_id AS user_id, content AS content "
+            f"FROM knowledge_objects WHERE {' AND '.join(clauses)} "  # nosec B608 - фиксированные условия
+            "ORDER BY rowid LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def decided_entity_links(self, user_id: str, ko_id: str) -> set[str]:
+        """Сущности, привязка которых к этому знанию УЖЕ решена человеком.
+
+        `link_knowledge_entity` перезаписывает статус по `ON CONFLICT`, поэтому
+        разовый проход, идущий по всему корпусу, молча вернул бы отклонённой
+        человеком связи статус `accepted`. Решение человека — вершина в этой
+        системе; проход обязан такие пары обходить, а не «освежать».
+        """
+        rows = self.execute(
+            "SELECT entity_id FROM knowledge_entity_links "
+            "WHERE user_id=? AND knowledge_object_id=? "
+            "AND (reviewed_by IS NOT NULL OR status='rejected')",
+            (user_id, ko_id),
+        ).fetchall()
+        return {str(row["entity_id"]) for row in rows}
+
     def set_document_date(self, ko_id: str, user_id: str, document_date: str) -> bool:
         """Записать собственную дату документа в метаданные, не создавая версию.
 

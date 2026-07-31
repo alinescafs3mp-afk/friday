@@ -79,7 +79,13 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # нужен порядок по дате самого документа.
 # 249 → 251: knowledge_date_histogram + count_knowledge_without_own_date — плотность
 # корпуса по годам/месяцам/дням для экрана хроники и число тех, кто в неё не попадёт.
-EXPECTED_MEMBER_COUNT = 251
+# 251 → 253: knowledge_bodies_after + decided_entity_links — разовый проход правилом
+# ФИО по архиву, загруженному до появления правила. Первый метод отдаёт тела страницами
+# по КУРСОРУ `rowid`, а не через LIMIT/OFFSET: идентификаторы здесь uuid4, и сортировка
+# по ним случайна. Второй существует ровно затем, чтобы проход не спорил с человеком —
+# `link_knowledge_entity` перезаписывает статус по ON CONFLICT, и без этой проверки
+# отклонённая владельцем связь молча вернулась бы в accepted.
+EXPECTED_MEMBER_COUNT = 253
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
