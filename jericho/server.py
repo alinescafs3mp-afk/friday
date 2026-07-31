@@ -1196,6 +1196,79 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         state.storage.update_user(actor.user_id, metadata_json=metadata)
         return {"custom_instructions": text}
 
+    # «Ещё раз» для последнего вопроса человека: тот же self-service контур, что
+    # /api/me/instructions (chat.use, только свой аккаунт). Хранилище не умеет
+    # ветвление ответов — agent.chat допишет новый user+assistant ход с тем же
+    # текстом; вложения первого хода не переотправляются (осознанное упрощение G15).
+    @application.post("/api/me/regenerate", tags=["chat"])
+    async def regenerate_last_turn(request: Request) -> dict[str, Any]:
+        actor = _require(request, "chat.use")
+        state = request.app.state
+        body = await _request_json(request)
+        conversation_id = str(body.get("conversation_id") or "").strip() or None
+        channel_chat_id = getattr(request.state, "bridge_chat_id", None)
+        if actor.source == "telegram-bridge" and channel_chat_id:
+            session = state.storage.get_channel_session(
+                actor.user_id,
+                "telegram",
+                str(channel_chat_id),
+            )
+            if session and not session.get("is_archived"):
+                conversation_id = str(session["conversation_id"])
+        if not conversation_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Нет активного разговора для повтора",
+            )
+        if not state.storage.get_conversation(conversation_id, actor.user_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Разговор не найден",
+            )
+        # Хвост из 4: обычно user+assistant (+ещё пара). Берём ПОСЛЕДНЕЕ user —
+        # не «первое в окне», иначе два user подряд без ответа дали бы старый вопрос.
+        recent = state.storage.get_conversation_messages(
+            conversation_id,
+            user_id=actor.user_id,
+            limit=4,
+        )
+        last_user: dict[str, Any] | None = None
+        for row in reversed(recent):
+            if str(row.get("role") or "") == "user":
+                last_user = row
+                break
+        if last_user is None:
+            raise HTTPException(
+                status_code=400,
+                detail="В разговоре нет вопроса для повтора",
+            )
+        message = str(last_user.get("content") or "").strip()
+        if not message:
+            raise HTTPException(
+                status_code=400,
+                detail="В разговоре нет вопроса для повтора",
+            )
+        result = await state.agent.chat(
+            actor.user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            attachments=[],
+            enable_tools=True,
+            kg=state.kg,
+            hybrid_searcher=state.hybrid_searcher,
+            ingestion_result=None,
+        )
+        if actor.source == "telegram-bridge" and channel_chat_id:
+            state.storage.set_channel_conversation(
+                actor.user_id,
+                "telegram",
+                str(channel_chat_id),
+                result["conversation_id"],
+                mode=str(result.get("context", {}).get("interaction_mode") or "dialogue"),
+            )
+        return result
+
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
         actor = _require(request, "chat.use")

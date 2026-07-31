@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### G15: «ещё раз» — regenerate последнего user-хода (#62)
+
+POST /api/me/regenerate (self-service, chat.use): резолв conversation_id как
+у /api/chat для Telegram, хвост сообщений, повтор gent.chat с тем же
+текстом (ttachments=[], ingestion_result=None). Telegram /retry +
+BOT_COMMANDS + /help. Ветвление ответов в storage нет — дописывается новый ход.
+Тесты: 	ests/test_regenerate_last_turn.py.
+
 ### G13/G14: авторегистрация — владелец видит новичка, `/start` честен (#60, #61)
 
 1. Первый self-register с preset `newcomer` ставит в outbound очередь

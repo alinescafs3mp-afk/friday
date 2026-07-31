@@ -379,7 +379,21 @@ dedup_key=)` — образец есть в `organs/sentinel/__init__.py:144` и
 
 ---
 
-# Новое (после G13/G14) — G15: «ещё раз» для ответа ассистента
+# Новое (после G13/G14)
+
+## G15 (#62). Команда «ещё раз» для последнего ответа — **сделано**
+
+POST /api/me/regenerate (self-service, chat.use): резолв conversation_id как у
+/api/chat для Telegram, хвост get_conversation_messages(limit=4), последнее
+role=user, повторный agent.chat с attachments=[] и ingestion_result=None.
+Telegram /retry + BOT_COMMANDS + /help. Ветвление ответов в storage нет —
+дописывается новый ход (осознанно). Тесты: tests/test_regenerate_last_turn.py
+(последний user, не более ранний; вызов agent.chat; пустой разговор → 400).
+
+---
+
+# Контекст назначения G15 (текст раздачи)
+
 
 Человеческая сторона: у любого мейнстримного чат-ассистента есть кнопка/команда
 «сгенерировать ответ заново», когда первый не устроил. У Jericho этого нет вовсе

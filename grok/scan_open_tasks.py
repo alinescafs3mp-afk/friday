@@ -37,6 +37,15 @@ HEADING_RE = re.compile(
     re.MULTILINE,
 )
 
+# Assigners sometimes drop the formal «## G15 (#n). …» shape and write prose:
+#   # Новое … — G15: «ещё раз» …
+#   ## G15: title
+# Without this, the watcher idles while work is already on origin/main (G15 lag).
+INFORMAL_HEADING_RE = re.compile(
+    r"^#+\s+.*?\b(G\d+)\b(?:\s*\(#(\d+)\))?\s*[:.—–-]+\s*(.+?)\s*$",
+    re.MULTILINE,
+)
+
 # Done markers on the heading line only (body «сделано» must not close a task).
 DONE_RE = re.compile(
     r"(?i)(\*\*сделано\*\*|\*\*закрыто\*\*|\bDONE\b|\bCLOSED\b)",
@@ -92,6 +101,7 @@ def _git_dirty() -> bool:
 
 def parse_tasks(text: str) -> list[dict[str, object]]:
     tasks: list[dict[str, object]] = []
+    seen: set[str] = set()
     for match in HEADING_RE.finditer(text):
         gid = match.group(1)
         issue = match.group(2)
@@ -107,6 +117,28 @@ def parse_tasks(text: str) -> list[dict[str, object]]:
                 "heading": match.group(0).strip(),
             }
         )
+        seen.add(gid)
+    # Informal assignments only fill gaps — formal ## G-heading always wins.
+    for match in INFORMAL_HEADING_RE.finditer(text):
+        gid = match.group(1)
+        if gid in seen:
+            continue
+        issue = match.group(2)
+        rest = match.group(3).strip()
+        done = bool(DONE_RE.search(match.group(0)))
+        title = DONE_RE.sub("", rest).strip(" —-").strip()
+        if not title:
+            continue
+        tasks.append(
+            {
+                "id": gid,
+                "issue": int(issue) if issue else None,
+                "title": title,
+                "open": not done,
+                "heading": match.group(0).strip(),
+            }
+        )
+        seen.add(gid)
     return tasks
 
 

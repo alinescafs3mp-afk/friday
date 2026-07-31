@@ -247,9 +247,41 @@ class CommandsMixin(BridgeShared):
                 "/why — почему был такой ответ\n"
                 "/new — начать новый диалог\n"
                 "/note текст — явно сохранить заметку\n"
-                "/instructions — как отвечать: показать, задать или очистить\n\n"
+                "/instructions — как отвечать: показать, задать или очистить\n"
+                "/retry — сгенерировать ответ на последний вопрос заново\n\n"
                 "Ответы можно оценивать кнопками, а результаты /work, /research и миссий — "
                 "отправлять в Inbox на review.",
+            )
+            return
+        if command == "/retry":
+            await register_backend_user()
+            typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
+            try:
+                try:
+                    response = await self._backend_json(
+                        backend,
+                        "POST",
+                        "/api/me/regenerate",
+                        {},
+                        external_user_id,
+                        str(chat_id),
+                    )
+                except PermanentUpdateError:
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Нечего повторять: в этом чате ещё не было вопроса. "
+                        "Задайте вопрос — и /retry сгенерирует ответ заново.",
+                    )
+                    return
+            finally:
+                typing_task.cancel()
+                await asyncio.gather(typing_task, return_exceptions=True)
+            await self._send_message(
+                telegram,
+                chat_id,
+                self._format_response_message(response),
+                reply_markup=self._response_reply_markup(response),
             )
             return
         if command == "/instructions":

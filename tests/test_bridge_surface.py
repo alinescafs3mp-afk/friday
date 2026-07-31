@@ -234,6 +234,7 @@ EXPECTED_COMMANDS = {
     "/new",
     "/note",
     "/research",
+    "/retry",
     "/search",
     # /source — дословный provenance-поиск по исходным файлам: 93% загруженных
     # знаков живут только в raw_objects и из Telegram были недостижимы.
@@ -249,6 +250,7 @@ EXPECTED_COMMANDS = {
 # (+_citation_open_buttons, +_format_status, +_format_timeline, +_log_loop_failure,
 # +_notify_backend_recovered, +_retire_markup_family, +_send_conflicts,
 # +_signer_chat_id, +_timeline_reply_markup, +_warn_owner_if_backend_down).
+# 49: /retry — команда «ещё раз» (G15), без новых методов на TelegramBridge.
 EXPECTED_BRIDGE_COUNT = 49
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
