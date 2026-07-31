@@ -249,7 +249,18 @@ class CallbacksMixin(BridgeShared):
                 clear_markup = True
             elif family == "conv" and action in {"delete", "keep"}:
                 # G18b: confirm hard-delete of the chat's current conversation.
-                # `current` is the same channel-session sentinel as /archive.
+                # `current` is the same channel-session sentinel as /archive,
+                # but the button also carries the id of whoever /delete was
+                # shown to ("current.{invoker_id}") — the prompt is visible to
+                # the whole chat, and without this check whichever OTHER
+                # capable account tapped it first would delete their own
+                # current conversation, not the invoker's (found by
+                # adversarial review; live-reachable in any allowlisted group
+                # or open-registration chat with more than one account).
+                conv_ref, _, invoker_id = target_id.partition(".")
+                if not invoker_id or invoker_id != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 if action == "keep":
                     await self._answer_callback(telegram, callback_id, "Не удаляю")
                     await self._send_message(telegram, chat_id, "Удаление отменено.")
@@ -258,7 +269,7 @@ class CallbacksMixin(BridgeShared):
                     await self._backend_json(
                         backend,
                         "DELETE",
-                        f"/api/conversations/{target_id}",
+                        f"/api/conversations/{conv_ref}",
                         {"telegram_user": user},
                         external_user_id,
                         str(chat_id),

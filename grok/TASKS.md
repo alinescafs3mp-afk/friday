@@ -5,6 +5,43 @@
 
 ---
 
+# СРОЧНОЕ (после G20) — G21: находка состязательного ревью в твоём же G19
+
+Второй проход ревью (после G17) по всему, что влилось с прошлой проверки —
+G18, G19, G20, S8, мой фикс очереди семафора. HIGH-находку в G18 (`/delete`
+путал того, кто нажал кнопку, с тем, кто вызвал команду) я уже закрыл сама
+(`_commands.py`/`_callbacks.py`, коммит скоро придёт). Эта — твоя, в G19.
+
+## G21. `dismiss_notification` не проверяет `kind='reminder'`, хотя `list_pending_reminders` проверяет
+
+`list_pending_reminders` (`storage/_runtime.py:56-72`) фильтрует `WHERE
+user_id=? AND kind='reminder' AND status='pending'`. Парный
+`dismiss_notification` (`:74-95`) — только `WHERE id=? AND user_id=? AND
+status='pending'`, без `kind`. Маршрут `POST
+/api/me/reminders/{id}/dismiss` называет себя reminder-only в докстринге, но
+сама SQL пропустит ЛЮБУЮ pending-строку этого же пользователя вне
+зависимости от `kind` — `chronicle`, `sentinel`, `reflection`, `onboarding`.
+
+Сегодня это НЕ эксплуатируется (проверено ревью): ни один self-service или
+admin маршрут не отдаёт id чужого-kind уведомления обратно арендатору,
+`list_pending_reminders` сама уже kind-scoped, `id` — uuid4[:16]. Но это
+латентное расхождение контракта с исполнением, и `dismiss` НЕ чистит
+`dedup_key` намеренно (для reminder это правильно — блокирует повторный
+scan) — если через это когда-нибудь пройдёт id ДРУГОГО kind (лог, будущая
+админ-ручка, ручной скрипт), его `dedup_key` будет заблокирован НАВСЕГДА
+без возможности переиграть.
+
+**Чем закрыть:** добавить `AND kind='reminder'` в SQL `dismiss_notification`
+— тот же охват, что уже есть в `list_pending_reminders`, ничего больше не
+менять (сигнатура, self-service контур — не трогай).
+
+Тест: строка `kind='chronicle'` (или любой другой не-reminder) в статусе
+pending у того же `user_id` — `dismiss_notification` должна вернуть `False`
+(404 на уровне маршрута), не снимать её. Мутация: убери `AND
+kind='reminder'` из SQL — тест обязан покраснеть.
+
+---
+
 # G20: скачать разговор текстом из Telegram — **сделано**
 
 Из того же исследования: у мейнстримных ассистентов можно выгрузить переписку

@@ -97,3 +97,49 @@ async def test_context_retrieval_expands_graph_for_measured_relational_form(sett
 
     assert spy.calls
     assert spy.calls[0].get("graph_expansion") is True
+
+
+@pytest.mark.asyncio
+async def test_a_relational_previous_turn_does_not_leak_into_an_unrelated_follow_up(settings, storage):
+    """Found by adversarial review: `_contextualize_query` joins a short
+    pronoun/when-where-why follow-up with the PREVIOUS user turn for retrieval
+    (`f"{clean}\\n{previous[:500]}"`) — but `is_relational_query` used to run
+    on that JOINED string, so a relational phrase in the prior turn alone
+    turned graph_expansion on for a current turn asking something unrelated.
+
+    "А когда это было?" is a plain temporal follow-up and is not relational on
+    its own; the previous turn asked "с кем работал" (relational). The joined
+    search_query IS relational-shaped, but the actual current question is not,
+    and graph_expansion must follow what was asked NOW.
+
+    Мутация: вернуть `is_relational_query(search_query)` вместо `(message)` —
+    тест обязан покраснеть.
+    """
+    from jericho.agent_runtime import AgentRuntime
+    from jericho.knowledge_graph import KnowledgeGraph
+
+    storage.ensure_user("alice")
+    agent = AgentRuntime(settings, storage)
+    spy = _SpySearcher()
+
+    history = [{"role": "user", "content": "С кем работал Иван Петров над проектом Аврора?"}]
+    await agent._prepare_context(
+        "alice",
+        "А когда это было?",
+        "conv-test",
+        prior_history=history,
+        kg=KnowledgeGraph(storage),
+        searcher=spy,
+        ingestion_result=None,
+        interaction_mode="dialogue",
+    )
+
+    assert spy.calls
+    # The joined search_query DOES carry the previous turn's relational phrase
+    # (retrieval still benefits from it) — the bug was letting THAT decide
+    # graph_expansion instead of the current message alone.
+    assert "\n" in spy.calls[0].get("query", ""), "проба проверяет не тот сценарий — follow-up не склеился"
+    assert spy.calls[0].get("graph_expansion") is False, (
+        "реляционная фраза из ПРЕДЫДУЩЕГО хода включила граф для текущего вопроса, "
+        "который сам по себе не о связях"
+    )

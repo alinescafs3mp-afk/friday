@@ -680,7 +680,19 @@ class AgentRuntime:
                     # Отдельный заранее объявленный замер на 12 реляционных кейсах
                     # дал ровно допустимый net_gain=2 без сбоев, поэтому расширение
                     # включается только для измеренного relational-language класса.
-                    graph_expansion=is_relational_query(search_query),
+                    #
+                    # Проверяется `message` (текст ЭТОГО хода), не `search_query`:
+                    # `_contextualize_query` для короткого местоименного follow-up'а
+                    # склеивает его с ПРЕДЫДУЩИМ ходом ради поиска — но тогда
+                    # реляционная фраза из прошлого вопроса (`с кем работал...`)
+                    # включала граф и для текущего хода, который об этом не
+                    # спрашивал. Найдено состязательным ревью, подтверждено
+                    # прогоном: `is_relational_query(search_query)` был True для
+                    # «А когда это было?» после «С кем работал Иван?», хотя сам
+                    # текущий вопрос — нет. Заодно чинит слепое пятно замера:
+                    # склеенный запрос содержит `\n` и `_is_mineable_eval_query`
+                    # его исключает — эта форма никогда не проверялась метрикой.
+                    graph_expansion=is_relational_query(message),
                     # The reasons a candidate was DROPPED are computed on every
                     # query and thrown away unless asked for. Keeping a compact
                     # copy is what makes "я точно сохранял эту заметку" answerable

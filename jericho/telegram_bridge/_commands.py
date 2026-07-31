@@ -544,6 +544,18 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/delete":
             # G18b: hard delete — ask first (Да/Нет), same button pattern as /merges.
+            #
+            # The invoker's own id rides inside target_id ("current.{id}"), not
+            # just the "current" sentinel: this prompt is visible to the whole
+            # chat, and in any chat with more than one capable account (an
+            # allowlisted group, or open registration admitting a second
+            # person) a DIFFERENT member tapping "Да, удалить" used to delete
+            # THEIR OWN current conversation instead — the button carried no
+            # record of who it was shown for, so the callback handler had
+            # nothing to check the presser against. Found by adversarial
+            # review, confirmed live-reachable now that open registration is
+            # on. `CALLBACK_TARGET_RE` allows `.`, so this needs no new
+            # separator or callback-data version bump.
             await register_backend_user()
             await self._send_message(
                 telegram,
@@ -553,8 +565,14 @@ class CommandsMixin(BridgeShared):
                 reply_markup={
                     "inline_keyboard": [
                         [
-                            {"text": "Да, удалить", "callback_data": "conv:delete:current"},
-                            {"text": "Нет", "callback_data": "conv:keep:current"},
+                            {
+                                "text": "Да, удалить",
+                                "callback_data": f"conv:delete:current.{external_user_id}",
+                            },
+                            {
+                                "text": "Нет",
+                                "callback_data": f"conv:keep:current.{external_user_id}",
+                            },
                         ]
                     ]
                 },
