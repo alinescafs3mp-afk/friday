@@ -23,6 +23,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from jericho.config import JerichoSettings
+from jericho.retrieval import best_snippet
 
 LOGGER = logging.getLogger(__name__)
 
@@ -97,15 +98,31 @@ class FetchResult:
     status_code: int | None = None
     error: str = ""
 
-    def to_dict(self, *, preview_chars: int = 12_000) -> dict[str, Any]:
+    def to_dict(self, *, preview_chars: int = 12_000, query: str = "") -> dict[str, Any]:
+        """Страница для модели: кусок ВОКРУГ совпадения, а не начало документа.
+
+        Раньше здесь стоял `self.text[:preview_chars]`, то есть модель получала шапку
+        страницы — меню, баннер согласия на cookie, хлебные крошки, — а искомое место
+        оставалось за границей. Ровно этот дефект проект уже чинил дважды: сперва в
+        контекстной выдержке («Quote the passage that matched, not the top of the
+        document»), потом в инструменте памяти, где до модели доходил титульный лист.
+        До веба починка не доехала.
+
+        Без запроса поведение прежнее — брать голову: без него «совпадение» не
+        определено, и придумывать его было бы хуже честного начала.
+        """
+        if query.strip():
+            text = best_snippet(query, self.text, max_chars=preview_chars)
+        else:
+            text = self.text[:preview_chars]
         return {
             "url": self.url,
             "title": self.title,
-            "text": self.text[:preview_chars],
+            "text": text,
             "text_length": self.text_length,
             "status_code": self.status_code,
             "error": self.error,
-            "truncated": len(self.text) > preview_chars,
+            "truncated": len(self.text) > len(text),
         }
 
 
@@ -594,7 +611,8 @@ class WebSurfer:
         for search_result, fetch_result in zip(results[:source_limit], fetched, strict=False):
             if isinstance(fetch_result, BaseException):
                 continue
-            item = fetch_result.to_dict(preview_chars=20_000)
+            # Выдержка по ИСХОДНОМУ запросу исследования, а не по адресу страницы.
+            item = fetch_result.to_dict(preview_chars=20_000, query=query)
             item["search_title"] = search_result.title
             item["snippet"] = search_result.snippet
             item["source"] = search_result.source

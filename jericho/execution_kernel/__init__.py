@@ -650,10 +650,12 @@ class ExecutionKernel:
         results = await web.search(query, max_results=max(1, min(int(max_results), 10)))
         return {"query": query, "results": [item.to_dict() for item in results]}
 
-    async def _web_fetch(self, *, actor: ActorContext, url: str) -> dict[str, Any]:
+    async def _web_fetch(self, *, actor: ActorContext, url: str, query: str = "") -> dict[str, Any]:
         del actor
         _, _, web, _ = self._require_services()
-        return (await web.fetch(url)).to_dict()
+        # `query` необязателен и означает «что искать на странице»: с ним модель
+        # получает кусок вокруг совпадения, без него — начало страницы.
+        return (await web.fetch(url)).to_dict(query=query)
 
     async def _web_research(self, *, actor: ActorContext, query: str, max_sources: int = 3) -> dict[str, Any]:
         del actor
@@ -1154,9 +1156,13 @@ class ExecutionKernel:
         )
         spec(
             "web_fetch",
-            "Получить текст публичной веб-страницы.",
+            "Получить текст публичной веб-страницы. query — что искать на ней: "
+            "с ним вернётся кусок вокруг совпадения, без него начало страницы.",
             "web.fetch",
-            {"url": {"type": "string", "format": "uri"}},
+            {
+                "url": {"type": "string", "format": "uri"},
+                "query": {"type": "string", "description": "что искать на странице"},
+            },
             ["url"],
         )
         spec(

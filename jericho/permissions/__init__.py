@@ -93,6 +93,21 @@ class CapabilityDefinition:
         invalid = set(self.default_presets) - set(BUILTIN_PRESET_KEYS)
         if invalid:
             raise ValueError(f"Unknown default presets: {sorted(invalid)}")
+        if self.default_requires_hitl:
+            # Поле объявлено, но НИЧЕГО его не читает: авторизация знает только
+            # «можно» и «нельзя», а ядро после проверки права сразу зовёт обработчик.
+            # Найдено Sol и подтверждено грепом по всему дереву — упоминаний ровно
+            # два, объявление и это место.
+            #
+            # Обещание в коде, за которым нет механизма, опаснее отсутствия обещания:
+            # тот, кто пометит способность как требующую человека, будет считать, что
+            # действие задержано, а оно исполнится сразу. Поэтому не молчим, а падаем
+            # на старте. Строка снимается вместе с появлением настоящего шлюза
+            # подтверждения — см. `sol/PROPOSALS.md` №2.
+            raise ValueError(
+                f"{self.security_id}: default_requires_hitl объявлен, но шлюза подтверждения "
+                "в системе нет — пометка не задержит действие. Сначала шлюз, потом пометка."
+            )
 
 
 # The same identifiers are used by HTTP routes and agent tools.
