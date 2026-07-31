@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### #39: вопрос про человека больше не «болтовня» после починки поиска
+
+Переизмерение G10 на коде с `graph_expansion=False`: формы из переписки
+(«давай про Макарова…», «найди … Нестеренко», follow-up «а его брат?») дают
+`personal_knowledge|mixed` и hits>0; контроль болтовни 8/8 остаётся
+`general_conversation`. Классификатор `personal_cue`/порог 0.35 не меняли —
+ночная находка (4/5 general_conversation при hits=0) была болезнью поиска.
+Сторож: `tests/test_person_query_answer_mode_remeasure.py`.
+
 ### Очередь конфликтов размечена подсказкой (#56)
 
 У каждой пары near-duplicate — triage: `likely_duplicate` / `likely_different_records`
