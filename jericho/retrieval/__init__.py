@@ -1402,6 +1402,16 @@ class HybridSearcher:
         limit: int = 20,
         include_entities: bool = True,
         kg: Any = None,
+        # Расширение по графу отдельно от самого графа. Раньше единственным способом
+        # его выключить было не передать `kg` вовсе — но `kg` служит ДВУМ делам:
+        # расширению пула кандидатов (ниже) и подбору упомянутых сущностей для
+        # контекста (`include_entities`). Выключать их вместе значит расплачиваться
+        # за одно другим, а это разные вещи с разной ценой.
+        #
+        # Ручка нужна именно отдельная: `ablate` для графа не годится и это сказано в
+        # `ENTANGLED_SIGNALS` — обнуление веса не равно удалению канала, потому что он
+        # ещё и расширяет пул, и кормит гейт доказательств.
+        graph_expansion: bool = True,
         explain: bool = False,
         since: str | None = None,
         until: str | None = None,
@@ -1542,7 +1552,7 @@ class HybridSearcher:
         graph_evidence: dict[str, list[dict[str, Any]]] = {}
         graph_depth = self._graph_max_depth if _RELATIONAL_QUERY_RE.search(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
-        if kg:
+        if kg and graph_expansion:
             # A seed has to be a real match. `_lexical_rank` returns EVERY candidate
             # with no floor, so the top eight exist even for a question the archive
             # cannot answer — and a graph score of 0.677 clears `insufficient_evidence`
