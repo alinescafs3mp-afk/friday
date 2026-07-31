@@ -1640,6 +1640,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 kg=state.kg,
                 hybrid_searcher=state.hybrid_searcher,
                 ingestion_result=ingestion_result,
+                synthetic_document_notice=synthetic_document_notice,
                 mode=requested_mode,
             )
             if actor.source == "telegram-bridge" and channel_chat_id:

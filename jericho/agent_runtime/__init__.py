@@ -428,6 +428,7 @@ class AgentRuntime:
         kg: Any = None,
         hybrid_searcher: Any = None,
         ingestion_result: dict[str, Any] | None = None,
+        synthetic_document_notice: bool = False,
         mode: str | None = None,
     ) -> dict[str, Any]:
         clean_message = (message or "").strip()
@@ -488,6 +489,7 @@ class AgentRuntime:
             kg=kg,
             searcher=hybrid_searcher,
             ingestion_result=ingestion_result,
+            synthetic_document_notice=synthetic_document_notice,
             interaction_mode=interaction_mode,
         )
 
@@ -651,6 +653,7 @@ class AgentRuntime:
         kg: Any = None,
         searcher: Any = None,
         ingestion_result: dict[str, Any] | None = None,
+        synthetic_document_notice: bool = False,
         interaction_mode: str = "dialogue",
     ) -> AgentContext:
         search_query = self._contextualize_query(message, prior_history)
@@ -692,7 +695,10 @@ class AgentRuntime:
                     # текущий вопрос — нет. Заодно чинит слепое пятно замера:
                     # склеенный запрос содержит `\n` и `_is_mineable_eval_query`
                     # его исключает — эта форма никогда не проверялась метрикой.
-                    graph_expansion=is_relational_query(message),
+                    # A generated document acknowledgement is not the user's query.
+                    # Its filename is untrusted content and may happen to contain a
+                    # relational phrase, so it must not reach the measured classifier.
+                    graph_expansion=(False if synthetic_document_notice else is_relational_query(message)),
                     # The reasons a candidate was DROPPED are computed on every
                     # query and thrown away unless asked for. Keeping a compact
                     # copy is what makes "я точно сохранял эту заметку" answerable

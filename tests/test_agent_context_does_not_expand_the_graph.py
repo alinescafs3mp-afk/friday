@@ -143,3 +143,40 @@ async def test_a_relational_previous_turn_does_not_leak_into_an_unrelated_follow
         "реляционная фраза из ПРЕДЫДУЩЕГО хода включила граф для текущего вопроса, "
         "который сам по себе не о связях"
     )
+
+
+@pytest.mark.asyncio
+async def test_generated_document_notice_never_reaches_relational_classifier(settings, storage, monkeypatch):
+    """A filename in a backend-generated notice is data, not the user's query.
+
+    Mutation: remove the synthetic-system-notice guard in ``_prepare_context``.
+    The fail-fast classifier below is then called and this test fails.
+    """
+    import jericho.agent_runtime as agent_runtime
+    from jericho.agent_runtime import AgentRuntime
+    from jericho.knowledge_graph import KnowledgeGraph
+
+    def reject_generated_notice(query: str) -> bool:
+        raise AssertionError(f"generated document notice reached relational classifier: {query!r}")
+
+    monkeypatch.setattr(agent_runtime, "is_relational_query", reject_generated_notice)
+    storage.ensure_user("alice")
+    agent = AgentRuntime(settings, storage)
+    spy = _SpySearcher()
+    message = "Загружен документ: с кем работал иван отчет.txt"
+
+    await agent._prepare_context(
+        "alice",
+        message,
+        "conv-test",
+        prior_history=[],
+        kg=KnowledgeGraph(storage),
+        searcher=spy,
+        ingestion_result=None,
+        synthetic_document_notice=True,
+        interaction_mode="dialogue",
+    )
+
+    assert spy.calls, "боевой путь вообще не позвал поиск — проба проверяет не то"
+    assert spy.calls[0]["query"] == message
+    assert spy.calls[0]["graph_expansion"] is False
