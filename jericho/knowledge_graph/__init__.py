@@ -243,7 +243,10 @@ _RELATION_PHRASES: tuple[tuple[re.Pattern[str], RelationType, float, bool], ...]
         False,
     ),
     (
-        re.compile(r"\b(?:управляет|администрирует|руководит|manages?|administers?|leads?)\b", re.I),
+        re.compile(
+            r"\b(?:управляет|администрирует|руководит|тренирует|manages?|administers?|leads?|coaches?)\b",
+            re.I,
+        ),
         RelationType.MANAGES,
         0.88,
         False,
@@ -275,11 +278,33 @@ _RELATION_PHRASES: tuple[tuple[re.Pattern[str], RelationType, float, bool], ...]
     # порядок упоминания сторон не меняет смысла «X координирует с Y».
     (
         re.compile(
-            r"\b(?:сотрудничает\s+с|координирует\s+с|coordinates?\s+with|collaborates?\s+with)\b",
+            r"\b(?:сотрудничает\s+с|координирует\s+с|консультируется\s+с|встречается\s+с|"
+            r"coordinates?\s+with|collaborates?\s+with|consults?\s+with|meets?\s+(?:\w+\s+)?with)\b",
             re.I,
         ),
         RelationType.RELATED_TO,
         0.75,
+        False,
+    ),
+    # Межотраслевой пробел, найденный на синтетике за пределами военного архива
+    # владельца — состязательное ревью перед демо, тема содержимого команды
+    # заранее непредсказуема («разной тематики»). Технические/деловые/
+    # административные/медицинские глаголы, каждый субъект-первый (X делает
+    # действие Y), разворот не нужен. RELATED_TO намеренно, а не более точный
+    # тип: «кто кого поставляет/уведомляет/лечит» не описан существующими
+    # RelationType, и утверждать точный тип значило бы гадать вместо честной
+    # нижней границы «эти двое как-то связаны».
+    (
+        re.compile(
+            r"\b(?:интегрируется\s+с|взаимодействует\s+с|поставляет|"
+            r"направил[аи]?|уведомил[аи]?|диагностировал[аи]?|"
+            r"подписал[аи]?\s+(?:контракт|договор)|заключил[аи]?\s+договор|"
+            r"integrates?\s+with|interacts?\s+with|supplies?|forwarded|notified|"
+            r"diagnosed|signed\s+a\s+contract)\b",
+            re.I,
+        ),
+        RelationType.RELATED_TO,
+        0.72,
         False,
     ),
 )

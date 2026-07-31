@@ -297,3 +297,97 @@ def test_coordination_phrase_is_found_and_not_reversed(storage, graph):
     suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
     assert suggestions, "фраза «координирует с» не дала ни одного кандидата"
     assert suggestions[0]["relation_type"] == "related_to"
+
+
+@pytest.mark.parametrize(
+    "text,left_name,right_name",
+    [
+        pytest.param(
+            "Сервис Атлас интегрируется с платёжным шлюзом Стрела через REST API.",
+            "Атлас",
+            "Стрела",
+            id="integrates_with",
+        ),
+        pytest.param(
+            "Модуль авторизации взаимодействует с базой данных Полярис при каждом запросе.",
+            "авторизации",
+            "Полярис",
+            id="interacts_with",
+        ),
+        pytest.param(
+            "Компания Ромашка подписала контракт с поставщиком Вектор на поставку оборудования.",
+            "Ромашка",
+            "Вектор",
+            id="signed_a_contract",
+        ),
+        pytest.param(
+            "Vendor Northwind Traders supplies raw materials to Fabrikam Manufacturing.",
+            "Northwind",
+            "Fabrikam",
+            id="supplies_to",
+        ),
+        pytest.param(
+            "Секретариат направил письмо в бухгалтерию с просьбой согласовать смету.",
+            "Секретариат",
+            "бухгалтерию",
+            id="forwarded_to",
+        ),
+        pytest.param(
+            "The compliance office notified the finance department about the new regulation.",
+            "compliance",
+            "finance",
+            id="notified",
+        ),
+        pytest.param(
+            "Врач Соколова диагностировала пациента Волкова с гипертонией на плановом осмотре.",
+            "Соколова",
+            "Волкова",
+            id="diagnosed",
+        ),
+        pytest.param(
+            "Dr. Alvarez consults with Dr. Chen on complex oncology cases every Thursday.",
+            "Alvarez",
+            "Chen",
+            id="consults_with",
+        ),
+        pytest.param(
+            "The book club at Elmwood Library meets weekly with the local historian Ms. Grant.",
+            "Elmwood",
+            "Grant",
+            id="meets_weekly_with",
+        ),
+    ],
+)
+def test_cross_domain_business_phrases_are_no_longer_missed(storage, graph, text, left_name, right_name):
+    """Найдено состязательным ревью перед демо: тема содержимого команды заранее
+    непредсказуема («разной тематики»), а словарь до этого фикса знал только
+    шесть технических глаголов (использует/управляет/работает над/зависит от/
+    часть/член) — на синтетике из деловой, административной и медицинской
+    переписки 33 из 36 предложений с явной связью не давали НИ ОДНОГО
+    кандидата. Каждый параметр здесь — предложение из той находки.
+
+    Мутация: убрать межотраслевой блок `_RELATION_PHRASES` целиком — каждый
+    из девяти случаев обязан покраснеть на пустом списке.
+    """
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, left_name, status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, right_name, status="accepted")
+
+    suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
+    assert suggestions, f"не дало ни одного кандидата: {text!r}"
+    assert suggestions[0]["relation_type"] == "related_to"
+
+
+def test_coach_phrase_maps_to_manages_not_related_to(storage, graph):
+    """«Тренирует»/«coaches» — не общий межотраслевой глагол, а тот же
+    направленный смысл, что «руководит»/«leads»: тренер управляет командой.
+    Проверяет, что фраза попала именно в существующую запись MANAGES, а не
+    случайно совпала с более общим межотраслевым RELATED_TO-блоком."""
+    text = f"Тренер Волков {FILLER} тренирует {FILLER} сборную клуба Метеор перед финалом."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "Волков", status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, "Метеор", status="accepted")
+
+    suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
+    assert suggestions, "фраза «тренирует» не дала ни одного кандидата"
+    assert suggestions[0]["relation_type"] == "manages"
