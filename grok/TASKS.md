@@ -5,6 +5,61 @@
 
 ---
 
+# Новое (после G19) — G20: скачать разговор текстом из Telegram
+
+Из того же исследования: у мейнстримных ассистентов можно выгрузить переписку
+файлом. У моста СЕГОДНЯ нет вообще никакой отправки файлов ОТ бота человеку —
+только `_send_message` (`telegram_bridge/_transport.py:653`, `sendMessage`
+JSON). G18/G19 переиспользовали готовый self-service backend; здесь backend
+для получения сообщений уже есть (`get_conversation_messages`,
+`storage/_conversations.py`), а вот отправка ФАЙЛА в мост — новая инфра,
+маленькая, но настоящая новая.
+
+**Как добавить:** `sendDocument` — не JSON, `multipart/form-data`. httpx это
+умеет через `files=`:
+
+```python
+async def _send_document(self, client, chat_id, filename, content_bytes, *, caption=""):
+    response = await client.post(
+        f"{self._api_url}/sendDocument",
+        data={"chat_id": chat_id, "caption": caption[:1024]},
+        files={"document": (filename, content_bytes, "text/plain")},
+    )
+    response.raise_for_status()
+```
+
+Рядом с `_send_message` (`_transport.py`), добавь в `BridgeShared`
+(`_base.py`), как остальные кросс-миксин методы.
+
+**Формат текста:** простой транскрипт — по строке на сообщение, роль +
+время + текст, без HTML/markdown-разметки Telegram (это отдельный файл, не
+чат-сообщение). `get_conversation_messages(conversation_id, user_id=...,
+limit=...)` уже отдаёт всё нужное; для целого разговора подними `limit`
+разумно (не «до бесконечности» — реши сама потолок и скажи явно в тексте
+файла, если обрезала: «показаны последние N сообщений», как это уже принято
+в проекте — молчаливая обрезка запрещена везде, где её ловили).
+
+**Self-service HTTP не обязателен** — эта фича по природе про Telegram
+(получить файл), не про JSON-ответ. Но если хочешь единообразия с
+G16/G17/G18 — `GET /api/conversations/{id}/export` (гейт
+`conversations.read`, тот же паттерн `_resolve_conversation_ref`/`current`
+из G18), отдающий `text/plain` напрямую, а команда в Telegram скачивает его
+и пересылает через `_send_document`. Выбор дизайна — твой, обоснуй коротко в
+коммите.
+
+Telegram: `/export` (текущий разговор, sentinel `current` как у G18).
+`BOT_COMMANDS`, `/help`, `tests/test_bridge_surface.py`
+(`EXPECTED_COMMANDS`/`EXPECTED_BRIDGE_COUNT`, и `_send_document` — новый
+кросс-миксин метод, значит новая строка в `BridgeShared`).
+
+Тест: self-service (чужой разговор — 404); файл содержит все ожидаемые
+реплики в порядке created_at; мутация — убрать вызов `_send_document` из
+обработчика команды, тест обязан покраснеть, поймав отсутствие вызова (не
+проверяй байты файла через реальный HTTP к Telegram — мокай клиента, как
+везде в этом файле).
+
+---
+
 # G19: посмотреть и снять предстоящее напоминание — **сделано**
 
 Из того же исследования: у мейнстримных ассистентов можно посмотреть список
