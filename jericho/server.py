@@ -1196,6 +1196,38 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         state.storage.update_user(actor.user_id, metadata_json=metadata)
         return {"custom_instructions": text}
 
+    # Поиск по своей переписке (не knowledge_objects). Self-service контур как
+    # /api/me/instructions: chat.use, только actor.user_id, без foreign user_id.
+    @application.get("/api/me/messages/search", tags=["chat"])
+    async def search_my_messages(
+        request: Request,
+        q: str = Query("", max_length=2000),
+        limit: int = Query(20, ge=1, le=100),
+        conversation_id: str | None = Query(None, max_length=128),
+    ) -> dict[str, Any]:
+        actor = _require(request, "chat.use")
+        state = request.app.state
+        rows = state.storage.search_messages(
+            actor.user_id,
+            q,
+            limit=limit,
+            conversation_id=conversation_id,
+        )
+        return {
+            "count": len(rows),
+            "query": " ".join((q or "").split()).strip(),
+            "results": [
+                {
+                    "id": str(row.get("id") or ""),
+                    "conversation_id": str(row.get("conversation_id") or ""),
+                    "role": str(row.get("role") or ""),
+                    "content": str(row.get("content") or ""),
+                    "created_at": row.get("created_at"),
+                }
+                for row in rows
+            ],
+        }
+
     # «Ещё раз» для последнего вопроса человека: тот же self-service контур, что
     # /api/me/instructions (chat.use, только свой аккаунт). Хранилище не умеет
     # ветвление ответов — agent.chat допишет новый user+assistant ход с тем же

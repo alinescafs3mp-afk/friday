@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### G16: поиск по истории переписки (#64)
+
+messages_fts (schema 20) + триггеры по образцу knowledge_fts. Storage
+search_messages(user_id, query, conversation_id=...) — tenant только через
+user_id. Инструмент агента message_search, self-service
+GET /api/me/messages/search, Telegram /history. Чужая переписка не
+видна даже owner-актору с чужим user_id. DELETE синхронизирует FTS.
+
+Тесты: 	ests/test_message_history_search.py.
+
+
 ### G15: «ещё раз» — regenerate последнего user-хода (#62)
 
 POST /api/me/regenerate (self-service, chat.use): резолв conversation_id как

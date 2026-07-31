@@ -276,6 +276,10 @@ class CoreMixin(StorageShared):
             conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_fts'").fetchone()
             is not None
         )
+        messages_fts_preexisting = (
+            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'").fetchone()
+            is not None
+        )
         # Create/recognize tables first, then add legacy columns, and only then
         # create indexes that reference those columns. Keep this core migration in
         # one explicit transaction: sqlite3's executescript() commits an existing
@@ -337,6 +341,17 @@ class CoreMixin(StorageShared):
             raw_count = conn.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0]
             if raw_count and (not raw_fts_preexisting or fts_unverified):
                 conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('rebuild')")
+            # Same contract for chat history: messages predate messages_fts on any
+            # schema < 20, so an empty external-content index must rebuild once.
+            messages_count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            if messages_count and (not messages_fts_preexisting or fts_unverified):
+                conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+            elif messages_fts_preexisting and previous_schema_version != str(SCHEMA_VERSION):
+                try:
+                    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+                except sqlite3.DatabaseError:
+                    LOGGER.warning("Rebuilding an inconsistent messages FTS index")
+                    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
             # The vocabulary view, in its own try: losing spelling repair on an
             # SQLite without `fts5vocab` is a degradation, losing full-text search
             # with it would be an outage.

@@ -13,8 +13,10 @@ from jericho.storage._base import (
     json,
     new_id,
     normalize_conversation_mode,
+    sqlite3,
     utc_now,
 )
+from jericho.storage._knowledge import _fts_terms
 
 
 class ConversationsMixin(StorageShared):
@@ -205,6 +207,70 @@ class ConversationsMixin(StorageShared):
             (message_id, user_id),
         ).fetchone()
         return dict(row) if row else None
+
+    def search_messages(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int = 20,
+        conversation_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Full-text search over the caller's own chat history.
+
+        Tenant boundary is ``user_id`` alone: another user's messages are never
+        visible, even to an owner actor. Conversation scoping is optional and
+        still requires the row to belong to ``user_id`` — filtering by a foreign
+        conversation id simply returns nothing.
+        """
+        text = " ".join((query or "").split()).strip()
+        if not text:
+            return []
+        window = max(1, min(int(limit), 200))
+        conv = " ".join(str(conversation_id or "").split()).strip() or None
+        rows: list[sqlite3.Row] = []
+        terms = _fts_terms(text)
+        if self._fts_available and terms:
+            match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+            try:
+                if conv is not None:
+                    rows = self.execute(
+                        """SELECT m.*, bm25(messages_fts) AS _rank
+                           FROM messages_fts
+                           JOIN messages m ON m.rowid=messages_fts.rowid
+                           WHERE m.user_id=? AND m.conversation_id=? AND messages_fts MATCH ?
+                           ORDER BY _rank ASC, m.created_at DESC LIMIT ?""",
+                        (user_id, conv, match_query, window),
+                    ).fetchall()
+                else:
+                    rows = self.execute(
+                        """SELECT m.*, bm25(messages_fts) AS _rank
+                           FROM messages_fts
+                           JOIN messages m ON m.rowid=messages_fts.rowid
+                           WHERE m.user_id=? AND messages_fts MATCH ?
+                           ORDER BY _rank ASC, m.created_at DESC LIMIT ?""",
+                        (user_id, match_query, window),
+                    ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+        if not rows:
+            escaped = text.replace("%", r"\%").replace("_", r"\_")
+            like = f"%{escaped}%"
+            if conv is not None:
+                rows = self.execute(
+                    """SELECT * FROM messages
+                       WHERE user_id=? AND conversation_id=? AND content LIKE ? ESCAPE '\\'
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (user_id, conv, like, window),
+                ).fetchall()
+            else:
+                rows = self.execute(
+                    """SELECT * FROM messages
+                       WHERE user_id=? AND content LIKE ? ESCAPE '\\'
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (user_id, like, window),
+                ).fetchall()
+        return [dict(row) for row in rows]
 
     def count_conversations(self, user_id: str, *, include_archived: bool = False) -> int:
         """Total, so a truncated page can say it is truncated."""

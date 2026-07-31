@@ -459,6 +459,55 @@ class ViewsMixin(BridgeShared):
             lines.append(f"• {title} ({kind}{marker})")
         return "\n".join(lines)
 
+    async def _send_history(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+        query: str,
+    ) -> None:
+        # Search chat history (messages FTS), not knowledge_objects. Self-service
+        # GET /api/me/messages/search — only the acting user's own user_id.
+        if not query:
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Использование: /history запрос — поиск по истории переписки",
+            )
+            return
+        data = await self._backend_json(
+            backend,
+            "GET",
+            f"/api/me/messages/search?q={quote(query, safe='')}&limit=8",
+            {"telegram_user": telegram_user},
+            external_user_id,
+            str(chat_id),
+        )
+        results = data.get("results") if isinstance(data.get("results"), list) else []
+        if not results:
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"В переписке по запросу «{query}» ничего не нашлось.",
+            )
+            return
+        lines = [f"В переписке по запросу «{query}»:"]
+        for position, item in enumerate(results, start=1):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "?")
+            when = str(item.get("created_at") or "")[:19]
+            body = str(item.get("content") or "").strip().replace("\n", " ")
+            head = f"{position}. [{role}]"
+            if when:
+                head = f"{head} {when}"
+            lines.append(head)
+            if body:
+                lines.append(f"  {body[:200]}")
+        await self._send_message(telegram, chat_id, "\n".join(lines))
+
     async def _send_search(
         self,
         telegram: httpx.AsyncClient,

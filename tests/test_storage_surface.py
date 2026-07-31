@@ -88,7 +88,8 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 253 → 255: find_entities_by_normalized_names + iter_entities снимают потолок
 # полного списка для точного сопоставления и token-overlap обхода.
 # 255 → 256: list_entities_knowledge_refs пакетирует проекции текущего фронта BFS.
-EXPECTED_MEMBER_COUNT = 258
+# 258 → 259: search_messages — FTS по истории переписки (G16 / schema 20).
+EXPECTED_MEMBER_COUNT = 259
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -263,6 +264,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "revoke_api_token": "(self, token_id: 'str', *, user_id: 'str | None' = None) -> 'bool'",
     "search_raw_objects": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
     "search_knowledge": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
+    "search_messages": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, conversation_id: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "set_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str', conversation_id: 'str', *, mode: 'str | None' = None) -> 'None'",
     "set_channel_mode": "(self, user_id: 'str', channel: 'str', channel_id: 'str', mode: 'str') -> 'dict[str, Any] | None'",
     "set_conversation_archived": "(self, conversation_id: 'str', user_id: 'str', archived: 'bool') -> 'dict[str, Any] | None'",

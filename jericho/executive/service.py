@@ -67,6 +67,7 @@ _STALE_RUNNING_SECONDS = 3600
 GATHER_TOOLS = frozenset(
     {
         "memory_search",
+        "message_search",
         "entity_lookup",
         "kg_stats",
         "inbox_list",

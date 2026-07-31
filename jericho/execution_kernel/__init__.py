@@ -438,6 +438,7 @@ class ExecutionKernel:
         self.searcher = searcher
         handlers: dict[str, Handler] = {
             "memory_search": self._memory_search,
+            "message_search": self._message_search,
             "memory_save": self._memory_save,
             "web_search": self._web_search,
             "web_fetch": self._web_fetch,
@@ -775,6 +776,45 @@ class ExecutionKernel:
             payload["filtered_out"] = dropped
         payload["results"] = results
         return payload
+
+    async def _message_search(
+        self,
+        *,
+        actor: ActorContext,
+        query: str,
+        limit: int = 10,
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Search the caller's own chat history — not the knowledge base.
+
+        ``memory_search`` only sees confirmed knowledge_objects. People ask
+        «что я спрашивал про X» and expect the conversation, so this tool
+        hits ``messages`` (FTS) under the same tenant as every other self-path.
+        """
+        storage = self.storage
+        if storage is None:
+            raise RuntimeError("Execution kernel storage is not initialized")
+        limit = max(1, min(int(limit), 50))
+        conv = " ".join(str(conversation_id or "").split()).strip() or None
+        rows = storage.search_messages(
+            actor.user_id,
+            query,
+            limit=limit,
+            conversation_id=conv,
+        )
+        results = [
+            {
+                "id": str(row.get("id") or ""),
+                "conversation_id": str(row.get("conversation_id") or ""),
+                "role": str(row.get("role") or ""),
+                "created_at": row.get("created_at"),
+                "excerpt": best_snippet(
+                    query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS
+                ),
+            }
+            for row in rows
+        ]
+        return {"count": len(results), "query": query, "results": results}
 
     async def _memory_save(
         self,
@@ -1446,6 +1486,23 @@ class ExecutionKernel:
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                 "since": {"type": "string", "description": "ГГГГ-ММ-ДД, начало периода"},
                 "until": {"type": "string", "description": "ГГГГ-ММ-ДД, конец периода"},
+            },
+            ["query"],
+        )
+        spec(
+            "message_search",
+            "Поиск по ИСТОРИИ ПЕРЕПИСКИ этого пользователя, а не по базе знаний. "
+            "Используй, когда человек спрашивает, что он уже писал или спрашивал, "
+            "а не что сохранено как заметка. memory_search — про знания; этот — "
+            "про сообщения. conversation_id сужает до одного разговора.",
+            "search.use",
+            {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                "conversation_id": {
+                    "type": "string",
+                    "description": "опционально: искать только в этом разговоре",
+                },
             },
             ["query"],
         )

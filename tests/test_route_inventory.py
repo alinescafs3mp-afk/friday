@@ -42,7 +42,8 @@ from jericho.server import create_app
 # chat.use, действует только на свой user_id.
 # 161 → 162: POST /api/me/regenerate — «ещё раз» для последнего user-хода
 # (Telegram /retry); self-service, chat.use, только свой conversation_id.
-EXPECTED_OPERATIONS = 162
+# 162 → 163: GET /api/me/messages/search — FTS по истории переписки (G16).
+EXPECTED_OPERATIONS = 163
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

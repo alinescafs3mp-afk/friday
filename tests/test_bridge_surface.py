@@ -226,6 +226,7 @@ EXPECTED_COMMANDS = {
     "/chat",
     "/conflicts",
     "/help",
+    "/history",
     "/inbox",
     "/instructions",
     "/merges",
@@ -251,7 +252,8 @@ EXPECTED_COMMANDS = {
 # +_notify_backend_recovered, +_retire_markup_family, +_send_conflicts,
 # +_signer_chat_id, +_timeline_reply_markup, +_warn_owner_if_backend_down).
 # 49: /retry — команда «ещё раз» (G15), без новых методов на TelegramBridge.
-EXPECTED_BRIDGE_COUNT = 49
+# 49 → 50: /history — поиск по переписке (G16), +_send_history.
+EXPECTED_BRIDGE_COUNT = 50
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -287,6 +289,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_select_media": "(message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'tuple[dict[str, Any] | None, str, str, str]'",
     "_send_browse": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_conflicts": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
+    "_send_history": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_message": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, reply_markup: 'dict[str, Any] | None' = None) -> 'None'",

@@ -243,6 +243,7 @@ class CommandsMixin(BridgeShared):
                 "/tags — теги базы знаний с количеством записей\n"
                 "/browse тег или название — записи по тегу, проекту или сущности\n"
                 "/search запрос — найти записи по смыслу, без ответа модели\n"
+                "/history запрос — найти реплики в истории переписки\n"
                 "/status — состояние базы\n"
                 "/why — почему был такой ответ\n"
                 "/new — начать новый диалог\n"
@@ -364,6 +365,10 @@ class CommandsMixin(BridgeShared):
         if command == "/search":
             query = argument
             await self._send_search(telegram, backend, chat_id, external_user_id, user, query)
+            return
+        if command == "/history":
+            query = argument
+            await self._send_history(telegram, backend, chat_id, external_user_id, user, query)
             return
         if command == "/timeline":
             # Хроника архива в чате. Стала возможна только теперь: до появления

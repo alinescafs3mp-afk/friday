@@ -61,7 +61,11 @@ def test_a_crash_before_the_fts_build_heals_on_the_next_open(settings, tmp_path)
     # auto-committed) but empty (the rebuild never committed), schema marker
     # untouched and current.
     raw_connection = sqlite3.connect(database)
-    raw_connection.executescript("DROP TABLE IF EXISTS knowledge_fts;\nDROP TABLE IF EXISTS raw_fts;\n")
+    raw_connection.executescript(
+        "DROP TABLE IF EXISTS knowledge_fts;\n"
+        "DROP TABLE IF EXISTS raw_fts;\n"
+        "DROP TABLE IF EXISTS messages_fts;\n"
+    )
     from jericho.storage._base import FTS_SCHEMA
 
     raw_connection.executescript(FTS_SCHEMA)
