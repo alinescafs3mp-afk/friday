@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### G17: гонка и вложения в /regenerate (#65)
+
+G17a: idempotency_claim на regenerate:{conversation_id}:{message_id}, lease 90с;
+in_progress/conflict → 409, complete → replay, после успеха — idempotency_complete.
+G17b: AgentRuntime.chat пишет had_attachments в metadata user-хода; regenerate
+ставит regenerate_notice (+ grounding_warning) если метка есть; Telegram
+_format_response_message показывает notice.
+
+Тесты: test_concurrent_regenerate_does_not_call_agent_twice,
+test_regenerate_warns_when_original_turn_had_attachments,
+test_agent_chat_records_had_attachments_on_user_message.
+
 ### G16: поиск по истории переписки (#64)
 
 messages_fts (schema 20) + триггеры по образцу knowledge_fts. Storage

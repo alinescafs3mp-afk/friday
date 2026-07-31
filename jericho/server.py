@@ -1231,7 +1231,9 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
     # «Ещё раз» для последнего вопроса человека: тот же self-service контур, что
     # /api/me/instructions (chat.use, только свой аккаунт). Хранилище не умеет
     # ветвление ответов — agent.chat допишет новый user+assistant ход с тем же
-    # текстом; вложения первого хода не переотправляются (осознанное упрощение G15).
+    # текстом; вложения первого хода не переотправляются (осознанное упрощение G15),
+    # но если у исходного хода они были — в ответе явная пометка (G17b).
+    # Гонка двух /regenerate закрыта idempotency_claim по разговору+user-ходу (G17a).
     @application.post("/api/me/regenerate", tags=["chat"])
     async def regenerate_last_turn(request: Request) -> dict[str, Any]:
         actor = _require(request, "chat.use")
@@ -1280,26 +1282,74 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 status_code=400,
                 detail="В разговоре нет вопроса для повтора",
             )
-        result = await state.agent.chat(
+        last_meta = _json_load(last_user.get("metadata_json"), {})
+        had_attachments = bool(last_meta.get("had_attachments"))
+        # Ключ включает id user-хода: concurrent double-tap на ОДИН ход дедупится,
+        # а повторный /regenerate после успешного (новый user-ряд с новым id) — нет.
+        request_key = f"regenerate:{conversation_id}:{last_user.get('id') or ''}"
+        claim = state.storage.idempotency_claim(
             actor.user_id,
-            message,
-            actor=actor,
-            conversation_id=conversation_id,
-            attachments=[],
-            enable_tools=True,
-            kg=state.kg,
-            hybrid_searcher=state.hybrid_searcher,
-            ingestion_result=None,
+            request_key,
+            lease_seconds=90,
         )
-        if actor.source == "telegram-bridge" and channel_chat_id:
-            state.storage.set_channel_conversation(
-                actor.user_id,
-                "telegram",
-                str(channel_chat_id),
-                result["conversation_id"],
-                mode=str(result.get("context", {}).get("interaction_mode") or "dialogue"),
+        if claim["status"] == "replay":
+            cached = claim.get("response") or {}
+            return {**cached, "idempotent_replay": True}
+        if claim["status"] == "conflict":
+            raise HTTPException(
+                status_code=409,
+                detail="regenerate already bound to a different request",
             )
-        return result
+        if claim["status"] == "in_progress":
+            raise HTTPException(
+                status_code=409,
+                detail="Этот ответ уже перегенерируется",
+                headers={"Retry-After": "2"},
+            )
+        lease_token = str(claim.get("lease_token") or "")
+        try:
+            result = await state.agent.chat(
+                actor.user_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+                attachments=[],
+                enable_tools=True,
+                kg=state.kg,
+                hybrid_searcher=state.hybrid_searcher,
+                ingestion_result=None,
+            )
+            if had_attachments:
+                # Вложения не переигрываются: transient-файлы физически негде
+                # взять, а документ без подписи дал бы «Загружен документ» без
+                # байтов. Сказать об этом явно — иначе «ещё раз» выглядит как
+                # полноценный переответ на том же основании.
+                notice = (
+                    "Ответ восстановлен без исходного вложения — модель не видит "
+                    "файл, на котором строился первый ответ. Пришлите вложение "
+                    "заново, если оно нужно для ответа."
+                )
+                result = {**result, "regenerate_notice": notice}
+                # Как grounding_warning: Telegram ставит оговорку ПЕРЕД текстом.
+                if not str(result.get("grounding_warning") or "").strip():
+                    result["grounding_warning"] = notice
+            if actor.source == "telegram-bridge" and channel_chat_id:
+                state.storage.set_channel_conversation(
+                    actor.user_id,
+                    "telegram",
+                    str(channel_chat_id),
+                    result["conversation_id"],
+                    mode=str(result.get("context", {}).get("interaction_mode") or "dialogue"),
+                )
+            if not state.storage.idempotency_complete(
+                actor.user_id, request_key, lease_token, result
+            ):
+                raise RuntimeError("Lost regenerate idempotency lease before response commit")
+            return result
+        except BaseException:
+            if lease_token:
+                state.storage.idempotency_release(actor.user_id, request_key, lease_token)
+            raise
 
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:

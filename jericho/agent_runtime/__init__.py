@@ -463,7 +463,23 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
-        self.storage.store_message(conversation_id, user_id, "user", clean_message)
+        # Fact-only marker for /regenerate: file bytes are not re-sent, but the
+        # endpoint must still know the original turn had attachments so it can
+        # warn instead of silently answering without the evidence.
+        attachment_list = list(attachments or [])
+        user_metadata: dict[str, Any] | None = None
+        if attachment_list:
+            user_metadata = {
+                "had_attachments": True,
+                "attachment_count": len(attachment_list),
+            }
+        self.storage.store_message(
+            conversation_id,
+            user_id,
+            "user",
+            clean_message,
+            metadata=user_metadata,
+        )
         context = await self._prepare_context(
             user_id,
             clean_message,

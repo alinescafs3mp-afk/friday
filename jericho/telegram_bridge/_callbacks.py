@@ -393,6 +393,12 @@ class CallbacksMixin(BridgeShared):
         warning = str(response.get("grounding_warning") or "").strip()
         if warning:
             body = f"{warning}\n\n{body}"
+        # G17b: /regenerate without the original attachment — same slot as
+        # grounding_warning (before the answer). Prefer regenerate_notice when
+        # both exist so a model-side grounding line does not hide the file loss.
+        regen_notice = str(response.get("regenerate_notice") or "").strip()
+        if regen_notice and regen_notice != warning:
+            body = f"{regen_notice}\n\n{body}"
         fate = _file_fate_line(response.get("file_ingestion"))
         if fate:
             body = f"{body}\n\n{fate}"
