@@ -26,7 +26,7 @@ async def upload_file(
     actor = _require(request, "files.upload")
     content = await file.read(request.app.state.settings.max_upload_bytes + 1)
     if len(content) > request.app.state.settings.max_upload_bytes:
-        raise HTTPException(status_code=413, detail="File is too large")
+        raise HTTPException(status_code=413, detail="Файл слишком большой")
     result = await request.app.state.ingestion.ingest_file(
         actor.user_id,
         None,
@@ -73,7 +73,7 @@ async def download_file(raw_id: str, request: Request):
     state = request.app.state
     raw = state.storage.get_raw_object(raw_id, actor.user_id)
     if not raw or raw.get("content_type") != "file" or raw.get("deleted_at"):
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     metadata = _json_load(raw.get("metadata_json"), {})
     path = _safe_owned_file(state.settings.files_dir, str(metadata.get("stored_path") or ""))
     # File bytes leaving the system are always audited.

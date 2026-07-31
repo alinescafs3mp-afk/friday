@@ -151,7 +151,7 @@ def test_an_unknown_entity_type_is_refused_by_name(instance):
         headers=owner,
     )
     assert response.status_code == 400
-    assert "Unknown entity_type" in response.text
+    assert "Неизвестный entity_type" in response.text
 
 
 def test_confirming_is_written_to_the_audit_log(instance):

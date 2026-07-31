@@ -108,7 +108,7 @@ async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "knowledge.read")
     item = request.app.state.storage.get_knowledge_object(knowledge_id, actor.user_id)
     if not item:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     return {
         "item": item,
         "versions": request.app.state.storage.list_knowledge_versions(knowledge_id, actor.user_id),
@@ -127,7 +127,7 @@ async def update_knowledge(knowledge_id: str, request: Request) -> dict[str, Any
     state = request.app.state
     before = state.storage.get_knowledge_object(knowledge_id, actor.user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     allowed = {
         "title",
         "summary",
@@ -153,7 +153,7 @@ async def delete_knowledge(knowledge_id: str, request: Request) -> dict[str, Any
     state = request.app.state
     before = state.storage.get_knowledge_object(knowledge_id, actor.user_id)
     if not before or not state.storage.soft_delete_knowledge_object(knowledge_id, actor.user_id):
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     after = state.storage.get_knowledge_object(knowledge_id, actor.user_id)
     _audit(request, "knowledge.delete", "knowledge_object", knowledge_id, before=before, after=after)
     return {"status": "soft_deleted"}

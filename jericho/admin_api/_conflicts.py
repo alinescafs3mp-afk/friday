@@ -72,12 +72,12 @@ async def bulk_review_conflicts(request: Request) -> dict[str, Any]:
     status = str(body.get("status") or "").casefold()
     conflict_ids = body.get("conflict_ids")
     if status not in {"confirmed", "dismissed", "resolved"}:
-        raise HTTPException(status_code=400, detail="Invalid conflict review status")
+        raise HTTPException(status_code=400, detail="Недопустимый статус проверки конфликта")
     if not isinstance(conflict_ids, list) or not conflict_ids:
-        raise HTTPException(status_code=400, detail="conflict_ids must be a non-empty list")
+        raise HTTPException(status_code=400, detail="conflict_ids должен быть непустым списком")
     unique_ids = list(dict.fromkeys(str(item) for item in conflict_ids if str(item).strip()))
     if len(unique_ids) > 200:
-        raise HTTPException(status_code=400, detail="At most 200 conflicts may be reviewed")
+        raise HTTPException(status_code=400, detail="За раз можно разобрать не больше 200 конфликтов")
     resolution_note = str(body.get("resolution_note") or "")[:1000]
 
     changed: list[dict[str, Any]] = []
@@ -131,7 +131,7 @@ async def review_conflict(conflict_id: str, request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
-        raise HTTPException(status_code=404, detail="Knowledge conflict not found")
+        raise HTTPException(status_code=404, detail="Конфликт знаний не найден")
     _audit(request, f"admin.knowledge_conflict.{status}", "knowledge_conflict", conflict_id, after=result)
     return {"item": result}
 
@@ -143,7 +143,7 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
     user_id = str(body.get("user_id") or "")
     winner_id = str(body.get("winner_id") or "")
     if not winner_id:
-        raise HTTPException(status_code=400, detail="winner_id is required")
+        raise HTTPException(status_code=400, detail="Нужен winner_id")
     try:
         result = _services(request).kg.resolve_conflict(
             user_id,
@@ -155,7 +155,7 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
-        raise HTTPException(status_code=404, detail="Knowledge conflict not found")
+        raise HTTPException(status_code=404, detail="Конфликт знаний не найден")
     _audit(request, "admin.knowledge_conflict.resolve", "knowledge_conflict", conflict_id, after=result)
     return {"item": result}
 
@@ -167,7 +167,7 @@ async def list_resolutions(request: Request, user_id: str, status: str | None = 
     try:
         status_enum = ResolutionStatus(status) if status else None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid resolution status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус объединения") from exc
     state = _services(request)
     items = state.storage.list_resolution_candidates(user_id, status_enum)
     enriched: list[dict[str, Any]] = []
@@ -193,7 +193,7 @@ async def detect_knowledge_duplicates(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     target = _target_user(request, str(body.get("user_id") or "") or None)
     if not _services(request).storage.get_user(target):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     from jericho.dedup import detect_near_duplicates
 
     state = _services(request)
@@ -215,7 +215,7 @@ async def detect_resolutions(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
     if not _services(request).storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     # Off the event loop, like the knowledge-duplicate route beside it. This one was
     # synchronous inside an `async def`: on a large graph a manual scan froze every
     # other request for the duration — measured at 137 s for 2000 entities.
@@ -260,7 +260,7 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
         resolved_by=request.state.actor.user_id,
     )
     if not ok:
-        raise HTTPException(status_code=404, detail="Resolution candidate not found")
+        raise HTTPException(status_code=404, detail="Кандидат на объединение не найден")
     _audit(request, "admin.entity.merge_rejected", "resolution", candidate_id)
     return {"status": "rejected"}
 
@@ -283,7 +283,7 @@ async def undo_admin_merge(merge_id: str, request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
     if not _services(request).storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     try:
         result = _services(request).kg.resolver.unmerge(
             user_id,

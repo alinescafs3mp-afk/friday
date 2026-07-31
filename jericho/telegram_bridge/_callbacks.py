@@ -306,6 +306,29 @@ class CallbacksMixin(BridgeShared):
             LOGGER.debug("Could not edit Telegram inline keyboard", exc_info=True)
 
     @staticmethod
+    def _citation_open_buttons(citations: Any) -> list[dict[str, str]]:
+        """Кнопки «открыть источник» из легенды ответа.
+
+        Легенда `📎 Источники` показывала метки и заголовки, но из ответа чата
+        до самого документа пути не было — кнопки `doc:show` жили только у
+        `/search` и `/browse`. Тот же callback уже умеет открыть запись целиком.
+        """
+        if not isinstance(citations, list):
+            return []
+        buttons: list[dict[str, str]] = []
+        for item in citations:
+            if not isinstance(item, dict):
+                continue
+            knowledge_id = str(item.get("knowledge_id") or "")
+            if not knowledge_id or not CALLBACK_TARGET_RE.fullmatch(knowledge_id):
+                continue
+            label = str(item.get("label") or "").strip()
+            text = label if label else str(len(buttons) + 1)
+            # Telegram: 64 байта на callback_data; ko_<hex> + префикс укладываются.
+            buttons.append({"text": text, "callback_data": f"doc:show:{knowledge_id}"})
+        return buttons
+
+    @staticmethod
     def _response_reply_markup(response: dict[str, Any]) -> dict[str, Any] | None:
         message_id = str(response.get("message_id") or "")
         if not message_id:
@@ -321,6 +344,11 @@ class CallbacksMixin(BridgeShared):
         if isinstance(citations, list) and citations:
             row.append({"text": "🔎 Поиск мимо", "callback_data": f"feedback:search_off:{message_id}"})
         keyboard: list[list[dict[str, str]]] = [row]
+        source_buttons = CallbacksMixin._citation_open_buttons(citations)
+        # По четыре в ряд — как у поиска и хроники: восемь «K#» в одну строку
+        # Telegram сжимает в нечитаемое.
+        for index in range(0, len(source_buttons), 4):
+            keyboard.append(source_buttons[index : index + 4])
         raw_context = response.get("context")
         context: dict[str, Any] = dict(raw_context) if isinstance(raw_context, dict) else {}
         interaction_mode = str(context.get("interaction_mode") or "")
@@ -370,6 +398,10 @@ class CallbacksMixin(BridgeShared):
         legend = str(response.get("citation_notice") or "").strip()
         if legend:
             body = f"{body}\n\n{legend}"
+            # Кнопки doc:show висят под ответом; без этой строки человек не знает,
+            # что метки [K#] в легенде — не просто подпись, а то, что можно открыть.
+            if CallbacksMixin._citation_open_buttons(response.get("citations")):
+                body = f"{body}\nКнопкой ниже — открыть источник целиком."
         return body
 
     async def _answer_callback(

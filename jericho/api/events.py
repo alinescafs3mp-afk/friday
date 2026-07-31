@@ -46,7 +46,7 @@ async def record_bridge_event(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     event_type = str(body.get("event_type") or "").strip()
     if event_type not in BRIDGE_EVENT_TYPES:
-        raise HTTPException(status_code=400, detail="Unknown bridge event type")
+        raise HTTPException(status_code=400, detail="Неизвестный тип события моста")
 
     raw_payload = body.get("payload")
     payload: dict[str, Any] = {}

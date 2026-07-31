@@ -988,11 +988,11 @@ def test_admin_api_rejects_malformed_and_non_object_json_with_400(settings):
     with TestClient(app) as client:
         malformed = client.post("/api/admin/lifecycle/deprecate", content=b"{", headers=headers)
         assert malformed.status_code == 400
-        assert malformed.json()["detail"] == "Request body must be valid JSON"
+        assert malformed.json()["detail"] == "Тело запроса должно быть корректным JSON"
 
         non_object = client.post("/api/admin/lifecycle/deprecate", json=[], headers=headers)
         assert non_object.status_code == 400
-        assert non_object.json()["detail"] == "JSON body must be an object"
+        assert non_object.json()["detail"] == "JSON-тело должно быть объектом"
 
 
 @pytest.mark.parametrize(
@@ -1003,32 +1003,32 @@ def test_admin_api_rejects_malformed_and_non_object_json_with_400(settings):
             # `ids` is required now; without it the route rejects on that first and
             # this case would stop testing scalar validation at all.
             {"user_id": "owner", "ids": ["ko_x"], "days_threshold": "not-a-number"},
-            "days_threshold must be an integer",
+            "days_threshold: нужно целое число",
         ),
         (
             "/api/admin/inbox/missing/classify",
             {"user_id": "owner", "importance": "NaN"},
-            "importance must be finite",
+            "importance: нужно конечное число",
         ),
         (
             "/api/admin/inbox/missing/classify",
             {"user_id": "owner", "importance": 1.5},
-            "importance must be between 0 and 1",
+            "importance: значение от 0 до 1",
         ),
         (
             "/api/admin/inbox/missing/classify",
             {"user_id": "owner", "promote": "false"},
-            "promote must be a boolean",
+            "promote: нужно логическое значение",
         ),
         (
             "/api/admin/knowledge/missing/entity-links",
             {"user_id": "owner", "entity_id": "missing", "confidence": "NaN"},
-            "confidence must be finite",
+            "confidence: нужно конечное число",
         ),
         (
             "/api/admin/knowledge/missing/entity-links",
             {"user_id": "owner", "entity_id": "missing", "status": "invented"},
-            "status must be suggested, accepted, or rejected",
+            "status должен быть suggested, accepted или rejected",
         ),
     ],
 )
@@ -1057,7 +1057,7 @@ def test_public_api_rejects_ambiguous_booleans_and_nonfinite_or_out_of_range_num
             headers=headers,
         )
         assert invalid_chat.status_code == 400
-        assert invalid_chat.json()["detail"] == "force_knowledge must be a boolean"
+        assert invalid_chat.json()["detail"] == "force_knowledge: нужно логическое значение"
 
         invalid_tools = client.post(
             "/api/chat",
@@ -1065,7 +1065,7 @@ def test_public_api_rejects_ambiguous_booleans_and_nonfinite_or_out_of_range_num
             headers=headers,
         )
         assert invalid_tools.status_code == 400
-        assert invalid_tools.json()["detail"] == "enable_tools must be a boolean"
+        assert invalid_tools.json()["detail"] == "enable_tools: нужно логическое значение"
 
         invalid_ingest = client.post(
             "/api/ingest",
@@ -1080,7 +1080,7 @@ def test_public_api_rejects_ambiguous_booleans_and_nonfinite_or_out_of_range_num
             headers={**headers, "Content-Type": "application/json"},
         )
         assert nan_feedback.status_code == 400
-        assert nan_feedback.json()["detail"] == "score must be finite"
+        assert nan_feedback.json()["detail"] == "score: нужно конечное число"
 
         out_of_range_feedback = client.post(
             "/api/feedback",

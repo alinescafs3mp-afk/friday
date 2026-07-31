@@ -37,9 +37,9 @@ async def _request_json(request: Request) -> dict[str, Any]:
     try:
         body = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
+        raise HTTPException(status_code=400, detail="Тело запроса должно быть корректным JSON") from exc
     if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
+        raise HTTPException(status_code=400, detail="JSON-тело должно быть объектом")
     request.state.json_body = body
     return body
 
@@ -50,7 +50,7 @@ def _parse_json_bool(value: Any, *, field: str, default: bool) -> bool:
     if value is None:
         return default
     if not isinstance(value, bool):
-        raise HTTPException(status_code=400, detail=f"{field} must be a boolean")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно логическое значение")
     return value
 
 
@@ -67,17 +67,17 @@ def _parse_json_float(
     if value is None:
         return default
     if isinstance(value, bool):
-        raise HTTPException(status_code=400, detail=f"{field} must be a number")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно число")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be a number") from exc
+        raise HTTPException(status_code=400, detail=f"{field}: нужно число") from exc
     if not math.isfinite(parsed):
-        raise HTTPException(status_code=400, detail=f"{field} must be finite")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно конечное число")
     if not minimum <= parsed <= maximum:
         raise HTTPException(
             status_code=400,
-            detail=f"{field} must be between {minimum:g} and {maximum:g}",
+            detail=f"{field}: значение от {minimum:g} до {maximum:g}",
         )
     return parsed
 
@@ -117,7 +117,7 @@ def _require_bridge(request: Request) -> ActorContext:
     # the bridge secret. Bearer/loopback actors are refused.
     actor = request.state.actor
     if actor.source != "telegram-bridge":
-        raise HTTPException(status_code=403, detail="Bridge authentication required")
+        raise HTTPException(status_code=403, detail="Требуется аутентификация моста")
     return actor
 
 
@@ -149,11 +149,11 @@ def _safe_owned_file(root: Path, candidate: str) -> Path:
     root = root.resolve()
     text = str(candidate or "")
     if not text:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     given = Path(text)
     path = (root / given).resolve() if not given.is_absolute() else given.resolve()
     if path != root and root not in path.parents:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     return path

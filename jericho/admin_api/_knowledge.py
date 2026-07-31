@@ -242,7 +242,7 @@ async def inspect_knowledge(knowledge_id: str, request: Request, user_id: str) -
     state = _services(request)
     item = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not item:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     _audit_cross_tenant_read(request, "admin.knowledge.inspect", user_id, knowledge_id=knowledge_id)
     raw = state.storage.get_raw_object(item["raw_object_id"], user_id)
     versions = state.storage.list_knowledge_versions(knowledge_id, user_id)
@@ -282,7 +282,7 @@ async def knowledge_diff(
         knowledge_id, user_id, from_version=from_version, to_version=to_version
     )
     if result is None:
-        raise HTTPException(status_code=404, detail="No versions to diff")
+        raise HTTPException(status_code=404, detail="Нет версий для сравнения")
     return result
 
 
@@ -294,7 +294,7 @@ async def reenrich_knowledge(knowledge_id: str, request: Request) -> dict[str, A
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     try:
         result = state.ingestion.reenrich_knowledge(
             user_id,
@@ -326,7 +326,7 @@ async def create_knowledge_entity_link(knowledge_id: str, request: Request) -> d
     entity_id = str(body.get("entity_id") or "")
     status = str(body.get("status") or "accepted")
     if status not in {"suggested", "accepted", "rejected"}:
-        raise HTTPException(status_code=400, detail="status must be suggested, accepted, or rejected")
+        raise HTTPException(status_code=400, detail="status должен быть suggested, accepted или rejected")
     state = _services(request)
     try:
         link = state.kg.link_knowledge_to_entity(
@@ -402,7 +402,7 @@ async def knowledge_entity_mentions(knowledge_id: str, request: Request, user_id
     state = _services(request)
     knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not knowledge or knowledge.get("deleted_at"):
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     links = state.storage.list_knowledge_entity_links(
         user_id, knowledge_object_id=knowledge_id, status="accepted", limit=500
     )
@@ -536,15 +536,15 @@ async def decide_entity_suggestion_group(request: Request) -> dict[str, Any]:
     entity_type = str(body.get("entity_type") or EntityType.OTHER.value).strip()
     document_ids = [str(item) for item in (body.get("knowledge_object_ids") or []) if str(item)]
     if not user_id or not name or not document_ids:
-        raise HTTPException(status_code=400, detail="user_id, name and knowledge_object_ids are required")
+        raise HTTPException(status_code=400, detail="Нужны user_id, name и knowledge_object_ids")
     if decision not in {"accept", "reject"}:
-        raise HTTPException(status_code=400, detail="decision must be accept or reject")
+        raise HTTPException(status_code=400, detail="decision должен быть accept или reject")
     if len(document_ids) > 200:
-        raise HTTPException(status_code=400, detail="at most 200 documents per decision")
+        raise HTTPException(status_code=400, detail="Не больше 200 документов на одно решение")
     try:
         parsed_type = EntityType(entity_type)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Unknown entity_type: {entity_type}") from exc
+        raise HTTPException(status_code=400, detail=f"Неизвестный entity_type: {entity_type}") from exc
 
     state = _services(request)
     entity = state.storage.find_entity_by_name(user_id, name)
@@ -638,7 +638,7 @@ async def list_entity_suggestions(knowledge_id: str, request: Request, user_id: 
     state = _services(request)
     knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not knowledge or knowledge.get("deleted_at"):
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
 
     content = str(knowledge.get("content") or knowledge.get("summary") or "")
     suggestions = await asyncio.to_thread(
@@ -687,16 +687,16 @@ async def accept_entity_suggestion(knowledge_id: str, request: Request) -> dict[
     name = str(body.get("name") or "").strip()
     entity_type = str(body.get("entity_type") or EntityType.OTHER.value).strip()
     if not user_id or not name:
-        raise HTTPException(status_code=400, detail="user_id and name are required")
+        raise HTTPException(status_code=400, detail="Нужны user_id и name")
     try:
         parsed_type = EntityType(entity_type)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Unknown entity_type: {entity_type}") from exc
+        raise HTTPException(status_code=400, detail=f"Неизвестный entity_type: {entity_type}") from exc
 
     state = _services(request)
     knowledge = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not knowledge or knowledge.get("deleted_at"):
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
 
     # Существующий узел переиспользуется: подтверждение одного и того же имени в двух
     # документах не должно плодить двойников, которые потом придётся сливать вручную.
@@ -757,7 +757,7 @@ async def review_knowledge_entity_link(link_id: str, request: Request) -> dict[s
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not link:
-        raise HTTPException(status_code=404, detail="Knowledge/entity link not found")
+        raise HTTPException(status_code=404, detail="Связь знания с сущностью не найдена")
     _audit(
         request,
         "admin.knowledge.entity_link.review",
@@ -792,7 +792,7 @@ async def update_knowledge(knowledge_id: str, request: Request) -> dict[str, Any
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, target)
     if not before:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     allowed = {
         "title",
         "summary",
@@ -842,11 +842,11 @@ async def restore_knowledge_version(knowledge_id: str, request: Request) -> dict
     try:
         version = int(str(body.get("version")))
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="version must be an integer") from exc
+        raise HTTPException(status_code=400, detail="version должен быть целым числом") from exc
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, target)
     if not before:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     actor = getattr(request.state, "actor", None)
     try:
         after = state.storage.restore_knowledge_version(
@@ -873,7 +873,7 @@ async def delete_knowledge(knowledge_id: str, request: Request, user_id: str) ->
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not before or not state.storage.soft_delete_knowledge_object(knowledge_id, user_id):
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     after = state.storage.get_knowledge_object(knowledge_id, user_id)
     _audit(
         request,
@@ -908,7 +908,7 @@ async def purge_knowledge_endpoint(knowledge_id: str, request: Request, user_id:
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="Knowledge object not found")
+        raise HTTPException(status_code=404, detail="Объект знания не найден")
     try:
         report = purge_knowledge(state.storage, state.settings, state.memory_vault, knowledge_id, user_id)
     except ValueError as exc:

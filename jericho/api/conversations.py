@@ -24,7 +24,7 @@ async def reset_channel_conversation(request: Request) -> dict[str, Any]:
     channel = str(body.get("channel") or ("telegram" if actor.source == "telegram-bridge" else "api"))
     channel_id = str(body.get("channel_id") or getattr(request.state, "bridge_chat_id", ""))
     if not channel_id:
-        raise HTTPException(status_code=400, detail="channel_id is required")
+        raise HTTPException(status_code=400, detail="Нужен channel_id")
     cleared = request.app.state.storage.clear_channel_conversation(actor.user_id, channel, channel_id)
     return {"status": "reset", "cleared": cleared}
 
@@ -50,17 +50,17 @@ async def channel_answer_diagnostics(
     resolved_channel = str(channel or ("telegram" if actor.source == "telegram-bridge" else "api"))
     resolved_id = str(channel_id or getattr(request.state, "bridge_chat_id", ""))
     if not resolved_id:
-        raise HTTPException(status_code=400, detail="channel_id is required")
+        raise HTTPException(status_code=400, detail="Нужен channel_id")
     conversation_id = storage.get_channel_conversation(actor.user_id, resolved_channel, resolved_id)
     if not conversation_id:
-        raise HTTPException(status_code=404, detail="No conversation in this channel yet")
+        raise HTTPException(status_code=404, detail="В этом канале ещё нет диалога")
     messages = storage.get_conversation_messages(conversation_id, user_id=actor.user_id, limit=30)
     latest = next(
         (item for item in reversed(messages) if str(item.get("role")) == "assistant"),
         None,
     )
     if latest is None:
-        raise HTTPException(status_code=404, detail="No answer to explain yet")
+        raise HTTPException(status_code=404, detail="Пока нет ответа для объяснения")
     metadata = _json_load(latest.get("metadata_json"), {})
     metadata = metadata if isinstance(metadata, dict) else {}
     return {
@@ -83,7 +83,7 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
     channel = str(body.get("channel") or ("telegram" if actor.source == "telegram-bridge" else "api"))
     channel_id = str(body.get("channel_id") or getattr(request.state, "bridge_chat_id", ""))
     if not channel_id:
-        raise HTTPException(status_code=400, detail="channel_id is required")
+        raise HTTPException(status_code=400, detail="Нужен channel_id")
     try:
         mode = normalize_conversation_mode(str(body.get("mode") or "dialogue"))
     except ValueError as exc:
@@ -137,7 +137,7 @@ async def conversation_messages(
 ) -> dict[str, Any]:
     actor = _require(request, "conversations.read")
     if not request.app.state.storage.get_conversation(conversation_id, actor.user_id):
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(status_code=404, detail="Диалог не найден")
     items = request.app.state.storage.get_conversation_messages(
         conversation_id,
         user_id=actor.user_id,
@@ -153,7 +153,7 @@ async def archive_conversation(conversation_id: str, request: Request) -> dict[s
     archived = _parse_json_bool(body.get("archived"), field="archived", default=True)
     updated = request.app.state.storage.set_conversation_archived(conversation_id, actor.user_id, archived)
     if not updated:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(status_code=404, detail="Диалог не найден")
     return {"conversation": updated}
 
 
@@ -162,5 +162,5 @@ async def delete_conversation(conversation_id: str, request: Request) -> dict[st
     actor = _require(request, "conversations.manage")
     report = request.app.state.storage.delete_conversation(conversation_id, actor.user_id)
     if not report.get("existed"):
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(status_code=404, detail="Диалог не найден")
     return {"status": "deleted", "report": report}

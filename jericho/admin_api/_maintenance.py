@@ -85,7 +85,7 @@ async def verify_backup(filename: str, request: Request) -> dict[str, Any]:
     try:
         result = _services(request).storage.verify_backup(filename)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Backup not found") from exc
+        raise HTTPException(status_code=404, detail="Резервная копия не найдена") from exc
     _audit(request, "admin.backup.verify", "backup", filename, after=result)
     return {"verification": result}
 

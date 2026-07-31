@@ -68,7 +68,7 @@ async def archive_conversation(conversation_id: str, request: Request, user_id: 
     state = _services(request)
     updated = state.storage.set_conversation_archived(conversation_id, user_id, archived)
     if not updated:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(status_code=404, detail="Диалог не найден")
     _audit(
         request,
         "admin.conversation.archive",
@@ -86,7 +86,7 @@ async def delete_conversation(conversation_id: str, request: Request, user_id: s
     state = _services(request)
     before = state.storage.get_conversation(conversation_id, user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(status_code=404, detail="Диалог не найден")
     report = state.storage.delete_conversation(conversation_id, user_id)
     _audit(
         request,
@@ -109,7 +109,7 @@ async def conversation_messages(
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     if not _services(request).storage.get_conversation(conversation_id, user_id):
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise HTTPException(status_code=404, detail="Диалог не найден")
     _audit_cross_tenant_read(request, "admin.messages.read", user_id, conversation_id=conversation_id)
     storage = _services(request).storage
     # Without an offset the window is the tail, as before. `total` is what the modal

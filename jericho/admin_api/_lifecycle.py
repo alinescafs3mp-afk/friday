@@ -39,7 +39,7 @@ async def preview_legacy_cleanup(
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.cleanup.read", user_id)
     if not _services(request).storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     # `scan_legacy_quality_page`, not `scan_legacy_quality`: the suspect predicate reads
     # each object's content and metadata, so there is no SQL COUNT for it — the page and
     # the total have to come from one and the same walk, or the pager lies. The visible
@@ -70,15 +70,15 @@ async def apply_legacy_cleanup(request: Request) -> dict[str, Any]:
     action = str(body.get("action") or "return_to_inbox")
     knowledge_ids = body.get("knowledge_ids")
     if not isinstance(knowledge_ids, list) or not knowledge_ids:
-        raise HTTPException(status_code=400, detail="knowledge_ids must be a non-empty list")
+        raise HTTPException(status_code=400, detail="knowledge_ids должен быть непустым списком")
     if len(knowledge_ids) > 200:
-        raise HTTPException(status_code=400, detail="At most 200 objects may be changed per request")
+        raise HTTPException(status_code=400, detail="За один запрос можно изменить не больше 200 объектов")
     allowed_actions = {"return_to_inbox", "archive", "reclassify", "keep", "soft_delete"}
     if action not in allowed_actions:
-        raise HTTPException(status_code=400, detail="Invalid cleanup action")
+        raise HTTPException(status_code=400, detail="Недопустимое действие очистки")
     state = _services(request)
     if not state.storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     reason = str(body.get("reason") or "legacy quality cleanup")[:500]
     changed: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -177,13 +177,15 @@ async def apply_lifecycle_review(request: Request) -> dict[str, Any]:
     user_id = str(body.get("user_id") or "")
     knowledge_ids = body.get("knowledge_ids")
     if not isinstance(knowledge_ids, list) or not knowledge_ids:
-        raise HTTPException(status_code=400, detail="knowledge_ids must be a non-empty list")
+        raise HTTPException(status_code=400, detail="knowledge_ids должен быть непустым списком")
     unique_ids = list(dict.fromkeys(str(item) for item in knowledge_ids if str(item).strip()))
     if len(unique_ids) > 200:
-        raise HTTPException(status_code=400, detail="At most 200 lifecycle candidates may be changed")
+        raise HTTPException(
+            status_code=400, detail="За раз можно изменить не больше 200 кандидатов жизненного цикла"
+        )
     action = str(body.get("action") or "archive").casefold()
     if action not in {"archive", "lower_importance", "keep"}:
-        raise HTTPException(status_code=400, detail="Invalid lifecycle action")
+        raise HTTPException(status_code=400, detail="Недопустимое действие жизненного цикла")
     days = max(1, min(_parse_int(body.get("days_threshold", 90), field="days_threshold"), 36500))
     state = _services(request)
     # The whole candidate set, walked once — not a 5000-row page of it. The old shape
@@ -278,7 +280,7 @@ async def run_deprecation(request: Request) -> dict[str, Any]:
     if not isinstance(raw_ids, list) or not raw_ids:
         raise HTTPException(
             status_code=400,
-            detail="ids is required: lifecycle changes apply only to explicitly selected objects",
+            detail="Нужны ids: изменения жизненного цикла только для явно выбранных объектов",
         )
     days = max(1, min(_parse_int(body.get("days_threshold", 90), field="days_threshold"), 36500))
     result = _services(request).storage.archive_selected_knowledge(

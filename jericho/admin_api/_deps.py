@@ -78,9 +78,9 @@ async def _request_json(request: Request) -> dict[str, Any]:
     try:
         body = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
+        raise HTTPException(status_code=400, detail="Тело запроса должно быть корректным JSON") from exc
     if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
+        raise HTTPException(status_code=400, detail="JSON-тело должно быть объектом")
     request.state.json_body = body
     return body
 
@@ -89,36 +89,36 @@ def _parse_float(value: Any, *, field: str) -> float:
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be a number") from exc
+        raise HTTPException(status_code=400, detail=f"{field}: нужно число") from exc
     if parsed != parsed or parsed in {float("inf"), float("-inf")}:
-        raise HTTPException(status_code=400, detail=f"{field} must be finite")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно конечное число")
     return parsed
 
 
 def _parse_unit_float(value: Any, *, field: str) -> float:
     parsed = _parse_float(value, field=field)
     if not 0.0 <= parsed <= 1.0:
-        raise HTTPException(status_code=400, detail=f"{field} must be between 0 and 1")
+        raise HTTPException(status_code=400, detail=f"{field}: значение от 0 до 1")
     return parsed
 
 
 def _parse_bool(value: Any, *, field: str) -> bool:
     if not isinstance(value, bool):
-        raise HTTPException(status_code=400, detail=f"{field} must be a boolean")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно логическое значение")
     return value
 
 
 def _parse_int(value: Any, *, field: str) -> int:
     if isinstance(value, bool):
-        raise HTTPException(status_code=400, detail=f"{field} must be an integer")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно целое число")
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
+        raise HTTPException(status_code=400, detail=f"{field}: нужно целое число") from exc
     if isinstance(value, float) and not value.is_integer():
-        raise HTTPException(status_code=400, detail=f"{field} must be an integer")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно целое число")
     if isinstance(value, str) and str(parsed) != value.strip():
-        raise HTTPException(status_code=400, detail=f"{field} must be an integer")
+        raise HTTPException(status_code=400, detail=f"{field}: нужно целое число")
     return parsed
 
 
@@ -178,7 +178,7 @@ def _protect_owner_target(request: Request, user_id: str) -> None:
     target = _services(request).storage.get_user(user_id)
     target_is_owner = user_id == LEGACY_OWNER_USER_ID or bool(target and target.get("preset_key") == "owner")
     if target_is_owner and not actor.is_owner:
-        raise HTTPException(status_code=403, detail="Only an owner may modify an owner account")
+        raise HTTPException(status_code=403, detail="Только владелец может изменять учётную запись владельца")
 
 
 def _require_delegable_capability(request: Request, security_id: str) -> None:
@@ -186,14 +186,14 @@ def _require_delegable_capability(request: Request, security_id: str) -> None:
 
     state = _services(request)
     if state.auth_service.get_capability(security_id) is None:
-        raise HTTPException(status_code=400, detail=f"Unknown capability: {security_id}")
+        raise HTTPException(status_code=400, detail=f"Неизвестное право: {security_id}")
     actor = request.state.actor
     if actor.is_owner:
         return
     if not state.auth_service.authorize(actor, security_id).allowed:
         raise HTTPException(
             status_code=403,
-            detail=f"Cannot delegate capability not held by the actor: {security_id}",
+            detail=f"Нельзя делегировать право, которого нет у исполнителя: {security_id}",
         )
 
 
@@ -202,16 +202,16 @@ def _require_delegable_preset(request: Request, preset_key: str) -> None:
 
     state = _services(request)
     if not state.auth_service.preset_exists(preset_key):
-        raise HTTPException(status_code=400, detail="Unknown preset")
+        raise HTTPException(status_code=400, detail="Неизвестный пресет")
     actor = request.state.actor
     if preset_key == "owner" and not actor.is_owner:
-        raise HTTPException(status_code=403, detail="Only an owner may assign the owner preset")
+        raise HTTPException(status_code=403, detail="Только владелец может назначать пресет владельца")
     preset = next(
         (item for item in state.auth_service.list_presets() if item.get("preset_key") == preset_key),
         None,
     )
     if preset is None:
-        raise HTTPException(status_code=400, detail="Unknown preset")
+        raise HTTPException(status_code=400, detail="Неизвестный пресет")
     for security_id in preset.get("capabilities", []):
         _require_delegable_capability(request, str(security_id))
 
@@ -220,9 +220,9 @@ def _safe_runtime_file(root: Path, candidate: str) -> Path:
     resolved_root = root.resolve()
     resolved = Path(candidate).resolve()
     if resolved != resolved_root and resolved_root not in resolved.parents:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     if not resolved.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     return resolved
 
 

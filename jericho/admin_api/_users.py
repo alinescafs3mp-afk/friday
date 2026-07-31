@@ -163,7 +163,7 @@ async def link_identity(request: Request) -> dict[str, Any]:
     external_id = str(body.get("external_id") or "").strip()
     target = str(body.get("user_id") or "").strip()
     if not source or not external_id or not target:
-        raise HTTPException(status_code=400, detail="source, external_id and user_id are required")
+        raise HTTPException(status_code=400, detail="Нужны source, external_id и user_id")
     _protect_owner_target(request, target)
     state = _services(request)
     before = state.storage.resolve_identity(source, external_id)
@@ -188,7 +188,7 @@ async def unlink_identity(source: str, external_id: str, request: Request) -> di
     state = _services(request)
     target = state.storage.resolve_identity(source, external_id)
     if not target:
-        raise HTTPException(status_code=404, detail="Identity is not linked")
+        raise HTTPException(status_code=404, detail="Идентичность не привязана")
     _protect_owner_target(request, target)
     state.storage.unlink_identity(source, external_id)
     _audit(request, "admin.identity.unlink", "user", target, before={"source": source})
@@ -245,7 +245,7 @@ async def create_token(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     state = _services(request)
     if not state.storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     # A delegated administrator must not mint a token for an owner account…
     _protect_owner_target(request, user_id)
     # …nor for any account that can do something they cannot. A token IS that
@@ -259,16 +259,16 @@ async def create_token(request: Request) -> dict[str, Any]:
     if raw_ttl is not None:
         # bool is an int subclass — reject it explicitly so `true` is not read as 1s.
         if isinstance(raw_ttl, bool):
-            raise HTTPException(status_code=400, detail="ttl_seconds must be an integer")
+            raise HTTPException(status_code=400, detail="ttl_seconds должен быть целым числом")
         try:
             ttl_seconds = int(raw_ttl)
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="ttl_seconds must be an integer") from exc
+            raise HTTPException(status_code=400, detail="ttl_seconds должен быть целым числом") from exc
         # Range-check before minting so a huge value is a 400, not a timedelta OverflowError (500).
         if ttl_seconds <= 0 or ttl_seconds > MAX_API_TOKEN_TTL_SECONDS:
             raise HTTPException(
                 status_code=400,
-                detail=f"ttl_seconds must be between 1 and {MAX_API_TOKEN_TTL_SECONDS}",
+                detail=f"ttl_seconds: значение от 1 до {MAX_API_TOKEN_TTL_SECONDS}",
             )
     secret = "jrc_" + secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
@@ -298,13 +298,13 @@ async def revoke_token(token_id: str, request: Request) -> dict[str, Any]:
     state = _services(request)
     record = state.storage.get_api_token(token_id)
     if not record:
-        raise HTTPException(status_code=404, detail="Token not found or already revoked")
+        raise HTTPException(status_code=404, detail="Токен не найден или уже отозван")
     # Minting a token for an owner was already guarded; revoking one was not, and
     # revocation is the more damaging half — a delegated administrator could lock the
     # owner out of their own instance.
     _protect_owner_target(request, str(record.get("user_id") or ""))
     if not state.storage.revoke_api_token(token_id):
-        raise HTTPException(status_code=404, detail="Token not found or already revoked")
+        raise HTTPException(status_code=404, detail="Токен не найден или уже отозван")
     _audit(request, "admin.token.revoke", "api_token", token_id)
     return {"status": "revoked"}
 
@@ -315,7 +315,7 @@ async def update_user(user_id: str, request: Request) -> dict[str, Any]:
     state = _services(request)
     before = state.storage.get_user(user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     _protect_owner_target(request, user_id)
     body = await _request_json(request)
     updates: dict[str, Any] = {}
@@ -325,11 +325,11 @@ async def update_user(user_id: str, request: Request) -> dict[str, Any]:
     if "status" in body:
         status = str(body["status"])
         if status not in {"active", "disabled"}:
-            raise HTTPException(status_code=400, detail="status must be active or disabled")
+            raise HTTPException(status_code=400, detail="status должен быть active или disabled")
         updates["status"] = status
     if "metadata" in body:
         if not isinstance(body["metadata"], dict):
-            raise HTTPException(status_code=400, detail="metadata must be an object")
+            raise HTTPException(status_code=400, detail="metadata должен быть объектом")
         updates["metadata_json"] = body["metadata"]
     if "preset_key" in body:
         preset_key = str(body["preset_key"])
@@ -348,7 +348,7 @@ async def set_user_preset(user_id: str, request: Request) -> dict[str, Any]:
     preset_key = str(body.get("preset_key") or "")
     before = state.storage.get_user(user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     _protect_owner_target(request, user_id)
     _require_delegable_preset(request, preset_key)
     try:
@@ -365,7 +365,7 @@ async def set_permission_override(user_id: str, security_id: str, request: Reque
     _require(request, "admin.users.manage")
     state = _services(request)
     if not state.storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     _protect_owner_target(request, user_id)
     body = await _request_json(request)
     effect = str(body.get("effect") or "")
@@ -411,7 +411,7 @@ async def create_preset(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     capabilities = body.get("capabilities")
     if not isinstance(capabilities, list):
-        raise HTTPException(status_code=400, detail="capabilities must be a list")
+        raise HTTPException(status_code=400, detail="capabilities должен быть списком")
     requested_capabilities = {str(item) for item in capabilities}
     for security_id in requested_capabilities:
         _require_delegable_capability(request, security_id)

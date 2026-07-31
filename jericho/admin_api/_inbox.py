@@ -77,7 +77,7 @@ async def list_all_inbox(
     try:
         status_enum = InboxStatus(status) if status else None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус входящих") from exc
     state = _services(request)
     items = state.storage.list_inbox(target, status_enum, limit=limit, offset=offset)
     for item in items:
@@ -116,7 +116,7 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     try:
         status = InboxStatus(str(body.get("status") or "classified"))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус входящих") from exc
     result = _services(request).ingestion.classify_inbox_item(
         user_id,
         inbox_id,
@@ -136,7 +136,7 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         knowledge_kind=str(body["knowledge_kind"]) if body.get("knowledge_kind") is not None else None,
     )
     if not result:
-        raise HTTPException(status_code=404, detail="Inbox item not found")
+        raise HTTPException(status_code=404, detail="Элемент входящих не найден")
     _audit(request, "admin.inbox.classify", "inbox", inbox_id, after=result)
     return {"item": result}
 
@@ -161,21 +161,23 @@ async def bulk_classify_inbox(request: Request) -> dict[str, Any]:
     user_id = str(body.get("user_id") or "")
     inbox_ids = body.get("inbox_ids")
     if not isinstance(inbox_ids, list) or not inbox_ids:
-        raise HTTPException(status_code=400, detail="inbox_ids must be a non-empty list")
+        raise HTTPException(status_code=400, detail="inbox_ids должен быть непустым списком")
     unique_ids = list(dict.fromkeys(str(item) for item in inbox_ids if str(item).strip()))
     if len(unique_ids) > 200:
-        raise HTTPException(status_code=400, detail="At most 200 Inbox items may be reviewed per request")
+        raise HTTPException(
+            status_code=400, detail="За один запрос можно разобрать не больше 200 элементов входящих"
+        )
     # `status` is required. It used to default to "classified", which — combined with
     # `promote` defaulting to None and `classify_inbox_item` reading
     # `promote is None and status == CLASSIFIED` as consent — meant the MINIMAL request
     # body, naming neither, promoted every item it was given.
     requested_status = str(body.get("status") or "").strip()
     if not requested_status:
-        raise HTTPException(status_code=400, detail="status is required")
+        raise HTTPException(status_code=400, detail="Нужен status")
     try:
         status = InboxStatus(requested_status)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус входящих") from exc
     promote = _parse_bool(body["promote"], field="promote") if "promote" in body else None
     if promote is True or status == InboxStatus.CLASSIFIED:
         raise HTTPException(
@@ -234,9 +236,9 @@ async def advise_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     user_id = str(body.get("user_id") or "")
     state = _services(request)
     if not state.storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     if not state.llm.enabled:
-        raise HTTPException(status_code=503, detail="Local model is disabled")
+        raise HTTPException(status_code=503, detail="Локальная модель отключена")
     try:
         result = await state.ingestion.advise_inbox_item(
             user_id,

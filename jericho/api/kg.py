@@ -49,7 +49,7 @@ async def list_entities(
     try:
         parsed_type = EntityType(entity_type) if entity_type else None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid entity type") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый тип сущности") from exc
     state = request.app.state
     if q and q.strip():
         # Name lookup for browse surfaces: exact/alias/token matches only.
@@ -111,7 +111,7 @@ async def get_entity(entity_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.read")
     entity = request.app.state.kg.get_entity(entity_id, actor.user_id)
     if not entity:
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
     return {
         "entity": entity,
         "relations": request.app.state.kg.get_entity_relations(entity_id, actor.user_id),
@@ -127,7 +127,7 @@ async def update_entity(entity_id: str, request: Request) -> dict[str, Any]:
     state = request.app.state
     before = state.kg.get_entity(entity_id, actor.user_id)
     if not before:
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
     # An allow-list, not the raw body. `update_entity(user_id, entity_id, **body)`
     # splatted whatever JSON arrived into a call whose first two parameters are
     # named `user_id` and `entity_id`, so `{"user_id": ...}` raised TypeError —
@@ -138,7 +138,7 @@ async def update_entity(entity_id: str, request: Request) -> dict[str, Any]:
         key: body[key] for key in ("name", "entity_type", "aliases", "description", "metadata") if key in body
     }
     if not fields:
-        raise HTTPException(status_code=400, detail="No updatable entity fields in the request")
+        raise HTTPException(status_code=400, detail="В запросе нет изменяемых полей сущности")
     try:
         after = state.kg.update_entity(actor.user_id, entity_id, **fields)
     except ValueError as exc:
@@ -153,7 +153,7 @@ async def delete_entity(entity_id: str, request: Request) -> dict[str, Any]:
     state = request.app.state
     before = state.kg.get_entity(entity_id, actor.user_id)
     if not before or not state.kg.delete_entity(actor.user_id, entity_id):
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
     _audit(request, "entity.delete", "entity", entity_id, before=before)
     return {"status": "soft_deleted"}
 
@@ -223,7 +223,7 @@ async def entity_graph(
     actor = _require(request, "kg.read")
     graph = request.app.state.kg.get_entity_graph(actor.user_id, entity_id, depth)
     if not graph.get("nodes"):
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
     return graph
 
 
@@ -245,7 +245,7 @@ async def list_resolutions(request: Request, status: str | None = None) -> dict[
     try:
         parsed = ResolutionStatus(status) if status else None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid resolution status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус объединения") from exc
     storage = request.app.state.storage
     items = await run_blocking(storage.list_resolution_candidates, actor.user_id, parsed)
     total = await run_blocking(storage.count_resolution_candidates, actor.user_id, parsed)
@@ -377,13 +377,13 @@ async def decide_own_conflict(conflict_id: str, request: Request) -> dict[str, A
     body = await _request_json(request)
     decision = str(body.get("decision") or "").casefold().strip()
     if decision not in {"dismiss", "keep_a", "keep_b"}:
-        raise HTTPException(status_code=400, detail="decision must be dismiss, keep_a or keep_b")
+        raise HTTPException(status_code=400, detail="decision должен быть dismiss, keep_a или keep_b")
     kg = request.app.state.kg
     conflict = await run_blocking(kg.storage.get_knowledge_conflict, actor.user_id, conflict_id)
     if not conflict:
-        raise HTTPException(status_code=404, detail="Conflict not found")
+        raise HTTPException(status_code=404, detail="Конфликт не найден")
     if str(conflict.get("status") or "") != "suggested":
-        raise HTTPException(status_code=409, detail=f"Conflict is already {conflict.get('status')}")
+        raise HTTPException(status_code=409, detail=f"Конфликт уже в статусе {conflict.get('status')}")
     try:
         if decision == "dismiss":
             result = await run_blocking(
@@ -434,7 +434,7 @@ async def set_event_time(entity_id: str, request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     occurred_at = str(body.get("occurred_at") or "").strip()
     if not occurred_at:
-        raise HTTPException(status_code=400, detail="occurred_at is required")
+        raise HTTPException(status_code=400, detail="Нужен occurred_at")
     occurred_end_value = body.get("occurred_end")
     occurred_end = str(occurred_end_value).strip() if occurred_end_value else None
     precision_value = body.get("precision")

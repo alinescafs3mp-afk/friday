@@ -75,7 +75,7 @@ async def download_file(raw_id: str, request: Request, user_id: str):
     state = _services(request)
     raw = state.storage.get_raw_object(raw_id, user_id)
     if not raw or raw.get("content_type") != "file":
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Файл не найден")
     metadata = _json_value(raw.get("metadata_json"), {})
     path = _safe_runtime_file(state.settings.files_dir, str(metadata.get("stored_path") or ""))
     # Data egress is always audited, unlike ordinary list reads.

@@ -679,10 +679,12 @@ def test_search_quality_button_appears_only_with_citations(tmp_path):
     )
     data = {b["callback_data"] for row in grounded["inline_keyboard"] for b in row}
     assert "feedback:search_off:msg_g" in data
+    assert "doc:show:ko_1" in data
 
     ungrounded = bridge._response_reply_markup({"message_id": "msg_u", "citations": []})
     data_u = {b["callback_data"] for row in ungrounded["inline_keyboard"] for b in row}
     assert not any("search_off" in d for d in data_u)
+    assert not any(item.startswith("doc:show:") for item in data_u)
     bridge._inbox.close()
 
 

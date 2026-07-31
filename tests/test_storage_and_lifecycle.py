@@ -570,7 +570,7 @@ def test_mass_archive_without_selection_is_refused(settings):
 
         refused = client.post("/api/admin/lifecycle/deprecate", json={"user_id": "owner"}, headers=owner)
         assert refused.status_code == 400
-        assert "ids is required" in refused.json()["detail"]
+        assert "Нужны ids" in refused.json()["detail"]
         assert storage.get_knowledge_object(ko.id, "owner")["lifecycle_stage"] == "active"
 
         accepted = client.post(

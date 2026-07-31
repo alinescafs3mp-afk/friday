@@ -22,7 +22,7 @@ async def ingest(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     content = str(body.get("content") or "").strip()
     if not content:
-        raise HTTPException(status_code=400, detail="content is required")
+        raise HTTPException(status_code=400, detail="Нужен content")
     force_knowledge = _parse_json_bool(body.get("force_knowledge"), field="force_knowledge", default=False)
     return await request.app.state.ingestion.ingest_text(
         actor.user_id,
@@ -43,14 +43,14 @@ async def ingest_url(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     url = str(body.get("url") or "").strip()
     if not url:
-        raise HTTPException(status_code=400, detail="url is required")
+        raise HTTPException(status_code=400, detail="Нужен url")
     result = await request.app.state.web_surfer.fetch(url)
     if result.error or not result.text.strip():
         # fetch() never raises — SSRF blocks, non-2xx and empty pages all
         # surface as an error string; ingesting empty text is refused.
         raise HTTPException(
             status_code=422,
-            detail=f"Could not fetch a readable page: {result.error or 'empty content'}",
+            detail=f"Не удалось получить читаемую страницу: {result.error or 'пустой текст'}",
         )
     title = result.title or result.url
     # The page is captured as a Raw Object and routed through the Inbox like

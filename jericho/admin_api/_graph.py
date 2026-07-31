@@ -44,7 +44,7 @@ async def list_all_entities(
         try:
             parsed_type = EntityType(entity_type)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid entity type") from exc
+            raise HTTPException(status_code=400, detail="Недопустимый тип сущности") from exc
     else:
         parsed_type = None
     _audit_cross_tenant_read(request, "admin.entities.read", target)
@@ -91,7 +91,7 @@ async def update_entity_admin(entity_id: str, request: Request) -> dict[str, Any
     state = _services(request)
     before = state.kg.get_entity(entity_id, target)
     if not before:
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
     fields = {key: body[key] for key in ("name", "entity_type", "aliases", "description") if key in body}
     try:
         after = state.kg.update_entity(target, entity_id, **fields)
@@ -107,7 +107,7 @@ async def delete_entity_admin(entity_id: str, request: Request, user_id: str) ->
     state = _services(request)
     before = state.kg.get_entity(entity_id, user_id)
     if not before or not state.kg.delete_entity(user_id, entity_id):
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
     _audit(request, "admin.entity.delete", "entity", entity_id, before=before)
     return {"status": "soft_deleted"}
 
@@ -181,12 +181,12 @@ async def bulk_review_relation_candidates(request: Request) -> dict[str, Any]:
     status = str(body.get("status") or "").casefold()
     candidate_ids = body.get("candidate_ids")
     if status not in {"accepted", "rejected"}:
-        raise HTTPException(status_code=400, detail="status must be accepted or rejected")
+        raise HTTPException(status_code=400, detail="status должен быть accepted или rejected")
     if not isinstance(candidate_ids, list) or not candidate_ids:
-        raise HTTPException(status_code=400, detail="candidate_ids must be a non-empty list")
+        raise HTTPException(status_code=400, detail="candidate_ids должен быть непустым списком")
     unique_ids = list(dict.fromkeys(str(item) for item in candidate_ids if str(item).strip()))
     if len(unique_ids) > 200:
-        raise HTTPException(status_code=400, detail="At most 200 relation candidates may be reviewed")
+        raise HTTPException(status_code=400, detail="За раз можно разобрать не больше 200 кандидатов связей")
 
     changed: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -237,6 +237,6 @@ async def review_relation_candidate(candidate_id: str, request: Request) -> dict
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
-        raise HTTPException(status_code=404, detail="Relation candidate not found")
+        raise HTTPException(status_code=404, detail="Кандидат связи не найден")
     _audit(request, f"admin.relation_candidate.{status}", "relation_candidate", candidate_id, after=result)
     return {"item": result}

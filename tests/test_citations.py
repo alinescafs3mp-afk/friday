@@ -179,7 +179,62 @@ def test_telegram_appends_citation_legend():
         }
     )
     assert "📎 Источники" in out
-    assert out.rstrip().endswith("[K1] Atlas база")
+    assert "[K1] Atlas база" in out
+
+
+def test_answer_sources_open_as_documents_from_the_legend():
+    """Легенда [K#] без кнопки — тупик: путь к документу из ответа чата.
+
+    Поиск и /browse уже отдавали doc:show; ответ с 📎 Источники — нет.
+    Тот же callback, что открывает найденное, должен висеть и под ответом.
+    """
+    from jericho.telegram_bridge import TelegramBridge
+
+    markup = TelegramBridge._response_reply_markup(
+        {
+            "message_id": "msg_src",
+            "citations": [
+                {"label": "K1", "knowledge_id": "ko_aaaa", "title": "Приказ"},
+                {"label": "K2", "knowledge_id": "ko_bbbb", "title": "Рапорт"},
+                {"label": "K3", "knowledge_id": "bad id", "title": "Пропуск"},
+            ],
+        }
+    )
+    assert markup is not None
+    buttons = [button for row in markup["inline_keyboard"] for button in row]
+    open_buttons = [button for button in buttons if button["callback_data"].startswith("doc:show:")]
+    assert [button["text"] for button in open_buttons] == ["K1", "K2"]
+    assert open_buttons[0]["callback_data"] == "doc:show:ko_aaaa"
+    assert open_buttons[1]["callback_data"] == "doc:show:ko_bbbb"
+
+    text = TelegramBridge._format_response_message(
+        {
+            "message": "По приказу [K1].",
+            "citation_notice": "📎 Источники: [K1] Приказ",
+            "citations": [{"label": "K1", "knowledge_id": "ko_aaaa", "title": "Приказ"}],
+            "context": {},
+        }
+    )
+    assert "Кнопкой ниже — открыть источник целиком." in text
+
+
+def test_answer_without_openable_sources_has_no_source_buttons():
+    from jericho.telegram_bridge import TelegramBridge
+
+    markup = TelegramBridge._response_reply_markup({"message_id": "msg_empty", "citations": []})
+    assert markup is not None
+    data = {button["callback_data"] for row in markup["inline_keyboard"] for button in row}
+    assert not any(item.startswith("doc:show:") for item in data)
+
+    text = TelegramBridge._format_response_message(
+        {
+            "message": "Общий ответ.",
+            "citation_notice": "",
+            "citations": [],
+            "context": {},
+        }
+    )
+    assert "Кнопкой ниже" not in text
 
 
 # --- deterministic overlap check ------------------------------------------

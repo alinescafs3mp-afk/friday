@@ -39,7 +39,7 @@ async def knowledge_quality_dashboard(
     state = _services(request)
     _audit_cross_tenant_read(request, "admin.quality.read", user_id)
     if not state.storage.get_user(user_id):
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     usage = state.storage.execute(
         """SELECT COUNT(*) AS tracked,
                   COALESCE(SUM(retrieval_count), 0) AS retrievals,
@@ -161,7 +161,7 @@ async def add_eval_case(request: Request) -> dict[str, Any]:
     target = _target_user(request, str(body.get("user_id") or "") or None)
     expected = body.get("expected_ids")
     if not isinstance(expected, list):
-        raise HTTPException(status_code=400, detail="expected_ids must be a list")
+        raise HTTPException(status_code=400, detail="expected_ids должен быть списком")
     try:
         case = _services(request).storage.add_eval_case(
             target,
@@ -179,7 +179,7 @@ async def add_eval_case(request: Request) -> dict[str, Any]:
 async def delete_eval_case(case_id: str, request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     if not _services(request).storage.delete_eval_case(user_id, case_id):
-        raise HTTPException(status_code=404, detail="Eval case not found")
+        raise HTTPException(status_code=404, detail="Эталонный запрос не найден")
     _audit(request, "admin.eval.case_delete", "eval_case", case_id)
     return {"status": "deleted"}
 

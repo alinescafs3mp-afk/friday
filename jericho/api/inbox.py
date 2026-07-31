@@ -28,7 +28,7 @@ async def list_inbox(
     try:
         status_enum = InboxStatus(status) if status else None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус входящих") from exc
     items = request.app.state.storage.list_inbox(
         actor.user_id,
         status_enum,
@@ -45,7 +45,7 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     try:
         status = InboxStatus(str(body.get("status") or "classified"))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid inbox status") from exc
+        raise HTTPException(status_code=400, detail="Недопустимый статус входящих") from exc
     item = request.app.state.ingestion.classify_inbox_item(
         actor.user_id,
         inbox_id,
@@ -56,6 +56,6 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         reviewed_by=actor.user_id,
     )
     if not item:
-        raise HTTPException(status_code=404, detail="Inbox item not found")
+        raise HTTPException(status_code=404, detail="Элемент входящих не найден")
     _audit(request, "inbox.classify", "inbox", inbox_id, after=item)
     return {"item": item}
