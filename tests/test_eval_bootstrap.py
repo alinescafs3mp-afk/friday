@@ -97,6 +97,27 @@ def test_the_audit_keeps_only_questions_that_test_retrieval(query, accepted):
     assert audit(query, DOCUMENT)[0] is accepted
 
 
+def test_two_shared_stems_still_pass_and_three_do_not():
+    """Boundary of MAX_SHARED_TOKENS = 2 (G2).
+
+    Measured 2026-07-31: threshold 1 yielded 2/60 cases (empty set), 2 yielded 25/60.
+    Criterion declared before the run: smallest threshold with ≥20 cases.
+    """
+    from jericho.eval_bootstrap import MAX_SHARED_TOKENS
+
+    assert MAX_SHARED_TOKENS == 2
+    # DOCUMENT content stems include: правило, резервн*, копи*, диск*, внешн*, носител*, ...
+    # Exactly two shared content words with the document — still a hard case.
+    ok_two, _, shared_two = audit("зачем правило про внешний архив", DOCUMENT)
+    assert ok_two is True
+    assert len(shared_two) <= 2
+    # Three shared content words — lexical search answers it; must be refused.
+    ok_three, reason, shared_three = audit("правило резервных копий внешний носитель", DOCUMENT)
+    assert ok_three is False
+    assert len(shared_three) > 2
+    assert "пересказывает" in reason
+
+
 def test_a_rejected_proposal_names_the_words_it_shares():
     """The owner has to be able to see WHY, or the audit is a black box they distrust."""
     ok, reason, shared = audit("правило резервных копий внешний носитель", DOCUMENT)
@@ -136,6 +157,45 @@ def test_only_accepted_proposals_are_saved(settings, storage):
     # A distinct source, so a bootstrapped set is never mistaken for one built from
     # what the owner actually asked.
     assert cases[0]["source"] == "bootstrap"
+
+
+def test_save_accepted_counts_distinct_queries_not_loop_iterations(settings, storage):
+    """G3: 25 accepted proposals with 3 duplicate queries must report 22, not 25.
+
+    `add_eval_case` upserts on (user_id, query). Counting every accepted proposal
+    made the save report larger than the gold set `run_eval` later saw.
+    """
+    storage.ensure_user("alice", source="upload")
+    knowledge_id = _knowledge(storage, "Правило резервных копий", DOCUMENT)
+    proposals = [
+        Proposal(
+            knowledge_id=knowledge_id,
+            title="A",
+            query="зачем хранить архив вне дома",
+            accepted=True,
+        ),
+        Proposal(
+            knowledge_id=knowledge_id,
+            title="B",
+            # Same cleaned query (case + whitespace) as the first — one row, not two.
+            query="  Зачем Хранить Архив Вне Дома  ",
+            accepted=True,
+        ),
+        Proposal(
+            knowledge_id=knowledge_id,
+            title="C",
+            query="как проверить восстановление копии",
+            accepted=True,
+        ),
+        Proposal(
+            knowledge_id=knowledge_id,
+            title="D",
+            query="отказ",
+            accepted=False,
+        ),
+    ]
+    assert save_accepted(storage, "alice", proposals) == 2
+    assert len(storage.list_eval_cases("alice")) == 2
 
 
 def test_a_paraphrase_of_the_document_is_refused_end_to_end(settings, storage):

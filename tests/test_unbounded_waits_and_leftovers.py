@@ -153,6 +153,79 @@ def test_other_tools_add_nothing(settings):
     assert ExecutionKernel._audit_details("code_run", {"code": 42}) == {}  # noqa: SLF001
 
 
+def test_web_tools_leave_a_fingerprint_not_a_body(settings):
+    """Outbound tools must leave a trail; the trail must not be the query/URL itself.
+
+    G1: before the fix `_audit_details` returned {} for every tool except code_run,
+    so the only tools that leave the machine left no audit trail at all.
+    """
+    import hashlib
+
+    from jericho.execution_kernel import ExecutionKernel
+
+    secret_query = "пароль от роутера secret-token-XYZ"
+    search = ExecutionKernel._audit_details(  # noqa: SLF001
+        "web_search", {"query": secret_query, "max_results": 5}
+    )
+    assert search["query_sha256"] == hashlib.sha256(secret_query.encode("utf-8")).hexdigest()
+    assert search["query_chars"] == len(secret_query)
+    assert search["max_results"] == 5
+    assert secret_query not in json.dumps(search, ensure_ascii=False)
+
+    research = ExecutionKernel._audit_details(  # noqa: SLF001
+        "web_research", {"query": secret_query, "max_sources": 3}
+    )
+    assert research["query_sha256"] == search["query_sha256"]
+    assert research["max_sources"] == 3
+    assert secret_query not in json.dumps(research, ensure_ascii=False)
+
+    url = "https://example.test/path?token=secret-token-XYZ#frag"
+    fetch = ExecutionKernel._audit_details("web_fetch", {"url": url})  # noqa: SLF001
+    assert fetch["url_host"] == "example.test"
+    assert fetch["url_sha256"] == hashlib.sha256(url.encode("utf-8")).hexdigest()
+    assert fetch["url_chars"] == len(url)
+    assert "secret-token-XYZ" not in json.dumps(fetch, ensure_ascii=False)
+    assert "/path" not in json.dumps(fetch, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_web_search_fingerprint_reaches_the_audit_row(settings, storage):
+    """Unit-testing the helper is not enough: the execute path must call it."""
+    from jericho.execution_kernel import ExecutionKernel
+    from jericho.ingestion import IngestionPipeline
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.permissions import AuthorizationService
+    from jericho.web_surfer import WebSurfer
+
+    storage.ensure_user("operator", preset_key="owner")
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    web = WebSurfer(settings)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(storage, graph, web, IngestionPipeline(settings, storage, graph))
+    actor = auth.actor_for_user("operator", source="test")
+
+    class _StubWeb:
+        async def search(self, query, *, max_results=5):
+            return []
+
+    kernel.web_surfer = _StubWeb()  # type: ignore[assignment]
+    try:
+        result = await kernel.execute(
+            "web_search", {"query": "canary-query-xyz", "max_results": 3}, actor=actor
+        )
+    finally:
+        await web.close()
+    assert result.success is True
+    entries = [e for e in storage.list_audit_log("operator", limit=20) if e["target_id"] == "web_search"]
+    assert entries, "web_search left no audit row"
+    after = json.loads(entries[0]["after_json"])
+    assert after["reason"] == "ok"
+    assert after["query_sha256"] == hashlib.sha256(b"canary-query-xyz").hexdigest()
+    assert after["max_results"] == 3
+    assert "canary-query-xyz" not in entries[0]["after_json"]
+
+
 @pytest.mark.asyncio
 async def test_a_refused_run_is_fingerprinted_too(settings, storage):
     """«Tried to run this and was refused» belongs in the record as much as a run."""

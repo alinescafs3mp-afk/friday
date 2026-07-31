@@ -54,6 +54,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("browse", "записи по тегу, проекту или сущности"),
     ("tags", "теги базы с количеством записей"),
     ("inbox", "разобрать ближайшие предложения"),
+    ("conflicts", "разобрать конфликты знаний"),
     ("merges", "подтвердить объединение дубликатов"),
     ("mission", "многошаговая миссия в фоне"),
     ("missions", "список миссий и управление"),
@@ -222,6 +223,7 @@ class BridgeShared:
     _response_reply_markup: Callable[..., Any]
     _send_browse: Callable[..., Any]
     _send_inbox: Callable[..., Any]
+    _send_conflicts: Callable[..., Any]
     _send_merges: Callable[..., Any]
     _send_message: Callable[..., Any]
     _send_missions: Callable[..., Any]

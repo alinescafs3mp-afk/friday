@@ -91,6 +91,9 @@ async def test_run_eval_measures_and_detects_regression(settings, storage):
 
     report = await run_eval(storage, None, settings, "alice", k=5)
     assert report["cases"] == 1
+    assert report["listed"] == 1
+    assert report["scored"] == 1
+    assert report["skipped_empty_expected"] == 0
     assert report["recall_at_k"] == 1.0  # the seeded record is found
     assert report["per_case"][0]["found"] == 1
     assert report["regression"]["previous_recall"] is None  # first run, no baseline

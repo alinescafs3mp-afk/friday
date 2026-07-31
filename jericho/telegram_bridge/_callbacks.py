@@ -227,6 +227,22 @@ class CallbacksMixin(BridgeShared):
                     "Сущности объединены" if action == "accept" else "Отмечено: не дубликат",
                 )
                 clear_markup = True
+            elif family == "conflict" and action in {"dismiss", "keep_a", "keep_b"}:
+                await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/kg/conflicts/{target_id}/decide",
+                    {"decision": action, "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                toast = {
+                    "dismiss": "Отмечено: не конфликт",
+                    "keep_a": "Оставлена первая запись",
+                    "keep_b": "Оставлена вторая запись",
+                }[action]
+                await self._answer_callback(telegram, callback_id, toast)
+                clear_markup = True
             else:
                 raise PermanentUpdateError("Unknown callback action")
         except PermanentUpdateError as exc:

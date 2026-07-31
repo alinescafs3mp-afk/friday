@@ -101,6 +101,71 @@ class ViewsMixin(BridgeShared):
                 },
             )
 
+    async def _send_conflicts(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+    ) -> None:
+        """Next five suggested conflicts. Decided ones never reappear (status filter)."""
+        data = await self._backend_json(
+            backend,
+            "GET",
+            "/api/kg/conflicts?status=suggested&limit=5",
+            {"telegram_user": telegram_user},
+            external_user_id,
+            str(chat_id),
+        )
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        total = int(data.get("total") or 0)
+        if not items:
+            await self._send_message(telegram, chat_id, "Конфликтов на разбор нет.")
+            return
+        await self._send_message(
+            telegram,
+            chat_id,
+            f"Конфликты знаний: показаны {len(items)} из {total}. "
+            "«Оставить первое/второе» гасит другую запись; «не конфликт» оставляет обе. "
+            "Решённые сюда больше не попадают.",
+        )
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            conflict_id = str(item.get("id") or "")
+            if not conflict_id:
+                continue
+            title_a = str(item.get("knowledge_a_title") or "без названия")[:160]
+            title_b = str(item.get("knowledge_b_title") or "без названия")[:160]
+            summary_a = str(item.get("knowledge_a_summary") or "").strip()[:280]
+            summary_b = str(item.get("knowledge_b_summary") or "").strip()[:280]
+            kind = str(item.get("conflict_type") or "potential_contradiction")
+            confidence = round(float(item.get("confidence") or 0.0) * 100)
+            body = (
+                f"Тип: {kind} ({confidence}%).\n\n"
+                f"1. {title_a}"
+                + (f"\n{summary_a}" if summary_a else "")
+                + f"\n\n2. {title_b}"
+                + (f"\n{summary_b}" if summary_b else "")
+            )
+            await self._send_message(
+                telegram,
+                chat_id,
+                body,
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {"text": "1 оставить", "callback_data": f"conflict:keep_a:{conflict_id}"},
+                            {"text": "2 оставить", "callback_data": f"conflict:keep_b:{conflict_id}"},
+                        ],
+                        [
+                            {"text": "не конфликт", "callback_data": f"conflict:dismiss:{conflict_id}"},
+                        ],
+                    ]
+                },
+            )
+
     async def _send_merges(
         self,
         telegram: httpx.AsyncClient,

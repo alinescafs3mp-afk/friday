@@ -115,10 +115,15 @@ async def _score_cases(
     with byte-identical code — a difference in the numbers can only come from the
     searcher, never from the harness."""
     per_case: list[dict[str, Any]] = []
+    skipped_empty_expected = 0
     recall_sum = precision_sum = rr_sum = 0.0
     for case in cases:
-        expected = {str(item) for item in case.get("expected_ids", [])}
+        expected = {str(item) for item in case.get("expected_ids", []) if str(item).strip()}
         if not expected:
+            # A gold case without targets cannot be scored. Counting it as scored
+            # would deflate recall; dropping it without a counter made a 25→22
+            # loss look like «the searcher» when the set itself had shrunk.
+            skipped_empty_expected += 1
             continue
         result = await searcher.search(user_id, str(case["query"]), limit=max(k, 20), kg=kg)
         retrieved = [str(hit.get("id")) for hit in result.get("results", []) if hit.get("id")]
@@ -147,7 +152,12 @@ async def _score_cases(
 
     scored = len(per_case) or 1
     return {
+        # `cases` stays the scored count so historical readers keep working; the
+        # three fields below make a silent drop audible (25 listed / 22 scored).
         "cases": len(per_case),
+        "listed": len(cases),
+        "scored": len(per_case),
+        "skipped_empty_expected": skipped_empty_expected,
         "k": k,
         "recall_at_k": round(recall_sum / scored, 4),
         "precision_at_k": round(precision_sum / scored, 4),

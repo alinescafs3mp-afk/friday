@@ -32,9 +32,22 @@ from jericho.retrieval import _STOPWORDS, tokens_of
 LOGGER = logging.getLogger(__name__)
 
 # A question sharing this many content words with its document is answerable by word
-# matching alone. One shared word is incidental; beyond that the case measures nothing
-# retrieval was not already going to get right.
-MAX_SHARED_TOKENS = 1
+# matching alone. Zero or one shared stem is incidental; beyond the cap the case
+# measures nothing retrieval was not already going to get right.
+#
+# Measured 2026-07-31 on 60 model proposals against the owner's archive (criterion
+# declared BEFORE the run: the smallest threshold that yields ≥20 gold cases):
+#
+#   threshold | accepted of 60 | share
+#           1 |              2 |   3%   — empty set, measures nothing
+#           2 |             25 |  42%   ← chosen
+#           3 |             50 |  83%   — filter has almost stopped filtering
+#           4 |             59 |  98%
+#         5–6 |             60 | 100%
+#
+# Business prose (orders, staffing tables, acts) reuses two–three content words
+# in any honest question; threshold 1 rejected 60/60 and left eval_cases at zero.
+MAX_SHARED_TOKENS = 2
 # Below this a "question" is a fragment, not something anyone would type.
 MIN_QUERY_WORDS = 3
 
@@ -171,19 +184,37 @@ async def propose_cases(
 
 
 def save_accepted(storage: Any, user_id: str, proposals: list[Proposal]) -> int:
-    """Persist the proposals the caller kept, marked as bootstrapped rather than mined."""
+    """Persist the proposals the caller kept, marked as bootstrapped rather than mined.
+
+    Returns the number of **distinct** queries written, not the number of accepted
+    proposals. `add_eval_case` upserts on `(user_id, query)`, so two accepted
+    proposals with the same cleaned query become one gold case — counting the
+    loop made `save_accepted` report 25 while `run_eval` later saw 22. The same
+    trap fires when a probe re-audits an old proposal list without re-running the
+    in-batch casefold dedup inside `propose_cases`.
+    """
+    existing = {str(case["query"]).casefold() for case in storage.list_eval_cases(user_id)}
     saved = 0
     for proposal in proposals:
         if not proposal.accepted or not proposal.query:
             continue
+        clean_query = " ".join(str(proposal.query).split()).strip()
+        if not clean_query:
+            continue
+        key = clean_query.casefold()
+        if key in existing:
+            # Already in the set (from a previous save or an earlier proposal in
+            # this batch). Do not inflate the count: the row is one, not two.
+            continue
         storage.add_eval_case(
             user_id,
-            proposal.query,
+            clean_query,
             [proposal.knowledge_id],
             note=f"bootstrap: {proposal.title}"[:500],
             # A distinct source so a bootstrapped set is never mistaken for one built
             # from what the owner actually asked.
             source="bootstrap",
         )
+        existing.add(key)
         saved += 1
     return saved

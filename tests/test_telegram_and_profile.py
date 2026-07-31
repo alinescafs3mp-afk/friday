@@ -476,6 +476,84 @@ async def test_merges_command_lists_candidates_and_accept_rejects_via_backend(tm
 
 
 @pytest.mark.asyncio
+async def test_conflicts_command_lists_and_decides_via_backend(tmp_path):
+    """G4: conflicts had no chat path; /conflicts mirrors /merges for knowledge pairs."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/conflicts": {
+                "items": [
+                    {
+                        "id": "kc_abc123",
+                        "conflict_type": "near_duplicate",
+                        "confidence": 0.91,
+                        "knowledge_a_title": "Штатка март",
+                        "knowledge_a_summary": "Первая редакция",
+                        "knowledge_b_title": "Штатка март копия",
+                        "knowledge_b_summary": "Повтор загрузки",
+                    }
+                ],
+                "count": 1,
+                "total": 200,
+            },
+            "/api/kg/conflicts/kc_abc123/decide": {"status": "dismissed"},
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "chat": {"id": 5001},
+                    "from": user,
+                    "text": "/conflicts",
+                },
+            },
+            cached_response=None,
+        )
+        assert any(
+            call["path"].startswith("/api/kg/conflicts") and call["method"] == "GET" for call in backend.calls
+        )
+        cards = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+        assert any("200" in str(c.get("text", "")) for c in cards)
+        card = cards[-1]
+        assert "Штатка март" in card["text"]
+        buttons = {
+            button["callback_data"] for row in card["reply_markup"]["inline_keyboard"] for button in row
+        }
+        assert buttons == {
+            "conflict:keep_a:kc_abc123",
+            "conflict:keep_b:kc_abc123",
+            "conflict:dismiss:kc_abc123",
+        }
+
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 2,
+                "callback_query": {
+                    "id": "cb-dismiss",
+                    "from": user,
+                    "data": "conflict:dismiss:kc_abc123",
+                    "message": {"message_id": 99, "chat": {"id": 5001}},
+                },
+            },
+            cached_response=None,
+        )
+        decide = next(call for call in backend.calls if call["path"] == "/api/kg/conflicts/kc_abc123/decide")
+        assert decide["method"] == "POST"
+        assert decide["body"]["decision"] == "dismiss"
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_merges_command_reports_when_no_candidates(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()

@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -321,6 +322,9 @@ class ExecutionKernel:
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
             "resolve_duplicates": self._resolve_duplicates,
+            "conflict_list": self._conflict_list,
+            "conflict_decide": self._conflict_decide,
+            "entity_merge_decide": self._entity_merge_decide,
             "inbox_list": self._inbox_list,
             "user_activity": self._user_activity,
             "user_knowledge_search": self._user_knowledge_search,
@@ -429,23 +433,58 @@ class ExecutionKernel:
     def _audit_details(tool_name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
         """What a tool invocation should leave behind besides its name.
 
-        `code_run` is the one tool whose whole point is executing text the caller
-        supplied, and the audit row recorded only that it ran — the code itself was
-        reachable only through the tool's own output, which is truncated. A fingerprint
-        closes that without putting a body in the log: the same `sha256` + `chars`
-        pairing `admin.knowledge.purge` already uses, and for the same reason —
         `audit_log` is append-only at the database level and not even purge clears it,
-        so it must never hold content.
+        so it must never hold content — only fingerprints (`sha256` + length), hosts
+        and counts. The same pairing `admin.knowledge.purge` already uses.
+
+        `code_run` was the first tool fingerprinted this way: without it the audit
+        row said only that code ran, and the body was reachable only through the
+        truncated tool output. Web tools are the only ones that leave the machine:
+        without a fingerprint the owner cannot answer «what did the system fetch
+        on my behalf yesterday».
         """
-        if tool_name != "code_run":
-            return {}
-        code = (arguments or {}).get("code")
-        if not isinstance(code, str):
-            return {}
-        return {
-            "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
-            "code_chars": len(code),
-        }
+        args = arguments or {}
+        if tool_name == "code_run":
+            code = args.get("code")
+            if not isinstance(code, str):
+                return {}
+            return {
+                "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+                "code_chars": len(code),
+            }
+        if tool_name in {"web_search", "web_research"}:
+            query = args.get("query")
+            if not isinstance(query, str):
+                return {}
+            details: dict[str, Any] = {
+                "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
+                "query_chars": len(query),
+            }
+            if tool_name == "web_search":
+                max_results = args.get("max_results")
+                if isinstance(max_results, int):
+                    details["max_results"] = max_results
+            else:
+                max_sources = args.get("max_sources")
+                if isinstance(max_sources, int):
+                    details["max_sources"] = max_sources
+            return details
+        if tool_name == "web_fetch":
+            url = args.get("url")
+            if not isinstance(url, str):
+                return {}
+            # Host answers «where did we go»; the path may carry a token in the
+            # query string and must never land in an un-purgeable table.
+            try:
+                host = (urllib.parse.urlsplit(url).hostname or "").casefold()
+            except ValueError:
+                host = ""
+            return {
+                "url_host": host,
+                "url_sha256": hashlib.sha256(url.encode("utf-8")).hexdigest(),
+                "url_chars": len(url),
+            }
+        return {}
 
     async def _audit(
         self,
@@ -771,6 +810,122 @@ class ExecutionKernel:
             "scan": report,
             "complete": bool(report.get("complete")),
         }
+
+    async def _conflict_list(self, *, actor: ActorContext, limit: int = 5) -> dict[str, Any]:
+        """Next pending knowledge conflicts for the actor — a page, not the whole queue.
+
+        Two hundred suggested conflicts on the live install, and zero paths from
+        chat until this tool and the matching /conflicts command. Portions only:
+        nobody reviews two hundred in one reply.
+        """
+        storage, _, _, _ = self._require_services()
+        page = max(1, min(int(limit), 10))
+        items = await run_blocking(
+            storage.list_knowledge_conflicts,
+            actor.user_id,
+            status="suggested",
+            limit=page,
+            offset=0,
+        )
+        total = await run_blocking(storage.count_knowledge_conflicts, actor.user_id, status="suggested")
+        compact: list[dict[str, Any]] = []
+        for item in items:
+            compact.append(
+                {
+                    "id": str(item.get("id") or ""),
+                    "conflict_type": str(item.get("conflict_type") or ""),
+                    "confidence": float(item.get("confidence") or 0.0),
+                    "a": {
+                        "id": str(item.get("knowledge_a_id") or ""),
+                        "title": str(item.get("knowledge_a_title") or "")[:200],
+                        "summary": str(item.get("knowledge_a_summary") or "")[:400],
+                    },
+                    "b": {
+                        "id": str(item.get("knowledge_b_id") or ""),
+                        "title": str(item.get("knowledge_b_title") or "")[:200],
+                        "summary": str(item.get("knowledge_b_summary") or "")[:400],
+                    },
+                }
+            )
+        return {
+            "count": len(compact),
+            "total": total,
+            "truncated": len(compact) < total,
+            "items": compact,
+        }
+
+    async def _conflict_decide(
+        self,
+        *,
+        actor: ActorContext,
+        conflict_id: str,
+        decision: str,
+    ) -> dict[str, Any]:
+        """Settle one suggested conflict. Does not re-open a terminal decision.
+
+        decision:
+          - dismiss — not a real conflict; both records stay as they are
+          - keep_a / keep_b — resolve by keeping that side; the other is deprecated
+        """
+        _, kg, _, _ = self._require_services()
+        choice = str(decision or "").casefold().strip()
+        if choice not in {"dismiss", "keep_a", "keep_b"}:
+            raise ValueError("decision must be dismiss, keep_a or keep_b")
+        conflict = await run_blocking(kg.storage.get_knowledge_conflict, actor.user_id, conflict_id)
+        if not conflict:
+            raise ValueError("Conflict not found")
+        if str(conflict.get("status") or "") != "suggested":
+            raise ValueError(f"Conflict is already {conflict.get('status')}")
+        if choice == "dismiss":
+            result = await run_blocking(
+                kg.review_conflict,
+                actor.user_id,
+                conflict_id,
+                "dismissed",
+                reviewed_by=actor.user_id,
+                resolution_note="telegram/agent: dismissed",
+            )
+            return {"status": "dismissed", "conflict_id": conflict_id, "item": result}
+        winner_id = str(conflict["knowledge_a_id"]) if choice == "keep_a" else str(conflict["knowledge_b_id"])
+        result = await run_blocking(
+            kg.resolve_conflict,
+            actor.user_id,
+            conflict_id,
+            winner_id,
+            reviewed_by=actor.user_id,
+            resolution_note=f"telegram/agent: {choice}",
+        )
+        return {"status": "resolved", "conflict_id": conflict_id, "winner_id": winner_id, "item": result}
+
+    async def _entity_merge_decide(
+        self,
+        *,
+        actor: ActorContext,
+        candidate_id: str,
+        decision: str,
+        target_entity_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Accept or reject one entity-merge candidate. Complements resolve_duplicates."""
+        _, kg, _, _ = self._require_services()
+        choice = str(decision or "").casefold().strip()
+        if choice not in {"accept", "reject"}:
+            raise ValueError("decision must be accept or reject")
+        if choice == "reject":
+            await run_blocking(
+                kg.resolver.reject_resolution,
+                candidate_id,
+                actor.user_id,
+                resolved_by=actor.user_id,
+            )
+            return {"status": "rejected", "candidate_id": candidate_id}
+        merged = await run_blocking(
+            kg.resolver.accept_resolution,
+            candidate_id,
+            actor.user_id,
+            target_entity_id=target_entity_id,
+            resolved_by=actor.user_id,
+        )
+        return {"status": "merged", "candidate_id": candidate_id, "result": merged}
 
     async def _inbox_list(self, *, actor: ActorContext, status: str | None = None) -> dict[str, Any]:
         storage, _, _, _ = self._require_services()
@@ -1211,6 +1366,46 @@ class ExecutionKernel:
             "kg.merge",
             {},
             [],
+        )
+        spec(
+            "conflict_list",
+            "Показать порцию конфликтов знаний, ждущих решения человека. "
+            "count — сколько в этой порции, total — сколько всего suggested. "
+            "Решённые сюда не попадают. Дальше — conflict_decide по id.",
+            "knowledge.read",
+            {"limit": {"type": "integer", "minimum": 1, "maximum": 10}},
+            [],
+        )
+        spec(
+            "conflict_decide",
+            "Решить один конфликт знаний. decision=dismiss — это не конфликт, обе "
+            "записи остаются; keep_a / keep_b — оставить указанную сторону, вторая "
+            "помечается устаревшей. Работает только со статусом suggested.",
+            "knowledge.edit",
+            {
+                "conflict_id": {"type": "string"},
+                "decision": {
+                    "type": "string",
+                    "enum": ["dismiss", "keep_a", "keep_b"],
+                },
+            },
+            ["conflict_id", "decision"],
+        )
+        spec(
+            "entity_merge_decide",
+            "Принять или отклонить одно предложение объединить сущности. "
+            "accept переносит связи на цель; reject помечает пару «не дубликат» "
+            "и она больше не предлагается. Список — через resolve_duplicates.",
+            "kg.merge",
+            {
+                "candidate_id": {"type": "string"},
+                "decision": {"type": "string", "enum": ["accept", "reject"]},
+                "target_entity_id": {
+                    "type": "string",
+                    "description": "какую из двух оставить; без неё — более богатая",
+                },
+            },
+            ["candidate_id", "decision"],
         )
         spec(
             "user_activity",

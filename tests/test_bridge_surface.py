@@ -33,12 +33,14 @@ from jericho.server import create_app
 # подтверждённых сущностей в тексте, для подсветки в инспекции.
 # 153 → 154: GET /api/admin/knowledge/timeline — плотность корпуса по времени
 # и лента окна; стоит ПЕРЕД /knowledge/{knowledge_id}, иначе будет проглочен.
-EXPECTED_OPERATIONS = 154
+# 154 → 156: GET /api/kg/conflicts + POST /api/kg/conflicts/{id}/decide —
+# разбор конфликтов знаний из чата (Telegram /conflicts) и инструментов агента.
+EXPECTED_OPERATIONS = 156
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
     "/api/admin": 85,
-    "/api/kg": 14,
+    "/api/kg": 16,
     "/api/missions": 4,
 }
 

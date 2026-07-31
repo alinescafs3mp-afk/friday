@@ -299,6 +299,84 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
     return {"status": "rejected"}
 
 
+@router.get("/conflicts", tags=["knowledge-graph"])
+async def list_own_conflicts(
+    request: Request,
+    status: str | None = "suggested",
+    limit: int = Query(5, ge=1, le=20),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Tenant-scoped conflict queue for chat triage (Telegram /conflicts).
+
+    Admin bulk routes live under /api/admin; this is the personal path that
+    buttons and the agent tool share. Portions only — the live install holds
+    hundreds of suggested rows.
+    """
+    actor = _require(request, "knowledge.read")
+    storage = request.app.state.storage
+    try:
+        items = await run_blocking(
+            storage.list_knowledge_conflicts,
+            actor.user_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        total = await run_blocking(storage.count_knowledge_conflicts, actor.user_id, status=status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "status": status,
+        "truncated": len(items) < total,
+    }
+
+
+@router.post("/conflicts/{conflict_id}/decide", tags=["knowledge-graph"])
+async def decide_own_conflict(conflict_id: str, request: Request) -> dict[str, Any]:
+    """One decision on one suggested conflict: dismiss / keep_a / keep_b."""
+    actor = _require(request, "knowledge.edit")
+    body = await _request_json(request)
+    decision = str(body.get("decision") or "").casefold().strip()
+    if decision not in {"dismiss", "keep_a", "keep_b"}:
+        raise HTTPException(status_code=400, detail="decision must be dismiss, keep_a or keep_b")
+    kg = request.app.state.kg
+    conflict = await run_blocking(kg.storage.get_knowledge_conflict, actor.user_id, conflict_id)
+    if not conflict:
+        raise HTTPException(status_code=404, detail="Conflict not found")
+    if str(conflict.get("status") or "") != "suggested":
+        raise HTTPException(status_code=409, detail=f"Conflict is already {conflict.get('status')}")
+    try:
+        if decision == "dismiss":
+            result = await run_blocking(
+                kg.review_conflict,
+                actor.user_id,
+                conflict_id,
+                "dismissed",
+                reviewed_by=actor.user_id,
+                resolution_note="chat: dismissed",
+            )
+            _audit(request, "knowledge_conflict.dismissed", "knowledge_conflict", conflict_id, after=result)
+            return {"status": "dismissed", "item": result}
+        winner_id = (
+            str(conflict["knowledge_a_id"]) if decision == "keep_a" else str(conflict["knowledge_b_id"])
+        )
+        result = await run_blocking(
+            kg.resolve_conflict,
+            actor.user_id,
+            conflict_id,
+            winner_id,
+            reviewed_by=actor.user_id,
+            resolution_note=f"chat: {decision}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(request, "knowledge_conflict.resolved", "knowledge_conflict", conflict_id, after=result)
+    return {"status": "resolved", "winner_id": winner_id, "item": result}
+
+
 @router.get("/timeline", tags=["knowledge-graph"])
 async def event_timeline(
     request: Request,

@@ -215,6 +215,7 @@ class CommandsMixin(BridgeShared):
                 "/mission цель — многошаговая миссия в фоне\n"
                 "/missions — список миссий и управление\n"
                 "/inbox — разобрать ближайшие предложения\n"
+                "/conflicts — разобрать конфликты знаний (порциями)\n"
                 "/merges — подтвердить или отклонить объединение дубликатов\n"
                 "/tags — теги базы знаний с количеством записей\n"
                 "/browse тег или название — записи по тегу, проекту или сущности\n"
@@ -259,6 +260,9 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/inbox":
             await self._send_inbox(telegram, backend, chat_id, external_user_id, user)
+            return
+        if command == "/conflicts":
+            await self._send_conflicts(telegram, backend, chat_id, external_user_id, user)
             return
         if command == "/merges":
             await self._send_merges(telegram, backend, chat_id, external_user_id, user)
