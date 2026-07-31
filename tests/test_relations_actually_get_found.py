@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -116,6 +117,30 @@ def test_every_occurrence_counts_not_only_the_first(storage, graph):
     assert suggestions, (
         "по первому вхождению «Полярис» стоит в начале, далеко от «Атлас» — "
         "и пара терялась, хотя рядом во втором предложении она есть"
+    )
+
+
+def test_evidence_phrase_is_the_relation_verb_not_a_stray_entity_name(storage, graph):
+    """Найдено состязательным ревью: `evidence["phrase"]` хранил `match.group(0)`, а
+    `match` — не результат `phrase.search(between)` (эта переменная не привязана к
+    результату вовсе), а последнее значение из БОЛЕЕ РАННЕГО цикла сбора упоминаний
+    (`for match in pattern.finditer(text)`). Ревьюер видел имя сущности вместо глагола,
+    оправдавшего связь.
+
+    Мутация: убрать привязку `phrase_match = phrase.search(between)` и вернуть чтение
+    из `match` — тест обязан покраснеть.
+    """
+    text = f"Сервис Атлас {FILLER * 2} использует {FILLER * 2} базу Полярис для хранения."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "Атлас", status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, "Полярис", status="accepted")
+
+    suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
+    assert suggestions, "проба проверяет не тот сценарий — связь не нашлась вовсе"
+    evidence = json.loads(suggestions[0]["evidence_json"])
+    phrase = evidence["phrase"]
+    assert phrase.casefold() == "использует", (
+        f"evidence.phrase должен быть глаголом связи, а не именем сущности: получено {phrase!r}"
     )
 
 

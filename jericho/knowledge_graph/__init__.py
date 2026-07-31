@@ -1316,7 +1316,8 @@ class KnowledgeGraph:
                     continue
                 between = text[left[1] : right[0]]
                 for phrase, relation_type, base_confidence in _RELATION_PHRASES:
-                    if not phrase.search(between):
+                    phrase_match = phrase.search(between)
+                    if not phrase_match:
                         continue
                     confidence = base_confidence
                     span = text[max(0, left[0] - 30) : min(len(text), right[1] + 30)]
@@ -1330,7 +1331,13 @@ class KnowledgeGraph:
                             "knowledge_object_id": knowledge_object_id,
                             "source_name": left[2].get("entity_name"),
                             "target_name": right[2].get("entity_name"),
-                            "phrase": match.group(0),
+                            # Found by adversarial review: `match` used to be the
+                            # leftover loop variable from the EARLIER mention-collection
+                            # loop above (`for match in pattern.finditer(text)`) — it was
+                            # never bound to the relation-phrase match itself, so this
+                            # showed the reviewer a stray entity name instead of the verb
+                            # that actually justified the relation.
+                            "phrase": phrase_match.group(0),
                             "excerpt": span[:500],
                             "method": "explicit_local_relation_phrase",
                         },
