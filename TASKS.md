@@ -95,12 +95,10 @@
 
 ## Открытые задачи
 
-### #69 — скачать разговор текстом из Telegram ⟶ **Grok**
+### #69 — скачать разговор текстом из Telegram ⟶ **сделано** (Grok, G20)
 
-У моста сегодня нет отправки файлов ОТ бота вовсе — только текстовые
-сообщения. Первая настоящая новая инфраструктура (`sendDocument`,
-multipart), не переиспользование self-service backend, как в G16-G19.
-Подробности, готовый набросок кода — `grok/TASKS.md`, раздел G20.
+GET /api/conversations/{id}/export (text/plain, current, потолок 500),
+_send_document + /export в Telegram. Тесты: test_conversation_export.py.
 
 ### #68 — где теряются 6 из 20: задача ранжирования, не отбора ⟶ **Sol**
 

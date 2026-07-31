@@ -1,5 +1,14 @@
 ## Unreleased
 
+### G20: скачать разговор текстом из Telegram (#69)
+
+GET /api/conversations/{id}/export — text/plain transcript (conversations.read,
+sentinel current, потолок 500 с явной пометкой). Мост: _send_document (sendDocument
+multipart), _backend_text, команда /export.
+
+Тесты: test_conversation_export.py (порядок реплик, foreign 404, _send_document).
+
+
 ### G19: посмотреть и снять предстоящее напоминание (#67)
 
 Storage: list_pending_reminders(user_id), dismiss_notification → status=dismissed

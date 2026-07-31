@@ -9,12 +9,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from jericho.api.deps import _json_load, _parse_json_bool, _request_json, _require
 from jericho.storage import normalize_conversation_mode
 
 router = APIRouter(prefix="/api/conversations", tags=["chat"])
+
+# Hard ceiling for a single export: Telegram documents are fine far above this,
+# but a multi-year chat should not dump unbounded rows into memory. The file
+# header always states when the window is the last N of a longer history.
+EXPORT_MESSAGE_LIMIT = 500
 
 
 def _resolve_conversation_ref(request: Request, actor: Any, conversation_id: str) -> str:
@@ -160,14 +165,93 @@ async def conversation_messages(
     limit: int = Query(100, ge=1, le=1000),
 ) -> dict[str, Any]:
     actor = _require(request, "conversations.read")
-    if not request.app.state.storage.get_conversation(conversation_id, actor.user_id):
+    resolved = _resolve_conversation_ref(request, actor, conversation_id)
+    if not request.app.state.storage.get_conversation(resolved, actor.user_id):
         raise HTTPException(status_code=404, detail="Диалог не найден")
     items = request.app.state.storage.get_conversation_messages(
-        conversation_id,
+        resolved,
         user_id=actor.user_id,
         limit=limit,
     )
     return {"items": items, "count": len(items)}
+
+
+def format_conversation_export(
+    conversation: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    limit: int,
+    truncated: bool,
+) -> str:
+    """Plain-text transcript: one line per message, role + time + text.
+
+    No Telegram markup — this is a downloadable file, not a chat bubble.
+    """
+    conv_id = str(conversation.get("id") or "")
+    title = str(conversation.get("title") or "").strip() or "без названия"
+    lines = [
+        "# Jericho conversation export",
+        f"# conversation_id: {conv_id}",
+        f"# title: {title}",
+        f"# messages: {len(messages)}",
+    ]
+    if truncated:
+        lines.append(
+            f"# note: показаны последние {limit} сообщений "
+            f"(потолок выгрузки; более ранние не включены)"
+        )
+    lines.append("")
+    for row in messages:
+        role = str(row.get("role") or "?").strip() or "?"
+        created = str(row.get("created_at") or "").strip() or "?"
+        content = str(row.get("content") or "")
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+        content = content.replace("\n", "\\n")
+        lines.append(f"[{created}] {role}: {content}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+@router.get("/{conversation_id}/export", tags=["chat"])
+async def export_conversation(
+    conversation_id: str,
+    request: Request,
+    limit: int = Query(EXPORT_MESSAGE_LIMIT, ge=1, le=EXPORT_MESSAGE_LIMIT),
+) -> Response:
+    """G20: plain-text transcript of one conversation (self-service).
+
+    Telegram is the primary consumer (bot sends the file via sendDocument),
+    but the route is ordinary HTTP so tenant checks and foreign-id 404 can be
+    pinned without mocking Telegram. Gate conversations.read — same as listing
+    messages; no manage rights needed to read one's own chat.
+    """
+    actor = _require(request, "conversations.read")
+    resolved = _resolve_conversation_ref(request, actor, conversation_id)
+    conversation = request.app.state.storage.get_conversation(resolved, actor.user_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Диалог не найден")
+    cap = max(1, min(int(limit), EXPORT_MESSAGE_LIMIT))
+    items = request.app.state.storage.get_conversation_messages(
+        resolved,
+        user_id=actor.user_id,
+        limit=cap,
+    )
+    # If we filled the window, earlier messages may exist — never silent-truncate.
+    truncated = len(items) >= cap
+    body = format_conversation_export(
+        conversation,
+        items,
+        limit=cap,
+        truncated=truncated,
+    )
+    filename = f"jericho-{resolved[:24]}.txt"
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.post("/{conversation_id}/archive", tags=["chat"])

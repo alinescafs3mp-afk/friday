@@ -113,7 +113,19 @@ class _FakeTelegramClient:
         self.updates = updates or []
 
     async def post(self, url, json=None, **kwargs):
-        self.calls.append((url, json or {}))
+        # sendMessage uses json=; sendDocument uses data=/files= multipart.
+        if json is not None:
+            self.calls.append((url, json))
+        else:
+            self.calls.append(
+                (
+                    url,
+                    {
+                        "data": kwargs.get("data"),
+                        "files": kwargs.get("files"),
+                    },
+                )
+            )
         if url.endswith("/getUpdates"):
             return _FakeResponse({"ok": True, "result": self.updates})
         return _FakeResponse({"ok": True, "result": {}})
@@ -132,6 +144,14 @@ class _FakeBackendClient:
         body = json.loads(content.decode("utf-8")) if content else None
         self.calls.append({"method": method, "path": path, "body": body, "headers": headers or {}})
         payload = self.responses.get(path, self.responses.get(parsed.path, {}))
+        # Plain-text backend routes (G20 export) store a str; keep JSON for the rest.
+        if isinstance(payload, str):
+            return _FakeResponse({}, text=payload)
+        if isinstance(payload, tuple) and len(payload) == 2:
+            status, body = payload
+            if isinstance(body, str):
+                return _FakeResponse({}, status_code=int(status), text=body)
+            return _FakeResponse(body, status_code=int(status))
         return _FakeResponse(payload)
 
 

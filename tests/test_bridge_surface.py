@@ -229,6 +229,7 @@ EXPECTED_COMMANDS = {
     "/chat",
     "/conflicts",
     "/delete",
+    "/export",
     "/help",
     "/history",
     "/inbox",
@@ -262,11 +263,13 @@ EXPECTED_COMMANDS = {
 # 50: /archive /delete /rename (G18) — только ветки команд + namespace conv, без
 # новых методов на TelegramBridge.
 # 50 → 51: /reminders + _send_reminders + namespace remind (G19).
-EXPECTED_BRIDGE_COUNT = 51
+# 51 → 53: /export + _send_document + _backend_text (G20).
+EXPECTED_BRIDGE_COUNT = 53
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
     "_backend_json": "(self, client: 'httpx.AsyncClient', method: 'str', path: 'str', payload: 'dict[str, Any] | None', external_user_id: 'str', chat_id: 'str') -> 'dict[str, Any]'",
+    "_backend_text": "(self, client: 'httpx.AsyncClient', method: 'str', path: 'str', payload: 'dict[str, Any] | None', external_user_id: 'str', chat_id: 'str') -> 'str'",
     "_citation_open_buttons": "(citations: 'Any') -> 'list[dict[str, str]]'",
     "_clear_inline_markup": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int') -> 'None'",
     "_describe_merge_entity": "(entity: 'dict[str, Any]') -> 'str'",
@@ -302,6 +305,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_reminders": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
+    "_send_document": "(self, client: 'httpx.AsyncClient', chat_id: 'int', filename: 'str', content_bytes: 'bytes', *, caption: 'str' = '') -> 'None'",
     "_send_message": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, reply_markup: 'dict[str, Any] | None' = None) -> 'None'",
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_search": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",

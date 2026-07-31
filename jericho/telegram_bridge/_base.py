@@ -69,6 +69,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("instructions", "как отвечать: показать, задать или очистить"),
     ("retry", "сгенерировать ответ на последний вопрос заново"),
     ("reminders", "предстоящие напоминания и снять одно"),
+    ("export", "скачать текущий разговор текстом"),
     ("help", "справка по командам"),
 )
 
@@ -216,6 +217,7 @@ class BridgeShared:
 
     _api_url: Any
     _backend_json: Callable[..., Any]
+    _backend_text: Callable[..., Any]
     _extract_forward: Callable[..., Any]
     _file_url: Any
     _format_full_document: Callable[..., Any]
@@ -237,6 +239,7 @@ class BridgeShared:
     _send_merges: Callable[..., Any]
     _send_reminders: Callable[..., Any]
     _send_message: Callable[..., Any]
+    _send_document: Callable[..., Any]
     _send_missions: Callable[..., Any]
     _send_search: Callable[..., Any]
     _send_tags: Callable[..., Any]

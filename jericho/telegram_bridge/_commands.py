@@ -253,7 +253,8 @@ class CommandsMixin(BridgeShared):
                 "/note текст — явно сохранить заметку\n"
                 "/instructions — как отвечать: показать, задать или очистить\n"
                 "/retry — сгенерировать ответ на последний вопрос заново\n"
-                "/reminders — предстоящие напоминания; кнопка «Снять» отменяет одно\n\n"
+                "/reminders — предстоящие напоминания; кнопка «Снять» отменяет одно\n"
+                "/export — скачать текущий разговор текстом\n\n"
                 "Ответы можно оценивать кнопками, а результаты /work, /research и миссий — "
                 "отправлять в Inbox на review.",
             )
@@ -481,6 +482,35 @@ class CommandsMixin(BridgeShared):
                 telegram,
                 chat_id,
                 "Новый диалог начат в обычном режиме. Сама база знаний не очищена.",
+            )
+            return
+        if command == "/export":
+            # G20: plain-text transcript of the current channel conversation as a file.
+            # Backend builds the body (tenant + truncation notice); bridge only ships it.
+            await register_backend_user()
+            try:
+                text = await self._backend_text(
+                    backend,
+                    "GET",
+                    "/api/conversations/current/export",
+                    None,
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Нечего выгружать: в этом чате ещё нет разговора.",
+                )
+                return
+            content = text.encode("utf-8")
+            await self._send_document(
+                telegram,
+                chat_id,
+                "jericho-export.txt",
+                content,
+                caption="Выгрузка текущего разговора (текст).",
             )
             return
         if command == "/archive":

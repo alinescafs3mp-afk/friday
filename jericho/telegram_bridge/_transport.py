@@ -637,6 +637,59 @@ class TransportMixin(BridgeShared):
             raise RuntimeError("Backend returned a non-object response")
         return data
 
+    async def _backend_text(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None,
+        external_user_id: str,
+        chat_id: str,
+    ) -> str:
+        """Same signed bridge call as ``_backend_json``, but return raw text body.
+
+        Used by ``/export``: the backend answers ``text/plain``, not JSON.
+        """
+        body = (
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            if payload is not None
+            else b""
+        )
+        timestamp = int(time.time())
+        nonce = uuid.uuid4().hex
+        signature = sign_bridge_request(
+            self.config.bridge_secret,
+            timestamp=timestamp,
+            method=method,
+            path=path,
+            external_user_id=external_user_id,
+            chat_id=chat_id,
+            nonce=nonce,
+            body=body,
+        )
+        headers = {
+            "Content-Type": "application/json",
+            "X-Jericho-Timestamp": str(timestamp),
+            "X-Jericho-User": external_user_id,
+            "X-Jericho-Chat": chat_id,
+            "X-Jericho-Nonce": nonce,
+            "X-Jericho-Signature": signature,
+        }
+        response = await client.request(
+            method,
+            f"{self._backend_url}{path}",
+            content=body if body else None,
+            headers=headers,
+        )
+        if response.status_code == 409 and not response.headers.get("Retry-After", "").strip():
+            detail = response.text[:500]
+            raise PermanentUpdateError(f"Backend rejected update (409): {detail}")
+        if response.status_code in {400, 403, 404, 413, 422}:
+            detail = response.text[:500]
+            raise PermanentUpdateError(f"Backend rejected update ({response.status_code}): {detail}")
+        response.raise_for_status()
+        return response.text
+
     async def _typing_loop(self, client: httpx.AsyncClient, chat_id: int) -> None:
         try:
             while True:
@@ -669,3 +722,21 @@ class TransportMixin(BridgeShared):
                 payload["reply_markup"] = reply_markup
             response = await client.post(f"{self._api_url}/sendMessage", json=payload)
             response.raise_for_status()
+
+    async def _send_document(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        filename: str,
+        content_bytes: bytes,
+        *,
+        caption: str = "",
+    ) -> None:
+        """Upload a file to the chat (G20 export). Multipart, not JSON sendMessage."""
+        safe_name = (filename or "export.txt").replace("/", "_").replace("\\", "_")[:128]
+        response = await client.post(
+            f"{self._api_url}/sendDocument",
+            data={"chat_id": str(chat_id), "caption": (caption or "")[:1024]},
+            files={"document": (safe_name, content_bytes, "text/plain; charset=utf-8")},
+        )
+        response.raise_for_status()
