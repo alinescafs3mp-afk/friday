@@ -24,7 +24,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -200,7 +200,7 @@ def watch_status(*, write_state: bool = True, git_ref: str = "origin/main") -> d
     prev_open = set(prev.get("open_ids") or [])
     newly_seen = sorted(set(must_work) - prev_open)
 
-    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    now = datetime.now(UTC).astimezone().isoformat(timespec="seconds")
     state = {
         "checked_at": now,
         "commit": head,
