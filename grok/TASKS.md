@@ -258,6 +258,67 @@ hardened against exactly this; missions were missed». Историю повто
 
 ---
 
+# Новое (пока G11 в работе — доразобрал остаток разведки, проверил сам)
+
+## G12 (#59). Два мелких, но реальных дефекта из разведки — низкий приоритет, но не выдумка
+
+### 1. `_user_knowledge_search` — асимметричный клэмп лимита
+
+`execution_kernel/__init__.py:1276-1278`:
+
+```python
+found = (
+    await self.searcher.search(chosen.user_id, clean_query, limit=max(1, min(int(limit), 20)))
+    if self.searcher is not None
+    else {"results": storage.search_knowledge(chosen.user_id, clean_query, limit=limit)}
+)
+```
+
+Ветка с `self.searcher` клэмпит `limit` в `[1, 20]` (совпадает с объявленной схемой
+инструмента, `"limit": {"maximum": 20}`). Ветка `else` — нет, сырой `limit` летит в
+`storage.search_knowledge` напрямую. Инструмент отдаёт содержимое ЧУЖОГО корпуса
+(гейт `admin.all_data.read`), поэтому лимит — не мелочь.
+
+Проверил: сегодня в проде это мёртвая ветка — `server.py:774`
+(`kernel.bind_services(..., searcher=searcher)`) всегда передаёт настоящий
+`searcher`, `self.searcher` в бою никогда не `None`. Но контракт «схема — верхняя
+граница» не гарантирован архитектурно — `execute()` не проверяет параметры по
+объявленной JSON-схеме вовсе, каждый обработчик клэмпит сам, и этот забыл. Почини
+just этот метод (клэмпни в else-ветке так же, `max(1, min(int(limit), 20))`) —
+общую валидацию по схеме заводить не нужно, это отдельный архитектурный вопрос
+за рамками находки.
+
+Тест: вызови с `limit=999` через путь без `searcher` (замокай/подставь
+`self.searcher = None`), убедись, что дошедший до `storage.search_knowledge` лимит
+клэмпнут. Мутация — убери клэмп, тест обязан покраснеть.
+
+### 2. `web_surfer/__init__.py:658` — `except BaseException` вместо `except Exception`
+
+```python
+try:
+    fetch_result = task.result()
+except BaseException:
+    failed_sources += 1
+    continue
+```
+
+Единственное место в проекте, где так поймано — везде рядом принят паттерн
+`except asyncio.CancelledError: raise` перед `except Exception` (сверь
+`workers/__init__.py:427-428`, `telegram_bridge/_transport.py:513-514`). Здесь
+`BaseException` глотает и `CancelledError` — при отмене родительской задачи
+(таймаут, остановка воркера) один упавший источник исследования проглотит сигнал
+отмены молча вместо того чтобы дать ему распространиться.
+
+Почини по образцу соседних мест: `except asyncio.CancelledError: raise`, потом
+`except Exception:` с тем же телом. Тест: замокай `task.result()` так, чтобы
+бросало `asyncio.CancelledError`, убедись, что оно долетает наружу из
+`WebSurfer.research()`, а не тонет в `failed_sources`.
+
+Обе находки я проверил сам построчно (не пересказ разведки) — низкий приоритет,
+бери после G11.
+
+---
+
 ## Общее
 
 - Гейт целиком до пуша, `git pull --rebase` перед ним — в `main` пишут трое.
