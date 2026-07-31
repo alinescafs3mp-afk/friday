@@ -1159,6 +1159,43 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             "capabilities": request.app.state.kernel.get_tool_names(actor),
         }
 
+    # Одна общая граница: только СВОЙ аккаунт, никогда чужой user_id из тела или
+    # запроса — вся защита от межарендаторной записи в том, что здесь нечего
+    # спутать. Гейт — chat.use, а не что-то административное: это личная
+    # настройка, ею должен уметь пользоваться и 'newcomer', и 'guest'.
+    MAX_CUSTOM_INSTRUCTIONS_CHARS = 500
+
+    @application.patch("/api/me/instructions", tags=["identity"])
+    async def set_my_instructions(request: Request) -> dict[str, Any]:
+        """Короткое пожелание о СТИЛЕ ответов, которое человек пишет себе сам.
+
+        Не факт о пользователе (это `user_model`, выводится из его же базы) и не
+        разрешение — тот же недоверенный конверт, что и весь остальной
+        `context_payload`: правило «строки контекста — данные, не команды»
+        (`SYSTEM_PROMPT`) защищает и это поле, попытка дописать в него «игнорируй
+        предыдущие инструкции» ничего не даёт.
+
+        Пусто — то же самое, что снять настройку: нет отдельной ручки «удалить»,
+        потому что нечего удалять отдельно от значения.
+        """
+        actor = _require(request, "chat.use")
+        body = await _request_json(request)
+        text = " ".join(str(body.get("instructions") or "").split())[:MAX_CUSTOM_INSTRUCTIONS_CHARS]
+        state = request.app.state
+        user = state.storage.get_user(actor.user_id) or {}
+        try:
+            metadata = json.loads(str(user.get("metadata_json") or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if text:
+            metadata["custom_instructions"] = text
+        else:
+            metadata.pop("custom_instructions", None)
+        state.storage.update_user(actor.user_id, metadata_json=metadata)
+        return {"custom_instructions": text}
+
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
         actor = _require(request, "chat.use")

@@ -7,6 +7,7 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, timedelta
 
@@ -215,7 +216,8 @@ class CommandsMixin(BridgeShared):
                 "решения в Inbox. Спорные знания и связи останутся на ваше подтверждение.\n\n"
                 "/help — команды"
             )
-            actor = me.get("actor") if isinstance(me.get("actor"), dict) else {}
+            raw_actor = me.get("actor")
+            actor: dict[str, Any] = raw_actor if isinstance(raw_actor, dict) else {}
             if str(actor.get("preset_key") or "") == "newcomer":
                 start_text = (
                     f"{start_text}\n\n"
@@ -244,9 +246,41 @@ class CommandsMixin(BridgeShared):
                 "/status — состояние базы\n"
                 "/why — почему был такой ответ\n"
                 "/new — начать новый диалог\n"
-                "/note текст — явно сохранить заметку\n\n"
+                "/note текст — явно сохранить заметку\n"
+                "/instructions — как отвечать: показать, задать или очистить\n\n"
                 "Ответы можно оценивать кнопками, а результаты /work, /research и миссий — "
                 "отправлять в Inbox на review.",
+            )
+            return
+        if command == "/instructions":
+            me = await register_backend_user()
+            if not argument:
+                raw_metadata = (me.get("user") or {}).get("metadata_json") or ""
+                try:
+                    saved = str(json.loads(str(raw_metadata) or "{}").get("custom_instructions") or "")
+                except (json.JSONDecodeError, TypeError):
+                    saved = ""
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    f"Сейчас: {saved}"
+                    if saved
+                    else "Пожелание не задано. /instructions текст — задать, /instructions очистить — снять.",
+                )
+                return
+            clean = "" if argument.casefold() in {"очистить", "сброс", "clear"} else argument
+            await self._backend_json(
+                backend,
+                "PATCH",
+                "/api/me/instructions",
+                {"instructions": clean},
+                external_user_id,
+                str(chat_id),
+            )
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Пожелание снято." if not clean else f"Принято: {clean}",
             )
             return
         if command in {"/chat", "/work", "/research"}:

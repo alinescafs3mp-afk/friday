@@ -970,3 +970,65 @@ def test_open_registration_notifies_owner_about_a_new_newcomer(settings):
             "SELECT COUNT(*) AS n FROM outbound_notifications WHERE kind='onboarding'"
         ).fetchone()
         assert int(again["n"]) == 1
+
+
+def test_custom_instructions_are_self_service_and_reflected_in_me(settings):
+    """PATCH /api/me/instructions writes into the actor's OWN metadata_json --
+    there is no user_id parameter to take, so a cross-tenant write is
+    structurally impossible, not merely gated. GET /api/me shows what was set,
+    and the endpoint is reachable by every preset that has chat.use (not just
+    'user'), because it is a personal preference, not an admin action."""
+    from jericho.server import create_app
+
+    scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
+    with TestClient(create_app(scoped)) as client:
+        # A private chat, statically allowlisted, gets 'user' -- has chat.use.
+        set_response = _bridge_json(
+            client,
+            scoped,
+            "PATCH",
+            "/api/me/instructions",
+            {"instructions": "  отвечай  коротко  "},
+            user="5001",
+            chat="5001",
+        )
+        assert set_response.status_code == 200
+        # Collapsed whitespace -- the same normalization the backend applies
+        # before storing, not the raw string echoed back.
+        assert set_response.json()["custom_instructions"] == "отвечай коротко"
+
+        me = _bridge_get(client, scoped, "/api/me", user="5001", chat="5001")
+        import json as _json
+
+        metadata = _json.loads(me.json()["user"]["metadata_json"])
+        assert metadata["custom_instructions"] == "отвечай коротко"
+
+        # Setting empty text clears it rather than storing an empty string.
+        clear_response = _bridge_json(
+            client, scoped, "PATCH", "/api/me/instructions", {"instructions": ""}, user="5001", chat="5001"
+        )
+        assert clear_response.json()["custom_instructions"] == ""
+        me_after = _bridge_get(client, scoped, "/api/me", user="5001", chat="5001")
+        metadata_after = _json.loads(me_after.json()["user"]["metadata_json"])
+        assert "custom_instructions" not in metadata_after
+
+
+def test_custom_instructions_are_capped(settings):
+    """500 chars, matching the project's convention for short free-text fields
+    (reason[:500] appears throughout the codebase) -- long enough for a real
+    preference, short enough that it cannot become a second system prompt."""
+    from jericho.server import create_app
+
+    scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
+    with TestClient(create_app(scoped)) as client:
+        long_text = "x" * 900
+        response = _bridge_json(
+            client,
+            scoped,
+            "PATCH",
+            "/api/me/instructions",
+            {"instructions": long_text},
+            user="5001",
+            chat="5001",
+        )
+        assert len(response.json()["custom_instructions"]) == 500

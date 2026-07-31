@@ -37,7 +37,10 @@ from jericho.server import create_app
 # разбор конфликтов знаний из чата (Telegram /conflicts) и инструментов агента.
 # 156 → 160: GET+POST /api/kg/merges[/{id}/undo] и /api/admin/merges[/{id}/undo] —
 # откат слияния сущностей (#51); transfer set пишется при merge.
-EXPECTED_OPERATIONS = 160
+# 160 → 161: PATCH /api/me/instructions — короткое пожелание о стиле ответов,
+# которое человек задаёт себе сам (Telegram /instructions); self-service, гейт
+# chat.use, действует только на свой user_id.
+EXPECTED_OPERATIONS = 161
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
