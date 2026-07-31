@@ -228,17 +228,60 @@ def _token_overlap(query: str, value: str) -> float:
 # ними считалась утверждением о связи. Замер — в `suggest_relations_for_knowledge`.
 _RELATION_SPAN_CHARS = 400
 
-_RELATION_PHRASES: tuple[tuple[re.Pattern[str], RelationType, float], ...] = (
+# Четвёртое поле — `reversed`: чья сторона встречается в тексте первой. У «X
+# управляет Y» подлежащее (X, руководитель) стоит ДО глагола — совпадает с
+# порядком хранения (source=left, target=right), reversed=False. У «X
+# подчиняется Y» подлежащее (X, подчинённый) тоже стоит до глагола, но это тот
+# же MANAGES наоборот: Y руководит X. Без разворота связь легла бы задом
+# наперёд — начальник значился бы подчинённым своего подчинённого. Найдено и
+# исправлено ДО применения, состязательным ревью перед демо для команды.
+_RELATION_PHRASES: tuple[tuple[re.Pattern[str], RelationType, float, bool], ...] = (
     (
         re.compile(r"\b(?:использует|используют|uses?|runs?\s+on|работает\s+на)\b", re.I),
         RelationType.USES,
         0.90,
+        False,
     ),
-    (re.compile(r"\b(?:управляет|администрирует|manages?|administers?)\b", re.I), RelationType.MANAGES, 0.88),
-    (re.compile(r"\b(?:работает\s+над|works?\s+on)\b", re.I), RelationType.WORKS_ON, 0.88),
-    (re.compile(r"\b(?:зависит\s+от|depends?\s+on)\b", re.I), RelationType.DEPENDS_ON, 0.90),
-    (re.compile(r"\b(?:часть|входит\s+в|part\s+of)\b", re.I), RelationType.PART_OF, 0.82),
-    (re.compile(r"\b(?:член|участник|состоит\s+в|member\s+of)\b", re.I), RelationType.MEMBER_OF, 0.82),
+    (
+        re.compile(r"\b(?:управляет|администрирует|руководит|manages?|administers?|leads?)\b", re.I),
+        RelationType.MANAGES,
+        0.88,
+        False,
+    ),
+    (
+        re.compile(r"\b(?:работает\s+над|отвечает\s+за|works?\s+on|is\s+responsible\s+for)\b", re.I),
+        RelationType.WORKS_ON,
+        0.88,
+        False,
+    ),
+    (re.compile(r"\b(?:зависит\s+от|depends?\s+on)\b", re.I), RelationType.DEPENDS_ON, 0.90, False),
+    (re.compile(r"\b(?:часть|входит\s+в|part\s+of)\b", re.I), RelationType.PART_OF, 0.82, False),
+    (re.compile(r"\b(?:член|участник|состоит\s+в|member\s+of)\b", re.I), RelationType.MEMBER_OF, 0.82, False),
+    # Иерархия, подчинённый упомянут первым: «Иванов подчиняется Смирновой»,
+    # «Петров отчитывается перед Кузнецовым», «Кузнецов подотчётен директору».
+    # Один из явно названных пробелов для сценария «4 начальника + 3
+    # подчинённых» — найдено состязательным ревью на синтетике перед демо.
+    (
+        re.compile(
+            r"\b(?:подчиняется|подотчётен|подотчетен|отчитывается\s+перед|"
+            r"reports?\s+to|accountable\s+to)\b",
+            re.I,
+        ),
+        RelationType.MANAGES,
+        0.85,
+        True,
+    ),
+    # Сотрудничество и координация — связь симметричная, разворот не нужен:
+    # порядок упоминания сторон не меняет смысла «X координирует с Y».
+    (
+        re.compile(
+            r"\b(?:сотрудничает\s+с|координирует\s+с|coordinates?\s+with|collaborates?\s+with)\b",
+            re.I,
+        ),
+        RelationType.RELATED_TO,
+        0.75,
+        False,
+    ),
 )
 
 _CONFLICT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -1315,22 +1358,27 @@ class KnowledgeGraph:
                     # падение на сотню документов.
                     continue
                 between = text[left[1] : right[0]]
-                for phrase, relation_type, base_confidence in _RELATION_PHRASES:
+                for phrase, relation_type, base_confidence, phrase_reversed in _RELATION_PHRASES:
                     phrase_match = phrase.search(between)
                     if not phrase_match:
                         continue
                     confidence = base_confidence
                     span = text[max(0, left[0] - 30) : min(len(text), right[1] + 30)]
+                    # `reversed` swaps which mention becomes source/target: "X
+                    # подчиняется Y" has the subordinate (X) mentioned first in
+                    # text, but the relation MANAGES is stored manager-first —
+                    # so the SECOND mention (Y) is the source here, not the first.
+                    source, target = (right, left) if phrase_reversed else (left, right)
                     candidate = self.storage.store_relation_candidate(
                         user_id,
-                        str(left[2]["entity_id"]),
-                        str(right[2]["entity_id"]),
+                        str(source[2]["entity_id"]),
+                        str(target[2]["entity_id"]),
                         relation_type.value,
                         confidence=confidence,
                         evidence={
                             "knowledge_object_id": knowledge_object_id,
-                            "source_name": left[2].get("entity_name"),
-                            "target_name": right[2].get("entity_name"),
+                            "source_name": source[2].get("entity_name"),
+                            "target_name": target[2].get("entity_name"),
                             # Found by adversarial review: `match` used to be the
                             # leftover loop variable from the EARLIER mention-collection
                             # loop above (`for match in pattern.finditer(text)`) — it was

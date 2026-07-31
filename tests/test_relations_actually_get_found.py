@@ -253,3 +253,47 @@ def test_one_entity_mentioned_twice_is_not_a_relation_with_itself(storage, graph
     _linked_entity(storage, graph, "alice", ko_id, "Атлас", status="accepted")
 
     assert graph.suggest_relations_for_knowledge("alice", ko_id) == []
+
+
+def test_hierarchy_phrase_reverses_direction_so_the_manager_is_the_source(storage, graph):
+    """Найдено состязательным ревью перед демо (сценарий «4 начальника + 3
+    подчинённых»): «X подчиняется Y» упоминает подчинённого ПЕРВЫМ, но связь
+    MANAGES по смыслу должна начинаться с руководителя. Без разворота
+    начальник записывался бы подчинённым собственного подчинённого.
+
+    Мутация: убрать `phrase_reversed` (всегда `source, target = left, right`) —
+    тест обязан покраснеть на перепутанном source/target.
+    """
+    # Mention finding in suggest_relations_for_knowledge matches the entity's
+    # stored name as an exact substring (no declension handling — a separate,
+    # already-tracked gap), so the linked name is given in the form it appears
+    # in the text, same convention as the file's other tests.
+    text = f"Иванов {FILLER} подчиняется {FILLER} Смирновой в вопросах отчётности."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "Иванов", status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, "Смирновой", status="accepted")
+
+    suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
+    assert suggestions, "фраза «подчиняется» не дала ни одного кандидата"
+    candidate = suggestions[0]
+    assert candidate["relation_type"] == "manages"
+    evidence = json.loads(candidate["evidence_json"])
+    assert evidence["source_name"] == "Смирновой", (
+        "руководитель должен быть source: «Иванов подчиняется Смирновой» значит "
+        "Смирнова управляет Ивановым, а не наоборот"
+    )
+    assert evidence["target_name"] == "Иванов"
+
+
+def test_coordination_phrase_is_found_and_not_reversed(storage, graph):
+    """Симметричная связь («сотрудничает с») — направление упоминания в тексте не
+    меняет смысл, разворот не нужен. Проверяет, что фраза вообще матчится (была
+    полностью отсутствующей до этого фикса)."""
+    text = f"Отдел продаж {FILLER} координирует с {FILLER} отделом логистики поставки."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "Отдел продаж", status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, "отделом логистики", status="accepted")
+
+    suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
+    assert suggestions, "фраза «координирует с» не дала ни одного кандидата"
+    assert suggestions[0]["relation_type"] == "related_to"
