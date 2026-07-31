@@ -240,6 +240,8 @@ class BridgeShared:
     _send_reminders: Callable[..., Any]
     _send_message: Callable[..., Any]
     _send_document: Callable[..., Any]
+    _send_voice: Callable[..., Any]
+    _deliver_voice_reply: Callable[..., Any]
     _send_missions: Callable[..., Any]
     _send_search: Callable[..., Any]
     _send_tags: Callable[..., Any]

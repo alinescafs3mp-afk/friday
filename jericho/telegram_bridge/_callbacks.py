@@ -13,6 +13,7 @@ from jericho.telegram_bridge._base import (
     Any,
     BridgeShared,
     PermanentUpdateError,
+    base64,
     httpx,
 )
 
@@ -460,6 +461,33 @@ class CallbacksMixin(BridgeShared):
             if CallbacksMixin._citation_open_buttons(response.get("citations")):
                 body = f"{body}\nКнопкой ниже — открыть источник целиком."
         return body
+
+    async def _deliver_voice_reply(
+        self,
+        telegram: httpx.AsyncClient,
+        chat_id: int,
+        response: dict[str, Any],
+    ) -> None:
+        """Send the `speak` tool's clip (if this turn produced one) as a native
+        Telegram voice bubble, after the text reply. Best-effort: a delivery
+        failure here must not turn an otherwise-successful text answer into an
+        error for the user, so it is logged and swallowed, not raised.
+        """
+        voice = response.get("voice")
+        if not isinstance(voice, dict):
+            return
+        encoded = str(voice.get("audio_base64") or "")
+        if not encoded:
+            return
+        try:
+            audio_bytes = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            LOGGER.warning("tts: response carried an unparsable voice attachment")
+            return
+        try:
+            await self._send_voice(telegram, chat_id, audio_bytes)
+        except Exception:
+            LOGGER.warning("tts: sendVoice failed", exc_info=True)
 
     async def _answer_callback(
         self,

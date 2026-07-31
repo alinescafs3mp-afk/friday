@@ -740,3 +740,23 @@ class TransportMixin(BridgeShared):
             files={"document": (safe_name, content_bytes, "text/plain; charset=utf-8")},
         )
         response.raise_for_status()
+
+    async def _send_voice(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        audio_bytes: bytes,
+    ) -> None:
+        """Send a synthesized reply as a native Telegram voice bubble.
+
+        `sendVoice` requires an OGG container with the Opus codec for the
+        waveform/voice UI (`jericho.tts.synthesize_speech` already produces
+        exactly that) — unlike `_send_document`, there is no caption or filename;
+        the spoken text was already sent as the regular text reply.
+        """
+        response = await client.post(
+            f"{self._api_url}/sendVoice",
+            data={"chat_id": str(chat_id)},
+            files={"voice": ("reply.ogg", audio_bytes, "audio/ogg")},
+        )
+        response.raise_for_status()
