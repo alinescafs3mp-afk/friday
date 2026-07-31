@@ -797,8 +797,19 @@ class ViewsMixin(BridgeShared):
             parts.append(f"источник: {source}" + (f" от {received}" if received else ""))
         versions = envelope.get("versions")
         version_count = len(versions) if isinstance(versions, list) else 0
-        if version_count > 1:
-            parts.append(f"версий: {version_count}")
+        if version_count > 1 and isinstance(versions, list):
+            # `list_knowledge_versions` orders DESC by version — versions[0] is the
+            # latest edit. "Correction time" is its own distinct temporal fact per
+            # spec v3 §2 ("distinguish... validity intervals, and correction
+            # time") — different from `raw_source`'s received_at (when the
+            # ORIGINAL arrived) and from event_time's occurred_at (when the event
+            # itself happened).
+            latest = versions[0] if isinstance(versions[0], dict) else {}
+            corrected_at = str(latest.get("created_at") or "")[:10]
+            if corrected_at:
+                parts.append(f"версий: {version_count}, правка от {corrected_at}")
+            else:
+                parts.append(f"версий: {version_count}")
         entity_links = envelope.get("entity_links")
         link_count = len(entity_links) if isinstance(entity_links, list) else 0
         if link_count:

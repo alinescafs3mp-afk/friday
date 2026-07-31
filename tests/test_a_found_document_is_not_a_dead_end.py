@@ -160,19 +160,39 @@ def test_the_real_api_response_opens_as_a_document_not_a_blank(settings):
 
 
 def test_lineage_footer_shows_source_versions_links_and_usage():
+    """`versions` идёт от `list_knowledge_versions` — DESC по номеру версии,
+    так что versions[0] это ПОСЛЕДНЯЯ правка; её created_at и есть время
+    правки, отдельное от received_at исходника (спека v3 §2: событие/
+    источник/приём/правка — четыре разных момента, не три)."""
     text = TelegramBridge._format_full_document(
         {
             "item": {"title": "Приказ", "content": "Тело."},
             "raw_source": {"source": "telegram", "received_at": "2026-05-01T10:00:00Z"},
-            "versions": [{"version": 1}, {"version": 2}],
+            "versions": [{"version": 2, "created_at": "2026-06-20T09:00:00Z"}, {"version": 1}],
             "entity_links": [{"entity_name": "Атлас"}, {"entity_name": "Иванов"}],
             "usage": {"retrieval_count": 5, "answer_count": 3},
         }
     )
     assert "источник: telegram от 2026-05-01" in text
-    assert "версий: 2" in text
+    assert "версий: 2, правка от 2026-06-20" in text
     assert "связано сущностей: 2" in text
     assert "использовано в ответах: 3" in text
+
+
+def test_lineage_footer_omits_the_correction_date_when_the_snapshot_lacks_one():
+    """Придуманные (не настоящие API) данные могут не нести `created_at` — не
+    должно падать, просто не хвастаться правкой, которой не подтвердить."""
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Документ", "content": "Тело."},
+            "raw_source": None,
+            "versions": [{"version": 2}, {"version": 1}],
+            "entity_links": [],
+            "usage": {},
+        }
+    )
+    assert "версий: 2" in text
+    assert "правка от" not in text
 
 
 def test_lineage_footer_is_silent_when_nothing_is_known():
@@ -258,7 +278,9 @@ def test_the_real_lineage_from_the_api_shows_a_real_edit_and_a_real_link(setting
 
     text = TelegramBridge._format_full_document(response.json())
     assert "источник: test" in text
-    assert "версий: 2" in text
+    assert "версий: 2, правка от" in text, (
+        "настоящий снимок несёт created_at — дата правки не должна пропасть"
+    )
     assert "связано сущностей: 1" in text
     assert "использовано в ответах: 1" in text
 
