@@ -262,12 +262,137 @@ class ToolResult:
     def to_llm_message(self) -> str:
         if not self.success:
             return f"Ошибка инструмента {self.tool_name}: {self.error}"
-        encoded = (
-            self.data if isinstance(self.data, str) else json.dumps(self.data, ensure_ascii=False, indent=2)
-        )
+        if self.tool_name == "web_research" and isinstance(self.data, dict):
+            encoded, compacted = _web_research_for_llm(self.data)
+            self.truncated = self.truncated or compacted
+        else:
+            encoded = (
+                self.data
+                if isinstance(self.data, str)
+                else json.dumps(self.data, ensure_ascii=False, indent=2)
+            )
         if len(encoded) > 12_000:
             encoded = encoded[:11_900] + "\n… (truncated)"
         return f"Результат {self.tool_name}:\n{encoded}"
+
+
+_LLM_TOOL_PAYLOAD_MAX_CHARS = 11_900
+_WEB_SOURCE_STRING_LIMITS = {
+    "id": 120,
+    "url": 800,
+    "title": 240,
+    "search_title": 240,
+    "snippet": 320,
+    "source": 80,
+    "error": 200,
+}
+
+
+def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
+    """Render every research source inside one bounded, valid JSON envelope.
+
+    Cutting the joined JSON at its head made the first long page consume the
+    entire tool budget: measured on three equal 20k fixtures, only 1/3 source URLs
+    reached the model and the JSON itself was invalid. Metadata is bounded first,
+    then the remaining text budget is shared between sources so a later source can
+    never disappear merely because an earlier one was long.
+    """
+
+    raw_sources = data.get("sources")
+    if not isinstance(raw_sources, list):
+        return json.dumps(data, ensure_ascii=False, indent=2), False
+
+    root: dict[str, Any] = {}
+    for key in (
+        "query",
+        "summary",
+        "requested_sources",
+        "completed_sources",
+        "timed_out_sources",
+        "failed_sources",
+        "search_timed_out",
+    ):
+        if key not in data:
+            continue
+        value = data[key]
+        if isinstance(value, str):
+            value = value[: (1_000 if key == "query" else 600)]
+        root[key] = value
+
+    sources: list[dict[str, Any]] = []
+    source_texts: list[str] = []
+    for raw_source in raw_sources:
+        source = raw_source if isinstance(raw_source, dict) else {"text": str(raw_source)}
+        compact: dict[str, Any] = {}
+        for key in (
+            "id",
+            "url",
+            "title",
+            "text_length",
+            "status_code",
+            "error",
+            "truncated",
+            "search_title",
+            "snippet",
+            "source",
+        ):
+            if key not in source:
+                continue
+            value = source[key]
+            if isinstance(value, str):
+                value = value[: _WEB_SOURCE_STRING_LIMITS.get(key, 200)]
+            compact[key] = value
+        compact["text"] = ""
+        sources.append(compact)
+        source_texts.append(str(source.get("text") or ""))
+
+    root["sources"] = sources
+    encoded_empty = json.dumps(root, ensure_ascii=False, indent=2)
+    if len(encoded_empty) > _LLM_TOOL_PAYLOAD_MAX_CHARS:
+        # Pathological metadata must not make later sources disappear either.
+        # Keep identity/status for every source and spend the rest on page text.
+        sources = [
+            {
+                **({"id": str(source.get("id") or "")[:80]} if source.get("id") else {}),
+                "url": str(source.get("url") or "")[:500],
+                "title": str(source.get("title") or source.get("search_title") or "")[:100],
+                "status_code": source.get("status_code"),
+                "error": str(source.get("error") or "")[:100],
+                "truncated": bool(source.get("truncated")),
+                "text": "",
+            }
+            for source in (item if isinstance(item, dict) else {} for item in raw_sources)
+        ]
+        root["sources"] = sources
+        encoded_empty = json.dumps(root, ensure_ascii=False, indent=2)
+
+    remaining = max(0, _LLM_TOOL_PAYLOAD_MAX_CHARS - len(encoded_empty) - 64)
+    per_source = remaining // max(1, len(sources))
+    compacted = False
+    for source, text in zip(sources, source_texts, strict=False):
+        source["text"] = text[:per_source]
+        if len(text) > len(source["text"]):
+            source["truncated"] = True
+            compacted = True
+
+    if compacted:
+        root["llm_truncated_sources"] = sum(
+            1 for source, text in zip(sources, source_texts, strict=False) if len(text) > len(source["text"])
+        )
+
+    encoded = json.dumps(root, ensure_ascii=False, indent=2)
+    # Quotes, slashes and control characters expand during JSON encoding. Shrink
+    # every source proportionally until the serialized envelope itself fits.
+    while len(encoded) > _LLM_TOOL_PAYLOAD_MAX_CHARS and any(source["text"] for source in sources):
+        ratio = max(0.1, (_LLM_TOOL_PAYLOAD_MAX_CHARS - 64) / len(encoded))
+        for source in sources:
+            text = str(source["text"])
+            source["text"] = text[: max(0, int(len(text) * ratio) - 4)]
+            source["truncated"] = True
+        compacted = True
+        encoded = json.dumps(root, ensure_ascii=False, indent=2)
+
+    return encoded, compacted
 
 
 # Длина выдержки в ответе инструмента. Десять результатов по 600 знаков — это 6 000

@@ -47,6 +47,13 @@ _FETCH_TIMEOUT = 20.0
 # page on a poor link still arrives, fast enough that a drip feed does not sit
 # forever on one of twenty pooled connections.
 _FETCH_TOTAL_BUDGET = 60.0
+# `ExecutionKernel` gives every non-code tool 30 seconds. Research returns at 27
+# even when provider fallback consumes the search stage; page fetches get at most
+# 12 of the remaining seconds. Three stay for scheduling, rendering and audit.
+# Without an inner deadline the outer timeout cancelled `gather()` and erased two
+# completed pages because one peer was still streaming.
+_RESEARCH_TOTAL_BUDGET = 27.0
+_RESEARCH_FETCH_BUDGET = 12.0
 _DEFAULT_MAX_RESULTS = 5
 _DEFAULT_MAX_SOURCES = 3
 _MAX_REDIRECTS = 5
@@ -599,17 +606,58 @@ class WebSurfer:
 
     async def research(self, query: str, *, max_sources: int = _DEFAULT_MAX_SOURCES) -> dict[str, Any]:
         source_limit = max(1, min(int(max_sources), 8))
-        results = await self.search(query, max_results=source_limit * 2)
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        try:
+            async with asyncio.timeout(_RESEARCH_TOTAL_BUDGET):
+                results = await self.search(query, max_results=source_limit * 2)
+        except TimeoutError:
+            return {
+                "query": query,
+                "sources": [],
+                "requested_sources": 0,
+                "completed_sources": 0,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": True,
+                "summary": "Public-source search timed out before pages could be fetched.",
+            }
         if not results:
-            return {"query": query, "sources": [], "summary": "No search results found."}
+            return {
+                "query": query,
+                "sources": [],
+                "requested_sources": 0,
+                "completed_sources": 0,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+                "summary": "No search results found.",
+            }
 
-        fetched = await asyncio.gather(
-            *(self.fetch(result.url, max_length=20_000) for result in results[:source_limit]),
-            return_exceptions=True,
-        )
+        selected = results[:source_limit]
+        tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in selected]
+        done: set[asyncio.Task[FetchResult]] = set()
+        pending: set[asyncio.Task[FetchResult]] = set(tasks)
+        remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+        fetch_budget = min(_RESEARCH_FETCH_BUDGET, remaining_total)
+        try:
+            done, pending = await asyncio.wait(tasks, timeout=fetch_budget)
+        finally:
+            unfinished = [task for task in tasks if not task.done()]
+            for task in unfinished:
+                task.cancel()
+            if unfinished:
+                await asyncio.gather(*unfinished, return_exceptions=True)
+
         sources: list[dict[str, Any]] = []
-        for search_result, fetch_result in zip(results[:source_limit], fetched, strict=False):
-            if isinstance(fetch_result, BaseException):
+        failed_sources = 0
+        for search_result, task in zip(selected, tasks, strict=False):
+            if task not in done:
+                continue
+            try:
+                fetch_result = task.result()
+            except BaseException:
+                failed_sources += 1
                 continue
             # Выдержка по ИСХОДНОМУ запросу исследования, а не по адресу страницы.
             item = fetch_result.to_dict(preview_chars=20_000, query=query)
@@ -618,14 +666,27 @@ class WebSurfer:
             item["source"] = search_result.source
             sources.append(item)
 
+        readable_sources = sum(1 for item in sources if not item["error"])
+        timed_out_sources = len(pending)
+        if sources:
+            summary = f"Collected {readable_sources} readable public sources."
+        else:
+            summary = "Search results were found, but no source could be fetched safely."
+        if timed_out_sources:
+            summary += (
+                f" {timed_out_sources} source fetch"
+                f"{'es' if timed_out_sources != 1 else ''} did not finish before the research deadline."
+            )
+
         return {
             "query": query,
             "sources": sources,
-            "summary": (
-                f"Collected {sum(1 for item in sources if not item['error'])} readable public sources."
-                if sources
-                else "Search results were found, but no source could be fetched safely."
-            ),
+            "requested_sources": len(selected),
+            "completed_sources": len(sources),
+            "timed_out_sources": timed_out_sources,
+            "failed_sources": failed_sources,
+            "search_timed_out": False,
+            "summary": summary,
         }
 
     @staticmethod
