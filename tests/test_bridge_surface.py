@@ -219,6 +219,7 @@ EXPECTED_CALLBACK_NAMESPACES = {
     "inbox",
     "merge",
     "mission",
+    "remind",
     "research",
     "work",
 }
@@ -237,6 +238,7 @@ EXPECTED_COMMANDS = {
     "/missions",
     "/new",
     "/note",
+    "/reminders",
     "/rename",
     "/research",
     "/retry",
@@ -259,7 +261,8 @@ EXPECTED_COMMANDS = {
 # 49 → 50: /history — поиск по переписке (G16), +_send_history.
 # 50: /archive /delete /rename (G18) — только ветки команд + namespace conv, без
 # новых методов на TelegramBridge.
-EXPECTED_BRIDGE_COUNT = 50
+# 50 → 51: /reminders + _send_reminders + namespace remind (G19).
+EXPECTED_BRIDGE_COUNT = 51
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -298,6 +301,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_history": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
+    "_send_reminders": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_message": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, reply_markup: 'dict[str, Any] | None' = None) -> 'None'",
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_search": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",

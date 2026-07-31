@@ -5,7 +5,7 @@
 
 ---
 
-# Новое (после G18) — G19: посмотреть и снять предстоящее напоминание
+# G19: посмотреть и снять предстоящее напоминание — **сделано**
 
 Из того же исследования: у мейнстримных ассистентов можно посмотреть список
 предстоящих напоминаний и снять одно. У Jericho «напоминания» — не то, что
@@ -61,6 +61,11 @@ dedup_key) WHERE dedup_key <> ''` (`storage/_base.py:744`). Если строк�
 мутация на то, что `dismiss_notification` НЕ чистит `dedup_key` (если
 случайно скопируешь паттерн `release_undeliverable_notifications` и
 очистишь его — тест обязан покраснеть, поймав возврат напоминания).
+
+Реализовано: `list_pending_reminders` / `dismiss_notification` (status=dismissed,
+dedup_key сохраняется), `GET/POST /api/me/reminders[...]`, Telegram `/reminders` +
+кнопка «Снять» (`remind:dismiss`). Тесты: `tests/test_reminders_self_service.py`.
+
 
 ---
 

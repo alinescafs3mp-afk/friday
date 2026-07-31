@@ -1,5 +1,14 @@
 ## Unreleased
 
+### G19: посмотреть и снять предстоящее напоминание (#67)
+
+Storage: list_pending_reminders(user_id), dismiss_notification → status=dismissed
+без очистки dedup_key (повторный scan_reminders не встаёт в очередь).
+HTTP: GET /api/me/reminders, POST /api/me/reminders/{id}/dismiss (chat.use).
+Telegram: /reminders + inline «Снять» (remind:dismiss).
+
+Тесты: test_reminders_self_service.py (dedup после dismiss, tenant 404, bridge).
+
 ### S8: graph expansion только для реляционных запросов (#63)
 
 Заранее объявленный замер на 12 обезличенных реляционных кейсах принят fail-closed:

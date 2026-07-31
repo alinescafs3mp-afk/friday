@@ -228,6 +228,52 @@ class ViewsMixin(BridgeShared):
                 },
             )
 
+    async def _send_reminders(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+    ) -> None:
+        """Pending reminder list with a dismiss button per row (G19)."""
+        data = await self._backend_json(
+            backend,
+            "GET",
+            "/api/me/reminders?limit=10",
+            {"telegram_user": telegram_user},
+            external_user_id,
+            str(chat_id),
+        )
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        if not items:
+            await self._send_message(telegram, chat_id, "Предстоящих напоминаний нет.")
+            return
+        await self._send_message(
+            telegram,
+            chat_id,
+            f"Предстоящие напоминания: {len(items)}. "
+            "«Снять» отменяет одно; повторный скан его не вернёт.",
+        )
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            notif_id = str(item.get("id") or "")
+            if not notif_id or not CALLBACK_TARGET_RE.fullmatch(notif_id):
+                continue
+            body = str(item.get("body") or "напоминание").strip() or "напоминание"
+            await self._send_message(
+                telegram,
+                chat_id,
+                body,
+                reply_markup={
+                    "inline_keyboard": [
+                        [{"text": "Снять", "callback_data": f"remind:dismiss:{notif_id}"}],
+                    ]
+                },
+            )
+
+
     @staticmethod
     def _format_status(mode_label: str, data: dict[str, Any]) -> str:
         """Состояние базы: только те счётчики, которые могут быть не нулём.

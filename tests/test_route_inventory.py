@@ -44,7 +44,8 @@ from jericho.server import create_app
 # (Telegram /retry); self-service, chat.use, только свой conversation_id.
 # 162 → 163: GET /api/me/messages/search — FTS по истории переписки (G16).
 # 163 → 164: PATCH /api/conversations/{id} — self-service rename (G18c).
-EXPECTED_OPERATIONS = 164
+# 164 → 166: GET /api/me/reminders + POST /api/me/reminders/{id}/dismiss (G19).
+EXPECTED_OPERATIONS = 166
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

@@ -270,6 +270,19 @@ class CallbacksMixin(BridgeShared):
                         "Разговор удалён. Следующее сообщение начнёт новый; база знаний не тронута.",
                     )
                     clear_markup = True
+            elif family == "remind" and action == "dismiss":
+                # G19: снять pending reminder, не очищая dedup_key (делает backend).
+                await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/me/reminders/{target_id}/dismiss",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(telegram, callback_id, "Снято")
+                await self._send_message(telegram, chat_id, "Напоминание снято.")
+                clear_markup = True
             else:
                 raise PermanentUpdateError("Unknown callback action")
         except PermanentUpdateError as exc:

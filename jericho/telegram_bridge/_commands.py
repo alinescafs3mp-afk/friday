@@ -252,7 +252,8 @@ class CommandsMixin(BridgeShared):
                 "/rename название — переименовать текущий разговор\n"
                 "/note текст — явно сохранить заметку\n"
                 "/instructions — как отвечать: показать, задать или очистить\n"
-                "/retry — сгенерировать ответ на последний вопрос заново\n\n"
+                "/retry — сгенерировать ответ на последний вопрос заново\n"
+                "/reminders — предстоящие напоминания; кнопка «Снять» отменяет одно\n\n"
                 "Ответы можно оценивать кнопками, а результаты /work, /research и миссий — "
                 "отправлять в Inbox на review.",
             )
@@ -357,6 +358,9 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/merges":
             await self._send_merges(telegram, backend, chat_id, external_user_id, user)
+            return
+        if command == "/reminders":
+            await self._send_reminders(telegram, backend, chat_id, external_user_id, user)
             return
         if command == "/tags":
             await self._send_tags(telegram, backend, chat_id, external_user_id, user)

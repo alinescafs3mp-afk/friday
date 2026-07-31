@@ -68,6 +68,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("note", "явно сохранить заметку"),
     ("instructions", "как отвечать: показать, задать или очистить"),
     ("retry", "сгенерировать ответ на последний вопрос заново"),
+    ("reminders", "предстоящие напоминания и снять одно"),
     ("help", "справка по командам"),
 )
 
@@ -234,6 +235,7 @@ class BridgeShared:
     _send_conflicts: Callable[..., Any]
     _send_history: Callable[..., Any]
     _send_merges: Callable[..., Any]
+    _send_reminders: Callable[..., Any]
     _send_message: Callable[..., Any]
     _send_missions: Callable[..., Any]
     _send_search: Callable[..., Any]

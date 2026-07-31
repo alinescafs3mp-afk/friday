@@ -1349,6 +1349,44 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 state.storage.idempotency_release(actor.user_id, request_key, lease_token)
             raise
 
+    # G19: предстоящие напоминания (entity_time → outbound_notifications kind=reminder).
+    # Self-service как /api/me/instructions: chat.use, только actor.user_id.
+    # Снятие = status='dismissed' БЕЗ очистки dedup_key — иначе scan_reminders
+    # заново встанет в очередь через INSERT OR IGNORE.
+    @application.get("/api/me/reminders", tags=["chat"])
+    async def list_my_reminders(
+        request: Request,
+        limit: int = Query(20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        actor = _require(request, "chat.use")
+        rows = request.app.state.storage.list_pending_reminders(actor.user_id, limit=limit)
+        return {
+            "count": len(rows),
+            "items": [
+                {
+                    "id": str(row.get("id") or ""),
+                    "body": str(row.get("body") or ""),
+                    "dedup_key": str(row.get("dedup_key") or ""),
+                    "created_at": row.get("created_at"),
+                    "chat_id": str(row.get("chat_id") or ""),
+                }
+                for row in rows
+            ],
+        }
+
+    @application.post("/api/me/reminders/{notification_id}/dismiss", tags=["chat"])
+    async def dismiss_my_reminder(request: Request, notification_id: str) -> dict[str, Any]:
+        actor = _require(request, "chat.use")
+        notification_id = str(notification_id or "").strip()
+        if not notification_id:
+            raise HTTPException(status_code=404, detail="Напоминание не найдено")
+        ok = request.app.state.storage.dismiss_notification(actor.user_id, notification_id)
+        if not ok:
+            # 404, не 403: чужой id и уже снятый/отправленный выглядят одинаково —
+            # не подтверждаем существование чужой очереди.
+            raise HTTPException(status_code=404, detail="Напоминание не найдено")
+        return {"dismissed": True, "id": notification_id}
+
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
         actor = _require(request, "chat.use")

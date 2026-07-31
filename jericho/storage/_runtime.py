@@ -53,6 +53,47 @@ class RuntimeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_pending_reminders(self, user_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Pending reminder pushes for one tenant only (self-service list).
+
+        Unlike ``list_pending_notifications`` (bridge drain, all users), this
+        method requires ``user_id`` so a self-service handler cannot leak another
+        person's queue. Only ``kind='reminder'`` and ``status='pending'`` —
+        dismissed/sent/failed rows stay out of the list and out of the drain.
+        """
+        user_id = validate_user_id(user_id)
+        rows = self.execute(
+            "SELECT id, user_id, chat_id, kind, dedup_key, body, status, created_at "
+            "FROM outbound_notifications "
+            "WHERE user_id=? AND kind='reminder' AND status='pending' "
+            "ORDER BY created_at ASC LIMIT ?",
+            (user_id, max(1, min(int(limit), 100))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def dismiss_notification(self, user_id: str, notification_id: str) -> bool:
+        """Mark a pending notification dismissed without releasing its dedup key.
+
+        Opposite of ``discard_notifications`` / terminal failure: those clear
+        ``dedup_key`` so the organ can re-raise the matter. Dismiss means the
+        person saw the reminder and cancelled it — the partial unique index on
+        ``(user_id, dedup_key)`` must keep blocking the next ``scan_reminders``
+        enqueue of the same key. Only ``status='pending'`` rows of this tenant
+        transition; foreign or already-terminal ids return False (→ 404).
+        """
+        user_id = validate_user_id(user_id)
+        notification_id = str(notification_id or "").strip()
+        if not notification_id:
+            return False
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE outbound_notifications
+                   SET status='dismissed'
+                   WHERE id=? AND user_id=? AND status='pending'""",
+                (notification_id, user_id),
+            )
+        return cursor.rowcount > 0
+
     def discard_notifications(self, ids: Sequence[str], *, reason: str) -> int:
         """Terminate rows that can never be delivered, without spending attempts.
 
