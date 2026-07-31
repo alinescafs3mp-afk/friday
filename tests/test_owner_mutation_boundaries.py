@@ -85,9 +85,7 @@ def _seed_owner_objects(storage, owner_id: str) -> dict[str, str]:
         title="Владелец",
     )
     storage.store_knowledge_object(knowledge)
-    entity = Entity(
-        id=new_id("ent"), user_id=owner_id, name="Владелец", entity_type=EntityType.CONCEPT
-    )
+    entity = Entity(id=new_id("ent"), user_id=owner_id, name="Владелец", entity_type=EntityType.CONCEPT)
     storage.create_entity(entity)
     conversation = storage.create_conversation(owner_id, "Владелец")
     mission = Mission(id=new_id("mis"), user_id=owner_id, goal="Цель владельца")
@@ -115,9 +113,7 @@ def _seed_owner_objects(storage, owner_id: str) -> dict[str, str]:
         "knowledge_id": knowledge.id,
         "entity_id": entity.id,
         "mission_id": mission.id,
-        "conversation_id": str(
-            conversation["id"] if isinstance(conversation, dict) else conversation.id
-        ),
+        "conversation_id": str(conversation["id"] if isinstance(conversation, dict) else conversation.id),
         "link_id": "kel_missing",
         "conflict_id": "kc_missing",
         "candidate_id": "rc_missing",
@@ -292,8 +288,7 @@ def test_every_admin_mutation_against_owner_is_forbidden(settings):
 
         assert checked, "no admin mutation with a tenant user_id was exercised — the walk is broken"
         assert not leaked, (
-            "delegated admin could act on the owner account through these routes "
-            f"(expected 403): {leaked}"
+            f"delegated admin could act on the owner account through these routes (expected 403): {leaked}"
         )
         assert not unreachable, (
             "these owner-mutation routes could not be exercised — seed placeholders "
