@@ -90,7 +90,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 255 → 256: list_entities_knowledge_refs пакетирует проекции текущего фронта BFS.
 # 258 → 259: search_messages — FTS по истории переписки (G16 / schema 20).
 # 259 → 260: set_conversation_title — self-service rename (G18c).
-EXPECTED_MEMBER_COUNT = 262
+EXPECTED_MEMBER_COUNT = 263
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

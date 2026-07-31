@@ -1551,6 +1551,11 @@ class KnowledgeGraph:
             return []
         return self.storage.get_entity_relations(entity_id, user_id)
 
+    def count_pending_relations(self, entity_id: str, user_id: str) -> int:
+        if not self.storage.get_entity(entity_id, user_id):
+            return 0
+        return self.storage.count_relation_candidates_for_entity(user_id, entity_id)
+
     def get_entity_graph(self, user_id: str, entity_id: str, depth: int = 2) -> dict[str, Any]:
         return self.storage.get_entity_graph(user_id, entity_id, depth)
 

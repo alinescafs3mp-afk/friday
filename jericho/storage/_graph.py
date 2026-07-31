@@ -718,6 +718,28 @@ class GraphMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
+    def count_relation_candidates_for_entity(
+        self, user_id: str, entity_id: str, *, status: str | None = "suggested"
+    ) -> int:
+        """How many relation candidates (either side) touch this one entity.
+
+        Reuses `_relation_candidate_filter`/`_RELATION_CANDIDATE_FROM` — same
+        query shape as `count_relation_candidates`, one extra predicate. Backs
+        the object-view "N connections awaiting review" line: a profile that
+        only showed CONFIRMED relations would silently hide a queue the owner
+        might not know exists for this specific entity.
+        """
+        clauses, params = self._relation_candidate_filter(user_id, status)
+        clauses.append("(c.source_entity_id=? OR c.target_entity_id=?)")
+        params.extend([entity_id, entity_id])
+        # ``clauses`` contains only fixed predicates; values remain bound.
+        row = self.execute(
+            f"SELECT COUNT(*) AS count {self._RELATION_CANDIDATE_FROM} "  # nosec B608
+            f"WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
     def list_relation_candidates(
         self,
         user_id: str,
