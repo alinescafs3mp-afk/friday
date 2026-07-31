@@ -47,11 +47,16 @@ def _candidates(count: int) -> list[dict]:
 async def test_lexical_rank_does_not_block_the_event_loop(settings, storage, monkeypatch):
     """A concurrently-scheduled coroutine must keep making progress WHILE a slow
     `_lexical_rank` pass runs — proof that `run_blocking` actually offloads it,
-    not just that the offload call exists syntactically.
+    not just that the offload call exists syntactically. `search()` calls
+    `_lexical_rank` from TWO call sites (once before graph expansion, once
+    after) — the assertion checks the largest gap between consecutive ticks,
+    not a total tick count, so blocking at EITHER site is caught even if the
+    other site's correct offload lets the ticker "catch up" afterwards and
+    pass a naive sum-based threshold.
 
-    Mutation: call `self._lexical_rank(...)` directly instead of
-    `await run_blocking(self._lexical_rank, ...)` — this test must go red
-    (the counter stops advancing while the slow call runs).
+    Mutation: revert either `await run_blocking(self._lexical_rank, ...)`
+    call site back to a direct `self._lexical_rank(...)` call — this test
+    must go red (one gap around 0.3s instead of every gap staying small).
     """
     from jericho.storage.models import KnowledgeObject, RawObject, new_id
 
@@ -87,23 +92,41 @@ async def test_lexical_rank_does_not_block_the_event_loop(settings, storage, mon
 
     monkeypatch.setattr(searcher, "_lexical_rank", _slow_lexical_rank)
 
-    ticks = 0
+    tick_times: list[float] = []
 
     async def _ticker():
-        nonlocal ticks
         while True:
-            ticks += 1
+            tick_times.append(time.monotonic())
             await asyncio.sleep(0.01)
 
     ticker_task = asyncio.create_task(_ticker())
+    # `create_task` only SCHEDULES the ticker — it does not run until this
+    # coroutine yields control, which does not happen just by writing `await
+    # searcher.search(...)` if `search()`'s own first blocking work runs before
+    # its own first internal suspend point. Without this explicit yield, a block
+    # right at the start of `search()` would finish before the ticker ever got a
+    # chance to record its first tick, leaving no gap to measure at all.
+    await asyncio.sleep(0)
     try:
         await searcher.search("alice", "договор поставки", limit=5)
     finally:
+        # Recorded BEFORE cancelling, and appended manually rather than relying on
+        # one more real tick: a block that runs right up to `search()` returning
+        # races `ticker_task.cancel()` against the ticker's already-overdue
+        # `asyncio.sleep(0.01)` timer, and cancellation wins — the ticker's
+        # `CancelledError` fires at that suspended await point without its loop
+        # body ever running again, so no tick gets recorded for the tail end of
+        # the block. Without this explicit marker, `tick_times` simply stops
+        # before the gap it needed to reveal, and the gap is invisible to `max()`.
+        tick_times.append(time.monotonic())
         ticker_task.cancel()
 
-    assert ticks >= 10, (
-        f"only {ticks} ticks during a 0.3s search — the event loop was blocked, "
-        "not freed for other coroutines"
+    assert len(tick_times) >= 5, f"only {len(tick_times)} ticks recorded — test setup is broken"
+    gaps = [b - a for a, b in zip(tick_times, tick_times[1:], strict=False)]
+    max_gap = max(gaps)
+    assert max_gap < 0.15, (
+        f"largest gap between ticker steps was {max_gap:.3f}s (expected ~0.01s) — "
+        "the event loop was blocked for a stretch, not freed for other coroutines"
     )
 
 
