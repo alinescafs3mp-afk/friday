@@ -142,6 +142,28 @@ async def test_speak_produces_a_voice_attachment_kept_out_of_the_llm_visible_dat
     assert base64.b64encode(fake_audio).decode("ascii") not in rendered
 
 
+def test_synthesize_speech_rejects_a_voice_that_produced_no_audio(monkeypatch):
+    """Proposed by Grok's G23 adversarial review of the voice feature: a voice
+    engine returning zero synthesized chunks (or chunks with empty PCM) used to
+    reach `_encode_opus_ogg` with an empty buffer instead of failing cleanly the
+    same way any other engine problem does.
+
+    Mutation: remove the `if not pcm: raise TTSUnavailable(...)` guard — this
+    test must go red (either a silent empty clip or an unhandled encoder error
+    instead of the expected `TTSUnavailable`).
+    """
+    import jericho.tts as tts_module
+
+    class _EmptyEngine:
+        def synthesize(self, text):
+            return iter(())  # zero chunks — the exact shape a broken voice model produces
+
+    monkeypatch.setattr(tts_module, "_load_voice", lambda voice, download_root: _EmptyEngine())
+
+    with pytest.raises(TTSUnavailable, match="no audio"):
+        tts_module.synthesize_speech("Привет", download_root="/tmp/unused")
+
+
 @pytest.mark.asyncio
 async def test_guest_can_call_speak(settings, storage):
     """`tts.use` is granted at the same tier as `chat.use` — a guest who can chat

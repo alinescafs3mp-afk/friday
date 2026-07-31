@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from bisect import bisect_right
 from collections import Counter, OrderedDict
@@ -1355,6 +1356,18 @@ class HybridSearcher:
         self._field_vector_cache: OrderedDict[tuple[str, str, str], tuple[dict[str, float], ...]] = (
             OrderedDict()
         )
+        # `_lexical_rank` is offloaded to a worker thread (see its call sites in
+        # `search`) so one tenant's cold-cache scoring pass — measured at 2.4s over
+        # 400 candidates — cannot freeze the single shared event loop for every
+        # OTHER tenant's concurrent request. `_vector_cache` is a plain `OrderedDict`
+        # and becomes reachable from more than one thread at once the moment that
+        # offload exists: two concurrent searches' threads racing on `.get()` /
+        # `.move_to_end()` / `.popitem()` is a real corruption risk (e.g. a key
+        # evicted by one thread between another thread's `.get()` and
+        # `.move_to_end()` on the same key), not a theoretical one. This lock is
+        # what makes the offload safe, not merely faster; found and fixed together
+        # by adversarial review ahead of a live multi-user demo.
+        self._vector_cache_lock = threading.Lock()
 
     def _repair_query(self, user_id: str, clean_query: str) -> Repair | None:
         """Ask whether the question was typed the way it was meant.
@@ -1424,6 +1437,12 @@ class HybridSearcher:
         since: str | None = None,
         until: str | None = None,
     ) -> dict[str, Any]:
+        # Deferred: `jericho.workers` (the package, not just `_blocking`) imports
+        # FROM `jericho.retrieval` — a module-level import here would be circular.
+        # `_blocking` itself has no such back-reference, so importing it lazily
+        # here breaks the cycle without duplicating `run_blocking`'s logic.
+        from jericho.workers._blocking import run_blocking
+
         limit = max(1, min(int(limit), 100))
         # Ширина отбора кандидатов считается от ГЛУБИНЫ ОТБОРА, а не от размера
         # страницы. Раньше и то и другое росло от `limit`, и пул для переранжирования
@@ -1519,8 +1538,12 @@ class HybridSearcher:
         # Shared by both `_lexical_rank` passes and by the snippet pass below, so a
         # candidate's body is tokenized once per request rather than once per use.
         lexical_cache: dict[str, dict[str, float]] = {}
-        lexical_ranking, lexical_scores, shares_word = self._lexical_rank(
-            candidates, clean_query, cache=lexical_cache
+        # Offloaded: measured 2.4s of pure CPU on a 400-candidate cold-cache pass
+        # (see `_vector_cache_lock`'s docstring). Left on the event loop, that is
+        # 2.4s during which every OTHER tenant's concurrent request is frozen —
+        # found by adversarial review ahead of a live multi-user demo.
+        lexical_ranking, lexical_scores, shares_word = await run_blocking(
+            self._lexical_rank, candidates, clean_query, cache=lexical_cache
         )
         rankings = [fts_ranking, lexical_ranking]
         embedding_scores: dict[str, float] = {}
@@ -1619,8 +1642,8 @@ class HybridSearcher:
 
         # Re-rank after graph expansion so newly discovered records receive lexical evidence too.
         candidates = list(candidate_map.values())
-        lexical_ranking, lexical_scores, shares_word = self._lexical_rank(
-            candidates, clean_query, cache=lexical_cache
+        lexical_ranking, lexical_scores, shares_word = await run_blocking(
+            self._lexical_rank, candidates, clean_query, cache=lexical_cache
         )
         rankings[1] = lexical_ranking
         if graph_scores:
@@ -2284,20 +2307,38 @@ class HybridSearcher:
         return knowledge_search_text(item)
 
     def _cached_vector(self, item: dict[str, Any]) -> dict[str, float]:
-        """The candidate's lexical vector, reused until its row changes."""
+        """The candidate's lexical vector, reused until its row changes.
+
+        `_lexical_rank` (this method's only caller) runs in a worker thread — see
+        `_vector_cache_lock`'s docstring at its declaration — so this cache is
+        reachable from more than one thread concurrently. The lock guards only the
+        dict bookkeeping; the expensive `lexical_vector` call itself runs OUTSIDE
+        it, so concurrent searches still score in parallel instead of being
+        serialized back onto one thread through this cache.
+        """
         key = (
             str(item.get("id") or ""),
             str(item.get("version") or ""),
             str(item.get("updated_at") or ""),
         )
-        cached = self._vector_cache.get(key)
-        if cached is not None:
-            self._vector_cache.move_to_end(key)
-            return cached
+        with self._vector_cache_lock:
+            cached = self._vector_cache.get(key)
+            if cached is not None:
+                self._vector_cache.move_to_end(key)
+                return cached
         vector = lexical_vector(self._search_text(item))
-        self._vector_cache[key] = vector
-        while len(self._vector_cache) > _VECTOR_CACHE_MAX:
-            self._vector_cache.popitem(last=False)
+        with self._vector_cache_lock:
+            # Another thread may have computed and stored the same key while this
+            # one was still working. Keep whichever is already there rather than
+            # overwrite — both are equal by construction, and this avoids an
+            # unnecessary second entry churning the LRU eviction order.
+            existing = self._vector_cache.get(key)
+            if existing is not None:
+                self._vector_cache.move_to_end(key)
+                return existing
+            self._vector_cache[key] = vector
+            while len(self._vector_cache) > _VECTOR_CACHE_MAX:
+                self._vector_cache.popitem(last=False)
         return vector
 
     def _cached_field_vectors(self, item: dict[str, Any]) -> tuple[dict[str, float], ...]:

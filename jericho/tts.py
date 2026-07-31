@@ -153,6 +153,11 @@ def synthesize_speech(
         raise TTSUnavailable(f"synthesis failed for voice {voice!r}: {exc}") from exc
 
     pcm = b"".join(pcm_chunks)
+    if not pcm:
+        # Found by adversarial review (G23): a voice with zero synthesized chunks
+        # would otherwise reach the encoder with an empty buffer. Surfaced as the
+        # same unavailability the caller already handles, not a silent empty clip.
+        raise TTSUnavailable(f"voice {voice!r} produced no audio for the given text")
     duration_sec = round(len(pcm) / 2 / sample_rate, 2) if sample_rate else 0.0
     audio_bytes = _encode_opus_ogg(pcm, source_rate=sample_rate)
     return Speech(
