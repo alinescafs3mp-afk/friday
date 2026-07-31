@@ -40,7 +40,7 @@ _ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
 
 
-def _iso_date(value: Any) -> str | None:
+def iso_date(value: Any) -> str | None:
     """Привести дату документа к `ГГГГ-ММ-ДД` или вернуть None.
 
     Строки берутся из бумаги как есть, поэтому здесь три работы сразу: узнать форму,
@@ -193,7 +193,7 @@ class CoreMixin(StorageShared):
             conn.create_function(
                 "jericho_iso_date",
                 1,
-                _iso_date,
+                iso_date,
                 deterministic=True,
             )
             # Schema creation/migration/FTS is applied exactly once, by the first

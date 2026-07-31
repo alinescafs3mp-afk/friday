@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -20,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from jericho.people import resolve_person, unambiguous
 from jericho.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
 from jericho.retrieval import best_snippet
+from jericho.storage._core import iso_date
 from jericho.storage._oversight import ANALYSES
 from jericho.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
 from jericho.workers._blocking import run_blocking
@@ -147,6 +150,46 @@ async def _collect_bounded_process_output(
         with suppress(asyncio.CancelledError):
             await limit_waiter
     return bytes(stdout), bytes(stderr), limit_exceeded.is_set(), terminated_for_limit
+
+
+def _window_bound(value: str | None, *, edge: str) -> tuple[str | None, str | None]:
+    """Граница периода в `ГГГГ-ММ-ДД`, либо причина, по которой её не понять.
+
+    Границы приходят СТРОКОЙ ОТ МОДЕЛИ и уходили прямо в SQL как операнды сравнения
+    строк. Проверено запуском на трёх документах за март 2023: окно
+    «01.01.2025..31.01.2025» возвращало все три — посимвольно `'2023-03-10' >=
+    '01.01.2025'` истинно, — то есть фильтр молча снимался, и мартовские документы
+    выдавались как январские. Форма дд.мм.гггг здесь не экзотика: в самом архиве
+    владельца 2537 значений дат из 3180 записаны именно так, и модель перепишет её
+    из документа. Зеркальный отказ: «2023-03» давало ноль там, где документов три.
+
+    HTTP-маршруты эту форму проверяют шаблоном, и на это есть отдельный тест с
+    обоснованием «опечатка не должна тихо снимать фильтр». Путь инструмента — то
+    есть Telegram, главный вход владельца, — этой проверки не имел вовсе.
+
+    Неполная дата достраивается к своему краю: как начало — к первому дню периода,
+    как конец — к последнему. Только так «с 2023-03 по 2023-03» означает весь март,
+    а не один нулевой день. Непонятое НЕ становится «без фильтра»: возвращается
+    причина, и вызывающий обязан сказать о ней вслух.
+    """
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None, None
+    exact = iso_date(text)
+    if exact:
+        return exact, None
+    year_month = re.fullmatch(r"(\d{4})[-./](\d{1,2})", text) or re.fullmatch(r"(\d{1,2})[-./](\d{4})", text)
+    if year_month:
+        first, second = year_month.groups()
+        year, month = (int(first), int(second)) if len(first) == 4 else (int(second), int(first))
+        if 1900 <= year <= 2200 and 1 <= month <= 12:
+            if edge == "since":
+                return f"{year:04d}-{month:02d}-01", None
+            last = calendar.monthrange(year, month)[1]
+            return f"{year:04d}-{month:02d}-{last:02d}", None
+    if re.fullmatch(r"\d{4}", text) and 1900 <= int(text) <= 2200:
+        return (f"{text}-01-01" if edge == "since" else f"{text}-12-31"), None
+    return None, text
 
 
 def _count_user_tasks() -> int:
@@ -494,6 +537,21 @@ class ExecutionKernel:
         if storage is None:
             raise RuntimeError("Execution kernel storage is not initialized")
         limit = max(1, min(int(limit), 50))
+        # Границы периода нормализуются ДО поиска. Непонятая граница — это отказ, а не
+        # «искать по всему архиву»: молча снятый фильтр выдаёт документы чужого периода
+        # как документы запрошенного, и человек об этом не узнаёт. См. `_window_bound`.
+        since, since_bad = _window_bound(since, edge="since")
+        until, until_bad = _window_bound(until, edge="until")
+        if since_bad or until_bad:
+            return {
+                "count": 0,
+                "query": query,
+                "empty_because": "date_window_unparsed",
+                "detail": (
+                    f"не понял период: {since_bad or until_bad}. Ожидается ГГГГ-ММ-ДД, ГГГГ-ММ или ГГГГ."
+                ),
+                "results": [],
+            }
         # Гибридный поиск, если он выдан: у инструмента был свой, на FTS-префиксе и
         # LIKE, без эмбеддингов и без морфологии. Замерено на живой базе: «поставка»
         # находит 0 документов, «поставк» — 2; «отчет» — 13, «отчёт» — 3. То есть
@@ -516,6 +574,14 @@ class ExecutionKernel:
                     dropped = 0
         else:
             rows = storage.search_knowledge(actor.user_id, query, limit=limit)
+            if since or until:
+                # Запасной путь (ядро без поиска — тесты, CLI) игнорировал период
+                # ЦЕЛИКОМ: тот же молчаливый обман, что и неразобранная граница, —
+                # человек просил период, получал весь архив и не узнавал об этом.
+                # Окно считается тем же предикатом, что и в основном пути.
+                window = storage.knowledge_ids_in_window(actor.user_id, since=since, until=until)
+                if window is not None:
+                    rows = [row for row in rows if str(row.get("id") or "") in window]
         results = [
             {
                 "id": str(row.get("id") or ""),
@@ -1052,7 +1118,9 @@ class ExecutionKernel:
             "Поиск по личной базе знаний. Если в ответе есть filtered_out, столько "
             "похожих записей нашлось и было отброшено как не отвечающие на вопрос: "
             "материал в архиве есть, но ответа в нём нет — так и скажи, не выдавая "
-            "это за пустой архив. since/until (ГГГГ-ММ-ДД) ограничивают выдачу периодом: "
+            "это за пустой архив. since/until ограничивают выдачу периодом по дате документа: "
+            "ГГГГ-ММ-ДД, либо ГГГГ-ММ или ГГГГ — они означают весь месяц и весь год. "
+            "Непонятную запись периода инструмент отвергает, а не ищет по всему архиву. "
             "берётся собственная дата документа, а при её отсутствии — даты, упомянутые "
             "в тексте. Если в ответе empty_because=date_window, то в архиве материал "
             "есть, но не в этом периоде — скажи именно так.",

@@ -20,7 +20,7 @@ import json
 
 import pytest
 
-from jericho.storage._core import _iso_date
+from jericho.storage import iso_date
 from jericho.storage.models import KnowledgeObject, RawObject, new_id
 
 
@@ -73,7 +73,7 @@ def test_only_real_dates_survive_normalisation(raw, expected):
     человек перестанет фильтру верить. `31.02.2020` выглядит датой и датой не является;
     `01.01.0001` — артефакт разбора, а не дата документа.
     """
-    assert _iso_date(raw) == expected
+    assert iso_date(raw) == expected
 
 
 # --- фильтр -------------------------------------------------------------------

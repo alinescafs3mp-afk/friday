@@ -25,7 +25,7 @@ from jericho.storage._base import (
     validate_user_id,
 )
 from jericho.storage._conversations import ConversationsMixin
-from jericho.storage._core import CoreMixin
+from jericho.storage._core import CoreMixin, iso_date
 from jericho.storage._feedback import FeedbackMixin
 from jericho.storage._graph import GraphMixin
 from jericho.storage._intake import IntakeMixin
@@ -47,6 +47,7 @@ __all__ = [
     "UnsupportedSchemaVersionError",
     "init_storage",
     "normalize_conversation_mode",
+    "iso_date",
     "normalize_entity_name",
     "validate_user_id",
 ]
