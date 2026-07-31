@@ -2022,6 +2022,18 @@ class KnowledgeMixin(StorageShared):
         ordered: list[tuple[int, int]] = []
         seen_pairs: set[tuple[int, int]] = set()
         truncated = False
+        # Пара двух объявленных ФИО отбрасывается ЗДЕСЬ, при наборе, а не ниже при
+        # оценке. Разница не косметическая: бюджет `pair_ceiling` тратится на наборе, и
+        # замерено на живом архиве — набор упирался в потолок на 214 323 парах и объявлял
+        # список неполным, при том что почти все набранные пары ниже отбрасывались как
+        # раз этим правилом. То есть настоящие кандидаты вытеснялись теми, которые всё
+        # равно не могли стать кандидатами.
+        #
+        # Ключ `variant` означает общий псевдоним — прямое утверждение человека «это один
+        # и тот же», и такие пары проходят. Ключи перебираются сильнейшим первым
+        # (`_KEY_RANK`, variant = 0), поэтому пара с общим псевдонимом всегда вносится
+        # именно этим ключом, и проверка по имени ключа здесь точна, а не приблизительна.
+        declared_person = [_is_declared_person(data["entity"]) for data in prepared]
         ranked = sorted(
             ((_KEY_RANK.get(key[0], len(_KEY_RANK)), list(key), key) for key in blocks),
             key=lambda item: (item[0], item[1]),
@@ -2044,10 +2056,19 @@ class KnowledgeMixin(StorageShared):
             keys_done += 1
             stopped_at = (rank, key_list)
             members = blocks[key]
+            alias_key = key[0] == "variant"
             for position, left_index in enumerate(members):
                 for right_index in members[position + 1 :]:
                     pair = (left_index, right_index)
                     if pair in seen_pairs:
+                        continue
+                    if not alias_key and declared_person[left_index] and declared_person[right_index]:
+                        # Намеренно НЕ помечается как `seen`. В одном прогоне это
+                        # безразлично — ключи `variant` идут первыми и своё уже внесли.
+                        # Но обход возобновляемый: на продолжении с курсором сильные
+                        # ключи остались в прошлом вызове, а `seen_pairs` живёт только
+                        # внутри вызова. Пометить сейчас значило бы закрыть паре дорогу
+                        # на случай, которого мы не проверяли.
                         continue
                     seen_pairs.add(pair)
                     ordered.append(pair)
