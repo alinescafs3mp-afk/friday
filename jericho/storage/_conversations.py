@@ -118,9 +118,7 @@ class ConversationsMixin(StorageShared):
             return None
         return self.get_conversation(conversation_id, user_id)
 
-    def set_conversation_title(
-        self, conversation_id: str, user_id: str, title: str
-    ) -> dict[str, Any] | None:
+    def set_conversation_title(self, conversation_id: str, user_id: str, title: str) -> dict[str, Any] | None:
         """Rename a conversation the caller owns; foreign ids are a silent miss."""
         clean = " ".join((title or "").split()).strip()[:200]
         if not clean:

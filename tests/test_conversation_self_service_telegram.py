@@ -25,9 +25,7 @@ async def test_archive_delete_rename_commands_hit_current_conversation(tmp_path)
             "/api/conversations/current/archive": {
                 "conversation": {"id": "conv_1", "title": "Рабочий", "is_archived": 1}
             },
-            "/api/conversations/current": {
-                "conversation": {"id": "conv_1", "title": "Новое имя"}
-            },
+            "/api/conversations/current": {"conversation": {"id": "conv_1", "title": "Новое имя"}},
         }
     )
     user = {"id": 1001, "first_name": "Alice"}
