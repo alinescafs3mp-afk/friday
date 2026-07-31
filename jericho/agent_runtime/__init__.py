@@ -208,6 +208,47 @@ def _verification_caution(status: str, issues: list[Any]) -> str:
     return ""
 
 
+def _grounding_warning(content: str, answer_grounded: bool | None) -> str:
+    """Предупреждение, которое обязано стоять ПЕРЕД ответом, а не после него.
+
+    Замерено на переписке владельца за 2026-07-30: из 15 ответов ассистента 10 несли
+    живые ссылки `[K#]` — забракованных среди них ноль; 5 состояли ТОЛЬКО из пометок
+    «(источник вне текущей выборки)» — забракованы все пять (две оценки «минус» и
+    реплика «это и предыдущее — неверно, посмотри в штатке»). Корреляция без
+    исключений, и она объяснима: такой ответ собран из прежних ходов диалога, чьи
+    ссылки при переносе в новый ход стали непроверяемыми, — то есть это пересказ, а
+    выглядел он как досье на живого человека с датой рождения и номером личного дела.
+
+    Почему не хватало прежних средств. Пометка честная, но она повторяется по строке
+    (в том досье — 14 раз) и от повторения читается как разметка, а не как
+    предупреждение. Оговорка `_citation_notice` ставилась ПОСЛЕ тела ответа — под
+    1645 знаками её никто не читает — и вдобавок молчала в четырёх случаях из пяти:
+    `answer_grounded` там `None`, потому что поиск в тот ход не нашёл НИЧЕГО, и
+    ветка «нашлось, но не сослались» не срабатывала.
+
+    Поэтому признак берётся из самого текста: пометки есть, живых ссылок нет — значит
+    под ответом нет ни одного источника из текущей выборки, чем бы это ни было
+    вызвано. Ответ при этом не отменяется: тот же механизм несёт законные короткие
+    продолжения («а его брат?»), и молчать в ответ на них было бы хуже. Меняется
+    одно — человек узнаёт об этом до того, как прочтёт факты, а не после.
+    """
+    body = content or ""
+    live = len(_KNOWLEDGE_CITATION_RE.findall(body))
+    if live:
+        return ""
+    if _CITATION_OUT_OF_VIEW in body:
+        return (
+            "⚠️ Это пересказ прежних ответов этого диалога: в вашем архиве под эти "
+            "утверждения сейчас не найдено ни одного источника. Проверьте по документам."
+        )
+    if answer_grounded is False:
+        return (
+            "⚠️ Ответ не опирается ни на одну запись вашей базы, хотя записи по запросу "
+            "нашлись — проверьте ключевые факты."
+        )
+    return ""
+
+
 def _citation_sort_key(label: str) -> tuple[int, int]:
     """Order K-labelled citations numerically; unlabelled (tool) sources come last."""
     if label[:1].upper() == "K" and label[1:].isdigit():
@@ -265,8 +306,9 @@ def _citation_notice(
         return "📎 Вероятно, на основе: " + "; ".join(labelled) + " (модель не сослалась явно)"
     if labelled:
         return "📎 Источники: " + "; ".join(labelled)
-    if answer_grounded is False:
-        return "ℹ️ В ответе нет явных ссылок на записи вашей базы — проверьте ключевые факты."
+    # Случай «нашлось, но не сослались» переехал в `_grounding_warning`: это
+    # предупреждение, а не легенда, и место ему ПЕРЕД ответом. Здесь остаётся только
+    # легенда источников — иначе одно и то же говорилось бы дважды, сверху и снизу.
     return ""
 
 
@@ -496,6 +538,11 @@ class AgentRuntime:
         else:
             answer_grounded = None
         citation_notice = _citation_notice(citations, answer_grounded, inferred=attribution_inferred)
+        # Считается по самому тексту ответа, а не по тому, что нашёл поиск: ответ,
+        # собранный из прежних ходов, приходит с пометками «вне выборки» и без единой
+        # живой ссылки — при этом поиск в текущем ходе мог не найти ничего и не поднять
+        # ни одного признака. См. `_grounding_warning`.
+        grounding_warning = _grounding_warning(content, answer_grounded)
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.
@@ -529,6 +576,7 @@ class AgentRuntime:
                     if knowledge_id in attributed_knowledge_ids
                 },
                 "answer_grounded": answer_grounded,
+                "grounding_warning": grounding_warning,
                 "work_product": context.interaction_mode in {"knowledge_work", "research"},
             },
         )
@@ -553,6 +601,7 @@ class AgentRuntime:
             "citations": citations,
             "answer_grounded": answer_grounded,
             "citation_notice": citation_notice,
+            "grounding_warning": grounding_warning,
             "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
             "context": {

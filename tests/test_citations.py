@@ -81,7 +81,10 @@ def test_citation_sort_orders_labels_numerically_then_unlabelled():
 def test_citation_notice_legend_and_ungrounded_and_silent():
     grounded = _citation_notice([{"label": "K1", "knowledge_id": "a", "title": "База"}], True)
     assert grounded == "📎 Источники: [K1] База"
-    assert _citation_notice([], False).startswith("ℹ️")
+    # Оговорка про безосновательный ответ переехала из легенды в `_grounding_warning`:
+    # это предупреждение, и его место ПЕРЕД ответом, а не под ним. Здесь остаётся
+    # только легенда источников — см. tests/test_answer_without_sources_says_so_first.py.
+    assert _citation_notice([], False) == ""
     assert _citation_notice([], None) == ""
 
 
@@ -138,7 +141,11 @@ async def test_ungrounded_personal_answer_is_flagged(settings, storage):
 
     assert result["answer_grounded"] is False
     assert result["citations"] == []
-    assert result["citation_notice"].startswith("ℹ️")
+    # Предупреждение теперь отдельным полем и ставится мостом ПЕРЕД ответом: под
+    # телом в 1645 знаков его не читали — замерено на переписке владельца.
+    assert result["citation_notice"] == ""
+    assert result["grounding_warning"].startswith("⚠️")
+    assert "не опирается" in result["grounding_warning"]
 
 
 @pytest.mark.asyncio

@@ -337,6 +337,14 @@ class CallbacksMixin(BridgeShared):
             "research": "🔎 Исследование",
         }.get(mode)
         body = f"{prefix}\n\n{message}" if prefix else message
+        # Предупреждение о безосновательности встаёт ПЕРЕД ответом, а не после него.
+        # Замерено на переписке владельца: досье на живого человека в 1645 знаков
+        # заканчивалось мягкой строчкой про «нет явных ссылок», и он оценил ответ
+        # минусом, а не прочитал оговорку. Всё, что ниже, — легенда и уточнения:
+        # их место после текста. Это — условие, на котором текст вообще стоит читать.
+        warning = str(response.get("grounding_warning") or "").strip()
+        if warning:
+            body = f"{warning}\n\n{body}"
         fate = _file_fate_line(response.get("file_ingestion"))
         if fate:
             body = f"{body}\n\n{fate}"
