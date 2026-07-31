@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### G12: клэмп limit в user_knowledge_search и CancelledError в web research (#59)
+
+1. _user_knowledge_search: ветка без HybridSearcher передавала limit в
+   storage.search_knowledge без клэмпа [1, 20], тогда как searcher-ветка
+   уже ограничивала. execute() схему max не проверяет — клэмп общий.
+2. WebSurfer.research: except BaseException глотал CancelledError как
+   failed_source. Как в workers/transport: CancelledError re-raise, иначе
+   Exception.
+
+Тесты: 	est_storage_fallback_clamps_limit_like_the_searcher_path,
+	est_research_does_not_swallow_cancelled_error_as_failed_source.
+
 ### Делегированный админ не мутирует и не выгружает аккаунт владельца (#57)
 
 `_protect_owner_target` подключён ко всем POST/PATCH/DELETE admin-маршрутам с

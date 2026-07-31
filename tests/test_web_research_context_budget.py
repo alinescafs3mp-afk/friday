@@ -107,3 +107,22 @@ async def test_research_search_stage_keeps_margin_for_the_kernel_deadline(monkey
     assert result["sources"] == []
     assert result["search_timed_out"] is True
     assert "timed out" in result["summary"].casefold()
+
+
+class _CancelledFetchHarness(_ResearchHarness):
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query, max_results
+        return [SearchResult("Source 1", "https://source-1.example/", "", "fixture")]
+
+    async def fetch(self, url: str, *, max_length: int) -> FetchResult:
+        del url, max_length
+        raise asyncio.CancelledError()
+
+
+@pytest.mark.asyncio
+async def test_research_does_not_swallow_cancelled_error_as_failed_source() -> None:
+    """CancelledError is BaseException — a bare except BaseException used to
+    count it as failed_sources and continue, hiding a parent-task cancel.
+    """
+    with pytest.raises(asyncio.CancelledError):
+        await _CancelledFetchHarness().research("same query", max_sources=1)

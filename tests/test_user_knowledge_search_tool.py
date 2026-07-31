@@ -166,3 +166,33 @@ async def test_an_ambiguous_name_answers_with_candidates_and_leaves_a_trace(kern
         str(row.get("action")) == "tool.user_knowledge_search.unresolved"
         for row in storage.list_audit_log(limit=50)
     ), "перебор неоднозначных имён не оставил следа"
+
+
+@pytest.mark.asyncio
+async def test_storage_fallback_clamps_limit_like_the_searcher_path(kernel, monkeypatch):
+    """Without a HybridSearcher the bare FTS path used to honour limit=999.
+
+    Schema says maximum 20, but execute() does not enforce schema bounds —
+    the handler itself must clamp both branches the same way.
+    """
+    runtime, auth, storage = kernel
+    boss = auth.actor_for_user("boss", source="test")
+    assert runtime.searcher is None, "precondition: fixture leaves searcher unbound"
+
+    seen: list[int] = []
+    real = storage.search_knowledge
+
+    def _spy(user_id, query, *, limit=20):
+        seen.append(int(limit))
+        return real(user_id, query, limit=limit)
+
+    monkeypatch.setattr(storage, "search_knowledge", _spy)
+
+    result = await runtime.execute(
+        "user_knowledge_search",
+        {"person": "Иван", "query": "поставка", "limit": 999},
+        actor=boss,
+    )
+
+    assert result.success is True, result.error
+    assert seen == [20], f"storage got unbounded limit: {seen}"

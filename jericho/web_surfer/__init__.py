@@ -656,7 +656,11 @@ class WebSurfer:
                 continue
             try:
                 fetch_result = task.result()
-            except BaseException:
+            except asyncio.CancelledError:
+                # Cancellation of the parent research must not be counted as a
+                # failed source and swallowed — same contract as workers/transport.
+                raise
+            except Exception:
                 failed_sources += 1
                 continue
             # Выдержка по ИСХОДНОМУ запросу исследования, а не по адресу страницы.

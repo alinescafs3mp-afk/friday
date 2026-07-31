@@ -1272,10 +1272,14 @@ class ExecutionKernel:
                 "reason": "ambiguous" if matches else "not_found",
             }
 
+        # Clamp on both branches: execute() does not enforce JSON-schema max, so
+        # the bare storage fallback used to honour an unbounded limit while
+        # HybridSearcher stayed capped at 20. Same bound as the declared schema.
+        clamped_limit = max(1, min(int(limit), 20))
         found = (
-            await self.searcher.search(chosen.user_id, clean_query, limit=max(1, min(int(limit), 20)))
+            await self.searcher.search(chosen.user_id, clean_query, limit=clamped_limit)
             if self.searcher is not None
-            else {"results": storage.search_knowledge(chosen.user_id, clean_query, limit=limit)}
+            else {"results": storage.search_knowledge(chosen.user_id, clean_query, limit=clamped_limit)}
         )
         rows = list(found.get("results") or [])
         strategy = found.get("strategy")
