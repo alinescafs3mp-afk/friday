@@ -7,6 +7,8 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
+
 from jericho.storage._base import (
     LOGGER,
     Any,
@@ -276,13 +278,120 @@ class GraphMixin(StorageShared):
         return dict(row) if row else None
 
     def find_entity_by_alias(self, user_id: str, alias: str) -> list[dict[str, Any]]:
+        """Entities whose alias normalises to ``alias``. No full-graph page cap.
+
+        The previous path walked ``list_entities(limit=5000)`` and therefore lost
+        every alias that lived past the alphabetical ceiling — the same silent
+        blindness as ``match_mentions``. Only rows that actually carry aliases are
+        loaded; empty ``[]`` is the common case and is filtered in SQL.
+        """
         normalized = normalize_entity_name(alias)
+        if not normalized:
+            return []
         results: list[dict[str, Any]] = []
-        for row in self.list_entities(user_id, limit=5000):
-            aliases = _json_load(row.get("aliases_json"), [])
-            if any(normalize_entity_name(item) == normalized for item in aliases):
-                results.append(row)
+        rows = self.execute(
+            """SELECT * FROM entities
+               WHERE user_id=? AND deleted_at IS NULL AND canonical=1
+                 AND aliases_json NOT IN ('[]', '', 'null')
+               ORDER BY name COLLATE NOCASE, id""",
+            (user_id,),
+        ).fetchall()
+        for row in rows:
+            item = dict(row)
+            aliases = _json_load(item.get("aliases_json"), [])
+            if any(normalize_entity_name(alias) == normalized for alias in aliases):
+                results.append(item)
         return results
+
+    def find_entities_by_normalized_names(
+        self,
+        user_id: str,
+        names: Sequence[str],
+        *,
+        include_aliases: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Canonical entities matching any of the given names (or their aliases).
+
+        Callers hand terms extracted from text; this method never lists the whole
+        graph. A graph past the ``list_entities`` ceiling of 5000 stays fully
+        addressable — the lookup is keyed on ``normalized_name`` (and, optionally,
+        alias JSON for the minority of nodes that carry one).
+        """
+        wanted: list[str] = []
+        seen: set[str] = set()
+        for raw in names:
+            key = normalize_entity_name(str(raw or ""))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            wanted.append(key)
+        if not wanted:
+            return []
+
+        by_id: dict[str, dict[str, Any]] = {}
+        # SQLite caps host parameters; stay well under the common 999 limit.
+        chunk_size = 400
+        for start in range(0, len(wanted), chunk_size):
+            chunk = wanted[start : start + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.execute(
+                f"""SELECT * FROM entities
+                    WHERE user_id=? AND deleted_at IS NULL AND canonical=1
+                      AND normalized_name IN ({placeholders})""",  # nosec B608
+                (user_id, *chunk),
+            ).fetchall()
+            for row in rows:
+                by_id[str(row["id"])] = dict(row)
+
+        if include_aliases:
+            alias_rows = self.execute(
+                """SELECT * FROM entities
+                   WHERE user_id=? AND deleted_at IS NULL AND canonical=1
+                     AND aliases_json NOT IN ('[]', '', 'null')""",
+                (user_id,),
+            ).fetchall()
+            wanted_set = set(wanted)
+            for row in alias_rows:
+                item = dict(row)
+                entity_id = str(item["id"])
+                if entity_id in by_id:
+                    continue
+                aliases = _json_load(item.get("aliases_json"), [])
+                if any(normalize_entity_name(str(alias)) in wanted_set for alias in aliases):
+                    by_id[entity_id] = item
+
+        return list(by_id.values())
+
+    def iter_entities(
+        self,
+        user_id: str,
+        entity_type: EntityType | None = None,
+        *,
+        page_size: int = 1000,
+        include_merged: bool = False,
+    ) -> Iterator[dict[str, Any]]:
+        """Walk every matching entity. No silent alphabetical ceiling.
+
+        ``list_entities`` is a page with a hard cap of 5000 and a warning when the
+        page fills. Callers that truly need the whole graph (token-overlap search)
+        must page explicitly — otherwise the tail of the alphabet stops existing.
+        """
+        where, params = self._entity_filter(user_id, entity_type, include_merged=include_merged)
+        bounded = max(1, min(int(page_size), 5000))
+        offset = 0
+        while True:
+            rows = self.execute(
+                f"SELECT * FROM entities WHERE {where} "  # nosec B608
+                "ORDER BY name COLLATE NOCASE, id LIMIT ? OFFSET ?",
+                (*params, bounded, offset),
+            ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                yield dict(row)
+            if len(rows) < bounded:
+                break
+            offset += len(rows)
 
     def soft_delete_entity(self, entity_id: str, user_id: str | None = None) -> bool:
         """Soft-delete an entity and record the state as a new entity version.

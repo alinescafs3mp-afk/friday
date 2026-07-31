@@ -1089,6 +1089,8 @@ class StorageShared:
     get_raw_object: Callable[..., Any]
     get_entity: Callable[..., dict[str, Any] | None]
     list_entities: Callable[..., list[dict[str, Any]]]
+    count_entities: Callable[..., int]
+    find_entities_by_normalized_names: Callable[..., list[dict[str, Any]]]
     get_knowledge_object: Callable[..., dict[str, Any] | None]
     list_eval_cases: Callable[..., list[dict[str, Any]]]
     eval_case_health: Callable[..., dict[str, Any]]

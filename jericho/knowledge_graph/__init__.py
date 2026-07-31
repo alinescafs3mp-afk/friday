@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
+from jericho.entity_phrases import mention_phrase_candidates
 from jericho.storage import JerichoStorage
 from jericho.storage.models import (
     Entity,
@@ -618,22 +619,27 @@ class KnowledgeGraph:
         Names are matched literally with Unicode word boundaries.  This is
         deliberately not stemming or prefix matching: an identifier or person
         must actually occur in the input before it can influence graph links.
+
+        Lookup is inverted: candidates come from the text, the database answers
+        by ``normalized_name`` / alias. Walking ``list_entities(limit=5000)`` used
+        to drop the alphabetical tail once the graph passed the ceiling — proven
+        on 8001 entities where direct name lookup still worked and this method
+        returned nothing.
         """
         if not text.strip():
             return []
+        phrases = mention_phrase_candidates(text)
+        entities = self.storage.find_entities_by_normalized_names(user_id, phrases)
         matches: list[dict[str, Any]] = []
         occupied: list[tuple[int, int]] = []
         lowered = text.casefold()
-        for entity in self.list_entities(user_id, limit=5000):
+        for entity in entities:
             best: dict[str, Any] | None = None
             for term, source in _entity_terms(entity):
                 # Necessary condition first, at C speed. The pattern below is the same
                 # literal term with word boundaries, so it cannot match unless the term
                 # occurs as a substring — and a term matching under IGNORECASE is equal
-                # under casefold, so this never hides a real mention. It was compiling
-                # one regex per entity per query: profiling a search over a
-                # 2000-entity graph showed 2000 compilations as the single largest
-                # cost in the whole request.
+                # under casefold, so this never hides a real mention.
                 if term.casefold() not in lowered:
                     continue
                 pattern = _mention_pattern(term)
@@ -667,7 +673,11 @@ class KnowledgeGraph:
         """Find graph entry points using exact mentions plus conservative token overlap."""
         exact = {item["entity_id"]: item for item in self.match_mentions(user_id, query, limit=limit * 2)}
         scored: list[tuple[dict[str, Any], float, str]] = []
-        for entity in self.list_entities(user_id, limit=5000):
+        # Token-overlap still needs every entity's terms: a short query can hit a
+        # name that shares only one word with it, which phrase lookup alone would
+        # miss. ``iter_entities`` pages without the silent 5000 ceiling that made
+        # the alphabetical tail invisible to this path.
+        for entity in self.storage.iter_entities(user_id):
             if entity["id"] in exact:
                 scored.append(
                     (entity, float(exact[entity["id"]]["confidence"]), exact[entity["id"]]["method"])

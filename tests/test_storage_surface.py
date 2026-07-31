@@ -85,7 +85,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # по ним случайна. Второй существует ровно затем, чтобы проход не спорил с человеком —
 # `link_knowledge_entity` перезаписывает статус по ON CONFLICT, и без этой проверки
 # отклонённая владельцем связь молча вернулась бы в accepted.
-EXPECTED_MEMBER_COUNT = 253
+EXPECTED_MEMBER_COUNT = 255
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -151,8 +151,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "export_user": "(self, user_id: 'str') -> 'dict[str, Any]'",
     "find_api_token": "(self, token_sha256: 'str') -> 'dict[str, Any] | None'",
     "find_duplicate_candidates": "(self, user_id: 'str', *, min_confidence: 'float' = 0.5) -> 'list[EntityResolutionCandidate]'",
+    "find_entities_by_normalized_names": "(self, user_id: 'str', names: 'Sequence[str]', *, include_aliases: 'bool' = True) -> 'list[dict[str, Any]]'",
     "find_entity_by_alias": "(self, user_id: 'str', alias: 'str') -> 'list[dict[str, Any]]'",
     "find_entity_by_name": "(self, user_id: 'str', name: 'str') -> 'dict[str, Any] | None'",
+    "iter_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, page_size: 'int' = 1000, include_merged: 'bool' = False) -> 'Iterator[dict[str, Any]]'",
     "find_inbox_by_raw": "(self, raw_object_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "find_raw_by_source_ref": "(self, user_id: 'str', source: 'str', source_ref: 'str') -> 'dict[str, Any] | None'",
     "get_api_token": "(self, token_id: 'str') -> 'dict[str, Any] | None'",

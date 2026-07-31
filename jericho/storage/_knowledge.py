@@ -2162,26 +2162,16 @@ class KnowledgeMixin(StorageShared):
 
         Курсор в `runtime_kv`, как у `sweep_entity_duplicates`: обход возобновляемый и
         ограниченный, потому что на большом архиве полный проход дорог.
-        """
-        entities = [item for item in self.list_entities(user_id, limit=2000) if not item.get("deleted_at")]
-        if not entities:
-            return {"linked": 0, "scanned": 0, "complete": True, "entities": 0}
 
-        patterns: list[tuple[str, Any]] = []
-        for entity in entities:
-            names = [entity.get("name", ""), *_aliases_of(entity)]
-            for candidate in names:
-                text = str(candidate).strip()
-                # Тот же порог и то же выражение с границами слов, что при разборе:
-                # правило должно быть ОДНО, иначе задним числом появятся связи,
-                # которых обычный путь не создал бы.
-                if len(text) < 3:
-                    continue
-                patterns.append(
-                    (str(entity["id"]), re.compile(rf"(?<![\w.]){re.escape(text)}(?![\w.])", re.I))
-                )
-        if not patterns:
-            return {"linked": 0, "scanned": 0, "complete": True, "entities": len(entities)}
+        Сопоставление инвертировано: кандидаты — n-граммы из текста документа, база
+        отвечает по имени/алиасу. Прежний `list_entities(limit=2000)` на графе в 4458
+        узлов молча терял хвост алфавита — тот же класс, что #50.
+        """
+        from jericho.entity_phrases import mention_phrase_candidates
+
+        entity_total = self.count_entities(user_id)
+        if entity_total == 0:
+            return {"linked": 0, "scanned": 0, "complete": True, "entities": 0}
 
         cursor = 0
         try:
@@ -2199,7 +2189,7 @@ class KnowledgeMixin(StorageShared):
         if not rows:
             # Обход дошёл до конца — начинаем сначала на следующем тике.
             self.kv_set(self._MENTION_SWEEP_KEY + user_id, json.dumps({"rowid": 0}))
-            return {"linked": 0, "scanned": 0, "complete": True, "entities": len(entities)}
+            return {"linked": 0, "scanned": 0, "complete": True, "entities": entity_total}
 
         linked = 0
         last_position = cursor
@@ -2215,8 +2205,23 @@ class KnowledgeMixin(StorageShared):
                     user_id, knowledge_object_id=document_id, status=None
                 )
             }
-            for entity_id, pattern in patterns:
-                if entity_id in known or not pattern.search(content):
+            lowered = content.casefold()
+            for entity in self.find_entities_by_normalized_names(user_id, mention_phrase_candidates(content)):
+                entity_id = str(entity["id"])
+                if entity_id in known:
+                    continue
+                # Тот же порог и то же выражение с границами слов, что при разборе:
+                # правило должно быть ОДНО, иначе задним числом появятся связи,
+                # которых обычный путь не создал бы.
+                matched = False
+                for candidate in [entity.get("name", ""), *_aliases_of(entity)]:
+                    text = str(candidate).strip()
+                    if len(text) < 3 or text.casefold() not in lowered:
+                        continue
+                    if re.search(rf"(?<![\w.]){re.escape(text)}(?![\w.])", content, re.I):
+                        matched = True
+                        break
+                if not matched:
                     continue
                 self.link_knowledge_entity(
                     user_id,
@@ -2233,7 +2238,7 @@ class KnowledgeMixin(StorageShared):
             "linked": linked,
             "scanned": len(rows),
             "complete": False,
-            "entities": len(entities),
+            "entities": entity_total,
         }
 
     def sweep_entity_duplicates(

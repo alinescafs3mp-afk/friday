@@ -559,17 +559,17 @@ class AdviceMixin(PipelineShared):
         # Exact mentions of existing entities are highly reliable and make the graph useful even
         # when the wording lacks an explicit marker such as "project" or "company".
         #
-        # Потолок был 2000, и проход правилом ФИО довёл граф владельца до 4458 сущностей:
-        # `list_entities` сортирует по имени, значит 2458 узлов — весь хвост алфавита —
-        # переставали существовать для этой проверки МОЛЧА. Новый документ, назвавший
-        # такого человека, к его узлу уже не привязывался. Обрез был слышен только в
-        # журнале («list_entities returned 2000 of 4458»), и услышан он был случайно.
-        #
-        # 5000 — потолок самого хранилища, не решение задачи: за ним стена та же.
-        # Настоящее лечение — перестать строить эту проверку на полной выборке;
-        # это отдельная задача с замером, см. TASKS.md.
+        # Раньше здесь был `list_entities(limit=…)`: при 2000 из 4458 после прохода
+        # ФИО хвост алфавита исчезал молча, при 5000 стена просто отодвигалась.
+        # Теперь кандидаты берутся из текста (n-граммы токенов, в т.ч. многословные
+        # имена без объявляющего слова), а база отвечает по `normalized_name` /
+        # alias — потолка на размере графа нет. Литеральное совпадение с границами
+        # слова то же, что было: lookup только сужает множество узлов.
+        from jericho.entity_phrases import mention_phrase_candidates
+
         lowered_content = content.casefold()
-        for entity in self.storage.list_entities(user_id, limit=5000):
+        phrases = mention_phrase_candidates(content)
+        for entity in self.storage.find_entities_by_normalized_names(user_id, phrases):
             names = [entity.get("name", ""), *_json_list(entity.get("aliases_json"))]
             for candidate_name in names:
                 candidate_name = str(candidate_name).strip()
@@ -577,9 +577,7 @@ class AdviceMixin(PipelineShared):
                     continue
                 # Необходимое условие сначала, на скорости C. Шаблон ниже — тот же
                 # литерал с границами слова, поэтому совпасть без вхождения подстроки
-                # он не может; а без этой проверки поднятый потолок означал бы 5000
-                # компиляций регулярки на каждый принимаемый документ. Тот же приём
-                # однажды снял 86% времени внутри поиска (`_identifier_coverage`).
+                # он не может.
                 if candidate_name.casefold() not in lowered_content:
                     continue
                 pattern = re.compile(rf"(?<![\w.]){re.escape(candidate_name)}(?![\w.])", re.I)
