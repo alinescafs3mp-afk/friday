@@ -20,6 +20,7 @@ from jericho.admin_api._deps import (
     _knowledge_fingerprint,
     _parse_bool,
     _parse_int,
+    _protect_owner_target,
     _request_json,
     _require,
     _services,
@@ -67,6 +68,7 @@ async def apply_legacy_cleanup(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     action = str(body.get("action") or "return_to_inbox")
     knowledge_ids = body.get("knowledge_ids")
     if not isinstance(knowledge_ids, list) or not knowledge_ids:
@@ -175,6 +177,7 @@ async def apply_lifecycle_review(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     knowledge_ids = body.get("knowledge_ids")
     if not isinstance(knowledge_ids, list) or not knowledge_ids:
         raise HTTPException(status_code=400, detail="knowledge_ids должен быть непустым списком")
@@ -276,6 +279,7 @@ async def run_deprecation(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     raw_ids = body.get("ids")
     if not isinstance(raw_ids, list) or not raw_ids:
         raise HTTPException(

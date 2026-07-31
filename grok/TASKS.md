@@ -150,7 +150,16 @@ hits=6 — это не болтовня. Ночной провал был `gener
 
 # СРОЧНО (31 июля, ночь) — реальная дыра доступа, найдена разведкой и проверена мной лично
 
-## G11 (#57). Делегированный админ может писать/удалять/выгружать аккаунт ВЛАДЕЛЬЦА
+## G11 (#57). Делегированный админ может писать/удалять/выгружать аккаунт ВЛАДЕЛЬЦА — **сделано**
+
+`_protect_owner_target` подключён на всех мутирующих admin-маршрутах с tenant
+`user_id`: export, knowledge write/restore/delete/reenrich/links/suggestions,
+graph entities/relations, lifecycle, conflicts/resolutions/merges undo, inbox
+classify/bulk/advise, eval cases. READ не трогали (заказанная видимость).
+
+Сторож: `tests/test_owner_mutation_boundaries.py` — точечный `POST /exports` +
+инвентарный обход manage/export с `user_id=<owner>` → 403; мутация (no-op
+protect на export) → 200.
 
 **Это не гипотеза.** Я проверил каждый файл лично, читал код построчно. Самое
 серьёзное — делегированный администратор (пресет `admin`, право `admin.export`,

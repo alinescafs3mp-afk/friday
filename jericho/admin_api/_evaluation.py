@@ -17,6 +17,7 @@ from jericho.admin_api._deps import (
     Request,
     _audit,
     _audit_cross_tenant_read,
+    _protect_owner_target,
     _request_json,
     _require,
     _services,
@@ -159,6 +160,7 @@ async def add_eval_case(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = _target_user(request, str(body.get("user_id") or "") or None)
+    _protect_owner_target(request, target)
     expected = body.get("expected_ids")
     if not isinstance(expected, list):
         raise HTTPException(status_code=400, detail="expected_ids должен быть списком")
@@ -178,6 +180,7 @@ async def add_eval_case(request: Request) -> dict[str, Any]:
 @router.delete("/eval/cases/{case_id}")
 async def delete_eval_case(case_id: str, request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
+    _protect_owner_target(request, user_id)
     if not _services(request).storage.delete_eval_case(user_id, case_id):
         raise HTTPException(status_code=404, detail="Эталонный запрос не найден")
     _audit(request, "admin.eval.case_delete", "eval_case", case_id)

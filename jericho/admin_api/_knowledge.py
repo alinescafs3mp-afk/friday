@@ -160,6 +160,7 @@ async def create_container_admin(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = _target_user(request, str(body.get("user_id") or "") or None)
+    _protect_owner_target(request, target)
     try:
         container = _services(request).kg.create_container(
             target,
@@ -291,6 +292,7 @@ async def reenrich_knowledge(knowledge_id: str, request: Request) -> dict[str, A
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not before:
@@ -323,6 +325,7 @@ async def create_knowledge_entity_link(knowledge_id: str, request: Request) -> d
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     entity_id = str(body.get("entity_id") or "")
     status = str(body.get("status") or "accepted")
     if status not in {"suggested", "accepted", "rejected"}:
@@ -531,6 +534,7 @@ async def decide_entity_suggestion_group(request: Request) -> dict[str, Any]:
     actor = _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     name = str(body.get("name") or "").strip()
     decision = str(body.get("decision") or "accept").strip()
     entity_type = str(body.get("entity_type") or EntityType.OTHER.value).strip()
@@ -684,6 +688,7 @@ async def accept_entity_suggestion(knowledge_id: str, request: Request) -> dict[
     actor = _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     name = str(body.get("name") or "").strip()
     entity_type = str(body.get("entity_type") or EntityType.OTHER.value).strip()
     if not user_id or not name:
@@ -746,6 +751,7 @@ async def review_knowledge_entity_link(link_id: str, request: Request) -> dict[s
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     status = str(body.get("status") or "")
     try:
         link = _services(request).storage.set_knowledge_entity_link_status(
@@ -789,6 +795,7 @@ async def update_knowledge(knowledge_id: str, request: Request) -> dict[str, Any
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = str(body.get("user_id") or "")
+    _protect_owner_target(request, target)
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, target)
     if not before:
@@ -839,6 +846,7 @@ async def restore_knowledge_version(knowledge_id: str, request: Request) -> dict
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = str(body.get("user_id") or "")
+    _protect_owner_target(request, target)
     try:
         version = int(str(body.get("version")))
     except (TypeError, ValueError) as exc:
@@ -870,6 +878,7 @@ async def restore_knowledge_version(knowledge_id: str, request: Request) -> dict
 @router.delete("/knowledge/{knowledge_id}")
 async def delete_knowledge(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
+    _protect_owner_target(request, user_id)
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not before or not state.storage.soft_delete_knowledge_object(knowledge_id, user_id):

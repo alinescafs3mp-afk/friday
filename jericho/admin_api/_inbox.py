@@ -20,6 +20,7 @@ from jericho.admin_api._deps import (
     _json_value,
     _parse_bool,
     _parse_unit_float,
+    _protect_owner_target,
     _request_json,
     _require,
     _services,
@@ -113,6 +114,7 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     try:
         status = InboxStatus(str(body.get("status") or "classified"))
     except ValueError as exc:
@@ -159,6 +161,7 @@ async def bulk_classify_inbox(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     inbox_ids = body.get("inbox_ids")
     if not isinstance(inbox_ids, list) or not inbox_ids:
         raise HTTPException(status_code=400, detail="inbox_ids должен быть непустым списком")
@@ -234,6 +237,7 @@ async def advise_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     state = _services(request)
     if not state.storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")

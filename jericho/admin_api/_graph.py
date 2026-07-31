@@ -17,6 +17,7 @@ from jericho.admin_api._deps import (
     _audit,
     _audit_cross_tenant_read,
     _json_value,
+    _protect_owner_target,
     _request_json,
     _require,
     _services,
@@ -67,6 +68,7 @@ async def create_entity_admin(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = _target_user(request, str(body.get("user_id") or "") or None)
+    _protect_owner_target(request, target)
     from jericho.storage.models import EntityType
 
     try:
@@ -88,6 +90,7 @@ async def update_entity_admin(entity_id: str, request: Request) -> dict[str, Any
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = _target_user(request, str(body.get("user_id") or "") or None)
+    _protect_owner_target(request, target)
     state = _services(request)
     before = state.kg.get_entity(entity_id, target)
     if not before:
@@ -104,6 +107,7 @@ async def update_entity_admin(entity_id: str, request: Request) -> dict[str, Any
 @router.delete("/entities/{entity_id}")
 async def delete_entity_admin(entity_id: str, request: Request, user_id: str) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
+    _protect_owner_target(request, user_id)
     state = _services(request)
     before = state.kg.get_entity(entity_id, user_id)
     if not before or not state.kg.delete_entity(user_id, entity_id):
@@ -178,6 +182,7 @@ async def bulk_review_relation_candidates(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     status = str(body.get("status") or "").casefold()
     candidate_ids = body.get("candidate_ids")
     if status not in {"accepted", "rejected"}:
@@ -226,6 +231,7 @@ async def review_relation_candidate(candidate_id: str, request: Request) -> dict
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     status = str(body.get("status") or "").casefold()
     try:
         result = _services(request).kg.review_relation_candidate(

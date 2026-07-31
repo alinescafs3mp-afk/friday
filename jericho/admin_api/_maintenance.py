@@ -17,6 +17,7 @@ from jericho.admin_api._deps import (
     Query,
     Request,
     _audit,
+    _protect_owner_target,
     _request_json,
     _require,
     _safe_runtime_file,
@@ -126,6 +127,7 @@ async def create_export(request: Request) -> dict[str, Any]:
     _require(request, "admin.export")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or request.state.actor.user_id)
+    _protect_owner_target(request, user_id)
     try:
         result = await run_blocking(_services(request).storage.export_user, user_id)
     except ValueError as exc:

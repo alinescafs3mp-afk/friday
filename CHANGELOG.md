@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Делегированный админ не мутирует и не выгружает аккаунт владельца (#57)
+
+`_protect_owner_target` подключён ко всем POST/PATCH/DELETE admin-маршрутам с
+tenant `user_id` (export, knowledge, graph, lifecycle, conflicts, inbox, eval).
+Самая тяжёлая дыра — `POST /api/admin/exports` — закрыта; READ-маршруты без
+изменений. Сторож: `tests/test_owner_mutation_boundaries.py` (инвентарь +
+мутация protect на export).
+
 ### #39: вопрос про человека больше не «болтовня» после починки поиска
 
 Переизмерение G10 на коде с `graph_expansion=False`: формы из переписки

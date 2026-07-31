@@ -18,6 +18,7 @@ from jericho.admin_api._deps import (
     _audit,
     _audit_cross_tenant_read,
     _json_value,
+    _protect_owner_target,
     _request_json,
     _require,
     _services,
@@ -69,6 +70,7 @@ async def bulk_review_conflicts(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     status = str(body.get("status") or "").casefold()
     conflict_ids = body.get("conflict_ids")
     if status not in {"confirmed", "dismissed", "resolved"}:
@@ -119,6 +121,7 @@ async def review_conflict(conflict_id: str, request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     status = str(body.get("status") or "").casefold()
     try:
         result = _services(request).kg.review_conflict(
@@ -141,6 +144,7 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     winner_id = str(body.get("winner_id") or "")
     if not winner_id:
         raise HTTPException(status_code=400, detail="Нужен winner_id")
@@ -192,6 +196,7 @@ async def detect_knowledge_duplicates(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     target = _target_user(request, str(body.get("user_id") or "") or None)
+    _protect_owner_target(request, target)
     if not _services(request).storage.get_user(target):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     from jericho.dedup import detect_near_duplicates
@@ -214,6 +219,7 @@ async def detect_resolutions(request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     if not _services(request).storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     # Off the event loop, like the knowledge-duplicate route beside it. This one was
@@ -236,6 +242,7 @@ async def accept_resolution(candidate_id: str, request: Request) -> dict[str, An
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     try:
         merged = _services(request).kg.resolver.accept_resolution(
             candidate_id,
@@ -254,6 +261,7 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     ok = _services(request).kg.resolver.reject_resolution(
         candidate_id,
         user_id,
@@ -282,6 +290,7 @@ async def undo_admin_merge(merge_id: str, request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
     if not _services(request).storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     try:
