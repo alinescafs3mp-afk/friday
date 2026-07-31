@@ -197,8 +197,7 @@ def format_conversation_export(
     ]
     if truncated:
         lines.append(
-            f"# note: показаны последние {limit} сообщений "
-            f"(потолок выгрузки; более ранние не включены)"
+            f"# note: показаны последние {limit} сообщений (потолок выгрузки; более ранние не включены)"
         )
     lines.append("")
     for row in messages:
