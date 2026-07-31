@@ -353,6 +353,13 @@ class JerichoSettings:
     whisper_language: str
     whisper_max_audio_sec: float
     whisper_download_root: str
+    # Local text-to-speech, spoken on request within a conversation. Same optional
+    # 'jericho[voice]' extra as whisper above (piper-tts, onnxruntime-based; shares
+    # PyAV, already pulled in transitively by faster-whisper, for OGG/Opus encoding).
+    tts_enabled: bool
+    tts_voice: str
+    tts_max_chars: int
+    tts_download_root: str
 
     purge_retention_days: int
     # Что попадает в ревью до того, как стать каноническим знанием. Перечисление,
@@ -688,6 +695,10 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         whisper_language=os.environ.get("JERICHO_WHISPER_LANGUAGE", ""),
         whisper_max_audio_sec=_float_env("JERICHO_WHISPER_MAX_AUDIO_SEC", 900.0, minimum=0.0),
         whisper_download_root=os.environ.get("JERICHO_WHISPER_DOWNLOAD_ROOT", ""),
+        tts_enabled=_bool_env("JERICHO_TTS_ENABLED", False),
+        tts_voice=os.environ.get("JERICHO_TTS_VOICE", "ru_RU-irina-medium"),
+        tts_max_chars=_int_env("JERICHO_TTS_MAX_CHARS", 2000, minimum=1),
+        tts_download_root=os.environ.get("JERICHO_TTS_DOWNLOAD_ROOT", ""),
         purge_retention_days=_int_env("JERICHO_PURGE_RETENTION_DAYS", 30, minimum=0),
         backup_keep=_int_env("JERICHO_BACKUP_KEEP", 14, minimum=0),
         ingestion_review_policy=_choice_env("JERICHO_INGESTION_REVIEW_POLICY", "assessed", REVIEW_POLICIES),

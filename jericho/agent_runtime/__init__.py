@@ -624,6 +624,7 @@ class AgentRuntime:
             "grounding_warning": grounding_warning,
             "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
+            "voice": response.get("voice_clip"),
             "context": {
                 "kb_size": context.kb_size,
                 "entities": context.entity_count,
@@ -875,6 +876,10 @@ class AgentRuntime:
         tools_used: list[str] = []
         tool_knowledge_ids: list[str] = []
         tool_evidence: list[dict[str, str]] = []
+        # Set by a successful `speak` call; last one wins (a turn ships at most one
+        # voice message). Kept off `tool_evidence`/`messages` entirely — see
+        # `ToolResult.attachment`.
+        voice_clip: dict[str, Any] | None = None
         total_calls = 0
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
             context.interaction_mode,
@@ -920,6 +925,7 @@ class AgentRuntime:
                     "tools_used": tools_used,
                     "tool_evidence": tool_evidence,
                     "llm_failed": True,
+                    "voice_clip": voice_clip,
                 }
 
             raw_native_calls = result.get("tool_calls")
@@ -941,6 +947,7 @@ class AgentRuntime:
                         "tools_used": tools_used,
                         "knowledge_object_ids": tool_knowledge_ids,
                         "tool_evidence": tool_evidence,
+                        "voice_clip": voice_clip,
                     }
 
             if turn.kind == "protocol_error" or not calls:
@@ -972,6 +979,8 @@ class AgentRuntime:
                 tool_knowledge_ids.extend(self._tool_knowledge_ids(call.name, tool_result.data))
                 tool_knowledge_ids = list(dict.fromkeys(tool_knowledge_ids))[:12]
                 total_calls += 1
+                if tool_result.success and tool_result.attachment:
+                    voice_clip = tool_result.attachment
                 rendered = tool_result.to_llm_message()
                 # Keep successful tool outputs as verification evidence: the answer
                 # may rest on these, not on personal notes.
@@ -1006,6 +1015,7 @@ class AgentRuntime:
                     "tools_used": tools_used,
                     "knowledge_object_ids": tool_knowledge_ids,
                     "tool_evidence": tool_evidence,
+                    "voice_clip": voice_clip,
                 }
         except Exception:
             LOGGER.exception("Final LLM synthesis failed")
@@ -1014,6 +1024,7 @@ class AgentRuntime:
             "tools_used": tools_used,
             "knowledge_object_ids": tool_knowledge_ids,
             "tool_evidence": tool_evidence,
+            "voice_clip": voice_clip,
         }
 
     @staticmethod

@@ -119,6 +119,13 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         "search.use", "Search personal knowledge", "retrieval", 0, ("admin", "moderator", "user", "guest")
     ),
     CapabilityDefinition(
+        "tts.use",
+        "Speak a reply aloud as a voice message",
+        "chat",
+        0,
+        ("admin", "moderator", "user", "guest"),
+    ),
+    CapabilityDefinition(
         "knowledge.read", "Read knowledge objects", "knowledge", 0, ("admin", "moderator", "user", "guest")
     ),
     CapabilityDefinition(

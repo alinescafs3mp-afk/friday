@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import calendar
 import hashlib
 import json
@@ -26,6 +27,7 @@ from jericho.retrieval import best_snippet
 from jericho.storage._core import iso_date
 from jericho.storage._oversight import ANALYSES
 from jericho.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
+from jericho.tts import TTSUnavailable, synthesize_speech
 from jericho.workers._blocking import run_blocking
 
 if TYPE_CHECKING:
@@ -246,6 +248,13 @@ class ToolResult:
     data: Any = None
     error: str = ""
     truncated: bool = False
+    # Out-of-band artifact (e.g. a synthesized voice clip) a tool produced this
+    # call. Deliberately excluded from `to_dict()`/`to_llm_message()`: models are
+    # untrusted reasoning components, not a transport for binary payloads, and a
+    # base64 audio blob would blow the LLM context budget for no benefit. Callers
+    # that need it (the agentic loop, for delivery to the user) read this field
+    # directly instead.
+    attachment: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"tool": self.tool_name, "success": self.success}
@@ -447,6 +456,7 @@ class ExecutionKernel:
             "entity_create": self._entity_create,
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
+            "speak": self._speak,
             "resolve_duplicates": self._resolve_duplicates,
             "conflict_list": self._conflict_list,
             "conflict_decide": self._conflict_decide,
@@ -544,7 +554,14 @@ class ExecutionKernel:
             async with asyncio.timeout(timeout):
                 data = await tool.handler(actor=actor, **(arguments or {}))
             await self._audit(actor, name, True, "ok", details=details)
-            return ToolResult(name, True, data=data)
+            attachment = None
+            # A handler that produces a binary side artifact (currently only
+            # `speak`) marks it with this key instead of returning it as part of
+            # `data`, so it never reaches the model via `to_llm_message()`.
+            if isinstance(data, dict) and "_attachment" in data:
+                data = dict(data)
+                attachment = data.pop("_attachment")
+            return ToolResult(name, True, data=data, attachment=attachment)
         except TimeoutError:
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
@@ -956,6 +973,42 @@ class ExecutionKernel:
     async def _kg_stats(self, *, actor: ActorContext) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
         return kg.get_stats(actor.user_id)
+
+    async def _speak(self, *, actor: ActorContext, text: str) -> dict[str, Any]:
+        """Synthesize `text` as a voice clip. Call this only when the user has
+        explicitly asked for a spoken reply within the conversation — most turns
+        should not call it. The clip is delivered to the user by the caller
+        (Telegram voice message); this tool never touches storage or other users.
+        """
+        del actor  # synthesis has no per-user state; kept for handler signature parity
+        if not (self.settings and self.settings.tts_enabled):
+            return {"spoken": False, "reason": "text-to-speech is disabled"}
+        download_root = self.settings.tts_download_root or str(self.settings.model_root / "piper")
+        try:
+            speech = await run_blocking(
+                synthesize_speech,
+                text,
+                voice=self.settings.tts_voice,
+                download_root=download_root,
+                max_chars=self.settings.tts_max_chars,
+            )
+        except TTSUnavailable as exc:
+            LOGGER.warning("tts: unavailable (%s)", exc)
+            return {"spoken": False, "reason": "voice engine unavailable"}
+        except ValueError:
+            return {"spoken": False, "reason": "nothing to speak"}
+        return {
+            "spoken": True,
+            "chars": len(text),
+            "duration_sec": speech.duration_sec,
+            "truncated": speech.truncated,
+            "_attachment": {
+                "kind": "voice",
+                "mime_type": "audio/ogg",
+                "audio_base64": base64.b64encode(speech.audio_bytes).decode("ascii"),
+                "duration_sec": speech.duration_sec,
+            },
+        }
 
     async def _resolve_duplicates(self, *, actor: ActorContext) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
@@ -1574,6 +1627,14 @@ class ExecutionKernel:
             ["source_entity_id", "target_entity_id", "relation_type"],
         )
         spec("kg_stats", "Статистика личного графа знаний.", "kg.read", {}, [])
+        spec(
+            "speak",
+            "Озвучить текст голосом в дополнение к письменному ответу. Звать ТОЛЬКО когда "
+            "пользователь явно попросил ответить/озвучить голосом в этом сообщении — не по умолчанию.",
+            "tts.use",
+            {"text": {"type": "string", "description": "Текст для озвучивания, обычно сам ответ."}},
+            ["text"],
+        )
         spec(
             "resolve_duplicates",
             "Предложить возможные дубликаты без автоматического слияния.",
