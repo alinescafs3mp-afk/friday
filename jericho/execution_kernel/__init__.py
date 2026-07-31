@@ -456,6 +456,7 @@ class ExecutionKernel:
             "entity_create": self._entity_create,
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
+            "list_tags": self._list_tags,
             "speak": self._speak,
             "resolve_duplicates": self._resolve_duplicates,
             "conflict_list": self._conflict_list,
@@ -973,6 +974,21 @@ class ExecutionKernel:
     async def _kg_stats(self, *, actor: ActorContext) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
         return kg.get_stats(actor.user_id)
+
+    async def _list_tags(self, *, actor: ActorContext) -> dict[str, Any]:
+        """Every tag in the user's own knowledge base with its record count.
+
+        Found by adversarial review ahead of a live multi-user demo: the
+        Telegram `/tags` command already calls `storage.list_knowledge_tags`
+        (via `/api/knowledge/tags`), but the agent's own tool loop had no
+        equivalent — a natural-language "what tags do I have and how many
+        records each" could only reach `memory_search`, which answers a
+        different question (content match, not taxonomy enumeration) and
+        produced an ungrounded answer that failed verification in rehearsal.
+        """
+        storage, _, _, _ = self._require_services()
+        items = storage.list_knowledge_tags(actor.user_id)
+        return {"tags": items, "count": len(items)}
 
     async def _speak(self, *, actor: ActorContext, text: str) -> dict[str, Any]:
         """Synthesize `text` as a voice clip. Call this only when the user has
@@ -1627,6 +1643,15 @@ class ExecutionKernel:
             ["source_entity_id", "target_entity_id", "relation_type"],
         )
         spec("kg_stats", "Статистика личного графа знаний.", "kg.read", {}, [])
+        spec(
+            "list_tags",
+            "Список всех тегов личной базы знаний с числом записей у каждого. "
+            "Используй для вопросов «какие у меня теги», «сгруппируй по тегам» — "
+            "не путать с поиском по содержимому (memory_search).",
+            "knowledge.read",
+            {},
+            [],
+        )
         spec(
             "speak",
             "Озвучить текст голосом в дополнение к письменному ответу. Звать ТОЛЬКО когда "

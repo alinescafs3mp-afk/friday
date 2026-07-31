@@ -82,6 +82,67 @@ async def test_kernel_enforces_actor_and_never_captures_one_owner(settings, stor
 
 
 @pytest.mark.asyncio
+async def test_list_tags_gives_the_agent_what_the_telegram_command_already_has(settings, storage):
+    """Found by adversarial review during a live demo rehearsal: `/tags` in
+    Telegram already calls `storage.list_knowledge_tags`, but the agent's own
+    tool loop had no equivalent — a natural-language "какие у меня теги"
+    could only reach `memory_search` (a content match, not a taxonomy
+    enumeration), and produced an answer that failed verification in
+    rehearsal. Also checks the same tenant isolation every other tool gets.
+    """
+    from jericho.ingestion import IngestionPipeline
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from jericho.web_surfer import WebSurfer
+
+    storage.ensure_user("alice", preset_key="user")
+    storage.ensure_user("bob", preset_key="user")
+
+    for tag in ("проект", "проект", "идея"):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"заметка про {tag}",
+            content_type="text",
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=raw.raw_content,
+                title=f"Заметка про {tag}",
+                tags_json=[tag],
+            )
+        )
+
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    ingestion = IngestionPipeline(settings, storage, graph)
+    web = WebSurfer(settings)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(storage, graph, web, ingestion)
+    alice = auth.actor_for_user("alice", source="test")
+    bob = auth.actor_for_user("bob", source="test")
+
+    try:
+        result = await kernel.execute("list_tags", {}, actor=alice)
+        assert result.success is True
+        by_tag = {item["tag"]: item["count"] for item in result.data["tags"]}
+        assert by_tag.get("проект") == 2
+        assert by_tag.get("идея") == 1
+
+        bob_result = await kernel.execute("list_tags", {}, actor=bob)
+        assert bob_result.success is True
+        assert bob_result.data["tags"] == [], "чужие теги не должны утекать"
+    finally:
+        await web.close()
+
+
+@pytest.mark.asyncio
 async def test_timed_out_code_execution_kills_child(settings, storage, tmp_path):
     storage.ensure_user("operator", preset_key="owner")
     executable_settings = replace(
