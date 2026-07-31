@@ -873,18 +873,16 @@ class AgentRuntime:
         # is never interrupted).
         #
         # This is wall clock from the moment the turn entered this loop, NOT the
-        # per-call budget's clock: `total_budget_sec` starts inside `_chat_impl`,
-        # i.e. only once `_foreground_sem` (four slots, shared by every concurrent
-        # chat in this process, llm.py) is already held, so it excludes queueing.
-        # This deadline does not — under heavy concurrent load, time spent blocked
-        # on that semaphore before the first call even starts counts against this
-        # budget too, so a fast, healthy endpoint's rounds can still get cut short
-        # if the process is busy. Left this way deliberately rather than threading
-        # queue-vs-generation timing back out of `LLMRouter`: under real contention,
-        # spending less budget per turn is arguably the right shape of degradation,
-        # not a bug — but it has NOT been measured against real concurrent load, so
-        # do not treat this as settled; a future pass with actual numbers should
-        # decide whether it needs the deeper fix.
+        # per-call budget's clock — but it is adjusted to exclude the same thing
+        # `total_budget_sec` excludes. `LLMRouter.chat` now reports how long each
+        # call waited for one of the four shared foreground slots
+        # (`_queue_wait_sec`, llm.py) before it ever reached the model; every such
+        # wait pushes this deadline back by the same amount. Without that, a
+        # deployment at real concurrent load (four people chatting at once is
+        # already the whole slot budget) would charge a healthy, busy endpoint's
+        # queueing time against the SAME turn's tool-round allowance and cut its
+        # rounds short for being busy, not for being slow — the opposite of what
+        # this budget exists to catch.
         loop_budget_sec = self.llm.total_budget_sec * 2
         loop_deadline = time.monotonic() + loop_budget_sec
 
@@ -896,6 +894,7 @@ class AgentRuntime:
                 break
             try:
                 result = await self.llm.chat(messages, tools=tools)
+                loop_deadline += float(result.get("_queue_wait_sec", 0.0) or 0.0)
             except Exception as exc:
                 LOGGER.error("LLM tool loop failed: %s", exc)
                 return {

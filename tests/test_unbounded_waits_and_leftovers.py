@@ -125,10 +125,18 @@ class _SlowSteadyLLM:
 
     enabled = True
 
-    def __init__(self, clock: dict[str, float], step_sec: float, total_budget_sec: float) -> None:
+    def __init__(
+        self,
+        clock: dict[str, float],
+        step_sec: float,
+        total_budget_sec: float,
+        *,
+        queue_wait_sec: float = 0.0,
+    ) -> None:
         self._clock = clock
         self._step_sec = step_sec
         self.total_budget_sec = total_budget_sec
+        self._queue_wait_sec = queue_wait_sec
         self.calls = 0
 
     async def chat(self, messages, *, temperature=None, max_tokens=None, tools=None):
@@ -140,8 +148,9 @@ class _SlowSteadyLLM:
                 "tool_calls": [
                     {"id": f"call_{self.calls}", "function": {"name": "noop_tool", "arguments": "{}"}}
                 ],
+                "_queue_wait_sec": self._queue_wait_sec,
             }
-        return {"content": "Итоговый ответ.", "tool_calls": None}
+        return {"content": "Итоговый ответ.", "tool_calls": None, "_queue_wait_sec": self._queue_wait_sec}
 
 
 class _NoopKernel:
@@ -197,6 +206,52 @@ async def test_a_slow_but_alive_endpoint_cannot_hold_a_slot_for_every_round(sett
     # + 1 final synthesis call. Without the fix this would run all 5 rounds plus
     # the final call: 6.
     assert llm.calls == 4, f"the loop spent {llm.calls} calls instead of stopping early"
+    assert result["content"] == "Итоговый ответ."
+
+
+@pytest.mark.asyncio
+async def test_semaphore_queueing_does_not_count_against_a_busy_but_healthy_turn(
+    settings, storage, monkeypatch
+):
+    """The finding this pins: at real concurrent load (four people chatting is
+    already the whole `_foreground_sem` budget), most of a call's elapsed time can
+    be spent WAITING for a slot, not generating. `LLMRouter.chat` now reports that
+    wait as `_queue_wait_sec`, and the loop must push its own deadline back by the
+    same amount each round — otherwise a perfectly healthy, busy endpoint gets its
+    tool rounds cut short for the wrong reason (see the comment above
+    `loop_budget_sec` in `_agentic_loop`).
+
+    Same 100s `total_budget_sec` as the sibling test (`loop_budget_sec=200`), but
+    each call's 100s is split 90s queueing / 10s real generation. Uncorrected, this
+    is indistinguishable from the sibling test's slow-endpoint case and stops after
+    3 round-calls. Corrected, every round only spends its real 10s against the
+    budget, so all 5 of `research` mode's rounds run.
+    """
+    import time as time_module
+
+    from jericho.agent_runtime import AgentContext, AgentRuntime
+    from jericho.permissions import ActorContext
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(time_module, "monotonic", lambda: clock["t"])
+
+    storage.ensure_user("alice")
+    llm = _SlowSteadyLLM(clock, step_sec=100.0, total_budget_sec=100.0, queue_wait_sec=90.0)
+    agent = AgentRuntime(settings, storage, llm=llm, kernel=_NoopKernel())
+    actor = ActorContext(user_id="alice", preset_key="owner", source="api")
+    context = AgentContext(
+        conversation_id="conv-test",
+        user_id="alice",
+        conversation_history=[],
+        interaction_mode="research",
+    )
+
+    result = await agent._agentic_loop(
+        context, "вопрос", actor, tools=[{"type": "function"}], attachments=None
+    )
+
+    # All 5 research-mode rounds run (queueing excluded) + 1 final synthesis call.
+    assert llm.calls == 6, f"queueing was charged against the turn budget: only {llm.calls} calls ran"
     assert result["content"] == "Итоговый ответ."
 
 

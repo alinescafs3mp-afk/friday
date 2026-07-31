@@ -322,8 +322,20 @@ class LLMRouter:
             raise LLMUnavailableError("LLM is disabled")
 
         sem = self._foreground_sem if priority == "foreground" else self._background_sem
+        queue_started = time.monotonic()
         async with sem:
-            return await self._chat_impl(messages, temperature, max_tokens, tools)
+            # How long this call waited for one of the shared slots, before it
+            # ever reached the model. `total_budget_sec` (below) starts only
+            # once the slot is held, so it already excludes this — a caller
+            # measuring its OWN elapsed budget across several calls (the
+            # agentic tool loop) needs the same exclusion or queueing under
+            # real concurrent load eats a budget meant for the model being
+            # slow, and cuts a healthy, busy deployment short for the wrong
+            # reason.
+            queue_wait_sec = time.monotonic() - queue_started
+            result = await self._chat_impl(messages, temperature, max_tokens, tools)
+        result["_queue_wait_sec"] = queue_wait_sec
+        return result
 
     async def chat_stream(
         self,
