@@ -218,3 +218,96 @@ URL, токены, ключи, cookies и любые учётные данные
 фиксированные ключи и enum, boolean, числа, `null` и `sha256[:16]`. Любое лишнее поле,
 несовпадение шести пар, настроек, ranks, scores или агрегатов закрывает вход
 fail-closed; продуктовый код по такому файлу не меняется.
+
+## S10b (#71): точность relational-классификатора на пользовательском тексте
+
+Исполнитель формирует и размечает локально, до запуска обеих рук, ровно 12 русских
+сообщений, подаваемых как обычный human-authored user input. Backend-generated строки,
+синтетические уведомления, имена файлов и сообщения из предыдущих ходов запрещены.
+Тексты не покидают локальное окружение и не попадают в Git.
+
+Набор содержит ровно по три кейса каждого класса:
+
+- `direct_relational_request` — основной запрос прямо спрашивает о связи;
+- `prefaced_relational_request` — перед настоящим вопросом есть вводная часть, в том
+  числе формула «не важно» с иным объектом отрицания; relational-match остаётся
+  основной просьбой;
+- `dismissed_relational_mention` — реляционная фраза явно названа неважной и не
+  является запросом;
+- `redirected_nonrelational_request` — отброшенное реляционное упоминание предваряет
+  отдельную нереляционную просьбу.
+
+Первые два класса имеют `expected_relational=true`, последние два — `false`. Все 12
+кейсов обязаны давать `baseline_match=true` на неизменённом
+`_RELATIONAL_QUERY_RE.search()`: иначе набор проверяет не заявленный дефект. Набор,
+классы и эталоны замораживаются до вычисления candidate.
+
+Разрешён ровно один candidate `dismiss_explicit_prefix_v1`. Он не меняет
+`_RELATIONAL_QUERY_RE` и для каждого его match проверяет префикс
+`query[:match.start()]`. Match подавляется, только если суффикс этого префикса
+совпадает с нижеследующим выражением при `re.IGNORECASE | re.VERBOSE`:
+
+```python
+r"""
+(?:^|[.!?;\n])\s*
+(?:вообще\s+)?
+(?:
+    (?:(?:мне|меня)\s+)?не\s*важно
+  | (?:меня\s+)?не\s+интерес\w*
+  | (?:мне\s+)?не\s+нуж\w*
+  | (?:мне\s+)?не\s+надо
+  | я\s+не\s+спрашива\w*
+  | без\s+разницы
+)
+\s*[,:\-—]?\s*$
+"""
+```
+
+Если между формулой отказа и relational-match есть хотя бы одно слово, выражение не
+совпадает и match не подавляется. `candidate_match=true`, если осталось хотя бы одно
+неподавленное совпадение. Нельзя пробовать `.match()`, другое якорение, новые фразы
+или вторую версию candidate после просмотра результата.
+
+Результат публикуется строго по пути:
+
+`sol/handoff/s10/relational_classifier_deidentified.json`
+
+Коммит содержит маркер `[handoff:sol:s10-classifier]`, файл не превышает 64 КиБ и
+имеет ровно верхние ключи `cases`, `candidate`, `dataset`, `per_case`, `summary`:
+
+- `cases=12`, `candidate=dismiss_explicit_prefix_v1`;
+- `dataset` содержит ровно `selection_frozen_before_arms=true`,
+  `labels_frozen_before_arms=true`, `human_authored_only=true`,
+  `synthetic_document_notices=false`, `language=ru`;
+- каждая запись `per_case` содержит ровно `case` (`sha256[:16]` непрозрачного
+  локального идентификатора, не текста), `class`, `expected_relational`,
+  `baseline_match`, `candidate_match`, `relational_match_count` и
+  `dismissed_match_count`; `relational_match_count` — положительный integer,
+  `dismissed_match_count` — неотрицательный integer,
+  `dismissed_match_count <= relational_match_count`, а `candidate_match` обязан
+  равняться `dismissed_match_count < relational_match_count`;
+- `summary` содержит ровно `true_positives_baseline`, `false_positives_baseline`,
+  `true_negatives_baseline`, `false_negatives_baseline`,
+  `true_positives_candidate`, `false_positives_candidate`,
+  `true_negatives_candidate`, `false_negatives_candidate`,
+  `fixed_false_positives`, `new_false_negatives`, `correct_baseline`,
+  `correct_candidate` и `net_corrections`; всё пересчитывается из `per_case`.
+
+TP/FP/TN/FN считаются обычной матрицей `expected_relational` против результата руки.
+`fixed_false_positives` — кейсы с `expected_relational=false`, baseline `true` и
+candidate `false`; `new_false_negatives` — кейсы с `expected_relational=true` и
+candidate `false`; `correct_* = TP + TN`; `net_corrections` равен
+`fixed_false_positives - new_false_negatives`. Baseline обязан пересчитать ровно
+TP=6, FP=6, TN=0, FN=0.
+
+Candidate проходит только при `true_positives_candidate=6`,
+`false_negatives_candidate=0`, `fixed_false_positives >= 4` и
+`net_corrections=fixed_false_positives-new_false_negatives >= 4`. Общая accuracy не
+может компенсировать потерю positive. При невзятом критерии продуктовый
+классификатор не меняется.
+
+В Git запрещены тексты и выдержки сообщений, имена людей, сущностей, документов и
+файлов, user/account/message id, пути, URL, имена моделей, токены, ключи, cookies и
+любые учётные данные. Разрешены только перечисленные ключи и enum, boolean, числа и
+`sha256[:16]`. Любое лишнее поле, повтор case, неверная стратификация, несовпадение
+summary или признак подбора после рук закрывает вход fail-closed.
