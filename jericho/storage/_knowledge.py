@@ -17,6 +17,7 @@ from jericho.storage._base import (
     UTC,
     Any,
     EntityResolutionCandidate,
+    EntityType,
     KnowledgeObject,
     LifecycleStage,
     SequenceMatcher,
@@ -290,6 +291,26 @@ def _aliases_of(entity: dict[str, Any]) -> list[str]:
     except (TypeError, ValueError):
         return []
     return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
+def _is_declared_person(entity: dict[str, Any]) -> bool:
+    """Человек, чьё имя было ОБЪЯВЛЕНО отчеством, а не угадано по форме слова.
+
+    Отдельной функцией, а не выражением по месту: её мутирует тест, и она же отвечает
+    в одном месте на вопрос «почему этот узел не предлагают сливать». Обоснование и
+    числа — у единственного её вызова в `find_duplicate_candidates`.
+    """
+    if str(entity.get("entity_type") or "") != EntityType.PERSON.value:
+        return False
+    metadata = entity.get("metadata_json")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(metadata, dict):
+        return False
+    return str(metadata.get("extraction_method") or "") == "explicit_person_patronymic"
 
 
 class KnowledgeMixin(StorageShared):
@@ -2069,6 +2090,25 @@ class KnowledgeMixin(StorageShared):
                 continue
 
             exact_alias = bool(set(left_variants) & set(right_variants))
+            # ОБЪЯВЛЕННОЕ ФИО — само по себе утверждение личности, и два РАЗНЫХ таких
+            # имени означают двух разных людей. Нечёткое сходство здесь не улика:
+            # русские ФИО делят между собой почти всю структуру, а `context_boost` за
+            # «общие документы» на штатном расписании означает всего лишь «оба в одном
+            # списке» — тот же концентратор, что губит графовый канал.
+            #
+            # Замерено на живой базе сразу после прохода правилом ФИО: очередь слияний
+            # выросла с 20 пар до 45 061, и 45 041 из них (100.0%) — пары, где ОБА узла
+            # заведены объявляющим правилом. 78% имели уверенность ниже 0.80, а у одной
+            # сущности набралось 173 пары. Такую очередь человек не разберёт никогда.
+            #
+            # Цена ошибки несимметрична: два дубликата — неудобство, а слитые в один
+            # узел два РАЗНЫХ человека — порча данных, и откатить её нечем (функции
+            # разъединения в системе нет, проверено grep'ом по undo|unmerge|split).
+            #
+            # Совпадение по псевдониму пропускается: псевдоним заводит человек, и это
+            # его прямое утверждение «это один и тот же».
+            if not exact_alias and _is_declared_person(left) and _is_declared_person(right):
+                continue
             # Codes, tickers, contract identifiers, and versioned names are exact-match only.
             if (left_data["identifier"] or right_data["identifier"]) and not exact_alias:
                 continue
