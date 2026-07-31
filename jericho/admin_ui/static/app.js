@@ -1,6 +1,6 @@
 'use strict';
-const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',conflictStatus:'suggested',knowledgeSince:'',knowledgeUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
-const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
+const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',conflictStatus:'suggested',knowledgeSince:'',knowledgeUntil:'',timelineSince:'',timelineUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
+const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['timeline','Хроника','◴'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const q=v=>encodeURIComponent(v??'').replace(/'/g,'%27').replace(/%20/g,'+');
 const fmtDate=v=>v?new Date(v).toLocaleString('ru-RU'):'—';
@@ -559,6 +559,54 @@ renderers.cleanup=async gen=>{
 };
 actions.selectAllCleanup=value=>document.querySelectorAll('.cleanup-check').forEach(el=>{el.checked=value});
 actions.applyCleanup=async action=>{state.cleanupOffset=0;const ids=[...document.querySelectorAll('.cleanup-check:checked')].map(el=>el.value);if(!ids.length){toast('Сначала выберите объекты',true);return}if(action==='soft_delete'&&!confirm(`Мягко удалить ${ids.length} объектов? История и Raw Objects сохранятся.`))return;await bulkApply(ids,batch=>api('/api/admin/cleanup/legacy/apply',{method:'POST',body:JSON.stringify({user_id:selectedUser(),action,knowledge_ids:batch,require_suspect:true,reason:'admin UI legacy quality review'})}))};
+// Хроника корпуса. Столбики строятся по СОБСТВЕННОЙ дате документа, а не по дате
+// загрузки: на корпусе владельца различных дней в `updated_at` три на 1537 объектов,
+// то есть лента по загрузке показала бы три деления и ничего не сказала бы о времени.
+// Своя дата известна у 88%; сколько объектов в ленту не попадает, экран называет сам.
+const monthName=v=>['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'][Number(v)-1]||v;
+// Подпись столбика зависит от крупности: «2024», «март 2024», «17.03».
+const bucketLabel=(key,gran)=>gran==='year'?key:gran==='month'?`${monthName(key.slice(5,7))} ${key.slice(0,4)}`:`${key.slice(8,10)}.${key.slice(5,7)}`;
+// Провал внутрь столбика: год раскрывается в месяцы, месяц — в дни, день дальше не
+// делится. Границы считаются здесь, а не на сервере: сервер получает готовое окно и
+// не должен догадываться, что значит «нажали на 2024».
+const bucketWindow=(key,gran)=>{
+  if(gran==='year')return[`${key}-01-01`,`${key}-12-31`];
+  if(gran==='month'){const y=Number(key.slice(0,4)),m=Number(key.slice(5,7));return[`${key}-01`,`${key}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`]}
+  return[key,key];
+};
+renderers.timeline=async gen=>{
+  const uid=selectedUser();
+  const params=[`user_id=${q(uid)}`,'granularity=auto','limit=100'];
+  if(state.timelineSince)params.push(`since=${q(state.timelineSince)}`);
+  if(state.timelineUntil)params.push(`until=${q(state.timelineUntil)}`);
+  const data=await api(`/api/admin/knowledge/timeline?${params.join('&')}`);
+  if(gen!==renderGen)return;
+  const buckets=data.buckets||[],gran=data.granularity||'year';
+  const peak=Math.max(1,...buckets.map(b=>Number(b.count)||0));
+  const total=buckets.reduce((sum,b)=>sum+(Number(b.count)||0),0);
+  // Высота столбика — доля от самого высокого, но КЛАССОМ, а не инлайновым стилем:
+  // админка запрещает их ради CSP, и это стережёт отдельный тест. Отсюда шаг в 5%
+  // и низ, обрезанный снизу: столбик в один документ на фоне пятисот обязан остаться
+  // видимым и нажимаемым, иначе редкие годы исчезают с картинки вовсе. Точное число
+  // всё равно подписано над столбиком, так что округление ничего не скрывает.
+  const bars=buckets.map(b=>`<button class="tl-bar" ${call('timelineZoom',b.bucket,gran)} title="${esc(bucketLabel(b.bucket,gran))}: ${Number(b.count)}"><span class="tl-fill tl-h${Math.max(1,Math.round(Number(b.count)/peak*20))*5}"></span><span class="tl-count">${Number(b.count)}</span><span class="tl-key">${esc(bucketLabel(b.bucket,gran))}</span></button>`).join('');
+  const rows=(data.items||[]).map(it=>`<tr><td class="mono">${esc(it.document_date||'—')}</td><td><b>${esc(it.title||'Без названия')}</b><div class="mono">${esc(it.id)}</div></td><td><span class="badge">${esc(it.knowledge_kind||'note')}</span></td><td><button class="btn small primary" ${call('inspectKnowledge',it.id)}>Инспекция</button></td></tr>`);
+  const scope=state.timelineSince||state.timelineUntil?`${esc(state.timelineSince||'начало')} — ${esc(state.timelineUntil||'сегодня')}`:'весь корпус';
+  const granName={year:'по годам',month:'по месяцам',day:'по дням'}[gran]||gran;
+  const back=state.timelineSince||state.timelineUntil?`<button class="btn" ${call('timelineReset')}>Ко всему корпусу</button>`:'';
+  const undated=Number(data.undated||0);
+  setApp(gen,`<section class="card"><div class="toolbar"><h2 class="grow">Хроника корпуса</h2>${back}<span class="badge">${scope}</span><span class="badge">${granName}</span></div>`
+    +`<div class="notice">Лента строится по <b>собственной дате документа</b> — той, что стоит в самом файле, а не по дате загрузки. Столбик открывается нажатием: год раскрывается в месяцы, месяц — в дни.`
+    +(undated?` <b>${undated.toLocaleString('ru')}</b> объектов собственной даты не имеют и в хронику не попадают вовсе.`:'')+`</div>`
+    +(buckets.length?`<div class="tl-chart">${bars}</div><div class="muted">В окне ${total.toLocaleString('ru')} документов.</div>`:empty('В этом окне документов с собственной датой нет'))
+    +`</section><section class="card"><div class="toolbar"><h2 class="grow">Документы окна по дате</h2><span class="badge">${rows.length}</span></div>`
+    +(rows.length?table(['Дата','Документ','Вид',''],rows):empty('Пусто'))
+    // Лента обрезана лимитом, и это сказано вслух: молчание читалось бы как «это всё».
+    +(rows.length>=Number(data.limit||100)?`<div class="muted">Показаны первые ${rows.length} — сузьте окно, нажав на столбик.</div>`:'')
+    +`</section>`);
+};
+actions.timelineZoom=(key,gran)=>{if(gran==='day')return;const[since,until]=bucketWindow(key,gran);state.timelineSince=since;state.timelineUntil=until;refresh()};
+actions.timelineReset=()=>{state.timelineSince='';state.timelineUntil='';refresh()};
 renderers.users=async gen=>{await loadUsers(gen);const rows=state.users.map(u=>`<tr><td><b>${esc(u.display_name||u.username||u.id)}</b><div class="mono">${esc(u.id)}</div><div class="muted">${esc(u.source)} ${esc(u.external_id)}</div></td><td><span class="badge ${u.status==='active'?'ok':'bad'}">${esc(u.status)}</span></td><td><select class="field" ${chg('setPreset',u.id)}>${state.presets.map(p=>`<option value="${esc(p.preset_key)}" ${u.preset_key===p.preset_key?'selected':''}>${esc(p.name||p.preset_key)}</option>`).join('')}</select></td><td>${fmtDate(u.last_seen_at)}</td><td><button class="btn small" ${call('permissionDialog',u.id)}>Права</button> <button class="btn small ${u.status==='active'?'danger':'good'}" ${call('setUserStatus',u.id,u.status==='active'?'disabled':'active')}>${u.status==='active'?'Отключить':'Включить'}</button></td></tr>`);setApp(gen,`<section class="card"><div class="toolbar"><h2 class="grow">Пользователи и роли</h2><button class="btn" ${call('createUserDialog')}>Добавить</button><span class="badge">${rows.length}</span></div>${rows.length?table(['Пользователь','Статус','Пресет','Последняя активность','Действия'],rows):empty('Пользователи не найдены')}</section>`)};
 actions.setPreset=async(id,preset_key)=>{try{await api(`/api/admin/users/${q(id)}/preset`,{method:'POST',body:JSON.stringify({preset_key})});toast('Пресет назначен');await loadUsers()}catch(e){toast(e.message,true)}};
 actions.setUserStatus=async(id,status)=>{try{await api(`/api/admin/users/${q(id)}`,{method:'PATCH',body:JSON.stringify({status})});toast('Статус изменён');await loadUsers();refresh()}catch(e){toast(e.message,true)}};

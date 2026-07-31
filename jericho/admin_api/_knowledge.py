@@ -8,6 +8,7 @@ owns ``/api/admin`` and the order these modules are included in.
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 
 from fastapi import APIRouter
 
@@ -198,6 +199,68 @@ async def create_container_admin(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _audit(request, "admin.container.create", "entity", container.get("id"), after=container)
     return {"container": container}
+
+
+@router.get("/knowledge/timeline")
+async def knowledge_timeline(
+    request: Request,
+    user_id: str | None = None,
+    since: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    until: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    granularity: str = Query("auto", pattern=r"^(auto|year|month|day)$"),
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Хроника корпуса: плотность по времени плюс сама лента за выбранное окно.
+
+    Крупность по умолчанию выбирается по ширине окна, а не задаётся человеком: на
+    корпусе владельца документы расходятся на 2000..2026, и годовые столбики — это
+    17 делений, тогда как дневные дали бы больше шести тысяч, из которых непустых
+    едва ли сотни. Выбранная крупность возвращается в ответе, чтобы подпись под
+    картинкой не расходилась с тем, что на ней нарисовано.
+
+    Стоит ПЕРЕД `/knowledge/{knowledge_id}`: параметризованный путь, объявленный
+    раньше, проглотил бы литерал, и запрос ушёл бы в обработчик инспекции с
+    `knowledge_id="timeline"`. Тот же порядок уже стерегут `/knowledge/tags` и
+    `tests/test_bridge_surface.py`.
+    """
+    _require(request, "admin.all_data.read")
+    target = _target_user(request, user_id)
+    _audit_cross_tenant_read(request, "admin.knowledge.read", target)
+    storage = _services(request).storage
+    chosen = granularity
+    if chosen == "auto":
+        span = _window_days(since, until)
+        chosen = (
+            "day"
+            if span is not None and span <= 92
+            else "month"
+            if span is not None and span <= 1100
+            else "year"
+        )
+    return {
+        "user_id": target,
+        "granularity": chosen,
+        "since": since,
+        "until": until,
+        "buckets": storage.knowledge_date_histogram(target, since=since, until=until, granularity=chosen),
+        "items": storage.list_documents_by_own_date(target, since=since, until=until, limit=limit),
+        # Лента строится по СОБСТВЕННОЙ дате, известной не у всех. Без этого числа
+        # экран читался бы как полный охват корпуса, а он показывает его часть.
+        "undated": storage.count_knowledge_without_own_date(target),
+        "limit": limit,
+    }
+
+
+def _window_days(since: str | None, until: str | None) -> int | None:
+    """Ширина окна в днях, или None, если границы заданы не обе."""
+    if not since or not until:
+        return None
+    try:
+        start = date.fromisoformat(since)
+        end = date.fromisoformat(until)
+    except ValueError:
+        return None
+    return max(0, (end - start).days)
 
 
 @router.get("/knowledge/{knowledge_id}")

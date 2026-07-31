@@ -1047,6 +1047,56 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def knowledge_date_histogram(
+        self,
+        user_id: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        granularity: str = "year",
+    ) -> list[dict[str, Any]]:
+        """Сколько документов приходится на каждый год, месяц или день окна.
+
+        Считается в SQLite, а не перебором страниц: на корпусе владельца документы
+        расходятся на 2000..2026 годы с пиком 521 в 2024-м, и вытащить их все ради
+        подсчёта столбиков значило бы гонять полторы тысячи записей за одну картинку.
+
+        Крупность — только из этого списка; она подставляется в SQL как срез строки,
+        и брать её из запроса напрямую было бы дырой.
+        """
+        width = {"year": 4, "month": 7, "day": 10}.get(str(granularity), 4)
+        expression = "jericho_iso_date(json_extract(metadata_json,'$.document_date'))"
+        clauses = ["user_id=?", "deleted_at IS NULL", f"{expression} IS NOT NULL"]
+        params: list[Any] = [user_id]
+        if since:
+            clauses.append(f"{expression} >= ?")
+            params.append(since)
+        if until:
+            clauses.append(f"{expression} <= ?")
+            params.append(until)
+        rows = self.execute(
+            f"SELECT substr({expression},1,{width}) AS bucket, COUNT(*) AS count "  # nosec B608
+            f"FROM knowledge_objects WHERE {' AND '.join(clauses)} "
+            "GROUP BY bucket ORDER BY bucket",
+            tuple(params),
+        ).fetchall()
+        return [{"bucket": str(row["bucket"]), "count": int(row["count"])} for row in rows]
+
+    def count_knowledge_without_own_date(self, user_id: str) -> int:
+        """Сколько живых объектов в ленту не попадёт вовсе.
+
+        Хроника строится по собственной дате, а она известна у 88% корпуса. Остальные
+        не «нулевые» и не «старые» — они просто невидимы для этого экрана, и экран
+        обязан назвать их число сам, иначе читается как полный охват.
+        """
+        row = self.execute(
+            "SELECT COUNT(*) AS count FROM knowledge_objects "
+            "WHERE user_id=? AND deleted_at IS NULL AND "
+            "jericho_iso_date(json_extract(metadata_json,'$.document_date')) IS NULL",
+            (user_id,),
+        ).fetchone()
+        return int(row["count"]) if row else 0
+
     def count_recent_knowledge(self, user_id: str, *, since_iso: str) -> int:
         """Сколько создано с этого момента — счётом, а не длиной страницы.
 

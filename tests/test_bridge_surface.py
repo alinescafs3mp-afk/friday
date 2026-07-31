@@ -31,11 +31,13 @@ from jericho.server import create_app
 # 151 → 152: GET /api/knowledge/by-date — документы по собственной дате для хроники.
 # 152 → 153: GET /api/admin/knowledge/{id}/entity-mentions — позиции упоминаний
 # подтверждённых сущностей в тексте, для подсветки в инспекции.
-EXPECTED_OPERATIONS = 153
+# 153 → 154: GET /api/admin/knowledge/timeline — плотность корпуса по времени
+# и лента окна; стоит ПЕРЕД /knowledge/{knowledge_id}, иначе будет проглочен.
+EXPECTED_OPERATIONS = 154
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 84,
+    "/api/admin": 85,
     "/api/kg": 14,
     "/api/missions": 4,
 }

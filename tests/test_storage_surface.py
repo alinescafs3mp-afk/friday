@@ -77,7 +77,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 248 → 249: list_documents_by_own_date — лента по СОБСТВЕННОЙ дате документа;
 # list_knowledge_objects сортирует по важности и свежести записи, для хроники
 # нужен порядок по дате самого документа.
-EXPECTED_MEMBER_COUNT = 249
+# 249 → 251: knowledge_date_histogram + count_knowledge_without_own_date — плотность
+# корпуса по годам/месяцам/дням для экрана хроники и число тех, кто в неё не попадёт.
+EXPECTED_MEMBER_COUNT = 251
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
