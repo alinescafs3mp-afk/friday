@@ -162,6 +162,75 @@ def test_list_and_dismiss_are_tenant_scoped(settings):
         assert storage.list_pending_reminders(bob)[0]["id"] == bob_id
 
 
+def test_dismiss_notification_rejects_non_reminder_kind(settings):
+    """G21: dismiss is kind-scoped like list_pending_reminders.
+
+    Mutation: drop ``AND kind='reminder'`` from dismiss SQL → this test reds
+    because a pending chronicle row of the same tenant would flip to dismissed
+    and permanently block its dedup_key.
+    """
+    tuned = _reminders_settings(settings)
+    with TestClient(create_app(tuned)) as client:
+        storage = client.app.state.storage
+        user_id = "telegram:telegram:5001"
+        storage.ensure_user(user_id, source="telegram", metadata={"chat_id": "5001"})
+        assert storage.enqueue_notification(
+            user_id,
+            "5001",
+            "chronicle body",
+            kind="chronicle",
+            dedup_key="chronicle:day:1",
+        )
+        assert storage.enqueue_notification(
+            user_id,
+            "5001",
+            "reminder body",
+            kind="reminder",
+            dedup_key="rem:own",
+        )
+        chronicle = storage.execute(
+            "SELECT id, status, kind, dedup_key FROM outbound_notifications "
+            "WHERE user_id=? AND kind='chronicle'",
+            (user_id,),
+        ).fetchone()
+        assert chronicle is not None
+        chronicle_id = chronicle["id"]
+        reminder_id = storage.list_pending_reminders(user_id)[0]["id"]
+
+        assert storage.dismiss_notification(user_id, chronicle_id) is False
+        still = storage.execute(
+            "SELECT status, dedup_key FROM outbound_notifications WHERE id=?",
+            (chronicle_id,),
+        ).fetchone()
+        assert still["status"] == "pending"
+        assert still["dedup_key"] == "chronicle:day:1"
+
+        # HTTP surface mirrors storage: non-reminder id → 404, row untouched.
+        http = _bridge_json(
+            client,
+            tuned,
+            "POST",
+            f"/api/me/reminders/{chronicle_id}/dismiss",
+            {},
+            user="5001",
+            chat="5001",
+        )
+        assert http.status_code == 404, http.text
+        after_http = storage.execute(
+            "SELECT status FROM outbound_notifications WHERE id=?",
+            (chronicle_id,),
+        ).fetchone()
+        assert after_http["status"] == "pending"
+
+        # Same-tenant reminder still dismisses; kind filter is not a blanket deny.
+        assert storage.dismiss_notification(user_id, reminder_id) is True
+        rem = storage.execute(
+            "SELECT status FROM outbound_notifications WHERE id=?",
+            (reminder_id,),
+        ).fetchone()
+        assert rem["status"] == "dismissed"
+
+
 @pytest.mark.asyncio
 async def test_reminders_command_lists_and_dismiss_callback_hits_api(tmp_path):
     """Mutation: drop /reminders branch or remind:dismiss handler → red."""

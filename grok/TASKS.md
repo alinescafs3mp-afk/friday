@@ -5,14 +5,14 @@
 
 ---
 
-# СРОЧНОЕ (после G20) — G21: находка состязательного ревью в твоём же G19
+# СРОЧНОЕ (после G20) — G21: находка состязательного ревью в твоём же G19 — **сделано**
 
 Второй проход ревью (после G17) по всему, что влилось с прошлой проверки —
 G18, G19, G20, S8, мой фикс очереди семафора. HIGH-находку в G18 (`/delete`
 путал того, кто нажал кнопку, с тем, кто вызвал команду) я уже закрыл сама
 (`_commands.py`/`_callbacks.py`, коммит скоро придёт). Эта — твоя, в G19.
 
-## G21. `dismiss_notification` не проверяет `kind='reminder'`, хотя `list_pending_reminders` проверяет
+## G21. `dismiss_notification` не проверяет `kind='reminder'`, хотя `list_pending_reminders` проверяет — **сделано**
 
 `list_pending_reminders` (`storage/_runtime.py:56-72`) фильтрует `WHERE
 user_id=? AND kind='reminder' AND status='pending'`. Парный
@@ -39,6 +39,11 @@ scan) — если через это когда-нибудь пройдёт id �
 pending у того же `user_id` — `dismiss_notification` должна вернуть `False`
 (404 на уровне маршрута), не снимать её. Мутация: убери `AND
 kind='reminder'` из SQL — тест обязан покраснеть.
+
+Реализовано: `dismiss_notification` SQL + `AND kind='reminder'` (как у
+`list_pending_reminders`); тест
+`test_dismiss_notification_rejects_non_reminder_kind` (storage False + HTTP
+404, reminder всё ещё dismissable). Мутация: без kind-фильтра тест красный.
 
 ---
 

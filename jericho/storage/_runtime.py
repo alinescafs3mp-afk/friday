@@ -72,14 +72,18 @@ class RuntimeMixin(StorageShared):
         return [dict(row) for row in rows]
 
     def dismiss_notification(self, user_id: str, notification_id: str) -> bool:
-        """Mark a pending notification dismissed without releasing its dedup key.
+        """Mark a pending reminder dismissed without releasing its dedup key.
 
         Opposite of ``discard_notifications`` / terminal failure: those clear
         ``dedup_key`` so the organ can re-raise the matter. Dismiss means the
         person saw the reminder and cancelled it — the partial unique index on
         ``(user_id, dedup_key)`` must keep blocking the next ``scan_reminders``
-        enqueue of the same key. Only ``status='pending'`` rows of this tenant
-        transition; foreign or already-terminal ids return False (→ 404).
+        enqueue of the same key. Only ``kind='reminder'`` and
+        ``status='pending'`` rows of this tenant transition — same scope as
+        ``list_pending_reminders``. Other kinds (chronicle/sentinel/…), foreign
+        or already-terminal ids return False (→ 404). Keeping non-reminder
+        rows out matters: dismiss intentionally leaves ``dedup_key`` in place,
+        which would permanently block re-raise for a non-reminder organ.
         """
         user_id = validate_user_id(user_id)
         notification_id = str(notification_id or "").strip()
@@ -89,7 +93,7 @@ class RuntimeMixin(StorageShared):
             cursor = conn.execute(
                 """UPDATE outbound_notifications
                    SET status='dismissed'
-                   WHERE id=? AND user_id=? AND status='pending'""",
+                   WHERE id=? AND user_id=? AND kind='reminder' AND status='pending'""",
                 (notification_id, user_id),
             )
         return cursor.rowcount > 0

@@ -114,10 +114,10 @@ S8, мой фикс очереди семафора). 5 подтверждённ
   метрика такие кейсы исключает. Теперь проверяется `message`. Тест:
   `tests/test_agent_context_does_not_expand_the_graph.py`.
 
-### #70 — `dismiss_notification` не проверяет kind='reminder' ⟶ **Grok**
+### #70 — `dismiss_notification` не проверяет kind='reminder' ⟶ **сделано** (Grok, G21)
 
-Латентное расхождение контракта (сегодня не эксплуатируется) в твоём же G19.
-Подробности — `grok/TASKS.md`, раздел G21.
+`dismiss_notification` SQL + `AND kind='reminder'` (как `list_pending_reminders`).
+Тест: `test_dismiss_notification_rejects_non_reminder_kind`.
 
 ### #71 — ложные срабатывания relational-regex на подстроке ⟶ **Sol**
 
