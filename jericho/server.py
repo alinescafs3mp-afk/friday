@@ -336,6 +336,58 @@ def _telegram_user_id(settings: JerichoSettings, external_id: str) -> str:
     return f"telegram:{realm}:{external_id}"
 
 
+# Deliberately narrower than 'user': granted automatically to a stranger the
+# owner never approved by chat id, so it excludes anything that spends the
+# owner's resources unattended or reaches beyond the newcomer's own tenant.
+# Capability choice — see JERICHO_TELEGRAM_OPEN_REGISTRATION in .env.local and
+# the config docstring for `telegram_open_registration`.
+NEWCOMER_PRESET_CAPABILITIES = frozenset(
+    {
+        "chat.use",
+        "search.use",
+        "knowledge.read",
+        "knowledge.create",
+        "knowledge.edit",
+        "inbox.read",
+        "inbox.review",
+        "kg.read",
+        "kg.write",
+        "files.upload",
+        "files.read",
+        "feedback.write",
+        "conversations.read",
+        "conversations.manage",
+        "web.search",
+        "web.fetch",
+    }
+)
+
+
+def _ensure_newcomer_preset(auth_service: Any, storage: Any) -> str:
+    """Idempotently create the 'newcomer' custom preset and return its key.
+
+    Bootstrapped lazily on first use rather than at startup: the preset is only
+    ever needed when open registration is on AND a genuinely new private chat
+    has just been admitted, which for most installs is rare or never. Presets
+    are content-addressed by their capability set (`upsert_custom_preset` is a
+    plain upsert), so calling this on every such event is harmless — it writes
+    only the first time and reads (via `preset_exists`) every time after.
+    """
+    if not auth_service.preset_exists("newcomer"):
+        storage.upsert_custom_preset(
+            "newcomer",
+            "Новичок (авторегистрация)",
+            set(NEWCOMER_PRESET_CAPABILITIES),
+            description=(
+                "Автоматически выдаётся при первом сообщении в личку, когда "
+                "включена открытая регистрация (JERICHO_TELEGRAM_OPEN_REGISTRATION). "
+                "Чат, свои знания, файлы, веб-поиск — без миссий и выполнения кода."
+            ),
+            created_by="system",
+        )
+    return "newcomer"
+
+
 def _chat_request_fingerprint(
     *,
     actor_source: str,
@@ -462,11 +514,22 @@ async def _authenticate(request: Request) -> ActorContext:
             max_age_sec=settings.telegram_signature_max_age_sec,
         )
         chat_number = int(identity.chat_id)
+        # In Telegram a private chat's id equals the sender's — the same signal
+        # `preset_for_new_account` uses below. Computed here, once, so the gate
+        # and the preset choice can never disagree about what counts as private.
+        sender_number = int(identity.external_user_id) if identity.external_user_id.isdigit() else 0
+        in_private_chat = bool(sender_number) and chat_number == sender_number
+        chat_is_allowlisted = chat_number in settings.telegram_effective_allowed_chat_ids
         # Deny-by-default: only chats on the effective allowlist (allowlist plus
         # owner chats) may authenticate. An empty allowlist denies every chat.
         # Raise AuthorizationError (403) so the bridge dead-letters the update
         # instead of retrying an unauthorized chat hundreds of times.
-        if chat_number not in settings.telegram_effective_allowed_chat_ids:
+        #
+        # The ONE exception is a private chat when open registration is on — the
+        # bridge already let it through on the same basis (see `_commands.py`);
+        # this is the backend's independent re-check of that same decision, not a
+        # second, looser gate.
+        if not chat_is_allowlisted and not (settings.telegram_open_registration and in_private_chat):
             raise AuthorizationError("Telegram chat is not allowed")
         # Single-use nonce closes the replay window inside the freshness bound.
         if not state.storage.claim_bridge_nonce(identity.nonce):
@@ -504,13 +567,25 @@ async def _authenticate(request: Request) -> ActorContext:
         # background missions. A NEW account created in a non-private chat therefore
         # gets 'guest' (read and chat only) — least privilege instead of a lockout, so
         # nobody in the chat stops working. In Telegram a private chat's id equals the
-        # sender's, which is what distinguishes the two. ``ensure_user`` never rewrites
-        # an existing preset, so the owner and anyone already provisioned are untouched.
-        sender_number = int(identity.external_user_id) if identity.external_user_id.isdigit() else 0
-        in_private_chat = bool(sender_number) and chat_number == sender_number
-        preset_for_new_account = (
-            "user" if in_private_chat or settings.telegram_group_members_full_access else "guest"
-        )
+        # sender's, which is what distinguishes the two (`in_private_chat`, computed
+        # above alongside the allowlist gate). ``ensure_user`` never rewrites an
+        # existing preset, so the owner and anyone already provisioned are untouched.
+        #
+        # A private chat that reached this point only because of open registration
+        # (not the static allowlist) is a stranger the owner never approved by id.
+        # Handing them 'user' — web access, file upload, background missions running
+        # on the owner's LLM budget — would make open registration a way to spend
+        # that budget anonymously. `newcomer` is the deliberately narrower preset
+        # decided for this feature: chat, own knowledge, files, web search; no
+        # missions, no code execution. See `ensure_newcomer_preset` below.
+        if in_private_chat and chat_is_allowlisted:
+            preset_for_new_account = "user"
+        elif in_private_chat:
+            preset_for_new_account = _ensure_newcomer_preset(state.auth_service, state.storage)
+        elif settings.telegram_group_members_full_access:
+            preset_for_new_account = "user"
+        else:
+            preset_for_new_account = "guest"
         # `chat_id` is not bookkeeping: it is where every proactive organ delivers.
         # Recording the chat the user last wrote in meant one message sent in an
         # allowlisted GROUP redirected the weekly digest, reminders and "on this day"

@@ -805,3 +805,95 @@ def test_an_existing_account_is_never_downgraded_by_a_group_message(settings):
             for row in client.get("/api/admin/users", headers=owner).json()["items"]
         }
         assert presets["telegram:telegram:5001"] == "user"
+
+
+def test_open_registration_off_still_denies_a_stranger(settings):
+    """The feature defaults off: an unlisted private chat gets nothing, exactly
+    as before it existed. This is the safety net for every install that never
+    touches JERICHO_TELEGRAM_OPEN_REGISTRATION."""
+    from jericho.server import create_app
+
+    scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
+    assert scoped.telegram_open_registration is False
+    with TestClient(create_app(scoped)) as client:
+        response = _bridge_get(client, scoped, "/api/me", user="7777", chat="7777")
+        assert response.status_code == 403
+
+
+def test_open_registration_provisions_a_stranger_with_the_newcomer_preset(settings):
+    """A private chat outside the allowlist is admitted only when the flag is on,
+    and gets 'newcomer' -- not the full 'user' preset a statically allowlisted
+    private chat gets. Mutation this test must catch: dropping the
+    `chat_is_allowlisted` distinction in server.py would hand 'user' here too.
+    """
+    from jericho.server import NEWCOMER_PRESET_CAPABILITIES, create_app
+
+    scoped = replace(
+        settings,
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[],
+        telegram_open_registration=True,
+    )
+    with TestClient(create_app(scoped)) as client:
+        owner = {"Authorization": f"Bearer {scoped.api_token}"}
+        # Statically allowlisted private chat: unaffected, still 'user'.
+        assert _bridge_get(client, scoped, "/api/me", user="5001", chat="5001").status_code == 200
+        # A stranger's private chat: admitted, but narrower.
+        response = _bridge_get(client, scoped, "/api/me", user="7777", chat="7777")
+        assert response.status_code == 200
+
+        presets = {
+            row["id"]: row["preset_key"]
+            for row in client.get("/api/admin/users", headers=owner).json()["items"]
+        }
+        assert presets["telegram:telegram:5001"] == "user"
+        assert presets["telegram:telegram:7777"] == "newcomer"
+
+        # No missions, no code execution, no admin -- checked against the source
+        # of truth the preset was built from, not a hand-copied literal list.
+        assert "missions.create" not in NEWCOMER_PRESET_CAPABILITIES
+        assert "code.run" not in NEWCOMER_PRESET_CAPABILITIES
+        assert not any(item.startswith("admin.") for item in NEWCOMER_PRESET_CAPABILITIES)
+        assert "web.search" in NEWCOMER_PRESET_CAPABILITIES
+        assert "files.upload" in NEWCOMER_PRESET_CAPABILITIES
+
+
+def test_open_registration_does_not_widen_a_group_chat(settings):
+    """Open registration is about strangers writing in PRIVATE, not about groups.
+    An unlisted group must still be silently refused -- the feature must not
+    become a second, wider allowlist by accident."""
+    from jericho.server import create_app
+
+    scoped = replace(
+        settings,
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[],
+        telegram_open_registration=True,
+    )
+    with TestClient(create_app(scoped)) as client:
+        # chat != user: this is a group, per the same signal the rest of the
+        # bridge uses to tell private from group chats.
+        response = _bridge_get(client, scoped, "/api/me", user="1234", chat="9001")
+        assert response.status_code == 403
+
+
+def test_open_registration_never_downgrades_a_returning_newcomer(settings):
+    """A returning self-registered account must keep its preset on the second
+    message, not be silently re-evaluated or upgraded/downgraded."""
+    from jericho.server import create_app
+
+    scoped = replace(
+        settings,
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[],
+        telegram_open_registration=True,
+    )
+    with TestClient(create_app(scoped)) as client:
+        owner = {"Authorization": f"Bearer {scoped.api_token}"}
+        assert _bridge_get(client, scoped, "/api/me", user="7777", chat="7777").status_code == 200
+        assert _bridge_get(client, scoped, "/api/me", user="7777", chat="7777").status_code == 200
+        presets = {
+            row["id"]: row["preset_key"]
+            for row in client.get("/api/admin/users", headers=owner).json()["items"]
+        }
+        assert presets["telegram:telegram:7777"] == "newcomer"

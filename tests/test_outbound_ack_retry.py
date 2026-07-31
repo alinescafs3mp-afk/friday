@@ -109,3 +109,62 @@ async def test_an_unacked_batch_is_reported_loudly_not_silently(tmp_path, caplog
 
     assert backend.ack_attempts == 3
     assert any("re-sent" in record.message for record in caplog.records), caplog.text
+
+
+class _RegisteredChatBackend:
+    """One pending notification, targeting a chat outside the static allowlist."""
+
+    def __init__(self, chat_id: str) -> None:
+        self.chat_id = chat_id
+        self.acked: list[str] = []
+
+    async def request(self, method: str, url: str, **kwargs):
+        import httpx as _httpx
+
+        request = _httpx.Request(method, url)
+        if "/api/notifications/pending" in url:
+            return _httpx.Response(
+                200,
+                json={"items": [{"id": "notif_1", "chat_id": self.chat_id, "body": "привет"}], "count": 1},
+                request=request,
+            )
+        if "/api/notifications/ack" in url:
+            payload = json.loads(kwargs.get("content") or b"{}")
+            self.acked.extend(payload.get("sent") or [])
+            return _httpx.Response(200, json={"sent": 1, "failed": 0}, request=request)
+        return _httpx.Response(200, json={}, request=request)
+
+
+@pytest.mark.asyncio
+async def test_outbound_reaches_a_chat_open_registration_already_admitted(tmp_path):
+    """The send-edge re-check (`_drain_outbound`) must recognise `registered_chats`,
+    not just the static allowlist -- otherwise a self-registered account (open
+    registration) would never receive a single proactive push: every organ's
+    delivery routes through this exact check."""
+    bridge = _bridge(tmp_path)
+    bridge._inbox.remember_registered_chat(7777)  # noqa: SLF001
+    telegram, backend = _Telegram(), _RegisteredChatBackend(chat_id="7777")
+    try:
+        await bridge._drain_outbound(telegram, backend)  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert telegram.sent == ["привет"], "push to a registered (non-allowlisted) chat was refused"
+    assert backend.acked == ["notif_1"]
+
+
+@pytest.mark.asyncio
+async def test_outbound_still_refuses_an_unregistered_stranger(tmp_path):
+    """The other half of the same check: a chat that was never admitted (neither
+    statically allowed nor open-registration-registered) must still be refused at
+    the send edge -- this re-check exists precisely to catch a backend bug that
+    picks the wrong chat_id, and loosening it for everyone would defeat that."""
+    bridge = _bridge(tmp_path)
+    telegram, backend = _Telegram(), _RegisteredChatBackend(chat_id="9999")
+    try:
+        await bridge._drain_outbound(telegram, backend)  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert telegram.sent == []
+    assert backend.acked == [], "an unregistered chat received a push"

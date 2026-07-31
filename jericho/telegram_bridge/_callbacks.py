@@ -59,8 +59,12 @@ class CallbacksMixin(BridgeShared):
         data = str(callback.get("data") or "")
         if not callback_id or not chat_id or not external_user_id.isdigit() or not data:
             raise PermanentUpdateError("Callback query is incomplete")
-        # Deny-by-default: chats outside the allowlist cannot trigger actions.
-        if chat_id not in self.config.allowed_chat_ids:
+        # Deny-by-default: chats outside the allowlist cannot trigger actions,
+        # UNLESS this chat was already admitted by open registration — a callback
+        # only exists because the bot already sent this chat a message with
+        # buttons, so it is never the first contact; no need to re-derive
+        # "private" here, `registered_chats` is the record of that admission.
+        if chat_id not in self.config.allowed_chat_ids and not self._inbox.is_registered_chat(chat_id):
             await self._answer_callback(telegram, callback_id, "Действие недоступно", alert=True)
             return
 

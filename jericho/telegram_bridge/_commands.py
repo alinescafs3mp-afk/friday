@@ -160,9 +160,16 @@ class CommandsMixin(BridgeShared):
         if not chat_id or not external_user_id.isdigit():
             raise PermanentUpdateError("Message has no valid chat or user id")
         # Deny-by-default: silently drop chats outside the allowlist so the bot
-        # does not act as an open reflector for unknown senders.
+        # does not act as an open reflector for unknown senders. The ONE
+        # exception is a private chat when open registration is on: this is the
+        # single admission point — every later check (callbacks, outbound push)
+        # trusts `registered_chats`, populated only here, only for a chat
+        # Telegram itself labels "private" (never a group/supergroup/channel).
         if chat_id not in self.config.allowed_chat_ids:
-            return
+            is_private = str(chat.get("type") or "") == "private"
+            if not (self.config.open_registration and is_private):
+                return
+            self._inbox.remember_registered_chat(chat_id)
 
         text = str(message.get("text") or message.get("caption") or "").strip()
         # Command and argument come from the SAME split. They used to disagree: the

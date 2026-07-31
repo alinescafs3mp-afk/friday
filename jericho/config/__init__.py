@@ -409,6 +409,15 @@ class JerichoSettings:
     # account never has its preset rewritten.
     telegram_group_members_full_access: bool
     telegram_signature_max_age_sec: int
+    # Off by default: the bot stays deny-by-default (only allowlisted chats are
+    # served). When on, anyone writing to it in a PRIVATE chat that is not on the
+    # allowlist gets a real, isolated account of their own instead of silence —
+    # provisioned with the 'newcomer' preset (chat, own knowledge, files, web
+    # search — no missions, no code execution, no admin capability). Group chats
+    # are unaffected: they still require the explicit allowlist, and
+    # `telegram_group_members_full_access` governs their member preset as before.
+    # An existing account's preset is never rewritten (`ensure_user` guarantee).
+    telegram_open_registration: bool
 
     autonomy_enabled: bool
     operator_full_autonomy: bool
@@ -747,6 +756,7 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         telegram_proxy=os.environ.get("JERICHO_TELEGRAM_PROXY", "").strip(),
         telegram_group_members_full_access=_bool_env("JERICHO_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS", False),
         telegram_signature_max_age_sec=_int_env("JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC", 90, minimum=10),
+        telegram_open_registration=_bool_env("JERICHO_TELEGRAM_OPEN_REGISTRATION", False),
         autonomy_enabled=_bool_env("JERICHO_AUTONOMY_ENABLED", True),
         operator_full_autonomy=_bool_env("JERICHO_OPERATOR_FULL_AUTONOMY", False),
         cognition_enabled=_bool_env("JERICHO_COGNITION_ENABLED", True),

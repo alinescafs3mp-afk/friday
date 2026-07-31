@@ -1358,3 +1358,152 @@ async def test_a_living_backend_resets_the_watchdog(tmp_path):
         assert not [u for u, _ in telegram.calls if u.endswith("/sendMessage")]
     finally:
         bridge._inbox.close()
+
+
+def test_registered_chats_table_remembers_and_forgets_nothing(tmp_path):
+    """Direct unit test of the small table `_commands.py` writes to and every
+    other gate point reads from. Durable and idempotent: re-admitting the same
+    chat must not error or duplicate the row."""
+    from jericho.telegram_bridge import _UpdateInbox
+
+    queue = _UpdateInbox(str(tmp_path / "telegram.sqlite3"))
+    try:
+        assert queue.is_registered_chat(7777) is False
+        queue.remember_registered_chat(7777)
+        queue.remember_registered_chat(7777)  # idempotent, must not raise
+        assert queue.is_registered_chat(7777) is True
+        assert queue.is_registered_chat(9999) is False
+    finally:
+        queue.close()
+
+    reopened = _UpdateInbox(str(tmp_path / "telegram.sqlite3"))
+    try:
+        # Durable across restarts -- see the docstring on remember_registered_chat
+        # for why this matters: losing it would silently re-lock out a person
+        # who already has a real account, until their next message.
+        assert reopened.is_registered_chat(7777) is True
+    finally:
+        reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_open_registration_admits_a_private_stranger_and_remembers_the_chat(tmp_path):
+    """Bridge-level counterpart to the backend test in test_api_vertical_slice.py:
+    a private chat outside the static allowlist is processed (not silently
+    dropped) when open_registration is on, and gets recorded so later gate
+    points (callbacks, outbound push) recognise it without re-deriving
+    "private" from a payload they do not have.
+    """
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+            open_registration=True,
+        )
+    )
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    # A private chat: Telegram's own `type` field, not the
+                    # id-equality heuristic used elsewhere -- the payload the
+                    # gate actually has to work with.
+                    "chat": {"id": 7777, "type": "private"},
+                    "from": {"id": 7777, "first_name": "Newcomer"},
+                    "text": "/research",
+                },
+            },
+            cached_response=None,
+        )
+        assert backend.calls, "a stranger's private message was silently dropped"
+        assert bridge._inbox.is_registered_chat(7777) is True
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_open_registration_does_not_admit_an_unlisted_group(tmp_path):
+    """The exception is PRIVATE chats only. An unlisted group must stay silently
+    refused even with the flag on -- otherwise open registration is a second,
+    wider allowlist by accident, not what it was built for."""
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+            open_registration=True,
+        )
+    )
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "chat": {"id": 9001, "type": "group"},
+                    "from": {"id": 1234, "first_name": "Someone"},
+                    "text": "/research",
+                },
+            },
+            cached_response=None,
+        )
+        assert not backend.calls, "an unlisted group was admitted by open registration"
+        assert bridge._inbox.is_registered_chat(9001) is False
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_a_registered_chat_can_trigger_callbacks_without_being_statically_allowed(tmp_path):
+    """`_callbacks.py` trusts `registered_chats`, not a live re-derivation of
+    "private" (a callback carries no chat.type worth trusting for this). A chat
+    admitted earlier through open registration must be able to press buttons."""
+    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+            open_registration=True,
+        )
+    )
+    bridge._inbox.remember_registered_chat(7777)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    try:
+        await bridge._process_callback_query(
+            telegram,
+            backend,
+            {
+                "id": "cb1",
+                "from": {"id": 7777},
+                "message": {"message_id": 1, "chat": {"id": 7777, "type": "private"}},
+                "data": "conflict:dismiss:x",
+            },
+        )
+        answers = [call for call in telegram.calls if call[0].endswith("/answerCallbackQuery")]
+        assert answers, "callback got no answer at all"
+        assert answers[0][1].get("text") != "Действие недоступно", (
+            "a chat already admitted by open registration was refused a callback"
+        )
+    finally:
+        bridge._inbox.close()

@@ -83,6 +83,8 @@ class TelegramConfig:
     outbound_poll_interval_sec: float = 15.0
     # Proxy for api.telegram.org only; the backend is always reached directly.
     telegram_proxy: str = ""
+    # Mirrors settings.telegram_open_registration — see there for what it grants.
+    open_registration: bool = False
 
     def validate(self) -> None:
         if not self.bot_token or ":" not in self.bot_token:

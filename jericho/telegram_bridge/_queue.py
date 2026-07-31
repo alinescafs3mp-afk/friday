@@ -89,6 +89,10 @@ class _UpdateInbox:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS registered_chats (
+                chat_id INTEGER PRIMARY KEY,
+                registered_at REAL NOT NULL
+            );
             """
         )
         # Idempotent upgrade from the original durable-inbox schema.  Add
@@ -150,7 +154,22 @@ class _UpdateInbox:
                ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
             (str(max(0, int(offset))),),
         )
+
+    def remember_registered_chat(self, chat_id: int) -> None:
+        """A private chat admitted through open registration, so later gate
+        checks (callbacks, outbound push) recognise it without re-deriving
+        'private' from a payload they do not have. Durable across restarts —
+        losing this on restart would silently re-lock out an already-registered
+        person until their next message."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO registered_chats(chat_id, registered_at) VALUES(?, ?)",
+            (int(chat_id), time.time()),
+        )
         self._conn.commit()
+
+    def is_registered_chat(self, chat_id: int) -> bool:
+        row = self._conn.execute("SELECT 1 FROM registered_chats WHERE chat_id=?", (int(chat_id),)).fetchone()
+        return row is not None
 
     def store(self, update: dict[str, Any]) -> bool:
         update_id = int(update.get("update_id", -1))

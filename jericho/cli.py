@@ -192,6 +192,11 @@ JERICHO_TELEGRAM_OWNER_CHAT_IDS=
 # this instance). A private chat is unaffected; set this to 1 to opt out.
 JERICHO_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS=0
 JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC=90
+# Off by default. When on, anyone who writes to the bot in a PRIVATE chat that is
+# not on the allowlist above gets their own isolated account (preset 'newcomer':
+# chat, own knowledge, files, web search — no missions, no code execution, no
+# admin). Groups are unaffected and still need the explicit allowlist.
+JERICHO_TELEGRAM_OPEN_REGISTRATION=0
 
 JERICHO_WORKERS_ENABLED=1
 # Reminders organ: proactive Telegram nudges for upcoming dated events.
@@ -1146,6 +1151,7 @@ def _run_telegram_bridge() -> int:
         max_document_bytes=settings.max_upload_bytes,
         backend_timeout_sec=max(30.0, settings.llm_timeout_sec + 30.0),
         telegram_proxy=settings.telegram_proxy,
+        open_registration=settings.telegram_open_registration,
         # Outbound delivery polls faster than the reminder scan so a queued
         # message reaches the user promptly rather than on the next scan.
     )

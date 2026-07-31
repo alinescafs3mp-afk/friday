@@ -398,12 +398,18 @@ class TransportMixin(BridgeShared):
             if not notif_id or not body:
                 continue
             # Deny-by-default re-check at the send edge: the bot token can reach
-            # any chat, so an outbound message must target an allowed chat only.
+            # any chat, so an outbound message must target an allowed chat only
+            # — the static allowlist, or a chat open registration already
+            # admitted (proactive organs would otherwise never reach a
+            # self-registered account: their push always routes through here).
             try:
-                if int(chat_raw) not in self.config.allowed_chat_ids:
+                candidate = int(chat_raw)
+                if candidate not in self.config.allowed_chat_ids and not self._inbox.is_registered_chat(
+                    candidate
+                ):
                     failed.append(notif_id)
                     continue
-                chat_id = int(chat_raw)
+                chat_id = candidate
             except ValueError:
                 failed.append(notif_id)
                 continue
