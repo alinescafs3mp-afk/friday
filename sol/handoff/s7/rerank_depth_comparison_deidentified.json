@@ -1,0 +1,605 @@
+{
+ "cases": 20,
+ "settings": {
+  "k": 10,
+  "pool_max": 400,
+  "graph_expansion": false,
+  "rerank_confident_min": 0.1,
+  "rerank_model": "qwen3-reranker-0.6b",
+  "same_scratch_snapshot": true
+ },
+ "per_case": [
+  {
+   "case": "319d088f511b832f",
+   "expected": [
+    {
+     "object": "fc1600b9e06e63de",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 10,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 12,
+       "rerank_score": 0.943348,
+       "found_in_top10": false,
+       "latency_ms": 5114.86
+      },
+      "40": {
+       "pre_rerank_rank": 10,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 19,
+       "rerank_score": 0.943348,
+       "found_in_top10": false,
+       "latency_ms": 5589.53
+      }
+     },
+     "verdict": "tie_miss"
+    }
+   ]
+  },
+  {
+   "case": "371ebd1f80db9a9d",
+   "expected": [
+    {
+     "object": "5240c49db900e845",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 10,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 9,
+       "rerank_score": 0.983085,
+       "found_in_top10": true,
+       "latency_ms": 2155.63
+      },
+      "40": {
+       "pre_rerank_rank": 10,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 11,
+       "rerank_score": 0.983085,
+       "found_in_top10": false,
+       "latency_ms": 2426.71
+      }
+     },
+     "verdict": "loss"
+    }
+   ]
+  },
+  {
+   "case": "0f49c9b77c389c1a",
+   "expected": [
+    {
+     "object": "d6b44b19908a4e09",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 5,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 7,
+       "rerank_score": 0.985936,
+       "found_in_top10": true,
+       "latency_ms": 1884.86
+      },
+      "40": {
+       "pre_rerank_rank": 5,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 9,
+       "rerank_score": 0.985936,
+       "found_in_top10": true,
+       "latency_ms": 2244.26
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "c63c7b103ff06f2a",
+   "expected": [
+    {
+     "object": "8d42d5c4e86ba529",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 3,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.964855,
+       "found_in_top10": true,
+       "latency_ms": 2032.89
+      },
+      "40": {
+       "pre_rerank_rank": 3,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.964855,
+       "found_in_top10": true,
+       "latency_ms": 2470.06
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "5989e15e1cb72776",
+   "expected": [
+    {
+     "object": "96dd27cee2c27382",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 25,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 25,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1894.86
+      },
+      "40": {
+       "pre_rerank_rank": 25,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 4,
+       "rerank_score": 0.995669,
+       "found_in_top10": true,
+       "latency_ms": 2453.41
+      }
+     },
+     "verdict": "win"
+    }
+   ]
+  },
+  {
+   "case": "522a3ffdcc68be24",
+   "expected": [
+    {
+     "object": "785300293f26dae1",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": null,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": null,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1690.87
+      },
+      "40": {
+       "pre_rerank_rank": null,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": null,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 2504.32
+      }
+     },
+     "verdict": "tie_miss"
+    }
+   ]
+  },
+  {
+   "case": "159953d52594a058",
+   "expected": [
+    {
+     "object": "a692541ed968dc21",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 0,
+       "rerank_score": 0.997527,
+       "found_in_top10": true,
+       "latency_ms": 1724.13
+      },
+      "40": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 0,
+       "rerank_score": 0.997527,
+       "found_in_top10": true,
+       "latency_ms": 2379.63
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "fba582ef2f9f034a",
+   "expected": [
+    {
+     "object": "08ab53a626793734",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": null,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": null,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1585.22
+      },
+      "40": {
+       "pre_rerank_rank": null,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": null,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1628.52
+      }
+     },
+     "verdict": "tie_miss"
+    }
+   ]
+  },
+  {
+   "case": "c0513c10c2b2f24c",
+   "expected": [
+    {
+     "object": "206cd5508df322e3",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 10,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 2,
+       "rerank_score": 0.966914,
+       "found_in_top10": true,
+       "latency_ms": 1797.05
+      },
+      "40": {
+       "pre_rerank_rank": 10,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 2,
+       "rerank_score": 0.966914,
+       "found_in_top10": true,
+       "latency_ms": 2640.6
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "d2ba4bbfe88b3f8b",
+   "expected": [
+    {
+     "object": "d752818aa7f86d15",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 7,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.991422,
+       "found_in_top10": true,
+       "latency_ms": 1765.92
+      },
+      "40": {
+       "pre_rerank_rank": 7,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.991422,
+       "found_in_top10": true,
+       "latency_ms": 2477.57
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "f3eabe3509855ea6",
+   "expected": [
+    {
+     "object": "f1256a3ded2dee8b",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 36,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 18,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1672.72
+      },
+      "40": {
+       "pre_rerank_rank": 36,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.212069,
+       "found_in_top10": true,
+       "latency_ms": 2324.54
+      }
+     },
+     "verdict": "win"
+    }
+   ]
+  },
+  {
+   "case": "f0aa58b9bc207051",
+   "expected": [
+    {
+     "object": "e6383b8a48b32a1c",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": null,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": null,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1969.06
+      },
+      "40": {
+       "pre_rerank_rank": null,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": null,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 2364.01
+      }
+     },
+     "verdict": "tie_miss"
+    }
+   ]
+  },
+  {
+   "case": "3521feeeb4d21f89",
+   "expected": [
+    {
+     "object": "d02916fb93aea191",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 9,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.998499,
+       "found_in_top10": true,
+       "latency_ms": 1636.13
+      },
+      "40": {
+       "pre_rerank_rank": 9,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.998499,
+       "found_in_top10": true,
+       "latency_ms": 2248.81
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "22d3eba48529b2f2",
+   "expected": [
+    {
+     "object": "e692b78305a21cbc",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 24,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 22,
+       "rerank_score": null,
+       "found_in_top10": false,
+       "latency_ms": 1312.78
+      },
+      "40": {
+       "pre_rerank_rank": 24,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.993307,
+       "found_in_top10": true,
+       "latency_ms": 2034.68
+      }
+     },
+     "verdict": "win"
+    }
+   ]
+  },
+  {
+   "case": "8c4b12688e2e047d",
+   "expected": [
+    {
+     "object": "753eb2d9911f264e",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 0,
+       "rerank_score": 0.999739,
+       "found_in_top10": true,
+       "latency_ms": 2004.57
+      },
+      "40": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 0,
+       "rerank_score": 0.999739,
+       "found_in_top10": true,
+       "latency_ms": 2886.67
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "2338384a3388aa58",
+   "expected": [
+    {
+     "object": "99b3ad1aceef5911",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.999374,
+       "found_in_top10": true,
+       "latency_ms": 1661.19
+      },
+      "40": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.999374,
+       "found_in_top10": true,
+       "latency_ms": 2456.05
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "af0cd7a5c6af37a9",
+   "expected": [
+    {
+     "object": "0767e119786b9bbd",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 6,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": null,
+       "rerank_score": 0.056652,
+       "found_in_top10": false,
+       "latency_ms": 1123.66
+      },
+      "40": {
+       "pre_rerank_rank": 6,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": null,
+       "rerank_score": 0.056652,
+       "found_in_top10": false,
+       "latency_ms": 1593.0
+      }
+     },
+     "verdict": "tie_miss"
+    }
+   ]
+  },
+  {
+   "case": "56f200702bb90534",
+   "expected": [
+    {
+     "object": "98acc54580466f77",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 2,
+       "rerank_score": 0.7773,
+       "found_in_top10": true,
+       "latency_ms": 1303.26
+      },
+      "40": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 3,
+       "rerank_score": 0.7773,
+       "found_in_top10": true,
+       "latency_ms": 1536.32
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "772639e78a227c3c",
+   "expected": [
+    {
+     "object": "bb078d3d6c79f67e",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 0,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.787931,
+       "found_in_top10": true,
+       "latency_ms": 1495.42
+      },
+      "40": {
+       "pre_rerank_rank": 0,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.787931,
+       "found_in_top10": true,
+       "latency_ms": 2399.27
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  },
+  {
+   "case": "d7a89a79d4f8085d",
+   "expected": [
+    {
+     "object": "8d792d2d9e410efb",
+     "arms": {
+      "20": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 20,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.99478,
+       "found_in_top10": true,
+       "latency_ms": 1810.93
+      },
+      "40": {
+       "pre_rerank_rank": 1,
+       "rerank_applied": true,
+       "reranked_count": 40,
+       "post_rerank_rank": 1,
+       "rerank_score": 0.99478,
+       "found_in_top10": true,
+       "latency_ms": 2563.37
+      }
+     },
+     "verdict": "tie_hit"
+    }
+   ]
+  }
+ ],
+ "summary": {
+  "hits_20": 12,
+  "hits_40": 14,
+  "wins": 3,
+  "losses": 1,
+  "tie_hit": 11,
+  "tie_miss": 5,
+  "net_gain": 2,
+  "p50_latency_ms_20": 1745.02,
+  "p50_latency_ms_40": 2412.99,
+  "rerank_failures": 0
+ }
+}
