@@ -141,3 +141,80 @@ Graph expansion проходит заранее объявленный крит�
 boolean, числа и `sha256[:16]`. Любое лишнее поле, несовпадение агрегатов, настроек,
 порядка рук или следов scratch-копии закрывает вход fail-closed; продуктовый код по
 такому файлу не меняется.
+
+## S9 (#68): фазовый след шести потерь ранжирования
+
+Исполнитель с доступом к живому экземпляру публикует файл строго по пути:
+
+`sol/handoff/s9/ranking_loss_trace_deidentified.json`
+
+Коммит должен содержать маркер `[handoff:sol:s9-ranking]`. Файл не должен превышать
+256 КиБ. Это только диагностический след: он не содержит новую руку весов и не
+разрешает изменение продуктового кода.
+
+След содержит ровно шесть пар `case`/`object`: те и только те `sha256[:16]` из уже
+принятого `sol/handoff/s7/phase_trace_deidentified.json`, у которых состояние равно
+`in_pool_below_top10`. Добавлять другие кейсы, выбирать объект после просмотра нового
+ранжирования или менять золотой набор запрещено.
+
+Все шесть кейсов запускаются на одной read-only scratch-копии одним настоящим боевым
+поиском на кейс. Фиксированы `k=10`, `pool_max=400`, `rerank_top=20`, рабочие embeddings
+и reranker, текущий порог и текущие blend weights, `record_usage=false`. Условный граф
+включает тот же `is_relational_query`, что путь агента; запускать отдельную третью руку
+для получения рангов нельзя. Ранги до reranker снимаются из фактического списка,
+переданного callback, до перестановки и порога.
+
+JSON содержит ровно верхние ключи `cases`, `settings`, `per_case`, `summary`:
+
+- `cases=6`;
+- `settings` содержит ровно `k=10`, `pool_max=400`, `rerank_top=20`, числовой
+  `rerank_confident_min`, `record_usage=false`, `same_scratch_snapshot=true`,
+  `same_gold_set=true`, `source_trace_pairs_match=true` и объект `blend_weights` с
+  текущими числовыми весами;
+- каждая запись `per_case` содержит ровно `case`, `object`,
+  `phase_state=in_pool_below_top10`, `relational_regex_match`, `graph_expansion`,
+  `channel_ranks`, `channel_scores`, `top10_cutoff_scores`, `blend_components`,
+  `pre_rerank_rank`, `rerank_applied`, `reranked_count`, `post_rerank_rank`,
+  `rerank_score`, `found_in_top10`, `latency_ms`, `graph_failed` и `reranker_failed`;
+- `channel_ranks`, `channel_scores` и `top10_cutoff_scores` содержат ровно ключи
+  `lexical`, `embedding`, `graph`, `blend`. Ранги 0-based и равны `integer|null`,
+  scores — `number|null`; `null` разрешён только когда объект либо десятый порог в
+  соответствующем канале отсутствует. `blend` — порядок по `final_scores` до
+  exclusion gate, а `pre_rerank_rank` — отдельный фактический порядок после gate на
+  входе callback;
+- `blend_components` содержит ровно те же числовые component keys, что соответствующий
+  объект в принятом фазовом следе S7. Компоненты и `blend_weights` обязаны
+  пересчитывать `channel_scores.blend` с точностью производственного округления;
+- `post_rerank_rank` — место в окончательном порядке после перестановки и порога;
+  `rerank_score=null` допустим только когда объект действительно не оценивался;
+  `found_in_top10` пересчитывается из `post_rerank_rank`;
+- `summary` содержит ровно `cases=6`, объекты `channel_top10` и `blend_suppressed`
+  с ключами `lexical`, `embedding`, `graph`, а также `reranker_demotions`,
+  `weak_in_all_channels`, `post_rerank_hits`, `p50_latency_ms`, `graph_failures` и
+  `reranker_failures`. Все агрегаты пересчитываются из `per_case`.
+
+`blend_suppressed[channel]` считает кейс, где rank ожидаемого объекта в канале меньше
+10, а фактический `pre_rerank_rank` не меньше 10 или отсутствует.
+`reranker_demotions` считает кейс с `pre_rerank_rank < 10`, который после reranker не
+остался в top-10. `weak_in_all_channels` считает кейс, где ни один отдельный канал не
+поставил объект в top-10.
+
+Болезнь признаётся систематической только если один из этих механизмов объясняет не
+менее четырёх из шести кейсов. Если ни один не набрал 4/6, веса blend не меняются. Если
+4/6 набрал только `reranker_demotions`, это не разрешает правку reranker в S9 и требует
+отдельной постановки. Только `blend_suppressed` с 4/6 разрешает Sol до запуска второй
+руки зафиксировать ровно одно изменение одного веса.
+
+Критерий будущей руки объявлен уже сейчас: те же 20 эталонов, одна baseline и одна
+candidate arm на одном commit/snapshot, различается только заранее записанный один
+числовой blend weight. Baseline обязана воспроизвести 12/20. Кандидат принимается лишь
+если возвращает в top-10 не менее двух из исходных шести, не теряет ни одного из 12
+baseline hits, имеет `net_gain >= 2` на всех 20 и ноль graph/reranker failures. Пробовать
+несколько значений и публиковать лучшее запрещено; цена по p50 публикуется отдельно.
+
+В Git запрещены запросы, заголовки, выдержки и тексты документов, исходные
+case/object/user/account id, имена людей, сущностей, файлов и моделей, локальные пути,
+URL, токены, ключи, cookies и любые учётные данные. Разрешены только перечисленные
+фиксированные ключи и enum, boolean, числа, `null` и `sha256[:16]`. Любое лишнее поле,
+несовпадение шести пар, настроек, ranks, scores или агрегатов закрывает вход
+fail-closed; продуктовый код по такому файлу не меняется.
