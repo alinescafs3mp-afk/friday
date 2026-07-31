@@ -514,6 +514,27 @@ _EVENT_QUOTED_RE = re.compile(
     r"(?i:\b(?:встреча|конференция|событие|meeting|conference|event))\s+[\"«]([^\"»\n]{3,80})[\"»]",
     re.UNICODE,
 )
+# Отчество — почти однозначный признак имени человека в русском тексте: ни
+# организация, ни город, ни должность так не оканчиваются. Поэтому ФИО целиком —
+# это ОБЪЯВЛЕНИЕ («вот человек»), а не форма («два слова с большой буквы»), и
+# отсюда право создавать сущность.
+#
+# Замерено на 900 документах живого корпуса (стенд `~/.jericho/eval/person_rule_*.py`):
+# правило находит 6094 упоминания, 3069 различных ФИО, 2333 фамилии; 64% имён
+# встречаются больше чем в одном документе. Точность 100% на 80 различных именах при
+# судье, проверенном на 6 контрольных примерах из 6. Порог был объявлен ДО замера —
+# выше 0.90 на выборке не меньше 50, и он выше обычных 0.75 потому, что узлы
+# появятся без участия человека и речь о живых людях.
+#
+# Зачем вообще: в графе владельца 109 сущностей и НИ ОДНОГО человека, при том что
+# почти все его вопросы — про людей. Прежнее правило (`capitalized_person_name`,
+# два слова с большой буквы) даёт 20.1 кандидата на документ и по замыслу никогда
+# не создаёт сущность само; 5842 таких предложения так и лежат в очереди.
+_PATRONYMIC = r"[А-ЯЁ][а-яё]+(?:ович|евич|ьевич|овна|евна|ьевна|инична|ична)"
+_PERSON_FULL_NAME_RE = re.compile(
+    rf"(?<![\w-])((?:[А-ЯЁ][а-яё-]{{2,30}}\s+[А-ЯЁ][а-яё-]{{2,30}}\s+{_PATRONYMIC})"
+    rf"|(?:[А-ЯЁ][а-яё-]{{2,30}}\s+{_PATRONYMIC}\s+[А-ЯЁ][а-яё-]{{2,30}}))(?![\w-])"
+)
 _PERSON_RE = re.compile(
     r"(?<![\w-])((?:[А-ЯЁ][а-яё-]{2,30}|[A-Z][a-z-]{2,30})\s+"
     r"(?:[А-ЯЁ][а-яё-]{2,30}|[A-Z][a-z-]{2,30}))(?![\w-])"
@@ -671,6 +692,9 @@ DECLARED_ENTITY_METHODS = frozenset(
         "explicit_infrastructure_marker",
         "explicit_location_marker",
         "explicit_organization_marker",
+        # ФИО с отчеством: 100% точности на 80 именах живого корпуса при судье,
+        # проверенном 6 из 6. Замер и порог — в комментарии у `_PERSON_FULL_NAME_RE`.
+        "explicit_person_patronymic",
         "explicit_project_marker",
         "explicit_technology_context",
         "explicit_technology_version",
@@ -785,12 +809,23 @@ def _extract_entities(text: str) -> list[dict[str, Any]]:
         # `SET_DEFAULT_BROWSER`, `ТОП-100`, `V2-`. Shape is evidence; only a
         # declaring word is a fact, so this now stays a reviewer suggestion.
         add(match.group(1), EntityType.OTHER, 0.75, "identifier_syntax")
+    # ФИО целиком — раньше и с правом создавать узел; см. `_PERSON_FULL_NAME_RE`.
+    full_names: set[str] = set()
+    for match in _PERSON_FULL_NAME_RE.finditer(text):
+        candidate = " ".join(match.group(1).split())
+        full_names.add(candidate.casefold())
+        add(candidate, EntityType.PERSON, 0.9, "explicit_person_patronymic")
     for match in _PERSON_RE.finditer(text):
         candidate = match.group(1)
         if (
             candidate in _PERSON_FALSE_POSITIVES
             or candidate.split(maxsplit=1)[0].casefold() in _PERSON_PREFIX_FALSE_POSITIVES
         ):
+            continue
+        # Пара слов ВНУТРИ уже найденного ФИО — не отдельный кандидат: иначе
+        # «Иванов Иван Иванович» порождает ещё и «Иванов Иван», и человек разбирает
+        # один и тот же факт дважды.
+        if any(candidate.casefold() in full_name for full_name in full_names):
             continue
         add(candidate, EntityType.PERSON, 0.76, "capitalized_person_name")
 
