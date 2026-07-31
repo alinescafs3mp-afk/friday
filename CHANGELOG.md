@@ -1,3 +1,16 @@
+## Unreleased
+
+### G18: self-service /archive /delete /rename в Telegram (#66)
+
+G18a: Telegram /archive → POST /api/conversations/current/archive (sentinel
+current резолвит channel session).
+G18b: /delete с Да/Нет (conv:delete|keep:current), hard DELETE после подтверждения.
+G18c: set_conversation_title + PATCH /api/conversations/{id} + /rename текст.
+
+Тесты: test_set_conversation_title_updates_own_row_only,
+test_rename_and_current_sentinel_are_self_service_only,
+test_archive_delete_rename_commands_hit_current_conversation.
+
 # Changelog
 
 ## Unreleased

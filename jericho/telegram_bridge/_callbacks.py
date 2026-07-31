@@ -247,6 +247,29 @@ class CallbacksMixin(BridgeShared):
                 }[action]
                 await self._answer_callback(telegram, callback_id, toast)
                 clear_markup = True
+            elif family == "conv" and action in {"delete", "keep"}:
+                # G18b: confirm hard-delete of the chat's current conversation.
+                # `current` is the same channel-session sentinel as /archive.
+                if action == "keep":
+                    await self._answer_callback(telegram, callback_id, "Не удаляю")
+                    await self._send_message(telegram, chat_id, "Удаление отменено.")
+                    clear_markup = True
+                else:
+                    await self._backend_json(
+                        backend,
+                        "DELETE",
+                        f"/api/conversations/{target_id}",
+                        {"telegram_user": user},
+                        external_user_id,
+                        str(chat_id),
+                    )
+                    await self._answer_callback(telegram, callback_id, "Удалено")
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Разговор удалён. Следующее сообщение начнёт новый; база знаний не тронута.",
+                    )
+                    clear_markup = True
             else:
                 raise PermanentUpdateError("Unknown callback action")
         except PermanentUpdateError as exc:

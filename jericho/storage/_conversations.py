@@ -118,6 +118,22 @@ class ConversationsMixin(StorageShared):
             return None
         return self.get_conversation(conversation_id, user_id)
 
+    def set_conversation_title(
+        self, conversation_id: str, user_id: str, title: str
+    ) -> dict[str, Any] | None:
+        """Rename a conversation the caller owns; foreign ids are a silent miss."""
+        clean = " ".join((title or "").split()).strip()[:200]
+        if not clean:
+            return None
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
+                (clean, utc_now(), conversation_id, user_id),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get_conversation(conversation_id, user_id)
+
     def store_message(
         self,
         conversation_id: str,

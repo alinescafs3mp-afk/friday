@@ -212,6 +212,7 @@ def test_every_button_namespace_has_a_handler() -> None:
 # первого совпадения делал записи остальных несуществующими.
 EXPECTED_CALLBACK_NAMESPACES = {
     "conflict",
+    "conv",
     "doc",
     "ent",
     "feedback",
@@ -222,9 +223,11 @@ EXPECTED_CALLBACK_NAMESPACES = {
     "work",
 }
 EXPECTED_COMMANDS = {
+    "/archive",
     "/browse",
     "/chat",
     "/conflicts",
+    "/delete",
     "/help",
     "/history",
     "/inbox",
@@ -234,6 +237,7 @@ EXPECTED_COMMANDS = {
     "/missions",
     "/new",
     "/note",
+    "/rename",
     "/research",
     "/retry",
     "/search",
@@ -253,6 +257,8 @@ EXPECTED_COMMANDS = {
 # +_signer_chat_id, +_timeline_reply_markup, +_warn_owner_if_backend_down).
 # 49: /retry — команда «ещё раз» (G15), без новых методов на TelegramBridge.
 # 49 → 50: /history — поиск по переписке (G16), +_send_history.
+# 50: /archive /delete /rename (G18) — только ветки команд + namespace conv, без
+# новых методов на TelegramBridge.
 EXPECTED_BRIDGE_COUNT = 50
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",

@@ -247,6 +247,9 @@ class CommandsMixin(BridgeShared):
                 "/status — состояние базы\n"
                 "/why — почему был такой ответ\n"
                 "/new — начать новый диалог\n"
+                "/archive — архивировать текущий разговор\n"
+                "/delete — удалить текущий разговор (с подтверждением)\n"
+                "/rename название — переименовать текущий разговор\n"
                 "/note текст — явно сохранить заметку\n"
                 "/instructions — как отвечать: показать, задать или очистить\n"
                 "/retry — сгенерировать ответ на последний вопрос заново\n\n"
@@ -475,6 +478,85 @@ class CommandsMixin(BridgeShared):
                 chat_id,
                 "Новый диалог начат в обычном режиме. Сама база знаний не очищена.",
             )
+            return
+        if command == "/archive":
+            # G18a: backend already had POST /archive (conversations.manage); Telegram
+            # never called it. Sentinel `current` resolves to this chat's session.
+            await register_backend_user()
+            try:
+                data = await self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/conversations/current/archive",
+                    {"archived": True, "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Нечего архивировать: в этом чате ещё нет разговора.",
+                )
+                return
+            raw_conv = data.get("conversation") if isinstance(data, dict) else None
+            conv: dict[str, Any] = raw_conv if isinstance(raw_conv, dict) else {}
+            title = str(conv.get("title") or "").strip() or "без названия"
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"Разговор «{title}» архивирован. /new — начать новый; база знаний не тронута.",
+            )
+            return
+        if command == "/delete":
+            # G18b: hard delete — ask first (Да/Нет), same button pattern as /merges.
+            await register_backend_user()
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Удалить текущий разговор безвозвратно? Сообщения и оценки ответов "
+                "пропадут; база знаний не тронута.",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {"text": "Да, удалить", "callback_data": "conv:delete:current"},
+                            {"text": "Нет", "callback_data": "conv:keep:current"},
+                        ]
+                    ]
+                },
+            )
+            return
+        if command == "/rename":
+            # G18c: storage + PATCH are new; Telegram is just the self-service front.
+            title = argument
+            if not title:
+                await register_backend_user()
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Использование: /rename новое название разговора",
+                )
+                return
+            try:
+                data = await self._backend_json(
+                    backend,
+                    "PATCH",
+                    "/api/conversations/current",
+                    {"title": title, "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Нечего переименовывать: в этом чате ещё нет разговора.",
+                )
+                return
+            raw_conv = data.get("conversation") if isinstance(data, dict) else None
+            conv = raw_conv if isinstance(raw_conv, dict) else {}
+            new_title = str(conv.get("title") or title).strip()
+            await self._send_message(telegram, chat_id, f"Разговор переименован: «{new_title}».")
             return
         if command == "/mission":
             goal = argument

@@ -17,6 +17,30 @@ from jericho.storage import normalize_conversation_mode
 router = APIRouter(prefix="/api/conversations", tags=["chat"])
 
 
+def _resolve_conversation_ref(request: Request, actor: Any, conversation_id: str) -> str:
+    """Map Telegram's «current chat = current conversation» to a real row id.
+
+    Archive/delete/rename in Telegram have no place to put a conversation UUID
+    (the person is already inside that chat). The bridge therefore calls these
+    routes with the sentinel ``current``; only a signed telegram-bridge actor
+    with a bound channel session may resolve it. A bare UUID still works for
+    the API and for self-service tests that prove foreign ids return 404.
+    """
+    ref = str(conversation_id or "").strip()
+    if ref != "current":
+        return ref
+    channel_chat_id = getattr(request.state, "bridge_chat_id", None)
+    if actor.source == "telegram-bridge" and channel_chat_id:
+        session = request.app.state.storage.get_channel_session(
+            actor.user_id,
+            "telegram",
+            str(channel_chat_id),
+        )
+        if session:
+            return str(session["conversation_id"])
+    raise HTTPException(status_code=404, detail="Диалог не найден")
+
+
 @router.post("/channel/reset", tags=["chat"])
 async def reset_channel_conversation(request: Request) -> dict[str, Any]:
     actor = _require(request, "chat.use")
@@ -149,9 +173,25 @@ async def conversation_messages(
 @router.post("/{conversation_id}/archive", tags=["chat"])
 async def archive_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "conversations.manage")
+    resolved = _resolve_conversation_ref(request, actor, conversation_id)
     body = await _request_json(request)
     archived = _parse_json_bool(body.get("archived"), field="archived", default=True)
-    updated = request.app.state.storage.set_conversation_archived(conversation_id, actor.user_id, archived)
+    updated = request.app.state.storage.set_conversation_archived(resolved, actor.user_id, archived)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Диалог не найден")
+    return {"conversation": updated}
+
+
+@router.patch("/{conversation_id}", tags=["chat"])
+async def rename_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
+    """Self-service rename. Same tenant gate as archive/delete: only own rows."""
+    actor = _require(request, "conversations.manage")
+    resolved = _resolve_conversation_ref(request, actor, conversation_id)
+    body = await _request_json(request)
+    title = " ".join(str(body.get("title") or "").split()).strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Нужен title")
+    updated = request.app.state.storage.set_conversation_title(resolved, actor.user_id, title)
     if not updated:
         raise HTTPException(status_code=404, detail="Диалог не найден")
     return {"conversation": updated}
@@ -160,7 +200,8 @@ async def archive_conversation(conversation_id: str, request: Request) -> dict[s
 @router.delete("/{conversation_id}", tags=["chat"])
 async def delete_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "conversations.manage")
-    report = request.app.state.storage.delete_conversation(conversation_id, actor.user_id)
+    resolved = _resolve_conversation_ref(request, actor, conversation_id)
+    report = request.app.state.storage.delete_conversation(resolved, actor.user_id)
     if not report.get("existed"):
         raise HTTPException(status_code=404, detail="Диалог не найден")
     return {"status": "deleted", "report": report}

@@ -89,7 +89,8 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # полного списка для точного сопоставления и token-overlap обхода.
 # 255 → 256: list_entities_knowledge_refs пакетирует проекции текущего фронта BFS.
 # 258 → 259: search_messages — FTS по истории переписки (G16 / schema 20).
-EXPECTED_MEMBER_COUNT = 259
+# 259 → 260: set_conversation_title — self-service rename (G18c).
+EXPECTED_MEMBER_COUNT = 260
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -269,6 +270,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "set_channel_mode": "(self, user_id: 'str', channel: 'str', channel_id: 'str', mode: 'str') -> 'dict[str, Any] | None'",
     "set_conversation_archived": "(self, conversation_id: 'str', user_id: 'str', archived: 'bool') -> 'dict[str, Any] | None'",
     "set_conversation_mode": "(self, conversation_id: 'str', user_id: 'str', mode: 'str') -> 'dict[str, Any] | None'",
+    "set_conversation_title": "(self, conversation_id: 'str', user_id: 'str', title: 'str') -> 'dict[str, Any] | None'",
     "set_entity_time": "(self, entity_id: 'str', user_id: 'str', occurred_at: 'str', *, occurred_end: 'str | None' = None, precision: 'str' = 'day', source: 'str' = '') -> 'dict[str, Any]'",
     "set_knowledge_entity_link_status": "(self, link_id: 'str', user_id: 'str', status: 'str', *, reviewed_by: 'str') -> 'dict[str, Any] | None'",
     "set_mission_plan": "(self, mission_id: 'str', user_id: 'str', tasks: 'list[MissionTask]', *, plan_summary: 'str', status: 'MissionStatus | str') -> 'dict[str, Any] | None'",
