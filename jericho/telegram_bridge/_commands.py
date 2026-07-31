@@ -20,6 +20,7 @@ from jericho.telegram_bridge._base import (
     asyncio,
     httpx,
 )
+from jericho.telegram_bridge._views import _TIMELINE_SHOWN
 
 _MONTHS_RU = {
     "янв": 1,
@@ -291,7 +292,10 @@ class CommandsMixin(BridgeShared):
             documents = await self._backend_json(
                 backend,
                 "GET",
-                f"/api/knowledge/by-date?since={since}&until={until}&limit=15",
+                # Просим на один больше, чем покажем: лишний нужен, чтобы честно сказать
+                # «показаны первые N из M», а не молча обрезать. Больше просить незачем —
+                # точное число за период человек увидит на экране «Хроника».
+                f"/api/knowledge/by-date?since={since}&until={until}&limit={_TIMELINE_SHOWN + 1}",
                 None,
                 external_user_id,
                 str(chat_id),

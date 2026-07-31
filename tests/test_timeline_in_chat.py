@@ -187,3 +187,46 @@ def test_the_literal_route_is_not_shadowed_by_the_id_route(settings):
         assert response.status_code == 200
         assert "items" in response.json()
         assert json.loads(response.text).get("count") == 0
+
+
+def test_the_chat_says_how_much_of_the_period_it_showed():
+    """Молчаливая обрезка читается как «это всё, что было в периоде».
+
+    На сорока документах марта человек видел десять последних, а первая половина
+    месяца для него не существовала. Экран «Хроника» в той же ситуации пишет
+    «Показаны первые N» — чат обязан говорить не хуже.
+    """
+    from jericho.telegram_bridge import TelegramBridge
+    from jericho.telegram_bridge._views import _TIMELINE_SHOWN
+
+    many = {
+        "items": [
+            {
+                "id": f"ko_{index:016x}",
+                "title": f"акт {index}",
+                "document_date": f"2023-03-{index % 28 + 1:02d}",
+            }
+            for index in range(40)
+        ]
+    }
+    text = TelegramBridge._format_timeline("март 2023", many, {})  # noqa: SLF001
+    assert f"первые {_TIMELINE_SHOWN}" in text, text
+    assert "40" in text, "не названо, из скольких показаны первые"
+
+    # А когда показано всё — лишней строки быть не должно.
+    few = {"items": many["items"][:3]}
+    assert "первые" not in TelegramBridge._format_timeline("март 2023", few, {})  # noqa: SLF001
+
+
+def test_the_timeline_buttons_are_laid_out_in_rows_of_four():
+    """То же правило, что под выдачей поиска, и по той же причине.
+
+    Там оно закреплено тестом с обоснованием «Восемь результатов в один ряд Telegram
+    сожмёт в нечитаемое»; в хронику оно не доехало, и кнопок ставилось десять подряд.
+    """
+    from jericho.telegram_bridge import TelegramBridge
+
+    documents = {"items": [{"id": f"ko_{index:016x}", "title": f"акт {index}"} for index in range(10)]}
+    markup = TelegramBridge._timeline_reply_markup(documents)  # noqa: SLF001
+    rows = markup["inline_keyboard"]
+    assert [len(row) for row in rows] == [4, 4, 2], [len(row) for row in rows]

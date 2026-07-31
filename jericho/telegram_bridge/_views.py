@@ -16,6 +16,12 @@ from jericho.telegram_bridge._base import (
     quote,
 )
 
+# Сколько документов хроники показывать в чате. Прежде их было десять, но лента
+# просила у бэкенда пятнадцать и пять выбрасывала молча — и о самой обрезке не
+# говорила ни слова: на сорока документах марта человек видел десять последних, а
+# первая половина месяца для него не существовала.
+_TIMELINE_SHOWN = 10
+
 
 class ViewsMixin(BridgeShared):
     _MERGE_RECOMMENDATION_LABELS = {
@@ -509,7 +515,7 @@ class ViewsMixin(BridgeShared):
         if doc_items:
             lines.append("")
             lines.append("Документы по их собственной дате:")
-            for index, item in enumerate(doc_items[:10], start=1):
+            for index, item in enumerate(doc_items[:_TIMELINE_SHOWN], start=1):
                 if not isinstance(item, dict):
                     continue
                 when = str(item.get("document_date") or "")[:10]
@@ -524,6 +530,11 @@ class ViewsMixin(BridgeShared):
             return "\n".join(lines)
         if doc_items:
             lines.append("")
+            if len(doc_items) > _TIMELINE_SHOWN:
+                # Обрезка называет себя. Молчание читается как «это всё, что было в
+                # периоде», и документы за первую половину месяца для человека просто
+                # не существуют. Экран «Хроника» в такой же ситуации пишет то же самое.
+                lines.append(f"Показаны первые {_TIMELINE_SHOWN} из {len(doc_items)} — сузьте период.")
             lines.append("Кнопкой ниже — открыть документ целиком.")
         return "\n".join(lines)
 
@@ -534,10 +545,13 @@ class ViewsMixin(BridgeShared):
             return None
         buttons = [
             {"text": str(index), "callback_data": f"doc:show:{item['id']}"}
-            for index, item in enumerate(items[:10], start=1)
+            for index, item in enumerate(items[:_TIMELINE_SHOWN], start=1)
             if isinstance(item, dict) and item.get("id") and CALLBACK_TARGET_RE.fullmatch(str(item["id"]))
         ]
-        return {"inline_keyboard": [buttons]} if buttons else None
+        # По четыре в ряд, как под выдачей поиска: десять кнопок в одну строку Telegram
+        # сжимает в нечитаемое. Правило там закреплено тестом, а сюда не доехало.
+        rows = [buttons[index : index + 4] for index in range(0, len(buttons), 4)]
+        return {"inline_keyboard": rows} if buttons else None
 
     @staticmethod
     def _search_reply_markup(results: list[Any]) -> dict[str, Any] | None:
