@@ -54,6 +54,11 @@ _FETCH_TOTAL_BUDGET = 60.0
 # completed pages because one peer was still streaming.
 _RESEARCH_TOTAL_BUDGET = 27.0
 _RESEARCH_FETCH_BUDGET = 12.0
+# CPU wall-clock for pypdf after the body is already in memory. Declared with the
+# PDF allowlist (G22 / PROPOSALS №3): measured 9/10 public PDFs extracted clean
+# text in <0.5 s; 8 s leaves headroom for a multi-megabyte report without letting
+# a pathological file pin the event-loop thread pool.
+_PDF_PARSE_BUDGET = 8.0
 _DEFAULT_MAX_RESULTS = 5
 _DEFAULT_MAX_SOURCES = 3
 _MAX_REDIRECTS = 5
@@ -73,6 +78,9 @@ _ALLOWED_CONTENT_TYPES = (
     "application/json",
     "application/xml",
     "text/xml",
+    # G22 measurement (threshold ≥7/10 declared first): 9/10 public PDFs yielded
+    # meaningful text via DocumentExtractor; dummy short PDF was the only miss.
+    "application/pdf",
 )
 
 
@@ -572,19 +580,50 @@ class WebSurfer:
                     status_code=status,
                     error=f"Unsupported content type: {content_type or 'missing'}",
                 )
-            encoding = response.encoding or "utf-8"
-            raw_text = body.decode(encoding, errors="replace")
-            if "html" in content_type or "<html" in raw_text[:500].casefold():
-                text, title = self._extract_text_from_html(raw_text)
-            elif "json" in content_type:
+            text_budget = max(1_000, min(int(max_length), self.settings.max_extracted_text_chars))
+            if content_type == "application/pdf":
+                # Parse after the download budget: a slow PDF must not borrow from
+                # the byte-stream ceiling, and parse_timeout must not look like a
+                # network Timeout (ingest/url would report «empty content»).
                 try:
-                    text = json.dumps(json.loads(raw_text), ensure_ascii=False, indent=2)
-                except json.JSONDecodeError:
-                    text = raw_text
-                title = ""
+                    async with asyncio.timeout(_PDF_PARSE_BUDGET):
+                        text, title, parse_error = await asyncio.to_thread(
+                            self._extract_pdf_text,
+                            body,
+                            max_text_chars=text_budget,
+                        )
+                except TimeoutError:
+                    return FetchResult(
+                        url=final_url,
+                        title="",
+                        text="",
+                        text_length=0,
+                        status_code=status,
+                        error="parse_timeout",
+                    )
+                if parse_error:
+                    return FetchResult(
+                        url=final_url,
+                        title="",
+                        text="",
+                        text_length=0,
+                        status_code=status,
+                        error=parse_error,
+                    )
             else:
-                text, title = raw_text, ""
-            text = text[: max(1_000, min(int(max_length), self.settings.max_extracted_text_chars))]
+                encoding = response.encoding or "utf-8"
+                raw_text = body.decode(encoding, errors="replace")
+                if "html" in content_type or "<html" in raw_text[:500].casefold():
+                    text, title = self._extract_text_from_html(raw_text)
+                elif "json" in content_type:
+                    try:
+                        text = json.dumps(json.loads(raw_text), ensure_ascii=False, indent=2)
+                    except json.JSONDecodeError:
+                        text = raw_text
+                    title = ""
+                else:
+                    text, title = raw_text, ""
+            text = text[:text_budget]
             return FetchResult(
                 url=final_url,
                 title=title,
@@ -692,6 +731,28 @@ class WebSurfer:
             "search_timed_out": False,
             "summary": summary,
         }
+
+    @staticmethod
+    def _extract_pdf_text(content: bytes, *, max_text_chars: int) -> tuple[str, str, str]:
+        """In-memory PDF → text via the existing DocumentExtractor.
+
+        Returns ``(text, title, error)``. Scan-only and encrypted PDFs fail with a
+        clear error rather than a silent empty body — same contract as office
+        extractors used by the ingestion path.
+        """
+        from jericho.documents import DocumentExtractor
+
+        result = DocumentExtractor(max_text_chars=max(1_000, int(max_text_chars))).extract(
+            content,
+            "document.pdf",
+            "application/pdf",
+        )
+        if result.error and not (result.text or "").strip():
+            return "", "", result.error
+        text = (result.text or "").strip()
+        if not text:
+            return "", "", "No extractable text (empty or scanned PDF)"
+        return text, "", ""
 
     @staticmethod
     def _extract_text_from_html(html: str) -> tuple[str, str]:

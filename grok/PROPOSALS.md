@@ -38,7 +38,7 @@
 
 ## 1. Веб-текст отдаётся головой страницы, а не фрагментом по запросу
 
-- **Статус:** предложено
+- **Статус:** сделано (FetchResult.to_dict query-aware snippet)
 - **Что не так:** путь памяти уже отдаёт `best_snippet` вокруг совпадения; веб-путь
   по-прежнему режет `text[:preview_chars]` с начала. Агент, читающий страницу сам,
   снова получает титул и навигацию, а не абзац с ответом.
@@ -72,7 +72,7 @@
 
 ## 2. Бюджет web_research режет хвост: «три источника» = один
 
-- **Статус:** предложено
+- **Статус:** сделано (_web_research_for_llm per-source budget + tests)
 - **Что не так:** `web_research` собирает до 8 источников по 20 000 знаков, а
   `ToolResult.to_llm_message` обрезает JSON **с головы** на 11 900. Счётчик и поздние
   источники до модели не доходят. Тот же класс дефекта уже чинили у `memory_search`.
@@ -107,7 +107,7 @@
 
 ## 3. Fetch отвергает PDF, хотя парсер уже в дереве
 
-- **Статус:** предложено
+- **Статус:** сделано (G22: allowlist + DocumentExtractor; замер 9/10)
 - **Что не так:** allowlist Content-Type — только html/text/json/xml. Публичный PDF
   (типичный носитель отчётов и спецификаций) возвращается как
   `Unsupported content type`. `DocumentExtractor` уже умеет PDF/Office в памяти.
@@ -220,7 +220,7 @@
 
 ## 6. Аудит tool.invoke не оставляет следа запроса и URL
 
-- **Статус:** предложено
+- **Статус:** сделано (_audit_details web fingerprints + audit row test)
 - **Что не так:** для веб-инструментов в audit_log попадают имя и success/reason,
   но не fingerprint запроса и не host назначения. Вопрос «куда система ходила
   вчера» неответим. При этом `code_run` уже пишет `sha256`+`chars` именно потому,
@@ -253,7 +253,7 @@
 
 ## 7. Таймаут ядра уничтожает уже загруженные источники research
 
-- **Статус:** предложено
+- **Статус:** сделано (_RESEARCH_TOTAL/FETCH_BUDGET partial sources + tests)
 - **Что не так:** один fetch имеет право на 60 с; ядро режет любой инструмент на
   30 с. `research` делает `gather` по всем URL; при превышении 30 с вызывающий
   получает `Tool execution timed out` и **ноль** источников, даже если два из
@@ -371,3 +371,12 @@
 проверим, цена. Продолжай так же. Одна просьба: там, где пишешь «замерено»,
 прикладывай сам стенд (скрипт или команду), чтобы замер можно было повторить —
 как это сделано в `~/.jericho/eval/`.
+
+---
+
+## Замер G22 / №3 PDF (2026-07-31)
+
+Порог **объявлен до fetch**: meaningful ≥ 7/10, где meaningful = success и chars≥200 и letter_ratio≥0.55 и long_words≥10. Скрипт: grok/_measure_pdf_extract.py.
+
+Результат: **9/10** meaningful (dummy W3C PDF 14 знаков — единственный FAIL; bitcoin, arxiv Attention, TraceMonkey, IRS W-4, css4.pub×2, orimi, learningcontainer, unec — OK; p95 разбора <0.5 с). Вердикт: **включить** pplication/pdf. Parse budget 8 с, тела ≤ web_max_response_bytes, empty/scanned → явный error.
+

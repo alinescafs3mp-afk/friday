@@ -47,7 +47,7 @@ kind='reminder'` из SQL — тест обязан покраснеть.
 
 ---
 
-# Новое (после G21) — G22: твои же предложения из `grok/PROPOSALS.md`, решение принято, в очередь не попало
+# Новое (после G21) — G22: твои же предложения из `grok/PROPOSALS.md`, решение принято, в очередь не попало — **сделано**
 
 Разбор твоих семи предложений (`grok/PROPOSALS.md`, раздел «Решения по этим
 предложениям») дал вердикты, но я не перенесла принятые пункты в этот файл —
@@ -80,6 +80,14 @@ kind='reminder'` из SQL — тест обязан покраснеть.
 Мутация и полный гейт — как обычно.
 
 ---
+
+
+Реализовано/проверено на HEAD:
+1. №6 — уже было: `_audit_details` для web_search/web_research/web_fetch + тесты fingerprint.
+2. №2 — уже было: `_web_research_for_llm` делит бюджет по источникам; `test_web_research_context_budget.py`.
+3. №7 — уже было: `_RESEARCH_TOTAL_BUDGET`/`_RESEARCH_FETCH_BUDGET`, partial sources.
+4. №3 — замер 9/10 (порог ≥7/10 до fetch) → `application/pdf` в allowlist, `DocumentExtractor` in-memory, `parse_timeout` 8 с; `tests/test_web_fetch_pdf.py` (мутация allowlist — красный).
+5. №4/№5 — не брались (очередь по решению).
 
 # G20: скачать разговор текстом из Telegram — **сделано**
 
