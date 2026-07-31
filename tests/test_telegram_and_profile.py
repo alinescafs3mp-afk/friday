@@ -86,7 +86,8 @@ def test_telegram_queue_migrates_original_schema_before_indexing(tmp_path):
         assert [item["update_id"] for item in pending] == [7]
         assert pending[0]["status"] == "pending"
         columns = {row["name"] for row in queue._conn.execute("PRAGMA table_info(updates)").fetchall()}
-        assert {"status", "next_attempt_at", "failed_at"} <= columns
+        assert {"status", "next_attempt_at", "failed_at", "ordering_key"} <= columns
+        assert pending[0]["ordering_key"] == "update:7"
     finally:
         queue.close()
 
@@ -911,6 +912,55 @@ async def test_dead_lettered_update_replies_to_the_user(tmp_path, monkeypatch):
         assert sends and sends[-1]["chat_id"] == 5001
         assert "отклонено" in sends[-1]["text"]  # the user is told, not left silent
         assert bridge._inbox.stats()["dead_letter"] == 1
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_transient_update_failure_isolated_by_chat_without_reordering(tmp_path, monkeypatch):
+    """A retryable update blocks its own chat, not the globally ordered inbox."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    attempts: list[int] = []
+    processed: list[int] = []
+
+    async def _process(*args, **kwargs):
+        update = args[2]
+        update_id = int(update["update_id"])
+        attempts.append(update_id)
+        if update_id == 602 and attempts.count(update_id) == 1:
+            raise RuntimeError("temporary backend outage")
+        processed.append(update_id)
+
+    monkeypatch.setattr(bridge, "_process_update", _process)
+    for update_id, chat_id in ((601, 5001), (602, 5002), (603, 5002), (604, 5003)):
+        bridge._inbox.store(
+            {
+                "update_id": update_id,
+                "message": {"chat": {"id": chat_id}, "from": {"id": chat_id}, "text": "hi"},
+            }
+        )
+
+    try:
+        await bridge._drain_inbox(telegram, backend)
+
+        # 604 belongs to another chat and must cross the failed 602 in this same
+        # drain. 603 belongs to 602's chat and must not overtake it.
+        assert attempts == [601, 602, 604]
+        assert processed == [601, 604]
+        assert [row["update_id"] for row in bridge._inbox.pending(now=time.time() + 3600)] == [602]
+
+        # The retry delay on 602 must keep 603 blocked on the next tick as well.
+        await bridge._drain_inbox(telegram, backend)
+        assert attempts == [601, 602, 604]
+
+        bridge._inbox._conn.execute("UPDATE updates SET next_attempt_at=0 WHERE update_id=602")
+        bridge._inbox._conn.commit()
+        await bridge._drain_inbox(telegram, backend)
+        assert attempts == [601, 602, 604, 602, 603]
+        assert processed == [601, 604, 602, 603]
+        assert bridge._inbox.stats() == {"pending": 0, "dead_letter": 0}
     finally:
         bridge._inbox.close()
 

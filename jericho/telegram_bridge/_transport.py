@@ -12,6 +12,7 @@ from contextlib import suppress
 from jericho.telegram_bridge._base import (
     API_BASE,
     BACKOFF_MAX,
+    BATCH_SIZE,
     BOT_COMMANDS,
     LOGGER,
     POLL_TIMEOUT,
@@ -493,35 +494,60 @@ class TransportMixin(BridgeShared):
         telegram: httpx.AsyncClient,
         backend: httpx.AsyncClient,
     ) -> None:
-        for row in self._inbox.pending():
-            update_id = int(row["update_id"])
-            update: dict[str, Any] = {}
-            try:
-                update = json.loads(row["payload_json"])
-                cached = (
-                    json.loads(row["backend_response_json"]) if row.get("backend_response_json") else None
-                )
-                await self._process_update(telegram, backend, update, cached_response=cached)
-                self._inbox.remove(update_id)
-            except PermanentUpdateError as exc:
-                LOGGER.warning("Quarantining invalid Telegram update %s: %s", update_id, exc)
-                self._inbox.mark_dead_letter(update_id, self._redact(f"{type(exc).__name__}: {exc}"))
-                # MediaTooLargeError already told the user; others left them in
-                # silence — a rejected message must never just vanish.
-                if not isinstance(exc, MediaTooLargeError):
-                    await self._notify_dead_letter(telegram, update, permanent=True)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                LOGGER.warning("Telegram update %s deferred: %s", update_id, exc)
-                dead_lettered = self._inbox.mark_failure(
-                    update_id,
-                    self._redact(f"{type(exc).__name__}: {exc}"),
-                )
-                if dead_lettered:
-                    LOGGER.error("Telegram update %s exhausted its retry budget", update_id)
-                    await self._notify_dead_letter(telegram, update, permanent=False)
+        # The budget counts attempted rows, not SELECT rounds. `pending()` exposes
+        # only the ready head of each chat; after a success/removal the next update
+        # of that same chat can become eligible in this drain. A retryable failure
+        # blocks only its own chat for the rest of this call, while other chats keep
+        # spending the bounded batch. This preserves per-chat FIFO across retry
+        # delays without restoring global head-of-line blocking.
+        attempted = 0
+        blocked_keys: set[str] = set()
+        while attempted < BATCH_SIZE:
+            remaining = BATCH_SIZE - attempted
+            rows = [
+                row
+                for row in self._inbox.pending(limit=remaining + len(blocked_keys))
+                if str(row["ordering_key"]) not in blocked_keys
+            ][:remaining]
+            if not rows:
                 break
+            for row in rows:
+                attempted += 1
+                update_id = int(row["update_id"])
+                ordering_key = str(row["ordering_key"])
+                update: dict[str, Any] = {}
+                try:
+                    update = json.loads(row["payload_json"])
+                    cached = (
+                        json.loads(row["backend_response_json"]) if row.get("backend_response_json") else None
+                    )
+                    await self._process_update(telegram, backend, update, cached_response=cached)
+                    self._inbox.remove(update_id)
+                except PermanentUpdateError as exc:
+                    LOGGER.warning("Quarantining invalid Telegram update %s: %s", update_id, exc)
+                    self._inbox.mark_dead_letter(
+                        update_id,
+                        self._redact(f"{type(exc).__name__}: {exc}"),
+                    )
+                    # MediaTooLargeError already told the user; others left them in
+                    # silence — a rejected message must never just vanish.
+                    if not isinstance(exc, MediaTooLargeError):
+                        await self._notify_dead_letter(telegram, update, permanent=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    LOGGER.warning("Telegram update %s deferred: %s", update_id, exc)
+                    dead_lettered = self._inbox.mark_failure(
+                        update_id,
+                        self._redact(f"{type(exc).__name__}: {exc}"),
+                    )
+                    if dead_lettered:
+                        LOGGER.error("Telegram update %s exhausted its retry budget", update_id)
+                        await self._notify_dead_letter(telegram, update, permanent=False)
+                    else:
+                        # Do not retry this row again if enough work in other chats
+                        # makes its delay expire before this same drain returns.
+                        blocked_keys.add(ordering_key)
 
     @staticmethod
     def _update_chat_id(update: dict[str, Any]) -> int | None:

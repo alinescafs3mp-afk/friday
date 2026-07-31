@@ -18,6 +18,47 @@ from jericho.telegram_bridge._base import (
 )
 
 
+def _ordering_key(update: dict[str, Any], update_id: int) -> str:
+    """Stable FIFO partition for one Telegram conversation.
+
+    Chat order is authoritative for ordinary and edited messages. Callback
+    queries normally carry the originating message; inline callbacks do not, so
+    their sender is the narrowest durable partition available. An unrecognised or
+    malformed update gets its own key: it may fail independently, but can never
+    become a global head-of-line blocker.
+    """
+
+    def _telegram_id(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed or None
+
+    for field in ("message", "edited_message"):
+        message = update.get(field)
+        chat = message.get("chat") if isinstance(message, dict) else None
+        chat_id = _telegram_id(chat.get("id")) if isinstance(chat, dict) else None
+        if chat_id is not None:
+            return f"chat:{chat_id}"
+
+    callback = update.get("callback_query")
+    if isinstance(callback, dict):
+        message = callback.get("message")
+        chat = message.get("chat") if isinstance(message, dict) else None
+        chat_id = _telegram_id(chat.get("id")) if isinstance(chat, dict) else None
+        if chat_id is not None:
+            return f"chat:{chat_id}"
+        sender = callback.get("from")
+        sender_id = _telegram_id(sender.get("id")) if isinstance(sender, dict) else None
+        if sender_id is not None:
+            return f"user:{sender_id}"
+
+    return f"update:{update_id}"
+
+
 class _UpdateInbox:
     """SQLite queue: Telegram offsets advance only after an update is durable."""
 
@@ -41,7 +82,8 @@ class _UpdateInbox:
                 created_at REAL NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 next_attempt_at REAL NOT NULL DEFAULT 0,
-                failed_at REAL
+                failed_at REAL,
+                ordering_key TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS state (
                 key TEXT PRIMARY KEY,
@@ -57,10 +99,27 @@ class _UpdateInbox:
             "status": "TEXT NOT NULL DEFAULT 'pending'",
             "next_attempt_at": "REAL NOT NULL DEFAULT 0",
             "failed_at": "REAL",
+            "ordering_key": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in additions.items():
             if name not in columns:
                 self._conn.execute(f"ALTER TABLE updates ADD COLUMN {name} {definition}")
+        # Old rows predate the FIFO partition. Backfill from their durable payload
+        # before the index is created; malformed legacy JSON is isolated under its
+        # own update id rather than sharing one empty key with every other chat.
+        for row in self._conn.execute(
+            "SELECT update_id, payload_json FROM updates WHERE ordering_key=''"
+        ).fetchall():
+            update_id = int(row["update_id"])
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                payload = {}
+            key = _ordering_key(payload if isinstance(payload, dict) else {}, update_id)
+            self._conn.execute(
+                "UPDATE updates SET ordering_key=? WHERE update_id=?",
+                (key, update_id),
+            )
         self._conn.execute(
             """UPDATE updates
                SET status='dead_letter', failed_at=COALESCE(failed_at, last_attempt_at)
@@ -71,6 +130,10 @@ class _UpdateInbox:
         self._conn.execute(
             """CREATE INDEX idx_updates_pending
                ON updates(status, next_attempt_at, update_id)"""
+        )
+        self._conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_updates_ordering
+               ON updates(status, ordering_key, update_id)"""
         )
         self._conn.commit()
 
@@ -94,20 +157,35 @@ class _UpdateInbox:
         if update_id < 0:
             return False
         cursor = self._conn.execute(
-            """INSERT OR IGNORE INTO updates(update_id, payload_json, created_at)
-               VALUES(?, ?, ?)""",
-            (update_id, json.dumps(update, ensure_ascii=False, sort_keys=True), time.time()),
+            """INSERT OR IGNORE INTO updates(update_id, payload_json, created_at, ordering_key)
+               VALUES(?, ?, ?, ?)""",
+            (
+                update_id,
+                json.dumps(update, ensure_ascii=False, sort_keys=True),
+                time.time(),
+                _ordering_key(update, update_id),
+            ),
         )
         self._conn.commit()
         return cursor.rowcount > 0
 
-    def pending(self, *, now: float | None = None) -> list[dict[str, Any]]:
+    def pending(self, *, now: float | None = None, limit: int = BATCH_SIZE) -> list[dict[str, Any]]:
         ready_at = time.time() if now is None else float(now)
+        row_limit = max(1, min(int(limit), BATCH_SIZE * 2))
         rows = self._conn.execute(
-            """SELECT * FROM updates
-               WHERE status='pending' AND attempts < ? AND next_attempt_at <= ?
-               ORDER BY update_id ASC LIMIT ?""",
-            (MAX_ATTEMPTS, ready_at, BATCH_SIZE),
+            """SELECT current.* FROM updates AS current
+               WHERE current.status='pending'
+                 AND current.attempts < ?
+                 AND current.next_attempt_at <= ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM updates AS earlier
+                     WHERE earlier.status='pending'
+                       AND earlier.attempts < ?
+                       AND earlier.ordering_key=current.ordering_key
+                       AND earlier.update_id < current.update_id
+                 )
+               ORDER BY current.update_id ASC LIMIT ?""",
+            (MAX_ATTEMPTS, ready_at, MAX_ATTEMPTS, row_limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
