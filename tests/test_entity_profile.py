@@ -166,3 +166,36 @@ async def test_entity_profile_tags_do_not_leak_across_tenants(kernel):
     result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=bob)
 
     assert result.data["found"] is False, "чужая сущность не должна находиться по имени"
+
+
+def test_http_entity_profile_by_name_matches_the_agent_tool_shape(settings):
+    """GET /api/kg/entity-profile?name=... — та же композиция (`kg.entity_profile`),
+    что и агентский инструмент entity_lookup, но по HTTP и без участия модели.
+    Основа для детерминированной команды /profile в Telegram, которая не зависит
+    от того, решит ли модель позвать инструмент (см. TASKS.md #72)."""
+    from fastapi.testclient import TestClient
+
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        storage = app.state.storage
+        kg = app.state.kg
+        entity_id = _linked_entity(storage, kg, LEGACY_OWNER_USER_ID, "Атлас")
+        ko = _document(
+            storage, LEGACY_OWNER_USER_ID, "Отчёт по Атласу.", tags=["отчёт"], document_date="2026-02-01"
+        )
+        kg.link_knowledge_to_entity(ko, entity_id, LEGACY_OWNER_USER_ID, status="accepted")
+
+        response = client.get("/api/kg/entity-profile", params={"name": "Атлас"}, headers=owner)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["entity"]["id"] == entity_id
+        assert body["profile"]["tags"] == ["отчёт"]
+        assert body["profile"]["document_date_range"] == {"earliest": "2026-02-01", "latest": "2026-02-01"}
+        assert body["pending_relations_count"] == 0
+
+        missing = client.get("/api/kg/entity-profile", params={"name": "Нет такой сущности"}, headers=owner)
+        assert missing.status_code == 404

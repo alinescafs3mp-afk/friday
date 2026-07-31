@@ -54,6 +54,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("timeline", "хроника периода: события и документы по их датам"),
     ("browse", "записи по тегу, проекту или сущности"),
     ("tags", "теги базы с количеством записей"),
+    ("profile", "карточка сущности: документы, теги, даты, связи"),
     ("inbox", "разобрать ближайшие предложения"),
     ("conflicts", "разобрать конфликты знаний"),
     ("merges", "подтвердить объединение дубликатов"),
@@ -233,6 +234,7 @@ class BridgeShared:
     _process_update: Callable[..., Any]
     _response_reply_markup: Callable[..., Any]
     _send_browse: Callable[..., Any]
+    _send_entity_profile: Callable[..., Any]
     _send_inbox: Callable[..., Any]
     _send_conflicts: Callable[..., Any]
     _send_history: Callable[..., Any]

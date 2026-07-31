@@ -380,6 +380,9 @@ class CommandsMixin(BridgeShared):
             query = argument
             await self._send_browse(telegram, backend, chat_id, external_user_id, user, query)
             return
+        if command == "/profile":
+            await self._send_entity_profile(telegram, backend, chat_id, external_user_id, user, argument)
+            return
         if command == "/search":
             query = argument
             await self._send_search(telegram, backend, chat_id, external_user_id, user, query)

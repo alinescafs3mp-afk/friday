@@ -883,78 +883,12 @@ class ExecutionKernel:
         _, _, web, _ = self._require_services()
         return await web.research(query, max_sources=max(1, min(int(max_sources), 8)))
 
-    @staticmethod
-    def _profile_tags(raw: Any) -> list[str]:
-        if isinstance(raw, list):
-            return [str(item) for item in raw]
-        if isinstance(raw, str):
-            with suppress(json.JSONDecodeError):
-                parsed = json.loads(raw)
-                if isinstance(parsed, list):
-                    return [str(item) for item in parsed]
-        return []
-
-    @staticmethod
-    def _profile_metadata(raw: Any) -> dict[str, Any]:
-        if isinstance(raw, dict):
-            return raw
-        if isinstance(raw, str):
-            with suppress(json.JSONDecodeError):
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    return parsed
-        return {}
-
-    @staticmethod
-    def _entity_profile_summary(knowledge_objects: list[dict[str, Any]]) -> dict[str, Any]:
-        """Tags and a date range derived from an entity's linked documents.
-
-        First slice of the ontology "object view" from spec v3
-        (OPUS_INTEGRATED_SYSTEM_AUDIT_PROMPT.md §6): open an entity, see what
-        connects to it without re-deriving it by hand each time. Kept honest
-        on two points this project has been burned by before:
-        - `document_date` (the file's OWN date, from its metadata) is used
-          when present; a document without one is counted separately rather
-          than silently falling back to `updated_at` (the upload date) and
-          passing it off as the same kind of fact.
-        - Tags are the UNION across every linked document, not one document's
-          list — a project entity's tags come from all its documents.
-        """
-        tags: set[str] = set()
-        document_dates: list[str] = []
-        undated_count = 0
-        for item in knowledge_objects:
-            for tag in ExecutionKernel._profile_tags(item.get("tags_json")):
-                tags.add(tag)
-            document_date = str(
-                ExecutionKernel._profile_metadata(item.get("metadata_json")).get("document_date") or ""
-            )
-            if document_date:
-                document_dates.append(document_date)
-            else:
-                undated_count += 1
-        return {
-            "tags": sorted(tags),
-            "document_date_range": (
-                {"earliest": min(document_dates), "latest": max(document_dates)} if document_dates else None
-            ),
-            "documents_without_own_date": undated_count,
-        }
-
     async def _entity_lookup(self, *, actor: ActorContext, name: str) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
         entity = kg.find_entity(actor.user_id, name)
         if not entity:
             return {"found": False, "entity": None}
-        knowledge_objects = kg.get_entity_knowledge(entity["id"], actor.user_id, limit=10)
-        return {
-            "found": True,
-            "entity": entity,
-            "relations": kg.get_entity_relations(entity["id"], actor.user_id),
-            "pending_relations_count": kg.count_pending_relations(entity["id"], actor.user_id),
-            "knowledge_objects": knowledge_objects,
-            "profile": self._entity_profile_summary(knowledge_objects),
-        }
+        return {"found": True, "entity": entity, **kg.entity_profile(entity["id"], actor.user_id)}
 
     async def _entity_create(
         self,

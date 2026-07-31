@@ -239,6 +239,7 @@ EXPECTED_COMMANDS = {
     "/missions",
     "/new",
     "/note",
+    "/profile",
     "/reminders",
     "/rename",
     "/research",
@@ -265,7 +266,8 @@ EXPECTED_COMMANDS = {
 # 50 → 51: /reminders + _send_reminders + namespace remind (G19).
 # 51 → 53: /export + _send_document + _backend_text (G20).
 # 53 → 55: speak tool + _send_voice + _deliver_voice_reply (Jericho voice output).
-EXPECTED_BRIDGE_COUNT = 55
+# 55 → 56: /profile — вид объекта (спека v3 §6), +_send_entity_profile.
+EXPECTED_BRIDGE_COUNT = 56
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -302,6 +304,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_select_media": "(message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'tuple[dict[str, Any] | None, str, str, str]'",
     "_send_browse": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_conflicts": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
+    "_send_entity_profile": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', name: 'str') -> 'None'",
     "_send_history": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",

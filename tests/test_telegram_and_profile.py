@@ -623,6 +623,75 @@ async def test_tags_command_lists_tags_with_counts(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_profile_command_shows_the_object_view(tmp_path):
+    """Спека v3 §6 «вид объекта», детерминированная Telegram-команда (не
+    зависит от того, решит ли модель позвать инструмент — см. TASKS.md #72).
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/entity-profile?name=%D0%90%D1%82%D0%BB%D0%B0%D1%81": {
+                "entity": {"id": "ent-1", "name": "Атлас"},
+                "relations": [{"id": "rel-1"}],
+                "pending_relations_count": 2,
+                "knowledge_objects": [{"title": "Отчёт за январь"}, {"title": "Смета"}],
+                "profile": {
+                    "tags": ["отчёт", "смета"],
+                    "document_date_range": {"earliest": "2026-01-15", "latest": "2026-03-02"},
+                    "documents_without_own_date": 0,
+                },
+            }
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 1,
+                "message": {"message_id": 10, "chat": {"id": 5001}, "from": user, "text": "/profile Атлас"},
+            },
+            cached_response=None,
+        )
+        sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+        text = str(sends[-1]["text"])
+        assert "Атлас" in text
+        assert "#отчёт" in text and "#смета" in text
+        assert "2026-01-15" in text and "2026-03-02" in text
+        assert "Отчёт за январь" in text and "Смета" in text
+        assert "1 подтверждено" in text and "2 ждут проверки" in text
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_profile_command_reports_not_found_honestly(tmp_path):
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {"/api/kg/entity-profile?name=%D0%9D%D0%B5%D1%82": (404, "Сущность не найдена")}
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 1,
+                "message": {"message_id": 10, "chat": {"id": 5001}, "from": user, "text": "/profile Нет"},
+            },
+            cached_response=None,
+        )
+        sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+        text = str(sends[-1]["text"])
+        assert "ничего не нашлось" in text
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_browse_command_by_tag_then_entity_fallback_and_tree(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()

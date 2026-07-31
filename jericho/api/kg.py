@@ -106,6 +106,24 @@ async def create_container(request: Request) -> dict[str, Any]:
     return {"container": container}
 
 
+@router.get("/entity-profile", tags=["knowledge-graph"])
+async def entity_profile_by_name(name: str, request: Request) -> dict[str, Any]:
+    """Object-view surface (spec v3 §6) reachable by NAME, not id — the shape a
+    Telegram command or a human search box has, unlike `GET /entities/{id}`.
+
+    Same `find_entity` best-match used by the agent's `entity_lookup` tool and
+    the same `kg.entity_profile` composition, so both surfaces show the exact
+    same thing for the same name — see `KnowledgeGraph.entity_profile`'s
+    docstring.
+    """
+    actor = _require(request, "kg.read")
+    kg = request.app.state.kg
+    entity = kg.find_entity(actor.user_id, name)
+    if not entity:
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
+    return {"entity": entity, **kg.entity_profile(entity["id"], actor.user_id)}
+
+
 @router.get("/entities/{entity_id}", tags=["knowledge-graph"])
 async def get_entity(entity_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.read")

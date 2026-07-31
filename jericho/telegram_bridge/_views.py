@@ -11,6 +11,7 @@ from jericho.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
     Any,
     BridgeShared,
+    PermanentUpdateError,
     httpx,
     json,
     quote,
@@ -352,6 +353,78 @@ class ViewsMixin(BridgeShared):
             if tag:
                 lines.append(f"• #{tag} — {int(item.get('count') or 0)}")
         lines.append("\nПоказать записи: /browse тег")
+        await self._send_message(telegram, chat_id, "\n".join(lines))
+
+    async def _send_entity_profile(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+        name: str,
+    ) -> None:
+        """Deterministic Telegram surface for the spec-v3 object view (§6):
+        unlike asking the agent "расскажи про X", this always calls the same
+        `GET /api/kg/entity-profile` regardless of whether the model would
+        have decided to use a tool for this phrasing (see TASKS.md #72 —
+        measured tool-call reliability under 5/5 for short factual asks)."""
+        clean = name.strip()
+        if not clean:
+            await self._send_message(telegram, chat_id, "Использование: /profile имя сущности")
+            return
+        try:
+            data = await self._backend_json(
+                backend,
+                "GET",
+                f"/api/kg/entity-profile?name={quote(clean, safe='')}",
+                {"telegram_user": telegram_user},
+                external_user_id,
+                str(chat_id),
+            )
+        except PermanentUpdateError:
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"По имени «{clean}» ничего не нашлось. Список тегов: /tags, поиск: /browse {clean}",
+            )
+            return
+
+        entity = data.get("entity") if isinstance(data.get("entity"), dict) else {}
+        profile = data.get("profile") if isinstance(data.get("profile"), dict) else {}
+        relations = data.get("relations") if isinstance(data.get("relations"), list) else []
+        knowledge_objects = (
+            data.get("knowledge_objects") if isinstance(data.get("knowledge_objects"), list) else []
+        )
+        pending_count = int(data.get("pending_relations_count") or 0)
+
+        entity_name = str(entity.get("name") or clean)
+        lines = [f"📇 {entity_name}"]
+        tags = profile.get("tags") or []
+        if tags:
+            lines.append("Теги: " + ", ".join(f"#{tag}" for tag in tags[:15]))
+        date_range = profile.get("document_date_range")
+        if isinstance(date_range, dict):
+            earliest = date_range.get("earliest")
+            latest = date_range.get("latest")
+            if earliest == latest:
+                lines.append(f"Дата документов: {earliest}")
+            else:
+                lines.append(f"Даты документов: {earliest} — {latest}")
+        undated = int(profile.get("documents_without_own_date") or 0)
+        if undated:
+            lines.append(f"Без собственной даты: {undated}")
+        lines.append(f"Связанных документов: {len(knowledge_objects)}")
+        lines.append(
+            f"Связей: {len(relations)} подтверждено"
+            + (f", {pending_count} ждут проверки" if pending_count else "")
+        )
+        for item in knowledge_objects[:5]:
+            if isinstance(item, dict):
+                title = str(item.get("title") or "Без названия")[:80]
+                lines.append(f"• {title}")
+        if len(knowledge_objects) > 5:
+            lines.append(f"…и ещё {len(knowledge_objects) - 5}")
         await self._send_message(telegram, chat_id, "\n".join(lines))
 
     async def _send_browse(

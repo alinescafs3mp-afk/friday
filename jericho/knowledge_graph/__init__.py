@@ -176,6 +176,40 @@ def _json_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _entity_profile_summary(knowledge_objects: list[dict[str, Any]]) -> dict[str, Any]:
+    """Tags and a date range derived from an entity's linked documents.
+
+    First slice of the ontology "object view" from spec v3
+    (OPUS_INTEGRATED_SYSTEM_AUDIT_PROMPT.md §6): open an entity, see what
+    connects to it without re-deriving it by hand each time. Kept honest on
+    two points this project has been burned by before:
+    - `document_date` (the file's OWN date, from its metadata) is used when
+      present; a document without one is counted separately rather than
+      silently falling back to `updated_at` (the upload date) and passing it
+      off as the same kind of fact.
+    - Tags are the UNION across every linked document, not one document's
+      list — a project entity's tags come from all its documents.
+    """
+    tags: set[str] = set()
+    document_dates: list[str] = []
+    undated_count = 0
+    for item in knowledge_objects:
+        for tag in _json_list(item.get("tags_json")):
+            tags.add(tag)
+        document_date = str(_json_dict(item.get("metadata_json")).get("document_date") or "")
+        if document_date:
+            document_dates.append(document_date)
+        else:
+            undated_count += 1
+    return {
+        "tags": sorted(tags),
+        "document_date_range": (
+            {"earliest": min(document_dates), "latest": max(document_dates)} if document_dates else None
+        ),
+        "documents_without_own_date": undated_count,
+    }
+
+
 def _build_entity_terms(name: str, aliases: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
     output = [(name.strip(), "canonical_name")]
     output.extend((alias.strip(), "alias") for alias in aliases if alias.strip())
@@ -1590,6 +1624,23 @@ class KnowledgeGraph:
         if not self.storage.get_entity(entity_id, user_id):
             return []
         return self.storage.get_entity_knowledge(user_id, entity_id, limit=limit)
+
+    def entity_profile(self, entity_id: str, user_id: str, *, knowledge_limit: int = 10) -> dict[str, Any]:
+        """Everything an object-view needs about one entity: confirmed relations,
+        linked documents, and derived tags/date-range/pending-review count.
+
+        Shared composition point — the agent's `entity_lookup` tool
+        (`execution_kernel`) and the HTTP/Telegram `/profile` surface both call
+        this, so they show exactly the same thing instead of two independently
+        maintained versions of "what does this entity look like".
+        """
+        knowledge_objects = self.get_entity_knowledge(entity_id, user_id, limit=knowledge_limit)
+        return {
+            "relations": self.get_entity_relations(entity_id, user_id),
+            "pending_relations_count": self.count_pending_relations(entity_id, user_id),
+            "knowledge_objects": knowledge_objects,
+            "profile": _entity_profile_summary(knowledge_objects),
+        }
 
     def review_knowledge_link(
         self,
