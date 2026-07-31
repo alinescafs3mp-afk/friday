@@ -1388,6 +1388,42 @@ async def test_an_edited_message_gets_an_honest_answer(tmp_path):
         bridge._inbox.close()
 
 
+@pytest.mark.asyncio
+async def test_live_location_pings_do_not_spam_the_edit_notice(tmp_path):
+    """Найдено состязательным ревью: Telegram доставляет каждый тик Live Location
+    как edited_message с тем же message_id и БЕЗ text/caption — только меняющиеся
+    координаты. Без проверки на текст это читалось как «пользователь исправил
+    сообщение», и бот отвечал фразой «правку не подхватываю» на каждый пинг,
+    раз в несколько секунд, пока трансляция активна.
+
+    Мутация: убери проверку `edited.get("text") or edited.get("caption")` перед
+    ранним `return` — тест обязан покраснеть (появится sendMessage на пустой ход)."""
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    try:
+        for update_id, lat, lon in [(60, 55.7558, 37.6173), (61, 55.7559, 37.6174)]:
+            await bridge._process_update(
+                telegram,
+                backend,
+                {
+                    "update_id": update_id,
+                    "edited_message": {
+                        "message_id": 90,
+                        "chat": {"id": 5001},
+                        "from": {"id": 1001},
+                        "location": {"latitude": lat, "longitude": lon, "live_period": 900},
+                    },
+                },
+                cached_response=None,
+            )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert not sends, f"живая геолокация не должна вызывать sendMessage вовсе: {sends}"
+        assert not backend.calls
+    finally:
+        bridge._inbox.close()
+
+
 class _DeadBackend:
     async def get(self, url):
         raise RuntimeError("connection refused")
