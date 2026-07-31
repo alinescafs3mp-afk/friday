@@ -125,7 +125,14 @@ async def _score_cases(
             # loss look like «the searcher» when the set itself had shrunk.
             skipped_empty_expected += 1
             continue
-        result = await searcher.search(user_id, str(case["query"]), limit=max(k, 20), kg=kg)
+        # `graph_expansion=False`: боевой путь агента (`_prepare_context`) выключил
+        # расширение по графу 2026-07-31 — замерено, что оно уполовинивало recall@10
+        # (0.35 -> 0.15). Без этого параметра здесь периодическая метрика качества
+        # (её же видит `jericho doctor`) продолжала бы мерить СТАРОЕ поведение и
+        # молча расходиться с тем, что владелец получает на самом деле.
+        result = await searcher.search(
+            user_id, str(case["query"]), limit=max(k, 20), kg=kg, graph_expansion=False
+        )
         retrieved = [str(hit.get("id")) for hit in result.get("results", []) if hit.get("id")]
         case_recall = recall_at_k(retrieved, expected, k)
         case_precision = precision_at_k(retrieved, expected, k)
