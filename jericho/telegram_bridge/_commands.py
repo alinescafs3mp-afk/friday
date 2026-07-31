@@ -484,15 +484,7 @@ class CommandsMixin(BridgeShared):
             await self._send_message(
                 telegram,
                 chat_id,
-                f"Текущий режим: {mode_label}.\n\n"
-                "В вашей базе:\n"
-                f"• объектов знаний: {data.get('knowledge_object_count', 0)}\n"
-                f"• сущностей: {data.get('entity_count', 0)}\n"
-                f"• подтверждённых связей: {data.get('relation_count', 0)}\n"
-                f"• во входящих: {data.get('pending_inbox', 0)}\n"
-                f"• связей на review: {data.get('pending_relation_candidates', 0)}\n"
-                f"• конфликтов на review: {data.get('pending_conflicts', 0)}\n"
-                f"• предложений объединить сущности: {data.get('pending_resolutions', 0)}",
+                self._format_status(mode_label, data),
             )
             return
 

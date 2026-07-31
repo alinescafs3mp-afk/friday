@@ -230,3 +230,50 @@ def test_the_timeline_buttons_are_laid_out_in_rows_of_four():
     markup = TelegramBridge._timeline_reply_markup(documents)  # noqa: SLF001
     rows = markup["inline_keyboard"]
     assert [len(row) for row in rows] == [4, 4, 2], [len(row) for row in rows]
+
+
+def test_status_hides_counters_that_can_only_be_zero():
+    """«Подтверждённых связей: 0» стояло в ответе всегда.
+
+    Таблица relations (сущность↔сущность) на живой установке пуста и была пуста
+    всегда: граф держится на связях знание↔сущность, которых 1399. Число, которое
+    не может показать иное, учит человека неправде о его данных.
+    """
+    from jericho.telegram_bridge import TelegramBridge
+
+    empty_graph = {
+        "knowledge_object_count": 1532,
+        "entity_count": 109,
+        "relation_count": 0,
+        "pending_relation_candidates": 0,
+        "pending_inbox": 1,
+        "pending_conflicts": 200,
+        "pending_resolutions": 20,
+    }
+    text = TelegramBridge._format_status("Диалог", empty_graph)  # noqa: SLF001
+    assert "подтверждённых связей" not in text
+    assert "связей на review" not in text
+    # А очереди, где действительно что-то лежит, обязаны быть видны.
+    assert "конфликтов на review: 200" in text
+    assert "предложений объединить сущности: 20" in text
+    # Ноль в очереди — это ответ на вопрос, а не ложное обещание: он остаётся.
+    assert "во входящих: 1" in text
+
+    # Появились связи — появилась и строка.
+    with_relations = {**empty_graph, "relation_count": 7, "pending_relation_candidates": 3}
+    text = TelegramBridge._format_status("Диалог", with_relations)  # noqa: SLF001
+    assert "подтверждённых связей: 7" in text
+    assert "связей на review: 3" in text
+
+
+def test_an_entity_without_relations_does_not_advertise_the_zero():
+    from jericho.telegram_bridge import TelegramBridge
+
+    described = TelegramBridge._describe_merge_entity(  # noqa: SLF001
+        {"name": "Казань", "entity_type": "location", "knowledge_count": 57, "relation_count": 0}
+    )
+    assert described == "Казань — location (знаний: 57)"
+    linked = TelegramBridge._describe_merge_entity(  # noqa: SLF001
+        {"name": "Казань", "entity_type": "location", "knowledge_count": 57, "relation_count": 2}
+    )
+    assert "связей: 2" in linked

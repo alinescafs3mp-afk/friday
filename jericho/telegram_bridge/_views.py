@@ -156,13 +156,52 @@ class ViewsMixin(BridgeShared):
             )
 
     @staticmethod
+    def _format_status(mode_label: str, data: dict[str, Any]) -> str:
+        """Состояние базы: только те счётчики, которые могут быть не нулём.
+
+        «Подтверждённых связей: 0» и «связей на review: 0» стояли в ответе всегда:
+        таблица `relations` (сущность↔сущность) на живой установке пуста и была пуста
+        всегда — граф держится на связях знание↔сущность, которых 1399. Две строки,
+        которые не могут показать иное, учат человека неправде о его данных и
+        заодно прячут те очереди, где действительно что-то лежит.
+
+        Очереди с содержимым показываются даже нулевыми: «конфликтов на review: 0» —
+        это ответ на вопрос, а не ложное обещание.
+        """
+        lines = [
+            f"Текущий режим: {mode_label}.",
+            "",
+            "В вашей базе:",
+            f"• объектов знаний: {int(data.get('knowledge_object_count') or 0)}",
+            f"• сущностей: {int(data.get('entity_count') or 0)}",
+        ]
+        relations = int(data.get("relation_count") or 0)
+        if relations:
+            lines.append(f"• подтверждённых связей: {relations}")
+        lines.append(f"• во входящих: {int(data.get('pending_inbox') or 0)}")
+        candidates = int(data.get("pending_relation_candidates") or 0)
+        if candidates:
+            lines.append(f"• связей на review: {candidates}")
+        lines.append(f"• конфликтов на review: {int(data.get('pending_conflicts') or 0)}")
+        lines.append(f"• предложений объединить сущности: {int(data.get('pending_resolutions') or 0)}")
+        return "\n".join(lines)
+
+    @staticmethod
     def _describe_merge_entity(entity: dict[str, Any]) -> str:
         name = str(entity.get("name") or "без имени")[:120]
         entity_type = str(entity.get("entity_type") or "").strip()
         knowledge = int(entity.get("knowledge_count") or 0)
         relations = int(entity.get("relation_count") or 0)
         suffix = f" — {entity_type}" if entity_type else ""
-        return f"{name}{suffix} (знаний: {knowledge}, связей: {relations})"
+        # «связей: 0» показывалось у КАЖДОЙ сущности и означало не «у этой связей нет»,
+        # а «связей нет ни у кого»: таблица `relations` на живой установке пуста и была
+        # пуста всегда — граф строится связями знание↔сущность, а не сущность↔сущность.
+        # Число, которое не может быть иным, учит человека неправде о его данных.
+        # Появятся связи — появится и подпись.
+        counts = f"знаний: {knowledge}"
+        if relations:
+            counts += f", связей: {relations}"
+        return f"{name}{suffix} ({counts})"
 
     async def _send_tags(
         self,
