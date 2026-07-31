@@ -7,7 +7,6 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
-import hashlib
 from datetime import date
 
 from fastapi import APIRouter
@@ -20,6 +19,7 @@ from jericho.admin_api._deps import (
     _audit,
     _audit_cross_tenant_read,
     _json_value,
+    _knowledge_fingerprint,
     _parse_bool,
     _parse_unit_float,
     _protect_owner_target,
@@ -34,33 +34,6 @@ from jericho.mentions import mention_spans
 from jericho.storage.models import EntityType
 
 router = APIRouter()
-
-
-def _knowledge_fingerprint(item: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Enough to identify a Knowledge Object in the journal, and no content.
-
-    `audit_log` is append-only at the DATABASE level — BEFORE UPDATE and BEFORE
-    DELETE triggers `RAISE(ABORT)` — so whatever a route writes here is permanent
-    beyond the reach of any later fix, purge or redaction. That makes the body of
-    a personal note the last thing that belongs in it. What an investigation
-    needs is which object, how big it was, and what it was called; what it does
-    not need is the note itself.
-    """
-    if not item:
-        return None
-    content = str(item.get("content") or "")
-    return {
-        "id": item.get("id"),
-        "user_id": item.get("user_id"),
-        "title": str(item.get("title") or "")[:120],
-        "knowledge_kind": item.get("knowledge_kind"),
-        "lifecycle_stage": item.get("lifecycle_stage"),
-        "version": item.get("version"),
-        "content_chars": len(content),
-        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-        "created_at": item.get("created_at"),
-        "updated_at": item.get("updated_at"),
-    }
 
 
 @router.get("/knowledge")
@@ -337,8 +310,10 @@ async def reenrich_knowledge(knowledge_id: str, request: Request) -> dict[str, A
             "admin.knowledge.reenrich",
             "knowledge_object",
             knowledge_id,
-            before=before,
-            after=result["item"],
+            # Отпечаток с обеих сторон: переобогащение переписывает текст, и обе
+            # его редакции оседали в журнале, который ничто не чистит.
+            before=_knowledge_fingerprint(before),
+            after=_knowledge_fingerprint(result["item"]),
         )
     return result
 

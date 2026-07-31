@@ -266,3 +266,30 @@ __all__ = [
     "secrets",
     "validate_user_id",
 ]
+
+
+def _knowledge_fingerprint(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Enough to identify a Knowledge Object in the journal, and no content.
+
+    `audit_log` is append-only at the DATABASE level — BEFORE UPDATE and BEFORE
+    DELETE triggers `RAISE(ABORT)` — so whatever a route writes here is permanent
+    beyond the reach of any later fix, purge or redaction. That makes the body of
+    a personal note the last thing that belongs in it. What an investigation
+    needs is which object, how big it was, and what it was called; what it does
+    not need is the note itself.
+    """
+    if not item:
+        return None
+    content = str(item.get("content") or "")
+    return {
+        "id": item.get("id"),
+        "user_id": item.get("user_id"),
+        "title": str(item.get("title") or "")[:120],
+        "knowledge_kind": item.get("knowledge_kind"),
+        "lifecycle_stage": item.get("lifecycle_stage"),
+        "version": item.get("version"),
+        "content_chars": len(content),
+        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }

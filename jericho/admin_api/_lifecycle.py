@@ -17,6 +17,7 @@ from jericho.admin_api._deps import (
     _audit,
     _audit_cross_tenant_read,
     _json_value,
+    _knowledge_fingerprint,
     _parse_bool,
     _parse_int,
     _request_json,
@@ -115,8 +116,18 @@ async def apply_legacy_cleanup(request: Request) -> dict[str, Any]:
             f"admin.knowledge.cleanup.{action}",
             "knowledge_object",
             knowledge_id,
-            before=before,
-            after=change,
+            # Отпечаток, а не сама строка: `before` — это весь Knowledge Object
+            # вместе с `content`, а журнал append-only на уровне триггеров, и
+            # никакой purge потом этот текст не сотрёт. См. `_knowledge_fingerprint`.
+            before=_knowledge_fingerprint(before),
+            # В `change` лежит `result` целиком, а внутри него — тот же документ с
+            # текстом: одной подмены `before` было мало, и это поймал тест.
+            after={
+                "knowledge_object_id": knowledge_id,
+                "status": action,
+                "result": _knowledge_fingerprint(result if isinstance(result, dict) else None)
+                or {"applied": bool(result)},
+            },
         )
     return {
         "user_id": user_id,
@@ -230,8 +241,9 @@ async def apply_lifecycle_review(request: Request) -> dict[str, Any]:
             f"admin.lifecycle.{action}",
             "knowledge_object",
             knowledge_id,
-            before=before,
-            after=after,
+            # Тела документа здесь были ДВАЖДЫ — и до, и после правки.
+            before=_knowledge_fingerprint(before),
+            after=_knowledge_fingerprint(after),
         )
     return {
         "user_id": user_id,
