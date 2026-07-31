@@ -55,12 +55,14 @@ def _store(storage, user_id: str, text: str) -> str:
 
 
 def _run(**overrides) -> int:
-    from jericho.cli import _backfill_person_entities
+    from jericho.cli import _backfill_entities
 
-    args = argparse.Namespace(user=None, batch=50, limit=0, apply=True)
+    # Метод называется явно: команда обобщена под любое ОБЪЯВЛЯЮЩЕЕ правило, а не
+    # только под ФИО — см. `backfill-entities` и правило войсковой части.
+    args = argparse.Namespace(method="explicit_person_patronymic", user=None, batch=50, limit=0, apply=True)
     for key, value in overrides.items():
         setattr(args, key, value)
-    return _backfill_person_entities(args)
+    return _backfill_entities(args)
 
 
 def test_the_pass_creates_people_for_documents_ingested_before_the_rule(settings, storage):

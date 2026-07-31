@@ -804,29 +804,47 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backfill_person_entities(args: argparse.Namespace) -> int:
-    """Провести правило ФИО по УЖЕ загруженному архиву.
+def _backfill_entities(args: argparse.Namespace) -> int:
+    """Провести ОБЪЯВЛЯЮЩЕЕ правило извлечения по УЖЕ загруженному архиву.
 
-    Правило `explicit_person_patronymic` (отчество как объявление «вот человек»)
-    появилось после того, как корпус был загружен, и потому на существующие
-    документы не действовало вовсе: в графе владельца 110 сущностей и ни одного
-    человека, при том что почти все его вопросы — про людей.
+    Правило, добавленное после загрузки корпуса, на лежащие в базе документы не
+    действует вовсе — извлечение работает только при приёме. Такой проход и есть
+    способ это исправить.
 
-    Замер на 900 документах живого корпуса: 6094 упоминания, 3069 различных ФИО,
-    2333 фамилии, 64% имён встречаются больше чем в одном документе; точность
-    100% на 80 именах при судье, проверенном 6 из 6.
+    Метод называется явно и только один за прогон: остальные отработали при приёме,
+    и повторный прогон по ним означал бы новое решение за человека там, где его уже
+    спрашивали. Разрешены только ОБЪЯВЛЯЮЩИЕ методы (`DECLARED_ENTITY_METHODS`) —
+    те, у которых есть право само создавать узел; догадка по форме слова таким
+    правом не обладает и через этот проход пройти не должна.
+
+    Чем уже пользовались:
+
+      explicit_person_patronymic — ФИО с отчеством. Замер на 900 документах: 6094
+        упоминания, 3069 различных ФИО; на всех 1532 объектах — 20 644 упоминания и
+        4349 узлов, 71% имён встречается больше чем в одном документе, перестановочных
+        двойников 4 из 4349. Точность 100% на 80 именах при судье, проверенном 6 из 6.
+
+      explicit_military_unit — «в/ч N» и «войсковая часть N». Замер на живом архиве:
+        240 документов, 151 различная часть, 67 из них более чем в одном документе,
+        1079 пар «человек и часть» в пределах абзаца. До правила извлекалось НОЛЬ.
 
     По умолчанию — ПОКАЗ: считает и не пишет. Запись включает `--apply`.
-
-    Берётся ТОЛЬКО правило ФИО, а не всё извлечение: остальные методы отработали
-    при приёме, и повторный прогон по ним означал бы новое решение за человека
-    там, где его уже спрашивали.
     """
     from jericho.config import ensure_runtime_dirs, load_settings
     from jericho.ingestion import _extract_entities
+    from jericho.ingestion._base import DECLARED_ENTITY_METHODS
     from jericho.knowledge_graph import KnowledgeGraph
     from jericho.storage import init_storage
     from jericho.storage.models import EntityType
+
+    method = str(args.method)
+    if method not in DECLARED_ENTITY_METHODS:
+        print(
+            f"Метод {method!r} не объявляющий. Проход умеет только те, что вправе сами "
+            f"создавать узел:\n  " + "\n  ".join(sorted(DECLARED_ENTITY_METHODS)),
+            file=sys.stderr,
+        )
+        return 2
 
     settings = load_settings()
     ensure_runtime_dirs(settings)
@@ -848,7 +866,7 @@ def _backfill_person_entities(args: argparse.Namespace) -> int:
                 candidates = [
                     item
                     for item in _extract_entities(str(row["content"] or ""))
-                    if str(item.get("method") or "") == "explicit_person_patronymic"
+                    if str(item.get("method") or "") == method
                 ]
                 if not candidates:
                     continue
@@ -867,10 +885,10 @@ def _backfill_person_entities(args: argparse.Namespace) -> int:
                             entity = graph.create_entity(
                                 owner,
                                 name,
-                                EntityType.PERSON,
+                                EntityType(str(candidate.get("entity_type") or EntityType.OTHER.value)),
                                 metadata={
-                                    "created_by": "backfill_person_entities",
-                                    "extraction_method": "explicit_person_patronymic",
+                                    "created_by": "backfill_entities",
+                                    "extraction_method": method,
                                     "initial_confidence": float(candidate.get("confidence", 0.9)),
                                 },
                             )
@@ -887,7 +905,7 @@ def _backfill_person_entities(args: argparse.Namespace) -> int:
                         owner,
                         confidence=float(candidate.get("confidence", 0.9)),
                         evidence={
-                            "method": "explicit_person_patronymic",
+                            "method": method,
                             "matched_as": candidate.get("matched_as", name),
                             "backfill": True,
                         },
@@ -898,8 +916,9 @@ def _backfill_person_entities(args: argparse.Namespace) -> int:
                 break
         if apply_changes:
             storage.record_event(
-                "graph.person_entities_backfilled",
+                "graph.entities_backfilled",
                 {
+                    "method": method,
                     "scanned": scanned,
                     "mentions": mentions,
                     "distinct_names": len(names),
@@ -910,7 +929,14 @@ def _backfill_person_entities(args: argparse.Namespace) -> int:
             )
     finally:
         storage.close()
-    print(f"Просмотрено объектов: {scanned}; упоминаний ФИО: {mentions}; различных имён: {len(names)}.")
+    # «Упоминаний» здесь — это пары (документ, имя), а не вхождения в текст:
+    # `_extract_entities` схлопывает одинаковые имена внутри документа. Отдельная проба
+    # по сырому тексту даёт больше (1522 против 464 у частей), и это не расхождение,
+    # а разные величины — путать их значит спорить с собственным замером.
+    print(
+        f"Метод: {method}. Просмотрено объектов: {scanned}; "
+        f"пар документ-имя: {mentions}; различных имён: {len(names)}."
+    )
     if apply_changes:
         print(
             f"Создано сущностей: {created}; связей знание-человек: {linked}; "
@@ -1299,19 +1325,24 @@ def build_parser() -> argparse.ArgumentParser:
     backfill.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
     backfill.set_defaults(handler=_backfill_document_dates)
 
-    people = sub.add_parser(
-        "backfill-person-entities",
-        help="Run the full-name (patronymic) rule over the archive ingested before it existed",
+    entities = sub.add_parser(
+        "backfill-entities",
+        help="Run one declaring extraction rule over the archive ingested before it existed",
     )
-    people.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
-    people.add_argument("--batch", type=int, default=200, help="Objects per pass (default: 200)")
-    people.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
-    people.add_argument(
+    entities.add_argument(
+        "--method",
+        required=True,
+        help="Declaring extraction method, e.g. explicit_person_patronymic or explicit_military_unit",
+    )
+    entities.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    entities.add_argument("--batch", type=int, default=200, help="Objects per pass (default: 200)")
+    entities.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
+    entities.add_argument(
         "--apply",
         action="store_true",
         help="Write the entities and links (without it the pass only counts)",
     )
-    people.set_defaults(handler=_backfill_person_entities)
+    entities.set_defaults(handler=_backfill_entities)
 
     mint = sub.add_parser("mint-token", help="Issue a scoped API token for an account/preset")
     mint.add_argument("--user", required=True, help="Account id the token authenticates as")

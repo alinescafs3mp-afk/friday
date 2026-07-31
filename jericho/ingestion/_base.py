@@ -505,6 +505,35 @@ _ORG_SUFFIX_RE = re.compile(
     r"[A-Z][A-Za-z0-9&.-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.-]{1,40}){0,3}\s+"
     r"(?:Inc\.?|LLC|Ltd\.?|Corp\.?|GmbH))(?!\w)"
 )
+# Войсковая часть — главная организационная единица этого архива, и до сих пор она не
+# извлекалась НИКАК: проверено исполнением, «в/ч 12345» и «войсковой части 54321» дают
+# ноль кандидатов. В графе владельца при 4349 людях всего 11 организаций.
+#
+# Почему это правило ОБЪЯВЛЯЮЩЕЕ, как ФИО с отчеством: «в/ч» и «войсковая часть» —
+# служебные слова, за которыми не может стоять ничего, кроме номера части.
+#
+# Замерено на живом архиве (1532 документа, стенд ~/.jericho/eval/unit_rule_probe.py):
+#
+#   форма                        упоминаний  различных номеров
+#   в/ч N                               460                138
+#   войсковая часть N                  1031                 17
+#   часть N (слабая форма)               48                  4
+#
+# Слабая форма НЕ берётся: она даёт ровно ОДИН номер, не подтверждённый однозначной
+# формой, а рискует поймать «часть 12345» в смысле «часть имущества». Её отсутствие
+# стоит одного узла из 151.
+#
+# Всего 240 документов, 151 различная часть, 67 из них встречаются больше чем в одном
+# документе — то есть узлы реально связывают документы, а не сидят по одному.
+#
+# ⚠️ Номер захватывается ОТДЕЛЬНО, потому что имя приводится к канону «в/ч N»: без
+# этого «в/ч 12345» и «войсковая часть 12345» дают РАЗНЫЕ узлы — `normalize_entity_name`
+# сворачивает по словам и получает `в ч 12345` против `войск част 12345`. Проверено
+# исполнением до правки.
+_MILITARY_UNIT_RE = re.compile(
+    r"(?<!\w)(?:в\s*/\s*ч\.?\s*|войсков\w*\s+част\w*\s+|в\.\s*ч\.\s*)(\d{4,6})(?!\d)",
+    re.I,
+)
 _EVENT_CALLED_RE = re.compile(
     rf"(?i:\b(?:встреча|конференция|событие|meeting|conference|event)\s+(?:под\s+названием|called|named))\s+"
     rf"[\"«]?({_PROPER_TOKEN}(?:\s+{_PROPER_TOKEN}){{0,3}})[\"»]?",
@@ -691,6 +720,9 @@ DECLARED_ENTITY_METHODS = frozenset(
         "explicit_identifier",
         "explicit_infrastructure_marker",
         "explicit_location_marker",
+        # «в/ч N» и «войсковая часть N» — служебное слово плюс номер, иным быть не может.
+        # Замер и обоснование — в комментарии у `_MILITARY_UNIT_RE`.
+        "explicit_military_unit",
         "explicit_organization_marker",
         # ФИО с отчеством: 100% точности на 80 именах живого корпуса при судье,
         # проверенном 6 из 6. Замер и порог — в комментарии у `_PERSON_FULL_NAME_RE`.
@@ -796,6 +828,16 @@ def _extract_entities(text: str) -> list[dict[str, Any]]:
         add(match.group("name"), EntityType.CONCEPT, 0.89, "explicit_technology_context")
     for match in _DOCUMENT_RE.finditer(text):
         add(match.group(1), EntityType.DOCUMENT, 0.9, "quoted_document_name")
+    for match in _MILITARY_UNIT_RE.finditer(text):
+        # Канон, а не то, как написано в тексте: обе объявляющие формы обязаны сойтись
+        # в один узел. См. замер у `_MILITARY_UNIT_RE`.
+        add(
+            f"в/ч {match.group(1)}",
+            EntityType.ORGANIZATION,
+            0.9,
+            "explicit_military_unit",
+            matched_as=match.group(0),
+        )
     for match in _IDENTIFIER_RE.finditer(text):
         add(match.group(1), EntityType.OTHER, 0.9, "explicit_identifier")
     for match in _COMPACT_IDENTIFIER_RE.finditer(text):
