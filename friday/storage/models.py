@@ -127,12 +127,27 @@ class TaskStatus(str, Enum):
     DONE = "done"
     FAILED = "failed"
     SKIPPED = "skipped"
+    #: Исполнение оборвалось рядом с побочным эффектом: неизвестно, случился ли
+    #: он. Спека v3 §5 запрещает автоматический повтор такого шага — сначала
+    #: сверка с миром. Это НЕ синоним `failed`: провал означает «эффекта не
+    #: было», а здесь этого никто не знает.
+    UNCERTAIN = "uncertain"
+    #: Побочный эффект откачен компенсацией.
+    COMPENSATED = "compensated"
 
 
 MISSION_TERMINAL_STATUSES = frozenset(
     {MissionStatus.COMPLETED, MissionStatus.FAILED, MissionStatus.CANCELLED}
 )
-TASK_TERMINAL_STATUSES = frozenset({TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.SKIPPED})
+#: Состояния, из которых шаг сам уже не сдвинется.
+#:
+#: `uncertain` СЮДА НЕ ВХОДИТ намеренно: миссия с неизвестным исходом побочного
+#: эффекта не должна тихо «завершиться». Она ждёт сверки, и человек обязан
+#: увидеть её незакрытой, иначе неизвестность превратится в молчаливый успех.
+#: `compensated` — терминальное: эффект откачен, шагу дальше идти некуда.
+TASK_TERMINAL_STATUSES = frozenset(
+    {TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.SKIPPED, TaskStatus.COMPENSATED}
+)
 
 
 class EntityLinkStatus(str, Enum):

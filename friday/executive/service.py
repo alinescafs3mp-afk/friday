@@ -368,6 +368,24 @@ class ExecutiveService:
                 began = began.replace(tzinfo=UTC)
             if began is not None and began > cutoff:
                 continue
+            if int(task.get("side_effect") or 0):
+                # Шаг с побочным эффектом, оборвавшийся на середине, — это
+                # НЕИЗВЕСТНЫЙ исход, а не повод повторить. Спека v3 §5: «Uncertain
+                # side effects require reconciliation, not automatic replay».
+                # Слепой повтор здесь означал бы второе письмо, второе слияние,
+                # второй перевод — то, что откатить уже нельзя.
+                LOGGER.warning(
+                    "Mission step with a side effect was interrupted; marking uncertain: %s",
+                    task["id"],
+                )
+                self.storage.update_mission_task_fields(
+                    task["id"],
+                    mission["user_id"],
+                    status=TaskStatus.UNCERTAIN.value,
+                    error="исполнение прервано: неизвестно, случился ли побочный эффект",
+                )
+                reclaimed += 1
+                continue
             LOGGER.warning(
                 "Mission task stuck in running since %s — returning it to pending: %s",
                 started or "unknown",

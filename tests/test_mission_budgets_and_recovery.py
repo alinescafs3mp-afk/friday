@@ -245,3 +245,47 @@ def test_a_mission_out_of_budget_is_stopped_before_the_next_step():
     assert source.index("_budget_verdict") < source.index("_pick_runnable"), (
         "бюджет проверяется уже после выбора шага"
     )
+
+
+def test_an_interrupted_side_effect_is_never_replayed_blindly(storage, settings):
+    """Мутация: убрать ветку `side_effect` из `_reclaim_stale_tasks` — тест краснеет.
+
+    Спека v3 §5: «Uncertain side effects require reconciliation, not automatic
+    replay». Шаг, оборвавшийся на середине побочного эффекта, возвращался в
+    очередь наравне с любым другим — то есть письмо уходило второй раз, слияние
+    выполнялось второй раз, и откатить это уже нельзя.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from friday.executive.service import ExecutiveService
+    from friday.storage.models import TaskStatus
+
+    mission_id = _mission(storage)
+    long_ago = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    risky = _task(storage, mission_id, seq=1, side_effect=1, status="running", started_at=long_ago)
+    plain = _task(storage, mission_id, seq=2, side_effect=0, status="running", started_at=long_ago)
+
+    service = object.__new__(ExecutiveService)
+    service.storage = storage
+    ExecutiveService._reclaim_stale_tasks(  # noqa: SLF001
+        service, {"id": mission_id, "user_id": "alice"}
+    )
+
+    states = {
+        row["id"]: row["status"]
+        for row in storage.execute("SELECT id, status FROM mission_tasks WHERE mission_id=?", (mission_id,))
+    }
+    assert states[risky] == TaskStatus.UNCERTAIN.value, "прерванный побочный эффект отправлен на повтор"
+    assert states[plain] == TaskStatus.PENDING.value, "обычный шаг перестал переигрываться"
+
+
+def test_uncertain_is_not_a_terminal_state():
+    """Миссия с неизвестным исходом не должна тихо «завершиться».
+
+    Человек обязан увидеть её незакрытой — иначе неизвестность превращается в
+    молчаливый успех.
+    """
+    from friday.storage.models import TASK_TERMINAL_STATUSES, TaskStatus
+
+    assert TaskStatus.UNCERTAIN not in TASK_TERMINAL_STATUSES
+    assert TaskStatus.COMPENSATED in TASK_TERMINAL_STATUSES
