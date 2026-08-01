@@ -102,6 +102,7 @@ async def knowledge_quality_dashboard(
 async def eval_search(
     request: Request, q: str, user_id: str | None = None, limit: int = Query(15, ge=1, le=50)
 ) -> dict[str, Any]:
+
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.eval.read", target)
@@ -127,6 +128,8 @@ async def retrieval_explain(
     """Explain-trace: why the ranker returned/discarded/ordered candidates for a
     query. Read-only, deterministic (no LLM) — the same HybridSearcher run the
     user sees, with the per-signal breakdown and discard reasons surfaced."""
+    from friday.retrieval import is_relational_query
+
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.eval.read", target)
@@ -134,8 +137,21 @@ async def retrieval_explain(
     # `record_usage=False` — не украшение: без него объявленный здесь read-only
     # писал счётчик обращений, который ранжирование читает обратно, и диагностика
     # меняла ту самую выдачу, которую показывает.
+    # Режим ТОТ ЖЕ, что у человека и у замера, иначе объяснение относится к другому
+    # поиску. `memory_search` — путь, которым ходит модель, — зовёт поиск БЕЗ `kg`;
+    # `run_eval` включает граф только для relational-запросов, и на этом наборе он
+    # не включается ни разу. А здесь граф стоял по умолчанию, и диагностика
+    # показывала документы-концентраторы с графовым вкладом 0.744, которого в
+    # боевой выдаче нет: «Судимости.docx» обгонял нужный листок ровно на эту
+    # величину — в объяснении, но не в жизни.
     result = await state.hybrid_searcher.search(
-        target, q, limit=limit, kg=state.kg, explain=True, record_usage=False
+        target,
+        q,
+        limit=limit,
+        kg=state.kg,
+        graph_expansion=is_relational_query(q),
+        explain=True,
+        record_usage=False,
     )
     trace = result.get("trace", [])
     discarded = [row for row in trace if row.get("status") == "discarded"]

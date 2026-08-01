@@ -12,6 +12,7 @@ dense recall), so this measures the retrieval layer in isolation.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import math
@@ -99,6 +100,49 @@ def reciprocal_rank(retrieved: list[str], expected: set[str]) -> float:
     return 0.0
 
 
+def _searcher_like_production(
+    storage: Any,
+    embeddings: Any,
+    settings: Any,
+    **overrides: Any,
+) -> Any:
+    """Поисковик ровно той же сборки, что обслуживает человека.
+
+    Метрика, которая меряет ДРУГУЮ конфигурацию, отвечает не на тот вопрос. Здесь
+    создавался поисковик без переранжировщика, без потолка пула и без порога
+    плотных доказательств — то есть все накопленные числа recall относились к
+    поиску, которого в бою нет. Расхождение видно прямо: на одном и том же наборе
+    диагностика (с переранжировщиком) находила 57 эталонов из 78, а замер — 41.
+
+    Переранжировщик подключается по тем же ДВУМ условиям, что в `create_app`:
+    настроен адрес И задана глубина. Одно без другого — молчаливая ошибка, и
+    повторять её здесь нельзя тем более: замер обязан знать, включён он или нет.
+    """
+    from friday.retrieval import HybridSearcher
+    from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
+
+    rerank_backend = RerankBackend(settings)
+    reranker = None
+    if rerank_backend.enabled and settings.rerank_top > 0:
+        reranker = functools.partial(rerank_with_backend, rerank_backend)
+    return HybridSearcher(
+        storage,
+        embeddings,
+        graph_max_depth=settings.graph_max_depth,
+        pool_max=settings.retrieval_pool_max,
+        dense_evidence_min=settings.retrieval_dense_evidence_min,
+        reranker=reranker,
+        rerank_top=settings.rerank_top,
+        rerank_confident_min=settings.rerank_confident_min,
+        # Единственное намеренное отличие от боя: замер НЕ пишет счётчик обращений,
+        # который сам же читает обратно в ранжирование. Всё остальное, чем арм
+        # отличается от боя (`chunk_recall`, `ablate`), передаёт вызывающий — и это
+        # ровно то, что он и собирался измерить.
+        record_usage=False,
+        **overrides,
+    )
+
+
 async def run_eval(
     storage: Any,
     embeddings: Any,
@@ -109,16 +153,13 @@ async def run_eval(
 ) -> dict[str, Any]:
     """Run the gold set through the real searcher; return an aggregate report."""
     from friday.knowledge_graph import KnowledgeGraph
-    from friday.retrieval import HybridSearcher
 
     cases = storage.list_eval_cases(user_id)
     if not cases:
         return {"cases": 0, "recall_at_k": None, "reason": "no gold cases"}
 
     # Advisory: never write the usage counter that ``usage_signal`` reads back.
-    searcher = HybridSearcher(
-        storage, embeddings, graph_max_depth=settings.graph_max_depth, record_usage=False
-    )
+    searcher = _searcher_like_production(storage, embeddings, settings)
     report = await _score_cases(searcher, KnowledgeGraph(storage), user_id, cases, k)
     # Tells a low recall caused by deleted expectations apart from one caused by search
     # actually getting worse — the number alone cannot distinguish them.
@@ -217,7 +258,6 @@ async def compare_chunk_recall(
     ``FRIDAY_EMBEDDINGS_CHUNK_CHARS=0``. Advisory only: nothing here feeds ranking.
     """
     from friday.knowledge_graph import KnowledgeGraph
-    from friday.retrieval import HybridSearcher
 
     cases = storage.list_eval_cases(user_id)
     if not cases:
@@ -228,13 +268,7 @@ async def compare_chunk_recall(
     kg = KnowledgeGraph(storage)
     arms: dict[str, dict[str, Any]] = {}
     for name, chunk_recall in (("baseline", False), ("chunked", True)):
-        searcher = HybridSearcher(
-            storage,
-            embeddings,
-            graph_max_depth=settings.graph_max_depth,
-            chunk_recall=chunk_recall,
-            record_usage=False,
-        )
+        searcher = _searcher_like_production(storage, embeddings, settings, chunk_recall=chunk_recall)
         arms[name] = await _score_cases(searcher, kg, user_id, cases, k)
 
     baseline_cases = {row["id"]: row for row in arms["baseline"]["per_case"]}
@@ -289,7 +323,7 @@ async def compare_signal_ablation(
     ranking, and no arm writes usage counters or moves the regression baseline.
     """
     from friday.knowledge_graph import KnowledgeGraph
-    from friday.retrieval import ABLATABLE_SIGNALS, ENTANGLED_SIGNALS, HybridSearcher
+    from friday.retrieval import ABLATABLE_SIGNALS, ENTANGLED_SIGNALS
 
     cases = storage.list_eval_cases(user_id)
     if not cases:
@@ -303,13 +337,7 @@ async def compare_signal_ablation(
     kg = KnowledgeGraph(storage)
 
     def _searcher(ablate: tuple[str, ...]) -> Any:
-        return HybridSearcher(
-            storage,
-            embeddings,
-            graph_max_depth=settings.graph_max_depth,
-            record_usage=False,
-            ablate=ablate,
-        )
+        return _searcher_like_production(storage, embeddings, settings, ablate=ablate)
 
     full = await _score_cases(_searcher(()), kg, user_id, cases, k)
     scored_cases = full["cases"]
