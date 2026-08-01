@@ -26,6 +26,7 @@ from jericho.admin_api._deps import (
     asyncio,
     functools,
 )
+from jericho.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -165,7 +166,30 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
 
 
 @router.get("/resolutions")
-async def list_resolutions(request: Request, user_id: str, status: str | None = None) -> dict[str, Any]:
+async def list_resolutions(
+    request: Request,
+    user_id: str,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Очередь слияний — страницей, и страница НАЗЫВАЕТ себя страницей.
+
+    Хранилище умеет и лимит, и смещение, и счёт (`count_resolution_candidates`), а
+    маршрут не брал ничего: отдавал умолчательные 500 строк и `count`, равный длине
+    этой самой страницы. На корпусе владельца кандидатур 45 947 — оператор видел
+    «500» и не мог отличить его от «всего 500». Числа `count` и `total` тут разные
+    по смыслу, поэтому названы по-разному и отдаются оба.
+
+    Два счётчика внутри строки — из той же семьи: `knowledge_count` считался как
+    `len(get_entity_knowledge(..., limit=1000))`, то есть у сущности с 45 000
+    документов показывал ровно 1000, а стоил 500 строк × 2 сущности × выборку в
+    тысячу записей. Теперь это COUNT в базе.
+
+    Вся сборка уходит с event loop: даже страница в сотню строк — это четыре сотни
+    обращений к SQLite, а один uvicorn обслуживает и API, и мост Telegram, и все
+    органы из одного цикла.
+    """
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.resolutions.read", user_id)
     try:
@@ -173,22 +197,35 @@ async def list_resolutions(request: Request, user_id: str, status: str | None = 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Недопустимый статус объединения") from exc
     state = _services(request)
-    items = state.storage.list_resolution_candidates(user_id, status_enum)
-    enriched: list[dict[str, Any]] = []
-    for item in items:
-        item["evidence"] = _json_value(item.get("evidence_json"), {})
-        left = state.storage.get_entity(item["entity_a_id"], user_id)
-        right = state.storage.get_entity(item["entity_b_id"], user_id)
-        if not left or not right:
-            continue
-        for entity in (left, right):
-            entity["aliases"] = _json_value(entity.get("aliases_json"), [])
-            entity["knowledge_count"] = len(
-                state.storage.get_entity_knowledge(user_id, entity["id"], limit=1000)
-            )
-            entity["relation_count"] = len(state.storage.get_entity_relations(entity["id"], user_id))
-        enriched.append({**item, "entity_a": left, "entity_b": right})
-    return {"user_id": user_id, "items": enriched, "count": len(enriched)}
+    bounded_limit = max(1, min(int(limit), 500))
+    bounded_offset = max(0, int(offset))
+
+    def _collect() -> dict[str, Any]:
+        items = state.storage.list_resolution_candidates(
+            user_id, status_enum, limit=bounded_limit, offset=bounded_offset
+        )
+        enriched: list[dict[str, Any]] = []
+        for item in items:
+            item["evidence"] = _json_value(item.get("evidence_json"), {})
+            left = state.storage.get_entity(item["entity_a_id"], user_id)
+            right = state.storage.get_entity(item["entity_b_id"], user_id)
+            if not left or not right:
+                continue
+            for entity in (left, right):
+                entity["aliases"] = _json_value(entity.get("aliases_json"), [])
+                entity["knowledge_count"] = state.storage.count_entity_knowledge(user_id, entity["id"])
+                entity["relation_count"] = state.storage.count_entity_relations(entity["id"], user_id)
+            enriched.append({**item, "entity_a": left, "entity_b": right})
+        return {
+            "user_id": user_id,
+            "items": enriched,
+            "count": len(enriched),
+            "total": state.storage.count_resolution_candidates(user_id, status_enum),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+        }
+
+    return await run_blocking(_collect)
 
 
 @router.post("/knowledge/detect-duplicates")
