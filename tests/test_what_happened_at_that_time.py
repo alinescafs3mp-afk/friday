@@ -377,3 +377,85 @@ def test_an_unparsed_moment_never_becomes_an_empty_timeline():
     )
     branch = source[source.index('get("understood") is False') :][:900]
     assert "НЕ утверждай" in branch
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("что было вчера в 8 часов вечера", "вчера 20:00"),
+        ("что было вчера в 3 часа дня", "вчера 15:00"),
+        ("что было вчера в два часа ночи", "вчера 02:00"),
+        ("что было сегодня в час ночи", "сегодня 01:00"),
+        ("что было вчера в час дня", "вчера 13:00"),
+        ("что было вчера в 9 утра", "вчера 09:00"),
+        ("что было вчера в 12 ночи", "вчера 00:00"),
+        ("что было вчера в полдень", "вчера 12:00"),
+        # Полное время частью суток не сдвигается: «в 20:30 вечера» — это 20:30.
+        ("что было вчера в 20:30", "вчера 20:30"),
+    ],
+)
+def test_the_hour_matches_the_part_of_the_day(question, expected):
+    """Мутация: убрать `_hour_with_part_of_day` — тест краснеет.
+
+    Замерено ревью: «8 часов вечера» разбиралось как 08:00, «3 часа дня» как
+    03:00, а «два часа ночи» — как 01:00 при любом числительном, потому что
+    правило «час ночи» искалось подстрокой по всему тексту. Человек спрашивал
+    про вечер и слышал «в тот час ничего не было».
+    """
+    from friday.agent_runtime import moment_from_question
+
+    assert moment_from_question(question) == expected
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("что было с 29 по 31 июля", ("29 июля", "31 июля")),
+        ("что было с 26 июля по 1 августа", ("26 июля", "1 августа")),
+        ("что было между 26 и 29 июля", ("26 июля", "29 июля")),
+    ],
+)
+def test_a_named_range_keeps_both_ends(question, expected):
+    """Мутация: убрать `period_from_question` — тест краснеет.
+
+    `until` не передавался НИКОГДА: «что было с 29 по 31 июля» показывало один
+    день вместо трёх, причём последний — то есть ответ был про другое время, чем
+    спросили.
+    """
+    from friday.agent_runtime import period_from_question
+
+    assert period_from_question(question) == expected
+
+
+@pytest.mark.parametrize("question", ["что было вчера", "что было 29 июля", "запиши: с Ивановым по срокам"])
+def test_a_single_day_is_not_mistaken_for_a_range(question):
+    from friday.agent_runtime import period_from_question
+
+    assert period_from_question(question) is None
+
+
+def test_the_feed_covers_the_whole_window_not_just_its_start(storage):
+    """Мутация: вернуть `events[:window]` — тест краснеет.
+
+    Лента отдавала первые N событий: на дне с 684 событиями человек видел первый
+    час и не знал, что было дальше. Теперь выборка равномерна по промежутку, а
+    последнее событие показывается всегда — чем всё кончилось, обычно и есть
+    ответ на «что было».
+    """
+    from datetime import UTC, datetime, timedelta
+
+    conversation_id = _seed(storage)
+    base = datetime.now(UTC) - timedelta(hours=12)
+    for index in range(60):
+        storage.store_message(conversation_id, "alice", "user", f"сообщение {index}")
+
+    since = (base - timedelta(hours=1)).isoformat()
+    until = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    events = storage.what_happened("alice", since=since, until=until, limit=10)
+
+    assert len(events) == 10
+    texts = [event["text"] for event in events]
+    assert texts[-1] == "сообщение 59", "последнее событие промежутка не показано"
+    assert texts[0] == "сообщение 0", "выборка не начинается с начала промежутка"
+    # Между краями должны быть события из середины, а не подряд идущие первые.
+    assert texts[1] != "сообщение 1", "показаны подряд идущие первые события"

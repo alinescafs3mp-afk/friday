@@ -91,17 +91,82 @@ _MOMENT_IN_QUESTION = re.compile(
     # вопросе — это что угодно, а не время.
     r"(?:[^0-9]{0,12}?(?:в\s+)?(?:"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})|"
-    r"(?P<hour_word>\d{1,2})\s*(?:час\w*|ч\b)"
+    # Слово «час» необязательно, если рядом названа часть суток: «в 9 утра»,
+    # «в 12 ночи» — это время, и человек говорит именно так.
+    r"(?P<hour_word>\d{1,2})\s*(?:час\w*|ч\b|(?=\s*(?:ночи|утра|дня|вечера)\b))"
     r"))?",
     re.IGNORECASE,
 )
-#: Часы, названные словами. «В час ночи» — это 01:00, и человек говорит именно так.
+#: Часы, названные словами. «В полночь», «в полдень» — без числа вообще.
 _SPOKEN_HOURS = (
     (re.compile(r"\bполноч\w*", re.IGNORECASE), 0),
     (re.compile(r"\bполд(?:ень|ня)", re.IGNORECASE), 12),
-    (re.compile(r"\bчас\w*\s+ночи", re.IGNORECASE), 1),
-    (re.compile(r"\bутра\b", re.IGNORECASE), None),
 )
+#: Числительные словом: «в два часа ночи» — это два, а не один.
+_SPOKEN_NUMBERS = {
+    "час": 1, "один": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6,
+    "семь": 7, "восемь": 8, "девять": 9, "десять": 10, "одиннадцать": 11, "двенадцать": 12,
+}
+_SPOKEN_HOUR_RE = re.compile(
+    r"\b(" + "|".join(sorted(_SPOKEN_NUMBERS, key=len, reverse=True)) + r")\s+час\w*",
+    re.IGNORECASE,
+)
+#: «в час ночи», «в час дня» — числительное здесь само слово «час».
+_BARE_HOUR_RE = re.compile(r"\bв\s+час\w*\s+(ночи|дня)\b", re.IGNORECASE)
+#: Часть суток. «Восемь вечера» — это 20:00, и человек говорит именно так.
+_PART_OF_DAY_RE = re.compile(r"\b(ночи|утра|дня|вечера)\b", re.IGNORECASE)
+
+
+def _hour_with_part_of_day(hour: int, text: str) -> int:
+    """Привести названный час к суточному по части суток.
+
+    «8 часов вечера» — это 20:00, а не 08:00: без этого лента показывала утро
+    вместо вечера и человек читал «в тот час ничего не было». Ночь: 12 ночи —
+    это полночь. День: 12 дня — это полдень.
+    """
+    part = _PART_OF_DAY_RE.search(text)
+    if not part:
+        return hour
+    name = part.group(1).casefold()
+    if name == "ночи":
+        return 0 if hour == 12 else hour
+    if name == "утра":
+        return hour
+    if hour == 12:
+        return 12 if name == "дня" else 0
+    return hour + 12 if hour < 12 else hour
+
+
+#: «с 29 по 31 июля», «с 26 июля по 1 августа», «между 26 и 29 июля».
+_RANGE_RE = re.compile(r"\b(?:с|от|между)\b(?P<body>.{3,80}?)\b(?:по|до|и)\b(?P<tail>.{2,40})", re.IGNORECASE)
+
+
+def period_from_question(message: str) -> tuple[str, str] | None:
+    """Начало и конец промежутка, если человек назвал именно промежуток.
+
+    Раньше `until` не передавался никогда: «что было с 29 по 31 июля» брало
+    только «31 июля» и показывало один день вместо трёх. Месяц из второй части
+    достраивается к первой — «с 29 по 31 июля» это июль с обеих сторон.
+    """
+    text = " ".join(str(message or "").split())
+    match = _RANGE_RE.search(text)
+    if not match:
+        return None
+    head = match.group("body").strip()
+    tail = match.group("tail").strip()
+    right = moment_from_question(f"что было {tail}")
+    if not right:
+        return None
+    # «с 29 по 31 июля»: в левой части месяца нет вовсе, и сама по себе она не
+    # разбирается. Месяц берётся из правой — промежуток внутри одного месяца
+    # человек так и записывает.
+    if re.fullmatch(r"\d{1,2}", head):
+        month = re.sub(r"^\s*\d{1,2}\s*", "", right).strip()
+        head = f"{head} {month}" if month else head
+    left = moment_from_question(f"что было {head}")
+    if not left:
+        return None
+    return left, right
 
 
 def moment_from_question(message: str) -> str | None:
@@ -121,9 +186,24 @@ def moment_from_question(message: str) -> str | None:
     hour_text = match.group("hour") or match.group("hour_word")
     if hour_text is not None and 0 <= int(hour_text) <= 23:
         minute = match.group("minute")
-        return f"{moment} {int(hour_text):02d}:{minute or '00'}"
+        hour = int(hour_text)
+        # Минуты названы явно — время уже полное, часть суток не применяется:
+        # «в 20:30 вечера» не должно превратиться в 32:30.
+        if minute is None:
+            hour = _hour_with_part_of_day(hour, text)
+        return f"{moment} {hour:02d}:{minute or '00'}"
+    bare = _BARE_HOUR_RE.search(text)
+    if bare:
+        return f"{moment} {_hour_with_part_of_day(1, text):02d}:00"
+    spoken = _SPOKEN_HOUR_RE.search(text)
+    if spoken:
+        # Проверяется слово ПЕРЕД «часа», а не наличие «часа ночи» где угодно:
+        # прежнее правило превращало «два часа ночи» в 01:00, потому что искало
+        # подстроку по всему тексту.
+        hour = _SPOKEN_NUMBERS[spoken.group(1).casefold()]
+        return f"{moment} {_hour_with_part_of_day(hour, text):02d}:00"
     for pattern, spoken_hour in _SPOKEN_HOURS:
-        if spoken_hour is not None and pattern.search(text):
+        if pattern.search(text):
             return f"{moment} {spoken_hour:02d}:00"
     return moment
 
@@ -1709,7 +1789,8 @@ class AgentRuntime:
         рассказала про 29 июля **2024** года по документу, где эта дата
         упомянута, — при полутора тысячах событий 29 июля 2026-го в архиве.
         """
-        moment = moment_from_question(message)
+        period = period_from_question(message)
+        moment = period[0] if period else moment_from_question(message)
         if not moment:
             return  # без времени в вопросе ленту показывать нечем
         if not _ASKS_WHAT_HAPPENED.search(message) and not await self._is_a_timeline_question(message):
@@ -1720,9 +1801,10 @@ class AgentRuntime:
         ):
             return
         try:
-            result = await self.kernel.execute(
-                "what_happened", {"since": moment, "limit": 40}, actor=actor
-            )
+            arguments: dict[str, Any] = {"since": moment, "limit": 40}
+            if period:
+                arguments["until"] = period[1]
+            result = await self.kernel.execute("what_happened", arguments, actor=actor)
         except Exception:  # noqa: BLE001 — лента не должна ронять ход
             LOGGER.exception("Prefetch timeline failed")
             return

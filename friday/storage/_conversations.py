@@ -420,13 +420,18 @@ class ConversationsMixin(StorageShared):
         границы к UTC сам — иначе «15 часов» будет чужим часом.
         """
         window = max(1, min(int(limit), 200))
+        # Из базы берётся с запасом, а прореживание идёт уже по собранному: иначе
+        # «равномерная выборка» получалась из первых N строк каждого источника,
+        # то есть снова из начала промежутка. Потолок — чтобы день с тысячами
+        # событий не поднимался в память целиком.
+        fetch_window = min(1000, max(window * 8, 200))
         events: list[dict[str, Any]] = []
         for row in self.execute(
             """SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title
                FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id
                WHERE m.user_id=? AND m.created_at >= ? AND m.created_at <= ?
                ORDER BY m.created_at ASC LIMIT ?""",
-            (user_id, since, until, window),
+            (user_id, since, until, fetch_window),
         ):
             events.append(
                 {
@@ -444,7 +449,7 @@ class ConversationsMixin(StorageShared):
                WHERE k.user_id=? AND k.deleted_at IS NULL
                  AND k.created_at >= ? AND k.created_at <= ?
                ORDER BY k.created_at ASC LIMIT ?""",
-            (user_id, since, until, window),
+            (user_id, since, until, fetch_window),
         ):
             events.append(
                 {
@@ -459,7 +464,19 @@ class ConversationsMixin(StorageShared):
                 }
             )
         events.sort(key=lambda item: (str(item["at"]), str(item.get("kind"))))
-        return events[:window]
+        if len(events) <= window:
+            return events
+        # Прежде возвращались первые N — то есть на дне с 541 событием человек
+        # видел утро и не знал, что было дальше. Берём равномерную выборку по
+        # всему промежутку: начало, середина и конец обязаны быть представлены,
+        # иначе «что было вчера» отвечает про первый час.
+        step = len(events) / float(window)
+        picked = [events[min(len(events) - 1, int(index * step))] for index in range(window)]
+        # Последнее событие промежутка показываем всегда: чем всё кончилось —
+        # обычно самое важное в вопросе «что было».
+        if picked[-1] is not events[-1]:
+            picked[-1] = events[-1]
+        return picked
 
     def count_what_happened(self, user_id: str, *, since: str, until: str) -> dict[str, int]:
         """Сколько всего событий в промежутке — отдельным счётом, без потолка.
