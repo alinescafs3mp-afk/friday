@@ -87,7 +87,7 @@ renderers.inbox=async gen=>{
       const qcls=qm<0.25?'danger':qm<0.5?'warn':'ok';
       const qual=`<span class="badge ${qcls}">качество ${qm.toFixed(2)}</span> <span class="muted">${Number(g.quality_min||0).toFixed(2)}–${Number(g.quality_max||0).toFixed(2)}</span>`;
       const note=g.truncated?`<span class="muted">действие охватит ${g.inbox_ids.length} из ${g.total}</span>`:'';
-      return `<tr><td><b>${esc(g.key)}</b> ${note}</td><td>${g.total}</td><td>${qual}</td><td>${acts}</td><td><button class="btn small" ${call('dismissGroup',g.key,'archived')}>В архив</button> <button class="btn small danger" ${call('dismissGroup',g.key,'ignored')}>Игнорировать</button></td></tr>`}).join('');
+      return `<tr><td><b>${esc(g.key)}</b> ${note}</td><td>${g.total}</td><td>${qual}</td><td>${acts}</td><td><button class="btn small" ${call('dismissGroup',g.key,'archived')}>В архив</button> <button class="btn small danger" ${call('dismissGroup',g.key,'ignored')}>Игнорировать</button></td></tr>`});
     groupsBlock=state.inboxGroups.length?`<section class="card"><div class="toolbar"><h2 class="grow">Группы непроверенного (${gd.grouped})</h2>${axisTabs}</div><div class="notice">Групповое действие только отклоняет. Продвижение в знания — поштучно, через «Разобрать», где виден исходный текст.</div>${table(['Группа','Материалов','Качество разбора','Что предлагает классификатор',''],rows)}</section>`:'';
   }catch(e){groupsBlock=`<div class="notice">Группировка недоступна: ${esc(e.message)}</div>`}
   const rows=state.inbox.map(i=>{
