@@ -72,7 +72,7 @@ async def test_the_model_cannot_merge_two_people_on_its_own(settings, storage):
     row = storage.get_resolution_candidate(candidate_id, "alice")
     assert str(row["status"]) == "suggested"
     # И модели сказано не повторять — иначе она устроит очередь одинаковых заявок.
-    assert "не повторяй" in result.error
+    assert "Не повторяй" in result.error or "не повторяй" in result.error
 
 
 @pytest.mark.asyncio
