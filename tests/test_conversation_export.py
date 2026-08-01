@@ -51,27 +51,19 @@ def test_export_contains_messages_in_order_and_foreign_is_404(settings):
         )
         assert second.status_code == 200, second.text
 
-        # Force known assistant texts so order assertions are stable.
+        # Раньше здесь переписывались тексты ответов ради детерминизма. Текст
+        # сообщения чата теперь неизменяем на уровне базы (требование владельца),
+        # да и нужды в этом нет: порядок проверяется по вопросам человека, они
+        # заданы этим же тестом, а от ответов требуется только присутствие.
         storage = client.app.state.storage
-        with storage.transaction() as conn:
-            conn.execute(
-                "UPDATE messages SET content=? WHERE conversation_id=? AND role='assistant'",
-                ("ответ-а", conversation_id),
-            )
-            # Two assistants may exist; set by rowid order separately.
-            rows = conn.execute(
-                "SELECT id, role, content, created_at, rowid FROM messages "
-                "WHERE conversation_id=? ORDER BY created_at ASC, rowid ASC",
+        roles = [
+            str(row["role"])
+            for row in storage.execute(
+                "SELECT role FROM messages WHERE conversation_id=? ORDER BY created_at ASC, rowid ASC",
                 (conversation_id,),
-            ).fetchall()
-        # Rebuild deterministic contents for user rows (already set) and assistants.
-        with storage.transaction() as conn:
-            for index, row in enumerate(rows):
-                if row["role"] == "assistant":
-                    conn.execute(
-                        "UPDATE messages SET content=? WHERE id=?",
-                        (f"ответ-{index}", row["id"]),
-                    )
+            )
+        ]
+        assert "assistant" in roles, "в разговоре нет ни одного ответа для экспорта"
 
         path = f"/api/conversations/{conversation_id}/export"
         response = _bridge_get(client, tuned, path, user="5001", chat="5001")

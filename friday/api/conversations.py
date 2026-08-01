@@ -282,9 +282,24 @@ async def rename_conversation(conversation_id: str, request: Request) -> dict[st
 
 @router.delete("/{conversation_id}", tags=["chat"])
 async def delete_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
+    """Убрать разговор из списка. История при этом сохраняется.
+
+    Метод остался DELETE — так его зовут обе панели и так его понимает человек
+    («убрать отсюда»). Но сказанное в чате неудаляемо (требование владельца,
+    2026-08-01), поэтому ответ говорит правду: `archived`, а не `deleted`, и
+    называет число сохранённых сообщений. Обещать удаление, оставляя данные, —
+    худший из вариантов: человек считает, что стёр, а оно лежит.
+    """
     actor = _require(request, "conversations.manage")
     resolved = _resolve_conversation_ref(request, actor, conversation_id)
     report = request.app.state.storage.delete_conversation(resolved, actor.user_id)
     if not report.get("existed"):
         raise HTTPException(status_code=404, detail="Диалог не найден")
-    return {"status": "deleted", "report": report}
+    return {
+        "status": "archived",
+        "report": report,
+        "note": (
+            f"Разговор убран из списка. Сообщений сохранено: {report.get('messages_kept', 0)} — "
+            "переписка не удаляется."
+        ),
+    }

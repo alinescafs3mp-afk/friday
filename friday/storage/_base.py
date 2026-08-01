@@ -57,7 +57,7 @@ from friday.storage.models import (
 # Named for the package, not this module: `__name__` here is "friday.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("friday.storage")
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -907,6 +907,30 @@ END;
 CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
     INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+-- Сказанное в чате сказано навсегда. Требование владельца (2026-08-01): попало в
+-- чат один раз — и всё, удалить нельзя. Защита стоит в САМОЙ базе, а не в коде
+-- над ней: код можно обойти новым маршрутом, забытым скриптом или прямым SQL из
+-- консоли, а триггер отменяет транзакцию в любом из этих случаев.
+--
+-- Правка содержимого — то же стирание, поэтому `content` и `role` тоже
+-- неизменны. Остальные колонки (служебные метки, ссылки на разговор) менять
+-- можно: они не были сказаны человеком.
+CREATE TRIGGER IF NOT EXISTS messages_are_never_deleted BEFORE DELETE ON messages BEGIN
+    SELECT RAISE(ABORT, 'сообщения чата неудаляемы: сказанное в чате остаётся навсегда');
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_are_never_rewritten BEFORE UPDATE OF content, role ON messages
+BEGIN
+    SELECT RAISE(ABORT, 'текст сообщения чата неизменяем: правка — то же стирание');
+END;
+
+-- Разговор — контейнер сообщений. Удалить его значило бы отрезать доступ к тому,
+-- что удалять запрещено, поэтому он тоже остаётся; «удаление» разговора в API
+-- переведено в архивирование.
+CREATE TRIGGER IF NOT EXISTS conversations_are_never_deleted BEFORE DELETE ON conversations BEGIN
+    SELECT RAISE(ABORT, 'разговоры неудаляемы: они держат историю чата');
 END;
 """
 _ENTITY_IDENTIFIER_RE = re.compile(r"^[A-Za-zА-ЯЁа-яё0-9][A-Za-zА-ЯЁа-яё0-9._+#/@:-]{1,63}$")

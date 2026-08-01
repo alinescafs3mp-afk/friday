@@ -1,14 +1,17 @@
 """G16: search chat history (messages FTS), not only knowledge_objects.
 
 Own history is findable; another user's is not. Empty query is a no-op.
-DELETE keeps the external-content FTS index in sync (no orphan hits).
+Удаление сообщений запрещено на уровне базы; отказ обязан откатываться целиком,
+не расходясь с внешним FTS-индексом.
 """
 
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from dataclasses import replace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from friday.execution_kernel import ExecutionKernel
@@ -72,22 +75,18 @@ def test_search_messages_empty_query_is_safe(settings):
         storage.close(final=True)
 
 
-def test_deleting_a_message_drops_it_from_messages_fts(settings):
-    """Осиротевшая строка индекса после DELETE — это выдуманный ход в поиске.
+def test_a_refused_deletion_leaves_the_index_intact(settings):
+    """Отказ в удалении обязан откатывать транзакцию целиком.
 
-    Проверяется САМ ИНДЕКС, а не выдача поиска: `search_messages` соединяет
-    индекс с таблицей `messages`, и JOIN молча гасит осиротевшие строки. Прежняя
-    редакция теста смотрела только на выдачу и оставалась зелёной при полностью
-    удалённом триггере `messages_ad` — то есть охраняла не то, что обещает
-    названием. Проверено исполнением: с `DROP TRIGGER messages_ad` тест проходил.
+    Сообщения чата неудаляемы на уровне базы (требование владельца 2026-08-01),
+    поэтому прежняя опасность — осиротевшая строка индекса после DELETE — стала
+    недостижимой. Осталась новая: половинчатый откат, при котором строка
+    `messages` на месте, а `messages_fts` уже без неё. Такое расхождение
+    незаметно в выдаче (`search_messages` соединяет индекс с таблицей и JOIN
+    молча гасит расхождения) — поэтому проверяется САМ ИНДЕКС.
 
-    Вторая половина — почему это не теория: rowid в SQLite переиспользуется.
-    Осиротевшая строка индекса указывает на номер, который достанется СЛЕДУЮЩЕМУ
-    сообщению, и тогда JOIN уже не спасает — чужой текст находится по слову из
-    удалённого.
-
-    Мутация: `DROP TRIGGER messages_ad` (или убрать его из схемы) — тест обязан
-    покраснеть на счётчике индекса.
+    Мутация: убрать триггер `messages_are_never_deleted` — тест краснеет на
+    `pytest.raises`.
     """
     storage = init_storage(settings)
     try:
@@ -100,23 +99,33 @@ def test_deleting_a_message_drops_it_from_messages_fts(settings):
             "уникальныймаркердежурств",
         )
         assert storage.search_messages("alice", "уникальныймаркердежурств")
-        with storage.transaction() as conn:
+
+        # Сообщения чата теперь неудаляемы на уровне базы (требование владельца,
+        # 2026-08-01), поэтому осиротевшей строке индекса взяться неоткуда — но
+        # ровно поэтому важно, что ОТКАЗ в удалении откатывает транзакцию
+        # целиком: полуудалённое состояние разошлось бы с индексом молча.
+        with pytest.raises(sqlite3.IntegrityError), storage.transaction() as conn:
             conn.execute("DELETE FROM messages WHERE id=?", (message["id"],))
 
         indexed = storage.execute(
             "SELECT COUNT(*) AS count FROM messages_fts WHERE messages_fts MATCH ?",
             ("уникальныймаркердежурств",),
         ).fetchone()["count"]
-        assert indexed == 0, (
-            f"в индексе осталось {indexed} строк удалённого сообщения — "
-            "поиск скрывает их только JOIN'ом, до первого переиспользования rowid"
+        assert indexed == 1, (
+            f"после отказа в удалении в индексе {indexed} строк вместо одной — "
+            "транзакция откатилась не полностью"
         )
-        assert storage.search_messages("alice", "уникальныймаркердежурств") == []
+        assert storage.search_messages("alice", "уникальныймаркердежурств"), (
+            "сообщение перестало находиться после отменённого удаления"
+        )
 
-        # Следующее сообщение получает освободившийся rowid: если бы строка
-        # индекса пережила удаление, оно нашлось бы по чужому слову.
+        # Следующее сообщение не должно ни затереть индекс предыдущего, ни
+        # унаследовать его слова: rowid в SQLite переиспользуется, и раньше
+        # именно здесь осиротевшая строка индекса давала чужое совпадение.
         storage.store_message(conv["id"], "alice", "user", "совершенно другой текст")
-        assert storage.search_messages("alice", "уникальныймаркердежурств") == []
+        still = storage.search_messages("alice", "уникальныймаркердежурств")
+        assert len(still) == 1 and still[0]["id"] == message["id"]
+        assert storage.search_messages("alice", "другой")[0]["content"] == "совершенно другой текст"
     finally:
         storage.close(final=True)
 

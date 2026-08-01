@@ -67,45 +67,44 @@ class ConversationsMixin(StorageShared):
         return self.get_conversation(conversation_id, user_id)
 
     def delete_conversation(self, conversation_id: str, user_id: str) -> dict[str, Any]:
-        """Hard-delete a conversation and its transient history.
+        """Убрать разговор из списка, сохранив всё сказанное.
 
-        Conversations are chat history, not knowledge provenance (Knowledge Objects
-        keep their own Raw Objects), so deletion is immediate rather than two-phase.
-        Feedback that targeted this conversation's answers is removed as well, and any
-        channel session bound to it is cleared so the next message starts fresh.
+        Раньше здесь стоял `DELETE FROM messages` и `DELETE FROM conversations`.
+        По требованию владельца (2026-08-01) сказанное в чате неудаляемо: попало
+        в чат один раз — и всё. Запрет стоит триггерами в самой базе, так что
+        прежний код теперь просто не выполнился бы; вместо него — архивирование.
+
+        Что действительно уходит: привязка канала к разговору. Она не история, а
+        указатель «куда писать дальше», и очистить его нужно, иначе следующее
+        сообщение из Telegram продолжит убранный разговор.
+
+        Имя метода сохранено: его зовёт маршрут `DELETE /api/conversations/{id}`
+        и обе панели. Снаружи смысл прежний — «убрать из списка», — а история
+        остаётся и находится поиском по переписке.
         """
         current = self.get_conversation(conversation_id, user_id)
         if not current:
             return {"existed": False, "conversation_id": conversation_id}
-        deleted: dict[str, int] = {}
-        message_ids_subquery = "SELECT id FROM messages WHERE conversation_id=? AND user_id=?"
         with self.transaction() as conn:
-            # feedback_state references feedback(id), so it must be cleared first.
-            for table in ("feedback_state", "feedback"):
-                cursor = conn.execute(
-                    f"DELETE FROM {table} WHERE user_id=? "  # nosec B608
-                    f"AND target_id IN ({message_ids_subquery})",
-                    (user_id, conversation_id, user_id),
-                )
-                if cursor.rowcount:
-                    deleted[table] = cursor.rowcount
-            messages = conn.execute(
-                "DELETE FROM messages WHERE conversation_id=? AND user_id=?",
-                (conversation_id, user_id),
+            conn.execute(
+                "UPDATE conversations SET is_archived=1, updated_at=? WHERE id=? AND user_id=?",
+                (utc_now(), conversation_id, user_id),
             )
-            deleted["messages"] = messages.rowcount
             sessions = conn.execute(
                 "DELETE FROM channel_sessions WHERE user_id=? AND conversation_id=?",
                 (user_id, conversation_id),
             )
-            if sessions.rowcount:
-                deleted["channel_sessions"] = sessions.rowcount
-            conversation = conn.execute(
-                "DELETE FROM conversations WHERE id=? AND user_id=?",
+            kept = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND user_id=?",
                 (conversation_id, user_id),
-            )
-            deleted["conversations"] = conversation.rowcount
-        return {"existed": True, "conversation_id": conversation_id, "deleted": deleted}
+            ).fetchone()[0]
+        return {
+            "existed": True,
+            "conversation_id": conversation_id,
+            "archived": True,
+            "messages_kept": int(kept),
+            "deleted": {"channel_sessions": sessions.rowcount} if sessions.rowcount else {},
+        }
 
     def set_conversation_mode(self, conversation_id: str, user_id: str, mode: str) -> dict[str, Any] | None:
         normalized_mode = normalize_conversation_mode(mode)

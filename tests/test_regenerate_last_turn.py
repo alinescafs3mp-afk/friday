@@ -54,13 +54,21 @@ def test_regenerate_replays_last_user_message_not_an_earlier_one(settings):
         )
         assert second.status_code == 200, second.text
 
-        # Drop assistant rows so the tail is pure user+user (the failure mode).
+        # Хвост должен стать чистым user+user — это и есть разбираемый случай.
+        # Раньше он получался удалением assistant-строк; теперь сообщения чата
+        # неудаляемы на уровне базы (требование владельца), поэтому тот же хвост
+        # строится добавлением двух вопросов подряд — как если бы человек написал
+        # дважды, не дождавшись ответа.
         storage = client.app.state.storage
-        with storage.transaction() as conn:
-            conn.execute(
-                "DELETE FROM messages WHERE conversation_id=? AND role='assistant'",
-                (conversation_id,),
-            )
+        owner_id = str(
+            storage.execute(
+                "SELECT user_id FROM conversations WHERE id=?", (conversation_id,)
+            ).fetchone()["user_id"]
+        )
+        storage.store_message(conversation_id, owner_id, "user", "первый вопрос подряд")
+        storage.store_message(
+            conversation_id, owner_id, "user", "второй вопрос — именно его надо повторить"
+        )
 
         seen: list[str] = []
 

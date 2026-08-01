@@ -1,8 +1,10 @@
 """Conversations gain a lifecycle: archive/unarchive and delete.
 
 Previously conversations had no user- or admin-reachable archive or delete, so chat
-history accumulated forever. These tests pin archive visibility, cascade deletion
-(messages + their feedback + channel binding), and the user/API surface.
+history accumulated forever. Сказанное в чате при этом неудаляемо (требование
+владельца 2026-08-01): «удаление» разговора убирает его из списка и очищает
+привязку канала, но сообщения и их оценки остаются. Тесты закрепляют видимость
+архива, это поведение и пользовательскую часть API.
 """
 
 from __future__ import annotations
@@ -34,7 +36,16 @@ def test_archive_and_unarchive_toggle_default_visibility(storage):
     assert [c["id"] for c in storage.list_conversations("alice")] == [cid]
 
 
-def test_delete_conversation_cascades_messages_feedback_and_channel_binding(storage):
+def test_removing_a_conversation_keeps_every_word_and_clears_only_the_channel(storage):
+    """«Удаление» разговора убирает его из списка, но не из истории.
+
+    Раньше здесь стоял каскад: сообщения, обратная связь и сам разговор
+    стирались. По требованию владельца (2026-08-01) сказанное в чате неудаляемо,
+    и запрет стоит триггерами в базе, так что прежний каскад теперь просто не
+    выполнился бы. Уходит ровно одно — привязка канала к разговору: она не
+    история, а указатель «куда писать дальше», и без её очистки следующее
+    сообщение из Telegram продолжило бы убранный разговор.
+    """
     storage.ensure_user("alice")
     conv = storage.create_conversation("alice", "Chat")
     cid = conv["id"]
@@ -59,16 +70,22 @@ def test_delete_conversation_cascades_messages_feedback_and_channel_binding(stor
 
     report = storage.delete_conversation(cid, "alice")
     assert report["existed"] is True
-    assert report["deleted"]["conversations"] == 1
-    assert report["deleted"]["messages"] == 1
+    assert report["archived"] is True
+    assert report["messages_kept"] == 1
 
-    assert storage.get_conversation(cid, "alice") is None
-    assert _count(storage, "SELECT COUNT(*) FROM messages WHERE conversation_id=?", (cid,)) == 0
-    assert _count(storage, "SELECT COUNT(*) FROM feedback WHERE target_id=?", (mid,)) == 0
-    assert _count(storage, "SELECT COUNT(*) FROM feedback_state WHERE target_id=?", (mid,)) == 0
+    kept = storage.get_conversation(cid, "alice")
+    assert kept and kept.get("is_archived"), "разговор исчез вместо того, чтобы уйти в архив"
+    assert _count(storage, "SELECT COUNT(*) FROM messages WHERE conversation_id=?", (cid,)) == 1
+    # Оценка ответа привязана к сообщению, а сообщение остаётся — значит остаётся и она.
+    assert _count(storage, "SELECT COUNT(*) FROM feedback WHERE target_id=?", (mid,)) == 1
+    assert _count(storage, "SELECT COUNT(*) FROM feedback_state WHERE target_id=?", (mid,)) == 1
     assert storage.get_channel_session("alice", "telegram", "5001") is None
 
-    assert storage.delete_conversation(cid, "alice")["existed"] is False
+    # Повтор безвреден: разговор уже в архиве, история по-прежнему на месте.
+    again = storage.delete_conversation(cid, "alice")
+    assert again["existed"] is True
+    assert again["messages_kept"] == 1
+    assert storage.delete_conversation("conv_никогда_не_существовал", "alice")["existed"] is False
 
 
 def test_conversations_manage_capability_scoped_to_real_users(storage):
@@ -95,6 +112,7 @@ def test_user_archives_then_deletes_own_conversation_over_http(settings):
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         conv = app.state.storage.create_conversation(LEGACY_OWNER_USER_ID, "Chat")
         cid = conv["id"]
+        app.state.storage.store_message(cid, LEGACY_OWNER_USER_ID, "user", "сказано в чате")
 
         archived = client.post(f"/api/conversations/{cid}/archive", json={"archived": True}, headers=owner)
         assert archived.status_code == 200
@@ -104,9 +122,14 @@ def test_user_archives_then_deletes_own_conversation_over_http(settings):
 
         deleted = client.delete(f"/api/conversations/{cid}", headers=owner)
         assert deleted.status_code == 200
-        assert deleted.json()["status"] == "deleted"
-        assert client.get(f"/api/conversations/{cid}/messages", headers=owner).status_code == 404
-        assert client.delete(f"/api/conversations/{cid}", headers=owner).status_code == 404
+        # Правду в ответе: разговор убран из списка, а переписка сохранена.
+        assert deleted.json()["status"] == "archived"
+        assert deleted.json()["report"]["messages_kept"] >= 1
+        kept = client.get(f"/api/conversations/{cid}/messages", headers=owner)
+        assert kept.status_code == 200, "история убранного разговора перестала открываться"
+        assert kept.json()["items"], "сообщения исчезли вместе с разговором"
+        # Повтор — не 404: разговор существует, просто уже в архиве.
+        assert client.delete(f"/api/conversations/{cid}", headers=owner).status_code == 200
 
 
 def test_set_conversation_title_updates_own_row_only(storage):
