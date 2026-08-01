@@ -18,7 +18,6 @@ from fastapi.testclient import TestClient
 
 from jericho.organs import ServiceContext
 from jericho.organs.monitors import scan_monitors
-from jericho.permissions import LEGACY_OWNER_USER_ID
 from jericho.server import create_app
 from jericho.storage.models import KnowledgeObject, RawObject, new_id
 
@@ -170,3 +169,84 @@ def test_a_foreign_monitor_cannot_be_stopped(settings, storage):
     assert storage.stop_monitor(monitor["id"], "bob") is False
     assert storage.get_monitor(monitor["id"], "bob") is None
     assert storage.get_monitor(monitor["id"], "alice") is not None
+
+
+@pytest.mark.asyncio
+async def test_a_monitor_on_a_code_like_name_actually_matches(settings, storage):
+    """«в/ч 12345» — главная организационная единица этого архива (149 узлов).
+
+    Первая редакция сравнения нормализовала текст документа целиком, а слова
+    запроса по отдельности, и искала подстроку: такой монитор не срабатывал
+    НИКОГДА, при этом выглядел живым — соседний монитор на обычные слова работал.
+
+    Мутация: сравнивать нормализованные слова запроса подстрокой в нормализованном
+    тексте (как было) — тест обязан покраснеть.
+    """
+    storage.ensure_user("alice")
+    storage.create_monitor("alice", "в/ч 12345", chat_id="5001")
+    _document(storage, "alice", "Приказ по в/ч 12345 о поверке от 3 марта", "Приказ по части")
+
+    await scan_monitors(_context(settings, storage))
+
+    rows = storage.execute("SELECT body FROM outbound_notifications WHERE kind='monitor'").fetchall()
+    assert len(rows) == 1, "монитор на код войсковой части не сработал"
+    assert "Приказ по части" in str(rows[0]["body"])
+
+
+@pytest.mark.asyncio
+async def test_a_monitor_never_pushes_into_a_group_chat(settings, storage):
+    """Проактивный пуш идёт в ЛИЧНЫЙ чат, даже если /watch отправили в группе.
+
+    Демо — это семь человек в одной комнате. Команда, отправленная там, положила
+    бы в монитор идентификатор группы, и заголовки документов ОДНОГО человека
+    ушли бы всем. Проект уже ловил ровно этот класс однажды.
+
+    Мутация: доверять `monitor.chat_id` как есть — тест обязан покраснеть.
+    """
+    storage.ensure_user("alice")
+    storage.create_monitor("alice", "поверка весов", chat_id="-1001234567890")
+    _document(storage, "alice", "Поверка весов назначена", "Акт")
+
+    await scan_monitors(_context(settings, storage))
+
+    rows = storage.execute("SELECT chat_id FROM outbound_notifications WHERE kind='monitor'").fetchall()
+    assert not [row for row in rows if str(row["chat_id"]).startswith("-")], (
+        "уведомление монитора уехало в групповой чат"
+    )
+
+
+@pytest.mark.asyncio
+async def test_matches_are_not_lost_when_there_is_nowhere_to_deliver(settings, storage):
+    """Если доставить некуда, граница НЕ двигается — иначе совпадение считалось бы
+    показанным и терялось навсегда.
+
+    Мутация: двигать курсор безусловно — тест обязан покраснеть.
+    """
+    storage.ensure_user("alice")  # без chat_id в метаданных
+    monitor = storage.create_monitor("alice", "поверка весов")  # и без chat_id у монитора
+    _document(storage, "alice", "Поверка весов назначена", "Акт")
+
+    await scan_monitors(_context(settings, storage))
+    stalled = storage.get_monitor(monitor["id"], "alice")
+    assert int(stalled["last_seen_rowid"]) == 0, "курсор ушёл вперёд, хотя никто ничего не получил"
+
+    # Чат появился — и накопившееся приходит.
+    storage.update_user("alice", metadata_json={"chat_id": "5001"})
+    await scan_monitors(_context(settings, storage))
+    rows = storage.execute("SELECT body FROM outbound_notifications WHERE kind='monitor'").fetchall()
+    assert len(rows) == 1, "после появления чата совпадение так и не доехало"
+
+
+def test_a_person_cannot_hoard_monitors(settings, storage):
+    """Потолок на человека: без него один аккаунт (открытая регистрация включена)
+    заводит сотни слежений, список показывает двести, а обход платит за каждое."""
+    storage.ensure_user("alice")
+    for index in range(storage.MAX_ACTIVE_MONITORS):
+        storage.create_monitor("alice", f"тема номер {index}")
+    with pytest.raises(ValueError):
+        storage.create_monitor("alice", "ещё одна тема")
+
+    # Снятое слежение освобождает место — потолок про АКТИВНЫЕ, а не про историю.
+    active = storage.list_monitors("alice")
+    assert storage.stop_monitor(active[0]["id"], "alice") is True
+    storage.create_monitor("alice", "тема после освобождения")

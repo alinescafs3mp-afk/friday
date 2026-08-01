@@ -71,20 +71,25 @@ async def scan_monitors(ctx: ServiceContext) -> None:
             continue
         checkpoint = max([int(item.get("rowid") or 0) for item in fresh], default=cursor)
         candidates = [item for item in fresh if _matches(query, item, searcher)]
-        if candidates:
-            chat_id = str(monitor.get("chat_id") or "") or resolve_chat_id(storage, user_id) or ""
-            if chat_id:
-                body = _format_match(query, candidates, len(candidates))
-                if storage.enqueue_notification(
-                    user_id,
-                    chat_id,
-                    body,
-                    kind="monitor",
-                    # Ключ несёт границу окна: тот же монитор с тем же окном не
-                    # напишет дважды, а следующее окно — уже другое сообщение.
-                    dedup_key=f"monitor:{monitor.get('id')}:{checkpoint}",
-                ):
-                    enqueued += 1
+        chat_id = _deliverable_chat(storage, monitor, user_id)
+        if candidates and not chat_id:
+            # Доставить некуда — курсор НЕ двигаем: иначе совпадение считалось бы
+            # показанным и терялось навсегда. Монитор просто ждёт, пока чат
+            # появится, и тогда сообщит про накопившееся.
+            LOGGER.warning("monitor %s has matches but nowhere to deliver", monitor.get("id"))
+            continue
+        if candidates and chat_id:
+            body = _format_match(query, candidates, len(candidates))
+            if storage.enqueue_notification(
+                user_id,
+                chat_id,
+                body,
+                kind="monitor",
+                # Ключ несёт границу окна: тот же монитор с тем же окном не
+                # напишет дважды, а следующее окно — уже другое сообщение.
+                dedup_key=f"monitor:{monitor.get('id')}:{checkpoint}",
+            ):
+                enqueued += 1
         storage.mark_monitor_checked(
             str(monitor.get("id")), user_id, seen_rowid=checkpoint, reported=len(candidates)
         )
@@ -92,26 +97,65 @@ async def scan_monitors(ctx: ServiceContext) -> None:
         LOGGER.info("Monitors organ queued %d notification(s)", enqueued)
 
 
+def _deliverable_chat(storage: Any, monitor: dict[str, Any], user_id: str) -> str:
+    """Куда монитору позволено писать — и только туда.
+
+    Сохранённому в мониторе `chat_id` доверять нельзя: команда `/watch`,
+    отправленная в ГРУППЕ (а демо — это семь человек в одной комнате), положила
+    бы туда идентификатор группы, и проактивный пуш с заголовками документов
+    ОДНОГО человека ушёл бы всей комнате. Проект уже ловил ровно это однажды:
+    `chat_id` перезаписывался на каждом запросе моста, и пуш мог уйти в группу.
+
+    Правило то же, что у остальных органов: личный чат человека. Отрицательный
+    идентификатор — это группа или канал, и он отбрасывается.
+    """
+    raw = str(monitor.get("chat_id") or "").strip()
+    if raw.lstrip("-").isdigit() and int(raw) > 0:
+        return raw
+    return str(resolve_chat_id(storage, user_id) or "")
+
+
+def _tokens(text: str) -> list[str]:
+    """Слова текста в нормализованной форме, с разбиением по разделителям кодов.
+
+    Обе стороны сравнения проходят через ЭТУ ЖЕ функцию — в этом весь смысл.
+    Первая редакция нормализовала текст документа целиком, а слова запроса по
+    отдельности, и совпадение искала подстрокой: «в/ч 12345» при таком способе не
+    находился НИКОГДА (нормализация склеивает и режет разделители по-разному в
+    двух путях), а на живом корпусе войсковая часть — главная организационная
+    единица, 149 узлов. Монитор при этом выглядел работающим: соседний монитор на
+    обычные слова срабатывал.
+    """
+    import re
+
+    from jericho.storage._base import normalize_entity_name
+
+    pieces = re.split(r"[\s\-_./\\,;:()\[\]«»\"']+", str(text or ""))
+    return [token for token in normalize_entity_name(" ".join(pieces)).split() if token]
+
+
 def _matches(query: str, item: dict[str, Any], searcher: Any = None) -> bool:
     """Совпадает ли документ с условием монитора.
 
-    Намеренно ПРОСТОЕ вхождение слов запроса в текст объекта, а не полный
-    гибридный поиск: монитор проверяет уже известный ему свежий материал, и
-    гонять по нему ранжирование с эмбеддингами значило бы платить за порядок,
-    которого здесь никто не спрашивает. Слова сравниваются по нормализованной
-    форме — тем же способом, что и остальной проект.
+    Намеренно ПРОСТОЕ совпадение по словам, а не полный гибридный поиск: монитор
+    проверяет уже известный ему свежий материал, и гонять по нему ранжирование с
+    эмбеддингами значило бы платить за порядок, которого здесь никто не
+    спрашивает. Сравниваются ТОКЕНЫ, а не подстроки: подстрока находила бы «в/ч»
+    внутри слова «вчера» и не находила бы там, где надо.
     """
     del searcher
-    from jericho.storage._base import normalize_entity_name
-
-    haystack = " ".join(
-        str(item.get(field) or "") for field in ("title", "summary", "content", "tags_json", "knowledge_kind")
+    haystack = set(
+        _tokens(
+            " ".join(
+                str(item.get(field) or "")
+                for field in ("title", "summary", "content", "tags_json", "knowledge_kind")
+            )
+        )
     )
-    normalized = normalize_entity_name(haystack)
-    words = [normalize_entity_name(word) for word in query.split() if len(word) > 2]
+    words = _tokens(query)
     if not words:
         return False
-    return all(word and word in normalized for word in words)
+    return all(word in haystack for word in words)
 
 
 class MonitorsOrgan(Organ):

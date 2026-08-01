@@ -477,6 +477,10 @@ class RuntimeMixin(StorageShared):
     # второй язык условий означал бы вторую реализацию «что считается
     # совпадением», и она разошлась бы с поиском молча.
 
+    # Сколько слежений человек может держать одновременно. Число небольшое
+    # намеренно: монитор — это внимание системы, а не хранилище закладок.
+    MAX_ACTIVE_MONITORS = 20
+
     def create_monitor(self, user_id: str, query: str, *, chat_id: str = "") -> dict[str, Any]:
         """Завести монитор.
 
@@ -491,6 +495,14 @@ class RuntimeMixin(StorageShared):
         if len(clean) < 2:
             raise ValueError("Запрос монитора слишком короткий")
         self.ensure_user(user_id)
+        # Потолок на человека. Без него один аккаунт (а открытая регистрация
+        # включена) заводит сотни слежений: список показывает двести новейших,
+        # остальные нельзя ни увидеть, ни снять — а обход платит за каждое.
+        active = self.execute(
+            "SELECT COUNT(*) AS count FROM monitors WHERE user_id=? AND active=1", (user_id,)
+        ).fetchone()
+        if int((active["count"] if active else 0) or 0) >= self.MAX_ACTIVE_MONITORS:
+            raise ValueError("Слишком много слежений; снимите лишние")
         now = utc_now()
         monitor_id = new_id("mon")
         with self.transaction() as conn:

@@ -1436,7 +1436,14 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 chat_id=chat_id,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Слишком короткий запрос для монитора") from exc
+            # Два разных отказа, и человеку они читаются по-разному: слишком
+            # короткое условие и исчерпанный потолок слежений.
+            detail = (
+                "Слишком много слежений — снимите лишние в /watching"
+                if "много" in str(exc)
+                else "Слишком короткий запрос для монитора"
+            )
+            raise HTTPException(status_code=400, detail=detail) from exc
         _audit(request, "monitor.create", "monitor", monitor.get("id"), after=monitor)
         return {"monitor": monitor}
 
