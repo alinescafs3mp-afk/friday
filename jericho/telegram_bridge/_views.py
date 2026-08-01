@@ -424,7 +424,11 @@ class ViewsMixin(BridgeShared):
         undated = int(profile.get("documents_without_own_date") or 0)
         if undated:
             lines.append(f"Без собственной даты: {undated}")
-        lines.append(f"Связанных документов: {len(knowledge_objects)}")
+        # Число документов берётся с сервера, а не из длины показанного списка:
+        # список — страница (сегодня 10), и печатать её длину значило бы отвечать
+        # «связанных документов: 10» про сущность, у которой их 314.
+        total_documents = int(data.get("knowledge_objects_total") or len(knowledge_objects))
+        lines.append(f"Связанных документов: {total_documents}")
         lines.append(
             f"Связей: {len(relations)} подтверждено"
             + (f", {pending_count} ждут проверки" if pending_count else "")
@@ -433,8 +437,8 @@ class ViewsMixin(BridgeShared):
             if isinstance(item, dict):
                 title = str(item.get("title") or "Без названия")[:80]
                 lines.append(f"• {title}")
-        if len(knowledge_objects) > 5:
-            lines.append(f"…и ещё {len(knowledge_objects) - 5}")
+        if total_documents > 5:
+            lines.append(f"…и ещё {total_documents - 5}")
         await self._send_message(telegram, chat_id, "\n".join(lines))
 
     async def _send_browse(

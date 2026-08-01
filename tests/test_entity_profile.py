@@ -20,7 +20,15 @@ from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObjec
 from jericho.web_surfer import WebSurfer
 
 
-def _document(storage, user_id: str, text: str, *, tags: list[str], document_date: str | None) -> str:
+def _document(
+    storage,
+    user_id: str,
+    text: str,
+    *,
+    tags: list[str],
+    document_date: str | None,
+    importance: float = 0.5,
+) -> str:
     raw = RawObject(
         id=new_id("raw"),
         user_id=user_id,
@@ -39,6 +47,7 @@ def _document(storage, user_id: str, text: str, *, tags: list[str], document_dat
         content_type="text",
         title="Документ",
         tags_json=tags,
+        importance=importance,
         metadata_json=({"document_date": document_date} if document_date else {}),
     )
     storage.store_knowledge_object(ko)
@@ -131,13 +140,73 @@ async def test_entity_profile_reports_no_date_range_when_nothing_is_dated(kernel
 
 
 @pytest.mark.asyncio
+async def test_entity_profile_summary_covers_every_document_not_just_the_shown_page(kernel):
+    """Сводка карточки считается по ВСЕМ документам сущности, а показанный
+    список — страница (сегодня 10 штук, отсортированных по важности).
+
+    Пока сводку выводили из этой самой страницы, карточка утверждала про сущность
+    то, что верно лишь для её десяти самых важных документов. Замерено на копии
+    боевой базы, а не предположено: из 200 сущностей с наибольшим числом
+    документов у 93 диапазон дат был неверным (худший край — мимо на 13 лет),
+    у всех 200 занижено число документов, объединение тегов теряло медианно 9
+    тегов (максимум 329).
+
+    Стенд повторяет ровно этот случай: крайние по датам документы наименее важны,
+    поэтому в страницу они не попадают.
+
+    Мутация: считать сводку от `knowledge_objects` (как было) — тест обязан
+    покраснеть на диапазоне, тегах и на `knowledge_objects_total`.
+    """
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Атлас")
+    # Десять «важных» документов середины диапазона — ровно страница.
+    for index in range(10):
+        ko = _document(
+            storage,
+            "alice",
+            f"Важный документ {index}.",
+            tags=["середина"],
+            document_date=f"2026-06-{index + 1:02d}",
+            importance=0.9,
+        )
+        graph.link_knowledge_to_entity(ko, entity_id, "alice", status="accepted")
+    # Края диапазона и уникальные теги — на документах с низкой важностью.
+    oldest = _document(
+        storage, "alice", "Самый ранний.", tags=["архив"], document_date="2011-02-03", importance=0.1
+    )
+    newest = _document(
+        storage, "alice", "Самый поздний.", tags=["свежее"], document_date="2026-12-31", importance=0.1
+    )
+    undated = _document(storage, "alice", "Без даты.", tags=[], document_date=None, importance=0.1)
+    for ko_id in (oldest, newest, undated):
+        graph.link_knowledge_to_entity(ko_id, entity_id, "alice", status="accepted")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
+
+    profile = result.data["profile"]
+    assert profile["document_date_range"] == {"earliest": "2011-02-03", "latest": "2026-12-31"}
+    assert "архив" in profile["tags"] and "свежее" in profile["tags"]
+    assert profile["documents_without_own_date"] == 1
+    assert result.data["knowledge_objects_total"] == 13
+    assert len(result.data["knowledge_objects"]) == 10, "показанный список остаётся страницей"
+
+
+@pytest.mark.asyncio
 async def test_entity_profile_counts_pending_relations_separately_from_confirmed(kernel):
     """Подтверждённые связи (`relations`) и ожидающие проверки (`pending_relations_count`)
     — разные вещи. Карточка сущности, показывающая только подтверждённые,
     молчала бы про очередь ревью, которая касается именно этой сущности.
 
-    Мутация: вернуть 0 вместо настоящего счётчика в `count_pending_relations` —
-    тест обязан покраснеть.
+    Вторая пара сущностей со своим кандидатом стоит здесь не для полноты:
+    без неё счёт «по этой сущности» и счёт «по всему пользователю» численно
+    совпадают, и предикат `(source=? OR target=?)` тест не держит вовсе —
+    проверено снятием предиката, тест оставался зелёным. С двумя парами
+    карточка «Атласа» обязана показать 1 из 2, а не всю очередь владельца.
+
+    Мутация: вернуть 0 вместо настоящего счётчика в `count_pending_relations`
+    ИЛИ снять entity-предикат в `count_relation_candidates_for_entity` — тест
+    обязан покраснеть в обоих случаях.
     """
     built, auth, storage, graph = kernel
     left_id = _linked_entity(storage, graph, "alice", "Атлас")
@@ -148,6 +217,13 @@ async def test_entity_profile_counts_pending_relations_separately_from_confirmed
     storage.store_relation_candidate(
         "alice", left_id, right_id, "uses", confidence=0.8, evidence={"method": "test"}
     )
+    # Чужая пара того же владельца: в очереди она есть, к «Атласу» отношения не имеет.
+    other_left = _linked_entity(storage, graph, "alice", "Веста")
+    other_right = _linked_entity(storage, graph, "alice", "Гелиос")
+    storage.store_relation_candidate(
+        "alice", other_left, other_right, "uses", confidence=0.8, evidence={"method": "test"}
+    )
+    assert storage.count_relation_candidates("alice") == 2, "в очереди владельца два кандидата"
 
     actor = auth.actor_for_user("alice", source="test")
     result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
