@@ -123,6 +123,24 @@ def moment_from_question(message: str) -> str | None:
     return moment
 
 
+#: Человек просит не ответ, а файл.
+#:
+#: Замерено на живом экземпляре 2026-08-01: «сделай pdf со сводкой» — инструмент
+#: не вызван ни разу из трёх, ответ «Сейчас соберу сводку и оформлю её в PDF».
+#: Обещание вместо файла: снаружи это выглядит как выполненная просьба ровно до
+#: момента, когда человек лезет искать вложение.
+_ASKS_FOR_A_FILE = re.compile(
+    r"(?:^|\W)(?:"
+    r"в\s+word|в\s+ворде?|\bdocx\b|"
+    r"в\s+excel|в\s+эксель|\bxlsx\b|таблиц\w*\s+файл\w*|"
+    r"\bpdf\b|пдф|"
+    r"картинк\w*|изображени\w*|\bpng\b|"
+    r"файл\w*\s+(?:пришли|отправь|сделай)|(?:пришли|отправь|скинь)\s+файл\w*|"
+    r"сделай\s+(?:мне\s+)?(?:отчёт|отчет|справк\w*|документ)|"
+    r"оформи\s+(?:в|как)\b"
+    r")",
+    re.IGNORECASE,
+)
 _ASKS_FOR_THE_WEB = re.compile(
     r"(?:^|\W)(?:"
     # «интеренете», «интренете» — опечатка в длинном слове не должна отменять
@@ -656,6 +674,16 @@ class AgentRuntime:
             response = await self._generate_response(context, clean_message, attachments)
 
         content = (response.get("content") or "").strip() or "Не удалось сформировать ответ."
+        if _ASKS_FOR_A_FILE.search(clean_message) and not response.get("file_clips"):
+            made = await self._file_for_a_request_that_wanted_one(
+                clean_message,
+                content,
+                actor,
+                evidence=response.get("tool_evidence") or [],
+                context=context,
+            )
+            if made:
+                response = {**response, "file_clips": [made]}
         verification: dict[str, Any] = {"status": VERDICT_SKIPPED, "ok": True, "score": None, "issues": []}
         if (
             self.settings.verify_answers
@@ -1128,6 +1156,7 @@ class AgentRuntime:
                         "knowledge_object_ids": tool_knowledge_ids,
                         "tool_evidence": tool_evidence,
                         "voice_clip": voice_clip,
+                        "file_clips": file_clips,
                     }
 
             if turn.kind == "protocol_error" or not calls:
@@ -1387,6 +1416,123 @@ class AgentRuntime:
         cleaned = _WEB_REQUEST_FILLER.sub(" ", message)
         cleaned = " ".join(cleaned.replace(",", " ").split()).strip(" ,.:;—-")
         return cleaned or " ".join(message.split())
+
+    async def _file_for_a_request_that_wanted_one(
+        self,
+        request: str,
+        answer: str,
+        actor: ActorContext,
+        *,
+        evidence: list[dict[str, str]] | None = None,
+        context: AgentContext | None = None,
+    ) -> dict[str, Any] | None:
+        """Просили файл — файл будет, даже если модель его не собрала.
+
+        Замерено на живом экземпляре 2026-08-01, по три попытки на каждый из
+        четырёх форматов: `make_file` вызывался в 1 случае из 12. Всё остальное —
+        «Сейчас соберу сводку и оформлю её в PDF» без единого вложения. Две
+        попытки поправить это внутри агентского цикла (напоминание, затем сборка
+        по ходу) дали 1/12 и 1/12: внутри цикла ответ модели связан протоколом
+        инструментов, и туда же уходит её внимание.
+
+        Поэтому упаковка вынесена ЗА цикл и делается одним чистым вызовом без
+        инструментов: содержимое либо уже есть в ответе, либо запрашивается
+        прямым «дай текст документа». Формат берётся из просьбы человека.
+        """
+        # Сообщение о сбое телом документа быть не может, но и отказываться рано:
+        # инструменты в этом ходе могли отработать, и основания есть. Замерено:
+        # чаще всего срывается сам протокол вызова («bare tool-call markup»), а
+        # данные при этом собраны.
+        failed = bool(_ANSWER_IS_A_FAILURE.search(answer))
+        blocks = [] if failed else _blocks_from_text(answer)
+        grounds = "\n\n".join(str(item.get("output") or "")[:4000] for item in (evidence or []))
+        if not grounds.strip() and context is not None:
+            # Инструменты в этом ходе могли не понадобиться, но контекст собран
+            # всегда — это те же документы, на которых строился ответ. Без этого
+            # запаса «сделай отчёт» упирался в «оснований нет» и человек оставался
+            # без файла: замерено 0/3 на word и картинке.
+            grounds = _grounds_from_context(context)
+        grounds = grounds[:12000]
+        if len(blocks) < 2 and self.llm.enabled:
+            if not grounds.strip():
+                # Ни содержимого, ни оснований. Второй заход дал бы красивый файл с
+                # выдуманными числами: замерено — «15 420 записей», «500 ГБ», «10
+                # миллионов уникальных записей» при 1533 документах в архиве.
+                # Отсутствие файла лучше уверенной выдумки в документе, который
+                # человек унесёт с собой и покажет другим.
+                LOGGER.warning("No content and no grounds for the requested file; skipping")
+                return None
+            try:
+                filled = await self.llm.chat(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Напиши СОДЕРЖИМОЕ документа: заголовок первой строкой, затем "
+                                "разделы и пункты с цифрами. Используй ТОЛЬКО данные из блока "
+                                "«Основания» ниже — ничего не добавляй от себя и не округляй. "
+                                "Если каких-то сведений в основаниях нет, не упоминай их вовсе. "
+                                "Без вступлений вроде «сейчас соберу» и без разметки.\n\n"
+                                f"Основания:\n{grounds}"
+                            ),
+                        },
+                        {"role": "user", "content": request[:400]},
+                    ],
+                    tools=[],
+                )
+                text = str(filled.get("content") or "")
+                if text.strip():
+                    blocks = _blocks_from_text(_strip_tool_call_markup(text) or text)
+            except Exception:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
+                LOGGER.warning("Could not obtain document content", exc_info=True)
+        if not blocks:
+            return None
+        # Когда ответа не получилось, заголовок берётся из просьбы человека:
+        # иначе им становится «Не удалось безопасно завершить вызов инструмента»,
+        # и это же попадает в имя файла.
+        return await self._make_file_from_answer(
+            request, "" if failed else answer, actor, blocks=blocks
+        )
+
+    async def _make_file_from_answer(
+        self, request: str, answer: str, actor: ActorContext, *, blocks: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any] | None:
+        """Собрать файл из уже написанного ответа, раз модель этого не сделала.
+
+        Замерено на живом экземпляре 2026-08-01, по три попытки на формат:
+        `make_file` вызывался в 0/3 для word, pdf и картинки и в 1/3 для excel.
+        Ответ при этом был содержательным — «Сейчас соберу сводку и оформлю её в
+        PDF», а дальше текст сводки. То есть работа сделана, не сделана только
+        упаковка.
+
+        Напоминание системным сообщением проверено и почти не помогло (1/3).
+        Поэтому упаковку берёт на себя рантайм: содержимое — тот же текст,
+        который человек всё равно бы прочитал, формат — из его же просьбы. Хуже,
+        чем если бы модель разметила блоки сама, но несравнимо лучше обещания.
+        """
+        kind = _file_kind_from_request(request)
+        if blocks is None:
+            blocks = _blocks_from_text(answer)
+        if not blocks:
+            return None
+        title = (
+            _title_from_text(str(blocks[0].get("text") or ""))
+            or _title_from_text(answer)
+            or _title_from_request(request)
+            or "Отчёт"
+        )
+        try:
+            result = await self.kernel.execute(
+                "make_file",
+                {"kind": kind, "title": title, "blocks": blocks},
+                actor=actor,
+            )
+        except Exception:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
+            LOGGER.exception("Fallback file build failed")
+            return None
+        if not result.success or not result.attachment:
+            return None
+        return dict(result.attachment)
 
     async def _is_a_timeline_question(self, message: str) -> bool:
         """Спросить модель, о чём вопрос, когда шаблон молчит.
@@ -2019,3 +2165,141 @@ class AgentRuntime:
                 except Exception:
                     LOGGER.debug("eval-case mining from feedback failed", exc_info=True)
         return feedback.to_row()
+
+
+#: Ответ, которого не получилось. Файл из сообщения об ошибке не собирают.
+_ANSWER_IS_A_FAILURE = re.compile(
+    r"не удалось (?:обработать|сформировать|безопасно)|произошла ошибка", re.IGNORECASE
+)
+
+#: Служебные обещания, которые модель пишет перед работой: в файл им не место.
+_IS_A_PROMISE = re.compile(
+    r"^(?:сейчас|сча[сз]|готово|вот|сделаю|соберу|оформлю|подготовлю|создам|формирую|"
+    # Дежурные зачины ответа: заголовком документа они быть не должны —
+    # «Нашёл в личной базе.docx» ничего не говорит о содержимом.
+    r"нашёл|нашел|нашлось|найдено|по\s+данным\s+из\s+базы|в\s+личной\s+базе)\b",
+    re.IGNORECASE,
+)
+
+
+def _file_kind_from_request(request: str) -> str:
+    """Какой формат просили. По умолчанию Word — он открывается у всех."""
+    lowered = " ".join(str(request or "").split()).casefold()
+    if re.search(r"\bexcel|эксель|\bxlsx\b|таблиц", lowered):
+        return "xlsx"
+    if re.search(r"\bpdf\b|пдф", lowered):
+        return "pdf"
+    if re.search(r"картинк|изображени|\bpng\b|скрин", lowered):
+        return "png"
+    return "docx"
+
+
+def _grounds_from_context(context: AgentContext) -> str:
+    """Собранный контекст как основания для документа.
+
+    Только то, что уже показано модели: числа архива и выдержки найденных
+    документов. Ничего нового здесь не появляется — иначе файл снова начал бы
+    сообщать сведения, которых никто не проверял.
+    """
+    lines = [
+        f"Записей в базе: {context.kb_size}",
+        f"Сущностей в графе: {context.entity_count}",
+        f"Связей в графе: {context.relation_count}",
+        f"Ожидают разбора во «Входящих»: {context.pending_inbox}",
+    ]
+    for index, hit in enumerate(context.knowledge_hits[:12], start=1):
+        title = str(hit.get("title") or "").strip()
+        snippet = " ".join(str(hit.get("snippet") or hit.get("content") or "").split())[:300]
+        lines.append(f"[K{index}] {title}: {snippet}")
+    return "\n".join(lines)
+
+
+def _title_from_request(request: str) -> str:
+    """Заголовок из просьбы, когда взять его из ответа нельзя.
+
+    «сделай отчёт в word: сводка по базе знаний» → «Сводка по базе знаний».
+    """
+    text = " ".join(str(request or "").split())
+    after_colon = text.split(":", 1)[1] if ":" in text else text
+    cleaned = re.sub(
+        r"^(?:сделай|собери|оформи|подготовь|пришли|выгрузи)\s+(?:мне\s+)?"
+        r"(?:отчёт|отчет|справку|документ|таблицу|картинку|файл)?\s*"
+        r"(?:в\s+\S+|как\s+\S+)?\s*[:\-—]?\s*",
+        "",
+        after_colon,
+        flags=re.IGNORECASE,
+    ).strip()
+    return (cleaned[:1].upper() + cleaned[1:])[:80] if cleaned else ""
+
+
+def _clean_markup(line: str) -> str:
+    """Убрать markdown, который модель ставит по привычке.
+
+    В чате разметка запрещена правилами промпта и приходит сырыми знаками; в
+    файле она тем более лишняя — Word и PDF показывают `**Итого**` буквально,
+    вместе со звёздочками. Ограждения ``` появляются, когда модель считает, что
+    отдаёт «блок текста».
+    """
+    cleaned = str(line or "").strip()
+    if cleaned.startswith("```") or cleaned == "---":
+        return ""
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"(?<!\w)[*_]{1,2}(?=\S)(.+?)(?<=\S)[*_]{1,2}(?!\w)", r"\1", cleaned)
+    cleaned = re.sub(r"^#{1,6}\s*", "", cleaned)
+    return cleaned.strip()
+
+
+def _title_from_text(text: str) -> str:
+    """Заголовок — первая содержательная строка, без служебных обещаний.
+
+    «Сейчас соберу сводку и оформлю её в PDF» заголовком быть не должно: это не
+    название документа, а реплика.
+    """
+    for line in str(text or "").splitlines():
+        stripped = _clean_markup(line).strip(" -•*#\t")
+        if len(stripped) < 4 or _IS_A_PROMISE.match(stripped):
+            continue
+        return stripped[:80]
+    return ""
+
+
+def _blocks_from_text(text: str) -> list[dict[str, Any]]:
+    """Текст ответа — в блоки документа.
+
+    Разметки в ответе нет по правилам системного промпта (канал — мессенджер),
+    поэтому разбор простой: строка, начинающаяся с дефиса или точки с цифрой, —
+    пункт списка; короткая строка, оканчивающаяся двоеточием, — заголовок
+    раздела; остальное — абзац.
+    """
+    blocks: list[dict[str, Any]] = []
+    bullets: list[str] = []
+
+    def flush() -> None:
+        nonlocal bullets
+        if bullets:
+            blocks.append({"kind": "bullets", "items": bullets})
+            bullets = []
+
+    for raw_line in str(text or "").splitlines():
+        line = _clean_markup(raw_line)
+        if not line:
+            flush()
+            continue
+        # «Сейчас соберу и оформлю в PDF» — реплика в чате, а не часть документа.
+        if _IS_A_PROMISE.match(line):
+            continue
+        if re.match(r"^[-•*]\s+|^\d+[.)]\s+", line):
+            bullets.append(re.sub(r"^[-•*]\s+|^\d+[.)]\s+", "", line))
+            continue
+        flush()
+        if len(line) <= 70 and line.endswith(":"):
+            blocks.append({"kind": "heading", "text": line.rstrip(":")})
+        else:
+            blocks.append({"kind": "text", "text": line})
+    flush()
+    # Первая строка стала заголовком документа — в теле она была бы повтором.
+    if blocks and blocks[0].get("kind") == "text":
+        first = str(blocks[0].get("text") or "")
+        if _title_from_text(first) == first[:80]:
+            blocks = blocks[1:]
+    return blocks

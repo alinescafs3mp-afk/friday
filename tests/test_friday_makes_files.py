@@ -172,3 +172,74 @@ async def test_an_empty_report_is_refused_rather_than_sent_blank(settings, stora
     )
     assert result.data["created"] is False
     assert result.attachment is None
+
+
+def test_a_promise_never_becomes_the_document():
+    """Мутация: убрать фильтр `_IS_A_PROMISE` — тест краснеет.
+
+    Замерено на живом экземпляре: файлы приходили с именами «Сейчас соберу
+    сводку….docx», «Нашёл в личной базе.pdf», «Не удалось безопасно завершить
+    вызов инструмента….png». Имя файла — первое, что видит человек, и по нему
+    он решает, открывать ли.
+    """
+    from friday.agent_runtime import _blocks_from_text, _title_from_text
+
+    answer = (
+        "Сейчас соберу сводку и оформлю её в PDF.\n\n"
+        "Сводка по базе знаний\n"
+        "- Документов: 1533\n"
+        "- Сущностей: 4608\n"
+    )
+    assert _title_from_text(answer) == "Сводка по базе знаний"
+    texts = " ".join(str(block) for block in _blocks_from_text(answer))
+    assert "Сейчас соберу" not in texts
+
+
+def test_markdown_does_not_leak_into_the_document():
+    """В Word и PDF `**Итого**` показывается вместе со звёздочками."""
+    from friday.agent_runtime import _blocks_from_text
+
+    blocks = _blocks_from_text("```\n**Итого:**\n- *Документов*: 1533\n---\n### Вывод\n")
+    rendered = " ".join(str(block) for block in blocks)
+    assert "**" not in rendered and "###" not in rendered and "```" not in rendered
+    assert "Документов: 1533" in rendered
+
+
+def test_the_title_falls_back_to_what_the_person_asked():
+    """Когда ответа не получилось, заголовок берётся из просьбы."""
+    from friday.agent_runtime import _title_from_request
+
+    assert _title_from_request("сделай отчёт в word: сводка по базе знаний") == "Сводка по базе знаний"
+    assert _title_from_request("оформи в excel таблицу с тегами базы")
+
+
+def test_the_requested_format_is_honoured():
+    from friday.agent_runtime import _file_kind_from_request
+
+    assert _file_kind_from_request("сделай pdf со сводкой") == "pdf"
+    assert _file_kind_from_request("оформи в excel") == "xlsx"
+    assert _file_kind_from_request("сделай картинку со сводкой") == "png"
+    assert _file_kind_from_request("сделай отчёт") == "docx"
+
+
+def test_grounds_come_from_the_context_not_from_thin_air(settings, storage):
+    """Мутация: убрать `_grounds_from_context` — тест краснеет.
+
+    Замерено: без оснований второй заход сочинял «15 420 записей», «500 ГБ»,
+    «10 миллионов уникальных записей» — при 1533 документах в архиве. Файл с
+    выдуманными числами хуже отсутствия файла: его уносят и показывают другим.
+    """
+    from friday.agent_runtime import AgentContext, _grounds_from_context
+
+    context = AgentContext(
+        conversation_id="c1",
+        user_id="alice",
+        kb_size=1533,
+        entity_count=4608,
+        relation_count=0,
+        knowledge_hits=[{"title": "Приказ 214", "snippet": "О назначении Хасанова"}],
+    )
+    grounds = _grounds_from_context(context)
+    assert "1533" in grounds
+    assert "4608" in grounds
+    assert "Приказ 214" in grounds
