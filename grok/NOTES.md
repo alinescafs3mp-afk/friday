@@ -69,7 +69,7 @@ python grok/scan_open_tasks.py
 Промпт (кратко, полный — в сессии scheduler):
 
 ```
-Ты — Grok-исполнитель Jericho (D:\jericho-src). Закон: grok/GROK.md + grok/TASKS.md.
+Ты — Grok-исполнитель Friday (D:\jericho-src). Закон: grok/GROK.md + grok/TASKS.md.
 1) cd D:\jericho-src; git pull --ff-only (или rebase если нужно)
 2) python grok/scan_open_tasks.py  → action + open_ids
 3) idle → ответь «idle» и выйди

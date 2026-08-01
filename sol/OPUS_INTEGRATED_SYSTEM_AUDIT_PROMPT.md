@@ -1,12 +1,12 @@
-# Prompt for Opus: Audit and Complete Jericho as a Local-First Ontology and Agentic Operations Platform
+# Prompt for Opus: Audit and Complete Friday as a Local-First Ontology and Agentic Operations Platform
 
 ## Mission
 
-You are Opus, acting as Jericho's principal architect, security reviewer, product owner, and implementation lead. Audit the current `origin/main` of Jericho against the target system defined below, then immediately implement every confirmed, feasible gap in priority order. Do not stop after writing an assessment or backlog. Continue through implementation, tests, documentation, full repository gates, commits, and verified pushes to `main` until all actionable P0 and P1 gaps are closed and every remaining item has an evidence-backed disposition.
+You are Opus, acting as Friday's principal architect, security reviewer, product owner, and implementation lead. Audit the current `origin/main` of Friday against the target system defined below, then immediately implement every confirmed, feasible gap in priority order. Do not stop after writing an assessment or backlog. Continue through implementation, tests, documentation, full repository gates, commits, and verified pushes to `main` until all actionable P0 and P1 gaps are closed and every remaining item has an evidence-backed disposition.
 
 The target is not a clone of Jarvis, Palantir, or any proprietary product. It is a coherent local-first system that combines:
 
-- Jericho's reviewed knowledge lifecycle, provenance, graph, hybrid retrieval, and tenant-safe Knowledge OS;
+- Friday's reviewed knowledge lifecycle, provenance, graph, hybrid retrieval, and tenant-safe Knowledge OS;
 - Jarvis's durable agent execution, missions, typed tools, approvals, verification, recovery, document intelligence, multimodal interaction, and operator-grade reliability;
 - Palantir-like ontology-centered operational modeling, object/link/action semantics, lineage, object views, monitored workflows, and governed writeback.
 
@@ -32,7 +32,7 @@ Treat this file as a product and engineering acceptance specification, not as an
 
 ## Target product definition
 
-Jericho should be a local-first, multi-user operational knowledge and action platform. A user must be able to turn heterogeneous private material into reviewed, typed, connected knowledge; ask evidence-grounded questions; understand people, projects, systems, events, decisions, risks, and changes over time; plan and execute bounded work through governed tools; and operate all of this with strong tenant isolation, provenance, observability, recovery, and human control.
+Friday should be a local-first, multi-user operational knowledge and action platform. A user must be able to turn heterogeneous private material into reviewed, typed, connected knowledge; ask evidence-grounded questions; understand people, projects, systems, events, decisions, risks, and changes over time; plan and execute bounded work through governed tools; and operate all of this with strong tenant isolation, provenance, observability, recovery, and human control.
 
 The system is complete only when the following capability domains work as coherent end-to-end flows.
 
@@ -189,7 +189,7 @@ Audit these journeys through real service boundaries. Add missing acceptance tes
 4. A user corrects an extracted entity or relation; the correction is versioned, linked to evidence, reflected in retrieval, and reversible without editing the Raw Object.
 5. Two possible identities are proposed, reviewed, merged, and later unmerged while all historical links and provenance remain interpretable.
 6. A relational question uses graph expansion only for the measured query class and returns evidence-backed relation paths; an ordinary query does not pay the graph-expansion behavior or cost.
-7. A temporal question distinguishes when an event happened, when a source reported it, and when Jericho learned or corrected it.
+7. A temporal question distinguishes when an event happened, when a source reported it, and when Friday learned or corrected it.
 8. Conflicting sources produce an explicit contradiction or review item rather than an invented consensus.
 9. A project view connects its reviewed people, documents, events, decisions, tasks, supported risks, supported metrics, recent changes, and permitted actions.
 10. A research answer combines stored and web evidence, labels external evidence, cites each material claim, rejects injected instructions, and does not silently promote web content into canonical knowledge.
@@ -197,10 +197,10 @@ Audit these journeys through real service boundaries. Add missing acceptance tes
 12. A multi-step mission survives a process restart, resumes from durable state, respects budgets, and proves its completion assertions independently.
 13. A dangerous action requests approval with the exact normalized payload; approval is one-shot, atomically claimed, invalidated by payload or policy changes, and audited.
 14. A crash occurs exactly around a side effect; the mission enters `uncertain`, reconciles through observation, and never blindly repeats the effect.
-15. A tool reports success while the postcondition is false; Jericho refuses to mark the step or mission complete and performs at most the bounded repair policy.
+15. A tool reports success while the postcondition is false; Friday refuses to mark the step or mission complete and performs at most the bounded repair policy.
 16. An unauthorized user names another account, project, file, conversation, object ID, or tenant. Resolution may identify a target, but every read and delivery remains denied without server-side authority.
 17. An authorized owner or administrator accesses a sealed cross-user material scope; the exact target and purpose are rechecked, minimized, audited, and prevented from contaminating ordinary tenant memory.
-18. A model, embedding service, reranker, OCR service, or browser is unavailable. Jericho degrades visibly and safely while unaffected local knowledge operations continue.
+18. A model, embedding service, reranker, OCR service, or browser is unavailable. Friday degrades visibly and safely while unaffected local knowledge operations continue.
 19. Telegram receives duplicate updates, delayed work, and a delivery failure. Processing and delivery are separately durable, duplicates are suppressed, and operators can distinguish completed work from confirmed delivery.
 20. A reminder or monitor fires once under concurrency, is tenant-scoped, produces a deduplicated notification, and records its condition and source state.
 21. A backup is restored into a clean environment and passes schema, tenant, raw-object hash, provenance, object-link, approval, and workflow integrity checks.
@@ -321,7 +321,7 @@ For quality optimizations, require a frozen baseline, deidentified gold set, fai
 
 ## Explicit anti-goals
 
-- Do not rewrite Jericho around a new database, graph engine, vector store, queue, UI framework, agent framework, or cloud platform without a measured blocker that existing architecture cannot solve.
+- Do not rewrite Friday around a new database, graph engine, vector store, queue, UI framework, agent framework, or cloud platform without a measured blocker that existing architecture cannot solve.
 - Do not create a second tool registry, capability system, policy engine, tenant context, audit stream, review queue, or mission runtime.
 - Do not make prompts the enforcement layer for permissions, approvals, provenance, data retention, or side effects.
 - Do not give the model arbitrary shell, filesystem, browser, network, database, or messaging power.
@@ -366,9 +366,9 @@ Do not answer with a vision deck. Audit the real system, prove the gaps, and com
 
 ## Conceptual references
 
-Use these only to clarify general product principles; Jericho's local-first, tenant-safe, reviewed architecture remains authoritative:
+Use these only to clarify general product principles; Friday's local-first, tenant-safe, reviewed architecture remains authoritative:
 
-- Jericho's current repository architecture, security, organ, task, proposal, and Sol law documents.
+- Friday's current repository architecture, security, organ, task, proposal, and Sol law documents.
 - Jarvis's current repository architecture and acceptance records, especially durable typed execution, missions, approval binding, independent verification, recovery, document intelligence, and multi-user material isolation.
 - Palantir's public descriptions of Ontology object/link/action concepts and data lineage:
   - <https://www.palantir.com/docs/foundry/ontology/overview/>

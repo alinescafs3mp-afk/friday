@@ -52,7 +52,7 @@ def main() -> None:
             break
         row: dict = {"url": url}
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "JerichoPDFMeasure/1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "FridayPDFMeasure/1.0"})
             with urllib.request.urlopen(req, timeout=25) as resp:
                 body = resp.read(6_000_000)
                 ctype = (resp.headers.get("Content-Type") or "").split(";", 1)[0].strip()
