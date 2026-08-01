@@ -306,6 +306,18 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     security_id: str
+    # Класс риска — ОБЯЗАТЕЛЬНОЕ поле, без умолчания, и это главное в нём.
+    # Спека v3 §5 требует различать наблюдение и мутацию; список опасных
+    # инструментов, живущий отдельно от них самих, — это fail-open: новый
+    # инструмент, меняющий данные, по умолчанию не попадает под гейт, и никто
+    # об этом не узнает, пока модель что-нибудь не сделает. Умолчания нет
+    # намеренно: забыть класс невозможно, программа не соберётся.
+    #
+    #   observe — только читает;
+    #   mutate  — меняет данные, но обратимо и в пределах своего арендатора;
+    #   high    — необратимо, каноническое или исполняющее; требует человека,
+    #             если предикат из HIGH_RISK_TOOLS подтверждает риск аргументов.
+    risk: str
     handler: Handler | None = None
 
     def to_openai(self) -> dict[str, Any]:
@@ -1822,13 +1834,21 @@ class ExecutionKernel:
 
     def _register_specs(self) -> None:
         def spec(
-            name: str, description: str, security_id: str, properties: dict[str, Any], required: list[str]
+            name: str,
+            description: str,
+            security_id: str,
+            properties: dict[str, Any],
+            required: list[str],
+            risk: str,
         ) -> None:
+            if risk not in {"observe", "mutate", "high"}:
+                raise ValueError(f"unknown risk class {risk!r} for tool {name!r}")
             self.register(
                 ToolSpec(
                     name=name,
                     description=description,
                     security_id=security_id,
+                    risk=risk,
                     parameters={
                         "type": "object",
                         "properties": properties,
@@ -1861,6 +1881,7 @@ class ExecutionKernel:
                 "until": {"type": "string", "description": "ГГГГ-ММ-ДД, конец периода"},
             },
             ["query"],
+            risk="observe",
         )
         spec(
             "message_search",
@@ -1878,6 +1899,7 @@ class ExecutionKernel:
                 },
             },
             ["query"],
+            risk="observe",
         )
         spec(
             "memory_save",
@@ -1890,6 +1912,7 @@ class ExecutionKernel:
                 "importance": {"type": "number", "minimum": 0, "maximum": 1},
             },
             ["content"],
+            risk="mutate",
         )
         spec(
             "web_search",
@@ -1897,6 +1920,7 @@ class ExecutionKernel:
             "web.search",
             {"query": {"type": "string"}, "max_results": {"type": "integer", "minimum": 1, "maximum": 10}},
             ["query"],
+            risk="observe",
         )
         spec(
             "web_fetch",
@@ -1908,6 +1932,7 @@ class ExecutionKernel:
                 "query": {"type": "string", "description": "что искать на странице"},
             },
             ["url"],
+            risk="observe",
         )
         spec(
             "web_research",
@@ -1915,6 +1940,7 @@ class ExecutionKernel:
             "web.research",
             {"query": {"type": "string"}, "max_sources": {"type": "integer", "minimum": 1, "maximum": 8}},
             ["query"],
+            risk="observe",
         )
         spec(
             "entity_lookup",
@@ -1925,6 +1951,7 @@ class ExecutionKernel:
             "kg.read",
             {"name": {"type": "string"}},
             ["name"],
+            risk="observe",
         )
         spec(
             "entity_create",
@@ -1937,6 +1964,7 @@ class ExecutionKernel:
                 "aliases": {"type": "array", "items": {"type": "string"}},
             },
             ["name", "entity_type"],
+            risk="mutate",
         )
         spec(
             "entity_link",
@@ -1950,8 +1978,9 @@ class ExecutionKernel:
                 "evidence": {"type": "string"},
             },
             ["source_entity_id", "target_entity_id", "relation_type"],
+            risk="mutate",
         )
-        spec("kg_stats", "Статистика личного графа знаний.", "kg.read", {}, [])
+        spec("kg_stats", "Статистика личного графа знаний.", "kg.read", {}, [], "observe")
         spec(
             "list_tags",
             "Список всех тегов личной базы знаний с числом записей у каждого. "
@@ -1960,6 +1989,7 @@ class ExecutionKernel:
             "knowledge.read",
             {},
             [],
+            risk="observe",
         )
         spec(
             "speak",
@@ -1968,6 +1998,7 @@ class ExecutionKernel:
             "tts.use",
             {"text": {"type": "string", "description": "Текст для озвучивания, обычно сам ответ."}},
             ["text"],
+            risk="mutate",
         )
         spec(
             "resolve_duplicates",
@@ -1975,6 +2006,7 @@ class ExecutionKernel:
             "kg.merge",
             {},
             [],
+            risk="observe",
         )
         spec(
             "conflict_list",
@@ -1984,6 +2016,7 @@ class ExecutionKernel:
             "knowledge.read",
             {"limit": {"type": "integer", "minimum": 1, "maximum": 10}},
             [],
+            risk="observe",
         )
         spec(
             "conflict_decide",
@@ -1999,6 +2032,7 @@ class ExecutionKernel:
                 },
             },
             ["conflict_id", "decision"],
+            risk="high",
         )
         spec(
             "entity_merge_decide",
@@ -2015,6 +2049,7 @@ class ExecutionKernel:
                 },
             },
             ["candidate_id", "decision"],
+            risk="high",
         )
         spec(
             "entity_merge_undo",
@@ -2026,6 +2061,7 @@ class ExecutionKernel:
             "kg.merge",
             {"merge_id": {"type": "string"}},
             ["merge_id"],
+            risk="mutate",
         )
         spec(
             "user_activity",
@@ -2052,6 +2088,7 @@ class ExecutionKernel:
                 "top": {"type": "integer", "minimum": 1, "maximum": 50},
             },
             ["person"],
+            risk="observe",
         )
         spec(
             "user_knowledge_search",
@@ -2070,6 +2107,7 @@ class ExecutionKernel:
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20},
             },
             ["person", "query"],
+            risk="observe",
         )
         spec(
             "inbox_list",
@@ -2077,6 +2115,7 @@ class ExecutionKernel:
             "inbox.read",
             {"status": {"type": "string", "enum": [item.value for item in InboxStatus]}},
             [],
+            risk="observe",
         )
         spec(
             "code_run",
@@ -2084,6 +2123,7 @@ class ExecutionKernel:
             "code.run",
             {"code": {"type": "string"}},
             ["code"],
+            risk="high",
         )
         spec(
             "mission_propose",
@@ -2093,4 +2133,5 @@ class ExecutionKernel:
             "missions.create",
             {"goal": {"type": "string"}},
             ["goal"],
+            risk="mutate",
         )
