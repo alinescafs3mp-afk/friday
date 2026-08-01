@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from email.utils import parsedate_to_datetime
@@ -252,6 +253,37 @@ def _tools_unsupported(body: str) -> bool:
     return "tool" in text and (
         "tool choice" in text or "tool_call_parser" in text or "tool-call-parser" in text
     )
+
+
+_TOOL_CALL_MARKUP = re.compile(
+    r"<\s*tool_call\s*>.*?(?:<\s*/\s*tool_call\s*>|$)", re.S | re.I
+)
+
+
+def _strip_tool_call_markup(content: str) -> str:
+    """Разметка вызова инструмента — не текст для человека.
+
+    Модель обязана просить инструмент отдельным полем протокола, но иногда пишет
+    его в ОТВЕТ как текст. Замерено на живом экземпляре: вопрос «сколько всего
+    знаний в базе? посчитай точно» вернул пользователю буквально
+
+        <tool_call>
+        {"name":"kg_stats"}
+        </tool_call>
+
+    и больше ничего. Снаружи это неотличимо от поломки, а на демо — хуже того.
+
+    Вызывается на ФИНАЛЬНОМ тексте — том, что уходит человеку, — и только там.
+    Раньше эта очистка стояла в `_strip_thinking`, то есть ДО разбора протокола, и
+    ломала работающий механизм: `tool_protocol` умеет распознать такой текстовый
+    вызов и ИСПОЛНИТЬ его, а вырезанный блок превращался в пустоту, пустота — в
+    «нарушение протокола», и пользователь получал «не удалось безопасно завершить
+    вызов инструмента» там, где раньше получал ответ. Поймано сравнением ответов
+    до и после правки, а не тестом.
+    """
+    if "tool_call" not in content.casefold():
+        return content
+    return _TOOL_CALL_MARKUP.sub("", content).strip()
 
 
 class LLMRouter:

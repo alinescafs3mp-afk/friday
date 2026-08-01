@@ -65,6 +65,10 @@ async def test_vertical_ingestion_graph_retrieval_and_idempotency(settings, stor
         "query": "DevFest",
         "results": [],
         "count": 0,
+        # Сколько подошло до обрезки страницы. У чужого арендатора — ноль, и это
+        # тот же ноль, что в `count`: поле различает «показано» и «найдено» только
+        # там, где найденного больше страницы.
+        "matched_at_least": 0,
         "entity_matches": [],
         "strategy": {
             "fts": True,

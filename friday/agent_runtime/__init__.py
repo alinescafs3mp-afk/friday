@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from friday.agent_runtime.llm import LLMRouter
+from friday.agent_runtime.llm import LLMRouter, _strip_tool_call_markup
 from friday.agent_runtime.tool_protocol import (
     ToolTurn,
     classify_tool_turn,
@@ -952,8 +952,25 @@ class AgentRuntime:
                 if turn.kind == "tool":
                     calls = turn.calls
                 elif turn.kind == "answer":
+                    # Разметка вызова снимается ЗДЕСЬ, а не раньше: до этой точки
+                    # текст ещё может оказаться настоящим вызовом, который
+                    # `tool_protocol` распознает и исполнит. Здесь он уже признан
+                    # ОТВЕТОМ человеку, и служебные маркеры в нём — мусор на экране.
+                    clean_answer = _strip_tool_call_markup(turn.text)
+                    if not clean_answer and turn.text.strip():
+                        # Ответ состоял ИЗ ОДНОЙ разметки: модель хотела позвать
+                        # инструмент, но написала это текстом, которого разбор
+                        # протокола не принимает. Показывать нечего — но и сдаваться
+                        # рано: это ровно тот случай, для которого рядом уже есть
+                        # ремонтное сообщение и счётчик попыток. Замерено на живом
+                        # экземпляре: вопрос «сколько всего знаний в базе? посчитай
+                        # точно» отдавал пользователю `<tool_call>{"name":"kg_stats"}
+                        # </tool_call>` целиком.
+                        LOGGER.warning("Model answered with bare tool-call markup; asking again")
+                        messages.append({"role": "system", "content": _TOOL_PROTOCOL_REPAIR})
+                        continue
                     return {
-                        "content": turn.text or "Не удалось обработать запрос.",
+                        "content": clean_answer or "Не удалось обработать запрос.",
                         "tools_used": tools_used,
                         "knowledge_object_ids": tool_knowledge_ids,
                         "tool_evidence": tool_evidence,

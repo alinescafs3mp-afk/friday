@@ -2044,6 +2044,11 @@ class HybridSearcher:
                             continue
                         kept.append(item)
                     results = kept
+        # Сколько прошло ВСЕ фильтры до обрезки страницы. Это нижняя оценка («не
+        # менее»), а не полное число совпадений: глубже `collect` кандидаты не
+        # рассматривались. Но именно она отличает «нашлось ровно столько» от
+        # «показана часть», а `count` этого не различает вовсе.
+        matched_before_page = len(results)
         results = results[:limit]
 
         # Resolve the winning passage's offsets so the answer can quote what actually
@@ -2162,6 +2167,11 @@ class HybridSearcher:
             "query": clean_query,
             "results": results,
             "count": len(results),
+            # Сколько кандидатов вообще подошло, до урезания до страницы. `count` —
+            # длина ОТВЕТА, и выдавать её за размер найденного нельзя: на вопрос
+            # «кто из Уфы» модель получала `count: 10`, отвечала одним человеком и
+            # звучала как полный перечень, тогда как Уфу упоминают 29 документов.
+            "matched_at_least": matched_before_page,
             "entity_matches": entity_matches,
             "strategy": strategy,
         }
