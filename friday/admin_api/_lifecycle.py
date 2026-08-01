@@ -25,6 +25,7 @@ from friday.admin_api._deps import (
     _require,
     _services,
 )
+from friday.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -46,7 +47,13 @@ async def preview_legacy_cleanup(
     # the total have to come from one and the same walk, or the pager lies. The visible
     # consequence is that page one is now genuinely the riskiest, which the «риск»
     # column always implied and the early-exit scan never delivered.
-    items, total = _services(request).ingestion.scan_legacy_quality_page(
+    # Обход С EVENT LOOP. Предикат «подозрительный» читает содержимое и метаданные
+    # КАЖДОГО объекта, поэтому обход стоит секунды: замерено 14.9 с на корпусе в
+    # 1533 документа. Пока он шёл на цикле, вставал весь процесс — `/health`
+    # отвечал 14.06 с, а вместе с ним молчали чат, мост и все органы. Один
+    # открытый раздел админки глушил систему для всех.
+    items, total = await run_blocking(
+        _services(request).ingestion.scan_legacy_quality_page,
         user_id,
         limit=limit,
         offset=offset,
