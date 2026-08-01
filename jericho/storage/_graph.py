@@ -118,6 +118,74 @@ class GraphMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    # Поля, которые ОПИСЫВАЮТ сущность и потому подлежат откату. Намеренно без
+    # `canonical`/`merged_into_id`: слияние — отдельное решение со своей историей
+    # и своим обратным ходом (`unmerge_entities`), и молча разъединять его откатом
+    # правки имени значило бы делать за человека то, о чём он не просил.
+    _RESTORABLE_ENTITY_FIELDS = ("name", "entity_type", "aliases_json", "description", "metadata_json")
+
+    def restore_entity_version(
+        self, entity_id: str, user_id: str, version: int, *, reviewed_by: str | None = None
+    ) -> dict[str, Any] | None:
+        """Вернуть сущность к состоянию из снимка — новой версией, не перемоткой.
+
+        Спека v3 §2 требует, чтобы исправление сущности было обратимым
+        («correction... reversible without editing the Raw Object»), и снимки для
+        этого уже писались при каждой правке — не было только обратного хода. У
+        знаний он давно есть (`restore_knowledge_version`), у сущностей не было.
+
+        Это не косметика на корпусе, где 4349 узлов-людей и 149 войсковых частей
+        заведены автоматическими правилами: первая же правка не того узла (или
+        правка, сделанная по ошибочной догадке) иначе необратима.
+
+        Откат идёт обычной правкой, поэтому создаёт версию N+1 и ничего не
+        стирает: откатившийся по ошибке может откатиться назад.
+        """
+        rows = [
+            row
+            for row in self.list_entity_versions(entity_id, user_id)
+            if int(row.get("version") or 0) == int(version)
+        ]
+        if not rows:
+            raise LookupError(f"Version {version} not found for {entity_id}")
+        try:
+            snapshot = json.loads(str(rows[0].get("snapshot_json") or "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Version snapshot is not readable") from exc
+        if not isinstance(snapshot, dict):
+            raise ValueError("Version snapshot is not an object")
+        current = self.get_entity(entity_id, user_id)
+        if not current or current.get("deleted_at"):
+            return None
+        fields = {name: snapshot[name] for name in self._RESTORABLE_ENTITY_FIELDS if name in snapshot}
+        if not fields:
+            raise ValueError("Version snapshot carries no restorable fields")
+        raw_metadata = _json_load(fields.get("metadata_json"), {})
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        if reviewed_by:
+            # Кто откатил и к чему — на самой сущности, а не только в аудите:
+            # тот же принцип, что у знаний.
+            metadata["restored_from_version"] = int(version)
+            metadata["restored_by"] = str(reviewed_by)
+        fields["metadata_json"] = metadata
+        entity = Entity(
+            id=str(current["id"]),
+            user_id=user_id,
+            name=str(fields.get("name") or current["name"]),
+            entity_type=EntityType(str(fields.get("entity_type") or current.get("entity_type") or "other")),
+            aliases_json=[str(item) for item in _json_load(fields.get("aliases_json"), []) or []],
+            description=str(fields.get("description") or ""),
+            metadata_json=metadata,
+            canonical=bool(current.get("canonical", 1)),
+            merged_into_id=current.get("merged_into_id"),
+            version=int(current.get("version", 1)),
+            created_at=str(current.get("created_at") or utc_now()),
+            updated_at=utc_now(),
+            deleted_at=current.get("deleted_at"),
+        )
+        self.update_entity(entity)
+        return self.get_entity(entity_id, user_id)
+
     def _entity_filter(
         self,
         user_id: str,

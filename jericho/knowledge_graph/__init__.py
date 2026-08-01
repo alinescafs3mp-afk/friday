@@ -1220,6 +1220,11 @@ class KnowledgeGraph:
     def delete_entity(self, user_id: str, entity_id: str) -> bool:
         return self.storage.soft_delete_entity(entity_id, user_id)
 
+    def restore_entity_version(
+        self, user_id: str, entity_id: str, version: int, *, reviewed_by: str | None = None
+    ) -> dict[str, Any] | None:
+        return self.storage.restore_entity_version(entity_id, user_id, version, reviewed_by=reviewed_by)
+
     def create_relation(
         self,
         user_id: str,
@@ -1618,6 +1623,7 @@ class KnowledgeGraph:
                 "knowledge_objects_total": 0,
                 "profile": {"tags": [], "document_date_range": None, "documents_without_own_date": 0},
                 "event_time": None,
+                "edits": {"versions": 0, "last_edited_at": None, "restorable_version": None},
             }
         # Карточка перечисляет документы, но не показывает их текст — поэтому
         # проекция без `content`: полный `k.*` давал замеренные 2.4–4.9 МБ на один
@@ -1636,6 +1642,24 @@ class KnowledgeGraph:
             "knowledge_objects_total": summary.pop("total"),
             "profile": summary,
             "event_time": self.get_event_time(user_id, entity_id),
+            # Четвёртый временной факт, теперь и для сущности: КОГДА ЕЁ ПРАВИЛИ —
+            # отдельно от дат документов и от времени события (спека v3 §2). У
+            # документа он уже показывался в подвале lineage, у объекта — нет.
+            # `restorable_version` — та версия, к которой ведёт откат «отменить
+            # последнюю правку»: предпоследняя, потому что последняя и есть
+            # текущее состояние.
+            "edits": self._entity_edit_history(user_id, entity_id),
+        }
+
+    def _entity_edit_history(self, user_id: str, entity_id: str) -> dict[str, Any]:
+        versions = self.storage.list_entity_versions(entity_id, user_id)  # новые первыми
+        if not versions:
+            return {"versions": 0, "last_edited_at": None, "restorable_version": None}
+        numbers = sorted({int(row.get("version") or 0) for row in versions})
+        return {
+            "versions": len(numbers),
+            "last_edited_at": str(versions[0].get("created_at") or "") or None,
+            "restorable_version": numbers[-2] if len(numbers) > 1 else None,
         }
 
     def review_knowledge_link(

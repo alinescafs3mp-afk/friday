@@ -439,7 +439,37 @@ class ViewsMixin(BridgeShared):
                 lines.append(f"• {title}")
         if total_documents > 5:
             lines.append(f"…и ещё {total_documents - 5}")
-        await self._send_message(telegram, chat_id, "\n".join(lines))
+
+        # Когда объект ПРАВИЛИ — отдельный временной факт от дат документов и от
+        # времени события (спека v3 §2). Пока правок нет, строки нет: «правок: 1»
+        # означало бы «ни разу не менялось» и только сбивало бы.
+        edits = data.get("edits") if isinstance(data.get("edits"), dict) else {}
+        version_count = int(edits.get("versions") or 0)
+        restorable = edits.get("restorable_version")
+        if version_count > 1:
+            edited_at = str(edits.get("last_edited_at") or "")[:10]
+            lines.append(
+                f"Правок: {version_count - 1}" + (f", последняя от {edited_at}" if edited_at else "")
+            )
+
+        entity_id = str(entity.get("id") or "")
+        markup: dict[str, Any] | None = None
+        if entity_id and restorable is not None and CALLBACK_TARGET_RE.fullmatch(entity_id):
+            # Кнопка отката появляется только когда откатывать ЕСТЬ К ЧЕМУ.
+            # Версия едет в самой кнопке: иначе между показом карточки и нажатием
+            # могла бы вклиниться другая правка, и «отменить последнюю» отменило
+            # бы уже не ту, которую человек видел.
+            markup = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "↩︎ Отменить последнюю правку",
+                            "callback_data": f"ent:undo:{entity_id}.{restorable}",
+                        }
+                    ]
+                ]
+            }
+        await self._send_message(telegram, chat_id, "\n".join(lines), reply_markup=markup)
 
     async def _send_browse(
         self,

@@ -180,6 +180,52 @@ async def delete_entity(entity_id: str, request: Request) -> dict[str, Any]:
     return {"status": "soft_deleted"}
 
 
+@router.post("/entities/{entity_id}/restore", tags=["knowledge-graph"])
+async def restore_entity_version(entity_id: str, request: Request) -> dict[str, Any]:
+    """Вернуть сущность к состоянию из снимка её версии.
+
+    Спека v3 §2 требует, чтобы исправление сущности было ОБРАТИМЫМ. Снимки при
+    каждой правке писались с самого начала (`entity_versions`), у знаний обратный
+    ход есть давно (`POST /api/admin/knowledge/{id}/restore`), а у сущностей его
+    не было вовсе — правка узла была дорогой в одну сторону.
+
+    Здесь это self-service под `kg.write`, а не админская ручка: сущности правит
+    их собственный владелец, и именно ему нужен откат — на корпусе, где 4349
+    узлов-людей и 149 войсковых частей заведены автоматическими правилами.
+
+    Откат создаёт НОВУЮ версию, а не перематывает историю.
+    """
+    actor = _require(request, "kg.write")
+    body = await _request_json(request)
+    try:
+        version = int(str(body.get("version")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="version должен быть целым числом") from exc
+    state = request.app.state
+    before = state.kg.get_entity(entity_id, actor.user_id)
+    if not before:
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
+    try:
+        after = await run_blocking(
+            state.kg.restore_entity_version,
+            actor.user_id,
+            entity_id,
+            version,
+            reviewed_by=actor.user_id,
+        )
+    except LookupError as exc:
+        # Текст исключения — английский и служебный («Version 7 not found for
+        # ent_…»); человек читает эту строку в Telegram, поэтому наружу идёт
+        # русское объяснение, а не `str(exc)`.
+        raise HTTPException(status_code=404, detail="У объекта нет такой версии") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Снимок этой версии нечитаем") from exc
+    if after is None:
+        raise HTTPException(status_code=404, detail="Сущность не найдена")
+    _audit(request, "entity.restore", "entity", entity_id, before=before, after=after)
+    return {"entity": after, "restored_from_version": version}
+
+
 @router.post("/relations", tags=["knowledge-graph"])
 async def create_relation(request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.write")

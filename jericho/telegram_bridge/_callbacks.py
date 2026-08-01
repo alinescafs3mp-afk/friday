@@ -115,6 +115,34 @@ class CallbacksMixin(BridgeShared):
                 )
                 await self._answer_callback(telegram, callback_id, "Открываю")
                 await self._send_message(telegram, chat_id, self._format_full_document(document))
+            elif family == "ent" and action == "undo":
+                # `target_id` — «{id сущности}.{версия}». Версия едет в кнопке, а не
+                # вычисляется здесь заново: между показом карточки и нажатием могла
+                # вклиниться другая правка, и «отменить последнюю» отменило бы уже
+                # не то, что человек видел на экране. Если версии больше нет —
+                # backend ответит 404, и это правильный отказ, а не тихий успех.
+                entity_id, _, raw_version = target_id.partition(".")
+                if not entity_id or not raw_version.isdigit():
+                    raise PermanentUpdateError("Invalid entity undo target")
+                restored = await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/kg/entities/{entity_id}/restore",
+                    {"version": int(raw_version), "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                raw_restored = restored.get("entity") if isinstance(restored, dict) else None
+                restored_entity: dict[str, Any] = raw_restored if isinstance(raw_restored, dict) else {}
+                name = str(restored_entity.get("name") or "").strip()
+                await self._answer_callback(telegram, callback_id, "Правка отменена")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    (f"Объект возвращён к прежнему состоянию: «{name}»." if name else "Правка отменена.")
+                    + " Сам откат — тоже правка, его можно отменить так же.",
+                )
+                clear_markup = True
             elif family == "feedback" and action in {"up", "down", "search_off"}:
                 if action == "search_off":
                     feedback_type, score = "search_quality", -1.0
