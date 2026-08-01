@@ -77,6 +77,9 @@ def tokens_of(text: str, *, fold_yo: bool = True) -> list[str]:
 # небо/нёбо). For recall over a personal archive that is the right trade, and it is
 # the same one every Russian search engine makes.
 _YO_FOLD = str.maketrans({"ё": "е", "Ё": "Е"})
+# Разделители ВНУТРИ имени файла. Те же знаки склеивают идентификатор, поэтому
+# они не трогают `tokens_of` — только дополняют вектор названия (см. `filename_words`).
+_FILENAME_SPLIT_RE = re.compile(r"[_.+\-]+")
 # Сколько идентификаторов запроса должен покрыть документ, когда их НЕСКОЛЬКО.
 # «Хотя бы один»: вопрос вида «чем X отличается от Y» законно отвечается
 # документом про одну из сторон, а требование покрыть обе оставляло человека с
@@ -90,6 +93,38 @@ _RELATIONAL_QUERY_RE = re.compile(
     r"related\s+to|depends?\s+on|works?\s+on|part\s+of|connected\s+to|between)\b",
     re.IGNORECASE,
 )
+
+
+def filename_words(title: str) -> str:
+    """Название файла, дополнительно разобранное по разделителям имени.
+
+    `tokens_of` намеренно НЕ делит по `_ . - +`: иначе рассыпались бы
+    `autovacuum_vacuum_scale_factor`, `BRK.A` и `file.txt`, ради которых это
+    правило и написано. Но у имени файла те же знаки — разделители, и на архиве
+    владельца это решало исход: «Бутко Сергей Александрович_октябрь_2025.pdf»
+    давал ОДИН токен `Александрович_октябрь_2025.pdf`, поэтому «октябрь» и «2025»
+    из запроса не совпадали с названием ни одной буквой. Замерено: нужный документ
+    получал score 0.27 и не попадал в топ-10, где стояли «Судимости.docx» и
+    «людииииии.docx» — большие списки людей, похожие на запрос семантически.
+
+    Возвращается ДОПОЛНЕНИЕ, а не замена: целые токены остаются на месте, к ним
+    приписываются части. Точное совпадение по идентификатору поэтому не страдает —
+    оно ищет целый токен, и целый токен никуда не делся.
+    """
+    extra: list[str] = []
+    for token in tokens_of(title):
+        if not _FILENAME_SPLIT_RE.search(token):
+            continue
+        parts = [part for part in _FILENAME_SPLIT_RE.split(token) if len(part) > 1]
+        if len(parts) > 1:
+            extra.extend(parts)
+    return " ".join(extra)
+
+
+def _title_text(title: str) -> str:
+    """Название плюс его же разобранные части — вход для вектора заголовка."""
+    extra = filename_words(title)
+    return f"{title} {extra}" if extra else title
 
 
 def is_relational_query(query: str) -> bool:
@@ -2389,7 +2424,7 @@ class HybridSearcher:
             self._field_vector_cache.move_to_end(key)
             return cached
         vectors = (
-            lexical_vector(str(item.get("title") or "")),
+            lexical_vector(_title_text(str(item.get("title") or ""))),
             lexical_vector(str(item.get("summary") or "")),
             lexical_vector(" ".join(self._json_list(item.get("tags_json")))),
         )

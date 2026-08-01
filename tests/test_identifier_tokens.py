@@ -246,3 +246,103 @@ def test_a_single_identifier_still_demands_a_full_match(settings, storage):
     results = asyncio.run(searcher.search("alice", "BRK.A", limit=10, kg=KnowledgeGraph(storage)))["results"]
 
     assert results == [], "запрос про BRK.A удовлетворён записью про BRK.B"
+
+
+def test_a_filename_with_underscores_matches_its_parts(settings, storage):
+    """Имя файла — не идентификатор, и его части должны совпадать с запросом.
+
+    `tokens_of` намеренно не делит по `_ . -`, иначе рассыплются
+    `autovacuum_vacuum_scale_factor` и `BRK.A`. Но у имени файла те же знаки —
+    разделители: «Бутко Сергей Александрович_октябрь_2025.pdf» давал ОДИН токен
+    `Александрович_октябрь_2025.pdf`, и слова «октябрь», «2025» из запроса не
+    совпадали с названием ни одной буквой.
+
+    Замерено на боевом корпусе: нужный документ получал score 0.27 и не попадал в
+    топ-10, где стояли «Судимости.docx» и «людииииии.docx» — большие списки людей,
+    похожие семантически. После правки recall@10 на 78 эталонах 0.4615 → 0.5,
+    MRR 0.1676 → 0.2165.
+
+    Мутация: строить вектор заголовка из голого `title` — тест краснеет.
+    """
+    from friday.retrieval import filename_words
+
+    assert filename_words("Бутко Сергей Александрович_октябрь_2025.pdf").split() == [
+        "Александрович",
+        "октябрь",
+        "2025",
+        "pdf",
+    ]
+
+    # Прямая проверка СИГНАЛА, а не порядка выдачи: на стенде из двух документов
+    # нужный побеждает и без правки, поэтому проверка «он первый» ничего не
+    # доказывает — первая редакция этого теста мутацию «строить вектор из голого
+    # title» НЕ ловила.
+    storage.ensure_user("alice", source="upload")
+    _store(
+        storage,
+        "Бутко Сергей Александрович_октябрь_2025.pdf",
+        "Расчётный листок. Начислено и удержано за отчётный период.",
+    )
+    searcher = HybridSearcher(storage, record_usage=False)
+    item = {
+        "id": "ko_x",
+        "version": 1,
+        "updated_at": "2026-01-01",
+        "title": "Бутко Сергей Александрович_октябрь_2025.pdf",
+        "summary": "",
+        "content": "",
+        "tags_json": "[]",
+    }
+    scores = searcher._field_scores(item, "зарплата Бутко октябрь 2025", [])  # noqa: SLF001
+    # Порог между двумя ЗАМЕРЕННЫМИ значениями: без разбора 0.314 (вытягивают одни
+    # триграммы), с разбором 0.512. Слабый порог вроде 0.2 проходил бы в обоих
+    # случаях — первая редакция теста так и делала и мутацию не ловила.
+    assert scores["title"] > 0.42, (
+        f"название с фамилией И месяцем совпало с запросом лишь на {scores['title']:.3f} — "
+        "части имени файла не участвуют в сопоставлении (без разбора выходит ≈0.314)"
+    )
+
+    # И обратная сторона: у названия без разделителей сигнал не появился из ниоткуда.
+    # Другой id: вектор заголовка кэшируется по (id, version, updated_at).
+    plain = dict(item, id="ko_plain", title="Судимости.docx")
+    assert searcher._field_scores(plain, "зарплата Бутко октябрь 2025", [])["title"] < 0.2  # noqa: SLF001
+
+
+def test_the_whole_filename_still_matches_itself(settings, storage):
+    """Части ДОПОЛНЯЮТ имя, а не заменяют его.
+
+    Человек часто ищет документ ровно тем именем, под которым его сохранил. Если
+    бы разбор заменял целое имя частями, такой запрос обвалился бы: замерено
+    0.773 при дополнении против 0.214 при замене.
+
+    Мутация: вернуть из `_title_text` только части — тест краснеет.
+    """
+    searcher = HybridSearcher(storage, record_usage=False)
+    item = {
+        "id": "ko_whole",
+        "version": 1,
+        "updated_at": "2026-01-01",
+        "title": "Бутко Сергей Александрович_октябрь_2025.pdf",
+        "summary": "",
+        "content": "",
+        "tags_json": "[]",
+    }
+    exact = searcher._field_scores(item, item["title"], [])["title"]  # noqa: SLF001
+    assert exact > 0.6, f"поиск точным именем файла даёт лишь {exact:.3f} — целое имя потеряно"
+
+
+def test_splitting_filenames_does_not_loosen_identifier_matching(settings, storage):
+    """Части добавляются, целый токен остаётся — иначе это подмена правила.
+
+    Если бы разбор ЗАМЕНЯЛ токен, `scale_factor` начал бы удовлетворять запрос про
+    `autovacuum_vacuum_scale_factor` и наоборот. Проверяется обратное направление:
+    подстрока по-прежнему не считается тем же идентификатором.
+    """
+    storage.ensure_user("alice", source="upload")
+    _store(storage, "pg-vacuum.md", "Подъём autovacuum_vacuum_scale_factor. Готово.")
+
+    searcher = HybridSearcher(storage, record_usage=False)
+    results = asyncio.run(searcher.search("alice", "scale_factor", limit=10, kg=KnowledgeGraph(storage)))[
+        "results"
+    ]
+    assert results == [], "разбор имён файлов ослабил точное совпадение идентификатора"
