@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.permissions import (
+from friday.execution_kernel import ExecutionKernel
+from friday.permissions import (
     ActorContext,
     AuthorizationError,
     AuthorizationService,
@@ -139,7 +139,7 @@ async def test_kernel_without_authorization_denies_everything(settings, storage)
 
 
 def test_agent_runtime_fallback_kernel_is_authorized(settings, storage):
-    from jericho.agent_runtime import AgentRuntime
+    from friday.agent_runtime import AgentRuntime
 
     runtime = AgentRuntime(settings, storage)
     assert runtime.kernel.authorization is not None

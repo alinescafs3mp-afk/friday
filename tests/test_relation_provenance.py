@@ -12,10 +12,10 @@ import json
 
 from fastapi.testclient import TestClient
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import EntityType
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import EntityType
 
 
 def _edge_metadata(storage, user_id: str) -> dict:

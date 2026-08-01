@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.permissions import CORE_CAPABILITIES, CapabilityDefinition
+from friday.permissions import CORE_CAPABILITIES, CapabilityDefinition
 
 
 def test_marking_a_capability_as_needing_a_human_fails_loudly():

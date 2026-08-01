@@ -28,10 +28,10 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.agent_runtime import AgentRuntime
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.retrieval import HybridSearcher
+from friday.agent_runtime import AgentRuntime
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.retrieval import HybridSearcher
 
 # Формы из переписки / существующих регрессий (см. test_answer_without_sources…,
 # test_people_get_into_the_graph). Не «удобные» выдумки.

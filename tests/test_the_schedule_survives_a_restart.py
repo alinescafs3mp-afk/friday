@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from jericho.workers import IntervalTask, WorkerSupervisor
+from friday.workers import IntervalTask, WorkerSupervisor
 
 
 def _task(name: str = "daily", interval: float = 86_400.0) -> IntervalTask:
@@ -96,7 +96,7 @@ def test_a_worker_that_never_ran_is_not_reported_healthy(settings, storage):
     import dataclasses
     import json
 
-    from jericho.diagnostics import _worker_status
+    from friday.diagnostics import _worker_status
 
     # В общей фикстуре воркеры выключены, и тогда состояние даже не читается.
     settings = dataclasses.replace(settings, workers_enabled=True)
@@ -115,7 +115,7 @@ def test_a_worker_merely_waiting_its_turn_is_left_alone(settings, storage):
     import dataclasses
     import json
 
-    from jericho.diagnostics import _worker_status
+    from friday.diagnostics import _worker_status
 
     settings = dataclasses.replace(settings, workers_enabled=True)
     future = (datetime.now(UTC) + timedelta(seconds=3_600)).isoformat(timespec="seconds")

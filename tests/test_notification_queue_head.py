@@ -17,8 +17,8 @@ from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
-from jericho.security import sign_bridge_request
-from jericho.server import create_app
+from friday.security import sign_bridge_request
+from friday.server import create_app
 
 
 def _pending(client, settings, *, limit: int = 20) -> dict:
@@ -29,11 +29,11 @@ def _pending(client, settings, *, limit: int = 20) -> dict:
     response = client.get(
         path,
         headers={
-            "X-Jericho-Timestamp": str(timestamp),
-            "X-Jericho-User": signer,
-            "X-Jericho-Chat": signer,
-            "X-Jericho-Nonce": nonce,
-            "X-Jericho-Signature": sign_bridge_request(
+            "X-Friday-Timestamp": str(timestamp),
+            "X-Friday-User": signer,
+            "X-Friday-Chat": signer,
+            "X-Friday-Nonce": nonce,
+            "X-Friday-Signature": sign_bridge_request(
                 settings.telegram_bridge_secret,
                 timestamp=timestamp,
                 method="GET",

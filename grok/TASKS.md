@@ -11,17 +11,17 @@
 
 Владелец за вечер попросил голосовой ответ (Jericho говорит на просьбу внутри
 разговора, не команда, не режим-переключатель) — я реализовала и включила на
-бою. Три коммита: `af620c3` (движок `jericho/tts.py` + инструмент агента
+бою. Три коммита: `af620c3` (движок `friday/tts.py` + инструмент агента
 `speak`), `faab13a` (доставка в Telegram — `_send_voice`/
 `_deliver_voice_reply`), `11a35b2` (девять тестов, каждый проверен мутацией).
-Гейт зелёный, `JERICHO_TTS_ENABLED=1` уже в бою.
+Гейт зелёный, `FRIDAY_TTS_ENABLED=1` уже в бою.
 
 **Твоя задача — состязательный обзор этих трёх коммитов, свежим взглядом
 (ты этот код не писал).** Смотри как в прошлых проходах ревью (G17/G18/G21
 нашли реальные HIGH). Наводки, откуда начать смотреть, не готовые находки:
 
 1. **`tts.use` — граница прав.** Выдан admin/moderator/user/guest, как
-   `chat.use` (`jericho/permissions/__init__.py`). Верно ли это по риску —
+   `chat.use` (`friday/permissions/__init__.py`). Верно ли это по риску —
    `speak` синтезирует локально, не читает и не пишет чужие данные, но ест
    CPU/GPU время наравне с LLM-вызовом. Стоит ли это ограничивать так же, как
    `web.search`/`web.fetch` (risk_level 1), а не risk_level 0?
@@ -36,7 +36,7 @@
    без пользовательского состояния). Это верно СЕЙЧАС (piper не трогает
    storage/kg), но подумай, есть ли путь, которым чужой `text` синтезируется
    не для того пользователя — например, кэш модели (`_MODEL_CACHE` в
-   `jericho/tts.py`) ключуется на `(voice, download_root)`, ОБЩИЙ на все
+   `friday/tts.py`) ключуется на `(voice, download_root)`, ОБЩИЙ на все
    тенанты. Это утечка? (Он общий у STT в `whisper.py` тоже — тот же вопрос
    применим и туда, если решишь, что это находка.)
 4. **`sanitize_text`/`max_chars=2000` — единственная защита от долгого
@@ -46,12 +46,12 @@
    текст для `speak`, не пользователь напрямую) достаточно часто, чтобы
    забить CPU?
 5. **`_deliver_voice_reply` глотает ЛЮБОЕ исключение** best-effort
-   (`jericho/telegram_bridge/_callbacks.py`) — сделано намеренно (сбой
+   (`friday/telegram_bridge/_callbacks.py`) — сделано намеренно (сбой
    голоса не должен портить успешный текстовый ответ), но проверь: не
    прячет ли это то, что стоило бы видеть оператору (например,
    систематический сбой `sendVoice` из-за неверного формата — сейчас это
    только `LOGGER.warning`, в метрики/`doctor` не попадает).
-6. **OGG/Opus кодирование через PyAV** (`jericho/tts.py:_encode_opus_ogg`) —
+6. **OGG/Opus кодирование через PyAV** (`friday/tts.py:_encode_opus_ogg`) —
    ресурс: как ведёт себя на пограничных/повреждённых входах (пустой PCM,
    очень короткий текст)? Есть ли тест на это или дыра.
 
@@ -125,7 +125,7 @@ kind='reminder'` из SQL — тест обязан покраснеть.
 2. **№2 и №7 — одним заходом, не порознь** (моё решение, причина внутри
    PROPOSALS.md): срез `to_llm_message`/`to_dict` с ГОЛОВЫ на большом
    `web_research`-результате, и `_FETCH_TOTAL_BUDGET` веб-фетча (сейчас 60с в
-   `jericho/web_surfer/__init__.py`) больше потолка ядра в 30с
+   `friday/web_surfer/__init__.py`) больше потолка ядра в 30с
    (`ExecutionKernel.execute`, `timeout = ... else 30`). **Тоже перепроверь
    сперва**: `_web_research_for_llm` в текущем коде уже бюджетирует по
    источникам (похоже на правку G12) — возможно это уже закрывает №2
@@ -216,7 +216,7 @@ Telegram ``/export``. Тесты: ``tests/test_conversation_export.py``.
 Из того же исследования: у мейнстримных ассистентов можно посмотреть список
 предстоящих напоминаний и снять одно. У Jericho «напоминания» — не то, что
 человек создаёт руками, а автосканирование `entity_time` (даты, найденные в
-документах) органом `reminders` (`jericho/organs/reminders/__init__.py`):
+документах) органом `reminders` (`friday/organs/reminders/__init__.py`):
 `scan_reminders` кладёт push в `outbound_notifications` с `kind="reminder"`
 и `dedup_key=f"reminder:{entity_id}:{occurred_at}"`. Это важно для формы
 задачи — «отменить» здесь значит не удалить строку, а официально её снять,
@@ -287,7 +287,7 @@ dedup_key сохраняется), `GET/POST /api/me/reminders[...]`, Telegram `
 
 **Общий кусок для всех трёх:** резолв «текущего разговора этого чата» уже есть
 как паттерн — `GET /api/conversations/channel/why`
-(`jericho/api/conversations.py:32-50`) резолвит `channel`/`channel_id` в
+(`friday/api/conversations.py:32-50`) резолвит `channel`/`channel_id` в
 `conversation_id` через `state.storage.get_channel_session(actor.user_id,
 "telegram", channel_id)`. Команды ниже читают ЭТОТ conversation_id (текущий
 чат = текущий разговор), не принимают чужой id аргументом.
@@ -313,7 +313,7 @@ dedup_key сохраняется), `GET/POST /api/me/reminders[...]`, Telegram `
 HTTP-маршрута. Добавь `ConversationsMixin.set_conversation_title(conversation_id,
 user_id, title)` в `storage/_conversations.py` (короткий, по образцу
 `set_conversation_mode`, тот же файл), `PATCH /api/conversations/{id}` с телом
-`{title}` в `jericho/api/conversations.py` (тот же гейт `conversations.manage`,
+`{title}` в `friday/api/conversations.py` (тот же гейт `conversations.manage`,
 образец — маршрут archive рядом), затем команду в Telegram.
 
 **Для всех трёх:** `BOT_COMMANDS`, `/help`, `tests/test_bridge_surface.py`
@@ -514,7 +514,7 @@ callback, что у поиска/browse/хроники). В тексте: «Кн
 
 ## G9 (#56). Разметить очередь конфликтов: очевидное vs требует внимания — **сделано**
 
-`jericho/conflict_triage.py`: Jaccard по `content_tokens` (стемы), отношение длин,
+`friday/conflict_triage.py`: Jaccard по `content_tokens` (стемы), отношение длин,
 доля data-diff (заглавная/цифра). Метки `likely_duplicate` /
 `likely_different_records` / `uncertain` — только подсказка, `conflict_decide` и
 порог 0.95 не тронуты. Поверхности: `conflict_list`, `GET /api/kg/conflicts`,
@@ -634,7 +634,7 @@ hardened against exactly this; missions were missed». Историю повто
 `purge_knowledge_endpoint` (`_knowledge.py:904-908`): resolve `user_id`, затем
 `_protect_owner_target(request, user_id)` СРАЗУ ПОСЛЕ резолва, ДО первого чтения
 или записи в хранилище. В файлах без импорта — добавь `_protect_owner_target` в
-`from jericho.admin_api._deps import (...)`.
+`from friday.admin_api._deps import (...)`.
 
 ### Сторожевой тест — ОБЯЗАТЕЛЕН, и он важнее самих правок
 
@@ -727,7 +727,7 @@ except BaseException:
 # Новое (после G12) — два хвоста моей же сегодняшней фичи авторегистрации
 
 Я сделал `jericho backfill-entities` -- нет, не то. Сделал авторегистрацию
-(`fe1f810`, `JERICHO_TELEGRAM_OPEN_REGISTRATION`) и по пути задумал, но не успел
+(`fe1f810`, `FRIDAY_TELEGRAM_OPEN_REGISTRATION`) и по пути задумал, но не успел
 дописать две вещи. Оба — прямое следствие правила проекта «максимум функционала
 в Telegram», и оба про один и тот же момент: человек только что впервые написал
 боту.

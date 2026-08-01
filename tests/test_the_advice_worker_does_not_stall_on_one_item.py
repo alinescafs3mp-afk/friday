@@ -18,9 +18,9 @@ from contextlib import suppress
 
 import httpx
 
-from jericho.ingestion import IngestionPipeline
-from jericho.storage.models import InboxItem, RawObject, new_id
-from jericho.workers import WorkerBatchError, WorkersManager, _is_endpoint_failure
+from friday.ingestion import IngestionPipeline
+from friday.storage.models import InboxItem, RawObject, new_id
+from friday.workers import WorkerBatchError, WorkersManager, _is_endpoint_failure
 
 POISON = "ЯДОВИТЫЙ"
 

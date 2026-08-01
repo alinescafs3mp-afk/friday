@@ -7,8 +7,8 @@ from dataclasses import replace
 
 import pytest
 
-import jericho.web_surfer as web_surfer_module
-from jericho.web_surfer import WebSurfer
+import friday.web_surfer as web_surfer_module
+from friday.web_surfer import WebSurfer
 
 # Hand-rolled one-page PDF with a Type1 Helvetica string. DocumentExtractor/pypdf
 # already recovers MARKER-PDF-42 from this fixture (checked before enabling the
@@ -196,7 +196,7 @@ def test_the_parse_budget_stops_the_work_itself_not_only_the_waiting() -> None:
 
     import pypdf
 
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     original = pypdf._page.PageObject.extract_text
 
@@ -220,7 +220,7 @@ def test_the_parse_budget_stops_the_work_itself_not_only_the_waiting() -> None:
 def test_a_pdf_without_a_budget_is_parsed_to_the_end() -> None:
     """Обратная сторона: без срока поведение прежнее — иначе правка не «ввела
     предохранитель», а обрезала разбор всем подряд."""
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     result = DocumentExtractor().extract(_blank_pdf(3), "plain.pdf", "application/pdf")
     assert result.metadata.get("parse_deadline_reached") is None
@@ -275,9 +275,9 @@ def test_the_deadline_marker_crosses_the_extraction_boundary(monkeypatch) -> Non
     Мутация: убрать ветку `parse_truncated` из `_extract_pdf_text` — тест обязан
     покраснеть.
     """
-    import jericho.documents as documents_module
-    from jericho.documents import DocumentResult
-    from jericho.web_surfer import WebSurfer as _Surfer
+    import friday.documents as documents_module
+    from friday.documents import DocumentResult
+    from friday.web_surfer import WebSurfer as _Surfer
 
     class _TruncatingExtractor:
         def __init__(self, **kwargs):
@@ -313,9 +313,9 @@ def test_a_page_limited_parse_also_says_it_is_partial() -> None:
     Мутация: убрать `extraction_truncated` из условия в `_extract_pdf_text` — тест
     краснеет.
     """
-    import jericho.documents as documents_module
-    from jericho.documents import DocumentResult
-    from jericho.web_surfer import WebSurfer as _Surfer
+    import friday.documents as documents_module
+    from friday.documents import DocumentResult
+    from friday.web_surfer import WebSurfer as _Surfer
 
     class _ClippedExtractor:
         def __init__(self, **kwargs):

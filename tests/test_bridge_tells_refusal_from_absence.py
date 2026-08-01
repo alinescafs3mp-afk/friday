@@ -24,7 +24,7 @@ pytest.importorskip("httpx")
 
 
 def _bridge(tmp_path):
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     return TelegramBridge(
         TelegramConfig(

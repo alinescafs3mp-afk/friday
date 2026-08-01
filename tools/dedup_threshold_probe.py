@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Find out what `JERICHO_DEDUP_THRESHOLD` actually catches on the installed model.
+"""Find out what `FRIDAY_DEDUP_THRESHOLD` actually catches on the installed model.
 
 Near-duplicate detection compares whole-document embeddings and flags a pair above
 the threshold as a review-gated conflict. The default is 0.92 and it has never been
@@ -38,8 +38,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jericho.config import load_settings  # noqa: E402
-from jericho.retrieval import (  # noqa: E402
+from friday.config import load_settings  # noqa: E402
+from friday.retrieval import (  # noqa: E402
     EmbeddingBackend,
     knowledge_search_text,
     lexical_vector,
@@ -242,7 +242,7 @@ async def main() -> int:
     settings = load_settings()
     backend = EmbeddingBackend(settings)
     if not backend.remote_enabled:
-        print("embeddings disabled — set JERICHO_EMBEDDINGS_* and retry", file=sys.stderr)
+        print("embeddings disabled — set FRIDAY_EMBEDDINGS_* and retry", file=sys.stderr)
         return 2
 
     texts = [knowledge_search_text(as_object(text)) for _, left, right in PAIRS for text in (left, right)]

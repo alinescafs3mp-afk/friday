@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.morphology import stem
-from jericho.retrieval import lexical_vector, sparse_cosine
+from friday.morphology import stem
+from friday.retrieval import lexical_vector, sparse_cosine
 
 
 @pytest.mark.parametrize(
@@ -83,7 +83,7 @@ def test_an_oblique_case_becomes_real_evidence():
     worse. With folding the same pair scores **0.3317**, four times the floor, so
     the seeds can be filtered honestly.
     """
-    from jericho.retrieval import _LEXICAL_EVIDENCE_MIN
+    from friday.retrieval import _LEXICAL_EVIDENCE_MIN
 
     score = sparse_cosine(
         lexical_vector("Казань"),
@@ -94,7 +94,7 @@ def test_an_oblique_case_becomes_real_evidence():
 
 def test_folding_beats_no_folding_on_an_oblique_case():
     """The number that made this worth doing, in miniature."""
-    from jericho import morphology as _morphology
+    from friday import morphology as _morphology
 
     query_text, document_text = "Казань", "поездка в Казани прошла хорошо"
     before_min = _morphology._MIN_STEM_INPUT

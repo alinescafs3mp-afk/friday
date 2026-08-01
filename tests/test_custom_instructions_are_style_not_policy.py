@@ -1,7 +1,7 @@
 """Owner-authored style preference, not a fact and not a permission.
 
 Every mainstream consumer AI assistant lets the person using it say "answer
-briefly" or "call me by name" once and have it stick — Jericho did not, despite
+briefly" or "call me by name" once and have it stick — Friday did not, despite
 being a PERSONAL system that should know its one user better than a generic
 chat product does. `PATCH /api/me/instructions` (self-service, `chat.use`,
 never takes a foreign user_id) writes it; `AgentRuntime._custom_instructions`
@@ -13,8 +13,8 @@ was invented for this feature).
 
 from __future__ import annotations
 
-from jericho.agent_runtime import AgentContext, AgentRuntime
-from jericho.storage.models import new_id
+from friday.agent_runtime import AgentContext, AgentRuntime
+from friday.storage.models import new_id
 
 
 def test_custom_instructions_are_read_back(settings, storage):
@@ -90,7 +90,7 @@ def test_custom_instructions_reach_the_actual_prompt_sent_to_the_model(settings,
     )
     messages = agent._build_initial_messages(context, "", None, tool_enabled=False)
 
-    # Two messages carry "JERICHO_CONTEXT_DATA" in their text: the rules message
+    # Two messages carry "FRIDAY_CONTEXT_DATA" in their text: the rules message
     # that WARNS about it, and the user-role message that actually IS it. Only
     # the second has the JSON payload.
     data_messages = [m["content"] for m in messages if m.get("role") == "user"]

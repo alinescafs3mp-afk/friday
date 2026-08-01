@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import httpx
 
-from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
 TOKEN = "123456789:AAHqwertyuiopASDFGHJKLzxcvbnm-Test01"
 
@@ -67,7 +67,7 @@ def test_diagnostics_redacts_what_it_reads_back(tmp_path):
     """Belt and braces: a row written by an older build must not leak either."""
     import sqlite3
 
-    from jericho.diagnostics import _bridge_queue_status
+    from friday.diagnostics import _bridge_queue_status
 
     database = tmp_path / "telegram.sqlite3"
     bridge = _bridge(tmp_path)

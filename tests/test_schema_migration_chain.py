@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from jericho.storage import SCHEMA_VERSION, JerichoStorage
+from friday.storage import SCHEMA_VERSION, FridayStorage
 
 FIXTURES = Path(__file__).parent / "fixtures" / "schemas"
 FIXTURE_USER = "fixture-owner"
@@ -71,7 +71,7 @@ def test_a_database_at_this_schema_migrates_forward_and_keeps_its_data(version, 
     finally:
         before.close()
 
-    storage = JerichoStorage(replace(settings, database_path=database))
+    storage = FridayStorage(replace(settings, database_path=database))
     try:
         marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
         assert int(marker[0]) == SCHEMA_VERSION, f"schema {version} did not migrate to {SCHEMA_VERSION}"
@@ -100,7 +100,7 @@ def test_migrating_twice_changes_nothing(version, settings, tmp_path):
     second open rather than the first."""
     database = _unpack(version, tmp_path)
 
-    first = JerichoStorage(replace(settings, database_path=database))
+    first = FridayStorage(replace(settings, database_path=database))
     try:
         snapshot = sorted(
             (row["type"], row["name"])
@@ -109,7 +109,7 @@ def test_migrating_twice_changes_nothing(version, settings, tmp_path):
     finally:
         first.close()
 
-    second = JerichoStorage(replace(settings, database_path=database))
+    second = FridayStorage(replace(settings, database_path=database))
     try:
         again = sorted(
             (row["type"], row["name"])
@@ -125,7 +125,7 @@ def test_migrating_twice_changes_nothing(version, settings, tmp_path):
 def test_a_migrated_database_can_be_written_to(version, settings, tmp_path):
     """Opening is not enough: the restored database has to accept the next write."""
     database = _unpack(version, tmp_path)
-    storage = JerichoStorage(replace(settings, database_path=database))
+    storage = FridayStorage(replace(settings, database_path=database))
     try:
         storage.record_event("migration.smoke", {"from_schema": version})
         assert storage.list_events(event_type="migration.smoke")[0]["payload"]["from_schema"] == version
@@ -147,10 +147,10 @@ def test_the_fixtures_carry_no_personal_data() -> None:
 
 # --- the owner's real backups, when they are present ----------------------
 
-REAL_BACKUPS = os.environ.get("JERICHO_TEST_BACKUPS_DIR", "")
+REAL_BACKUPS = os.environ.get("FRIDAY_TEST_BACKUPS_DIR", "")
 
 
-@pytest.mark.skipif(not REAL_BACKUPS, reason="set JERICHO_TEST_BACKUPS_DIR to check real backups")
+@pytest.mark.skipif(not REAL_BACKUPS, reason="set FRIDAY_TEST_BACKUPS_DIR to check real backups")
 def test_every_real_backup_migrates_and_opens(settings, tmp_path):
     """Point this at a live backups directory to rehearse the actual restore.
 
@@ -175,7 +175,7 @@ def test_every_real_backup_migrates_and_opens(settings, tmp_path):
         # Work on a copy: a test must never migrate the owner's actual backup.
         working = tmp_path / backup.name
         shutil.copy2(backup, working)
-        storage = JerichoStorage(replace(settings, database_path=working))
+        storage = FridayStorage(replace(settings, database_path=working))
         try:
             marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
             assert int(marker[0]) == SCHEMA_VERSION, f"{backup.name}: schema {origin} did not migrate"
@@ -195,7 +195,7 @@ def _seed_ignored_verdict(storage, user_id: str = "owner") -> tuple[str, str]:
     the attached Knowledge Object and clear the Inbox link. Done at the storage
     layer so the test pins the *migration*, not the review service.
     """
-    from jericho.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject, new_id
+    from friday.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject, new_id
 
     storage.ensure_user(user_id)
     raw = RawObject(
@@ -249,13 +249,13 @@ def test_reopening_does_not_resurrect_an_ignored_verdict(settings, tmp_path):
     in the Inbox wearing its old KO.
     """
     database = tmp_path / "verdict.sqlite3"
-    first = JerichoStorage(replace(settings, database_path=database))
+    first = FridayStorage(replace(settings, database_path=database))
     try:
         inbox_id, ko_id = _seed_ignored_verdict(first)
     finally:
         first.close()
 
-    second = JerichoStorage(replace(settings, database_path=database))
+    second = FridayStorage(replace(settings, database_path=database))
     try:
         row = second.get_inbox_item(inbox_id, "owner")
         assert row is not None
@@ -272,13 +272,13 @@ def test_legacy_reconstruction_is_skipped_once_the_schema_is_current(settings, t
     of every entity row on every single start.
     """
     database = tmp_path / "current.sqlite3"
-    first = JerichoStorage(replace(settings, database_path=database))
+    first = FridayStorage(replace(settings, database_path=database))
     try:
         first.ensure_user("owner")
     finally:
         first.close()
 
-    from jericho.storage._core import CoreMixin
+    from friday.storage._core import CoreMixin
 
     calls: list[int] = []
     original = CoreMixin._migrate_legacy_schema
@@ -287,14 +287,14 @@ def test_legacy_reconstruction_is_skipped_once_the_schema_is_current(settings, t
         calls.append(1)
         return original(self, conn)
 
-    # Patch the class that DEFINES the method. Assigning to JerichoStorage would
+    # Patch the class that DEFINES the method. Assigning to FridayStorage would
     # add a shadowing entry to the subclass __dict__ that reassignment cannot
     # remove, and `test_no_method_is_defined_twice_across_the_class_hierarchy`
     # would then fail in whichever test file happens to run next.
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(CoreMixin, "_migrate_legacy_schema", counting)
     try:
-        second = JerichoStorage(replace(settings, database_path=database))
+        second = FridayStorage(replace(settings, database_path=database))
         try:
             second.execute("SELECT 1").fetchone()
         finally:

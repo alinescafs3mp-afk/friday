@@ -11,16 +11,16 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import (
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import (
     EVENT_TIME_RELATION,
     KnowledgeGraph,
     normalize_event_date,
     parse_event_date,
 )
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import EntityType
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import EntityType
 
 # --- pure date helpers ----------------------------------------------------
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 
-from jericho.storage.models import (
+from friday.storage.models import (
     Entity,
     EntityType,
     KnowledgeObject,
@@ -153,9 +153,9 @@ def test_entities_with_the_same_name_still_page_cleanly(storage):
 
 
 def test_the_inbox_total_matches_the_status_being_listed(storage, settings):
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.storage.models import InboxStatus
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage.models import InboxStatus
 
     storage.ensure_user("alice")
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
@@ -233,7 +233,7 @@ def test_the_knowledge_route_returns_a_total_that_respects_the_filter(settings):
     """
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -275,7 +275,7 @@ def test_every_paged_listing_orders_by_something_unique():
     import pathlib
     import re
 
-    root = pathlib.Path(__file__).resolve().parents[1] / "jericho" / "storage"
+    root = pathlib.Path(__file__).resolve().parents[1] / "friday" / "storage"
     paged = []
     for path in root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")

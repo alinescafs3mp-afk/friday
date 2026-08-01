@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from jericho.permissions import DEFAULT_PRESET_KEY
-from jericho.server import create_app
+from friday.permissions import DEFAULT_PRESET_KEY
+from friday.server import create_app
 
 
 def _guest_token(client) -> str:

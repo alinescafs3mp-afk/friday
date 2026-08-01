@@ -14,12 +14,12 @@ import json
 
 import pytest
 
-from jericho.agent_runtime import AgentRuntime
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import ActorContext
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.agent_runtime import AgentRuntime
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import ActorContext
+from friday.retrieval import HybridSearcher
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _store(storage, user_id: str, content: str, title: str) -> dict:
@@ -66,7 +66,7 @@ class _CapturingLLM:
         del kwargs
         for item in messages:
             content = str(item.get("content") or "")
-            if "JERICHO_CONTEXT_DATA" in content and "{" in content:
+            if "FRIDAY_CONTEXT_DATA" in content and "{" in content:
                 self.context_payload = json.loads(content[content.index("{") :])
         return {"content": "Данные противоречат друг другу [K1] и [K2]."}
 

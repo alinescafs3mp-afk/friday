@@ -18,8 +18,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
-from jericho.storage.models import Entity, EntityResolutionCandidate, EntityType, new_id
+from friday.server import create_app
+from friday.storage.models import Entity, EntityResolutionCandidate, EntityType, new_id
 
 
 def _pending_as_bridge(client, settings) -> dict:
@@ -27,7 +27,7 @@ def _pending_as_bridge(client, settings) -> dict:
     import time
     import uuid
 
-    from jericho.security import sign_bridge_request
+    from friday.security import sign_bridge_request
 
     path = "/api/notifications/pending?limit=20"
     timestamp = int(time.time())
@@ -36,11 +36,11 @@ def _pending_as_bridge(client, settings) -> dict:
     response = client.get(
         path,
         headers={
-            "X-Jericho-Timestamp": str(timestamp),
-            "X-Jericho-User": signer,
-            "X-Jericho-Chat": signer,
-            "X-Jericho-Nonce": nonce,
-            "X-Jericho-Signature": sign_bridge_request(
+            "X-Friday-Timestamp": str(timestamp),
+            "X-Friday-User": signer,
+            "X-Friday-Chat": signer,
+            "X-Friday-Nonce": nonce,
+            "X-Friday-Signature": sign_bridge_request(
                 settings.telegram_bridge_secret,
                 timestamp=timestamp,
                 method="GET",
@@ -86,11 +86,11 @@ def api(settings):
 @pytest.mark.asyncio
 async def test_a_request_is_pushed_to_the_person_with_buttons(settings, storage):
     """Мутация: убрать постановку уведомления в `_request_approval` — тест краснеет."""
-    from jericho.execution_kernel import ExecutionKernel
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import AuthorizationService
-    from jericho.web_surfer import WebSurfer
+    from friday.execution_kernel import ExecutionKernel
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import AuthorizationService
+    from friday.web_surfer import WebSurfer
 
     storage.ensure_user("alice", preset_key="owner")
     # Чат, в который проактивные сообщения вообще доставляются.

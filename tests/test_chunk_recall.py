@@ -25,8 +25,8 @@ from dataclasses import replace
 
 import pytest
 
-from jericho import retrieval as retrieval_module
-from jericho.retrieval import (
+from friday import retrieval as retrieval_module
+from friday.retrieval import (
     HybridSearcher,
     aggregate_chunk_scores,
     chunk_scheme,
@@ -36,9 +36,9 @@ from jericho.retrieval import (
     knowledge_search_text,
     pack_vector,
 )
-from jericho.storage import SCHEMA_VERSION, JerichoStorage
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.workers import WorkersManager
+from friday.storage import SCHEMA_VERSION, FridayStorage
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.workers import WorkersManager
 
 # A composite "semantic" embedding: unlike a one-hot toy vector it reproduces
 # DILUTION, which is the whole point — a topic that owns 1/40th of a document
@@ -149,7 +149,7 @@ QUERY = "что любит мой питомец"
 async def test_long_object_passage_is_missed_by_the_averaged_vector(storage, settings):
     """Pins the pre-0.41 defect: one averaged vector loses a single relevant passage.
 
-    Also the regression test for the off switch — ``JERICHO_EMBEDDINGS_CHUNK_CHARS=0``
+    Also the regression test for the off switch — ``FRIDAY_EMBEDDINGS_CHUNK_CHARS=0``
     must reproduce 0.40.0 exactly, including this weakness.
     """
     tuned = _embeddings_settings(settings, embeddings_chunk_chars=0)
@@ -366,7 +366,7 @@ def test_chunk_settings_default_and_off_switch(settings):
 
 def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path):
     database = tmp_path / "legacy-chunks.sqlite3"
-    seed = JerichoStorage(replace(settings, database_path=database))
+    seed = FridayStorage(replace(settings, database_path=database))
     note = _make_ko(seed, "alice", "Мой пёс Рекс", title="Пёс", summary="Про пса")
     seed.upsert_knowledge_embeddings(
         [
@@ -391,7 +391,7 @@ def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path
     raw.commit()
     raw.close()
 
-    migrated = JerichoStorage(replace(settings, database_path=database))
+    migrated = FridayStorage(replace(settings, database_path=database))
     try:
         tables = {
             row[0] for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -597,7 +597,7 @@ async def test_explain_trace_names_the_winning_chunk(storage, settings):
 @pytest.mark.asyncio
 async def test_matched_passage_grounds_the_answer_context(storage, settings):
     """Retrieval improved is worthless if the model still reads the wrong window."""
-    from jericho.agent_runtime import _matched_region
+    from friday.agent_runtime import _matched_region
 
     tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200)
     fake = _FakeTopicEmbeddings(tuned)
@@ -617,7 +617,7 @@ async def test_matched_passage_grounds_the_answer_context(storage, settings):
 
 @pytest.mark.asyncio
 async def test_diagnostics_reports_chunk_coverage(storage, settings):
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200)
     fake = _FakeTopicEmbeddings(tuned)
@@ -635,7 +635,7 @@ async def test_diagnostics_reports_chunk_coverage(storage, settings):
 @pytest.mark.asyncio
 async def test_eval_ab_reports_the_recall_gain(storage, settings):
     """The acceptance criterion runs on the operator's own gold set."""
-    from jericho.eval import compare_chunk_recall
+    from friday.eval import compare_chunk_recall
 
     tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200)
     fake = _FakeTopicEmbeddings(tuned)
@@ -743,7 +743,7 @@ async def test_chunking_never_evicts_a_doc_only_object_from_recall(storage, sett
 
 
 def test_row_fuse_cuts_only_on_object_boundaries():
-    from jericho.retrieval import _trim_to_whole_objects
+    from friday.retrieval import _trim_to_whole_objects
 
     def rows(spec):
         return [(f"{name}#{index}", b"") for name, count in spec for index in range(count)]
@@ -883,7 +883,7 @@ async def test_the_pool_fallback_bounds_what_it_sends(storage, settings):
     likely to time out or be refused outright: a 400-object pool of ordinary
     articles is several megabytes.
     """
-    from jericho.retrieval import _POOL_REQUEST_MAX_CHARS, _POOL_TEXT_MAX_CHARS, HybridSearcher
+    from friday.retrieval import _POOL_REQUEST_MAX_CHARS, _POOL_TEXT_MAX_CHARS, HybridSearcher
 
     class _RecordingEmbeddings:
         def __init__(self, settings) -> None:
@@ -970,7 +970,7 @@ async def test_resident_cache_reloads_on_change_and_respects_the_stale_window(st
     """Подпись таблиц пересобирает матрицу; внутри окна выдержки поиск живёт со
     старой (во время массовой индексации пересборка на каждый запрос стоила бы
     дороже поиска), и это честно видно в meta как stale."""
-    from jericho.retrieval._dense_cache import DenseVectorCache
+    from friday.retrieval._dense_cache import DenseVectorCache
 
     tuned = _embeddings_settings(settings, embeddings_chunk_chars=1200)
     fake = _FakeTopicEmbeddings(tuned)

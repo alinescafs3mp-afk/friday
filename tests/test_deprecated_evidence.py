@@ -20,9 +20,9 @@ import math
 
 import pytest
 
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.workers import WorkersManager
+from friday.retrieval import HybridSearcher
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.workers import WorkersManager
 
 # One semantic axis per topic; the query scores ~1.0 on "pet" without sharing a
 # single surface token with the document (same trick as test_chunk_recall).

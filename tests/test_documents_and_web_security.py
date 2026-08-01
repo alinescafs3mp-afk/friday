@@ -5,8 +5,8 @@ import zipfile
 
 import pytest
 
-from jericho.documents import DocumentExtractor
-from jericho.web_surfer import UnsafeURLError, validate_public_url
+from friday.documents import DocumentExtractor
+from friday.web_surfer import UnsafeURLError, validate_public_url
 
 
 def _zip(entries: dict[str, bytes]) -> bytes:
@@ -75,7 +75,7 @@ def test_a_corrupted_embedded_image_does_not_crash_office_extraction():
     to `(OSError, zipfile.BadZipFile, RuntimeError)` — this test must go red with an
     uncaught `zlib.error`.
     """
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     data = _office_zip_with_a_corrupted_image()
     images = DocumentExtractor._office_embedded_images(data, max_candidates=5)

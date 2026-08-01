@@ -18,8 +18,8 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.api.events import BRIDGE_EVENT_TYPES, MAX_PAYLOAD_KEYS, MAX_VALUE_CHARS
-from jericho.server import create_app
+from friday.api.events import BRIDGE_EVENT_TYPES, MAX_PAYLOAD_KEYS, MAX_VALUE_CHARS
+from friday.server import create_app
 
 
 def _signed(settings, body, *, user: str = "5001"):
@@ -28,18 +28,18 @@ def _signed(settings, body, *, user: str = "5001"):
     import time
     import uuid
 
-    from jericho.security import sign_bridge_request
+    from friday.security import sign_bridge_request
 
     payload = _json.dumps(body).encode()
     timestamp = int(time.time())
     nonce = uuid.uuid4().hex
     headers = {
         "Content-Type": "application/json",
-        "X-Jericho-Timestamp": str(timestamp),
-        "X-Jericho-User": user,
-        "X-Jericho-Chat": user,
-        "X-Jericho-Nonce": nonce,
-        "X-Jericho-Signature": sign_bridge_request(
+        "X-Friday-Timestamp": str(timestamp),
+        "X-Friday-User": user,
+        "X-Friday-Chat": user,
+        "X-Friday-Nonce": nonce,
+        "X-Friday-Signature": sign_bridge_request(
             settings.telegram_bridge_secret,
             timestamp=timestamp,
             method="POST",
@@ -114,7 +114,7 @@ def test_every_allowed_type_is_accepted(settings, storage, event_type):
 class _Bridge:
     """Only the parts of the bridge `_journal_transition` touches."""
 
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     _journal_transition = TelegramBridge._journal_transition
     # Real method, not a stub: the signer choice is exactly what this file's

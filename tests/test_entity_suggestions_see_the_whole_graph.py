@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import Entity, EntityType, new_id
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import Entity, EntityType, new_id
 
 # Имена НЕ в форме ФИО и без объявляющего слова рядом: правило `explicit_person_patronymic`
 # вытащило бы «Ясенев Ярослав Ярославович» прямо из текста, и проба прошла бы на

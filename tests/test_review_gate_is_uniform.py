@@ -25,8 +25,8 @@ import pathlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.config import REVIEW_POLICIES
-from jericho.server import create_app
+from friday.config import REVIEW_POLICIES
+from friday.server import create_app
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -120,8 +120,8 @@ def test_force_review_is_a_floor_no_policy_can_lower(settings, policy):
     «Указать на папку» — одно действие, а файлов в ней сотни: разрешив политике
     снимать `force_review`, мы дали бы одному клику канонизировать всё.
     """
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
 
     tuned = dataclasses.replace(settings, ingestion_review_policy=policy)
     app = _client(settings, policy)
@@ -138,11 +138,11 @@ def test_force_review_is_a_floor_no_policy_can_lower(settings, policy):
 
 
 def test_an_unknown_policy_is_refused_by_name(monkeypatch):
-    from jericho.config import _choice_env
+    from friday.config import _choice_env
 
-    monkeypatch.setenv("JERICHO_INGESTION_REVIEW_POLICY", "строго")
-    with pytest.raises(ValueError, match="Unknown JERICHO_INGESTION_REVIEW_POLICY"):
-        _choice_env("JERICHO_INGESTION_REVIEW_POLICY", "assessed", REVIEW_POLICIES)
+    monkeypatch.setenv("FRIDAY_INGESTION_REVIEW_POLICY", "строго")
+    with pytest.raises(ValueError, match="Unknown FRIDAY_INGESTION_REVIEW_POLICY"):
+        _choice_env("FRIDAY_INGESTION_REVIEW_POLICY", "assessed", REVIEW_POLICIES)
 
 
 # --- структурный переучёт --------------------------------------------------
@@ -153,13 +153,13 @@ def test_an_unknown_policy_is_refused_by_name(monkeypatch):
 # `force_review` записан ЗДЕСЬ, а не только в коде: это и есть то решение, которое
 # каждая точка входа обязана принять явно. `False` значит «подчиняется политике».
 EXPECTED_INGEST_CALLS = {
-    ("jericho/api/files.py", "ingest_file", False),  # загрузка файла — по политике
-    ("jericho/api/ingest.py", "ingest_text", False),  # вставленный текст — по политике
-    ("jericho/api/ingest.py", "ingest_text", True),  # /ingest/url — веб-страницу никто не читал
-    ("jericho/bulk_import.py", "ingest_file", True),  # папка — одно действие, файлов сотни
-    ("jericho/organs/importer/__init__.py", "ingest_text", True),  # импортёр — то же самое
-    ("jericho/server.py", "ingest_file", False),  # вложение в чате — по политике
-    ("jericho/server.py", "ingest_text", False),  # сообщение в чате — по политике
+    ("friday/api/files.py", "ingest_file", False),  # загрузка файла — по политике
+    ("friday/api/ingest.py", "ingest_text", False),  # вставленный текст — по политике
+    ("friday/api/ingest.py", "ingest_text", True),  # /ingest/url — веб-страницу никто не читал
+    ("friday/bulk_import.py", "ingest_file", True),  # папка — одно действие, файлов сотни
+    ("friday/organs/importer/__init__.py", "ingest_text", True),  # импортёр — то же самое
+    ("friday/server.py", "ingest_file", False),  # вложение в чате — по политике
+    ("friday/server.py", "ingest_text", False),  # сообщение в чате — по политике
 }
 
 
@@ -170,7 +170,7 @@ def _ingest_call_sites() -> set[tuple[str, str, bool]]:
     что решение принято где-то ещё, и такой вызов обязан быть замечен.
     """
     found: set[tuple[str, str, bool]] = set()
-    for path in (ROOT / "jericho").rglob("*.py"):
+    for path in (ROOT / "friday").rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover
@@ -211,12 +211,12 @@ def test_the_policy_is_read_by_both_paths_not_just_one():
     политику читал один текстовый путь. Здесь требуется, чтобы решение принимал
     ОДИН предикат и чтобы обе ветки звали именно его.
     """
-    core = (ROOT / "jericho" / "ingestion" / "_core.py").read_text(encoding="utf-8")
+    core = (ROOT / "friday" / "ingestion" / "_core.py").read_text(encoding="utf-8")
     assert "def review_required" in core
     assert "ingestion_review_policy" in core
 
     for module in ("_capture.py", "_files.py"):
-        source = (ROOT / "jericho" / "ingestion" / module).read_text(encoding="utf-8")
+        source = (ROOT / "friday" / "ingestion" / module).read_text(encoding="utf-8")
         assert "self.review_required(" in source, f"{module} решает судьбу поступления сам по себе"
         assert "ingestion_review_policy" not in source, (
             f"{module} читает политику напрямую — это вторая реализация одного правила"

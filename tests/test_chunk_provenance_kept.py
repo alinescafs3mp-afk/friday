@@ -21,8 +21,8 @@ import math
 
 import pytest
 
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.retrieval import HybridSearcher
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 # Оси задают «смысл» для поддельных векторов. Слова запроса и слова документа
 # лежат на ОДНОЙ оси, но не совпадают буквально: так объект находится плотным
@@ -86,7 +86,7 @@ def dense_settings(settings):
 
 @pytest.mark.asyncio
 async def test_the_matching_passage_is_reported_even_when_the_document_vector_wins(dense_settings, storage):
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     storage.ensure_user("alice")
     # Шапка на «уставной» оси, совпадение с запросом — глубоко в теле.
@@ -114,7 +114,7 @@ async def test_the_matching_passage_is_reported_even_when_the_document_vector_wi
 @pytest.mark.asyncio
 async def test_the_trace_still_says_which_signal_carried_the_retrieval(dense_settings, storage):
     """Честность объяснения не приносится в жертву: это отдельное поле, а не молчание."""
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     storage.ensure_user("alice")
     document = _store(storage, "alice", "Заметка", "Щенок и питомец, лапы. " * 40)
@@ -154,7 +154,7 @@ async def test_provenance_survives_the_band_where_the_document_vector_wins(dense
     0.75 + 0.25·(2/3) = 0.9167 < 0.94. Подобрать такую пару обычным текстом почти
     невозможно — полоса узкая, — поэтому векторы записаны прямо в базу.
     """
-    from jericho.dedup import pack_vector
+    from friday.dedup import pack_vector
 
     storage.ensure_user("alice")
     document = _store(storage, "alice", "Документ", "тело " * 400)

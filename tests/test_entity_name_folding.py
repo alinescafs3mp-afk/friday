@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.storage import normalize_entity_name
-from jericho.storage.models import Entity, new_id
+from friday.storage import normalize_entity_name
+from friday.storage.models import Entity, new_id
 
 
 @pytest.mark.parametrize(

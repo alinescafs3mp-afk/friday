@@ -17,8 +17,8 @@
 
 from __future__ import annotations
 
-from jericho.agent_runtime import SYSTEM_PROMPT
-from jericho.permissions import CORE_CAPABILITIES
+from friday.agent_runtime import SYSTEM_PROMPT
+from friday.permissions import CORE_CAPABILITIES
 
 
 def test_the_prompt_does_not_enumerate_tool_categories():

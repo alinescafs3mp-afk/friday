@@ -24,9 +24,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import RawObject, new_id
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import RawObject, new_id
 
 
 def _pending(storage, *, source: str, path: str | None, content_type: str = "text/plain") -> str:
@@ -127,7 +127,7 @@ def test_an_unknown_axis_is_refused(seeded):
 def test_the_endpoint_returns_groups_and_the_available_axes(settings, seeded):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         response = client.get(
@@ -149,7 +149,7 @@ def test_a_group_can_be_dismissed_but_not_promoted(settings, seeded):
     """The whole point: one decision covers a pile, and it can only ever be a refusal."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     headers = {"Authorization": f"Bearer {settings.api_token}"}
     with TestClient(create_app(settings)) as client:
@@ -196,7 +196,7 @@ def test_grouping_survives_a_purge(settings, storage):
     result = asyncio.run(
         pipeline.ingest_file("alice", None, b"# note\n\nsome content", filename="a.md", force_review=True)
     )
-    from jericho.storage.models import InboxStatus
+    from friday.storage.models import InboxStatus
 
     pipeline.classify_inbox_item(
         "alice", result["inbox_id"], InboxStatus.CLASSIFIED, promote=True, reviewed_by="alice"
@@ -204,7 +204,7 @@ def test_grouping_survives_a_purge(settings, storage):
     knowledge_id = storage.list_knowledge_objects("alice")[0]["id"]
     storage.soft_delete_knowledge_object(knowledge_id, "alice")
 
-    from jericho.purge import purge_knowledge
+    from friday.purge import purge_knowledge
 
     purge_knowledge(storage, settings, None, knowledge_id, "alice")
 

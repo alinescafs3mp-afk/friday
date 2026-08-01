@@ -1,4 +1,4 @@
-"""Sentinel organ (#6) — Jericho monitors itself and pushes health alerts.
+"""Sentinel organ (#6) — Friday monitors itself and pushes health alerts.
 
 Covers: a degraded-worker fault becoming a deduplicated outbound alert, the
 enable gate, allowlist deny-by-default, quiet-hours suppression, the message
@@ -15,12 +15,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from jericho.organs import ServiceContext, build_registry
-from jericho.organs.sentinel import SentinelOrgan, _format_alert, scan_health
+from friday.organs import ServiceContext, build_registry
+from friday.organs.sentinel import SentinelOrgan, _format_alert, scan_health
 
 
 def _sentinel_settings(*, quiet_start: int = 0, quiet_end: int = 0):
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     return replace(
         load_settings(),
@@ -65,7 +65,7 @@ def test_format_alert_shapes_message():
     msg = _format_alert(
         {"severity": "error", "title": "Сбой", "detail": "деталь", "command": "jericho doctor"}
     )
-    assert msg.startswith("🚨 Jericho: Сбой")
+    assert msg.startswith("🚨 Friday: Сбой")
     assert "деталь" in msg
     assert "→ jericho doctor" in msg
     assert _format_alert({"severity": "warning", "title": "Мелочь"}).startswith("⚠️")
@@ -86,7 +86,7 @@ async def test_sentinel_pushes_alert_for_degraded_workers(storage):
     pending = storage.list_pending_notifications(limit=100)
     assert pending
     assert all(n["chat_id"] == "5001" and n["kind"] == "sentinel" for n in pending)
-    assert any("Jericho:" in n["body"] for n in pending)
+    assert any("Friday:" in n["body"] for n in pending)
     # The failed-workers diagnostics action reached the owner.
     assert any("Фоновые задачи" in n["body"] for n in pending)
 
@@ -149,7 +149,7 @@ async def test_a_guest_is_never_told_about_the_host(storage):
     the backup state and the secret-hygiene report of a machine that is not
     theirs. Reading the identical report over HTTP requires `admin.diagnostics`.
     """
-    from jericho.permissions import AuthorizationService
+    from friday.permissions import AuthorizationService
 
     settings = _sentinel_settings()
     owner = _seed_telegram_user(storage, "5001", preset_key="owner")
@@ -181,13 +181,13 @@ def test_no_filesystem_path_is_transmitted():
     exposed = _format_alert(
         {
             "severity": "error",
-            "title": "Секрет Jericho лежит в постороннем файле",
-            "detail": "/home/jericho/notes/todo.txt содержит значение JERICHO_TELEGRAM_BOT_TOKEN. "
+            "title": "Секрет Friday лежит в постороннем файле",
+            "detail": "/home/jericho/notes/todo.txt содержит значение FRIDAY_TELEGRAM_BOT_TOKEN. "
             "Удалите файл и перевыпустите этот секрет.",
         }
     )
     assert "/home/jericho/notes/todo.txt" not in exposed
-    assert "JERICHO_TELEGRAM_BOT_TOKEN" in exposed  # which secret is still useful
+    assert "FRIDAY_TELEGRAM_BOT_TOKEN" in exposed  # which secret is still useful
     assert "jericho doctor" in exposed
 
     perms = _format_alert(
@@ -227,7 +227,7 @@ async def test_the_scan_does_not_freeze_the_event_loop(storage, monkeypatch):
     import asyncio
     import time
 
-    import jericho.organs.sentinel as sentinel
+    import friday.organs.sentinel as sentinel
 
     def slow_diagnostics(*_args, **_kwargs):
         time.sleep(0.5)

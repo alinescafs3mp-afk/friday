@@ -1,6 +1,6 @@
 """One release, one version number.
 
-`pyproject.toml` and `jericho.__version__` are both hand-edited and had drifted
+`pyproject.toml` and `friday.__version__` are both hand-edited and had drifted
 nineteen releases apart: the package said 0.132.0 while `jericho --version`,
 `jericho status --json` and `GET /api/health` all reported 0.113.0. Everything a
 person can read off a running instance comes from `__version__`, so the number the
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pathlib
 import re
 
-import jericho
+import friday
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -25,9 +25,9 @@ def _pyproject_version() -> str:
 
 
 def test_the_package_and_the_runtime_agree():
-    assert jericho.__version__ == _pyproject_version()
+    assert friday.__version__ == _pyproject_version()
 
 
 def test_the_changelog_documents_this_release():
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert f"## {jericho.__version__} " in changelog, f"CHANGELOG.md has no entry for {jericho.__version__}"
+    assert f"## {friday.__version__} " in changelog, f"CHANGELOG.md has no entry for {friday.__version__}"

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make(storage, user_id: str, index: int, tags: list[str]) -> None:
@@ -101,8 +101,8 @@ def test_an_imported_file_no_longer_gets_the_two_useless_tags(settings, storage)
     """Показ их отбрасывает, но плодить мусор в базе всё равно незачем."""
     import asyncio
 
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
     storage.ensure_user("alice")

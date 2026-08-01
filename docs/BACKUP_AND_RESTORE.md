@@ -1,5 +1,7 @@
 # Резервное копирование и восстановление
 
+> Проект переименован: **Friday** (по-русски — **Пятница**), ex codename Jericho.
+
 ## 1. Встроенный SQLite backup
 
 ```powershell
@@ -34,11 +36,11 @@ jericho verify-backup jericho-20260721T010203Z-before-upgrade.sqlite3
 
 `jericho backup` открывает хранилище, а **открытие мигрирует схему**. Копия, снятая перед обновлением, окажется уже в новой схеме — метка в имени файла солжёт. Наступал на это при переходе 16→17.
 
-Настоящий откат — это плановые копии, сделанные **до** обновления кода: они лежат в старой схеме и мигрируются вперёд при восстановлении (цепочка проверяется `tests/test_schema_migration_chain.py`, в том числе на настоящих бэкапах через `JERICHO_TEST_BACKUPS_DIR`). Если снимок «ровно перед миграцией» нужен именно как файл, копируйте `data/state/jericho.sqlite3` (вместе с `-wal`/`-shm`) при **остановленном** экземпляре.
+Настоящий откат — это плановые копии, сделанные **до** обновления кода: они лежат в старой схеме и мигрируются вперёд при восстановлении (цепочка проверяется `tests/test_schema_migration_chain.py`, в том числе на настоящих бэкапах через `FRIDAY_TEST_BACKUPS_DIR`). Если снимок «ровно перед миграцией» нужен именно как файл, копируйте `data/state/friday.sqlite3` (вместе с `-wal`/`-shm`) при **остановленном** экземпляре.
 
 ### Ротация
 
-`JERICHO_BACKUP_KEEP` (по умолчанию **14**) — сколько проверенных копий оставлять локально; `0` выключает уборку. Плановый воркер удаляет лишние **после** зеркалирования, чтобы старшее поколение успело уехать наружу прежде, чем исчезнет отсюда.
+`FRIDAY_BACKUP_KEEP` (по умолчанию **14**) — сколько проверенных копий оставлять локально; `0` выключает уборку. Плановый воркер удаляет лишние **после** зеркалирования, чтобы старшее поколение успело уехать наружу прежде, чем исчезнет отсюда.
 
 Это не аккуратность, а вторая половина ежедневного бэкапа: расписание добавляет полную копию базы каждые 24 часа, а убирать её было некому. Диск заполняется — и уносит с собой живой экземпляр вместе с самими бэкапами.
 
@@ -57,7 +59,7 @@ jericho verify-backup jericho-20260721T010203Z-before-upgrade.sqlite3
 Включено только согласованное состояние:
 
 ```text
-data/state/jericho.sqlite3
+data/state/friday.sqlite3
 ```
 
 Не включены:
@@ -137,7 +139,7 @@ data/state/telegram-inbox.sqlite3*   если нужно сохранить pend
 ```
 
 4. Сохраните checksum списка файлов.
-5. Проверьте восстановление в отдельном `JERICHO_HOME`.
+5. Проверьте восстановление в отдельном `FRIDAY_HOME`.
 
 Модельные веса можно исключить только при наличии надёжного источника и зафиксированного checksum snapshot.
 
@@ -147,7 +149,7 @@ data/state/telegram-inbox.sqlite3*   если нужно сохранить pend
 
 ```powershell
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$target = "E:\JerichoBackups\$stamp"
+$target = "E:\FridayBackups\$stamp"
 New-Item -ItemType Directory -Force $target | Out-Null
 robocopy D:\jericho\data\files "$target\files" /MIR /COPY:DAT /R:2 /W:2
 robocopy D:\jericho\data\memory-vault "$target\memory-vault" /MIR /COPY:DAT /R:2 /W:2
@@ -161,7 +163,7 @@ Get-ChildItem $target -Recurse -File | Get-FileHash -Algorithm SHA256 |
 
 ## 5. Полное восстановление
 
-1. Разверните ту же или совместимую версию Jericho в новом каталоге.
+1. Разверните ту же или совместимую версию Friday в новом каталоге.
 2. Восстановите `data/files/`, `data/memory-vault/` и при необходимости Telegram queue из одного согласованного snapshot.
 3. Верните secrets из зашифрованного хранилища.
 4. Поместите пару `.sqlite3 + manifest` в `data/backups/`.
@@ -174,8 +176,8 @@ Get-ChildItem $target -Recurse -File | Get-FileHash -Algorithm SHA256 |
 
 Не реже выбранного RPO/RTO-периода:
 
-- восстановите копию в другой `JERICHO_HOME`;
-- запустите с `JERICHO_LLM_ENABLED=0` и `JERICHO_WORKERS_ENABLED=0`;
+- восстановите копию в другой `FRIDAY_HOME`;
+- запустите с `FRIDAY_LLM_ENABLED=0` и `FRIDAY_WORKERS_ENABLED=0`;
 - выполните `jericho doctor`;
 - проверьте API vertical slice, retrieval и экспорт пользователя;
 - убедитесь, что Raw Object file paths соответствуют восстановленному каталогу;

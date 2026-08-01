@@ -17,8 +17,8 @@ import pathlib
 
 import pytest
 
-from jericho.mentions import mention_spans
-from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+from friday.mentions import mention_spans
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _marked(text: str, entities: list[tuple[str, str]]) -> list[str]:
@@ -81,9 +81,9 @@ def test_the_route_marks_only_confirmed_entities(settings, storage):
     человека, — ровно та подмена, которую чинили в легенде источников."""
     from fastapi.testclient import TestClient
 
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -138,7 +138,7 @@ def test_the_route_marks_only_confirmed_entities(settings, storage):
 def test_reading_someone_elses_document_is_audited(settings, storage):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -188,7 +188,7 @@ def test_the_cap_keeps_the_first_mentions_in_the_text_not_the_first_name_parsed(
     где одно имя встречается шестьсот раз, съедал весь запас: вторая подтверждённая
     сущность не получала ни одной подсветки, хотя стояла первым словом документа.
     """
-    from jericho.mentions import _MAX_SPANS
+    from friday.mentions import _MAX_SPANS
 
     text = "Петров подписал. " + ("Иванов. " * (_MAX_SPANS + 100)) + " Петров снова."
     spans = mention_spans(text, [("Петров", "e1"), ("Иванов", "e2")])
@@ -220,7 +220,7 @@ def test_the_browser_marks_the_same_word_the_server_pointed_at():
     spans = mention_spans(text, [("Иванов", "e1")])
     assert [text[s.start : s.end] for s in spans] == ["Иванов"], "сервер указал не на то слово"
 
-    source = pathlib.Path("jericho/admin_ui/static/app.js").read_text(encoding="utf-8")
+    source = pathlib.Path("friday/admin_ui/static/app.js").read_text(encoding="utf-8")
     body = re.search(r"function highlightMentions\(text,spans\)\{[\s\S]*?\n\}", source)
     assert body, "highlightMentions не найдена в app.js — тест устарел вместе с кодом"
     script = (

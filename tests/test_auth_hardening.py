@@ -14,8 +14,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
 
 
 def test_failed_auth_attempts_are_rate_limited_per_ip(settings):
@@ -113,10 +113,10 @@ def test_malformed_credentials_still_cost_the_budget(settings):
     limited = replace(settings, api_auth_failure_limit_per_minute=2)
     with TestClient(create_app(limited)) as client:
         garbage = {
-            "X-Jericho-Timestamp": "not-a-number",
-            "X-Jericho-User": "42",
-            "X-Jericho-Chat": "42",
-            "X-Jericho-Signature": "deadbeef",
+            "X-Friday-Timestamp": "not-a-number",
+            "X-Friday-User": "42",
+            "X-Friday-Chat": "42",
+            "X-Friday-Signature": "deadbeef",
         }
         assert client.get("/api/me", headers=garbage).status_code == 401
         assert client.get("/api/me", headers=garbage).status_code == 401

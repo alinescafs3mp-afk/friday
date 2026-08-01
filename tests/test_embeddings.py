@@ -14,7 +14,7 @@ import hashlib
 
 import pytest
 
-from jericho.retrieval import (
+from friday.retrieval import (
     EmbeddingBackend,
     HybridSearcher,
     _dense_scores_numpy,
@@ -22,8 +22,8 @@ from jericho.retrieval import (
     dense_scores,
     pack_vector,
 )
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.workers import WorkersManager
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.workers import WorkersManager
 
 
 def _make_ko(storage, user_id: str, content: str, *, title: str) -> dict:
@@ -322,7 +322,7 @@ def test_numpy_and_python_dense_scores_agree():
 
 
 def test_dense_scores_dispatches_to_numpy_when_available_else_python(monkeypatch):
-    import jericho.retrieval as retrieval
+    import friday.retrieval as retrieval
 
     stored = _rand_vectors(seed=3, count=20, dim=32)
     query = [0.5] * 32

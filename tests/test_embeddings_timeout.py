@@ -19,7 +19,7 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from jericho.retrieval import EmbeddingBackend
+from friday.retrieval import EmbeddingBackend
 
 
 class _CapturingClient:

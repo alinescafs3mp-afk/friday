@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.agent_runtime import AgentRuntime
-from jericho.storage._knowledge import _FTS_TERM_BUDGET, _fts_terms
+from friday.agent_runtime import AgentRuntime
+from friday.storage._knowledge import _FTS_TERM_BUDGET, _fts_terms
 
 LONG_PREVIOUS = (
     "подскажи пожалуйста как именно в нашей организации правильно оформляется "

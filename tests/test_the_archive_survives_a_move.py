@@ -3,7 +3,7 @@
 Замерено на живой базе: у всех 1671 импортированного raw-объекта в метаданных лежали
 АБСОЛЮТНЫЕ пути (3342 штуки, ни одного относительного), укоренённые в прежнем каталоге.
 Отдача файла требует, чтобы путь лежал внутри текущего хранилища, поэтому после смены
-`JERICHO_HOME`, переезда на другой диск или даже смены имени пользователя каждый файл
+`FRIDAY_HOME`, переезда на другой диск или даже смены имени пользователя каждый файл
 отдаёт 404 — причём «безопасный» 404 неотличим от «файла нет». Это полный отказ, а не
 деградация, и узнаётся он только по клику.
 
@@ -19,7 +19,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from jericho.api.deps import _safe_owned_file
+from friday.api.deps import _safe_owned_file
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_an_empty_path_is_refused(storage_root):
 def _raw_with_path(storage, user_id: str, stored: str, source: str = "") -> str:
     import hashlib
 
-    from jericho.storage.models import RawObject, new_id
+    from friday.storage.models import RawObject, new_id
 
     raw = RawObject(
         id=new_id("raw"),

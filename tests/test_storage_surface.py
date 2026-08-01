@@ -1,4 +1,4 @@
-"""`JerichoStorage` is the single data-access surface; splitting it must not move it.
+"""`FridayStorage` is the single data-access surface; splitting it must not move it.
 
 The class carries 181 methods over 35 tables and is reached from roughly 140 call
 sites. Unlike the HTTP layer it publishes no schema, so a refactor has no external
@@ -18,12 +18,12 @@ from __future__ import annotations
 import inspect
 import re
 
-from jericho.storage import JerichoStorage
+from friday.storage import FridayStorage
 
 
 def _surface() -> dict[str, str]:
     surface: dict[str, str] = {}
-    for name, member in inspect.getmembers(JerichoStorage):
+    for name, member in inspect.getmembers(FridayStorage):
         if name.startswith("__"):
             continue
         if not (inspect.isfunction(member) or inspect.ismethod(member) or isinstance(member, property)):
@@ -38,7 +38,7 @@ def _surface() -> dict[str, str]:
 def test_storage_exposes_the_same_surface() -> None:
     surface = _surface()
     assert len(surface) == EXPECTED_MEMBER_COUNT, (
-        f"JerichoStorage exposes {len(surface)} members, expected {EXPECTED_MEMBER_COUNT}. "
+        f"FridayStorage exposes {len(surface)} members, expected {EXPECTED_MEMBER_COUNT}. "
         "Update EXPECTED_MEMBER_COUNT only when a method was added or removed on purpose."
     )
     missing = sorted(set(EXPECTED_SIGNATURES) - set(surface))
@@ -57,7 +57,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
     complete. Nothing else in the suite would notice."""
     seen: dict[str, str] = {}
     duplicates: list[str] = []
-    for base in JerichoStorage.__mro__:
+    for base in FridayStorage.__mro__:
         if base is object:
             continue
         for name, member in vars(base).items():
@@ -373,7 +373,7 @@ def test_the_hot_read_paths_are_index_ordered(storage):
     is exactly why this hid: SQLite used it to FIND the rows and then sorted every
     one of them, because `importance` is its fourth column and orders nothing here.
     """
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("owner")
     for index in range(200):
@@ -432,8 +432,8 @@ def test_the_capped_vector_window_still_returns_the_newest_object(storage):
     moves the ORDER BY off the outer result, so the property that actually matters
     is pinned here rather than implied by a plan.
     """
-    from jericho.retrieval import pack_vector
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.retrieval import pack_vector
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("owner")
     ids = []

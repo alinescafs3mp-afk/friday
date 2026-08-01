@@ -22,9 +22,9 @@ import argparse
 
 import pytest
 
-from jericho.ingestion import _extract_entities
-from jericho.ingestion._base import DECLARED_ENTITY_METHODS, normalize_entity_name
-from jericho.storage.models import EntityType
+from friday.ingestion import _extract_entities
+from friday.ingestion._base import DECLARED_ENTITY_METHODS, normalize_entity_name
+from friday.storage.models import EntityType
 
 
 def _units(text: str) -> list[dict]:
@@ -77,7 +77,7 @@ def test_the_backfill_refuses_a_method_that_may_not_create_nodes():
     Догадка по форме слова (`identifier_syntax`, `capitalized_person_name`) права
     создавать узел не имеет; разовый проход не должен выдавать ей это право оптом.
     """
-    from jericho.cli import _backfill_entities
+    from friday.cli import _backfill_entities
 
     code = _backfill_entities(
         argparse.Namespace(method="identifier_syntax", user=None, batch=10, limit=0, apply=True)

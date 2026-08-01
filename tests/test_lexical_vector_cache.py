@@ -18,8 +18,8 @@ import hashlib
 
 import pytest
 
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.retrieval import HybridSearcher
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make_ko(storage, user_id: str, title: str, content: str) -> str:
@@ -77,7 +77,7 @@ async def test_repeating_a_question_gives_the_same_answer(storage):
 @pytest.mark.asyncio
 async def test_the_cache_is_bounded(storage):
     """A cache that grows with the corpus is a leak with a good excuse."""
-    from jericho.retrieval import _VECTOR_CACHE_MAX
+    from friday.retrieval import _VECTOR_CACHE_MAX
 
     storage.ensure_user("alice")
     for index in range(12):

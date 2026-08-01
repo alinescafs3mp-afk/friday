@@ -1,7 +1,7 @@
 """User model injection into the agent context — personalization.
 
 The derived profile (people/projects/interests) now rides in the untrusted
-JERICHO_CONTEXT_DATA envelope so answers can be personal. These tests pin: the
+FRIDAY_CONTEXT_DATA envelope so answers can be personal. These tests pin: the
 compact payload shape (even with zero retrieval hits — pure dialogue), the
 off-switch, silence on an empty base, and the SYSTEM_PROMPT ground rule that
 the model is background, not a citable source.
@@ -14,10 +14,10 @@ import json
 
 import pytest
 
-from jericho.agent_runtime import SYSTEM_PROMPT, AgentRuntime
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import ActorContext
-from jericho.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.agent_runtime import SYSTEM_PROMPT, AgentRuntime
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import ActorContext
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
 
 
 class _FakeSearcher:
@@ -37,7 +37,7 @@ class _CapturingLLM:
         del kwargs
         for item in messages:
             content = str(item.get("content") or "")
-            if "JERICHO_CONTEXT_DATA" in content and "{" in content:
+            if "FRIDAY_CONTEXT_DATA" in content and "{" in content:
                 self.context_payload = json.loads(content[content.index("{") :])
         return {"content": "Хорошо."}
 

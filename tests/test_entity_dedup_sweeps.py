@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from jericho.storage.models import Entity, EntityType, new_id
+from friday.storage.models import Entity, EntityType, new_id
 
 
 def _entities(storage, user_id: str, count: int) -> None:
@@ -111,7 +111,7 @@ def test_the_route_reports_the_state_of_the_walk(settings):
     """Пустой список предложений при незакрытом обходе — это «ещё не смотрели»."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:

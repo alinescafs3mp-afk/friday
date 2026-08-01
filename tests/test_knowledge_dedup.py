@@ -14,11 +14,11 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.dedup import NEAR_DUPLICATE_TYPE, detect_near_duplicates, find_near_duplicate_pairs
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.retrieval import pack_vector
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.dedup import NEAR_DUPLICATE_TYPE, detect_near_duplicates, find_near_duplicate_pairs
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.retrieval import pack_vector
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 # --- pure detector --------------------------------------------------------
 
@@ -126,8 +126,8 @@ def test_detect_no_model_is_a_clean_noop(settings, storage):
 async def test_near_duplicates_excluded_from_agent_context(settings, storage):
     import json
 
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.permissions import ActorContext
+    from friday.agent_runtime import AgentRuntime
+    from friday.permissions import ActorContext
 
     storage.ensure_user("alice")
     a = _store(storage, "alice", "Купить молоко и хлеб.", "Список A")
@@ -154,7 +154,7 @@ async def test_near_duplicates_excluded_from_agent_context(settings, storage):
         async def chat(self, messages, **kwargs):
             for item in messages:
                 content = str(item.get("content") or "")
-                if "JERICHO_CONTEXT_DATA" in content and "{" in content:
+                if "FRIDAY_CONTEXT_DATA" in content and "{" in content:
                     self.payload = json.loads(content[content.index("{") :])
             return {"content": "ок"}
 
@@ -432,7 +432,7 @@ def test_threshold_decrease_rescans_but_increase_does_not(settings, storage):
 
 
 def test_scan_state_roundtrip_and_corruption_recovery(settings, storage):
-    from jericho.dedup import ScanState, load_scan_state, save_scan_state
+    from friday.dedup import ScanState, load_scan_state, save_scan_state
 
     storage.ensure_user("alice")
     state = ScanState(model="m", threshold=0.9, watermark=("2026-01-01T00:00:00+00:00", "ko_x"))
@@ -449,10 +449,10 @@ def test_storage_has_no_capped_created_at_vector_scan(storage):
 
 
 def test_dedup_scan_settings_are_clamped(monkeypatch):
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
-    monkeypatch.setenv("JERICHO_DEDUP_SCAN_BATCH", "0")
-    monkeypatch.setenv("JERICHO_DEDUP_SCAN_MAX_SECONDS", "0.1")
+    monkeypatch.setenv("FRIDAY_DEDUP_SCAN_BATCH", "0")
+    monkeypatch.setenv("FRIDAY_DEDUP_SCAN_MAX_SECONDS", "0.1")
     loaded = load_settings()
     assert loaded.dedup_scan_batch == 1
     assert loaded.dedup_scan_max_seconds == 1.0
@@ -466,7 +466,7 @@ def _packed(vector):
 
 
 def test_kernel_skips_zero_norm_mismatched_dim_and_self_pairs():
-    from jericho.dedup import find_near_duplicate_pairs_against
+    from friday.dedup import find_near_duplicate_pairs_against
 
     probes = [
         ("a", _packed([1.0, 0.0, 0.0])),
@@ -487,8 +487,8 @@ def test_numpy_and_python_kernels_agree(monkeypatch):
     """The optional extra must not change WHICH pairs are reported."""
     import random
 
-    from jericho import dedup as dedup_module
-    from jericho.dedup import find_near_duplicate_pairs_against
+    from friday import dedup as dedup_module
+    from friday.dedup import find_near_duplicate_pairs_against
 
     random.seed(11)
     rows = [
@@ -581,7 +581,7 @@ def test_a_tile_costlier_than_the_budget_still_makes_progress(settings, storage,
     costs more than one budget would never advance — zero progress, forever."""
     from dataclasses import replace
 
-    from jericho import dedup as dedup_module
+    from friday import dedup as dedup_module
 
     monkeypatch.setattr(dedup_module, "_CORPUS_PAGE", 2)  # force a multi-page sweep
     cfg = replace(_dedup_settings(settings), dedup_scan_batch=2)
@@ -606,7 +606,7 @@ def test_end_of_history_comes_from_an_empty_page_not_a_short_one(settings, stora
     read as 'history finished' — that would leave everything older unprobed forever."""
     from dataclasses import replace
 
-    from jericho import dedup as dedup_module
+    from friday import dedup as dedup_module
 
     cfg = replace(_dedup_settings(settings), dedup_scan_batch=99999)
     requested: list[int] = []
@@ -643,7 +643,7 @@ def test_pair_accumulator_is_bounded_on_a_duplicate_cluster(settings, storage, m
     on exactly the bulk-import workload this module exists for."""
     from dataclasses import replace
 
-    from jericho import dedup as dedup_module
+    from friday import dedup as dedup_module
 
     monkeypatch.setattr(dedup_module, "_MAX_PAIRS_PER_RUN", 3)
     cfg = replace(_dedup_settings(settings), dedup_scan_batch=64)
@@ -668,8 +668,8 @@ def test_numpy_and_python_agree_at_the_threshold_boundary(monkeypatch):
     make the optional extra report a DIFFERENT set of duplicates."""
     import math
 
-    from jericho import dedup as dedup_module
-    from jericho.dedup import find_near_duplicate_pairs_against
+    from friday import dedup as dedup_module
+    from friday.dedup import find_near_duplicate_pairs_against
 
     threshold = 0.92
     rows = []
@@ -692,7 +692,7 @@ def test_numpy_and_python_agree_at_the_threshold_boundary(monkeypatch):
 def test_concurrent_state_writes_merge_conservatively():
     """Worker tick and manual admin scan overlap; the loser may cost extra work but
     must never mark history finished on the winner's behalf."""
-    from jericho.dedup import ScanState, _merge_concurrent, save_scan_state
+    from friday.dedup import ScanState, _merge_concurrent, save_scan_state
 
     class _Kv:
         def __init__(self):
@@ -729,7 +729,7 @@ def test_a_row_appearing_below_the_watermark_reopens_the_backfill(settings, stor
     old_b = _store(storage, "alice", "Купить молоко, хлеб.", "Старый B")
     _index(storage, "alice", old_a, [1.0, 0.0, 0.0], "test-embed")
     _index(storage, "alice", old_b, [0.98, 0.2, 0.0], "test-embed")
-    from jericho.dedup import load_scan_state
+    from friday.dedup import load_scan_state
 
     watermark = load_scan_state(storage, "alice").watermark
     assert watermark is not None
@@ -764,8 +764,8 @@ def test_the_default_threshold_clears_the_measured_non_duplicate_ceiling():
     move the ceiling constant to whatever it then reports rather than moving this
     assertion.
     """
-    from jericho.config import load_settings
-    from jericho.dedup import _MEASURED_NON_DUPLICATE_CEILING
+    from friday.config import load_settings
+    from friday.dedup import _MEASURED_NON_DUPLICATE_CEILING
 
     default = load_settings().dedup_threshold
     assert default > _MEASURED_NON_DUPLICATE_CEILING, (

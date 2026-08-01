@@ -7,9 +7,9 @@ import json
 
 import pytest
 
-import jericho.web_surfer as web_surfer_module
-from jericho.execution_kernel import ToolResult
-from jericho.web_surfer import FetchResult, SearchResult, WebSurfer
+import friday.web_surfer as web_surfer_module
+from friday.execution_kernel import ToolResult
+from friday.web_surfer import FetchResult, SearchResult, WebSurfer
 
 
 def _source(number: int) -> dict[str, object]:

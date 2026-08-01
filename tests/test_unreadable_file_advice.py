@@ -1,4 +1,4 @@
-"""What Jericho advises for a file it could not read at all.
+"""What Friday advises for a file it could not read at all.
 
 Routing was never the problem: `not extraction_succeeded` forces the Inbox, so an
 unreadable file has never become a Knowledge Object on its own. The ADVICE was the
@@ -18,8 +18,8 @@ import json
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
 
 
 def _json(value):
@@ -105,7 +105,7 @@ async def test_a_file_that_parses_but_yields_nothing_still_says_so(settings, sto
     `success=True` and `chars=0`, and not one of them carried the marker that tells a
     reviewer they are looking at a document with nothing in it.
     """
-    from jericho.documents import DocumentResult
+    from friday.documents import DocumentResult
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     # A parser that succeeds and returns nothing: exactly a scanned page.

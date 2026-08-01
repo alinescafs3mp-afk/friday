@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 
-from jericho.agent_runtime import _CITATION_OUT_OF_VIEW, _relabel_history_citations
+from friday.agent_runtime import _CITATION_OUT_OF_VIEW, _relabel_history_citations
 
 
 def _message(content: str, citations: dict[str, str] | None = None) -> dict:
@@ -75,7 +75,7 @@ def test_broken_metadata_does_not_break_the_prompt():
 
 def test_the_prompt_builder_actually_applies_it(settings, storage):
     """The helper being right is not the same as the prompt using it."""
-    from jericho.agent_runtime import AgentContext, AgentRuntime
+    from friday.agent_runtime import AgentContext, AgentRuntime
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.settings = settings

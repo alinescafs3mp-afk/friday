@@ -24,8 +24,8 @@ import json
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel, ToolResult
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.execution_kernel import ExecutionKernel, ToolResult
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make(storage, user_id: str, index: int, *, head: str, tail: str) -> str:
@@ -55,8 +55,8 @@ def _make(storage, user_id: str, index: int, *, head: str, tail: str) -> str:
 
 @pytest.fixture
 def kernel(settings, storage):
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import AuthorizationService
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import AuthorizationService
 
     instance = ExecutionKernel(AuthorizationService(storage), settings)
     instance.bind_services(storage, KnowledgeGraph(storage), None, None)
@@ -64,7 +64,7 @@ def kernel(settings, storage):
 
 
 def _search(kernel, storage, user_id: str, query: str, limit: int = 10) -> dict:
-    from jericho.permissions import ActorContext
+    from friday.permissions import ActorContext
 
     actor = ActorContext(user_id=user_id, preset_key="owner", source="test")
     return asyncio.run(kernel._memory_search(actor=actor, query=query, limit=limit))  # noqa: SLF001
@@ -127,8 +127,8 @@ def test_the_hybrid_searcher_is_used_when_bound(settings, storage):
     13, «отчёт» — 3. Слово в именительном падеже — ровно так его напишет модель,
     переформулируя вопрос, — давало пустую выдачу при существующих документах.
     """
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import ActorContext, AuthorizationService
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import ActorContext, AuthorizationService
 
     class _Searcher:
         def __init__(self) -> None:
@@ -153,8 +153,8 @@ def test_the_hybrid_searcher_is_used_when_bound(settings, storage):
 def test_without_a_searcher_it_still_works(settings, storage):
     """Ядро может быть собрано без поиска (тесты, CLI) — инструмент не должен падать."""
     storage.ensure_user("alice")
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import ActorContext, AuthorizationService
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import ActorContext, AuthorizationService
 
     kernel = ExecutionKernel(AuthorizationService(storage), settings)
     kernel.bind_services(storage, KnowledgeGraph(storage), None, None)
@@ -206,7 +206,7 @@ def test_the_chat_model_is_told_similar_records_were_cut(settings, storage):
     """Главный путь чата: «в архиве пусто» и «похожее есть, но не отвечает» —
     разные ответы человеку, и без этой строки модель выдаёт первый в обоих
     случаях."""
-    from jericho.agent_runtime import AgentContext, AgentRuntime
+    from friday.agent_runtime import AgentContext, AgentRuntime
 
     runtime = AgentRuntime(settings, storage)
     context = AgentContext(
@@ -228,21 +228,21 @@ def test_the_chat_model_is_told_similar_records_were_cut(settings, storage):
 
 
 def test_rerank_top_without_endpoint_is_a_config_error(settings):
-    """Включённый JERICHO_RERANK_TOP без адреса/модели — противоречие того же
+    """Включённый FRIDAY_RERANK_TOP без адреса/модели — противоречие того же
     класса, что эмбеддинги без модели: и переранжирование, и порог уверенности
     молча не работают, пока настройка говорит «включено»."""
     import dataclasses
 
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     broken = dataclasses.replace(settings, rerank_top=20, rerank_base_url="", rerank_model="")
     problems = validate_settings(broken)
-    assert any("JERICHO_RERANK_TOP" in item and "warning" not in item for item in problems)
+    assert any("FRIDAY_RERANK_TOP" in item and "warning" not in item for item in problems)
 
     configured = dataclasses.replace(
         settings, rerank_top=20, rerank_base_url="http://rerank.invalid/v1", rerank_model="qwen3"
     )
-    assert not any("JERICHO_RERANK_TOP" in item for item in validate_settings(configured))
+    assert not any("FRIDAY_RERANK_TOP" in item for item in validate_settings(configured))
 
 
 def test_nothing_extra_is_said_when_nothing_was_filtered(kernel, storage):

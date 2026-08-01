@@ -16,7 +16,7 @@ from __future__ import annotations
 import pathlib
 import re
 
-APP_JS = pathlib.Path(__file__).resolve().parents[1] / "jericho" / "admin_ui" / "static" / "app.js"
+APP_JS = pathlib.Path(__file__).resolve().parents[1] / "friday" / "admin_ui" / "static" / "app.js"
 
 # `const name = (a, b) => …`, `const name = x => …`, `const name = async () => …`
 _ARROW = re.compile(r"\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>")

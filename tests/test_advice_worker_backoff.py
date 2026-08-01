@@ -20,9 +20,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from jericho.agent_runtime.llm import LLMUnavailableError
-from jericho.storage.models import RawObject, new_id
-from jericho.workers import _ADVICE_ENDPOINT_DOWN_AFTER, WorkerBatchError, WorkersManager
+from friday.agent_runtime.llm import LLMUnavailableError
+from friday.storage.models import RawObject, new_id
+from friday.workers import _ADVICE_ENDPOINT_DOWN_AFTER, WorkerBatchError, WorkersManager
 
 
 def _pending(storage, index: int) -> str:
@@ -67,7 +67,7 @@ class _Ingestion:
 
 
 def _manager(settings, storage, ingestion) -> WorkersManager:
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     class _LLM:
         enabled = True

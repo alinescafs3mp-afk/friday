@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from jericho.memory import MemoryVault
-from jericho.permissions import ActorContext, AuthorizationService
-from jericho.purge import purge_knowledge
-from jericho.retrieval import pack_vector
-from jericho.storage import SCHEMA_VERSION
-from jericho.storage.models import FeedbackItem, FeedbackType, KnowledgeObject, RawObject, new_id
+from friday.memory import MemoryVault
+from friday.permissions import ActorContext, AuthorizationService
+from friday.purge import purge_knowledge
+from friday.retrieval import pack_vector
+from friday.storage import SCHEMA_VERSION
+from friday.storage.models import FeedbackItem, FeedbackType, KnowledgeObject, RawObject, new_id
 
 
 def _text_ko(storage, user_id: str, content: str, *, title: str) -> dict:
@@ -235,7 +235,7 @@ def test_list_purgeable_respects_retention_window(storage):
 
 
 def test_purge_capability_is_admin_and_owner_only(storage):
-    from jericho.permissions import CORE_CAPABILITIES
+    from friday.permissions import CORE_CAPABILITIES
 
     cap = next(c for c in CORE_CAPABILITIES if c.security_id == "admin.data.purge")
     assert cap.risk_level == 4

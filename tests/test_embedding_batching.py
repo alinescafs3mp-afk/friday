@@ -22,7 +22,7 @@ import contextlib
 
 import pytest
 
-from jericho.workers import _DOC_VECTOR_MAX_CHARS, _EMBED_REQUEST_MAX_CHARS, WorkersManager
+from friday.workers import _DOC_VECTOR_MAX_CHARS, _EMBED_REQUEST_MAX_CHARS, WorkersManager
 
 
 class _Backend:

@@ -32,7 +32,7 @@ def _mounted(path):
 
 
 def _backup(settings):
-    from jericho.storage import init_storage
+    from friday.storage import init_storage
 
     storage = init_storage(settings)
     try:
@@ -51,7 +51,7 @@ def test_turning_encryption_on_reports_the_plaintext_left_behind(settings, tmp_p
     erase each other's copies. So it is reported, loudly, where an operator looks:
     the report and `doctor`.
     """
-    from jericho.backup_mirror import mirror_backups
+    from friday.backup_mirror import mirror_backups
 
     mirror_dir = _mounted(tmp_path / "mirror")
     plain = replace(settings, backup_mirror_dir=mirror_dir, backup_encryption_key_file=None)
@@ -77,7 +77,7 @@ def test_turning_encryption_on_reports_the_plaintext_left_behind(settings, tmp_p
 
 def test_it_keeps_reporting_on_later_runs(settings, tmp_path):
     """Counted before the skip, or the first encrypted run says it once and never again."""
-    from jericho.backup_mirror import mirror_backups
+    from friday.backup_mirror import mirror_backups
 
     mirror_dir = _mounted(tmp_path / "mirror")
     plain = replace(settings, backup_mirror_dir=mirror_dir, backup_encryption_key_file=None)
@@ -101,7 +101,7 @@ def test_it_keeps_reporting_on_later_runs(settings, tmp_path):
 
 def test_a_call_stops_retrying_once_its_budget_is_spent(settings):
     """Three attempts of `llm_timeout_sec` each is the number this bounds."""
-    from jericho.agent_runtime.llm import MAX_RETRIES, LLMRouter
+    from friday.agent_runtime.llm import MAX_RETRIES, LLMRouter
 
     router = LLMRouter(replace(settings, llm_timeout_sec=240.0))
     assert router.total_budget_sec == 360.0
@@ -155,7 +155,7 @@ class _SlowSteadyLLM:
 
 class _NoopKernel:
     async def execute(self, name, arguments, *, actor=None):
-        from jericho.execution_kernel import ToolResult
+        from friday.execution_kernel import ToolResult
 
         return ToolResult(name, True, data={})
 
@@ -181,8 +181,8 @@ async def test_a_slow_but_alive_endpoint_cannot_hold_a_slot_for_every_round(sett
     """
     import time as time_module
 
-    from jericho.agent_runtime import AgentContext, AgentRuntime
-    from jericho.permissions import ActorContext
+    from friday.agent_runtime import AgentContext, AgentRuntime
+    from friday.permissions import ActorContext
 
     clock = {"t": 0.0}
     monkeypatch.setattr(time_module, "monotonic", lambda: clock["t"])
@@ -229,8 +229,8 @@ async def test_semaphore_queueing_does_not_count_against_a_busy_but_healthy_turn
     """
     import time as time_module
 
-    from jericho.agent_runtime import AgentContext, AgentRuntime
-    from jericho.permissions import ActorContext
+    from friday.agent_runtime import AgentContext, AgentRuntime
+    from friday.permissions import ActorContext
 
     clock = {"t": 0.0}
     monkeypatch.setattr(time_module, "monotonic", lambda: clock["t"])
@@ -266,7 +266,7 @@ async def test_an_offline_stub_is_not_sent_for_verification(settings, storage):
     """
     import inspect
 
-    from jericho import agent_runtime
+    from friday import agent_runtime
 
     source = inspect.getsource(agent_runtime.AgentRuntime.chat)
     assert 'not response.get("llm_failed")' in source, "the offline stub is still verified"
@@ -279,7 +279,7 @@ async def test_an_offline_stub_is_not_sent_for_verification(settings, storage):
 
 
 def test_code_run_records_what_it_ran_without_storing_it(settings, storage):
-    from jericho.execution_kernel import ExecutionKernel
+    from friday.execution_kernel import ExecutionKernel
 
     details = ExecutionKernel._audit_details("code_run", {"code": "print(1)"})  # noqa: SLF001
     assert details["code_sha256"] == hashlib.sha256(b"print(1)").hexdigest()
@@ -289,7 +289,7 @@ def test_code_run_records_what_it_ran_without_storing_it(settings, storage):
 
 
 def test_other_tools_add_nothing(settings):
-    from jericho.execution_kernel import ExecutionKernel
+    from friday.execution_kernel import ExecutionKernel
 
     assert ExecutionKernel._audit_details("memory_search", {"query": "секрет"}) == {}  # noqa: SLF001
     assert ExecutionKernel._audit_details("code_run", {}) == {}  # noqa: SLF001
@@ -304,7 +304,7 @@ def test_web_tools_leave_a_fingerprint_not_a_body(settings):
     """
     import hashlib
 
-    from jericho.execution_kernel import ExecutionKernel
+    from friday.execution_kernel import ExecutionKernel
 
     secret_query = "пароль от роутера secret-token-XYZ"
     search = ExecutionKernel._audit_details(  # noqa: SLF001
@@ -334,11 +334,11 @@ def test_web_tools_leave_a_fingerprint_not_a_body(settings):
 @pytest.mark.asyncio
 async def test_web_search_fingerprint_reaches_the_audit_row(settings, storage):
     """Unit-testing the helper is not enough: the execute path must call it."""
-    from jericho.execution_kernel import ExecutionKernel
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import AuthorizationService
-    from jericho.web_surfer import WebSurfer
+    from friday.execution_kernel import ExecutionKernel
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import AuthorizationService
+    from friday.web_surfer import WebSurfer
 
     storage.ensure_user("operator", preset_key="owner")
     auth = AuthorizationService(storage)
@@ -372,14 +372,14 @@ async def test_web_search_fingerprint_reaches_the_audit_row(settings, storage):
 @pytest.mark.asyncio
 async def test_a_refused_run_is_fingerprinted_too(settings, storage):
     """«Tried to run this and was refused» belongs in the record as much as a run."""
-    from jericho.execution_kernel import ExecutionKernel
-    from jericho.permissions import AuthorizationService
+    from friday.execution_kernel import ExecutionKernel
+    from friday.permissions import AuthorizationService
 
     storage.ensure_user("operator", preset_key="owner")
     auth = AuthorizationService(storage)
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.web_surfer import WebSurfer
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.web_surfer import WebSurfer
 
     graph = KnowledgeGraph(storage)
     web = WebSurfer(settings)
@@ -406,14 +406,14 @@ async def test_a_refused_run_is_fingerprinted_too(settings, storage):
 @pytest.mark.asyncio
 async def test_a_drip_feeding_server_cannot_hold_a_connection(settings):
     """`read=20` means «twenty seconds between chunks», which is not a ceiling."""
-    from jericho.web_surfer import _FETCH_TOTAL_BUDGET, WebSurfer
+    from friday.web_surfer import _FETCH_TOTAL_BUDGET, WebSurfer
 
     assert _FETCH_TOTAL_BUDGET > 0
 
     surfer = WebSurfer(replace(settings, web_allow_private_networks=True))
     try:
         # Patch the budget down rather than waiting a minute for the real one.
-        import jericho.web_surfer as module
+        import friday.web_surfer as module
 
         original = module._FETCH_TOTAL_BUDGET
         module._FETCH_TOTAL_BUDGET = 0.4

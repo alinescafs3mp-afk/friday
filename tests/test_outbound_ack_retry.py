@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 import pytest
 
-from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
 
 class _Telegram:

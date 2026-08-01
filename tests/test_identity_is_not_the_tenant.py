@@ -26,7 +26,7 @@ import hashlib
 
 import pytest
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 SECRET_FACT = "Договор аренды склада на Полевой подписан 14 марта, ставка 480 тысяч в месяц."
 
@@ -101,13 +101,13 @@ def _bridge_post(client, settings, *, chat_id: str, sender: str, text: str):
 
     Личность едет ЗАГОЛОВКАМИ и входит в подпись: подделать отправителя, не зная
     секрета моста, нельзя. Именно поэтому связь личность→арендатор безопасно
-    строить по `X-Jericho-User`.
+    строить по `X-Friday-User`.
     """
     import json as _json
     import time
     import uuid
 
-    from jericho.security import sign_bridge_request
+    from friday.security import sign_bridge_request
 
     payload = _json.dumps(
         {"message": text, "telegram_user": {"first_name": "Владелец", "username": "owner"}}
@@ -119,11 +119,11 @@ def _bridge_post(client, settings, *, chat_id: str, sender: str, text: str):
         content=payload,
         headers={
             "Content-Type": "application/json",
-            "X-Jericho-Timestamp": str(timestamp),
-            "X-Jericho-User": sender,
-            "X-Jericho-Chat": chat_id,
-            "X-Jericho-Nonce": nonce,
-            "X-Jericho-Signature": sign_bridge_request(
+            "X-Friday-Timestamp": str(timestamp),
+            "X-Friday-User": sender,
+            "X-Friday-Chat": chat_id,
+            "X-Friday-Nonce": nonce,
+            "X-Friday-Signature": sign_bridge_request(
                 settings.telegram_bridge_secret,
                 timestamp=timestamp,
                 method="POST",
@@ -144,7 +144,7 @@ def bridged(settings):
 
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     tuned = dataclasses.replace(
         settings,

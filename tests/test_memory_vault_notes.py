@@ -1,4 +1,4 @@
-"""The vault has to be usable by a person opening it outside Jericho.
+"""The vault has to be usable by a person opening it outside Friday.
 
 Until now a note was `ko_<12 hex>.md` with no links: the folder was a pile of
 hashes, and Obsidian's graph view — the reason to keep a Markdown projection at
@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from jericho.memory import MemoryVault
+from friday.memory import MemoryVault
 
 USER = "telegram:telegram:777"
 

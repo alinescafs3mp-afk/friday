@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from jericho.workers import WorkerSupervisor
+from friday.workers import WorkerSupervisor
 
 
 @pytest.mark.asyncio

@@ -44,8 +44,8 @@ async def test_context_retrieval_asks_for_no_graph_expansion(settings, storage):
     """Мутация, которую тест обязан ловить: убрать `graph_expansion=False` из вызова
     в `_prepare_context`. Значение по умолчанию — True, то есть дефект вернётся молча
     и проявится только уполовиненным recall, который никто не заметит без набора."""
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.agent_runtime import AgentRuntime
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user("alice")
     agent = AgentRuntime(settings, storage)
@@ -77,8 +77,8 @@ async def test_context_retrieval_asks_for_no_graph_expansion(settings, storage):
 @pytest.mark.asyncio
 async def test_context_retrieval_expands_graph_for_measured_relational_form(settings, storage):
     """Мутация: заменить mode-dependent флаг на False — этот тест обязан упасть."""
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.agent_runtime import AgentRuntime
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user("alice")
     agent = AgentRuntime(settings, storage)
@@ -115,8 +115,8 @@ async def test_a_relational_previous_turn_does_not_leak_into_an_unrelated_follow
     Мутация: вернуть `is_relational_query(search_query)` вместо `(message)` —
     тест обязан покраснеть.
     """
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.agent_runtime import AgentRuntime
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user("alice")
     agent = AgentRuntime(settings, storage)
@@ -152,9 +152,9 @@ async def test_generated_document_notice_never_reaches_relational_classifier(set
     Mutation: remove the synthetic-system-notice guard in ``_prepare_context``.
     The fail-fast classifier below is then called and this test fails.
     """
-    import jericho.agent_runtime as agent_runtime
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.knowledge_graph import KnowledgeGraph
+    import friday.agent_runtime as agent_runtime
+    from friday.agent_runtime import AgentRuntime
+    from friday.knowledge_graph import KnowledgeGraph
 
     def reject_generated_notice(query: str) -> bool:
         raise AssertionError(f"generated document notice reached relational classifier: {query!r}")
@@ -201,7 +201,7 @@ async def test_a_spoken_question_is_a_human_turn_not_a_generated_notice(settings
     """
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     captured: dict[str, object] = {}
@@ -266,7 +266,7 @@ async def test_retry_of_a_generated_notice_stays_a_generated_notice(settings, mo
     """
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     calls: list[dict] = []

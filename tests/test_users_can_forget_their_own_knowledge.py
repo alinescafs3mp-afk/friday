@@ -18,8 +18,8 @@ import hashlib
 
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _issue(storage, user_id: str, preset: str, secret: str) -> dict:

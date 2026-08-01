@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-SOURCE = Path("jericho/admin_ui/static/app.js").read_text(encoding="utf-8")
+SOURCE = Path("friday/admin_ui/static/app.js").read_text(encoding="utf-8")
 
 
 def test_the_conflict_list_is_not_pinned_to_one_status():
@@ -49,7 +49,7 @@ def test_the_review_endpoint_still_accepts_the_transition(settings, storage):
     """
     import inspect
 
-    from jericho.storage._knowledge import KnowledgeMixin
+    from friday.storage._knowledge import KnowledgeMixin
 
     source = inspect.getsource(KnowledgeMixin.review_knowledge_conflict)
     assert "confirmed" in source, "подтверждённый конфликт больше не разрешим — перечитайте правку"
@@ -74,7 +74,7 @@ def _pair(storage, user_id: str, first: str, second: str) -> str:
 def _knowledge(storage, user_id: str, index: int) -> str:
     import hashlib
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     text = f"Документ {index} про поставку оборудования. " * 5
     raw = RawObject(

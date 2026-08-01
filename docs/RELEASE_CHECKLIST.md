@@ -1,6 +1,8 @@
 # Release checklist
 
-Этот gate предназначен для технического выпуска Jericho. Он отделяет проверенный source release от deployment-проверок, которые требуют конкретного Windows/GPU/Telegram окружения.
+> Проект переименован: **Friday** (по-русски — **Пятница**), ex codename Jericho.
+
+Этот gate предназначен для технического выпуска Friday. Он отделяет проверенный source release от deployment-проверок, которые требуют конкретного Windows/GPU/Telegram окружения.
 
 ## 1. Source tree
 

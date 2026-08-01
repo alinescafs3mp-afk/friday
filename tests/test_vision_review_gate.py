@@ -17,9 +17,9 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import EntityType, InboxItem, InboxStatus, new_id
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import EntityType, InboxItem, InboxStatus, new_id
 
 
 class _VisionLLM:

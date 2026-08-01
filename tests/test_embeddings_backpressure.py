@@ -25,7 +25,7 @@ import time
 import httpx
 import pytest
 
-from jericho.retrieval import EmbeddingBackend, _retry_after_seconds
+from friday.retrieval import EmbeddingBackend, _retry_after_seconds
 
 
 def _backend(settings, monkeypatch, *, status: int = 200, raises: Exception | None = None):
@@ -149,7 +149,7 @@ def test_the_counter_and_the_listing_share_one_condition(storage, settings):
     """Прогресс «осталось N» обязан считаться тем же правилом, что и выборка."""
     import hashlib
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("alice")
     for index in range(7):
@@ -197,7 +197,7 @@ async def test_a_loaded_tick_earns_a_rest_and_the_next_one_is_skipped(settings, 
     """
     import dataclasses
 
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     tuned = dataclasses.replace(
         settings,
@@ -225,7 +225,7 @@ async def test_a_loaded_tick_earns_a_rest_and_the_next_one_is_skipped(settings, 
 
     import hashlib
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("alice")
     for index in range(2):
@@ -265,7 +265,7 @@ async def test_a_cooling_backend_stops_the_tick_entirely(settings, storage):
     """Пока бэкенд отступает, воркер не должен даже собирать пачку."""
     import dataclasses
 
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     tuned = dataclasses.replace(
         settings, embeddings_enabled=True, embeddings_base_url="http://x/v1", embeddings_model="m"
@@ -348,7 +348,7 @@ def test_no_single_input_can_exceed_what_the_service_accepts():
     выполняться: в запрос помещается хотя бы один вектор документа целиком, иначе
     такой объект не проиндексируется ни при каком делении пачки.
     """
-    from jericho.workers import (
+    from friday.workers import (
         _DOC_VECTOR_MAX_CHARS,
         _EMBED_INPUT_MAX_CHARS,
         _EMBED_REQUEST_MAX_CHARS,
@@ -385,8 +385,8 @@ async def test_a_fast_service_is_not_throttled_by_a_character_budget(settings, s
     import dataclasses
     import hashlib
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
-    from jericho.workers import WorkersManager
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.workers import WorkersManager
 
     tuned = dataclasses.replace(
         settings,
@@ -439,7 +439,7 @@ async def test_a_fast_service_is_not_throttled_by_a_character_budget(settings, s
     # умолчанию и своим порогом. С `chunk_scheme=""` счёт отвечает на другой
     # вопрос, и тест «падает» на исправном коде — ровно та ошибка, что уже была
     # сделана сегодня при оценке падежного правила.
-    from jericho.retrieval import chunk_scheme
+    from friday.retrieval import chunk_scheme
 
     left = storage.count_knowledge_missing_embedding(
         "m", chunk_scheme=chunk_scheme(tuned), chunk_threshold=tuned.embeddings_chunk_chars
@@ -452,7 +452,7 @@ async def test_a_fast_service_is_not_throttled_by_a_character_budget(settings, s
 
 def test_a_length_rejection_is_told_apart_from_other_bad_requests():
     """Укорачивать текст на любом 400 значило бы лечить чужую болезнь."""
-    from jericho.retrieval import _input_too_long
+    from friday.retrieval import _input_too_long
 
     assert _input_too_long('{"error":{"message":"an input exceeds the 8192-token limit"}}') is True
     assert _input_too_long('{"error":{"code":"input_too_many_tokens"}}') is True
@@ -533,8 +533,8 @@ async def test_a_rest_inside_a_tick_is_waited_out_not_treated_as_the_end(storage
     """
     import dataclasses
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
-    from jericho.workers import WorkersManager
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.workers import WorkersManager
 
     class _SlowEmbeddings:
         """Отвечает не мгновенно — иначе отдых не назначается и различать нечего."""
@@ -558,7 +558,7 @@ async def test_a_rest_inside_a_tick_is_waited_out_not_treated_as_the_end(storage
         embeddings_index_batch=4,
         embeddings_chunk_chars=0,
         embeddings_index_tick_budget_sec=30.0,
-        # Общая настройка тестов гасит отдых (`JERICHO_EMBEDDINGS_INDEX_REST_RATIO=0`),
+        # Общая настройка тестов гасит отдых (`FRIDAY_EMBEDDINGS_INDEX_REST_RATIO=0`),
         # чтобы прогоны не спали. Здесь отдых — предмет проверки, и его надо вернуть:
         # без этой строки тест зелен и на сломанном коде, что я и увидел, проверив
         # его подменой поведения. Пауза выходит в сотые доли секунды.
@@ -594,7 +594,7 @@ async def test_a_rest_inside_a_tick_is_waited_out_not_treated_as_the_end(storage
     # Порог «работа была настоящей» опущен под скорость подставного бэкенда: смысл
     # теста в поведении цикла при назначенном отдыхе, а не в величине порога.
     monkeypatch_floor = 0.01
-    import jericho.workers as workers_module
+    import friday.workers as workers_module
 
     original_floor = workers_module._EMBED_REST_MIN_WORK_SEC  # noqa: SLF001
     workers_module._EMBED_REST_MIN_WORK_SEC = monkeypatch_floor  # noqa: SLF001
@@ -733,7 +733,7 @@ def test_the_character_request_limit_is_recognised_as_a_length_refusal():
     Такой отказ уходил в общий `except`, и пачка терялась целиком: ни деления, ни
     укорачивания, ни внятной записи — просто «embeddings backend request failed».
     """
-    from jericho.retrieval import _input_too_long
+    from friday.retrieval import _input_too_long
 
     assert _input_too_long(
         '{"error":{"message":"input exceeds the 262144-character request limit","code":"request_too_large"}}'
@@ -765,8 +765,8 @@ def test_a_long_document_gets_more_passages_rather_than_wider_ones(settings, sto
     """
     import dataclasses
 
-    from jericho.retrieval import knowledge_chunk_units
-    from jericho.workers import _DOC_VECTOR_MAX_CHARS
+    from friday.retrieval import knowledge_chunk_units
+    from friday.workers import _DOC_VECTOR_MAX_CHARS
 
     # Документ, которому 64 пассажей не хватает: 64 x 10 000 = 640 000.
     body = "Раздел о сроках поставки и порядке приёмки оборудования. " * 16_000

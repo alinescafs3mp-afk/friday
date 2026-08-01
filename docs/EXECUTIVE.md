@@ -1,6 +1,8 @@
 # Миссии (executive)
 
-Модуль `executive` координирует высокоуровневые цели («миссии») поверх тех же bounded, review-gated примитивов Jericho. Миссия ничего не пишет в знания напрямую: её итоги проходят через Inbox review, а инструменты вызываются через capability-gated Execution Kernel с actor владельца.
+> Проект переименован: **Friday** (по-русски — **Пятница**), ex codename Jericho.
+
+Модуль `executive` координирует высокоуровневые цели («миссии») поверх тех же bounded, review-gated примитивов Friday. Миссия ничего не пишет в знания напрямую: её итоги проходят через Inbox review, а инструменты вызываются через capability-gated Execution Kernel с actor владельца.
 
 ## 1. Модель данных
 
@@ -36,16 +38,16 @@ proposed ─▶ ready ─▶ running ─▶ completed | failed
 
 ## 3. Планирование
 
-Планировщик просит локальную модель вернуть строгий JSON с шагами. Валидация: зависимости — только на предыдущие `seq` (ацикличность), число шагов ограничено `JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION`, гарантирован хотя бы один `produce`-шаг. При недоступной модели или непригодном ответе — детерминированный fallback из одного `produce`-шага.
+Планировщик просит локальную модель вернуть строгий JSON с шагами. Валидация: зависимости — только на предыдущие `seq` (ацикличность), число шагов ограничено `FRIDAY_EXECUTIVE_MAX_TASKS_PER_MISSION`, гарантирован хотя бы один `produce`-шаг. При недоступной модели или непригодном ответе — детерминированный fallback из одного `produce`-шага.
 
 ## 4. Выполнение
 
-Фоновый worker `mission_runner` продвигает готовые задачи короткими тактами (интервал `JERICHO_EXECUTIVE_TICK_INTERVAL_SEC`), не перекрываясь и не удерживая транзакцию во время работы модели. Шаг выполняется ограниченным tool-loop’ом (бюджет `JERICHO_EXECUTIVE_TASK_TOOL_BUDGET`) над read/gather-инструментами (`memory_search`, `entity_lookup`, `kg_stats`, `inbox_list`, `web_search`, `web_fetch`, `web_research`). Итог `produce`-шага направляется в Inbox как `knowledge_work` candidate — Knowledge Object напрямую не создаётся.
+Фоновый worker `mission_runner` продвигает готовые задачи короткими тактами (интервал `FRIDAY_EXECUTIVE_TICK_INTERVAL_SEC`), не перекрываясь и не удерживая транзакцию во время работы модели. Шаг выполняется ограниченным tool-loop’ом (бюджет `FRIDAY_EXECUTIVE_TASK_TOOL_BUDGET`) над read/gather-инструментами (`memory_search`, `entity_lookup`, `kg_stats`, `inbox_list`, `web_search`, `web_fetch`, `web_research`). Итог `produce`-шага направляется в Inbox как `knowledge_work` candidate — Knowledge Object напрямую не создаётся.
 
 ## 5. Управляемая автономия
 
-- `JERICHO_AUTONOMY_ENABLED` (по умолчанию `1`) — общий выключатель выполнения миссий. При `0` миссии создаются, но остаются `blocked`.
-- `JERICHO_OPERATOR_FULL_AUTONOMY` (по умолчанию `0`) — авто-запуск миссий, предложенных агентом или worker-ом. При `0` такие миссии ждут запуска пользователем.
+- `FRIDAY_AUTONOMY_ENABLED` (по умолчанию `1`) — общий выключатель выполнения миссий. При `0` миссии создаются, но остаются `blocked`.
+- `FRIDAY_OPERATOR_FULL_AUTONOMY` (по умолчанию `0`) — авто-запуск миссий, предложенных агентом или worker-ом. При `0` такие миссии ждут запуска пользователем.
 
 Ни один флаг не обходит Inbox review: `produce`-итоги всегда остаются кандидатами на подтверждение.
 

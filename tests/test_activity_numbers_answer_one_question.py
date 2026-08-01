@@ -21,7 +21,7 @@ import hashlib
 
 import pytest
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 OLD = "2026-01-10T09:00:00+00:00"
 NEW = "2026-07-20T09:00:00+00:00"
@@ -85,7 +85,7 @@ def test_every_card_in_the_panel_counts_the_same_window(история):
 
 def test_the_inbox_card_counts_the_same_window(storage):
     storage.ensure_user("alice")
-    from jericho.storage.models import InboxItem, InboxStatus
+    from friday.storage.models import InboxItem, InboxStatus
 
     for at in (OLD, NEW):
         raw = _arrival(storage, "alice", at=at, content=f"Требует решения {at}")
@@ -100,7 +100,7 @@ def test_the_inbox_card_counts_the_same_window(storage):
 
 def test_a_clipped_day_histogram_says_so(история, monkeypatch):
     """Обрезка обязана быть видна, а не выводиться из длины списка."""
-    import jericho.storage._oversight as oversight
+    import friday.storage._oversight as oversight
 
     monkeypatch.setattr(oversight, "_DAY_BUCKETS", 1)
     summary = история.user_activity_summary("alice")

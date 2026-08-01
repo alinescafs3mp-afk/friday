@@ -1,8 +1,10 @@
 # Безопасность
 
+> Проект переименован: **Friday** (по-русски — **Пятница**), ex codename Jericho.
+
 ## 1. Основные границы доверия
 
-1. **Admin bearer token** (`JERICHO_API_TOKEN`) — полный доступ владельца. Утечка токена равна компрометации базы. Дополнительно можно выпускать **scoped-токены** для отдельных аккаунтов: такой токен аутентифицирует ровно с preset/capabilities своего аккаунта (не владельца), хранится как SHA-256 и отзывается.
+1. **Admin bearer token** (`FRIDAY_API_TOKEN`) — полный доступ владельца. Утечка токена равна компрометации базы. Дополнительно можно выпускать **scoped-токены** для отдельных аккаунтов: такой токен аутентифицирует ровно с preset/capabilities своего аккаунта (не владельца), хранится как SHA-256 и отзывается.
 2. **Telegram bridge secret** — право представлять Telegram identities backend-у. Он не должен попадать пользователям бота.
 3. **Telegram bot token** — хранится только в процессе bridge.
 4. **Backend** — имеет доступ к SQLite, raw files, vault и локальному LLM.
@@ -13,13 +15,13 @@
 
 ### Admin/API
 
-`Authorization: Bearer <JERICHO_API_TOKEN>` сравнивается через constant-time comparison и даёт владельца. Минимум — 32 символа; `jericho init` генерирует 48-byte URL-safe token.
+`Authorization: Bearer <FRIDAY_API_TOKEN>` сравнивается через constant-time comparison и даёт владельца. Минимум — 32 символа; `jericho init` генерирует 48-byte URL-safe token.
 
 **Scoped-токены аккаунтов.** Любой другой bearer резолвится по SHA-256 в таблице `api_tokens` и аутентифицирует как привязанный аккаунт с его preset/capabilities — так ролевая модель применяется и к HTTP-акторам, а не только к Telegram-пользователям. Плейнтекст показывается один раз при выпуске и никогда не хранится. Выпуск/список/отзыв — capability `admin.tokens.manage` (owner+admin) через `POST/GET/DELETE /api/admin/tokens`; для bootstrap офлайн — `jericho mint-token --user <id> --preset <preset>` и `jericho revoke-token <id>`. Delegated-админ не может выпустить токен для owner-аккаунта (защита от эскалации), и не-owner не может назначить preset `owner`. Отозванный или неизвестный токен → 401.
 
-Если `JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK=0`, loopback может работать как owner без токена; этот путь дополнительно закрыт CSRF/rebinding-guard-ом (loopback-`Host` обязателен, мутации проверяют `Origin`/`Sec-Fetch-Site` — см. §5) и уважает статус аккаунта: отключённый владелец получает 401, беспарольный путь не реактивирует его молча. Для нормальной эксплуатации оставляйте значение `1`.
+Если `FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK=0`, loopback может работать как owner без токена; этот путь дополнительно закрыт CSRF/rebinding-guard-ом (loopback-`Host` обязателен, мутации проверяют `Origin`/`Sec-Fetch-Site` — см. §5) и уважает статус аккаунта: отключённый владелец получает 401, беспарольный путь не реактивирует его молча. Для нормальной эксплуатации оставляйте значение `1`.
 
-**Rate-limit неудачных попыток.** Неудачная аутентификация (неверный bearer, невалидная подпись моста, битые креденшалы) расходует бюджет `JERICHO_API_AUTH_FAILURE_LIMIT_PER_MINUTE` (по умолчанию 10) на IP клиента; после исчерпания запросы получают 429 с `Retry-After` ещё до оценки креденшалов — brute-force токена ограничен, timing-оракул закрыт. Успешная аутентификация бюджет не расходует.
+**Rate-limit неудачных попыток.** Неудачная аутентификация (неверный bearer, невалидная подпись моста, битые креденшалы) расходует бюджет `FRIDAY_API_AUTH_FAILURE_LIMIT_PER_MINUTE` (по умолчанию 10) на IP клиента; после исчерпания запросы получают 429 с `Retry-After` ещё до оценки креденшалов — brute-force токена ограничен, timing-оракул закрыт. Успешная аутентификация бюджет не расходует.
 
 ### Telegram bridge
 
@@ -37,7 +39,7 @@ SHA-256(body)
 
 Backend проверяет HMAC-SHA256, допустимый возраст timestamp, целочисленные identity и одноразовость nonce. Nonce (32-символьный hex) генерируется мостом на каждый запрос; backend хранит короткоживущий кэш увиденных nonce и отклоняет повтор внутри окна свежести — это закрывает воспроизведение перехваченного подписанного запроса. Durable idempotency lease захватывается до побочных эффектов и привязывает `source_ref` к SHA-256 фактического payload: точный retry воспроизводится, активный конкурент повторяется позже, а изменённое содержимое получает постоянный conflict.
 
-**Deny-by-default доступ к чатам.** Бот принимает только чаты из эффективного allowlist = `JERICHO_TELEGRAM_ALLOWED_CHAT_IDS` ∪ `JERICHO_TELEGRAM_OWNER_CHAT_IDS`; пустой список не допускает никого. Проверка дублируется на мосту (сообщения и callback) и на backend (403, чтобы мост сразу отбрасывал неавторизованный чат). Если bridge secret задан, а эффективный allowlist пуст, `validate_settings` даёт жёсткую ошибку в production и предупреждение в loopback; мост отказывается стартовать открытым.
+**Deny-by-default доступ к чатам.** Бот принимает только чаты из эффективного allowlist = `FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS` ∪ `FRIDAY_TELEGRAM_OWNER_CHAT_IDS`; пустой список не допускает никого. Проверка дублируется на мосту (сообщения и callback) и на backend (403, чтобы мост сразу отбрасывал неавторизованный чат). Если bridge secret задан, а эффективный allowlist пуст, `validate_settings` даёт жёсткую ошибку в production и предупреждение в loopback; мост отказывается стартовать открытым.
 
 ## 3. Авторизация
 
@@ -63,9 +65,9 @@ Backend проверяет HMAC-SHA256, допустимый возраст time
 ## 5. Admin UI и HTTP
 
 - Admin UI обслуживается backend-ом и защищается строгой Content Security Policy **без `unsafe-inline`** (`script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` и запретом framing. UI разделён на внешние `app.js`/`app.css`; обработчики событий — только делегированные (`data-call` с JSON-payload в явный реестр действий), поэтому XSS в отрендеренном контенте не может исполнить скрипт даже при ошибке экранирования.
-- Беспарольный loopback-доступ (`JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK=0`) защищён от браузерных атак: `Host` обязан быть loopback-именем (`localhost`/`127.0.0.1`/`::1` — блокирует DNS rebinding), а мутирующие методы дополнительно проходят `Origin`/`Sec-Fetch-Site`-проверку (разрешены loopback-origins и `JERICHO_CORS_ORIGINS`). Cross-site страница не может выполнить мутацию от имени владельца через его браузер. Non-browser клиенты (curl, CLI) этих заголовков не шлют и работают как раньше; bearer-токены и HMAC моста guard не затрагивает — это не-CSRF-абельные пути с явными креденшалами.
+- Беспарольный loopback-доступ (`FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK=0`) защищён от браузерных атак: `Host` обязан быть loopback-именем (`localhost`/`127.0.0.1`/`::1` — блокирует DNS rebinding), а мутирующие методы дополнительно проходят `Origin`/`Sec-Fetch-Site`-проверку (разрешены loopback-origins и `FRIDAY_CORS_ORIGINS`). Cross-site страница не может выполнить мутацию от имени владельца через его браузер. Non-browser клиенты (curl, CLI) этих заголовков не шлют и работают как раньше; bearer-токены и HMAC моста guard не затрагивает — это не-CSRF-абельные пути с явными креденшалами.
 - Wildcard CORS запрещён конфигурационным validator-ом.
-- `JERICHO_TRUST_PROXY_HEADERS=0` по умолчанию. При включении задайте `JERICHO_TRUSTED_PROXY_NETWORKS`: forwarded headers учитываются только от непосредственного TCP peer из этого списка, а цепочка разбирается справа налево. Сам заголовок не может выдать удалённого клиента за loopback.
+- `FRIDAY_TRUST_PROXY_HEADERS=0` по умолчанию. При включении задайте `FRIDAY_TRUSTED_PROXY_NETWORKS`: forwarded headers учитываются только от непосредственного TCP peer из этого списка, а цепочка разбирается справа налево. Сам заголовок не может выдать удалённого клиента за loopback.
 - При публикации наружу используйте TLS, дополнительную authentication layer и firewall allowlist.
 - Не выставляйте vLLM port в публичную сеть.
 - Pure-ASGI body limiter считает реально принятые байты, включая chunked transfer, и отклоняет oversized JSON/base64/multipart до аутентификации и парсинга.
@@ -112,7 +114,7 @@ Research synthesis также является недоверенным output. 
 - редирект на запрещённый адрес (каждый hop проверяется заново);
 - ответ больше установленного лимита.
 
-`JERICHO_WEB_ALLOW_PRIVATE_NETWORKS=1` отключает часть защиты и должен использоваться только в изолированной сети при явной необходимости.
+`FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS=1` отключает часть защиты и должен использоваться только в изолированной сети при явной необходимости.
 
 ## 8. Документы и архивы
 
@@ -133,11 +135,11 @@ Extractor:
 
 ## 9. Code execution
 
-`JERICHO_CODE_EXECUTION_ENABLED=0` — обязательный безопасный default.
+`FRIDAY_CODE_EXECUTION_ENABLED=0` — обязательный безопасный default.
 
 Встроенный executor ограничивает timeout, output и часть environment, но остаётся обычным subprocess на том же OS/container. Он **не** является надёжной sandbox boundary против злонамеренного Python-кода.
 
-При timeout или превышении `JERICHO_CODE_EXECUTION_MAX_OUTPUT_BYTES` Jericho завершает всё созданное executor-ом process tree (POSIX process group / Windows `taskkill /T`), чтобы дочерний процесс не продолжил работу после уже отклонённого tool call. Stdout/stderr читаются потоково в общий budget. Это защита отказоустойчивости, а не замена песочницы.
+При timeout или превышении `FRIDAY_CODE_EXECUTION_MAX_OUTPUT_BYTES` Friday завершает всё созданное executor-ом process tree (POSIX process group / Windows `taskkill /T`), чтобы дочерний процесс не продолжил работу после уже отклонённого tool call. Stdout/stderr читаются потоково в общий budget. Это защита отказоустойчивости, а не замена песочницы.
 
 Для реального code execution нужен отдельный disposable sandbox service: rootless container/VM, seccomp, no network, read-only image, tmpfs quota, PID/memory/CPU limits и одноразовый workspace. До этого момента не выдавайте `code.run` пользователям.
 
@@ -167,12 +169,12 @@ Audit log фиксирует actor, action, target, before/after, request ID и 
 
 - [ ] `jericho doctor` без критических ошибок.
 - [ ] API token и bridge secret уникальны и длиннее 32 символов.
-- [ ] `JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK=1`.
-- [ ] `JERICHO_TRUST_PROXY_HEADERS=0`, если нет доверенного proxy.
-- [ ] При доверенных proxy перечислены только непосредственные hop-ы в `JERICHO_TRUSTED_PROXY_NETWORKS`.
+- [ ] `FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK=1`.
+- [ ] `FRIDAY_TRUST_PROXY_HEADERS=0`, если нет доверенного proxy.
+- [ ] При доверенных proxy перечислены только непосредственные hop-ы в `FRIDAY_TRUSTED_PROXY_NETWORKS`.
 - [ ] CORS содержит только реальные origin.
-- [ ] `JERICHO_WEB_ALLOW_PRIVATE_NETWORKS=0`.
-- [ ] `JERICHO_CODE_EXECUTION_ENABLED=0`.
+- [ ] `FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS=0`.
+- [ ] `FRIDAY_CODE_EXECUTION_ENABLED=0`.
 - [ ] Backend bind только loopback/VPN/private interface.
 - [ ] vLLM не опубликован наружу.
 - [ ] Есть проверенная резервная копия БД и отдельная копия raw files.

@@ -15,13 +15,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.storage import JerichoStorage, UnsupportedSchemaVersionError
-from jericho.storage.models import EntityType, KnowledgeObject, RawObject, RelationType, new_id, utc_now
-from jericho.web_surfer import (
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.storage import FridayStorage, UnsupportedSchemaVersionError
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, RelationType, new_id, utc_now
+from friday.web_surfer import (
     UnsafeURLError,
     WebSurfer,
     _PinnedPublicNetworkBackend,
@@ -89,7 +89,7 @@ def test_future_schema_is_rejected_without_modifying_database(settings, tmp_path
     )
     conn.close()
 
-    instance = JerichoStorage(replace(settings, database_path=database))
+    instance = FridayStorage(replace(settings, database_path=database))
     with pytest.raises(UnsupportedSchemaVersionError, match="999"):
         _ = instance.conn
 
@@ -105,7 +105,7 @@ def test_future_schema_is_rejected_without_modifying_database(settings, tmp_path
 
 @pytest.mark.asyncio
 async def test_concurrent_chat_retry_is_claimed_before_side_effects(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -153,7 +153,7 @@ async def test_concurrent_chat_retry_is_claimed_before_side_effects(settings):
 
 @pytest.mark.asyncio
 async def test_proxy_headers_are_ignored_from_untrusted_peer(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     proxy_settings = replace(
         settings,
@@ -251,7 +251,7 @@ def test_backup_without_manifest_is_not_reported_as_verified(storage):
 
 
 def test_soft_deleted_file_is_hidden_from_user_routes(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -318,7 +318,7 @@ def test_user_export_includes_versions_permissions_and_sessions(storage):
 
 @pytest.mark.asyncio
 async def test_text_source_ref_reuse_with_different_content_is_rejected(settings, storage):
-    from jericho.ingestion import IdempotencyConflictError
+    from friday.ingestion import IdempotencyConflictError
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     first = await pipeline.ingest_text(
@@ -373,7 +373,7 @@ async def test_raw_audio_is_stored_with_provenance_and_queued_for_review(setting
 
 @pytest.mark.asyncio
 async def test_file_source_ref_reuse_with_different_bytes_is_rejected(settings, storage):
-    from jericho.ingestion import IdempotencyConflictError
+    from friday.ingestion import IdempotencyConflictError
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     first = await pipeline.ingest_file(
@@ -438,7 +438,7 @@ async def test_file_is_removed_when_outer_ingestion_transaction_rolls_back(setti
 
 
 def test_chat_source_ref_is_bound_to_request_payload(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -672,7 +672,7 @@ def test_graph_rejects_non_finite_weights_and_unknown_link_states(storage):
 
 
 def test_explicit_no_save_document_is_transient_and_never_written(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -714,7 +714,7 @@ def test_explicit_no_save_document_is_transient_and_never_written(settings):
 
 
 def test_invalid_oversized_caption_cannot_persist_document_before_413(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     limited = replace(settings, max_extracted_text_chars=16)
     app = create_app(limited)
@@ -765,7 +765,7 @@ def test_direct_text_ingestion_is_atomic_across_independent_connections(settings
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
-    second_storage = JerichoStorage(settings)
+    second_storage = FridayStorage(settings)
     first_pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     second_pipeline = IngestionPipeline(settings, second_storage, KnowledgeGraph(second_storage))
     barrier = Barrier(2)
@@ -820,7 +820,7 @@ def test_direct_text_ingestion_is_atomic_across_independent_connections(settings
 async def test_losing_file_source_ref_race_leaves_no_final_or_staged_orphan(
     settings, storage, monkeypatch: pytest.MonkeyPatch
 ):
-    from jericho.ingestion import IdempotencyConflictError
+    from friday.ingestion import IdempotencyConflictError
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     await pipeline.ingest_file(
@@ -894,7 +894,7 @@ async def test_failed_file_promotion_rolls_back_database_and_new_file(
 @pytest.mark.parametrize(
     ("changes", "expected"),
     [
-        ({"api_port": 65536}, "JERICHO_API_PORT"),
+        ({"api_port": 65536}, "FRIDAY_API_PORT"),
         ({"trust_proxy_headers": True, "trusted_proxy_networks": ["0.0.0.0/0"]}, "Unrestricted"),
         ({"trust_proxy_headers": True, "trusted_proxy_networks": ["::/0"]}, "Unrestricted"),
         ({"cors_origins": ["http://localhost:8000/admin"]}, "Invalid CORS origin"),
@@ -903,14 +903,14 @@ async def test_failed_file_promotion_rolls_back_database_and_new_file(
     ],
 )
 def test_security_sensitive_settings_fail_closed(settings, changes, expected):
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     problems = validate_settings(replace(settings, **changes))
     assert any(expected in problem for problem in problems)
 
 
 def test_api_and_bridge_credentials_must_be_separate(settings):
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     shared = "S" * 48
     problems = validate_settings(replace(settings, api_token=shared, telegram_bridge_secret=shared))
@@ -918,7 +918,7 @@ def test_api_and_bridge_credentials_must_be_separate(settings):
 
 
 def test_configured_bridge_without_allowlist_fails_closed_in_production(settings):
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     open_bot = replace(settings, telegram_allowed_chat_ids=[], telegram_owner_chat_ids=[])
     # Production (non-loopback) treats an open bot as a fatal error.
@@ -934,7 +934,7 @@ def test_configured_bridge_without_allowlist_fails_closed_in_production(settings
 
 
 def test_owner_chat_ids_satisfy_the_allowlist_requirement(settings):
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     with_owner = replace(settings, telegram_allowed_chat_ids=[], telegram_owner_chat_ids=[5001])
     problems = validate_settings(with_owner, production=True)
@@ -943,7 +943,7 @@ def test_owner_chat_ids_satisfy_the_allowlist_requirement(settings):
 
 
 def test_oversized_content_length_is_rejected_before_authentication(settings):
-    from jericho.server import _max_request_body_bytes, create_app
+    from friday.server import _max_request_body_bytes, create_app
 
     limited = replace(settings, max_upload_bytes=1024, max_extracted_text_chars=1000)
     app = create_app(limited)
@@ -960,7 +960,7 @@ def test_oversized_content_length_is_rejected_before_authentication(settings):
 
 @pytest.mark.asyncio
 async def test_chunked_request_body_is_counted_without_content_length(settings):
-    from jericho.server import _max_request_body_bytes, create_app
+    from friday.server import _max_request_body_bytes, create_app
 
     limited = replace(settings, max_upload_bytes=1024, max_extracted_text_chars=1000)
     app = create_app(limited)
@@ -989,7 +989,7 @@ async def test_chunked_request_body_is_counted_without_content_length(settings):
 
 
 def test_admin_api_rejects_malformed_and_non_object_json_with_400(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}", "Content-Type": "application/json"}
@@ -1041,7 +1041,7 @@ def test_admin_api_rejects_malformed_and_non_object_json_with_400(settings):
     ],
 )
 def test_admin_api_rejects_invalid_scalar_types_with_400(settings, path, payload, detail):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -1054,7 +1054,7 @@ def test_admin_api_rejects_invalid_scalar_types_with_400(settings, path, payload
 def test_public_api_rejects_ambiguous_booleans_and_nonfinite_or_out_of_range_numbers(settings):
     """Control flags and ranking signals must not be coerced from hostile JSON values."""
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -1133,7 +1133,7 @@ def test_lifecycle_stage_cannot_be_set_to_something_that_is_not_a_stage(storage)
     """
     import pytest
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("owner")
     raw = RawObject(
@@ -1175,7 +1175,7 @@ def test_rescoring_a_pair_keeps_the_duplicate_heap_a_heap():
     """
     import heapq
 
-    from jericho.dedup import _PairCollector
+    from friday.dedup import _PairCollector
 
     collector = _PairCollector({})
     for index in range(200):
@@ -1202,7 +1202,7 @@ def test_precision_at_k_divides_by_k():
     that legitimately return different numbers of results, so the metric moved for
     a reason unrelated to quality.
     """
-    from jericho.eval import precision_at_k
+    from friday.eval import precision_at_k
 
     assert precision_at_k(["a", "b"], {"a"}, 10) == 0.1
     assert precision_at_k(["a"] + [f"x{i}" for i in range(9)], {"a"}, 10) == 0.1
@@ -1230,7 +1230,7 @@ def test_a_forwarded_header_cannot_claim_to_be_loopback(settings):
 
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     trusting = _replace(
         settings,
@@ -1259,7 +1259,7 @@ def test_tls_pair_is_validated_as_a_pair(settings, tmp_path):
     невнятным исключением — говорим это на языке конфигурации."""
     import dataclasses
 
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     half = dataclasses.replace(settings, ssl_certfile="/x/cert.pem", ssl_keyfile="")
     assert any("must be set together" in item for item in validate_settings(half))
@@ -1283,7 +1283,7 @@ def test_a_bare_http_bind_beyond_loopback_is_a_warning_not_an_error(settings):
     владельца сегодня слушает 0.0.0.0 без TLS, и ошибка не дала бы ему встать."""
     import dataclasses
 
-    from jericho.config import validate_settings
+    from friday.config import validate_settings
 
     exposed = dataclasses.replace(settings, api_host="0.0.0.0", api_token="T" * 40)
     problems = validate_settings(exposed)

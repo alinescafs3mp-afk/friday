@@ -23,14 +23,14 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.agent_runtime import (
+from friday.agent_runtime import (
     _CITATION_OUT_OF_VIEW,
     AgentRuntime,
     _citation_notice,
     _grounding_warning,
 )
-from jericho.permissions import ActorContext
-from jericho.telegram_bridge import TelegramBridge
+from friday.permissions import ActorContext
+from friday.telegram_bridge import TelegramBridge
 
 
 class _EmptySearcher:

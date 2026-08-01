@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.telegram_bridge import TelegramBridge
+from friday.telegram_bridge import TelegramBridge
 
 read = TelegramBridge._read_command_layout
 

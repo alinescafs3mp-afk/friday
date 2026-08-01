@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import EntityResolutionCandidate, EntityType, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import EntityResolutionCandidate, EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _knowledge(storage, user_id: str):
@@ -139,7 +139,7 @@ def test_pending_resolutions_are_enriched_for_review(storage):
 
 
 def _seed_entities(storage, names: list[str], *, user_id: str = "owner") -> None:
-    from jericho.storage.models import new_id, utc_now
+    from friday.storage.models import new_id, utc_now
 
     storage.ensure_user(user_id)
     now = utc_now()
@@ -170,7 +170,7 @@ def _exhaustive(storage, *, min_confidence: float) -> list[tuple[str, str, float
     Setting the short-name threshold beyond any real name puts every entity in the
     one exhaustive bucket, which is exactly the original algorithm.
     """
-    import jericho.storage._knowledge as module
+    import friday.storage._knowledge as module
 
     saved = module._SHORT_NAME_CHARS
     module._SHORT_NAME_CHARS = 10_000
@@ -254,13 +254,13 @@ def test_the_pair_ceiling_is_announced_rather_than_silent(storage, caplog):
     """
     import logging
 
-    import jericho.storage._knowledge as module
+    import friday.storage._knowledge as module
 
     _seed_entities(storage, [f"Сервис Уведомлений {index}" for index in range(120)])
     saved = module._MAX_DUPLICATE_PAIRS
     module._MAX_DUPLICATE_PAIRS = 50
     try:
-        with caplog.at_level(logging.WARNING, logger="jericho.storage"):
+        with caplog.at_level(logging.WARNING, logger="friday.storage"):
             storage.find_duplicate_candidates("owner", min_confidence=0.55)
     finally:
         module._MAX_DUPLICATE_PAIRS = saved

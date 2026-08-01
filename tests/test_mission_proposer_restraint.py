@@ -21,8 +21,8 @@ from dataclasses import replace
 
 import pytest
 
-from jericho.executive.service import _PROPOSE_INBOX_THRESHOLD, ExecutiveService
-from jericho.storage.models import MissionOrigin, MissionStatus
+from friday.executive.service import _PROPOSE_INBOX_THRESHOLD, ExecutiveService
+from friday.storage.models import MissionOrigin, MissionStatus
 
 
 class _HangingPlanner:
@@ -33,7 +33,7 @@ class _HangingPlanner:
 
 class _TrivialPlanner:
     async def plan(self, goal: str):
-        from jericho.executive.planner import PlannedTask
+        from friday.executive.planner import PlannedTask
 
         return "план", [PlannedTask(seq=1, instruction="сводка", kind="produce", title="Сводка")]
 

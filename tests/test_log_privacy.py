@@ -11,8 +11,8 @@ import logging
 
 import pytest
 
-from jericho.telemetry.logging import AccessLogQueryStripper, install_access_log_privacy
-from jericho.web_surfer import _log_safe_host
+from friday.telemetry.logging import AccessLogQueryStripper, install_access_log_privacy
+from friday.web_surfer import _log_safe_host
 
 
 def _access_record(path: str) -> logging.LogRecord:
@@ -64,11 +64,11 @@ def test_log_safe_host_drops_path_and_query():
 
 @pytest.mark.asyncio
 async def test_web_fetch_failure_logs_host_and_type_only(settings, caplog):
-    from jericho.web_surfer import WebSurfer
+    from friday.web_surfer import WebSurfer
 
     surfer = WebSurfer(settings)
     try:
-        with caplog.at_level(logging.DEBUG, logger="jericho.web_surfer"):
+        with caplog.at_level(logging.DEBUG, logger="friday.web_surfer"):
             result = await surfer.fetch("https://192.0.2.7/private/path?token=supersecret")
         assert result.error
         for record in caplog.records:

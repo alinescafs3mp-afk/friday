@@ -5,14 +5,14 @@ from dataclasses import replace
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.executive import ExecutiveService
-from jericho.executive.planner import MissionPlanner
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.storage.models import MissionOrigin
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.executive import ExecutiveService
+from friday.executive.planner import MissionPlanner
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.storage.models import MissionOrigin
+from friday.web_surfer import WebSurfer
 
 
 class PlanLLM:
@@ -226,7 +226,7 @@ async def test_operator_full_autonomy_auto_starts_proposed_missions(settings, st
 def test_mission_http_endpoints_create_list_and_stop(settings):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}

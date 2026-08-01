@@ -4,7 +4,7 @@ Compose reads `.env` for `${...}` interpolation only. The backend and bridge use
 to receive exactly the keys hand-listed in `x-backend-environment`, so every other
 setting in the file README tells the operator to copy was silently discarded on
 the Docker path — 63 of the 120 keys `load_settings` reads, including
-JERICHO_TELEGRAM_PROXY, which exists precisely for the case where Telegram is only
+FRIDAY_TELEGRAM_PROXY, which exists precisely for the case where Telegram is only
 reachable through a tunnel. `.env` and `.env.local` are both in `.dockerignore`
 and the WORKDIR is `/runtime`, so `load_local_env_file` finds nothing inside the
 container either.
@@ -30,20 +30,20 @@ COMPOSE = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8
 # provides. A host `.env` setting one of these would point the container at a path
 # that is not there, so `environment:` must pin them — it wins over `env_file:`.
 CONTAINER_OWNED = {
-    "JERICHO_HOME",
-    "JERICHO_DATA_DIR",
-    "JERICHO_CACHE_DIR",
-    "JERICHO_LOG_DIR",
-    "JERICHO_MODEL_ROOT",
-    "JERICHO_STATE_DIR",
-    "JERICHO_DATABASE_PATH",
-    "JERICHO_FILES_DIR",
-    "JERICHO_MEMORY_VAULT_DIR",
-    "JERICHO_BACKUPS_DIR",
-    "JERICHO_EXPORTS_DIR",
-    "JERICHO_WHISPER_DOWNLOAD_ROOT",
-    "JERICHO_ENV_FILE",
-    "JERICHO_API_HOST",
+    "FRIDAY_HOME",
+    "FRIDAY_DATA_DIR",
+    "FRIDAY_CACHE_DIR",
+    "FRIDAY_LOG_DIR",
+    "FRIDAY_MODEL_ROOT",
+    "FRIDAY_STATE_DIR",
+    "FRIDAY_DATABASE_PATH",
+    "FRIDAY_FILES_DIR",
+    "FRIDAY_MEMORY_VAULT_DIR",
+    "FRIDAY_BACKUPS_DIR",
+    "FRIDAY_EXPORTS_DIR",
+    "FRIDAY_WHISPER_DOWNLOAD_ROOT",
+    "FRIDAY_ENV_FILE",
+    "FRIDAY_API_HOST",
 }
 
 CONTAINERISED_SERVICES = ("backend", "telegram")
@@ -51,20 +51,20 @@ CONTAINERISED_SERVICES = ("backend", "telegram")
 
 def _keys_read_by_code() -> set[str]:
     found: set[str] = set()
-    for path in (ROOT / "jericho").rglob("*.py"):
-        found |= set(re.findall(r'"(JERICHO_[A-Z0-9_]+)"', path.read_text(encoding="utf-8")))
+    for path in (ROOT / "friday").rglob("*.py"):
+        found |= set(re.findall(r'"(FRIDAY_[A-Z0-9_]+)"', path.read_text(encoding="utf-8")))
     return found
 
 
 def _keys_used_by_compose() -> set[str]:
     """Host-side keys: consumed by `${...}` interpolation, never by the container."""
     text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    return set(re.findall(r"\$\{(JERICHO_[A-Z0-9_]+)", text))
+    return set(re.findall(r"\$\{(FRIDAY_[A-Z0-9_]+)", text))
 
 
 def _documented_keys() -> set[str]:
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    return set(re.findall(r"^(JERICHO_[A-Z0-9_]+)=", text, re.M))
+    return set(re.findall(r"^(FRIDAY_[A-Z0-9_]+)=", text, re.M))
 
 
 @pytest.mark.parametrize("service", CONTAINERISED_SERVICES)

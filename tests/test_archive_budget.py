@@ -22,7 +22,7 @@ import zipfile
 
 import pytest
 
-from jericho.documents import DocumentExtractor
+from friday.documents import DocumentExtractor
 
 _MEMBER_BYTES = 250 * 1024
 _MEMBERS_PER_TAR = 200

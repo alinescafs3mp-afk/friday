@@ -20,16 +20,16 @@ from pathlib import Path
 
 import pytest
 
-import jericho.ingestion._base as base
-from jericho.ingestion import IngestionPipeline
-from jericho.ingestion._advice import _capped_per_method
-from jericho.ingestion._base import (
+import friday.ingestion._base as base
+from friday.ingestion import IngestionPipeline
+from friday.ingestion._advice import _capped_per_method
+from friday.ingestion._base import (
     DECLARED_ENTITY_METHODS,
     EVIDENCE_ONLY_ENTITY_METHODS,
     _extract_entities,
 )
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import InboxStatus, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import InboxStatus, KnowledgeObject, RawObject, new_id
 
 
 def _methods_produced_anywhere_in_ingestion() -> set[str]:

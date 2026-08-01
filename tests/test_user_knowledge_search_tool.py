@@ -19,12 +19,12 @@ import json
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.web_surfer import WebSurfer
 
 
 def _knowledge(storage, user_id: str, text: str, title: str) -> str:

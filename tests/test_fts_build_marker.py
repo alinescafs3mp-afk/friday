@@ -20,8 +20,8 @@ import hashlib
 import sqlite3
 from dataclasses import replace
 
-from jericho.storage import SCHEMA_VERSION, JerichoStorage, init_storage
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage import SCHEMA_VERSION, FridayStorage, init_storage
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _seed(storage, title: str, content: str) -> str:
@@ -66,7 +66,7 @@ def test_a_crash_before_the_fts_build_heals_on_the_next_open(settings, tmp_path)
         "DROP TABLE IF EXISTS raw_fts;\n"
         "DROP TABLE IF EXISTS messages_fts;\n"
     )
-    from jericho.storage._base import FTS_SCHEMA
+    from friday.storage._base import FTS_SCHEMA
 
     raw_connection.executescript(FTS_SCHEMA)
     raw_connection.execute("DELETE FROM schema_meta WHERE key='fts_build'")
@@ -80,7 +80,7 @@ def test_a_crash_before_the_fts_build_heals_on_the_next_open(settings, tmp_path)
     raw_connection.close()
 
     # Reopening must notice and rebuild.
-    healed = JerichoStorage(tuned)
+    healed = FridayStorage(tuned)
     try:
         # A document written AFTER the crash is indexed by the triggers, so FTS
         # returns something — which switches off `search_knowledge`'s LIKE
@@ -110,7 +110,7 @@ def test_a_healthy_database_does_not_rebuild_on_every_open(settings, tmp_path):
     probe.close()
     assert marker and str(marker[0]) == str(SCHEMA_VERSION)
 
-    reopened = JerichoStorage(tuned)
+    reopened = FridayStorage(tuned)
     try:
         assert reopened.search_knowledge("alice", "отпуск")
     finally:

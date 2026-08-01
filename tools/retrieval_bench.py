@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Measure retrieval quality on a synthetic personal archive, with and without the model.
 
-Jericho's live database is nearly empty, so retrieval cannot be measured on real data.
+Friday's live database is nearly empty, so retrieval cannot be measured on real data.
 This builds a corpus that has the properties personal knowledge actually has and asks
 the real searcher real questions.
 
@@ -23,7 +23,7 @@ search, because those are the ones that reveal what dense retrieval would buy:
 
 Usage:
     python tools/retrieval_bench.py --home /tmp/bench-a            # heuristic only
-    JERICHO_LLM_ENABLED=1 python tools/retrieval_bench.py --home /tmp/bench-b
+    FRIDAY_LLM_ENABLED=1 python tools/retrieval_bench.py --home /tmp/bench-b
 """
 
 from __future__ import annotations
@@ -251,7 +251,7 @@ MAX_SHARED_TOKENS = 1
 
 def audit_gold_set() -> list[str]:
     """Return a complaint per gold case whose label overstates its difficulty."""
-    from jericho.retrieval import _STOPWORDS, tokens_of
+    from friday.retrieval import _STOPWORDS, tokens_of
 
     text_of = {doc_id: f"{title} {body}" for doc_id, title, body, _ in DOCUMENTS}
     complaints: list[str] = []
@@ -315,13 +315,13 @@ def build_corpus(root: Path, *, filler: int, seed: int) -> None:
 
 
 async def ingest(root: Path, settings: Any, storage: Any, user_id: str) -> dict[str, Any]:
-    from jericho.bulk_import import plan_import, run_import, summarise
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.bulk_import import plan_import, run_import, summarise
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
 
     llm = None
     if settings.llm_enabled:
-        from jericho.agent_runtime.llm import LLMRouter
+        from friday.agent_runtime.llm import LLMRouter
 
         llm = LLMRouter(settings)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), llm)
@@ -342,7 +342,7 @@ def promote_everything(storage: Any, pipeline: Any, user_id: str) -> int:
     stands in for the human review that would normally happen — which is exactly why it
     lives in a bench script and not behind an API.
     """
-    from jericho.storage.models import InboxStatus
+    from friday.storage.models import InboxStatus
 
     promoted = 0
     for item in storage.list_inbox(user_id, InboxStatus.PENDING, limit=5000):
@@ -360,8 +360,8 @@ async def index_embeddings(settings: Any, storage: Any, kg: Any, embeddings: Any
     decides chunking, batch sizes and what counts as already-indexed. A bench that
     embedded documents its own way would be measuring a pipeline that does not exist.
     """
-    from jericho.ingestion import IngestionPipeline
-    from jericho.workers import WorkersManager
+    from friday.ingestion import IngestionPipeline
+    from friday.workers import WorkersManager
 
     manager = WorkersManager(
         settings,
@@ -432,7 +432,7 @@ async def measure(searcher: Any, kg: Any, user_id: str, k: int) -> dict[str, Any
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--home", required=True, help="Throwaway JERICHO_HOME for this run")
+    parser.add_argument("--home", required=True, help="Throwaway FRIDAY_HOME for this run")
     parser.add_argument("--filler", type=int, default=120, help="Filler documents")
     parser.add_argument("--seed", type=int, default=20260726)
     parser.add_argument("--k", type=int, default=10)
@@ -441,15 +441,15 @@ def main() -> int:
 
     home = Path(args.home).expanduser().resolve()
     corpus = home / "corpus"
-    os.environ["JERICHO_HOME"] = str(home)
+    os.environ["FRIDAY_HOME"] = str(home)
     if home.exists():
         shutil.rmtree(home)
     home.mkdir(parents=True)
     build_corpus(corpus, filler=args.filler, seed=args.seed)
 
-    from jericho.config import ensure_runtime_dirs, load_settings
-    from jericho.retrieval import HybridSearcher
-    from jericho.storage import init_storage
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.retrieval import HybridSearcher
+    from friday.storage import init_storage
 
     settings = load_settings()
     ensure_runtime_dirs(settings)
@@ -469,8 +469,8 @@ def main() -> int:
     try:
         report["ingest"] = asyncio.run(ingest(corpus, settings, storage, "bench"))
 
-        from jericho.ingestion import IngestionPipeline
-        from jericho.knowledge_graph import KnowledgeGraph
+        from friday.ingestion import IngestionPipeline
+        from friday.knowledge_graph import KnowledgeGraph
 
         pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
         report["promoted"] = promote_everything(storage, pipeline, "bench")
@@ -479,7 +479,7 @@ def main() -> int:
         kg = KnowledgeGraph(storage)
         embeddings = None
         if settings.embeddings_enabled:
-            from jericho.retrieval import EmbeddingBackend
+            from friday.retrieval import EmbeddingBackend
 
             embeddings = EmbeddingBackend(settings)
             report["index"] = asyncio.run(index_embeddings(settings, storage, kg, embeddings))

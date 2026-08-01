@@ -14,11 +14,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.organs import ServiceContext, build_registry, in_quiet_hours
-from jericho.organs.reminders import RemindersOrgan, scan_reminders
-from jericho.server import create_app
-from jericho.storage.models import EntityType
+from friday.knowledge_graph import KnowledgeGraph
+from friday.organs import ServiceContext, build_registry, in_quiet_hours
+from friday.organs.reminders import RemindersOrgan, scan_reminders
+from friday.server import create_app
+from friday.storage.models import EntityType
 
 
 def _today_iso(offset_days: int = 0) -> str:
@@ -158,7 +158,7 @@ def test_registry_includes_reminders_worker(settings):
 def _reminders_settings(*, quiet_start: int = 0, quiet_end: int = 0):
     # Import the conftest settings via a fresh load with reminders enabled and a
     # disabled quiet window unless a test asks otherwise.
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     base = load_settings()
     return replace(
@@ -185,7 +185,7 @@ async def test_a_group_chat_is_never_a_push_target(storage):
     Repairing the write site cannot reach rows already stored, so resolution
     refuses a non-private chat id outright.
     """
-    from jericho.organs import resolve_chat_id
+    from friday.organs import resolve_chat_id
 
     group = "-1001234567890"
     reminders_settings = replace(
@@ -209,7 +209,7 @@ def test_writing_from_a_group_keeps_the_private_chat_on_file(settings):
     import time
     import uuid
 
-    from jericho.security import sign_bridge_request
+    from friday.security import sign_bridge_request
 
     group_settings = replace(settings, telegram_allowed_chat_ids=[5001, -1001234567890])
     with TestClient(create_app(group_settings)) as client:
@@ -222,11 +222,11 @@ def test_writing_from_a_group_keeps_the_private_chat_on_file(settings):
             return client.get(
                 path,
                 headers={
-                    "X-Jericho-Timestamp": str(timestamp),
-                    "X-Jericho-User": "5001",
-                    "X-Jericho-Chat": chat,
-                    "X-Jericho-Nonce": nonce,
-                    "X-Jericho-Signature": sign_bridge_request(
+                    "X-Friday-Timestamp": str(timestamp),
+                    "X-Friday-User": "5001",
+                    "X-Friday-Chat": chat,
+                    "X-Friday-Nonce": nonce,
+                    "X-Friday-Signature": sign_bridge_request(
                         group_settings.telegram_bridge_secret,
                         timestamp=timestamp,
                         method="GET",
@@ -256,7 +256,7 @@ def test_the_documented_organ_list_matches_the_registry(settings):
     and it silently lost `sentinel` — `build_registry` had six, the constant
     named five. Pinned here so the next organ cannot be added to only one of them.
     """
-    from jericho.organs import BUILTIN_ORGAN_NAMES
+    from friday.organs import BUILTIN_ORGAN_NAMES
 
     registered = tuple(organ.name for organ in build_registry(settings).organs)
     assert sorted(BUILTIN_ORGAN_NAMES) == sorted(registered)

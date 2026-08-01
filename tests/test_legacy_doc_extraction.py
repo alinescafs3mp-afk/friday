@@ -20,8 +20,8 @@ import time
 
 import pytest
 
-from jericho.documents import DocumentExtractor
-from jericho.documents._ole import OleError, OleFile, extract_doc_text
+from friday.documents import DocumentExtractor
+from friday.documents._ole import OleError, OleFile, extract_doc_text
 
 _SECTOR = 512
 _ENDOFCHAIN = 0xFFFFFFFE
@@ -195,7 +195,7 @@ def test_field_instructions_are_dropped_and_results_kept():
 def test_a_file_that_is_not_a_compound_document_is_reported_as_unsupported():
     """Five of the owner's 206 `.doc` files are not compound files at all.
 
-    "Jericho cannot read this format" and "this file is damaged" have to stay
+    "Friday cannot read this format" and "this file is damaged" have to stay
     different sentences for whoever is looking at the Inbox.
     """
     with pytest.raises(OleError):

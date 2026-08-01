@@ -11,7 +11,7 @@ import concurrent.futures
 
 import pytest
 
-from jericho.storage._approvals import payload_digest
+from friday.storage._approvals import payload_digest
 
 
 def _approval(storage, **kwargs):
@@ -196,9 +196,9 @@ def test_the_hygiene_worker_is_actually_registered(settings, storage):
 
     Мутация: убрать `supervisor.register("approval_hygiene", ...)` — тест краснеет.
     """
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.workers import WorkersManager
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.workers import WorkersManager
 
     graph = KnowledgeGraph(storage)
     workers = WorkersManager(settings, storage, IngestionPipeline(settings, storage, graph), graph)

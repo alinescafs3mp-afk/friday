@@ -19,8 +19,8 @@ import hashlib
 
 import pytest
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import Entity, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import Entity, KnowledgeObject, RawObject, new_id
 
 
 def _make_ko(storage, user_id: str, content: str, *, title: str) -> str:

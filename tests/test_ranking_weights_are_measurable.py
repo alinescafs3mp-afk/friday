@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.retrieval import _CHANNEL_WEIGHTS, HybridSearcher
+from friday.retrieval import _CHANNEL_WEIGHTS, HybridSearcher
 
 
 def test_the_defaults_are_the_constants_that_were_in_the_expression():

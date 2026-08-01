@@ -5,11 +5,11 @@ import json
 
 import pytest
 
-from jericho.agent_runtime import AgentRuntime
-from jericho.ingestion import IngestionPipeline, _extract_entities
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import (
+from friday.agent_runtime import AgentRuntime
+from friday.ingestion import IngestionPipeline, _extract_entities
+from friday.knowledge_graph import KnowledgeGraph
+from friday.retrieval import HybridSearcher
+from friday.storage.models import (
     EntityType,
     InboxStatus,
     KnowledgeObject,
@@ -574,8 +574,8 @@ async def test_reenrichment_preview_is_non_destructive_and_apply_versions(settin
 def test_admin_quality_workflows_and_api_ingest_default(settings):
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}

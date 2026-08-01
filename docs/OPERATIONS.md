@@ -1,8 +1,10 @@
 # Эксплуатация и диагностика
 
+> Проект переименован: **Friday** (по-русски — **Пятница**), ex codename Jericho.
+
 ## 1. Конфигурация и первый запуск
 
-Direct Python автоматически читает `./.env.local` либо путь из `JERICHO_ENV_FILE`. Уже заданные environment variables имеют приоритет.
+Direct Python автоматически читает `./.env.local` либо путь из `FRIDAY_ENV_FILE`. Уже заданные environment variables имеют приоритет.
 
 ```powershell
 jericho init --home D:\jericho
@@ -49,7 +51,7 @@ jericho doctor --check-llm
 
 ### Гигиена секретов
 
-`jericho doctor` (и sentinel) ищут учётные данные самого Jericho в посторонних файлах — сравнением по точному значению, а не по шаблону, поэтому ложных срабатываний нет: файл либо содержит этот токен, либо нет. Проверяются `$HOME` и `JERICHO_HOME` на глубину 3, с ограничениями по числу и размеру файлов; путь в отчёте есть, значение — никогда.
+`jericho doctor` (и sentinel) ищут учётные данные самого Friday в посторонних файлах — сравнением по точному значению, а не по шаблону, поэтому ложных срабатываний нет: файл либо содержит этот токен, либо нет. Проверяются `$HOME` и `FRIDAY_HOME` на глубину 3, с ограничениями по числу и размеру файлов; путь в отчёте есть, значение — никогда.
 
 Повод конкретный: живой токен бота двое суток пролежал в открытом файле на рабочем столе, и ничто этого не заметило. Резервные копии `.env.local` тоже считаются лишними копиями и попадают в отчёт.
 
@@ -61,7 +63,7 @@ jericho events               # журнал: что сломалось и поч
 jericho eval-bootstrap       # черновики золотого набора для оценки поиска
 ```
 
-**`model-check`** пробует то, что реально ломает интеграцию: отдаётся ли настроенная модель, отвечает ли она в том бюджете токенов, который Jericho использует, не протекает ли цепочка рассуждений в ответ, парсится ли вывод как JSON, есть ли эмбеддинги. TCP-коннект не доказывает ничего, а `/models` доказывает лишь, что сервер слышал про модель.
+**`model-check`** пробует то, что реально ломает интеграцию: отдаётся ли настроенная модель, отвечает ли она в том бюджете токенов, который Friday использует, не протекает ли цепочка рассуждений в ответ, парсится ли вывод как JSON, есть ли эмбеддинги. TCP-коннект не доказывает ничего, а `/models` доказывает лишь, что сервер слышал про модель.
 
 **`events`** — операционный журнал. Пишутся переходы, а не состояния: воркер, сломанный всю ночь, даёт две записи (`worker.failed`, `worker.recovered`), а не одну на каждый тик. Плюс `backup.created` на каждую копию. Журнал ограничен 2000 записями.
 
@@ -103,7 +105,7 @@ docker compose logs --tail 200 telegram
 
 ### Логи детей `jericho up`
 
-Супервизор пишет stdout/stderr каждого ребёнка в `<log_dir>/<имя>.log` и **проворачивает** файл, когда тот перерастает `JERICHO_LOG_MAX_BYTES` (по умолчанию 16 МиБ), храня `JERICHO_LOG_BACKUPS` поколений (`backend.log.1`, `.2`, `.3`). `0` в первой переменной выключает ротацию.
+Супервизор пишет stdout/stderr каждого ребёнка в `<log_dir>/<имя>.log` и **проворачивает** файл, когда тот перерастает `FRIDAY_LOG_MAX_BYTES` (по умолчанию 16 МиБ), храня `FRIDAY_LOG_BACKUPS` поколений (`backend.log.1`, `.2`, `.3`). `0` в первой переменной выключает ротацию.
 
 Ротация нужна не для порядка, а потому что рост реальный: мост опрашивает `GET /api/notifications/pending` каждые 15 с, и каждый опрос стоит строки в access-логе — `backend.log` набирает десятки мегабайт в сутки и без потолка однажды забьёт диск.
 
@@ -120,9 +122,9 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 Проверка identity:
 
 ```powershell
-$env:JERICHO_TOKEN='<token>'
+$env:FRIDAY_TOKEN='<token>'
 Invoke-RestMethod http://127.0.0.1:8000/api/me `
-  -Headers @{Authorization="Bearer $env:JERICHO_TOKEN"}
+  -Headers @{Authorization="Bearer $env:FRIDAY_TOKEN"}
 ```
 
 Admin diagnostics показывает те же schema/backup/worker/lease/actions, но raw JSON оставлен под progressive disclosure для глубокого разбора.
@@ -201,7 +203,7 @@ jericho import ~/Архив --suffix .md --limit 500
 
 ## 8. Background workers
 
-При `JERICHO_WORKERS_ENABLED=1` supervisor запускает tenant-scoped задачи lifecycle, ER candidates, vault, backup, SQLite optimize, quality scan и bounded model advice.
+При `FRIDAY_WORKERS_ENABLED=1` supervisor запускает tenant-scoped задачи lifecycle, ER candidates, vault, backup, SQLite optimize, quality scan и bounded model advice.
 
 Для каждой задачи сохраняются:
 
@@ -226,7 +228,7 @@ jericho doctor
 
 ### Admin UI просит ключ снова
 
-Token хранится в `sessionStorage`, поэтому новая вкладка/сессия требует повторного ввода. Используйте `JERICHO_API_TOKEN`.
+Token хранится в `sessionStorage`, поэтому новая вкладка/сессия требует повторного ввода. Используйте `FRIDAY_API_TOKEN`.
 
 ### Backend не запускается второй раз
 
@@ -242,7 +244,7 @@ jericho doctor
 
 ### Telegram получает 401
 
-Backend и bridge должны использовать одинаковый `JERICHO_TELEGRAM_BRIDGE_SECRET`; часы host/container не должны сильно расходиться; signature max age по умолчанию 90 секунд.
+Backend и bridge должны использовать одинаковый `FRIDAY_TELEGRAM_BRIDGE_SECRET`; часы host/container не должны сильно расходиться; signature max age по умолчанию 90 секунд.
 
 ### Telegram повторяет update
 

@@ -27,7 +27,7 @@ class _SpySearcher:
 async def test_score_cases_asks_for_no_graph_expansion(settings, storage):
     """Мутация, которую тест обязан ловить: убрать `graph_expansion=False` из вызова
     в `_score_cases`. По умолчанию True, поэтому дефект не упадёт нигде, кроме числа."""
-    from jericho.eval import _score_cases
+    from friday.eval import _score_cases
 
     storage.ensure_user("alice")
     storage.add_eval_case("alice", "тестовый вопрос", ["ko_1"])
@@ -46,7 +46,7 @@ async def test_score_cases_asks_for_no_graph_expansion(settings, storage):
 @pytest.mark.asyncio
 async def test_score_cases_matches_relational_graph_mode():
     """Мутация: сделать флаг константой False — измерительный путь обязан упасть."""
-    from jericho.eval import _score_cases
+    from friday.eval import _score_cases
 
     spy = _SpySearcher()
     cases = [{"id": "case-1", "query": "с кем работал Альфа", "expected_ids": ["ko_1"]}]

@@ -18,8 +18,8 @@ import hashlib
 
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
 
 
 def _issue(storage, user_id: str, preset: str, secret: str) -> dict:

@@ -13,7 +13,7 @@ import dataclasses
 
 import httpx
 
-from jericho.retrieval._rerank_backend import RerankBackend, rerank_with_backend
+from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 
 
 def _tuned(settings, **overrides):
@@ -197,7 +197,7 @@ def test_the_order_is_the_score_and_nothing_else(settings, monkeypatch):
 
 def test_documents_are_bounded_before_they_are_sent(settings, monkeypatch):
     """У cross-encoder свой предел длины; резать надо до отправки, а не ловить отказ."""
-    from jericho.retrieval._rerank_backend import DOCUMENT_CHARS
+    from friday.retrieval._rerank_backend import DOCUMENT_CHARS
 
     seen = _client(monkeypatch, {"results": [{"index": 0, "relevance_score": 1.0}]})
     asyncio.run(RerankBackend(_tuned(settings)).scores("вопрос", ["я" * 50_000]))

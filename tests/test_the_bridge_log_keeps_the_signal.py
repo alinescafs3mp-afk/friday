@@ -17,7 +17,7 @@ import logging
 
 import httpx
 
-from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
 
 def _bridge(tmp_path) -> TelegramBridge:
@@ -35,7 +35,7 @@ def test_the_first_failure_carries_a_traceback_and_the_rest_do_not(tmp_path, cap
     bridge = _bridge(tmp_path)
     error = httpx.ConnectError("сеть недоступна")
 
-    with caplog.at_level(logging.WARNING, logger="jericho.telegram_bridge"):
+    with caplog.at_level(logging.WARNING, logger="friday.telegram_bridge"):
         bridge._log_loop_failure("poll", error)  # noqa: SLF001
         first = list(caplog.records)
         assert len(first) == 1
@@ -57,7 +57,7 @@ def test_the_first_failure_carries_a_traceback_and_the_rest_do_not(tmp_path, cap
 def test_a_new_episode_gets_its_traceback_again(tmp_path, caplog):
     """Иначе вторая, другая поломка осталась бы без объяснения."""
     bridge = _bridge(tmp_path)
-    with caplog.at_level(logging.WARNING, logger="jericho.telegram_bridge"):
+    with caplog.at_level(logging.WARNING, logger="friday.telegram_bridge"):
         bridge._log_loop_failure("poll", httpx.ConnectError("первый обрыв"))  # noqa: SLF001
         bridge._loop_failing["poll"] = True  # noqa: SLF001
         bridge._log_loop_failure("poll", httpx.ConnectError("тот же обрыв"))  # noqa: SLF001
@@ -73,7 +73,7 @@ def test_a_new_episode_gets_its_traceback_again(tmp_path, caplog):
 def test_the_two_loops_are_counted_apart(tmp_path, caplog):
     """Сломанная отправка не должна лишить опрос его стека, и наоборот."""
     bridge = _bridge(tmp_path)
-    with caplog.at_level(logging.WARNING, logger="jericho.telegram_bridge"):
+    with caplog.at_level(logging.WARNING, logger="friday.telegram_bridge"):
         bridge._log_loop_failure("poll", httpx.ConnectError("опрос"))  # noqa: SLF001
         bridge._loop_failing["poll"] = True  # noqa: SLF001
         caplog.clear()

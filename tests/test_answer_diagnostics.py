@@ -15,9 +15,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _knowledge(storage, user_id: str, text: str, **fields) -> str:
@@ -66,7 +66,7 @@ def test_the_owner_can_ask_the_search_why(settings):
 @pytest.mark.asyncio
 async def test_a_discarded_candidate_carries_its_reason(storage):
     """The reason is real output, not a label invented for the diagnostic."""
-    from jericho.retrieval import HybridSearcher
+    from friday.retrieval import HybridSearcher
 
     _knowledge(storage, "owner", "Совершенно посторонний документ о ремонте велосипеда")
     result = await HybridSearcher(storage).search("owner", "квартальная отчётность", explain=True)
@@ -91,7 +91,7 @@ def test_the_agent_captures_the_trace_at_answer_time():
     import ast
     import inspect
 
-    from jericho.agent_runtime import AgentContext, AgentRuntime
+    from friday.agent_runtime import AgentContext, AgentRuntime
 
     assert "retrieval_trace" in AgentContext.__dataclass_fields__
 

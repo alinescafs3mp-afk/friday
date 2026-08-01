@@ -18,10 +18,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.cli import _parse_ttl_seconds
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage import SCHEMA_VERSION, JerichoStorage
+from friday.cli import _parse_ttl_seconds
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage import SCHEMA_VERSION, FridayStorage
 
 
 def _issue(storage, user_id: str, preset: str, secret: str) -> dict:
@@ -197,7 +197,7 @@ def test_ttl_token_is_rejected_after_expiry_but_perpetual_survives(storage):
 
 
 def test_create_api_token_rejects_out_of_range_ttl(storage):
-    from jericho.storage import MAX_API_TOKEN_TTL_SECONDS
+    from friday.storage import MAX_API_TOKEN_TTL_SECONDS
 
     storage.ensure_user("u1", preset_key="user")
     for bad in (0, -5, MAX_API_TOKEN_TTL_SECONDS + 1, 10**30):
@@ -212,7 +212,7 @@ def test_create_api_token_rejects_out_of_range_ttl(storage):
 
 def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(settings, tmp_path):
     database = tmp_path / "legacy-tokens.sqlite3"
-    seed = JerichoStorage(replace(settings, database_path=database))
+    seed = FridayStorage(replace(settings, database_path=database))
     seed.ensure_user("leg", preset_key="user")
     hashed = hashlib.sha256(b"jrc_legacy").hexdigest()
     record = seed.create_api_token("leg", hashed, label="old", created_by="t")
@@ -225,7 +225,7 @@ def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(settin
     raw.commit()
     raw.close()
 
-    migrated = JerichoStorage(replace(settings, database_path=database))
+    migrated = FridayStorage(replace(settings, database_path=database))
     try:
         columns = {row[1] for row in migrated.execute("PRAGMA table_info(api_tokens)").fetchall()}
         assert "expires_at" in columns  # migration re-added the column

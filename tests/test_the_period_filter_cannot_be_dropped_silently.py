@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel, _window_bound
-from jericho.permissions import ActorContext
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.execution_kernel import ExecutionKernel, _window_bound
+from friday.permissions import ActorContext
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _dated(storage, user_id: str, title: str, document_date: str) -> None:

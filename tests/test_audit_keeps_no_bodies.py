@@ -18,7 +18,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
+from friday.server import create_app
 
 SECRET_TEXT = "Пароль от роутера 12345 и адрес квартиры, Лесная 7-15."
 

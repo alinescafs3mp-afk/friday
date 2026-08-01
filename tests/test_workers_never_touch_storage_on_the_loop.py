@@ -20,7 +20,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-WORKERS = pathlib.Path(__file__).resolve().parents[1] / "jericho" / "workers"
+WORKERS = pathlib.Path(__file__).resolve().parents[1] / "friday" / "workers"
 
 # Attribute chains that reach the database. `self.kg` and `self.ingestion` are
 # deliberately absent: they are async or already offload internally, and this

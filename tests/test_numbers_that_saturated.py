@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _stale(storage, user_id: str, title: str, *, importance: float, protected: bool = False) -> str:
@@ -173,7 +173,7 @@ def test_the_trace_target_is_checked_before_writing():
     import pathlib
 
     source = (
-        pathlib.Path(__file__).resolve().parents[1] / "jericho" / "admin_ui" / "static" / "app.js"
+        pathlib.Path(__file__).resolve().parents[1] / "friday" / "admin_ui" / "static" / "app.js"
     ).read_text(encoding="utf-8")
     body = source[source.index("actions.explainSearch") :][:600]
     assert "if(!box)return" in body
@@ -184,7 +184,7 @@ def test_the_trace_target_is_checked_before_writing():
 
 def test_the_audit_page_walks_a_fixed_snapshot(storage):
     """Reading the audit log writes to the audit log; the anchor keeps the window still."""
-    from jericho.storage.models import AuditEntry
+    from friday.storage.models import AuditEntry
 
     storage.ensure_user("alice")
     for index in range(10):
@@ -233,7 +233,7 @@ def test_the_lifecycle_count_does_not_go_through_a_page():
     """
     import inspect
 
-    from jericho.storage._knowledge import KnowledgeMixin
+    from friday.storage._knowledge import KnowledgeMixin
 
     body = inspect.getsource(KnowledgeMixin.count_lifecycle_candidates)
     assert "_lifecycle_candidates" in body
@@ -245,7 +245,7 @@ def test_the_lifecycle_count_does_not_go_through_a_page():
 
 
 def _feedback(storage, user_id: str, target: str, *, kind: str, score: float) -> None:
-    from jericho.storage.models import FeedbackItem, FeedbackType
+    from friday.storage.models import FeedbackItem, FeedbackType
 
     storage.store_feedback(
         FeedbackItem(
@@ -290,7 +290,7 @@ def test_the_reflection_digest_counts_instead_of_paging(storage):
     """Four numbers the owner reads as fact; each used to stop at its own limit."""
     import inspect
 
-    from jericho.organs import reflection
+    from friday.organs import reflection
 
     body = inspect.getsource(reflection.build_reflection)
     for measured in (
@@ -312,7 +312,7 @@ def test_the_reflection_digest_counts_instead_of_paging(storage):
 def test_the_lifecycle_candidates_route_reports_a_total(settings, storage):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:

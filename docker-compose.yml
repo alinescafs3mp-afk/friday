@@ -5,81 +5,81 @@ name: jericho
 # short list of keys the CONTAINER owns and a host `.env` must never win, because
 # they name paths that only exist inside it or that the volume map provides.
 x-backend-environment: &backend-environment
-  JERICHO_HOME: /runtime
-  JERICHO_DATA_DIR: /runtime/data
-  JERICHO_CACHE_DIR: /runtime/cache
-  JERICHO_LOG_DIR: /runtime/logs
-  JERICHO_MODEL_ROOT: /runtime/models
-  JERICHO_STATE_DIR: /runtime/data/state
-  JERICHO_DATABASE_PATH: /runtime/data/state/jericho.sqlite3
-  JERICHO_FILES_DIR: /runtime/data/files
-  JERICHO_MEMORY_VAULT_DIR: /runtime/data/memory-vault
-  JERICHO_BACKUPS_DIR: /runtime/data/backups
-  JERICHO_EXPORTS_DIR: /runtime/data/exports
-  JERICHO_WHISPER_DOWNLOAD_ROOT: /runtime/cache/whisper
+  FRIDAY_HOME: /runtime
+  FRIDAY_DATA_DIR: /runtime/data
+  FRIDAY_CACHE_DIR: /runtime/cache
+  FRIDAY_LOG_DIR: /runtime/logs
+  FRIDAY_MODEL_ROOT: /runtime/models
+  FRIDAY_STATE_DIR: /runtime/data/state
+  FRIDAY_DATABASE_PATH: /runtime/data/state/friday.sqlite3
+  FRIDAY_FILES_DIR: /runtime/data/files
+  FRIDAY_MEMORY_VAULT_DIR: /runtime/data/memory-vault
+  FRIDAY_BACKUPS_DIR: /runtime/data/backups
+  FRIDAY_EXPORTS_DIR: /runtime/data/exports
+  FRIDAY_WHISPER_DOWNLOAD_ROOT: /runtime/cache/whisper
   # The container has no `.env` of its own (both are in .dockerignore) and must not
   # go looking for one on a path inherited from the host.
-  JERICHO_ENV_FILE: ""
-  JERICHO_PROFILE: ${JERICHO_PROFILE:-qwen36-vl}
-  JERICHO_LLM_BASE_URL: ${JERICHO_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}
-  JERICHO_LLM_MODEL: ${JERICHO_LLM_MODEL:-dispatcher}
-  JERICHO_LLM_ENABLED: ${JERICHO_LLM_ENABLED:-1}
-  JERICHO_LLM_TIMEOUT_SEC: ${JERICHO_LLM_TIMEOUT_SEC:-240}
-  JERICHO_LLM_MAX_TOKENS: ${JERICHO_LLM_MAX_TOKENS:-2048}
-  JERICHO_VERIFY_ANSWERS: ${JERICHO_VERIFY_ANSWERS:-1}
-  JERICHO_EMBEDDINGS_ENABLED: ${JERICHO_EMBEDDINGS_ENABLED:-0}
-  JERICHO_EMBEDDINGS_BASE_URL: ${JERICHO_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}
-  JERICHO_EMBEDDINGS_MODEL: ${JERICHO_EMBEDDINGS_MODEL:-}
-  JERICHO_API_HOST: 0.0.0.0
-  JERICHO_API_PORT: ${JERICHO_API_PORT:-8000}
-  JERICHO_API_TOKEN: ${JERICHO_API_TOKEN:?set JERICHO_API_TOKEN in .env}
-  JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK: "1"
-  JERICHO_API_USER_RATE_LIMIT_PER_MINUTE: ${JERICHO_API_USER_RATE_LIMIT_PER_MINUTE:-240}
-  JERICHO_TRUST_PROXY_HEADERS: ${JERICHO_TRUST_PROXY_HEADERS:-0}
-  JERICHO_TRUSTED_PROXY_NETWORKS: ${JERICHO_TRUSTED_PROXY_NETWORKS:-127.0.0.1/32,::1/128}
-  JERICHO_TELEGRAM_BRIDGE_SECRET: ${JERICHO_TELEGRAM_BRIDGE_SECRET:?set JERICHO_TELEGRAM_BRIDGE_SECRET in .env}
-  JERICHO_TELEGRAM_REALM_ID: ${JERICHO_TELEGRAM_REALM_ID:-telegram}
-  JERICHO_TELEGRAM_ALLOWED_CHAT_IDS: ${JERICHO_TELEGRAM_ALLOWED_CHAT_IDS:-}
-  JERICHO_TELEGRAM_OWNER_CHAT_IDS: ${JERICHO_TELEGRAM_OWNER_CHAT_IDS:-}
-  JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC: ${JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC:-90}
-  JERICHO_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: ${JERICHO_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE:-30}
-  JERICHO_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE: ${JERICHO_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE:-1200}
-  JERICHO_CORS_ORIGINS: ${JERICHO_CORS_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
-  JERICHO_AUTONOMY_ENABLED: ${JERICHO_AUTONOMY_ENABLED:-1}
-  JERICHO_OPERATOR_FULL_AUTONOMY: ${JERICHO_OPERATOR_FULL_AUTONOMY:-0}
-  JERICHO_COGNITION_ENABLED: ${JERICHO_COGNITION_ENABLED:-1}
-  JERICHO_COGNITION_INTERVAL_SEC: ${JERICHO_COGNITION_INTERVAL_SEC:-300}
-  JERICHO_COGNITION_MAX_TOKENS: ${JERICHO_COGNITION_MAX_TOKENS:-512}
-  JERICHO_EXECUTIVE_MAX_ACTIVE_MISSIONS: ${JERICHO_EXECUTIVE_MAX_ACTIVE_MISSIONS:-8}
-  JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION: ${JERICHO_EXECUTIVE_MAX_TASKS_PER_MISSION:-12}
-  JERICHO_EXECUTIVE_TASK_TOOL_BUDGET: ${JERICHO_EXECUTIVE_TASK_TOOL_BUDGET:-6}
-  JERICHO_EXECUTIVE_TICK_INTERVAL_SEC: ${JERICHO_EXECUTIVE_TICK_INTERVAL_SEC:-15}
-  JERICHO_WORKERS_ENABLED: ${JERICHO_WORKERS_ENABLED:-1}
-  JERICHO_CODE_EXECUTION_ENABLED: ${JERICHO_CODE_EXECUTION_ENABLED:-0}
-  JERICHO_CODE_EXECUTION_TIMEOUT_SEC: ${JERICHO_CODE_EXECUTION_TIMEOUT_SEC:-15}
-  JERICHO_CODE_EXECUTION_MAX_OUTPUT_BYTES: ${JERICHO_CODE_EXECUTION_MAX_OUTPUT_BYTES:-65536}
-  JERICHO_WEB_ALLOW_PRIVATE_NETWORKS: ${JERICHO_WEB_ALLOW_PRIVATE_NETWORKS:-0}
-  JERICHO_WEB_MAX_RESPONSE_BYTES: ${JERICHO_WEB_MAX_RESPONSE_BYTES:-5242880}
-  JERICHO_MAX_UPLOAD_BYTES: ${JERICHO_MAX_UPLOAD_BYTES:-52428800}
-  JERICHO_MAX_EXTRACTED_TEXT_CHARS: ${JERICHO_MAX_EXTRACTED_TEXT_CHARS:-2000000}
-  JERICHO_MAX_ARCHIVE_ENTRIES: ${JERICHO_MAX_ARCHIVE_ENTRIES:-500}
-  JERICHO_MAX_ARCHIVE_UNCOMPRESSED_BYTES: ${JERICHO_MAX_ARCHIVE_UNCOMPRESSED_BYTES:-262144000}
-  JERICHO_BRAVE_SEARCH_API_KEY: ${JERICHO_BRAVE_SEARCH_API_KEY:-}
-  JERICHO_TAVILY_API_KEY: ${JERICHO_TAVILY_API_KEY:-}
-  JERICHO_SERPER_API_KEY: ${JERICHO_SERPER_API_KEY:-}
+  FRIDAY_ENV_FILE: ""
+  FRIDAY_PROFILE: ${FRIDAY_PROFILE:-qwen36-vl}
+  FRIDAY_LLM_BASE_URL: ${FRIDAY_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}
+  FRIDAY_LLM_MODEL: ${FRIDAY_LLM_MODEL:-dispatcher}
+  FRIDAY_LLM_ENABLED: ${FRIDAY_LLM_ENABLED:-1}
+  FRIDAY_LLM_TIMEOUT_SEC: ${FRIDAY_LLM_TIMEOUT_SEC:-240}
+  FRIDAY_LLM_MAX_TOKENS: ${FRIDAY_LLM_MAX_TOKENS:-2048}
+  FRIDAY_VERIFY_ANSWERS: ${FRIDAY_VERIFY_ANSWERS:-1}
+  FRIDAY_EMBEDDINGS_ENABLED: ${FRIDAY_EMBEDDINGS_ENABLED:-0}
+  FRIDAY_EMBEDDINGS_BASE_URL: ${FRIDAY_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}
+  FRIDAY_EMBEDDINGS_MODEL: ${FRIDAY_EMBEDDINGS_MODEL:-}
+  FRIDAY_API_HOST: 0.0.0.0
+  FRIDAY_API_PORT: ${FRIDAY_API_PORT:-8000}
+  FRIDAY_API_TOKEN: ${FRIDAY_API_TOKEN:?set FRIDAY_API_TOKEN in .env}
+  FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK: "1"
+  FRIDAY_API_USER_RATE_LIMIT_PER_MINUTE: ${FRIDAY_API_USER_RATE_LIMIT_PER_MINUTE:-240}
+  FRIDAY_TRUST_PROXY_HEADERS: ${FRIDAY_TRUST_PROXY_HEADERS:-0}
+  FRIDAY_TRUSTED_PROXY_NETWORKS: ${FRIDAY_TRUSTED_PROXY_NETWORKS:-127.0.0.1/32,::1/128}
+  FRIDAY_TELEGRAM_BRIDGE_SECRET: ${FRIDAY_TELEGRAM_BRIDGE_SECRET:?set FRIDAY_TELEGRAM_BRIDGE_SECRET in .env}
+  FRIDAY_TELEGRAM_REALM_ID: ${FRIDAY_TELEGRAM_REALM_ID:-telegram}
+  FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS: ${FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS:-}
+  FRIDAY_TELEGRAM_OWNER_CHAT_IDS: ${FRIDAY_TELEGRAM_OWNER_CHAT_IDS:-}
+  FRIDAY_TELEGRAM_SIGNATURE_MAX_AGE_SEC: ${FRIDAY_TELEGRAM_SIGNATURE_MAX_AGE_SEC:-90}
+  FRIDAY_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: ${FRIDAY_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE:-30}
+  FRIDAY_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE: ${FRIDAY_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE:-1200}
+  FRIDAY_CORS_ORIGINS: ${FRIDAY_CORS_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
+  FRIDAY_AUTONOMY_ENABLED: ${FRIDAY_AUTONOMY_ENABLED:-1}
+  FRIDAY_OPERATOR_FULL_AUTONOMY: ${FRIDAY_OPERATOR_FULL_AUTONOMY:-0}
+  FRIDAY_COGNITION_ENABLED: ${FRIDAY_COGNITION_ENABLED:-1}
+  FRIDAY_COGNITION_INTERVAL_SEC: ${FRIDAY_COGNITION_INTERVAL_SEC:-300}
+  FRIDAY_COGNITION_MAX_TOKENS: ${FRIDAY_COGNITION_MAX_TOKENS:-512}
+  FRIDAY_EXECUTIVE_MAX_ACTIVE_MISSIONS: ${FRIDAY_EXECUTIVE_MAX_ACTIVE_MISSIONS:-8}
+  FRIDAY_EXECUTIVE_MAX_TASKS_PER_MISSION: ${FRIDAY_EXECUTIVE_MAX_TASKS_PER_MISSION:-12}
+  FRIDAY_EXECUTIVE_TASK_TOOL_BUDGET: ${FRIDAY_EXECUTIVE_TASK_TOOL_BUDGET:-6}
+  FRIDAY_EXECUTIVE_TICK_INTERVAL_SEC: ${FRIDAY_EXECUTIVE_TICK_INTERVAL_SEC:-15}
+  FRIDAY_WORKERS_ENABLED: ${FRIDAY_WORKERS_ENABLED:-1}
+  FRIDAY_CODE_EXECUTION_ENABLED: ${FRIDAY_CODE_EXECUTION_ENABLED:-0}
+  FRIDAY_CODE_EXECUTION_TIMEOUT_SEC: ${FRIDAY_CODE_EXECUTION_TIMEOUT_SEC:-15}
+  FRIDAY_CODE_EXECUTION_MAX_OUTPUT_BYTES: ${FRIDAY_CODE_EXECUTION_MAX_OUTPUT_BYTES:-65536}
+  FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS: ${FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS:-0}
+  FRIDAY_WEB_MAX_RESPONSE_BYTES: ${FRIDAY_WEB_MAX_RESPONSE_BYTES:-5242880}
+  FRIDAY_MAX_UPLOAD_BYTES: ${FRIDAY_MAX_UPLOAD_BYTES:-52428800}
+  FRIDAY_MAX_EXTRACTED_TEXT_CHARS: ${FRIDAY_MAX_EXTRACTED_TEXT_CHARS:-2000000}
+  FRIDAY_MAX_ARCHIVE_ENTRIES: ${FRIDAY_MAX_ARCHIVE_ENTRIES:-500}
+  FRIDAY_MAX_ARCHIVE_UNCOMPRESSED_BYTES: ${FRIDAY_MAX_ARCHIVE_UNCOMPRESSED_BYTES:-262144000}
+  FRIDAY_BRAVE_SEARCH_API_KEY: ${FRIDAY_BRAVE_SEARCH_API_KEY:-}
+  FRIDAY_TAVILY_API_KEY: ${FRIDAY_TAVILY_API_KEY:-}
+  FRIDAY_SERPER_API_KEY: ${FRIDAY_SERPER_API_KEY:-}
 
 x-backend-volumes: &backend-volumes
   - type: bind
-    source: ${JERICHO_HOST_HOME:-D:/jericho}/data
+    source: ${FRIDAY_HOST_HOME:-D:/jericho}/data
     target: /runtime/data
   - type: bind
-    source: ${JERICHO_HOST_HOME:-D:/jericho}/cache
+    source: ${FRIDAY_HOST_HOME:-D:/jericho}/cache
     target: /runtime/cache
   - type: bind
-    source: ${JERICHO_HOST_HOME:-D:/jericho}/logs
+    source: ${FRIDAY_HOST_HOME:-D:/jericho}/logs
     target: /runtime/logs
   - type: bind
-    source: ${JERICHO_MODEL_ROOT:-D:/jericho/models}
+    source: ${FRIDAY_MODEL_ROOT:-D:/friday/models}
     target: /runtime/models
     read_only: true
 
@@ -89,16 +89,16 @@ services:
     build:
       context: .
       dockerfile: docker/vllm-asyncio/Dockerfile
-    image: ${JERICHO_VLLM_IMAGE:-jericho/vllm-openai:v0.25.1-asyncio-e4f88a8}
+    image: ${FRIDAY_VLLM_IMAGE:-friday/vllm-openai:v0.25.1-asyncio-e4f88a8}
     container_name: jericho-dispatcher
     restart: unless-stopped
     ipc: host
     command: >-
       --model /models/qwen3.6-35b-a3b-nvfp4
-      --served-model-name ${JERICHO_LLM_MODEL:-dispatcher}
+      --served-model-name ${FRIDAY_LLM_MODEL:-dispatcher}
       --dtype auto
-      ${JERICHO_QWEN_QUANT_ARGS:-}
-      ${JERICHO_QWEN_ENFORCE_EAGER:-}
+      ${FRIDAY_QWEN_QUANT_ARGS:-}
+      ${FRIDAY_QWEN_ENFORCE_EAGER:-}
       --max-model-len 32768
       --gpu-memory-utilization 0.90
       --kv-cache-dtype fp8
@@ -110,7 +110,7 @@ services:
       --mm-processor-cache-gb 4.0
       --max-num-batched-tokens 4096
       --limit-mm-per-prompt '{"image":4,"video":1}'
-      ${JERICHO_QWEN_EXTRA_ARGS:-}
+      ${FRIDAY_QWEN_EXTRA_ARGS:-}
       --host 0.0.0.0
       --port 8001
     environment:
@@ -127,11 +127,11 @@ services:
       NCCL_P2P_DISABLE: ${NCCL_P2P_DISABLE:-1}
     volumes:
       - type: bind
-        source: ${JERICHO_MODEL_ROOT:-D:/jericho/models}
+        source: ${FRIDAY_MODEL_ROOT:-D:/friday/models}
         target: /models
         read_only: true
       - type: bind
-        source: ${JERICHO_HOST_HOME:-D:/jericho}/cache
+        source: ${FRIDAY_HOST_HOME:-D:/jericho}/cache
         target: /root/.cache
     ports:
       - "127.0.0.1:8001:8001"
@@ -160,14 +160,14 @@ services:
     tmpfs:
       - /tmp:size=256m,noexec,nosuid,nodev
     ports:
-      - "${JERICHO_API_BIND_ADDRESS:-127.0.0.1}:${JERICHO_API_PORT:-8000}:${JERICHO_API_PORT:-8000}"
+      - "${FRIDAY_API_BIND_ADDRESS:-127.0.0.1}:${FRIDAY_API_PORT:-8000}:${FRIDAY_API_PORT:-8000}"
     env_file:
       - path: .env
         required: false
     # `.env` reaches the containers here, not through the map above. Compose reads
     # `.env` for `${...}` interpolation only, so every setting the operator wrote in
     # the file README tells them to copy was silently discarded on the Docker path —
-    # JERICHO_TELEGRAM_PROXY among them, which is the whole point of the setting when
+    # FRIDAY_TELEGRAM_PROXY among them, which is the whole point of the setting when
     # Telegram is only reachable through a tunnel. Keys in `environment:` still win,
     # so the container-owned paths above cannot be overridden from the host.
     environment: *backend-environment
@@ -179,7 +179,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${JERICHO_API_PORT:-8000}/api/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${FRIDAY_API_PORT:-8000}/api/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -200,7 +200,7 @@ services:
     # `.env` reaches the containers here, not through the map above. Compose reads
     # `.env` for `${...}` interpolation only, so every setting the operator wrote in
     # the file README tells them to copy was silently discarded on the Docker path —
-    # JERICHO_TELEGRAM_PROXY among them, which is the whole point of the setting when
+    # FRIDAY_TELEGRAM_PROXY among them, which is the whole point of the setting when
     # Telegram is only reachable through a tunnel. Keys in `environment:` still win,
     # so the container-owned paths above cannot be overridden from the host.
     env_file:
@@ -208,9 +208,9 @@ services:
         required: false
     environment:
       <<: *backend-environment
-      JERICHO_BACKEND_URL: http://backend:${JERICHO_API_PORT:-8000}
-      JERICHO_TELEGRAM_BOT_TOKEN: ${JERICHO_TELEGRAM_BOT_TOKEN:?set JERICHO_TELEGRAM_BOT_TOKEN in .env}
-      JERICHO_WORKERS_ENABLED: "0"
+      FRIDAY_BACKEND_URL: http://backend:${FRIDAY_API_PORT:-8000}
+      FRIDAY_TELEGRAM_BOT_TOKEN: ${FRIDAY_TELEGRAM_BOT_TOKEN:?set FRIDAY_TELEGRAM_BOT_TOKEN in .env}
+      FRIDAY_WORKERS_ENABLED: "0"
     security_opt:
       - no-new-privileges:true
     cap_drop:

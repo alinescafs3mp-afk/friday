@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from jericho.storage.models import EntityType
+from friday.storage.models import EntityType
 
 EXPECTED_ENTITY_TYPES = {
     "person",

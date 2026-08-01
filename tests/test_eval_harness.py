@@ -13,10 +13,10 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.eval import precision_at_k, recall_at_k, reciprocal_rank, run_eval
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.eval import precision_at_k, recall_at_k, reciprocal_rank, run_eval
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 # --- pure metrics ---------------------------------------------------------
 
@@ -217,8 +217,8 @@ def test_upsert_feedback_eval_case_never_overwrites_manual(storage):
 
 @pytest.mark.asyncio
 async def test_positive_answer_feedback_mines_eval_case(settings, storage):
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.storage.models import FeedbackType
+    from friday.agent_runtime import AgentRuntime
+    from friday.storage.models import FeedbackType
 
     storage.ensure_user("alice")
     ko = _store_ko(storage, "alice")
@@ -236,8 +236,8 @@ async def test_positive_answer_feedback_mines_eval_case(settings, storage):
 async def test_feedback_mining_skips_negative_disabled_and_untethered(settings, storage):
     import dataclasses
 
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.storage.models import FeedbackType
+    from friday.agent_runtime import AgentRuntime
+    from friday.storage.models import FeedbackType
 
     storage.ensure_user("alice")
     ko = _store_ko(storage, "alice")
@@ -282,7 +282,7 @@ async def test_feedback_mining_skips_negative_disabled_and_untethered(settings, 
 
 
 def test_is_mineable_eval_query_filters_followups_and_generic():
-    from jericho.agent_runtime import _is_mineable_eval_query
+    from friday.agent_runtime import _is_mineable_eval_query
 
     assert _is_mineable_eval_query("ip сервера atlas") is True
     assert _is_mineable_eval_query("привет") is False  # too short/generic
@@ -329,7 +329,7 @@ def test_manual_case_survives_the_listing_window(storage):
 
 
 def test_sign_test_matches_the_exact_binomial():
-    from jericho.eval import _sign_test_p
+    from friday.eval import _sign_test_p
 
     assert _sign_test_p(6, 0) == pytest.approx(0.03125)
     assert _sign_test_p(5, 0) == pytest.approx(0.0625)
@@ -339,7 +339,7 @@ def test_sign_test_matches_the_exact_binomial():
 
 def test_ablation_seam_is_neutral_by_default(storage, settings):
     """Turning the seam on with nothing ablated must reproduce the shipped ranking."""
-    from jericho.retrieval import ABLATABLE_SIGNALS, HybridSearcher
+    from friday.retrieval import ABLATABLE_SIGNALS, HybridSearcher
 
     assert HybridSearcher(storage, None)._ablate == frozenset()  # noqa: SLF001
     assert HybridSearcher(storage, None, ablate=())._ablate == frozenset()  # noqa: SLF001
@@ -356,7 +356,7 @@ def test_ablation_seam_is_neutral_by_default(storage, settings):
 @pytest.mark.asyncio
 async def test_ablation_refuses_a_verdict_on_a_small_gold_set(settings, storage):
     """Three cases cannot separate signal from noise — the honest answer is a refusal."""
-    from jericho.eval import compare_signal_ablation
+    from friday.eval import compare_signal_ablation
 
     storage.ensure_user("alice")
     target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7 в дата-центре.", "Atlas IP")
@@ -374,7 +374,7 @@ async def test_ablation_refuses_a_verdict_on_a_small_gold_set(settings, storage)
 
 @pytest.mark.asyncio
 async def test_ablation_does_not_move_the_regression_baseline(settings, storage):
-    from jericho.eval import compare_signal_ablation, run_eval
+    from friday.eval import compare_signal_ablation, run_eval
 
     storage.ensure_user("alice")
     target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
@@ -431,7 +431,7 @@ def test_prune_never_deletes_a_manual_case(storage):
 
 
 def test_mined_cases_are_capped_per_user(storage):
-    from jericho.storage import EVAL_MINED_CASE_CAP
+    from friday.storage import EVAL_MINED_CASE_CAP
 
     storage.ensure_user("alice")
     live = _store(storage, "alice", "Живой объект для эталонов.", "Живой")
@@ -468,7 +468,7 @@ async def test_baseline_reanchors_after_a_k_change(settings, storage):
 @pytest.mark.asyncio
 async def test_ablation_arms_are_deduplicated(settings, storage):
     """Each arm is a full pass over the gold set; a repeated name must not multiply it."""
-    from jericho.eval import compare_signal_ablation
+    from friday.eval import compare_signal_ablation
 
     storage.ensure_user("alice")
     target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")
@@ -484,7 +484,7 @@ def test_ablation_reports_reordering_that_recall_cannot_see():
     """recall@k only asks whether the object is INSIDE the top k, so it is blind to
     reordering within it — which is exactly where the 0.05/0.028/0.018 weights work.
     A signal that only reorders must not be reported as having no effect."""
-    from jericho.eval import _MATERIAL_MRR, _sign_test_p
+    from friday.eval import _MATERIAL_MRR, _sign_test_p
 
     # Membership unchanged (recall delta 0), order moved consistently across cases.
     assert _sign_test_p(0, 0) == 1.0  # nothing moved -> no evidence
@@ -494,7 +494,7 @@ def test_ablation_reports_reordering_that_recall_cannot_see():
 
 @pytest.mark.asyncio
 async def test_ablation_row_carries_both_metrics(settings, storage):
-    from jericho.eval import compare_signal_ablation
+    from friday.eval import compare_signal_ablation
 
     storage.ensure_user("alice")
     target = _store(storage, "alice", "Сервер Atlas имеет IP 10.0.0.7.", "Atlas IP")

@@ -15,12 +15,12 @@ canonical entities.
 
 from __future__ import annotations
 
-from jericho.ingestion._advice import (
+from friday.ingestion._advice import (
     _MAX_SUGGESTIONS,
     _MAX_SUGGESTIONS_PER_METHOD,
     _capped_per_method,
 )
-from jericho.ingestion._base import DECLARED_ENTITY_METHODS, EVIDENCE_ONLY_ENTITY_METHODS
+from friday.ingestion._base import DECLARED_ENTITY_METHODS, EVIDENCE_ONLY_ENTITY_METHODS
 
 
 def _candidates(method: str, count: int, confidence: float) -> list[dict]:

@@ -11,9 +11,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.agent_runtime import AgentContext, AgentRuntime
-from jericho.documents import DocumentExtractor
-from jericho.telegram_bridge import (
+from friday.agent_runtime import AgentContext, AgentRuntime
+from friday.documents import DocumentExtractor
+from friday.telegram_bridge import (
     PermanentUpdateError,
     TelegramBridge,
     TelegramConfig,
@@ -86,7 +86,7 @@ def test_dynamic_knowledge_context_is_never_elevated_to_system_role(settings, st
     user_text = "\n".join(str(item.get("content") or "") for item in messages if item["role"] == "user")
     assert marker not in system_text
     assert marker in user_text
-    assert "JERICHO_CONTEXT_DATA" in user_text
+    assert "FRIDAY_CONTEXT_DATA" in user_text
     assert "недоверенные данные" in system_text
 
 
@@ -94,7 +94,7 @@ def test_dynamic_knowledge_context_is_never_elevated_to_system_role(settings, st
 # with telegram_bridge/_commands.py — the newcomer branch must append, never
 # rewrite, so an allowlisted user still sees this byte-for-byte.
 _START_WELCOME = (
-    "Привет! Я Jericho — локальная система личных знаний. Отправьте заметку, "
+    "Привет! Я Friday, по-русски — Пятница: локальная система личных знаний. Отправьте заметку, "
     "вопрос, изображение, документ, голосовое, аудио или видео, геолокацию или "
     "контакт. Аудио и видео сохраняются как есть (без расшифровки) и ждут вашего "
     "решения в Inbox. Спорные знания и связи останутся на ваше подтверждение.\n\n"
@@ -205,8 +205,8 @@ def test_signed_get_with_json_body_registers_telegram_identity(settings):
     import json
     import time
 
-    from jericho.security import sign_bridge_request
-    from jericho.server import create_app
+    from friday.security import sign_bridge_request
+    from friday.server import create_app
 
     body = json.dumps(
         {
@@ -228,11 +228,11 @@ def test_signed_get_with_json_body_registers_telegram_identity(settings):
     nonce = uuid.uuid4().hex
     headers = {
         "Content-Type": "application/json",
-        "X-Jericho-Timestamp": str(timestamp),
-        "X-Jericho-User": "42",
-        "X-Jericho-Chat": "42",
-        "X-Jericho-Nonce": nonce,
-        "X-Jericho-Signature": sign_bridge_request(
+        "X-Friday-Timestamp": str(timestamp),
+        "X-Friday-User": "42",
+        "X-Friday-Chat": "42",
+        "X-Friday-Nonce": nonce,
+        "X-Friday-Signature": sign_bridge_request(
             settings.telegram_bridge_secret,
             timestamp=timestamp,
             method="GET",
@@ -371,7 +371,7 @@ async def test_telegram_prepares_media_types(tmp_path: Path, field, descriptor, 
 
 @pytest.mark.asyncio
 async def test_oversized_voice_media_reports_too_large(tmp_path: Path):
-    from jericho.telegram_bridge import MediaTooLargeError
+    from friday.telegram_bridge import MediaTooLargeError
 
     bridge = _bridge(tmp_path, max_document_bytes=8)
 
@@ -395,7 +395,7 @@ async def test_document_between_20_and_50_mb_names_the_telegram_ceiling(tmp_path
     """The backend accepts 50 MB, but `getFile` on api.telegram.org refuses bots
     anything above 20 MB. A 25 MB document used to reach getFile and die as an
     unexplained RuntimeError; the sender must instead hear WHOSE limit it hit."""
-    from jericho.telegram_bridge import MediaTooLargeError
+    from friday.telegram_bridge import MediaTooLargeError
 
     bridge = _bridge(tmp_path, max_document_bytes=50 * 1024 * 1024)
     requests_made: list[str] = []
@@ -431,7 +431,7 @@ async def test_getfile_refusal_file_is_too_big_is_permanent_and_explained(tmp_pa
     """Descriptors may carry no file_size, so the ceiling can first appear as
     getFile answering 400 «file is too big». That refusal is permanent: it must
     not raise a retryable HTTP error, and the sender must hear the reason."""
-    from jericho.telegram_bridge import MediaTooLargeError
+    from friday.telegram_bridge import MediaTooLargeError
 
     bridge = _bridge(tmp_path, max_document_bytes=50 * 1024 * 1024)
 
@@ -502,11 +502,11 @@ def test_office_zip_rejects_suspicious_expansion_before_library_parser():
 
 
 def test_core_schema_migration_rolls_back_as_one_transaction(settings, tmp_path: Path):
-    from jericho.storage import JerichoStorage
+    from friday.storage import FridayStorage
 
     database = tmp_path / "atomic-migration.sqlite3"
 
-    class FailingMigrationStorage(JerichoStorage):
+    class FailingMigrationStorage(FridayStorage):
         def _migrate_legacy_schema(self, conn):
             conn.execute("CREATE TABLE migration_should_rollback(value TEXT)")
             raise RuntimeError("injected migration failure")
@@ -526,7 +526,7 @@ def test_core_schema_migration_rolls_back_as_one_transaction(settings, tmp_path:
     assert "schema_meta" not in tables
     assert "migration_should_rollback" not in tables
 
-    recovered = JerichoStorage(replace(settings, database_path=database))
+    recovered = FridayStorage(replace(settings, database_path=database))
     try:
         assert recovered.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert recovered.conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
@@ -539,7 +539,7 @@ def test_core_schema_migration_rolls_back_as_one_transaction(settings, tmp_path:
 def test_run_server_preserves_raw_peer_for_application_proxy_validation(settings, monkeypatch):
     import uvicorn
 
-    from jericho import server
+    from friday import server
 
     captured: dict[str, object] = {}
     proxy_settings = replace(
@@ -564,9 +564,9 @@ async def test_failed_file_promotion_does_not_delete_bytes_referenced_by_another
     import hashlib
     import json
 
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.storage.models import RawObject, new_id
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage.models import RawObject, new_id
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     user_id = "alice"
@@ -617,7 +617,7 @@ async def test_failed_file_promotion_does_not_delete_bytes_referenced_by_another
 
 
 def test_restore_cli_requires_explicit_confirmation(capsys):
-    from jericho.cli import build_parser
+    from friday.cli import build_parser
 
     args = build_parser().parse_args(["restore-backup"])
     assert args.handler(args) == 2
@@ -627,7 +627,7 @@ def test_restore_cli_requires_explicit_confirmation(capsys):
 def test_init_refuses_to_replace_configuration_through_symlink(settings, tmp_path):
     import argparse
 
-    from jericho.cli import _init_environment
+    from friday.cli import _init_environment
 
     victim = tmp_path / "victim.txt"
     victim.write_text("do-not-overwrite", encoding="utf-8")

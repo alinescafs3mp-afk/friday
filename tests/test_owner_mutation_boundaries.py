@@ -17,8 +17,8 @@ import re
 
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
 
 # Capabilities that authorize cross-tenant mutation or export. `.read` is out of
 # scope: owner deliberately allows delegated admins to *see* other accounts.
@@ -54,7 +54,7 @@ def _seed_owner_objects(storage, owner_id: str) -> dict[str, str]:
     """Real ids for every path placeholder the inventory walk may hit."""
     import pathlib
 
-    from jericho.storage.models import (
+    from friday.storage.models import (
         Entity,
         EntityType,
         KnowledgeObject,
@@ -307,7 +307,7 @@ def test_mutation_removing_export_protect_is_caught(settings, monkeypatch):
     403. Patching the name bound in `_maintenance` (not only `_deps`) is required:
     the handler imported the guard at module load time.
     """
-    import jericho.admin_api._maintenance as maintenance
+    import friday.admin_api._maintenance as maintenance
 
     monkeypatch.setattr(maintenance, "_protect_owner_target", lambda *_a, **_k: None)
 

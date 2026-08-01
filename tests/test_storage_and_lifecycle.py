@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from jericho.memory import MemoryVault
-from jericho.storage import SCHEMA_VERSION, JerichoStorage
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.memory import MemoryVault
+from friday.storage import SCHEMA_VERSION, FridayStorage
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def make_knowledge(
@@ -262,7 +262,7 @@ def test_pre_release_database_is_migrated_without_losing_tenant_data(settings, t
     conn.commit()
     conn.close()
 
-    migrated = JerichoStorage(replace(settings, database_path=database))
+    migrated = FridayStorage(replace(settings, database_path=database))
     try:
         assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert (
@@ -289,14 +289,14 @@ def test_pre_release_database_is_migrated_without_losing_tenant_data(settings, t
 
 
 def test_verified_backup_restore_is_atomic_and_creates_safety_copy(storage):
-    from jericho.diagnostics.runtime_lease import ProcessLease
+    from friday.diagnostics.runtime_lease import ProcessLease
 
     storage.ensure_user("before-restore")
     created = storage.create_backup(label="restore-source")
     storage.ensure_user("after-backup")
     assert storage.get_user("after-backup") is not None
 
-    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="jericho.backend.v1"):
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
         restored = storage.restore_backup(created["database"], safety_label="pytest-pre-restore")
 
     assert restored["ok"] is True
@@ -318,7 +318,7 @@ def test_restore_requires_exclusive_backend_process_lease(storage):
 
 
 def test_restore_refuses_tampered_backup_without_touching_active_database(storage):
-    from jericho.diagnostics.runtime_lease import ProcessLease
+    from friday.diagnostics.runtime_lease import ProcessLease
 
     storage.ensure_user("active-user")
     created = storage.create_backup(label="tampered-restore")
@@ -328,7 +328,7 @@ def test_restore_refuses_tampered_backup_without_touching_active_database(storag
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with (
-        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="jericho.backend.v1"),
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
         pytest.raises(RuntimeError, match="Refusing to restore unverified backup"),
     ):
         storage.restore_backup(created["database"])
@@ -347,7 +347,7 @@ def test_verify_backup_rejects_path_components(storage):
 
 
 def test_restore_refuses_symlink_database_path_before_safety_backup(storage):
-    from jericho.diagnostics.runtime_lease import ProcessLease
+    from friday.diagnostics.runtime_lease import ProcessLease
 
     storage.ensure_user("symlink-victim")
     created = storage.create_backup(label="symlink-restore")
@@ -359,7 +359,7 @@ def test_restore_refuses_symlink_database_path_before_safety_backup(storage):
     active_path.symlink_to(victim_path)
     try:
         with (
-            ProcessLease(storage.settings.state_dir / "backend.lock", protocol="jericho.backend.v1"),
+            ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
             pytest.raises(RuntimeError, match="must not be symlinks"),
         ):
             storage.restore_backup(created["database"])
@@ -373,9 +373,9 @@ def test_restore_refuses_symlink_database_path_before_safety_backup(storage):
 
 def test_restore_detects_backup_change_during_staging_and_rolls_back(storage, monkeypatch):
     # Patched where the name is LOOKED UP: restore lives in the maintenance mixin and
-    # binds the helper at import time, so patching jericho.storage would not reach it.
-    from jericho.diagnostics.runtime_lease import ProcessLease
-    from jericho.storage import _maintenance as storage_module
+    # binds the helper at import time, so patching friday.storage would not reach it.
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
 
     storage.ensure_user("stable-before-staging-race")
     created = storage.create_backup(label="staging-race")
@@ -396,7 +396,7 @@ def test_restore_detects_backup_change_during_staging_and_rolls_back(storage, mo
 
     monkeypatch.setattr(storage_module, "_stage_private_copy", tampered_stage)
     with (
-        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="jericho.backend.v1"),
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
         pytest.raises(RuntimeError, match="Backup changed while it was staged"),
     ):
         storage.restore_backup(created["database"], safety_label="staging-race-safety")
@@ -408,14 +408,14 @@ def test_restore_detects_backup_change_during_staging_and_rolls_back(storage, mo
 
 
 def test_restore_recovers_over_corrupt_active_database_and_preserves_raw_snapshot(storage):
-    from jericho.diagnostics.runtime_lease import ProcessLease
+    from friday.diagnostics.runtime_lease import ProcessLease
 
     storage.ensure_user("known-good-backup-user")
     created = storage.create_backup(label="before-corruption")
     storage.close()
     storage.settings.database_path.write_bytes(b"not-a-sqlite-database")
 
-    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="jericho.backend.v1"):
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
         restored = storage.restore_backup(created["database"], safety_label="corrupt-active")
 
     assert restored["ok"] is True
@@ -423,7 +423,7 @@ def test_restore_recovers_over_corrupt_active_database_and_preserves_raw_snapsho
     recovery = restored["recovery_snapshot"]
     assert recovery and recovery["verified"] is False
     recovery_dir = Path(recovery["path"])
-    assert (recovery_dir / "jericho.sqlite3").read_bytes() == b"not-a-sqlite-database"
+    assert (recovery_dir / "friday.sqlite3").read_bytes() == b"not-a-sqlite-database"
     assert storage.get_user("known-good-backup-user") is not None
     assert storage.diagnostics()["ok"] is True
 
@@ -483,7 +483,7 @@ async def test_the_vault_stops_keeping_plaintext_of_deleted_knowledge(settings, 
     its full content** in the vault forever, while the user was told it was deleted
     and search agreed with them. Backups then carried that copy onward.
     """
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     kept_raw, kept = make_knowledge(storage, "alice", "Рабочая заметка, которая остаётся")
     _, doomed = make_knowledge(storage, "alice", "Пароль от роутера: 12345, удалить это")
@@ -519,8 +519,8 @@ async def test_the_vault_worker_carries_entity_links_into_the_notes(settings, st
     storage method, or a page loop that forgets to pass it, would leave every note
     linkless and every test in `test_memory_vault_notes.py` still green.
     """
-    from jericho.storage.models import Entity, EntityType
-    from jericho.workers import WorkersManager
+    from friday.storage.models import Entity, EntityType
+    from friday.workers import WorkersManager
 
     _, ko = make_knowledge(storage, "alice", "Аренда квартиры на Мира")
     entity = storage.create_entity(
@@ -557,7 +557,7 @@ def test_mass_archive_without_selection_is_refused(settings):
     """
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:

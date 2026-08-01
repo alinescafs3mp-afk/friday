@@ -25,8 +25,8 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 # Текст без объявляющих слов («проект X», «сервис Y») — то есть ровно такой, какой
 # приезжает из рабочего архива и из которого автомат сущностей не создаёт.

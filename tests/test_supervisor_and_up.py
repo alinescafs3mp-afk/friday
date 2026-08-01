@@ -14,7 +14,7 @@ import threading
 import time
 from contextlib import suppress
 
-from jericho.supervisor import ChildSpec, Supervisor
+from friday.supervisor import ChildSpec, Supervisor
 
 
 def _spec(tmp_path, name: str, code: str) -> ChildSpec:
@@ -190,7 +190,7 @@ def test_settings_bound_the_child_logs_by_default(settings):
 
 
 def test_install_services_writes_units(tmp_path, settings):
-    from jericho.cli import _install_services
+    from friday.cli import _install_services
 
     args = argparse.Namespace(dir=str(tmp_path / "units"))
     assert _install_services(args) == 0
@@ -198,6 +198,6 @@ def test_install_services_writes_units(tmp_path, settings):
     bridge = (tmp_path / "units" / "jericho-bridge.service").read_text(encoding="utf-8")
     assert "ExecStart=" in backend and " server" in backend
     assert "Restart=on-failure" in backend
-    assert f"Environment=JERICHO_HOME={settings.home}" in backend
+    assert f"Environment=FRIDAY_HOME={settings.home}" in backend
     assert " telegram-bridge" in bridge
     assert "After=network-online.target jericho-backend.service" in bridge

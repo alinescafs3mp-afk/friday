@@ -8,10 +8,10 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage import SCHEMA_VERSION
-from jericho.storage.models import (
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage import SCHEMA_VERSION
+from friday.storage.models import (
     FeedbackItem,
     FeedbackType,
     InboxStatus,
@@ -408,8 +408,8 @@ def test_current_feedback_stats_replace_superseded_signal(storage):
 
 @pytest.mark.asyncio
 async def test_agent_feedback_attribution_uses_only_cited_knowledge(settings, storage):
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.permissions import ActorContext
+    from friday.agent_runtime import AgentRuntime
+    from friday.permissions import ActorContext
 
     first = _store_knowledge(storage, "alice", "Atlas uses Redis.", title="Atlas cache")
     second = _store_knowledge(storage, "alice", "Atlas uses PostgreSQL 16.", title="Atlas database")
@@ -437,7 +437,7 @@ async def test_agent_feedback_attribution_uses_only_cited_knowledge(settings, st
                 item["content"]
                 for item in messages
                 if item.get("role") == "user"
-                and str(item.get("content") or "").startswith("JERICHO_CONTEXT_DATA")
+                and str(item.get("content") or "").startswith("FRIDAY_CONTEXT_DATA")
             )
             assert '"citation": "K1"' in context_message
             assert '"citation": "K2"' in context_message

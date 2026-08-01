@@ -14,13 +14,13 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.web_surfer import WebSurfer
 from tests.conftest import run_with_approval
 
 
@@ -70,7 +70,7 @@ def test_http_conflict_decide_dismisses_and_hides_from_suggested(settings):
     # Seed through the app's own storage: the bearer token authenticates as the
     # legacy owner, not an arbitrary fixture user.
     with TestClient(create_app(settings)) as client:
-        from jericho.permissions import LEGACY_OWNER_USER_ID
+        from friday.permissions import LEGACY_OWNER_USER_ID
 
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         app_storage = client.app.state.storage

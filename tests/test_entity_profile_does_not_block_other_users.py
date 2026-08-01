@@ -22,9 +22,9 @@ import time
 import httpx
 import pytest
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import Entity, EntityType, new_id
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import Entity, EntityType, new_id
 
 
 @pytest.mark.asyncio

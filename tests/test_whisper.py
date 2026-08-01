@@ -14,10 +14,10 @@ import math
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import InboxStatus
-from jericho.whisper import (
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import InboxStatus
+from friday.whisper import (
     Transcript,
     _segment_confidence,
     assemble_transcript,
@@ -120,7 +120,7 @@ def _fake_transcribe(content, **kwargs):
 
 @pytest.mark.asyncio
 async def test_voice_note_transcribes_inbox_first_then_confirms(settings, storage, monkeypatch):
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _fake_transcribe)
     settings = dataclasses.replace(settings, whisper_enabled=True)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -167,7 +167,7 @@ async def test_voice_note_untouched_when_whisper_disabled(settings, storage, mon
         calls.append(True)
         return _fake_transcribe(content, **kwargs)
 
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _spy)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _spy)
     settings = dataclasses.replace(settings, whisper_enabled=False)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -200,7 +200,7 @@ async def test_empty_transcript_falls_back_to_unextractable(settings, storage, m
             model="small",
         )
 
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _silent)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _silent)
     settings = dataclasses.replace(settings, whisper_enabled=True)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -227,7 +227,7 @@ async def test_long_audio_skipped_by_duration_guard(settings, storage, monkeypat
         calls.append(True)
         return _fake_transcribe(content, **kwargs)
 
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _spy)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _spy)
     settings = dataclasses.replace(settings, whisper_enabled=True, whisper_max_audio_sec=60.0)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 
@@ -254,7 +254,7 @@ def test_ingest_file_returns_the_transcript_for_the_caller(settings, storage, mo
     только в raw_content инбокс-элемента."""
     import asyncio
 
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _fake_transcribe)
     tuned = dataclasses.replace(settings, whisper_enabled=True)
     pipeline = IngestionPipeline(tuned, storage, KnowledgeGraph(storage), None)
 
@@ -281,10 +281,10 @@ def test_a_short_voice_note_becomes_the_question_of_the_turn(settings, monkeypat
 
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
 
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _fake_transcribe)
     tuned = dataclasses.replace(settings, whisper_enabled=True)
     app = create_app(tuned)
     headers = {"Authorization": f"Bearer {tuned.api_token}"}
@@ -318,10 +318,10 @@ def test_a_long_voice_note_stays_a_document_upload(settings, monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
 
-    monkeypatch.setattr("jericho.ingestion._files.transcribe_bytes", _fake_transcribe)
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", _fake_transcribe)
     tuned = dataclasses.replace(settings, whisper_enabled=True)
     app = create_app(tuned)
     headers = {"Authorization": f"Bearer {tuned.api_token}"}

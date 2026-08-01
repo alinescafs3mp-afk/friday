@@ -14,7 +14,7 @@ installation actually stores, across four relations:
 * CONTRADICTION — same subject, incompatible claims. The target.
 * PARAPHRASE    — same claim, different words. Must not be flagged.
 * UPDATE        — same subject, later state. Must not be flagged: supersession is
-                  what Jericho is *for*, not an error to report.
+                  what Friday is *for*, not an error to report.
 * UNRELATED     — different subject. Must not be flagged.
 
 The question is not "is the band 0.78-0.92 correct". It is whether ANY threshold
@@ -35,8 +35,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jericho.config import load_settings  # noqa: E402
-from jericho.retrieval import EmbeddingBackend  # noqa: E402
+from friday.config import load_settings  # noqa: E402
+from friday.retrieval import EmbeddingBackend  # noqa: E402
 
 # Each pair is (relation, text_a, text_b). Subjects repeat across relations on
 # purpose: the same claim appears as a contradiction, a paraphrase and an update,
@@ -83,7 +83,7 @@ async def main() -> int:
     settings = load_settings()
     backend = EmbeddingBackend(settings)
     if not backend.remote_enabled:
-        print("embeddings disabled — set JERICHO_EMBEDDINGS_* and retry", file=sys.stderr)
+        print("embeddings disabled — set FRIDAY_EMBEDDINGS_* and retry", file=sys.stderr)
         return 2
 
     texts = [text for _, left, right in PAIRS for text in (left, right)]

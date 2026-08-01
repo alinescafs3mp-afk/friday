@@ -14,13 +14,13 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.organs import ServiceContext, build_registry
-from jericho.organs.chronicle import ChronicleOrgan, _years_ago, build_on_this_day, chronicle_on_this_day
-from jericho.organs.profile import PROFILE_CAPABILITY, ProfileOrgan, build_profile, format_profile
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.organs import ServiceContext, build_registry
+from friday.organs.chronicle import ChronicleOrgan, _years_ago, build_on_this_day, chronicle_on_this_day
+from friday.organs.profile import PROFILE_CAPABILITY, ProfileOrgan, build_profile, format_profile
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _seed_telegram_user(storage, chat_id: str) -> str:
@@ -205,13 +205,13 @@ def test_chronicle_organ_uses_all_three_extension_points():
 
 
 def _chronicle_settings():
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     return replace(load_settings(), chronicle_enabled=True, quiet_hours_start=0, quiet_hours_end=0)
 
 
 def _dummy_ctx():
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     return ServiceContext(settings=load_settings(), storage=None, kg=None, ingestion=None, llm=None)
 
@@ -235,7 +235,7 @@ def test_a_self_registered_newcomer_is_a_valid_push_target(settings, storage):
     """
     from dataclasses import replace
 
-    from jericho.organs import may_push_to
+    from friday.organs import may_push_to
 
     storage.ensure_user("newbie", preset_key="newcomer")
     storage.update_user("newbie", metadata_json={"chat_id": "7777"})
@@ -267,7 +267,7 @@ def test_promoting_a_newcomer_does_not_silence_their_notifications(settings, sto
     """
     from dataclasses import replace
 
-    from jericho.organs import may_push_to
+    from friday.organs import may_push_to
 
     storage.ensure_user("promoted", preset_key="newcomer")
     storage.update_user("promoted", metadata_json={"chat_id": "7777", "self_registered": True})

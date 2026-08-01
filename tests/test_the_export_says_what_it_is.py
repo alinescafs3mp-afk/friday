@@ -9,7 +9,7 @@
 пишется с отступами, то есть ещё в полтора-два раза больше), пик памяти 759 МБ при
 3.9 ГБ доступных. Оригиналы файлов (684 МБ) и векторы в выгрузку не входят.
 
-Человек, считающий её способом уйти, узнает правду в худший момент — когда Jericho уже
+Человек, считающий её способом уйти, узнает правду в худший момент — когда Friday уже
 нет. Поэтому ответ обязан называть настоящие пути: копия SQLite с каталогом файлов и
 `memory-vault` (1539 заметок Markdown, читаются чем угодно).
 """
@@ -20,7 +20,7 @@ import inspect
 
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
+from friday.server import create_app
 
 
 def test_the_response_names_the_real_ways_to_move(settings):
@@ -52,7 +52,7 @@ def test_it_admits_what_it_leaves_behind(settings):
 def test_the_export_does_not_run_on_the_event_loop():
     """Она синхронная и на секунды подвешивала ВЕСЬ сервер: ни HTTP, ни Telegram,
     пока строится словарь на сотню миллионов знаков."""
-    from jericho.admin_api._maintenance import create_export
+    from friday.admin_api._maintenance import create_export
 
     source = inspect.getsource(create_export)
     assert "run_blocking" in source, "выгрузка снова строится прямо на event loop"

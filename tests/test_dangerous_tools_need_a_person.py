@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.storage.models import Entity, EntityResolutionCandidate, EntityType, new_id
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.storage.models import Entity, EntityResolutionCandidate, EntityType, new_id
+from friday.web_surfer import WebSurfer
 
 
 def _kernel(settings, storage):
@@ -244,7 +244,7 @@ async def test_a_timed_out_execution_is_uncertain_not_failed(settings, storage):
         await asyncio.sleep(60)
 
     kernel._tools["entity_merge_decide"].handler = _never_returns  # noqa: SLF001
-    import jericho.execution_kernel as kernel_module
+    import friday.execution_kernel as kernel_module
 
     original = kernel_module.asyncio.timeout
 

@@ -15,7 +15,7 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
+from friday.server import create_app
 
 
 def _actions(storage) -> list[str]:
@@ -31,7 +31,7 @@ def _seed_addressable_objects(storage, user_id: str) -> dict[str, str]:
     import hashlib
     import pathlib
 
-    from jericho.storage.models import (
+    from friday.storage.models import (
         Entity,
         EntityType,
         KnowledgeObject,
@@ -97,7 +97,7 @@ def _seed_addressable_objects(storage, user_id: str) -> dict[str, str]:
 
 def test_audit_log_is_append_only_at_database_level(storage):
     storage.ensure_user("alice")
-    from jericho.storage.models import AuditEntry, new_id
+    from friday.storage.models import AuditEntry, new_id
 
     entry = storage.log_audit(
         AuditEntry(
@@ -186,7 +186,7 @@ def test_every_admin_read_of_another_account_is_audited(settings):
     """
     import inspect
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     def _admin_get_routes(app):
         """`include_router` stores an `_IncludedRouter` wrapper rather than flattening."""

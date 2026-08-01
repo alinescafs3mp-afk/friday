@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import InboxStatus
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import InboxStatus
 
 
 @pytest.fixture

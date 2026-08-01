@@ -14,10 +14,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import Entity, EntityType, new_id
-from jericho.telegram_bridge import TelegramBridge
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import Entity, EntityType, new_id
+from friday.telegram_bridge import TelegramBridge
 
 
 def _entity(storage, name: str = "Атлас") -> str:
@@ -38,7 +38,7 @@ def test_restoring_an_entity_version_is_a_new_version_not_a_rewind(settings, sto
     Мутация: писать снимок ПОВЕРХ (без роста версии) или удалять версии старше
     восстановленной — тест обязан покраснеть на числе версий или на обратном откате.
     """
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user(LEGACY_OWNER_USER_ID)
     kg = KnowledgeGraph(storage)
@@ -63,7 +63,7 @@ def test_restoring_an_entity_version_is_a_new_version_not_a_rewind(settings, sto
 
 
 def test_restore_records_who_rolled_back_and_from_which_version(settings, storage):
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user(LEGACY_OWNER_USER_ID)
     kg = KnowledgeGraph(storage)
@@ -80,7 +80,7 @@ def test_restore_records_who_rolled_back_and_from_which_version(settings, storag
 
 
 def test_restore_refuses_a_version_that_does_not_exist(settings, storage):
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user(LEGACY_OWNER_USER_ID)
     kg = KnowledgeGraph(storage)
@@ -92,7 +92,7 @@ def test_restore_refuses_a_version_that_does_not_exist(settings, storage):
 def test_restore_does_not_cross_tenants(settings, storage):
     """Чужая сущность не восстанавливается даже по точному id: скоуп арендатора
     стоит в самом запросе версий, а не проверяется отдельно сверху."""
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user(LEGACY_OWNER_USER_ID)
     storage.ensure_user("bob", preset_key="user")
@@ -222,7 +222,7 @@ def test_a_merge_version_is_not_offered_as_an_undoable_edit(settings, storage):
     Мутация: убрать `merge_version_floor` из `_entity_edit_history` (или из
     `restore_entity_version`) — тест обязан покраснеть.
     """
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user(LEGACY_OWNER_USER_ID)
     kg = KnowledgeGraph(storage)
@@ -247,7 +247,7 @@ def test_a_merge_version_is_not_offered_as_an_undoable_edit(settings, storage):
 
 def test_an_edit_made_after_a_merge_is_still_undoable(settings, storage):
     """Обратная сторона: запрет не должен запирать НОРМАЛЬНЫЕ правки после слияния."""
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user(LEGACY_OWNER_USER_ID)
     kg = KnowledgeGraph(storage)

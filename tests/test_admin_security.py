@@ -15,7 +15,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.admin_ui import STATIC_DIR
+from friday.admin_ui import STATIC_DIR
 
 DETECT = "/api/kg/resolutions/detect"
 
@@ -26,7 +26,7 @@ def _loopback_client(app) -> httpx.AsyncClient:
 
 
 def test_csp_is_strict_without_unsafe_inline(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     client = TestClient(create_app(settings))
     for path in ("/admin/", "/api/health"):
@@ -60,7 +60,7 @@ def test_admin_ui_ships_no_inline_script_styles_or_handlers():
 
 @pytest.mark.asyncio
 async def test_loopback_guard_blocks_cross_origin_browser_mutations(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(replace(settings, api_require_token_on_loopback=False))
     async with app.router.lifespan_context(app), _loopback_client(app) as client:
@@ -114,7 +114,7 @@ async def test_loopback_guard_blocks_cross_origin_browser_mutations(settings):
 
 @pytest.mark.asyncio
 async def test_loopback_guard_blocks_dns_rebinding_host(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(replace(settings, api_require_token_on_loopback=False))
     async with app.router.lifespan_context(app):
@@ -128,7 +128,7 @@ async def test_loopback_guard_blocks_dns_rebinding_host(settings):
 
 def test_bearer_token_auth_ignores_origin(settings):
     """Explicit credentials are not CSRF-able; foreign Origins stay allowed."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         response = client.post(
@@ -143,7 +143,7 @@ def test_bearer_token_auth_ignores_origin(settings):
 
 def test_auth_failure_is_audited_without_leaking_the_secret(settings):
     """A rejected credential leaves a durable, secret-free forensic record."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:

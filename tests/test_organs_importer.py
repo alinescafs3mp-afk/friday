@@ -11,10 +11,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.organs import build_registry
-from jericho.organs.importer import detect_format, parse_bookmarks, parse_ics
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
+from friday.organs import build_registry
+from friday.organs.importer import detect_format, parse_bookmarks, parse_ics
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
 
 ICS_SAMPLE = "\r\n".join(
     [
@@ -84,8 +84,8 @@ def test_detect_format():
 
 @pytest.mark.asyncio
 async def test_force_review_lands_in_inbox_without_ko(settings, storage):
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
     result = await pipeline.ingest_text(
@@ -214,7 +214,7 @@ EML_HTML_SAMPLE = (
 
 
 def test_parse_mbox_decodes_rfc2047_and_declared_charsets():
-    from jericho.organs.importer import parse_mbox
+    from friday.organs.importer import parse_mbox
 
     items = parse_mbox(MBOX_SAMPLE)
     assert len(items) == 2
@@ -226,7 +226,7 @@ def test_parse_mbox_decodes_rfc2047_and_declared_charsets():
 
 
 def test_parse_eml_strips_html_to_text():
-    from jericho.organs.importer import parse_eml
+    from friday.organs.importer import parse_eml
 
     items = parse_eml(EML_HTML_SAMPLE)
     assert len(items) == 1

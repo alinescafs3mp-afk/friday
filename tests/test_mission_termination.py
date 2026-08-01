@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.executive.service import ExecutiveService
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.storage.models import Mission, MissionStatus, MissionTask, TaskKind, TaskStatus, new_id
+from friday.execution_kernel import ExecutionKernel
+from friday.executive.service import ExecutiveService
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.storage.models import Mission, MissionStatus, MissionTask, TaskKind, TaskStatus, new_id
 
 
 def _service(settings, storage) -> ExecutiveService:
@@ -181,7 +181,7 @@ async def test_a_mission_step_cannot_call_a_tool_outside_its_allowed_set(setting
     """
     import json as _json
 
-    from jericho.executive.service import GATHER_TOOLS
+    from friday.executive.service import GATHER_TOOLS
 
     storage.ensure_user("alice")
     service = _service(settings, storage)

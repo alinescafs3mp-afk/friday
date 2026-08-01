@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.retrieval import HybridSearcher
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _store(storage, user_id: str, title: str, text: str) -> str:

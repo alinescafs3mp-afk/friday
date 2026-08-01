@@ -1,6 +1,6 @@
 """`jericho import` — the path from a folder on disk into the review queue.
 
-Jericho could take a file; it could not take a folder, which is the shape personal
+Friday could take a file; it could not take a folder, which is the shape personal
 knowledge actually has. The risks worth pinning are not in the walking:
 
 * **The review gate.** An import is the user pointing at a directory, not a decision
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from jericho.bulk_import import (
+from friday.bulk_import import (
     SKIP_EMPTY,
     SKIP_HIDDEN,
     SKIP_SUFFIX,
@@ -31,8 +31,8 @@ from jericho.bulk_import import (
     run_import,
     summarise,
 )
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
 
 
 def _tree(root):
@@ -214,7 +214,7 @@ def test_single_file_path_is_accepted(tmp_path):
 
 @pytest.mark.parametrize("requested,users,expected", [("bob", [], "bob"), (None, [{"id": "solo"}], "solo")])
 def test_target_account_is_resolved_when_unambiguous(requested, users, expected):
-    from jericho.cli import _resolve_import_user
+    from friday.cli import _resolve_import_user
 
     class _Storage:
         def list_users(self, **_kwargs):
@@ -226,7 +226,7 @@ def test_target_account_is_resolved_when_unambiguous(requested, users, expected)
 @pytest.mark.parametrize("users", [[], [{"id": "a"}, {"id": "b"}]])
 def test_target_account_refuses_to_guess(users):
     """Misfiling an import into the wrong tenant is not undoable with a flag."""
-    from jericho.cli import _resolve_import_user
+    from friday.cli import _resolve_import_user
 
     class _Storage:
         def list_users(self, **_kwargs):
@@ -284,7 +284,7 @@ def test_bulk_review_cannot_canonize_with_an_omitted_flag(settings, storage):
     """
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     ids = _pending_ids(settings, storage, 5)
     with TestClient(create_app(settings)) as client:
@@ -302,7 +302,7 @@ def test_bulk_review_refuses_explicit_promotion_too(settings, storage):
     """Being explicit does not make approving 200 unread items a decision."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     ids = _pending_ids(settings, storage, 3)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -321,7 +321,7 @@ def test_bulk_review_still_dismisses(settings, storage):
     """Dismissal is the point of a bulk action and must keep working."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     ids = _pending_ids(settings, storage, 4)
     with TestClient(create_app(settings)) as client:
@@ -341,7 +341,7 @@ def test_single_item_promotion_is_untouched(settings, storage):
     inbox_id = _pending_ids(settings, storage, 1)[0]
     pipeline = _pipeline(settings, storage)
 
-    from jericho.storage.models import InboxStatus
+    from friday.storage.models import InboxStatus
 
     pipeline.classify_inbox_item("alice", inbox_id, InboxStatus.CLASSIFIED, promote=True, reviewed_by="alice")
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from jericho.diagnostics import collect_diagnostics
+from friday.diagnostics import collect_diagnostics
 
 
 def _tuned(settings, **overrides):
@@ -117,7 +117,7 @@ def test_the_admin_screen_asks_for_live_checks(settings):
     """
     from pathlib import Path
 
-    source = Path("jericho/admin_ui/static/app.js").read_text(encoding="utf-8")
+    source = Path("friday/admin_ui/static/app.js").read_text(encoding="utf-8")
     marker = "renderers.diagnostics="
     body = source[source.index(marker) : source.index(marker) + 1200]
     assert "/api/admin/diagnostics?check_llm=true" in body, (
@@ -134,8 +134,8 @@ def test_the_admin_screen_asks_for_live_checks(settings):
 def _corpus(storage, count: int, *, indexed: int) -> None:
     import hashlib
 
-    from jericho.dedup import pack_vector
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.dedup import pack_vector
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("alice")
     for index in range(count):
@@ -243,7 +243,7 @@ def test_a_full_disk_becomes_an_action_instead_of_a_number_in_a_dump(settings, m
     отдаёт «disk I/O error», который человеку ничего не объясняет. Ровно на этом я
     сегодня сам потерял время: 389 ложных падений тестов из-за забитого /tmp.
     """
-    import jericho.telemetry as telemetry_module
+    import friday.telemetry as telemetry_module
 
     real = telemetry_module.SystemTelemetry.snapshot
 
@@ -301,7 +301,7 @@ def test_a_fresh_outbound_notification_is_not_an_alarm(settings, storage):
 def test_versions_size_is_measured_and_growth_becomes_an_action(settings, storage):
     """Версии хранят полный content в каждом снапшоте, DELETE не существует нигде:
     рост был невидим, пока не смотреть на размер таблицы руками."""
-    from jericho.diagnostics import _add_versions_growth_action
+    from friday.diagnostics import _add_versions_growth_action
 
     storage.ensure_user("alice")
     result = collect_diagnostics(_tuned(settings), storage=storage)

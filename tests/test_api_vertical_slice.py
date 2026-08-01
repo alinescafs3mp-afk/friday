@@ -7,8 +7,8 @@ from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.security import sign_bridge_request
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.security import sign_bridge_request
 
 
 def _signed_headers(secret: str, method: str, path: str, body: bytes, user: str, chat: str, *, nonce=None):
@@ -16,11 +16,11 @@ def _signed_headers(secret: str, method: str, path: str, body: bytes, user: str,
     nonce = nonce or uuid.uuid4().hex
     return {
         "Content-Type": "application/json",
-        "X-Jericho-Timestamp": str(timestamp),
-        "X-Jericho-User": user,
-        "X-Jericho-Chat": chat,
-        "X-Jericho-Nonce": nonce,
-        "X-Jericho-Signature": sign_bridge_request(
+        "X-Friday-Timestamp": str(timestamp),
+        "X-Friday-User": user,
+        "X-Friday-Chat": chat,
+        "X-Friday-Nonce": nonce,
+        "X-Friday-Signature": sign_bridge_request(
             secret,
             timestamp=timestamp,
             method=method,
@@ -67,7 +67,7 @@ def _bridge_json(client, settings, method, path, payload, *, user="5001", chat="
 
 
 def test_authenticated_api_and_telegram_vertical_slice(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -167,7 +167,7 @@ def test_authenticated_api_and_telegram_vertical_slice(settings):
             "1001",
             "5001",
         )
-        bad_headers["X-Jericho-Signature"] = "0" * 64
+        bad_headers["X-Friday-Signature"] = "0" * 64
         assert client.post("/api/chat", content=body, headers=bad_headers).status_code == 401
 
         users = client.get("/api/admin/users", headers=owner_headers)
@@ -180,7 +180,7 @@ def test_authenticated_api_and_telegram_vertical_slice(settings):
 
 
 def test_bridge_denies_chat_outside_allowlist(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -197,7 +197,7 @@ def test_bridge_denies_chat_outside_allowlist(settings):
 
 
 def test_bridge_owner_chat_ids_are_allowed(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[], telegram_owner_chat_ids=[5001])
     with TestClient(create_app(scoped)) as client:
@@ -206,7 +206,7 @@ def test_bridge_owner_chat_ids_are_allowed(settings):
 
 
 def test_bridge_nonce_replay_is_rejected(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         body = json.dumps(
@@ -221,17 +221,17 @@ def test_bridge_nonce_replay_is_rejected(settings):
 
 
 def test_bridge_request_without_nonce_is_rejected(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         body = b"{}"
         headers = _signed_headers(settings.telegram_bridge_secret, "GET", "/api/me", body, "5001", "5001")
-        del headers["X-Jericho-Nonce"]
+        del headers["X-Friday-Nonce"]
         assert client.request("GET", "/api/me", content=body, headers=headers).status_code == 401
 
 
 def test_rate_limit_from_authentication_middleware_returns_429(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     limited_settings = replace(settings, api_user_rate_limit_per_minute=1)
     app = create_app(limited_settings)
@@ -245,7 +245,7 @@ def test_rate_limit_from_authentication_middleware_returns_429(settings):
 
 
 def test_admin_delegation_cannot_escalate_to_owner(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -347,7 +347,7 @@ def test_admin_delegation_cannot_escalate_to_owner(settings):
 def test_rate_limit_from_authentication_middleware_is_http_429(settings):
     from dataclasses import replace
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(replace(settings, api_user_rate_limit_per_minute=1))
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -362,7 +362,7 @@ def test_rate_limit_from_authentication_middleware_is_http_429(settings):
 def test_document_chat_replay_is_idempotent_before_file_side_effects(settings):
     import base64
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -392,7 +392,7 @@ def test_document_chat_replay_is_idempotent_before_file_side_effects(settings):
 def test_document_only_chat_does_not_promote_its_synthetic_acknowledgement(settings):
     import base64
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -430,7 +430,7 @@ def test_document_only_chat_does_not_promote_its_synthetic_acknowledgement(setti
 
 
 def test_maturity_workflows_are_reachable_through_signed_and_admin_apis(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -593,7 +593,7 @@ def test_maturity_workflows_are_reachable_through_signed_and_admin_apis(settings
 
 
 def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -683,8 +683,8 @@ def test_knowledge_work_result_can_only_enter_memory_through_inbox(settings):
 
 
 def test_admin_bulk_graph_review_is_bounded_and_reports_partial_failures(settings):
-    from jericho.server import create_app
-    from jericho.storage.models import EntityType
+    from friday.server import create_app
+    from friday.storage.models import EntityType
 
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -760,7 +760,7 @@ def test_group_chat_members_are_provisioned_with_least_privilege(settings):
     upload and background missions. A new account in a non-private chat is now 'guest'
     (read and chat only), which keeps the chat working instead of locking anyone out.
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001, 9001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -792,7 +792,7 @@ def test_group_chat_members_are_provisioned_with_least_privilege(settings):
 def test_an_existing_account_is_never_downgraded_by_a_group_message(settings):
     """ensure_user does not rewrite preset_key, so writing in a group must not strip
     an established member (or the owner) of their capabilities."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001, 9001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -810,8 +810,8 @@ def test_an_existing_account_is_never_downgraded_by_a_group_message(settings):
 def test_open_registration_off_still_denies_a_stranger(settings):
     """The feature defaults off: an unlisted private chat gets nothing, exactly
     as before it existed. This is the safety net for every install that never
-    touches JERICHO_TELEGRAM_OPEN_REGISTRATION."""
-    from jericho.server import create_app
+    touches FRIDAY_TELEGRAM_OPEN_REGISTRATION."""
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
     assert scoped.telegram_open_registration is False
@@ -826,7 +826,7 @@ def test_open_registration_provisions_a_stranger_with_the_newcomer_preset(settin
     private chat gets. Mutation this test must catch: dropping the
     `chat_is_allowlisted` distinction in server.py would hand 'user' here too.
     """
-    from jericho.server import NEWCOMER_PRESET_CAPABILITIES, create_app
+    from friday.server import NEWCOMER_PRESET_CAPABILITIES, create_app
 
     scoped = replace(
         settings,
@@ -872,7 +872,7 @@ def test_open_registration_does_not_widen_a_group_chat(settings):
     """Open registration is about strangers writing in PRIVATE, not about groups.
     An unlisted group must still be silently refused -- the feature must not
     become a second, wider allowlist by accident."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(
         settings,
@@ -890,7 +890,7 @@ def test_open_registration_does_not_widen_a_group_chat(settings):
 def test_open_registration_never_downgrades_a_returning_newcomer(settings):
     """A returning self-registered account must keep its preset on the second
     message, not be silently re-evaluated or upgraded/downgraded."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(
         settings,
@@ -914,7 +914,7 @@ def test_open_registration_notifies_owner_about_a_new_newcomer(settings):
     notification naming the newcomer. Mutation this must catch: drop the
     enqueue in server.py after ensure_user — this assertion goes red.
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     owner_chat = 5001
     scoped = replace(
@@ -988,7 +988,7 @@ def test_custom_instructions_are_self_service_and_reflected_in_me(settings):
     structurally impossible, not merely gated. GET /api/me shows what was set,
     and the endpoint is reachable by every preset that has chat.use (not just
     'user'), because it is a personal preference, not an admin action."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -1027,7 +1027,7 @@ def test_custom_instructions_are_capped(settings):
     """500 chars, matching the project's convention for short free-text fields
     (reason[:500] appears throughout the codebase) -- long enough for a real
     preference, short enough that it cannot become a second system prompt."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -1055,7 +1055,7 @@ def test_narrowing_the_newcomer_preset_in_code_reaches_a_database_that_already_h
     Мутация: вернуть охрану `if not auth_service.preset_exists("newcomer")` —
     тест обязан покраснеть.
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(
         settings,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
-from jericho.agent_runtime.llm import LLMRouter, _fit_messages_to_context, _system_first
+from friday.agent_runtime.llm import LLMRouter, _fit_messages_to_context, _system_first
 
 
 def test_qwen_prompt_collapses_all_system_messages_in_order():

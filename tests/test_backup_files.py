@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from jericho.backup_files import backup_files_incremental
+from friday.backup_files import backup_files_incremental
 
 
 def test_incremental_copy_is_idempotent_and_append_only(tmp_path):
@@ -64,7 +64,7 @@ def test_the_scheduled_worker_actually_calls_the_file_backup(settings, storage):
 
     import asyncio
 
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     manager = WorkersManager(settings, storage, None, None)
     asyncio.run(manager._scheduled_backup())  # noqa: SLF001
@@ -75,7 +75,7 @@ def test_the_scheduled_worker_actually_calls_the_file_backup(settings, storage):
 
 
 def test_diagnostics_warns_when_files_have_no_backup_yet(settings, storage):
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     storage.ensure_user("alice")
     (settings.files_dir / "u1").mkdir(parents=True, exist_ok=True)

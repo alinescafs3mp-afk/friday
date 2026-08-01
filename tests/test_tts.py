@@ -1,4 +1,4 @@
-"""Jericho speaks a reply on request — text-to-speech output.
+"""Friday speaks a reply on request — text-to-speech output.
 
 Pins the pure helper (`sanitize_text`) without loading a model, the `speak`
 agent tool's gating/degradation contract with piper monkeypatched (so the
@@ -17,7 +17,7 @@ import base64
 
 import pytest
 
-from jericho.tts import Speech, TTSUnavailable, sanitize_text
+from friday.tts import Speech, TTSUnavailable, sanitize_text
 
 # --- sanitize_text (pure, no model) ----------------------------------------
 
@@ -44,11 +44,11 @@ def test_sanitize_text_empty_input_stays_empty():
 
 
 def _kernel(settings, storage):
-    from jericho.execution_kernel import ExecutionKernel
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import AuthorizationService
-    from jericho.web_surfer import WebSurfer
+    from friday.execution_kernel import ExecutionKernel
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import AuthorizationService
+    from friday.web_surfer import WebSurfer
 
     storage.ensure_user("alice", preset_key="user")
     auth = AuthorizationService(storage)
@@ -82,7 +82,7 @@ async def test_speak_degrades_gracefully_when_the_engine_is_unavailable(settings
     calls and the final answer must survive a missing optional dependency."""
     from dataclasses import replace
 
-    import jericho.execution_kernel as execution_kernel_module
+    import friday.execution_kernel as execution_kernel_module
 
     settings = replace(settings, tts_enabled=True)
     kernel, actor = _kernel(settings, storage)
@@ -112,7 +112,7 @@ async def test_speak_produces_a_voice_attachment_kept_out_of_the_llm_visible_dat
     `to_llm_message()`."""
     from dataclasses import replace
 
-    import jericho.execution_kernel as execution_kernel_module
+    import friday.execution_kernel as execution_kernel_module
 
     settings = replace(settings, tts_enabled=True)
     kernel, actor = _kernel(settings, storage)
@@ -152,7 +152,7 @@ def test_synthesize_speech_rejects_a_voice_that_produced_no_audio(monkeypatch):
     test must go red (either a silent empty clip or an unhandled encoder error
     instead of the expected `TTSUnavailable`).
     """
-    import jericho.tts as tts_module
+    import friday.tts as tts_module
 
     class _EmptyEngine:
         def synthesize(self, text):
@@ -169,7 +169,7 @@ async def test_guest_can_call_speak(settings, storage):
     """`tts.use` is granted at the same tier as `chat.use` — a guest who can chat
     can also ask for a spoken reply. Mutation: drop "guest" from tts.use's
     default_presets — this must go red."""
-    from jericho.permissions import AuthorizationService
+    from friday.permissions import AuthorizationService
 
     storage.ensure_user("bob", preset_key="guest")
     auth = AuthorizationService(storage)
@@ -214,7 +214,7 @@ class _SpeaksKernel:
         self._attachment = attachment
 
     async def execute(self, name, arguments, *, actor=None):
-        from jericho.execution_kernel import ToolResult
+        from friday.execution_kernel import ToolResult
 
         if name == "speak":
             return ToolResult(name, True, data={"spoken": True}, attachment=self._attachment)
@@ -227,8 +227,8 @@ async def test_agentic_loop_surfaces_the_speak_attachment_as_voice_clip(settings
     while the production loop never reads its output. Mutation: stop reading
     `tool_result.attachment` in `_agentic_loop`'s per-call loop (or stop adding
     `voice_clip` to the returned dict) — this must go red."""
-    from jericho.agent_runtime import AgentContext, AgentRuntime
-    from jericho.permissions import ActorContext
+    from friday.agent_runtime import AgentContext, AgentRuntime
+    from friday.permissions import ActorContext
 
     storage.ensure_user("alice")
     attachment = {"kind": "voice", "mime_type": "audio/ogg", "audio_base64": "Zm9v", "duration_sec": 1.0}
@@ -252,8 +252,8 @@ async def test_agentic_loop_surfaces_the_speak_attachment_as_voice_clip(settings
 async def test_agentic_loop_leaves_voice_clip_none_when_speak_was_not_called(settings, storage):
     """Mutation: hardcode `voice_clip` to a truthy value regardless of whether
     `speak` ran — this must go red (a turn that never spoke must not ship audio)."""
-    from jericho.agent_runtime import AgentContext, AgentRuntime
-    from jericho.permissions import ActorContext
+    from friday.agent_runtime import AgentContext, AgentRuntime
+    from friday.permissions import ActorContext
 
     class _AnswersImmediatelyLLM:
         enabled = True

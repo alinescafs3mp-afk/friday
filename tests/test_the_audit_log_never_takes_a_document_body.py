@@ -23,7 +23,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
+from friday.server import create_app
 
 SECRET = "СЕКРЕТНАЯ-СТРОКА-КОТОРОЙ-НЕ-МЕСТО-В-ЖУРНАЛЕ"
 

@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from jericho.ingestion._base import (
+from friday.ingestion._base import (
     DECLARED_ENTITY_METHODS,
     EVIDENCE_ONLY_ENTITY_METHODS,
     _extract_entities,

@@ -1,6 +1,6 @@
-# Jericho
+# Friday
 
-**Jericho** — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
+**Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
 Текущая версия: **0.151.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
 
@@ -54,7 +54,7 @@ Telegram → подписанный durable bridge → Conversation + mode
 - Строгая tenant isolation действует на SQL, graph, conversations, files, feedback, Admin API и tools.
 - Capability-based permissions используют default deny, preset-ы `owner`, `admin`, `moderator`, `user`, `guest`, custom presets и явные allow/deny overrides без обходного повышения прав.
 - Admin UI/API поддерживают массовый triage Inbox, ручное promotion/correction, model advice, inspection provenance/versions/entity links, Entity Resolution с выбором canonical target, очереди связей/конфликтов, quality dashboard, explain-трейс ретривера (почему запись нашлась/отброшена/так ранжирована) и безопасную ревизию legacy-мусора.
-- Веб-страницы сохраняются по URL (`POST /api/ingest/url`, только публичные адреса, очистка и review-gate) прямо из панели или в один клик через букмарклет «Сохранить в Jericho» — он открывает панель с адресом текущей страницы, не храня токен в закладке.
+- Веб-страницы сохраняются по URL (`POST /api/ingest/url`, только публичные адреса, очистка и review-gate) прямо из панели или в один клик через букмарклет «Сохранить в Friday» — он открывает панель с адресом текущей страницы, не храня токен в закладке.
 - Legacy quality и lifecycle scan только показывают кандидатов. По выбранным объектам администратор может вернуть материал в Inbox, переобогатить, явно подтвердить, снизить importance, архивировать или выполнить soft delete; worker никогда не применяет эти действия автоматически.
 - Telegram bridge использует устойчивую SQLite-очередь, persistent offset, OS-backed singleton lease, idempotency, bounded retry/dead-letter и HMAC-подпись backend-запросов. Временная ошибка inline-действия сохраняет кнопку для безопасного повтора.
 - Backend захватывает durable idempotency lease до любых побочных эффектов: точный retry воспроизводит сохранённый результат, активный конкурент получает временный `409`, а повтор того же `source_ref` с иным payload — постоянный conflict без потери новых данных.
@@ -101,8 +101,8 @@ D:\jericho\models\qwen3.6-35b-a3b-nvfp4\
 В `.env.local` временно задайте:
 
 ```dotenv
-JERICHO_LLM_ENABLED=0
-JERICHO_WORKERS_ENABLED=0
+FRIDAY_LLM_ENABLED=0
+FRIDAY_WORKERS_ENABLED=0
 ```
 
 Затем:
@@ -112,7 +112,7 @@ jericho doctor
 jericho server
 ```
 
-Admin UI: `http://127.0.0.1:8000/admin/`. Нажмите **API-ключ** и вставьте значение `JERICHO_API_TOKEN` из `.env.local`.
+Admin UI: `http://127.0.0.1:8000/admin/`. Нажмите **API-ключ** и вставьте значение `FRIDAY_API_TOKEN` из `.env.local`.
 
 Без LLM ingestion, граф, поиск, права, Admin UI и резервирование работают; ответы агента переходят в честный локальный fallback.
 
@@ -127,13 +127,13 @@ Copy-Item .env.example .env
 2. В `.env` обязательно задайте:
 
 ```dotenv
-JERICHO_API_TOKEN=<случайная строка минимум 32 символа>
-JERICHO_TELEGRAM_BRIDGE_SECRET=<другая случайная строка минимум 32 символа>
-JERICHO_TELEGRAM_BOT_TOKEN=<токен BotFather>
-JERICHO_HOST_HOME=D:/jericho
-JERICHO_MODEL_ROOT=D:/jericho/models
+FRIDAY_API_TOKEN=<случайная строка минимум 32 символа>
+FRIDAY_TELEGRAM_BRIDGE_SECRET=<другая случайная строка минимум 32 символа>
+FRIDAY_TELEGRAM_BOT_TOKEN=<токен BotFather>
+FRIDAY_HOST_HOME=D:/jericho
+FRIDAY_MODEL_ROOT=D:/friday/models
 # Внутри Compose backend обращается к vLLM по имени сервиса:
-JERICHO_DOCKER_LLM_BASE_URL=http://dispatcher:8001/v1
+FRIDAY_DOCKER_LLM_BASE_URL=http://dispatcher:8001/v1
 ```
 
 Случайные значения можно получить так:
@@ -151,7 +151,7 @@ docker compose --profile llm --profile telegram up -d --build
 Только backend, без модели и Telegram:
 
 ```powershell
-# Сначала задайте JERICHO_LLM_ENABLED=0 в .env
+# Сначала задайте FRIDAY_LLM_ENABLED=0 в .env
 docker compose up -d --build backend
 ```
 
@@ -164,7 +164,7 @@ docker compose logs -f dispatcher
 docker compose logs -f telegram
 ```
 
-Compose сам собирает закреплённый image `jericho/vllm-openai:v0.25.1-asyncio-e4f88a8` из `docker/vllm-asyncio/Dockerfile`. Базовый vLLM-образ закреплён по digest, а небольшая fail-closed правка применяется только при полном совпадении SHA-256 исходного файла. Отдельная ручная сборка при первом запуске не нужна; её можно выполнить командой `docker compose --profile llm build dispatcher`.
+Compose сам собирает закреплённый image `friday/vllm-openai:v0.25.1-asyncio-e4f88a8` из `docker/vllm-asyncio/Dockerfile`. Базовый vLLM-образ закреплён по digest, а небольшая fail-closed правка применяется только при полном совпадении SHA-256 исходного файла. Отдельная ручная сборка при первом запуске не нужна; её можно выполнить командой `docker compose --profile llm build dispatcher`.
 
 ## Обновление существующей установки
 
@@ -195,7 +195,7 @@ Compose сам собирает закреплённый image `jericho/vllm-ope
 | MM profiling | пропускается |
 | MM processor cache | `4.0 GiB` |
 
-Поля `JERICHO_QWEN_QUANT_ARGS`, `JERICHO_QWEN_ENFORCE_EAGER` и `JERICHO_QWEN_EXTRA_ARGS` оставлены для конкретной сборки vLLM/GPU, поскольку точные quantization-флаги зависят от формата локального snapshot.
+Поля `FRIDAY_QWEN_QUANT_ARGS`, `FRIDAY_QWEN_ENFORCE_EAGER` и `FRIDAY_QWEN_EXTRA_ARGS` оставлены для конкретной сборки vLLM/GPU, поскольку точные quantization-флаги зависят от формата локального snapshot.
 
 ## Telegram
 
@@ -218,15 +218,15 @@ Bridge допускает только один активный процесс 
 
 Ответы получают inline-оценки 👍/👎. В `knowledge_work` и `research` итог можно отправить кнопкой в Inbox; это предложение на review, а не скрытая запись в граф. `/status` показывает сохранённый режим текущего Telegram-канала.
 
-Принимаются вложения: текст, изображения и документы (с извлечением текста/OCR), а также голосовые, аудио, видео, видео-кружки и анимации. Локальная модель зрения распознаёт изображения; голосовые и аудио при включённом `JERICHO_WHISPER_ENABLED` расшифровываются локально (опциональный пакет `jericho[voice]`, faster-whisper, полностью офлайн) и попадают в Inbox уже текстом — иначе, как и видео, сохраняются как есть с провенансом и метаданными и ждут вашего решения в Inbox, без расшифровки. Геолокация и контакт превращаются в заметку. Неподдерживаемые типы (стикеры, опросы) получают понятный ответ, а не молча теряются. Происхождение пересланных сообщений (кто и когда переслал) сохраняется в провенанс.
+Принимаются вложения: текст, изображения и документы (с извлечением текста/OCR), а также голосовые, аудио, видео, видео-кружки и анимации. Локальная модель зрения распознаёт изображения; голосовые и аудио при включённом `FRIDAY_WHISPER_ENABLED` расшифровываются локально (опциональный пакет `jericho[voice]`, faster-whisper, полностью офлайн) и попадают в Inbox уже текстом — иначе, как и видео, сохраняются как есть с провенансом и метаданными и ждут вашего решения в Inbox, без расшифровки. Геолокация и контакт превращаются в заметку. Неподдерживаемые типы (стикеры, опросы) получают понятный ответ, а не молча теряются. Происхождение пересланных сообщений (кто и когда переслал) сохраняется в провенанс.
 
-Доступ к боту работает по принципу deny-by-default: бот отвечает только чатам из эффективного allowlist (объединение `JERICHO_TELEGRAM_ALLOWED_CHAT_IDS` и `JERICHO_TELEGRAM_OWNER_CHAT_IDS`). Пустой список означает, что не допущен никто. Прошедший allowlist пользователь регистрируется автоматически с preset-ом `user` и получает отдельный tenant ID вида `telegram:<realm>:<telegram_id>`.
+Доступ к боту работает по принципу deny-by-default: бот отвечает только чатам из эффективного allowlist (объединение `FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS` и `FRIDAY_TELEGRAM_OWNER_CHAT_IDS`). Пустой список означает, что не допущен никто. Прошедший allowlist пользователь регистрируется автоматически с preset-ом `user` и получает отдельный tenant ID вида `telegram:<realm>:<telegram_id>`.
 
 Чтобы разрешить конкретные чаты (или задать чат владельца для первичной настройки):
 
 ```dotenv
-JERICHO_TELEGRAM_ALLOWED_CHAT_IDS=123456789,-1001234567890
-JERICHO_TELEGRAM_OWNER_CHAT_IDS=123456789
+FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS=123456789,-1001234567890
+FRIDAY_TELEGRAM_OWNER_CHAT_IDS=123456789
 ```
 
 Если задан bridge secret, но эффективный allowlist пуст, backend в production не стартует (в loopback-разработке выводится предупреждение). Запросы моста подписываются HMAC с одноразовым nonce, что закрывает окно повторного воспроизведения.
@@ -289,10 +289,10 @@ jericho model-check
 
 ## Где лежат данные
 
-При `JERICHO_HOME=D:\jericho`:
+При `FRIDAY_HOME=D:\jericho`:
 
 ```text
-data/state/jericho.sqlite3       основная БД
+data/state/friday.sqlite3       основная БД
 data/state/telegram-inbox.sqlite3 очередь Telegram bridge
 data/files/                      исходные загруженные файлы
 data/memory-vault/               Markdown-представление знаний

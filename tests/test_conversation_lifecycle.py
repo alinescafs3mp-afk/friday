@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import FeedbackItem, FeedbackType, new_id
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import FeedbackItem, FeedbackType, new_id
 
 
 def _count(storage, sql: str, params: tuple) -> int:
@@ -72,7 +72,7 @@ def test_delete_conversation_cascades_messages_feedback_and_channel_binding(stor
 
 
 def test_conversations_manage_capability_scoped_to_real_users(storage):
-    from jericho.permissions import CORE_CAPABILITIES, ActorContext, AuthorizationService
+    from friday.permissions import CORE_CAPABILITIES, ActorContext, AuthorizationService
 
     cap = next(c for c in CORE_CAPABILITIES if c.security_id == "conversations.manage")
     assert cap.default_presets == ("admin", "moderator", "user")

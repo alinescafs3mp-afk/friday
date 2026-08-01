@@ -23,7 +23,7 @@ a live request.
 
 from __future__ import annotations
 
-from jericho.server import create_app
+from friday.server import create_app
 
 # Bumped deliberately when an endpoint is added or removed, never to make a test pass.
 # 149 → 151: пакетное подтверждение сущностей — GET групп и POST решения

@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.entity_phrases import mention_phrase_candidates
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import Entity, EntityType, new_id
+from friday.entity_phrases import mention_phrase_candidates
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import Entity, EntityType, new_id
 
 TAIL_NAME = "Ядрица Омега Ультра"
 HEAD_NAME = "Аметист Ноль Прайм"

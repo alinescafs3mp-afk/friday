@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 
-from jericho.storage._base import RUNTIME_EVENT_CAP
+from friday.storage._base import RUNTIME_EVENT_CAP
 
 
 def test_events_round_trip_with_their_payload(storage):
@@ -59,7 +59,7 @@ def test_events_can_be_filtered_by_type(storage):
 class _Manager:
     """The two attributes _persist_worker_state actually touches."""
 
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     _FAILED_STATUSES = WorkersManager._FAILED_STATUSES
     _persist_worker_state = WorkersManager._persist_worker_state

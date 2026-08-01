@@ -16,11 +16,11 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-import jericho.organs.monitors as monitors_module
-from jericho.organs import ServiceContext
-from jericho.organs.monitors import scan_monitors
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+import friday.organs.monitors as monitors_module
+from friday.organs import ServiceContext
+from friday.organs.monitors import scan_monitors
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _document(storage, user_id: str, text: str, title: str = "") -> str:

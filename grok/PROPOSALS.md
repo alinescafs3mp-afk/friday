@@ -42,9 +42,9 @@
 - **Что не так:** путь памяти уже отдаёт `best_snippet` вокруг совпадения; веб-путь
   по-прежнему режет `text[:preview_chars]` с начала. Агент, читающий страницу сам,
   снова получает титул и навигацию, а не абзац с ответом.
-- **Доказательство:** `jericho/retrieval/__init__.py:396-411` — `best_snippet` (query-aware);
-  `jericho/execution_kernel/__init__.py:525-526` применяет его в `memory_search`;
-  `jericho/web_surfer/__init__.py:100-109` — `FetchResult.to_dict` всегда берёт
+- **Доказательство:** `friday/retrieval/__init__.py:396-411` — `best_snippet` (query-aware);
+  `friday/execution_kernel/__init__.py:525-526` применяет его в `memory_search`;
+  `friday/web_surfer/__init__.py:100-109` — `FetchResult.to_dict` всегда берёт
   `self.text[:preview_chars]`; `research` на `:597` вызывает
   `to_dict(preview_chars=20_000)` без запроса; `_web_fetch` на
   `execution_kernel/__init__.py:587-590` возвращает этот словарь как есть.
@@ -370,7 +370,7 @@
 Формат твоих предложений — то, что нужно: файл:строка, сценарий отказа, чем
 проверим, цена. Продолжай так же. Одна просьба: там, где пишешь «замерено»,
 прикладывай сам стенд (скрипт или команду), чтобы замер можно было повторить —
-как это сделано в `~/.jericho/eval/`.
+как это сделано в `~/.friday/eval/`.
 
 ---
 
@@ -385,7 +385,7 @@
 ## G23. Состязательный обзор голоса Jericho (af620c3 / faab13a / 11a35b2) — 2026-07-31
 
 - **Статус:** обзор завершён; **HIGH-находок нет** (свежий взгляд, код не мой).
-- **Охват:** jericho/tts.py, execution_kernel (ToolResult.attachment, _speak,
+- **Охват:** friday/tts.py, execution_kernel (ToolResult.attachment, _speak,
   _audit_details), permissions (	ts.use), gent_runtime (oice_clip → oice),
   	elegram_bridge (_send_voice, _deliver_voice_reply, три call site), тесты
   	ests/test_tts.py + три delivery-теста в 	est_telegram_and_profile.py.
@@ -401,7 +401,7 @@ isk_level=0, presets admin/moderator/user/guest — как
 - **Нагрузка:** ограничена уже существующими потолками — API/Telegram rate-limit
   (server.py _enforce_rate_limit), tool-budget agentic loop (dialogue 4/2,
   research 12/5), 	ts_max_chars (default 2000), timeout tool 30 с, флаг
-  JERICHO_TTS_ENABLED (default off). Отдельный rate-limit на speak не нужен
+  FRIDAY_TTS_ENABLED (default off). Отдельный rate-limit на speak не нужен
   без замера реальной нагрузки; guest+speak не хуже guest+LLM по классу риска.
 - **Не меняю** risk/presets: тест 	est_guest_can_call_speak это уже контракт.
 

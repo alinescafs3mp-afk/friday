@@ -18,9 +18,9 @@ from datetime import date
 
 import pytest
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.telegram_bridge import TelegramBridge
-from jericho.telegram_bridge._commands import parse_period
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.telegram_bridge import TelegramBridge
+from friday.telegram_bridge._commands import parse_period
 
 
 @pytest.mark.parametrize(
@@ -157,8 +157,8 @@ def test_an_empty_period_explains_itself_instead_of_looking_like_an_empty_archiv
 def test_the_route_serves_documents_by_own_date(settings, storage):
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -178,7 +178,7 @@ def test_the_literal_route_is_not_shadowed_by_the_id_route(settings):
     идентификатор — эту грабку в проекте уже ловили с `/tags`."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         response = client.get(
@@ -201,8 +201,8 @@ def test_the_chat_says_how_much_of_the_period_it_showed():
 
     Мутация: печатать `len(doc_items)` вместо `total` — тест обязан покраснеть.
     """
-    from jericho.telegram_bridge import TelegramBridge
-    from jericho.telegram_bridge._views import _TIMELINE_SHOWN
+    from friday.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge._views import _TIMELINE_SHOWN
 
     page = {
         "items": [
@@ -236,9 +236,9 @@ def test_the_period_total_comes_from_the_route_not_from_the_page(settings):
 
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -283,7 +283,7 @@ def test_the_timeline_buttons_are_laid_out_in_rows_of_four():
     Там оно закреплено тестом с обоснованием «Восемь результатов в один ряд Telegram
     сожмёт в нечитаемое»; в хронику оно не доехало, и кнопок ставилось десять подряд.
     """
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     documents = {"items": [{"id": f"ko_{index:016x}", "title": f"акт {index}"} for index in range(10)]}
     markup = TelegramBridge._timeline_reply_markup(documents)  # noqa: SLF001
@@ -298,7 +298,7 @@ def test_status_hides_counters_that_can_only_be_zero():
     всегда: граф держится на связях знание↔сущность, которых 1399. Число, которое
     не может показать иное, учит человека неправде о его данных.
     """
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     empty_graph = {
         "knowledge_object_count": 1532,
@@ -326,7 +326,7 @@ def test_status_hides_counters_that_can_only_be_zero():
 
 
 def test_an_entity_without_relations_does_not_advertise_the_zero():
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     described = TelegramBridge._describe_merge_entity(  # noqa: SLF001
         {"name": "Казань", "entity_type": "location", "knowledge_count": 57, "relation_count": 0}

@@ -1,6 +1,6 @@
 """POST /api/me/regenerate — replay the last user turn through agent.chat.
 
-G15: mainstream chat products have «regenerate»; Jericho only let you retype.
+G15: mainstream chat products have «regenerate»; Friday only let you retype.
 Self-service, chat.use, conversation resolved like /api/chat for Telegram.
 Storage cannot branch alternate answers — a new user+assistant pair is appended.
 """
@@ -23,7 +23,7 @@ def test_regenerate_replays_last_user_message_not_an_earlier_one(settings):
     endpoint must take the LAST role=user row. Mutation: change the scan to
     `for row in recent` (forward) — this test turns red.
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -93,7 +93,7 @@ def test_regenerate_calls_agent_chat_and_empty_conversation_is_400(settings):
     """Mutation: delete the agent.chat call inside /regenerate — this turns red.
     Empty channel session (no prior chat) must 400, not invent a conversation.
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:
@@ -156,7 +156,7 @@ def test_regenerate_calls_agent_chat_and_empty_conversation_is_400(settings):
 
 def test_regenerate_accepts_explicit_conversation_id(settings):
     """Non-Telegram clients pass conversation_id in the body — same as /api/chat."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -198,7 +198,7 @@ async def test_concurrent_regenerate_does_not_call_agent_twice(settings):
 
     import httpx
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -254,8 +254,8 @@ def test_regenerate_warns_when_original_turn_had_attachments(settings):
 
     Mutation: stop writing had_attachments in AgentRuntime.chat → notice absent.
     """
-    from jericho.server import create_app
-    from jericho.telegram_bridge._callbacks import CallbacksMixin
+    from friday.server import create_app
+    from friday.telegram_bridge._callbacks import CallbacksMixin
 
     with TestClient(create_app(settings)) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -339,8 +339,8 @@ def test_agent_chat_records_had_attachments_on_user_message(settings, storage):
     import asyncio
     import json
 
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.permissions import AuthorizationService
+    from friday.agent_runtime import AgentRuntime
+    from friday.permissions import AuthorizationService
 
     storage.ensure_user("alice", preset_key="user")
     auth = AuthorizationService(storage)

@@ -20,8 +20,8 @@ import json
 
 import pytest
 
-from jericho.storage import iso_date
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage import iso_date
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make(storage, user_id: str, index: int, dates: list[str]) -> str:
@@ -148,7 +148,7 @@ def test_the_route_rejects_a_malformed_date_instead_of_ignoring_it(settings):
     и решит, что за период ничего нет."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -193,14 +193,14 @@ def _docx_bytes(created: str | None, *, modified: str | None = None) -> bytes:
 def test_a_docx_carries_its_own_date_from_the_file_not_the_text():
     """У владельца дата загрузки одна на весь архив — день импорта. Собственную
     дату документа записал редактор при сохранении, и это не угадывание."""
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     result = DocumentExtractor().extract(_docx_bytes("2023-04-12T08:30:00Z"), "приказ.docx", "")
     assert result.metadata.get("document_date") == "2023-04-12"
 
 
 def test_modified_is_used_only_when_created_is_missing():
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     extractor = DocumentExtractor()
     only_modified = extractor.extract(_docx_bytes(None, modified="2021-09-01T10:00:00Z"), "a.docx", "")
@@ -215,7 +215,7 @@ def test_modified_is_used_only_when_created_is_missing():
 def test_a_file_without_core_properties_gets_no_invented_date():
     """Нет даты в файле — нет даты. Придумывать её значит вернуть ровно то
     угадывание, от которого фильтр по упоминаниям уходил."""
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     result = DocumentExtractor().extract(_docx_bytes(None), "без-даты.docx", "")
     assert "document_date" not in result.metadata
@@ -223,7 +223,7 @@ def test_a_file_without_core_properties_gets_no_invented_date():
 
 @pytest.mark.parametrize("bogus", ["0000-00-00T00:00:00Z", "9999-12-31T00:00:00Z", "мусор"])
 def test_implausible_dates_are_refused(bogus):
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     result = DocumentExtractor().extract(_docx_bytes(bogus), "кривая.docx", "")
     assert "document_date" not in result.metadata
@@ -285,7 +285,7 @@ def test_the_date_survives_a_failed_text_extraction():
     владельца 35 файлов не читаются вовсе, а их место в хронологии от этого не
     исчезает. Здесь docx намеренно неполон (нет _rels), python-docx на нём
     падает — дата обязана остаться."""
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     result = DocumentExtractor().extract(_docx_bytes("2018-11-20T12:00:00Z"), "битый.docx", "")
 
@@ -299,7 +299,7 @@ def test_the_backfill_reaches_objects_ingested_before_dates_were_captured(settin
     никуда не делся, и не создаёт версию — это дозапись провенанса, не правка."""
     import argparse
 
-    from jericho.cli import _backfill_document_dates
+    from friday.cli import _backfill_document_dates
 
     storage.ensure_user("alice")
     stored = settings.files_dir / "alice" / "old.docx"
@@ -347,7 +347,7 @@ def test_the_backfill_terminates_when_files_carry_no_dates(settings, storage):
     """
     import argparse
 
-    from jericho.cli import _backfill_document_dates
+    from friday.cli import _backfill_document_dates
 
     storage.ensure_user("alice")
     for index in range(7):
@@ -401,7 +401,7 @@ def test_the_backfill_terminates_when_files_carry_no_dates(settings, storage):
 
 
 async def _search(storage, **kwargs):
-    from jericho.retrieval import HybridSearcher
+    from friday.retrieval import HybridSearcher
 
     return await HybridSearcher(storage, None, record_usage=False).search("alice", "документ", **kwargs)
 

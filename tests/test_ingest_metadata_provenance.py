@@ -18,8 +18,8 @@ import json
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
 
 
 @pytest.fixture

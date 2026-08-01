@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from jericho.agent_runtime import (
+from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _extract_json_object,
@@ -23,8 +23,8 @@ from jericho.agent_runtime import (
     _unknown_verdict,
     _verification_caution,
 )
-from jericho.execution_kernel import ToolResult
-from jericho.permissions import ActorContext
+from friday.execution_kernel import ToolResult
+from friday.permissions import ActorContext
 
 
 class _EmptySearcher:

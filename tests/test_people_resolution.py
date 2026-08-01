@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.people import resolve_person, unambiguous
+from friday.people import resolve_person, unambiguous
 
 PEOPLE = [
     {

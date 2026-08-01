@@ -13,7 +13,7 @@ import re
 import time
 import urllib.request
 
-from jericho.documents import DocumentExtractor
+from friday.documents import DocumentExtractor
 
 URLS = [
     "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",

@@ -15,7 +15,7 @@ import json
 import httpx
 import pytest
 
-from jericho.model_check import check_model
+from friday.model_check import check_model
 
 CLEAN_ANSWER = "Париж"
 THINKING_ANSWER = (
@@ -100,7 +100,7 @@ def test_spending_the_whole_budget_thinking_is_reported_as_no_answer(settings, m
 
 
 def test_the_configured_model_not_being_served_is_caught(settings, monkeypatch):
-    """A typo in JERICHO_LLM_MODEL passes a TCP probe and fails every real request."""
+    """A typo in FRIDAY_LLM_MODEL passes a TCP probe and fails every real request."""
     _endpoint(monkeypatch, models=("some-other-model",))
     report = check_model(settings)
 
@@ -113,7 +113,7 @@ def test_missing_credentials_say_which_variable_to_set(settings, monkeypatch):
     report = check_model(settings)
 
     endpoint = _probe(report, "endpoint")
-    assert not endpoint.ok and "JERICHO_LLM_API_KEY" in endpoint.detail
+    assert not endpoint.ok and "FRIDAY_LLM_API_KEY" in endpoint.detail
     # It stops there: probing generation against an endpoint that refuses auth is noise.
     assert len(report.probes) == 1
 
@@ -169,7 +169,7 @@ def test_local_weights_advice_only_when_this_host_serves_the_model(settings, bas
     the advice tells the owner to configure what they already configured."""
     import dataclasses
 
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     settings = dataclasses.replace(settings, llm_enabled=True, llm_base_url=base_url)
     codes = [a["code"] for a in collect_diagnostics(settings)["actions"]]
@@ -237,7 +237,7 @@ def test_a_service_that_answers_one_input_but_rejects_the_batch_fails_the_check(
     batch = _probe(report, "embeddings batch")
     assert not batch.ok
     assert "maximum allowed batch size 32" in batch.detail
-    assert "JERICHO_EMBEDDINGS_MAX_INPUTS_PER_REQUEST" in batch.detail
+    assert "FRIDAY_EMBEDDINGS_MAX_INPUTS_PER_REQUEST" in batch.detail
     assert not report.ok
 
 
@@ -264,20 +264,20 @@ def test_a_batch_within_the_limit_passes(settings, monkeypatch):
 def test_an_empty_embeddings_key_inherits_the_llm_key(monkeypatch):
     """`.get(name, default)` falls back only when the variable is ABSENT.
 
-    An env file line `JERICHO_EMBEDDINGS_API_KEY=` supplies an empty VALUE, so the
+    An env file line `FRIDAY_EMBEDDINGS_API_KEY=` supplies an empty VALUE, so the
     intended inheritance did not happen: the backend sent no Authorization header and
     every indexing request came back 401 while the corpus quietly stayed unvectorised.
     """
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
-    monkeypatch.setenv("JERICHO_LLM_API_KEY", "shared-key-value")
-    monkeypatch.setenv("JERICHO_EMBEDDINGS_API_KEY", "")
+    monkeypatch.setenv("FRIDAY_LLM_API_KEY", "shared-key-value")
+    monkeypatch.setenv("FRIDAY_EMBEDDINGS_API_KEY", "")
     assert load_settings().embeddings_api_key == "shared-key-value"
 
-    monkeypatch.delenv("JERICHO_EMBEDDINGS_API_KEY")
+    monkeypatch.delenv("FRIDAY_EMBEDDINGS_API_KEY")
     assert load_settings().embeddings_api_key == "shared-key-value"
 
-    monkeypatch.setenv("JERICHO_EMBEDDINGS_API_KEY", "its-own-key")
+    monkeypatch.setenv("FRIDAY_EMBEDDINGS_API_KEY", "its-own-key")
     assert load_settings().embeddings_api_key == "its-own-key"
 
 

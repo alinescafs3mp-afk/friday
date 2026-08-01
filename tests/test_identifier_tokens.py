@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.retrieval import HybridSearcher, tokens_of
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.retrieval import HybridSearcher, tokens_of
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _store(storage, title: str, content: str) -> str:
@@ -126,8 +126,8 @@ def test_a_long_question_does_not_lose_the_term_that_identifies_the_answer(stora
     """
     import re
 
-    from jericho.storage._knowledge import _FTS_TERM_BUDGET, _fts_terms
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage._knowledge import _FTS_TERM_BUDGET, _fts_terms
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("owner")
 
@@ -179,7 +179,7 @@ def test_a_long_question_does_not_lose_the_term_that_identifies_the_answer(stora
     # The budget counts WORDS. `чёрных` and `черных` are one word in two spellings
     # (see `_yo_spellings`), added after the budget so a spelling never costs a
     # distinct word its slot.
-    from jericho.retrieval import _YO_FOLD
+    from friday.retrieval import _YO_FOLD
 
     assert len({term.translate(_YO_FOLD) for term in chosen}) <= _FTS_TERM_BUDGET
 

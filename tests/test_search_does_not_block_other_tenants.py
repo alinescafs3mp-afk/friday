@@ -24,8 +24,8 @@ import time
 
 import pytest
 
-import jericho.retrieval as retrieval_module
-from jericho.retrieval import HybridSearcher
+import friday.retrieval as retrieval_module
+from friday.retrieval import HybridSearcher
 
 
 def _candidates(count: int) -> list[dict]:
@@ -58,7 +58,7 @@ async def test_lexical_rank_does_not_block_the_event_loop(settings, storage, mon
     call site back to a direct `self._lexical_rank(...)` call — this test
     must go red (one gap around 0.3s instead of every gap staying small).
     """
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("alice")
     for index in range(5):

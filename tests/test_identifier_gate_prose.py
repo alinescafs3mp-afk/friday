@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.retrieval import HybridSearcher
+from friday.retrieval import HybridSearcher
 
 identifiers = HybridSearcher._query_identifiers  # noqa: SLF001
 
@@ -63,7 +63,7 @@ def test_a_single_part_token_with_a_dot_is_not_an_abbreviation():
 @pytest.mark.asyncio
 async def test_a_common_russian_phrase_no_longer_empties_the_answer(storage, settings):
     """Сквозь настоящий поиск: тот же запрос с «и т.д.» и без него."""
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("alice")
     text = (

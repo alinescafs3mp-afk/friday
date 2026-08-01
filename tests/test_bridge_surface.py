@@ -27,7 +27,7 @@ import pathlib
 
 import pytest
 
-from jericho.telegram_bridge import BOT_COMMANDS, TelegramBridge, _UpdateInbox
+from friday.telegram_bridge import BOT_COMMANDS, TelegramBridge, _UpdateInbox
 
 PACKAGE = pathlib.Path(inspect.getfile(TelegramBridge)).parent
 
@@ -168,7 +168,7 @@ def test_package_still_exports_every_module_level_name() -> None:
     Every one of these resolved from the single file. None is imported elsewhere in the
     tree today, which is exactly why nothing would have failed had they been dropped.
     """
-    import jericho.telegram_bridge as package
+    import friday.telegram_bridge as package
 
     expected = {
         "API_BASE",
@@ -189,7 +189,7 @@ def test_package_still_exports_every_module_level_name() -> None:
         "_UpdateInbox",
     }
     missing = sorted(name for name in expected if not hasattr(package, name))
-    assert not missing, f"no longer importable from jericho.telegram_bridge: {missing}"
+    assert not missing, f"no longer importable from friday.telegram_bridge: {missing}"
 
 
 def test_every_button_namespace_has_a_handler() -> None:
@@ -272,7 +272,7 @@ EXPECTED_COMMANDS = {
 # новых методов на TelegramBridge.
 # 50 → 51: /reminders + _send_reminders + namespace remind (G19).
 # 51 → 53: /export + _send_document + _backend_text (G20).
-# 53 → 55: speak tool + _send_voice + _deliver_voice_reply (Jericho voice output).
+# 53 → 55: speak tool + _send_voice + _deliver_voice_reply (Friday voice output).
 # 55 → 56: /profile — вид объекта (спека v3 §6), +_send_entity_profile.
 # 56 → 57: lineage-подвал у doc:show (спека v3 §6), +_format_lineage_footer.
 # 58 → 60: _entity_actions_markup + _entity_type_markup — действия над объектом
@@ -371,7 +371,7 @@ def test_proxy_applies_to_telegram_only(monkeypatch, tmp_path) -> None:
     """
     import httpx
 
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     seen: list[str | None] = []
     real_init = httpx.AsyncClient.__init__
@@ -404,7 +404,7 @@ def test_proxy_applies_to_telegram_only(monkeypatch, tmp_path) -> None:
 
 
 def test_proxy_credentials_are_kept_out_of_the_log() -> None:
-    from jericho.telegram_bridge._base import _proxy_password, _redact_userinfo
+    from friday.telegram_bridge._base import _proxy_password, _redact_userinfo
 
     assert _redact_userinfo("http://user:s3cret@127.0.0.1:10808") == "http://***@127.0.0.1:10808"
     assert _proxy_password("http://user:s3cret@127.0.0.1:10808") == "s3cret"
@@ -425,7 +425,7 @@ def test_durable_queue_path_has_no_cwd_relative_default() -> None:
     """
     import dataclasses
 
-    from jericho.telegram_bridge import TelegramConfig
+    from friday.telegram_bridge import TelegramConfig
 
     field_map = {f.name: f for f in dataclasses.fields(TelegramConfig)}
     path_field = field_map["inbox_db_path"]
@@ -444,7 +444,7 @@ def test_durable_queue_path_has_no_cwd_relative_default() -> None:
 def test_socks_proxy_is_refused_with_a_usable_message() -> None:
     """httpx needs the optional `socksio` package for SOCKS and would otherwise fail
     with a bare ImportError inside the first poll, long after startup looked fine."""
-    from jericho.telegram_bridge import TelegramConfig
+    from friday.telegram_bridge import TelegramConfig
 
     config = TelegramConfig(
         bot_token="1:aaa",
@@ -498,7 +498,7 @@ def test_a_multiline_command_keeps_its_whole_argument() -> None:
     import ast
     from pathlib import Path
 
-    import jericho.telegram_bridge._commands as commands_module
+    import friday.telegram_bridge._commands as commands_module
 
     # Over the AST, not the text: the explanatory comment in that module quotes the
     # old expression, and a substring search would match the very explanation.
@@ -531,7 +531,7 @@ def test_chunking_counts_the_units_telegram_counts() -> None:
     sendMessage answers 400 and the user never receives the answer at all. The
     more expressive the reply, the likelier it fails.
     """
-    from jericho.telegram_bridge._base import TELEGRAM_TEXT_LIMIT, split_for_telegram, utf16_length
+    from friday.telegram_bridge._base import TELEGRAM_TEXT_LIMIT, split_for_telegram, utf16_length
 
     assert utf16_length("абв") == 3
     assert utf16_length("🚀") == 2  # one code point, two UTF-16 units
@@ -562,7 +562,7 @@ def test_chunking_counts_the_units_telegram_counts() -> None:
 
 
 def _bridge(tmp_path, allowed: list[int]):
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     return TelegramBridge(
         TelegramConfig(
@@ -587,7 +587,7 @@ def test_one_allowlisted_group_used_to_silence_every_notification(tmp_path) -> N
     budget, once per poll interval, so the bridge eventually rate-limited itself —
     and the owner shares the loopback address with it.
     """
-    from jericho.security import sign_bridge_request, verify_bridge_request
+    from friday.security import sign_bridge_request, verify_bridge_request
 
     # The order the config layer actually produces.
     allowed = sorted([-1001234567890, 5001])
@@ -643,7 +643,7 @@ def test_a_group_only_allowlist_says_so_instead_of_going_quiet(tmp_path, caplog)
     bridge = _bridge(tmp_path, [-1001234567890])
     try:
         assert bridge._signer_chat_id() == ""  # noqa: SLF001
-        with caplog.at_level(logging.ERROR, logger="jericho.telegram_bridge"):
+        with caplog.at_level(logging.ERROR, logger="friday.telegram_bridge"):
             asyncio.run(bridge._drain_outbound(None, None))  # noqa: SLF001
             asyncio.run(bridge._drain_outbound(None, None))  # noqa: SLF001
     finally:

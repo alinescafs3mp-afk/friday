@@ -8,7 +8,7 @@ background workers on threadpool threads stepped cursors on the *same*
 connection concurrently with request handlers — a documented "recursive use of
 cursors" / half-written-read hazard that surfaced as ``None`` in NOT NULL
 columns (e.g. ``quality_score``). The tests below hammer reads and writes from
-many threads on one shared :class:`JerichoStorage` and assert no exceptions and
+many threads on one shared :class:`FridayStorage` and assert no exceptions and
 internally consistent reads.
 """
 
@@ -19,8 +19,8 @@ import threading
 import time
 from dataclasses import replace
 
-from jericho.storage import JerichoStorage
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage import FridayStorage
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make_pair(user_id: str, n: int) -> tuple[RawObject, KnowledgeObject]:
@@ -200,7 +200,7 @@ def test_close_shuts_every_thread_connection_and_reopens(settings, tmp_path):
     """
 
     database = tmp_path / "concurrency.sqlite3"
-    store = JerichoStorage(replace(settings, database_path=database))
+    store = FridayStorage(replace(settings, database_path=database))
     try:
         store.ensure_user("carol")
 
@@ -239,7 +239,7 @@ def test_close_waits_for_in_flight_write_transaction(settings, tmp_path):
     """
 
     database = tmp_path / "drain.sqlite3"
-    store = JerichoStorage(replace(settings, database_path=database))
+    store = FridayStorage(replace(settings, database_path=database))
     try:
         store.ensure_user("erin")
         raw, ko = _make_pair("erin", 0)
@@ -296,10 +296,10 @@ def test_an_interrupted_transaction_is_not_committed_by_close(settings, tmp_path
     """
     import pytest
 
-    from jericho.storage.models import utc_now
+    from friday.storage.models import utc_now
 
     database = tmp_path / "interrupted.sqlite3"
-    store = JerichoStorage(replace(settings, database_path=database))
+    store = FridayStorage(replace(settings, database_path=database))
     try:
         store.ensure_user("owner")
         raw, ko = _make_pair("owner", 1)
@@ -314,7 +314,7 @@ def test_an_interrupted_transaction_is_not_committed_by_close(settings, tmp_path
     finally:
         store.close()
 
-    reopened = JerichoStorage(replace(settings, database_path=database))
+    reopened = FridayStorage(replace(settings, database_path=database))
     try:
         row = reopened.execute("SELECT value FROM runtime_kv WHERE key='half-written'").fetchone()
         assert row is None, "an interrupted transaction survived close() as a durable write"
@@ -324,7 +324,7 @@ def test_an_interrupted_transaction_is_not_committed_by_close(settings, tmp_path
 
 
 def _one_knowledge_object(storage, user_id: str = "owner"):
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user(user_id)
     raw = RawObject(
@@ -397,7 +397,7 @@ def test_concurrent_edits_to_one_object_all_survive(storage):
 
 def test_concurrent_entity_edits_all_survive(storage):
     """`update_entity` had the identical shape, and so does its snapshot table."""
-    from jericho.storage.models import Entity, EntityType, new_id
+    from friday.storage.models import Entity, EntityType, new_id
 
     writers = 6
     storage.ensure_user("owner")
@@ -455,11 +455,11 @@ def test_shutdown_waits_for_a_reader_and_then_refuses_to_reopen(settings, tmp_pa
     """
     import pytest
 
-    from jericho.storage import StorageClosedError
-    from jericho.workers._blocking import _tracked, snapshot, wait_until_idle
+    from friday.storage import StorageClosedError
+    from friday.workers._blocking import _tracked, snapshot, wait_until_idle
 
     database = tmp_path / "shutdown.sqlite3"
-    store = JerichoStorage(replace(settings, database_path=database))
+    store = FridayStorage(replace(settings, database_path=database))
     store.ensure_user("owner")
 
     reading = threading.Event()
@@ -504,7 +504,7 @@ def test_shutdown_waits_for_a_reader_and_then_refuses_to_reopen(settings, tmp_pa
 def test_a_plain_close_still_reopens_for_restore(settings, tmp_path):
     """`final` must not break the contract restore_backup depends on."""
     database = tmp_path / "reopen.sqlite3"
-    store = JerichoStorage(replace(settings, database_path=database))
+    store = FridayStorage(replace(settings, database_path=database))
     try:
         store.ensure_user("owner")
         store.close()  # not final
@@ -515,7 +515,7 @@ def test_a_plain_close_still_reopens_for_restore(settings, tmp_path):
 
 def test_the_drain_budget_comes_from_the_workers(settings, storage):
     """A constant would be a guess; the worker's own timeout is the answer."""
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     manager = WorkersManager(replace(settings, workers_enabled=True), storage, None, None)
     manager.register_all()

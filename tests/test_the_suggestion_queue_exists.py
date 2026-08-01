@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 
-from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _document(storage, user_id: str, index: int, suggestions: int) -> str:
@@ -128,7 +128,7 @@ def test_the_route_says_the_number_is_an_estimate(settings, storage):
     """Предложение и связь — не одно и то же, и называть оценку точным остатком нельзя."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     storage.ensure_user("alice")
     _document(storage, "alice", 1, 5)
@@ -176,7 +176,7 @@ def test_groups_collect_one_entity_across_documents(settings, storage):
     «Казань в 57 документах» — одно решение, а не 57."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     storage.ensure_user("alice")
     _document_with_text(storage, "alice", 1, "Сервис ATLAS-01 обслуживает узел связи по графику.")
@@ -199,7 +199,7 @@ def test_groups_collect_one_entity_across_documents(settings, storage):
 def test_group_accept_is_one_decision_for_every_document(settings, storage):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     storage.ensure_user("alice")
     first = _document_with_text(storage, "alice", 3, "Сервис ATLAS-02 обслуживает узел связи.")
@@ -249,7 +249,7 @@ def test_group_reject_records_refusal_without_creating_a_node(settings, storage)
     """Отклонение группы без узла не должно СОЗДАВАТЬ узел ради записи отказа."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     storage.ensure_user("alice")
     first = _document_with_text(storage, "alice", 5, "В тексте встречается в Наставлении по связи.")

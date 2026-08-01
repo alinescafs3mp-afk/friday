@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.retrieval._keyboard import switched, to_english, to_russian
+from friday.retrieval._keyboard import switched, to_english, to_russian
 
 
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ def test_digits_and_unmapped_characters_survive():
 
 def test_the_table_pairs_every_key():
     """A shifted character here would corrupt every query it touches."""
-    from jericho.retrieval import _keyboard
+    from friday.retrieval import _keyboard
 
     for english_row, russian_row in _keyboard._ROWS:
         assert len(english_row) == len(russian_row), (english_row, russian_row)

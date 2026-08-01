@@ -15,21 +15,21 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.organs import ServiceContext
-from jericho.organs.reflection import (
+from friday.knowledge_graph import KnowledgeGraph
+from friday.organs import ServiceContext
+from friday.organs.reflection import (
     REFLECTION_CAPABILITY,
     ReflectionOrgan,
     build_reflection,
     format_reflection,
 )
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _reflection_settings(*, min_knowledge: int = 1, quiet_start: int = 0, quiet_end: int = 0):
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     return replace(
         load_settings(),
@@ -100,7 +100,7 @@ async def test_reflection_worker_enqueues_weekly_digest_and_dedups(storage):
     user_id = _seed_telegram_user(storage, "5001")
     _seed_knowledge(storage, user_id, "Проект Orion", "переходит на PostgreSQL", ["orion"])
 
-    from jericho.organs.reflection import reflection_digest
+    from friday.organs.reflection import reflection_digest
 
     ctx = ServiceContext(
         settings=settings, storage=storage, kg=KnowledgeGraph(storage), ingestion=None, llm=None
@@ -123,7 +123,7 @@ async def test_reflection_worker_skips_almost_empty_base(storage):
     user_id = _seed_telegram_user(storage, "5001")
     _seed_knowledge(storage, user_id, "Одна", "мало", [])  # below threshold
 
-    from jericho.organs.reflection import reflection_digest
+    from friday.organs.reflection import reflection_digest
 
     ctx = ServiceContext(
         settings=settings, storage=storage, kg=KnowledgeGraph(storage), ingestion=None, llm=None
@@ -139,7 +139,7 @@ async def test_reflection_worker_respects_quiet_hours(storage):
     user_id = _seed_telegram_user(storage, "5001")
     _seed_knowledge(storage, user_id, "Ночью", "текст", [])
 
-    from jericho.organs.reflection import reflection_digest
+    from friday.organs.reflection import reflection_digest
 
     ctx = ServiceContext(
         settings=settings, storage=storage, kg=KnowledgeGraph(storage), ingestion=None, llm=None
@@ -175,6 +175,6 @@ def test_reflection_endpoint_returns_digest_for_actor(settings):
 
 
 def _dummy_ctx():
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     return ServiceContext(settings=load_settings(), storage=None, kg=None, ingestion=None, llm=None)

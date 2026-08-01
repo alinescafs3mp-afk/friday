@@ -16,7 +16,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SURFACE = [ROOT / "jericho" / "admin_api", ROOT / "jericho" / "api"]
+SURFACE = [ROOT / "friday" / "admin_api", ROOT / "friday" / "api"]
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
 # Каждая запись — «path:lineno» точки, где detail= не литерал (обычно str(exc)).

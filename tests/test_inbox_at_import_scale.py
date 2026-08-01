@@ -21,7 +21,7 @@ import hashlib
 
 import pytest
 
-from jericho.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 # Три класса материала того самого импорта, с настоящими оценками качества.
 CORPUS = (
@@ -146,7 +146,7 @@ def test_the_bands_are_fixed_not_quantiles(storage):
 def test_the_route_offers_the_axis(settings):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -180,7 +180,7 @@ def test_a_truncated_answer_says_so_instead_of_blaming_the_model():
     """
     import pytest
 
-    from jericho.ingestion._base import _parse_model_response
+    from friday.ingestion._base import _parse_model_response
 
     with pytest.raises(ValueError, match="cut off by the token budget"):
         _parse_model_response(
@@ -207,6 +207,6 @@ def test_the_token_ceiling_admits_a_reasoning_model():
     быть выше, иначе установка с рассуждающей моделью не работает «из коробки» и
     ломается молча — ошибкой разбора, а не отказом на старте.
     """
-    from jericho.config import load_settings
+    from friday.config import load_settings
 
     assert load_settings().cognition_max_tokens >= 3616

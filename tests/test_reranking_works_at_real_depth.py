@@ -16,7 +16,7 @@ import dataclasses
 
 import httpx
 
-from jericho.retrieval._rerank_backend import RerankBackend
+from friday.retrieval._rerank_backend import RerankBackend
 
 SERVICE_TOKEN_LIMIT = 16_384
 
@@ -112,7 +112,7 @@ def test_the_split_is_not_paid_for_twice(settings, monkeypatch):
 def test_the_split_shares_one_deadline(settings, monkeypatch):
     """Половины наследуют срок, а не таймаут: поиск не ждёт кратно обещанного."""
     clock = [1_000.0]
-    monkeypatch.setattr("jericho.retrieval._rerank_backend.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("friday.retrieval._rerank_backend.time.monotonic", lambda: clock[0])
     calls = _service(monkeypatch, clock=clock, cost_sec=3.0)
     started = clock[0]
 
@@ -137,7 +137,7 @@ def test_a_short_pool_still_goes_in_one_request(settings, monkeypatch):
 
 
 def _knowledge(storage, user_id: str, text: str) -> str:
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user(user_id)
     raw = RawObject(
@@ -176,7 +176,7 @@ def _reranker(by_position):
 
 
 def _searcher(storage, scores, **kwargs):
-    from jericho.retrieval import HybridSearcher
+    from friday.retrieval import HybridSearcher
 
     options = {"rerank_top": 20, "rerank_confident_min": 0.10}
     options.update(kwargs)
@@ -278,7 +278,7 @@ async def test_a_single_candidate_is_scored_and_can_be_cut(settings, storage):
 
 async def test_a_single_candidate_without_threshold_is_not_worth_a_call(settings, storage):
     """Без порога перестановка одного — пустой вызов службы; планка остаётся 2."""
-    from jericho.retrieval import HybridSearcher
+    from friday.retrieval import HybridSearcher
 
     calls: list[int] = []
 

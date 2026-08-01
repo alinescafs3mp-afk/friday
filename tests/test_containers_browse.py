@@ -16,10 +16,10 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.knowledge_graph import CONTAINER_ENTITY_TYPES, KnowledgeGraph
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import CONTAINER_ENTITY_TYPES, KnowledgeGraph
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _tagged_ko(storage, user_id: str, content: str, tags: list[str]) -> dict:
@@ -221,7 +221,7 @@ def test_bridge_signature_covers_query_string(settings):
     import time
     import uuid
 
-    from jericho.security import sign_bridge_request
+    from friday.security import sign_bridge_request
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -232,11 +232,11 @@ def test_bridge_signature_covers_query_string(settings):
             return client.get(
                 path,
                 headers={
-                    "X-Jericho-Timestamp": str(timestamp),
-                    "X-Jericho-User": "1001",
-                    "X-Jericho-Chat": "5001",
-                    "X-Jericho-Nonce": nonce,
-                    "X-Jericho-Signature": sign_bridge_request(
+                    "X-Friday-Timestamp": str(timestamp),
+                    "X-Friday-User": "1001",
+                    "X-Friday-Chat": "5001",
+                    "X-Friday-Nonce": nonce,
+                    "X-Friday-Signature": sign_bridge_request(
                         settings.telegram_bridge_secret,
                         timestamp=timestamp,
                         method="GET",
@@ -260,7 +260,7 @@ def test_bridge_signature_covers_query_string(settings):
 
 
 def _make_knowledge(storage, user_id: str, text: str):
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user(user_id)
     raw = RawObject(
@@ -292,8 +292,8 @@ def test_entity_counts_do_not_materialise_the_rows_they_count(storage, monkeypat
     every relation with both endpoint names joined in. Per returned entity, per
     query.
     """
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.storage.models import EntityType
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage.models import EntityType
 
     graph = KnowledgeGraph(storage)
     storage.ensure_user("owner")
@@ -326,8 +326,8 @@ def test_graph_context_reads_a_projection_not_document_bodies(storage):
     discarded. `list_entity_knowledge_refs` returns the four columns that are
     actually consulted.
     """
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.storage.models import EntityType
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage.models import EntityType
 
     graph = KnowledgeGraph(storage)
     storage.ensure_user("owner")

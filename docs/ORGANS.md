@@ -1,16 +1,18 @@
-# Jericho Organ Protocol (JOP)
+# Friday Organ Protocol (JOP)
 
-An **Organ** is a self-contained extension module for Jericho — a plugin. This
+> Проект переименован: **Friday** (по-русски — **Пятница**), ex codename Jericho.
+
+An **Organ** is a self-contained extension module for Friday — a plugin. This
 document is the contract: read it to understand how to write, integrate, or
 review an Organ. It is written to be followed without any other context.
 
 ## What an Organ is
 
-An Organ is a Python package under `jericho/organs/<name>/` that contributes one
+An Organ is a Python package under `friday/organs/<name>/` that contributes one
 or more of a small, fixed set of **extension points**. It is composed into the
 running system at startup by the `OrganRegistry`. There is no dynamic discovery
 and no entry-point magic: Organs are listed explicitly in
-`jericho.organs.build_registry`, so the running route/worker/capability set is
+`friday.organs.build_registry`, so the running route/worker/capability set is
 always exactly what the code says.
 
 The guiding rule, inherited from the whole system:
@@ -22,11 +24,11 @@ The guiding rule, inherited from the whole system:
 
 ## Extension points
 
-An Organ subclasses `jericho.organs.Organ` and overrides only what it needs.
+An Organ subclasses `friday.organs.Organ` and overrides only what it needs.
 All extension points are optional; the defaults contribute nothing.
 
 ```python
-from jericho.organs import Organ, OrganWorker, ServiceContext
+from friday.organs import Organ, OrganWorker, ServiceContext
 
 class MyOrgan(Organ):
     name = "my_organ"
@@ -44,7 +46,7 @@ class MyOrgan(Organ):
 
 ### `capabilities()`
 
-Return `CapabilityDefinition` objects (from `jericho.permissions`) to add new
+Return `CapabilityDefinition` objects (from `friday.permissions`) to add new
 entries to the capability model. Set `source="organ"` (or your organ's name) and
 use only the built-in preset keys (`owner`/`admin`/`moderator`/`user`/`guest`)
 in `default_presets`. They are registered on the `AuthorizationService` at
@@ -83,8 +85,8 @@ to touch (never reach into globals):
 
 | field       | what it is                                         |
 |-------------|----------------------------------------------------|
-| `settings`  | the frozen `JerichoSettings`                       |
-| `storage`   | `JerichoStorage` (DB + all data access)            |
+| `settings`  | the frozen `FridaySettings`                       |
+| `storage`   | `FridayStorage` (DB + all data access)            |
 | `kg`        | `KnowledgeGraph`                                    |
 | `ingestion` | `IngestionPipeline`                                 |
 | `llm`       | the `LLMRouter` (may be disabled — check `llm.enabled`) |
@@ -94,14 +96,14 @@ Need another service? Add a field here (once), not per-organ.
 ## Quiet hours
 
 Proactive organs must not ping the user at night. A shared, midnight-safe helper
-`jericho.organs.in_quiet_hours(hour, start, end)` and the system-wide settings
+`friday.organs.in_quiet_hours(hour, start, end)` and the system-wide settings
 `quiet_hours_start`/`quiet_hours_end` (UTC, `start == end` disables) apply to
 **every** organ — gate enqueue on them so a due message simply waits until the
 window ends.
 
 ## Reaching the user: the outbound notification channel
 
-Jericho's backend does not talk to Telegram directly — the Telegram bridge is
+Friday's backend does not talk to Telegram directly — the Telegram bridge is
 the only holder of the bot token. To push a message, an Organ **enqueues** it;
 the bridge drains the queue and delivers it.
 
@@ -125,12 +127,12 @@ ctx.storage.enqueue_notification(
 
 ## How an Organ is wired in (the integration seam)
 
-In `jericho/organs/__init__.py`, add your organ to `build_registry`:
+In `friday/organs/__init__.py`, add your organ to `build_registry`:
 
 ```python
 def build_registry(settings):
-    from jericho.organs.reminders import RemindersOrgan
-    from jericho.organs.my_organ import MyOrgan
+    from friday.organs.reminders import RemindersOrgan
+    from friday.organs.my_organ import MyOrgan
     return OrganRegistry([RemindersOrgan(), MyOrgan()])
 ```
 
@@ -140,33 +142,33 @@ that is the whole point of JOP.
 
 ## Reference organs
 
-**`reminders`** (`jericho/organs/reminders/`) — the minimal example: a single
+**`reminders`** (`friday/organs/reminders/`) — the minimal example: a single
 worker. It scans `entity_time` (the timeline) for events inside a lead window,
 resolves each user's Telegram chat from their metadata, checks the allowlist,
 and enqueues one deduplicated reminder per due event — respecting quiet hours.
-Config: `JERICHO_REMINDERS_ENABLED`, `_LEAD_DAYS`, `_POLL_INTERVAL_SEC`.
+Config: `FRIDAY_REMINDERS_ENABLED`, `_LEAD_DAYS`, `_POLL_INTERVAL_SEC`.
 
-**`reflection`** (`jericho/organs/reflection/`) — the **full** example: it uses
+**`reflection`** (`friday/organs/reflection/`) — the **full** example: it uses
 all three extension points. `capabilities()` contributes `reflection.read`;
 `workers()` pushes a weekly self-review digest (deterministic state summary plus
 an optional model-synthesised reflection when `ctx.llm` is enabled — the
 narrative is a message to the user, never written to the graph); `router()`
 serves an on-demand `GET /api/reflection` gated by that capability. Config:
-`JERICHO_REFLECTION_ENABLED`, `_INTERVAL_SEC`, `_MIN_KNOWLEDGE`. Copy its
+`FRIDAY_REFLECTION_ENABLED`, `_INTERVAL_SEC`, `_MIN_KNOWLEDGE`. Copy its
 structure when an organ needs a capability + an endpoint, not just a worker.
 
-**`profile`** (`jericho/organs/profile/`) — a pull-only organ: `capabilities()`
+**`profile`** (`friday/organs/profile/`) — a pull-only organ: `capabilities()`
 + `router()`, no worker. Computes a user model (recurring people, active
 projects, interests) from the graph and serves it at `GET /api/profile`. Copy
 it when an organ is a read surface, not a push.
 
-**`chronicle`** (`jericho/organs/chronicle/`) — temporal presence: an "on this
+**`chronicle`** (`friday/organs/chronicle/`) — temporal presence: an "on this
 day" resurfacing push (`workers()`) plus an episodic window query (`router()`),
 gated by `chronicle.read`. Shows how an organ contributes new **storage
 queries** (`list_recent_knowledge`, `list_knowledge_on_this_day`,
-`list_entities_by_activity` live in `jericho/storage`) without a schema change.
+`list_entities_by_activity` live in `friday/storage`) without a schema change.
 
-**`importer`** (`jericho/organs/importer/`) — cold-start bulk intake: a
+**`importer`** (`friday/organs/importer/`) — cold-start bulk intake: a
 multipart upload endpoint (`POST /api/import`, cap `import.run`) parsing ICS
 calendars, Netscape bookmark exports, mbox mail archives, and single .eml
 messages into **pending Inbox items** via `ingest_text(force_review=True)` —
@@ -177,7 +179,7 @@ UID / bookmark URL / Message-ID). Mail is parsed from the original BYTES
 correctly — follow that pattern for any format whose encoding is
 self-described.
 
-**`sentinel`** (`jericho/organs/sentinel/`) — self-monitoring: a single worker
+**`sentinel`** (`friday/organs/sentinel/`) — self-monitoring: a single worker
 that reuses the read-only `collect_diagnostics` powering the admin panel and
 pushes an alert when a real fault appears (a worker crash-looping, the backend
 not refreshing state, a missing/invalid backup, an unreachable vLLM). It writes
@@ -185,7 +187,7 @@ nothing and derives nothing new — it forwards the diagnostics' own `actions`
 (severity `error`/`warning`) as messages, deduplicated per issue per day so a
 persistent fault never becomes a stream. The reference for an organ that
 **observes existing system state** and reports it, rather than computing over
-the knowledge graph. Config: `JERICHO_SENTINEL_ENABLED`, `_INTERVAL_SEC`,
+the knowledge graph. Config: `FRIDAY_SENTINEL_ENABLED`, `_INTERVAL_SEC`,
 `_CHECK_LLM` (active vLLM port probe).
 
 Аудитория и содержание у sentinel уже́, чем у остальных органов, и это часть контракта:

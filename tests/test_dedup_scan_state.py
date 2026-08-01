@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 
-from jericho.dedup import ScanState, _decode_scan_state, _merge_concurrent, save_scan_state
+from friday.dedup import ScanState, _decode_scan_state, _merge_concurrent, save_scan_state
 
 
 def _blob(**fields) -> str:

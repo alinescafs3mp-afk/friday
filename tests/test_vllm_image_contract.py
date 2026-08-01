@@ -22,11 +22,11 @@ def test_vllm_derivative_is_pinned_and_compose_builds_it():
     assert "dockerfile: docker/vllm-asyncio/Dockerfile" in compose
     dispatcher_block = compose.split("  dispatcher:", 1)[1].split("\n  backend:", 1)[0]
     assert dispatcher_block.count("\n    build:") == 1
-    assert ("JERICHO_LLM_BASE_URL: ${JERICHO_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}") in compose
+    assert ("FRIDAY_LLM_BASE_URL: ${FRIDAY_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}") in compose
     assert (
-        "JERICHO_EMBEDDINGS_BASE_URL: ${JERICHO_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}"
+        "FRIDAY_EMBEDDINGS_BASE_URL: ${FRIDAY_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}"
     ) in compose
-    assert "http://127.0.0.1:${JERICHO_API_PORT:-8000}/api/health" in compose
+    assert "http://127.0.0.1:${FRIDAY_API_PORT:-8000}/api/health" in compose
     assert "--max-model-len 32768" in compose
     assert "--gpu-memory-utilization 0.90" in compose
     assert "--max-num-batched-tokens 4096" in compose
@@ -35,16 +35,16 @@ def test_vllm_derivative_is_pinned_and_compose_builds_it():
 def test_compose_propagates_security_and_resource_limits():
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
     required = {
-        "JERICHO_API_USER_RATE_LIMIT_PER_MINUTE",
-        "JERICHO_TRUST_PROXY_HEADERS",
-        "JERICHO_TELEGRAM_SIGNATURE_MAX_AGE_SEC",
-        "JERICHO_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE",
-        "JERICHO_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE",
-        "JERICHO_CODE_EXECUTION_TIMEOUT_SEC",
-        "JERICHO_WEB_MAX_RESPONSE_BYTES",
-        "JERICHO_MAX_UPLOAD_BYTES",
-        "JERICHO_MAX_ARCHIVE_ENTRIES",
-        "JERICHO_MAX_ARCHIVE_UNCOMPRESSED_BYTES",
+        "FRIDAY_API_USER_RATE_LIMIT_PER_MINUTE",
+        "FRIDAY_TRUST_PROXY_HEADERS",
+        "FRIDAY_TELEGRAM_SIGNATURE_MAX_AGE_SEC",
+        "FRIDAY_TELEGRAM_USER_RATE_LIMIT_PER_MINUTE",
+        "FRIDAY_TELEGRAM_GLOBAL_RATE_LIMIT_PER_MINUTE",
+        "FRIDAY_CODE_EXECUTION_TIMEOUT_SEC",
+        "FRIDAY_WEB_MAX_RESPONSE_BYTES",
+        "FRIDAY_MAX_UPLOAD_BYTES",
+        "FRIDAY_MAX_ARCHIVE_ENTRIES",
+        "FRIDAY_MAX_ARCHIVE_UNCOMPRESSED_BYTES",
     }
     assert all(f"{name}:" in compose for name in required)
 

@@ -11,12 +11,12 @@ from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.storage import init_storage
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.storage import init_storage
+from friday.web_surfer import WebSurfer
 from tests.test_api_vertical_slice import _bridge_get, _bridge_request
 
 
@@ -122,7 +122,7 @@ def test_deleting_a_message_drops_it_from_messages_fts(settings):
 
 
 def test_http_me_messages_search_is_self_service_only(settings):
-    from jericho.server import create_app
+    from friday.server import create_app
 
     scoped = replace(settings, telegram_allowed_chat_ids=[5001, 5002], telegram_owner_chat_ids=[])
     with TestClient(create_app(scoped)) as client:

@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make(storage, user_id: str = "alice") -> str:
@@ -113,7 +113,7 @@ def test_who_restored_and_from_where_is_written_on_the_object(storage):
 def test_the_route_restores_and_audits(settings, storage):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
@@ -145,7 +145,7 @@ def test_the_route_restores_and_audits(settings, storage):
 def test_the_route_refuses_a_missing_version(settings):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     with TestClient(create_app(settings)) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}

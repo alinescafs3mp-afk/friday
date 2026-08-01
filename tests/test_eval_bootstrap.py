@@ -24,8 +24,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from jericho.eval_bootstrap import Proposal, audit, propose_cases, save_accepted
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.eval_bootstrap import Proposal, audit, propose_cases, save_accepted
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 DOCUMENT = (
     "Правило резервных копий. Копия на том же диске копией не является. "
@@ -103,7 +103,7 @@ def test_two_shared_stems_still_pass_and_three_do_not():
     Measured 2026-07-31: threshold 1 yielded 2/60 cases (empty set), 2 yielded 25/60.
     Criterion declared before the run: smallest threshold with ≥20 cases.
     """
-    from jericho.eval_bootstrap import MAX_SHARED_TOKENS
+    from friday.eval_bootstrap import MAX_SHARED_TOKENS
 
     assert MAX_SHARED_TOKENS == 2
     # DOCUMENT content stems include: правило, резервн*, копи*, диск*, внешн*, носител*, ...
@@ -250,7 +250,7 @@ def test_a_reply_that_ignores_the_json_format_is_still_usable(settings, storage)
 
 def test_a_bootstrapped_set_is_measurable_by_the_real_eval(settings, storage):
     """The point of the whole thing: the eval worker stops running on an empty set."""
-    from jericho.eval import run_eval
+    from friday.eval import run_eval
 
     storage.ensure_user("alice", source="upload")
     _knowledge(storage, "Правило резервных копий", DOCUMENT)

@@ -22,7 +22,7 @@ import hashlib
 
 import pytest
 
-from jericho.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 NOW_START = "2026-07-15T00:00:00+00:00"
 NOW_END = "2026-07-30T00:00:00+00:00"
@@ -163,7 +163,7 @@ def test_both_analysis_shapes_have_the_same_keys(worked):
 def test_the_route_carries_the_analysis_and_records_it(settings):
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:

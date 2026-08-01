@@ -20,9 +20,9 @@ import json
 
 import pytest
 
-from jericho.documents import DocumentResult
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
+from friday.documents import DocumentResult
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
 
 _PDF = b"%PDF-1.4\n%%EOF\n"
 
@@ -80,7 +80,7 @@ def test_a_reused_extractor_does_not_outlive_its_own_deadline() -> None:
 
     from pypdf import PdfWriter
 
-    from jericho.documents import DocumentExtractor
+    from friday.documents import DocumentExtractor
 
     writer = PdfWriter()
     for _ in range(3):
@@ -104,7 +104,7 @@ def test_a_reused_extractor_does_not_outlive_its_own_deadline() -> None:
 def test_the_budget_is_one_knob_for_both_intake_paths(settings) -> None:
     """Веб-путь и загрузка не могут расходиться в этом сроке."""
     assert settings.pdf_parse_budget_sec > 0
-    from jericho.web_surfer import WebSurfer
+    from friday.web_surfer import WebSurfer
 
     surfer = WebSurfer(settings)
     assert surfer.settings.pdf_parse_budget_sec == settings.pdf_parse_budget_sec
@@ -115,7 +115,7 @@ async def test_a_truncated_parse_is_recorded_on_the_stored_object(
     settings, storage, monkeypatch
 ) -> None:
     """Частичность — свойство хранимого документа, а не подробность одного ответа."""
-    import jericho.ingestion._core as core
+    import friday.ingestion._core as core
 
     monkeypatch.setattr(core, "DocumentExtractor", _TruncatingExtractor)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
@@ -165,7 +165,7 @@ async def test_the_transient_preview_separates_its_two_truncations(
     Читатель, которому показали только первое, решит, что полный текст есть и его
     просто не показали целиком.
     """
-    import jericho.ingestion._core as core
+    import friday.ingestion._core as core
 
     monkeypatch.setattr(core, "DocumentExtractor", _TruncatingExtractor)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))

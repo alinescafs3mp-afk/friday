@@ -18,9 +18,9 @@ import hashlib
 
 import pytest
 
-from jericho.memory import MemoryVault
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.workers import _sync_vault_page
+from friday.memory import MemoryVault
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.workers import _sync_vault_page
 
 
 def _object(title: str, content: str = "Тело заметки.") -> dict:

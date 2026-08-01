@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 
-from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _document(storage, user_id: str, index: int, text: str) -> str:

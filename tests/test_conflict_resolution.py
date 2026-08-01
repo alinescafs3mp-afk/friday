@@ -15,9 +15,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _store(storage, user_id: str, content: str, title: str) -> dict:

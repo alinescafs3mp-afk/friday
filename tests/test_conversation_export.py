@@ -11,7 +11,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
+from friday.server import create_app
 from tests.test_api_vertical_slice import _bridge_get, _bridge_request, _signed_headers
 from tests.test_telegram_and_profile import _FakeBackendClient, _FakeTelegramClient, _media_bridge
 
@@ -108,7 +108,7 @@ def test_export_contains_messages_in_order_and_foreign_is_404(settings):
 
 def test_export_current_sentinel_and_truncation_note(settings):
     """current resolves like G18; full window notes truncation when cap is hit."""
-    from jericho.api.conversations import EXPORT_MESSAGE_LIMIT, format_conversation_export
+    from friday.api.conversations import EXPORT_MESSAGE_LIMIT, format_conversation_export
 
     text = format_conversation_export(
         {"id": "conv_x", "title": "План"},
@@ -156,7 +156,7 @@ async def test_export_command_calls_send_document(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()
     export_body = (
-        "# Jericho conversation export\n"
+        "# Friday conversation export\n"
         "# conversation_id: conv_1\n"
         "# title: тест\n"
         "# messages: 2\n"

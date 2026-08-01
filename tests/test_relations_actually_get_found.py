@@ -27,8 +27,8 @@ import json
 
 import pytest
 
-from jericho.knowledge_graph import _RELATION_SPAN_CHARS, KnowledgeGraph
-from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import _RELATION_SPAN_CHARS, KnowledgeGraph
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 # Два упоминания на расстоянии, типичном для абзаца рабочего документа: между ними
 # помещается связка, но они не стоят вплотную.
@@ -171,7 +171,7 @@ def test_accepting_a_link_reconsiders_the_relations(settings):
     """
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -210,7 +210,7 @@ def test_rejecting_a_link_proposes_nothing(settings):
     """Отклонение — не повод искать связи; и оно не должно стоить прохода по тексту."""
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:

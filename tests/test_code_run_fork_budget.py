@@ -16,11 +16,11 @@ from dataclasses import replace
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel, _count_user_tasks
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel, _count_user_tasks
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.web_surfer import WebSurfer
 from tests.conftest import run_with_approval
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="rlimits are POSIX")

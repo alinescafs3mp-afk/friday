@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from jericho.security import sign_bridge_request, verify_bridge_request
+from friday.security import sign_bridge_request, verify_bridge_request
 
 SECRET = "s" * 48
 FIELDS = {

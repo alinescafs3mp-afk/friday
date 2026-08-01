@@ -17,8 +17,8 @@ import hashlib
 
 import pytest
 
-from jericho.dedup import pack_vector
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.dedup import pack_vector
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make(storage, user_id: str, index: int) -> str:
@@ -133,7 +133,7 @@ def test_the_command_asks_before_it_makes_the_gpu_work(tmp_path, monkeypatch, co
     """Без --yes команда обязана ничего не делать: она заказывает работу на часы."""
     import argparse
 
-    from jericho.cli import _reindex_embeddings
+    from friday.cli import _reindex_embeddings
 
     calls: list[str | None] = []
 
@@ -145,9 +145,9 @@ def test_the_command_asks_before_it_makes_the_gpu_work(tmp_path, monkeypatch, co
         def record_event(self, *args, **kwargs): ...
         def close(self): ...
 
-    monkeypatch.setattr("jericho.config.load_settings", lambda: object())
-    monkeypatch.setattr("jericho.config.ensure_runtime_dirs", lambda settings: None)
-    monkeypatch.setattr("jericho.storage.init_storage", lambda settings: _Storage())
+    monkeypatch.setattr("friday.config.load_settings", lambda: object())
+    monkeypatch.setattr("friday.config.ensure_runtime_dirs", lambda settings: None)
+    monkeypatch.setattr("friday.storage.init_storage", lambda settings: _Storage())
 
     code = _reindex_embeddings(argparse.Namespace(user=None, yes=confirmed))
 
@@ -196,7 +196,7 @@ def test_passage_vectors_are_marked_with_their_object(storage):
     """Чанки укорачивались в тех же пачках, значит и пересчитываться должны вместе."""
     import hashlib as _hashlib
 
-    from jericho.dedup import pack_vector
+    from friday.dedup import pack_vector
 
     storage.ensure_user("alice")
     object_id = _make(storage, "alice", 0)
@@ -250,7 +250,7 @@ async def test_a_per_tenant_reindex_is_not_served_from_another_tenants_vector(st
     """
     import dataclasses
 
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     class _CountingEmbeddings:
         def __init__(self, tuned) -> None:
@@ -287,8 +287,8 @@ async def test_a_per_tenant_reindex_is_not_served_from_another_tenants_vector(st
     # был зелёным на сломанном коде. Проверено подменой поведения.
     import hashlib as _hl
 
-    from jericho.retrieval import knowledge_search_text
-    from jericho.workers import _DOC_VECTOR_MAX_CHARS
+    from friday.retrieval import knowledge_search_text
+    from friday.workers import _DOC_VECTOR_MAX_CHARS
 
     bob_row = storage.get_knowledge_object(bob_id)
     assert bob_row is not None
@@ -334,8 +334,8 @@ async def test_a_forced_object_is_not_served_by_a_neighbours_hash(storage, setti
     import dataclasses
     import hashlib as _hl
 
-    from jericho.retrieval import knowledge_search_text
-    from jericho.workers import _DOC_VECTOR_MAX_CHARS, WorkersManager
+    from friday.retrieval import knowledge_search_text
+    from friday.workers import _DOC_VECTOR_MAX_CHARS, WorkersManager
 
     class _CountingEmbeddings:
         def __init__(self, tuned) -> None:
@@ -411,8 +411,8 @@ async def test_a_mark_arriving_mid_flight_is_not_erased_by_a_cached_write(storag
     import dataclasses
     import hashlib as _hl
 
-    from jericho.retrieval import knowledge_search_text
-    from jericho.workers import _DOC_VECTOR_MAX_CHARS, WorkersManager
+    from friday.retrieval import knowledge_search_text
+    from friday.workers import _DOC_VECTOR_MAX_CHARS, WorkersManager
 
     class _MarkingEmbeddings:
         """Помечает объекты РОВНО в тот момент, когда пачка ушла в сервис."""

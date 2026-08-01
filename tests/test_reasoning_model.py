@@ -12,7 +12,7 @@ JSON-parsed enrichment reads ``content``.
 
 from __future__ import annotations
 
-from jericho.agent_runtime.llm import LLMRouter
+from friday.agent_runtime.llm import LLMRouter
 
 # Captured verbatim; only the middle of the longer monologues is elided.
 LEADS_WITH_MARKER = (

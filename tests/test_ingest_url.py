@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.permissions import LEGACY_OWNER_USER_ID
-from jericho.server import create_app
-from jericho.web_surfer import FetchResult
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.server import create_app
+from friday.web_surfer import FetchResult
 
 
 class _FakeWebSurfer:

@@ -17,8 +17,8 @@ import dataclasses
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
 
 _AUTO_PROMOTE_FACT = "Сервер Atlas работает на Ubuntu 24.04."
 
@@ -98,7 +98,7 @@ async def test_concurrent_inbox_promotion_creates_exactly_one_ko(settings, stora
     # (Admin UI + Telegram + a worker) must not each mint a KO from one Raw Object.
     import threading
 
-    from jericho.storage.models import InboxStatus
+    from friday.storage.models import InboxStatus
 
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     seeded = await pipeline.ingest_text(

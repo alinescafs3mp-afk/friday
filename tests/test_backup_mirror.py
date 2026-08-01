@@ -11,8 +11,8 @@ import secrets
 from dataclasses import replace
 from pathlib import Path
 
-from jericho.backup_mirror import decrypt_file, mirror_backups
-from jericho.storage import init_storage
+from friday.backup_mirror import decrypt_file, mirror_backups
+from friday.storage import init_storage
 
 
 def _mounted(path: Path) -> Path:
@@ -206,7 +206,7 @@ def _files_tree(settings) -> None:
 def test_files_tree_mirrors_plain_and_is_idempotent(settings, tmp_path):
     """mirror_backups ходит по манифестам БД — оригиналы документов оставались
     без offsite-копии даже у того, кто зеркало включил."""
-    from jericho.backup_mirror import mirror_files_tree
+    from friday.backup_mirror import mirror_files_tree
 
     mirrored = replace(settings, backup_mirror_dir=_mounted(tmp_path / "mirror"))
     _files_tree(mirrored)
@@ -227,7 +227,7 @@ def test_files_tree_mirrors_plain_and_is_idempotent(settings, tmp_path):
 
 
 def test_files_tree_mirrors_encrypted_with_roundtrip_verification(settings, tmp_path):
-    from jericho.backup_mirror import decrypt_file, mirror_files_tree
+    from friday.backup_mirror import decrypt_file, mirror_files_tree
 
     key_file = tmp_path / "backup.key"
     key_file.write_text(secrets.token_hex(32) + "\n", encoding="utf-8")
@@ -252,7 +252,7 @@ def test_files_tree_mirrors_encrypted_with_roundtrip_verification(settings, tmp_
 def test_files_tree_never_creates_the_mirror_mountpoint(settings, tmp_path):
     """mkdir на неподключённом диске создаёт каталог В ТОЧКЕ МОНТИРОВАНИЯ и
     рапортует успех — ту же ловушку уже ловили у баз."""
-    from jericho.backup_mirror import mirror_files_tree
+    from friday.backup_mirror import mirror_files_tree
 
     mirrored = replace(settings, backup_mirror_dir=tmp_path / "unmounted" / "mirror")
     _files_tree(mirrored)
@@ -263,7 +263,7 @@ def test_files_tree_never_creates_the_mirror_mountpoint(settings, tmp_path):
 
 
 def test_no_files_backup_yet_is_not_an_error(settings, tmp_path):
-    from jericho.backup_mirror import mirror_files_tree
+    from friday.backup_mirror import mirror_files_tree
 
     mirrored = replace(settings, backup_mirror_dir=_mounted(tmp_path / "mirror"))
     report = mirror_files_tree(mirrored)

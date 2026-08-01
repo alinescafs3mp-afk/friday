@@ -14,8 +14,8 @@ import types
 
 import pytest
 
-from jericho import tui
-from jericho.tui import (
+from friday import tui
+from friday.tui import (
     LLM_FIELDS,
     Command,
     LauncherState,
@@ -38,14 +38,14 @@ KEY_BACKSPACE = tui.KEY_BACKSPACE
 
 
 def test_parse_env_ignores_comments_and_blanks():
-    env = "# a comment\n\nJERICHO_LLM_MODEL=dispatcher\n  JERICHO_LLM_ENABLED=1  \nnot-a-pair\n"
-    assert parse_env(env) == {"JERICHO_LLM_MODEL": "dispatcher", "JERICHO_LLM_ENABLED": "1"}
+    env = "# a comment\n\nFRIDAY_LLM_MODEL=dispatcher\n  FRIDAY_LLM_ENABLED=1  \nnot-a-pair\n"
+    assert parse_env(env) == {"FRIDAY_LLM_MODEL": "dispatcher", "FRIDAY_LLM_ENABLED": "1"}
 
 
 def test_upsert_updates_active_line_and_preserves_the_rest():
-    env = "# comment\nJERICHO_LLM_BASE_URL=http://old:8001/v1\nOTHER=x\n"
-    out = upsert_env_var(env, "JERICHO_LLM_BASE_URL", "http://192.168.1.5:8001/v1")
-    assert "JERICHO_LLM_BASE_URL=http://192.168.1.5:8001/v1" in out
+    env = "# comment\nFRIDAY_LLM_BASE_URL=http://old:8001/v1\nOTHER=x\n"
+    out = upsert_env_var(env, "FRIDAY_LLM_BASE_URL", "http://192.168.1.5:8001/v1")
+    assert "FRIDAY_LLM_BASE_URL=http://192.168.1.5:8001/v1" in out
     assert "http://old:8001/v1" not in out
     assert "# comment" in out and "OTHER=x" in out
     assert out.endswith("\n")
@@ -53,16 +53,16 @@ def test_upsert_updates_active_line_and_preserves_the_rest():
 
 def test_upsert_appends_when_missing_and_never_clobbers_a_comment():
     # A commented example must be left alone; a fresh active line is appended.
-    out = upsert_env_var("# JERICHO_LLM_API_KEY=example\n", "JERICHO_LLM_API_KEY", "sk-1")
-    assert "# JERICHO_LLM_API_KEY=example" in out
-    assert "JERICHO_LLM_API_KEY=sk-1" in out
-    assert out.count("JERICHO_LLM_API_KEY") == 2
+    out = upsert_env_var("# FRIDAY_LLM_API_KEY=example\n", "FRIDAY_LLM_API_KEY", "sk-1")
+    assert "# FRIDAY_LLM_API_KEY=example" in out
+    assert "FRIDAY_LLM_API_KEY=sk-1" in out
+    assert out.count("FRIDAY_LLM_API_KEY") == 2
 
 
 def test_upsert_does_not_match_a_longer_key_prefix():
-    out = upsert_env_var("JERICHO_LLM_API_KEY_EXTRA=keep\n", "JERICHO_LLM_API_KEY", "sk-1")
-    assert "JERICHO_LLM_API_KEY_EXTRA=keep" in out
-    assert "JERICHO_LLM_API_KEY=sk-1" in out
+    out = upsert_env_var("FRIDAY_LLM_API_KEY_EXTRA=keep\n", "FRIDAY_LLM_API_KEY", "sk-1")
+    assert "FRIDAY_LLM_API_KEY_EXTRA=keep" in out
+    assert "FRIDAY_LLM_API_KEY=sk-1" in out
 
 
 def test_apply_values_upserts_every_field():
@@ -76,11 +76,11 @@ def test_apply_values_skips_empty_to_preserve_fallback():
     # An empty value must NOT be written as `KEY=` (that would break the documented
     # "absent → fallback" behaviour, e.g. embeddings token defaulting to the LLM key).
     values = {key: "" for key, _, _ in LLM_FIELDS}
-    values["JERICHO_LLM_BASE_URL"] = "http://lan:8001/v1"
+    values["FRIDAY_LLM_BASE_URL"] = "http://lan:8001/v1"
     out = apply_values("", values)
-    assert "JERICHO_LLM_BASE_URL=http://lan:8001/v1" in out
-    assert "JERICHO_EMBEDDINGS_API_KEY=" not in out  # empty → not written
-    assert "JERICHO_LLM_API_KEY=" not in out
+    assert "FRIDAY_LLM_BASE_URL=http://lan:8001/v1" in out
+    assert "FRIDAY_EMBEDDINGS_API_KEY=" not in out  # empty → not written
+    assert "FRIDAY_LLM_API_KEY=" not in out
 
 
 def test_mask_secret():
@@ -186,12 +186,12 @@ def test_config_quit_returns_to_main():
 
 def test_save_writes_private_env_file(tmp_path):
     target = tmp_path / ".env.local"
-    target.write_text("# header\nJERICHO_LLM_MODEL=old\nOTHER=keep\n", encoding="utf-8")
-    state = LauncherState(values={"JERICHO_LLM_MODEL": "dispatcher", "JERICHO_LLM_API_KEY": "sk-lan-1"})
+    target.write_text("# header\nFRIDAY_LLM_MODEL=old\nOTHER=keep\n", encoding="utf-8")
+    state = LauncherState(values={"FRIDAY_LLM_MODEL": "dispatcher", "FRIDAY_LLM_API_KEY": "sk-lan-1"})
     tui._save(state, target)
     text = target.read_text(encoding="utf-8")
-    assert "JERICHO_LLM_MODEL=dispatcher" in text and "old" not in text
-    assert "JERICHO_LLM_API_KEY=sk-lan-1" in text
+    assert "FRIDAY_LLM_MODEL=dispatcher" in text and "old" not in text
+    assert "FRIDAY_LLM_API_KEY=sk-lan-1" in text
     assert "OTHER=keep" in text and "# header" in text
     assert state.dirty is False
     assert stat.S_IMODE(target.stat().st_mode) == 0o600  # private
@@ -209,8 +209,8 @@ def test_gather_status_reads_llm_endpoint_key_and_probes_edited_values(settings,
             "ok": True,
         }
 
-    monkeypatch.setattr("jericho.diagnostics.collect_diagnostics", _fake)
-    values = {"JERICHO_LLM_BASE_URL": "http://192.168.1.7:8001/v1", "JERICHO_LLM_API_KEY": "sk-x"}
+    monkeypatch.setattr("friday.diagnostics.collect_diagnostics", _fake)
+    values = {"FRIDAY_LLM_BASE_URL": "http://192.168.1.7:8001/v1", "FRIDAY_LLM_API_KEY": "sk-x"}
     out = tui._gather_status(settings, values)
     # It reads the real "llm_endpoint" key (not "llm") and probes the edited endpoint.
     assert captured["base_url"] == "http://192.168.1.7:8001/v1"
@@ -224,7 +224,7 @@ def test_gather_status_never_crashes_on_error(settings, monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("diag exploded")
 
-    monkeypatch.setattr("jericho.diagnostics.collect_diagnostics", _boom)
+    monkeypatch.setattr("friday.diagnostics.collect_diagnostics", _boom)
     out = tui._gather_status(settings, {})
     assert "Диагностика недоступна" in out
 

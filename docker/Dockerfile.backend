@@ -12,7 +12,7 @@ RUN groupadd --system jericho \
 
 WORKDIR /build
 COPY pyproject.toml README.md requirements.lock ./
-COPY jericho/ ./jericho/
+COPY friday/ ./friday/
 # Constrained to the exact transitive versions the suite was green on, so a rebuild
 # months later cannot quietly resolve a different dependency tree. Every compiled
 # dependency has a cp314 manylinux wheel, so no build toolchain is needed here.

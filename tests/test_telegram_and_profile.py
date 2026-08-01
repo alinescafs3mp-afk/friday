@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import pytest
 
-from jericho.telegram_bridge import _UpdateInbox
+from friday.telegram_bridge import _UpdateInbox
 
 
 def test_primary_vllm_profile_is_pinned_to_expected_operational_values(settings):
@@ -159,7 +159,7 @@ class _FakeBackendClient:
 
 @pytest.mark.asyncio
 async def test_telegram_bridge_exposes_modes_inbox_and_feedback_callbacks(tmp_path):
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(
@@ -292,7 +292,7 @@ async def test_telegram_bridge_exposes_modes_inbox_and_feedback_callbacks(tmp_pa
 
 @pytest.mark.asyncio
 async def test_telegram_polling_requests_callback_updates(tmp_path):
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(
@@ -314,7 +314,7 @@ async def test_telegram_polling_requests_callback_updates(tmp_path):
 
 
 def _media_bridge(tmp_path):
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     return TelegramBridge(
         TelegramConfig(
@@ -1049,7 +1049,7 @@ def test_api_search_endpoint_backs_the_command(settings):
     # Telegram formatter consumes (title / knowledge_kind / lifecycle_stage).
     from fastapi.testclient import TestClient
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -1090,7 +1090,7 @@ async def test_register_commands_sets_the_telegram_menu(tmp_path):
 
 @pytest.mark.asyncio
 async def test_dead_lettered_update_replies_to_the_user(tmp_path, monkeypatch):
-    from jericho.telegram_bridge import PermanentUpdateError
+    from friday.telegram_bridge import PermanentUpdateError
 
     bridge = _media_bridge(tmp_path)  # allowlist [5001]
     telegram = _FakeTelegramClient()
@@ -1212,7 +1212,7 @@ async def test_why_before_any_answer_explains_itself_instead_of_dead_letter(tmp_
     dead-letter, и человек сразу после /new читал «⚠️ сообщение отклонено» —
     текст, написанный для настоящих сбоев. «Ещё нечего объяснять» — не сбой.
     """
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(
@@ -1261,7 +1261,7 @@ async def test_why_before_any_answer_explains_itself_instead_of_dead_letter(tmp_
 @pytest.mark.asyncio
 async def test_why_names_its_sources_instead_of_bare_labels(tmp_path):
     """«Источники: K1, K10, K2» бесполезны, когда легенда 📎 уехала вверх по чату."""
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(
@@ -1316,7 +1316,7 @@ def test_the_file_fate_reaches_the_chat():
     """Бэкенд честно возвращал file_ingestion с каждым файлом — и ни бридж, ни
     модель его не читали. Владелец отправлял документ и не знал, стал тот
     знанием или завис в Inbox, а это разные следующие шаги."""
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     promoted = TelegramBridge._format_response_message(
         {"message": "Принял.", "file_ingestion": {"promoted": True}}
@@ -1347,7 +1347,7 @@ def test_the_file_fate_reaches_the_chat():
 
 
 def _ux_bridge(tmp_path):
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     return TelegramBridge(
         TelegramConfig(
@@ -1627,7 +1627,7 @@ def test_registered_chats_table_remembers_and_forgets_nothing(tmp_path):
     """Direct unit test of the small table `_commands.py` writes to and every
     other gate point reads from. Durable and idempotent: re-admitting the same
     chat must not error or duplicate the row."""
-    from jericho.telegram_bridge import _UpdateInbox
+    from friday.telegram_bridge import _UpdateInbox
 
     queue = _UpdateInbox(str(tmp_path / "telegram.sqlite3"))
     try:
@@ -1657,7 +1657,7 @@ async def test_open_registration_admits_a_private_stranger_and_remembers_the_cha
     points (callbacks, outbound push) recognise it without re-deriving
     "private" from a payload they do not have.
     """
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(
@@ -1699,7 +1699,7 @@ async def test_open_registration_does_not_admit_an_unlisted_group(tmp_path):
     """The exception is PRIVATE chats only. An unlisted group must stay silently
     refused even with the flag on -- otherwise open registration is a second,
     wider allowlist by accident, not what it was built for."""
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(
@@ -1738,7 +1738,7 @@ async def test_a_registered_chat_can_trigger_callbacks_without_being_statically_
     """`_callbacks.py` trusts `registered_chats`, not a live re-derivation of
     "private" (a callback carries no chat.type worth trusting for this). A chat
     admitted earlier through open registration must be able to press buttons."""
-    from jericho.telegram_bridge import TelegramBridge, TelegramConfig
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     bridge = TelegramBridge(
         TelegramConfig(

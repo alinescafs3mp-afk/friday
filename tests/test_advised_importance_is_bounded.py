@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.ingestion._base import _coerce_score
+from friday.ingestion._base import _coerce_score
 
 
 def _bounded(baseline: float, advised) -> float:
@@ -55,7 +55,7 @@ def test_the_model_can_never_reach_below_the_deterministic_floor():
 def test_the_rule_is_the_one_in_the_source():
     import inspect
 
-    from jericho.ingestion import _advice
+    from friday.ingestion import _advice
 
     source = inspect.getsource(_advice)
     assert "baseline_importance + 0.15" in source
@@ -66,7 +66,7 @@ def test_the_other_machine_scores_are_not_model_writable():
     """quality_score and promotion_score must not appear in the merged suggestions."""
     import inspect
 
-    from jericho.ingestion import _advice
+    from friday.ingestion import _advice
 
     body = inspect.getsource(_advice.AdviceMixin.advise_inbox_item)
     merged = body[body.index("merged = {") : body.index("model_advice", body.index("merged = {"))]
@@ -82,7 +82,7 @@ def test_a_stored_zero_is_not_read_as_a_half():
     weigh MOST toward review — was the single value that weighed least. The same
     pattern sat on quality_score and promotion_score.
     """
-    from jericho.storage._knowledge import _score_or
+    from friday.storage._knowledge import _score_or
 
     assert _score_or(0.0) == 0.0
     assert _score_or(0) == 0.0

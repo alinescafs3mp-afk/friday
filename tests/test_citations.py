@@ -12,9 +12,9 @@ import hashlib
 
 import pytest
 
-from jericho.agent_runtime import AgentRuntime, _citation_notice, _citation_sort_key
-from jericho.permissions import ActorContext
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.agent_runtime import AgentRuntime, _citation_notice, _citation_sort_key
+from friday.permissions import ActorContext
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _store(storage, user_id: str, content: str, title: str) -> dict:
@@ -168,7 +168,7 @@ async def test_general_answer_has_no_citation_notice(settings, storage):
 
 
 def test_telegram_appends_citation_legend():
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     out = TelegramBridge._format_response_message(
         {
@@ -188,7 +188,7 @@ def test_answer_sources_open_as_documents_from_the_legend():
     Поиск и /browse уже отдавали doc:show; ответ с 📎 Источники — нет.
     Тот же callback, что открывает найденное, должен висеть и под ответом.
     """
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     markup = TelegramBridge._response_reply_markup(
         {
@@ -219,7 +219,7 @@ def test_answer_sources_open_as_documents_from_the_legend():
 
 
 def test_answer_without_openable_sources_has_no_source_buttons():
-    from jericho.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge import TelegramBridge
 
     markup = TelegramBridge._response_reply_markup({"message_id": "msg_empty", "citations": []})
     assert markup is not None
@@ -302,7 +302,7 @@ async def test_citation_check_never_changes_the_answer(settings, storage):
 
 
 def test_citation_overlap_ignores_the_marker_and_short_claims():
-    from jericho.citation_check import citation_overlap
+    from friday.citation_check import citation_overlap
 
     # An object containing the literal "K1" must not look like support for it.
     report = citation_overlap(
@@ -320,7 +320,7 @@ def test_citation_overlap_ignores_the_marker_and_short_claims():
 
 
 def test_citation_overlap_is_length_invariant():
-    from jericho.citation_check import citation_overlap
+    from friday.citation_check import citation_overlap
 
     claim = "Atlas использует PostgreSQL 16 для хранения [K1]."
     short_body = "Atlas использует PostgreSQL 16 для хранения."
@@ -338,7 +338,7 @@ def test_citation_overlap_survives_a_decoy_region(settings, storage):
     claim's token substrings capture that window, so the genuinely supporting sentence
     was never scored at all — a verbatim quote read as unsupported.
     """
-    from jericho.citation_check import citation_overlap
+    from friday.citation_check import citation_overlap
 
     claim = "Atlas использует PostgreSQL 16 для хранения [K1]."
     support = "Atlas использует PostgreSQL 16 для хранения."
@@ -361,7 +361,7 @@ def test_citation_overlap_does_not_truncate_a_long_sentence():
     support has to at least register, which is what separates it from a body that
     genuinely says nothing on the subject.
     """
-    from jericho.citation_check import citation_overlap
+    from friday.citation_check import citation_overlap
 
     claim = "Atlas использует PostgreSQL 16 для хранения [K1]."
     filler = "перечисление, " * 120
@@ -378,7 +378,7 @@ def test_citation_overlap_does_not_truncate_a_long_sentence():
 def test_the_legend_carries_a_date_so_a_source_can_be_judged():
     """Без даты человек не отличит позапрошлогоднюю редакцию от вчерашней и
     вынужден открывать запись, чтобы понять, стоит ли ей верить."""
-    from jericho.agent_runtime import _citation_notice
+    from friday.agent_runtime import _citation_notice
 
     notice = _citation_notice(
         [{"label": "K1", "knowledge_id": "ko_1", "title": "Приказ о поверке", "date": "2023-04-12"}],
@@ -388,7 +388,7 @@ def test_the_legend_carries_a_date_so_a_source_can_be_judged():
 
 
 def test_a_source_without_a_date_is_shown_without_inventing_one():
-    from jericho.agent_runtime import _citation_notice
+    from friday.agent_runtime import _citation_notice
 
     notice = _citation_notice([{"label": "K1", "knowledge_id": "ko_1", "title": "Заметка", "date": ""}], True)
     assert "[K1] Заметка" in notice
@@ -400,7 +400,7 @@ def test_the_document_own_date_wins_over_the_import_date():
     документе не говорит ничего; собственную дату записал редактор при сохранении."""
     import json as jsonlib
 
-    from jericho.agent_runtime import _citation_date
+    from friday.agent_runtime import _citation_date
 
     imported = {
         "updated_at": "2026-07-30T12:00:00+00:00",
@@ -417,6 +417,6 @@ def test_the_document_own_date_wins_over_the_import_date():
 
 def test_a_broken_metadata_blob_does_not_break_the_answer():
     """Легенда — часть ответа человеку: испорченные метаданные не должны его ронять."""
-    from jericho.agent_runtime import _citation_date
+    from friday.agent_runtime import _citation_date
 
     assert _citation_date({"metadata_json": "{битый", "updated_at": "2024-01-02T03:04:05"}) == "2024-01-02"

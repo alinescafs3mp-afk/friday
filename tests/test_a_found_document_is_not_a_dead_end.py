@@ -12,7 +12,7 @@ Telegram — основной интерфейс владельца. Выдач�
 
 from __future__ import annotations
 
-from jericho.telegram_bridge import TelegramBridge
+from friday.telegram_bridge import TelegramBridge
 
 
 def _results(count: int) -> list[dict]:
@@ -116,9 +116,9 @@ def test_the_real_api_response_opens_as_a_document_not_a_blank(settings):
 
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     body = "Тело приказа о поверке весового оборудования."
     app = create_app(settings)
@@ -284,9 +284,9 @@ def test_the_real_lineage_from_the_api_shows_a_real_edit_and_a_real_link(setting
 
     from fastapi.testclient import TestClient
 
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.server import create_app
-    from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
+    from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
     body = "Тело приказа о поверке весового оборудования."
     app = create_app(settings)
@@ -422,10 +422,10 @@ def test_impact_counts_only_entities_this_document_alone_confirms(settings):
     документами, потерей не считается — она переживёт удаление любого из них."""
     import hashlib
 
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.permissions import LEGACY_OWNER_USER_ID
-    from jericho.storage import init_storage
-    from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.storage import init_storage
+    from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
     storage = init_storage(settings)
     try:

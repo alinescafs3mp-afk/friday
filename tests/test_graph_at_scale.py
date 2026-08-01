@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 
-from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _entity(storage, user_id: str, name: str) -> str:
@@ -128,7 +128,7 @@ def test_graph_stats_report_counts_not_page_lengths(storage, monkeypatch):
     обратно на `len(entities)` тест не роняла. Мутация это показала. Здесь выборка
     урезается принудительно, и утверждение становится про ИСТОЧНИК числа.
     """
-    from jericho.knowledge_graph import KnowledgeGraph
+    from friday.knowledge_graph import KnowledgeGraph
 
     storage.ensure_user("alice")
     for index in range(6):
@@ -154,7 +154,7 @@ def test_a_truncated_entity_listing_says_so_in_the_log(storage, caplog):
     for index in range(6):
         _entity(storage, "alice", f"Сущность {index:03d}")
 
-    with caplog.at_level(logging.WARNING, logger="jericho.storage"):
+    with caplog.at_level(logging.WARNING, logger="friday.storage"):
         rows = storage.list_entities("alice", limit=4)
 
     assert len(rows) == 4
@@ -170,7 +170,7 @@ def test_a_complete_listing_stays_quiet(storage, caplog):
     for index in range(3):
         _entity(storage, "alice", f"Сущность {index}")
 
-    with caplog.at_level(logging.WARNING, logger="jericho.storage"):
+    with caplog.at_level(logging.WARNING, logger="friday.storage"):
         rows = storage.list_entities("alice", limit=3)
 
     assert len(rows) == 3

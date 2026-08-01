@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from jericho.storage.models import RawObject, new_id
+from friday.storage.models import RawObject, new_id
 
 playwright_api = pytest.importorskip("playwright.sync_api")
 
@@ -70,7 +70,7 @@ def live_admin(settings, tmp_path):
 
     import uvicorn
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     global _APP
     app = create_app(replace(settings, api_token=TOKEN, api_port=PORT))
@@ -338,7 +338,7 @@ def test_the_knowledge_list_pages_over_a_real_total(live_admin):
 
     from playwright.sync_api import sync_playwright
 
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     with sync_playwright() as play:
         try:

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from jericho.workers import IntervalTask, WorkerBatchError, WorkersManager, WorkerSupervisor
+from friday.workers import IntervalTask, WorkerBatchError, WorkersManager, WorkerSupervisor
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.retrieval._rerank import parse_order, rerank
+from friday.retrieval._rerank import parse_order, rerank
 
 
 class _Model:
@@ -126,7 +126,7 @@ async def test_the_excerpt_carries_the_title_and_is_bounded():
     """Замерено: 400 знаков ДОРОЖЕ 800 — по обрывку модель дольше рассуждает, а на
     двадцати фрагментах упирается в потолок токенов. Заголовок нужен потому, что без
     него однотипные служебные документы неразличимы."""
-    from jericho.retrieval._rerank import EXCERPT_CHARS, _excerpt
+    from friday.retrieval._rerank import EXCERPT_CHARS, _excerpt
 
     text = _excerpt({"title": "Протокол приёмки", "content": "тело " * 5000})
     assert text.startswith("Протокол приёмки")

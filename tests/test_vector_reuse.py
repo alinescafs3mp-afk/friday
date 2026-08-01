@@ -14,8 +14,8 @@ import hashlib
 
 import pytest
 
-from jericho.dedup import pack_vector
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.dedup import pack_vector
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 MODEL = "test-embed"
 
@@ -109,7 +109,7 @@ async def test_the_indexer_does_not_pay_twice_for_the_same_text(settings, storag
     """
     from dataclasses import replace
 
-    from jericho.workers import WorkersManager
+    from friday.workers import WorkersManager
 
     calls: list[list[str]] = []
 

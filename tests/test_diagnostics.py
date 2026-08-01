@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from jericho.diagnostics import collect_diagnostics
-from jericho.storage import SCHEMA_VERSION, init_storage
-from jericho.telemetry import SystemTelemetry
+from friday.diagnostics import collect_diagnostics
+from friday.storage import SCHEMA_VERSION, init_storage
+from friday.telemetry import SystemTelemetry
 
 
 def test_telemetry_and_diagnostics_work_before_home_exists(settings, tmp_path):
@@ -24,7 +24,7 @@ def test_cli_style_diagnostics_reads_schema_and_backup_without_open_storage(sett
         settings,
         home=tmp_path / "home",
         state_dir=tmp_path / "home" / "data",
-        database_path=tmp_path / "home" / "data" / "jericho.sqlite3",
+        database_path=tmp_path / "home" / "data" / "friday.sqlite3",
         files_dir=tmp_path / "home" / "data" / "files",
         backups_dir=tmp_path / "home" / "data" / "backups",
         exports_dir=tmp_path / "home" / "data" / "exports",
@@ -46,7 +46,7 @@ def test_cli_style_diagnostics_reads_schema_and_backup_without_open_storage(sett
 
 
 def test_diagnostics_reports_uninitialized_database_without_creating_it(settings, tmp_path):
-    database_path = tmp_path / "absent" / "jericho.sqlite3"
+    database_path = tmp_path / "absent" / "friday.sqlite3"
     local = replace(
         settings,
         database_path=database_path,
@@ -64,7 +64,7 @@ def test_diagnostics_turns_worker_failures_and_stalls_into_actions(settings, sto
     import json
     from datetime import UTC, datetime, timedelta
 
-    from jericho.diagnostics.runtime_lease import ProcessLease
+    from friday.diagnostics.runtime_lease import ProcessLease
 
     local = replace(settings, workers_enabled=True)
     old = (datetime.now(UTC) - timedelta(hours=2)).isoformat(timespec="seconds")
@@ -93,7 +93,7 @@ def test_diagnostics_turns_worker_failures_and_stalls_into_actions(settings, sto
         ),
     )
 
-    lease = ProcessLease(local.state_dir / "backend.lock", protocol="jericho.backend.v1")
+    lease = ProcessLease(local.state_dir / "backend.lock", protocol="friday.backend.v1")
     lease.acquire()
     try:
         result = collect_diagnostics(local, storage)
@@ -159,8 +159,8 @@ def test_diagnostics_handles_corrupt_worker_health_without_crashing(settings, st
 
 
 def test_bridge_queue_dead_letters_are_observable_in_diagnostics(settings):
-    from jericho.diagnostics import _bridge_queue_status
-    from jericho.telegram_bridge import _UpdateInbox
+    from friday.diagnostics import _bridge_queue_status
+    from friday.telegram_bridge import _UpdateInbox
 
     path = settings.state_dir / "telegram-inbox.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -185,7 +185,7 @@ def test_bridge_queue_dead_letters_are_observable_in_diagnostics(settings):
 
 
 def test_bridge_queue_status_is_absent_when_no_inbox(settings):
-    from jericho.diagnostics import _bridge_queue_status
+    from friday.diagnostics import _bridge_queue_status
 
     status = _bridge_queue_status(settings.state_dir / "telegram-inbox.sqlite3")
     assert status["state"] == "absent"
@@ -193,7 +193,7 @@ def test_bridge_queue_status_is_absent_when_no_inbox(settings):
 
 
 def test_llm_endpoint_status_unreachable_skips_http(settings):
-    from jericho.diagnostics import _llm_endpoint_status
+    from friday.diagnostics import _llm_endpoint_status
 
     status = _llm_endpoint_status("http://127.0.0.1:1", "dispatcher", timeout=0.5)
     assert status["reachable"] is False
@@ -202,7 +202,7 @@ def test_llm_endpoint_status_unreachable_skips_http(settings):
 
 
 def test_diagnostics_flags_configured_model_not_served(settings, monkeypatch):
-    import jericho.diagnostics as diag
+    import friday.diagnostics as diag
 
     tuned = replace(settings, llm_enabled=True)
     monkeypatch.setattr(
@@ -218,7 +218,7 @@ def test_diagnostics_flags_configured_model_not_served(settings, monkeypatch):
 
 
 def test_diagnostics_flags_llm_unreachable(settings, monkeypatch):
-    import jericho.diagnostics as diag
+    import friday.diagnostics as diag
 
     tuned = replace(settings, llm_enabled=True)
     monkeypatch.setattr(
@@ -233,7 +233,7 @@ def test_diagnostics_flags_llm_unreachable(settings, monkeypatch):
 
 
 def _seed_auth_failures(storage, count, *, created_at=None):
-    from jericho.storage.models import AuditEntry, new_id, utc_now
+    from friday.storage.models import AuditEntry, new_id, utc_now
 
     for index in range(count):
         entry = AuditEntry(
@@ -335,7 +335,7 @@ def _seed_pending(storage, count: int, *, age_days: int) -> None:
 
 def test_backlog_alert_stays_quiet_right_after_an_import(settings, storage):
     """Thousands pending minutes after `jericho import` is exactly what should happen."""
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     _seed_pending(storage, 500, age_days=0)
     report = collect_diagnostics(settings, storage)
@@ -343,7 +343,7 @@ def test_backlog_alert_stays_quiet_right_after_an_import(settings, storage):
 
 
 def test_backlog_alert_stays_quiet_for_a_handful_of_old_items(settings, storage):
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     _seed_pending(storage, 5, age_days=400)
     report = collect_diagnostics(settings, storage)
@@ -352,7 +352,7 @@ def test_backlog_alert_stays_quiet_for_a_handful_of_old_items(settings, storage)
 
 def test_backlog_alert_fires_once_material_has_been_ignored(settings, storage):
     """Pending means unsearchable: this is imported material the owner cannot reach."""
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     _seed_pending(storage, 300, age_days=30)
     report = collect_diagnostics(settings, storage)
@@ -364,10 +364,10 @@ def test_backlog_alert_fires_once_material_has_been_ignored(settings, storage):
 
 def test_backlog_alert_reaches_the_sentinel_severity_filter(settings, storage):
     """Sentinel only pushes error/warning; a signal below that would never be seen."""
-    from jericho.organs.sentinel import _ALERT_SEVERITIES
+    from friday.organs.sentinel import _ALERT_SEVERITIES
 
     _seed_pending(storage, 300, age_days=30)
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     alert = [a for a in collect_diagnostics(settings, storage)["actions"] if a["code"] == "inbox_backlog"][0]
     assert alert["severity"] in _ALERT_SEVERITIES
@@ -387,7 +387,7 @@ def test_a_skipped_worker_is_a_valid_state_not_a_corrupt_one(settings, storage):
     import json
     from datetime import UTC, datetime
 
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     storage.kv_set(
         "workers:health:embeddings_index",
@@ -420,7 +420,7 @@ def test_a_mirror_that_stopped_working_reaches_the_operator(settings, storage, t
     """
     import json
 
-    from jericho.diagnostics import collect_diagnostics
+    from friday.diagnostics import collect_diagnostics
 
     mirrored = replace(settings, backup_mirror_dir=tmp_path / "mirror")
 

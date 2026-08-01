@@ -94,9 +94,9 @@ def _seed_script(home: Path) -> str:
     return f"""
 import sys
 sys.path.insert(0, ".")
-from jericho.config import ensure_runtime_dirs, load_settings
-from jericho.storage import init_storage, SCHEMA_VERSION
-from jericho.storage.models import RawObject, new_id
+from friday.config import ensure_runtime_dirs, load_settings
+from friday.storage import init_storage, SCHEMA_VERSION
+from friday.storage.models import RawObject, new_id
 from datetime import UTC, datetime
 
 settings = load_settings()
@@ -131,14 +131,14 @@ def build_from_commit(version: int, commit: str, workspace: Path) -> Path:
     try:
         script = worktree / "_seed_fixture.py"
         script.write_text(_seed_script(home), encoding="utf-8")
-        env_line = f"JERICHO_HOME={home}"
+        env_line = f"FRIDAY_HOME={home}"
         reported = _run(
             ["env", env_line, sys.executable, str(script)],
             cwd=worktree,
         ).strip()
         if reported != str(version):
             raise SystemExit(f"commit {commit} reports schema {reported}, expected {version}")
-        source = home / "data" / "state" / "jericho.sqlite3"
+        source = home / "data" / "state" / "friday.sqlite3"
         return _finalise(source, version)
     finally:
         _run(["git", "worktree", "remove", "--force", str(worktree)], cwd=REPO)
@@ -158,11 +158,11 @@ def build_from_working_tree(workspace: Path) -> Path:
     script = REPO / "_seed_fixture.py"
     script.write_text(_seed_script(home), encoding="utf-8")
     try:
-        reported = _run(["env", f"JERICHO_HOME={home}", sys.executable, str(script)], cwd=REPO).strip()
+        reported = _run(["env", f"FRIDAY_HOME={home}", sys.executable, str(script)], cwd=REPO).strip()
     finally:
         script.unlink(missing_ok=True)
     version = int(reported)
-    return _finalise(home / "data" / "state" / "jericho.sqlite3", version)
+    return _finalise(home / "data" / "state" / "friday.sqlite3", version)
 
 
 def build_from_backup(version: int, backup: Path, workspace: Path) -> Path:

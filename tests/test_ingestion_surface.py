@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 
-from jericho.ingestion import IngestionPipeline
+from friday.ingestion import IngestionPipeline
 
 
 def _surface() -> dict[str, str]:
@@ -94,7 +94,7 @@ def test_no_pipeline_method_is_defined_twice() -> None:
 
 def test_public_names_stay_importable() -> None:
     """The three names the rest of the tree imports from this package."""
-    from jericho.ingestion import (  # noqa: F401
+    from friday.ingestion import (  # noqa: F401
         IdempotencyConflictError,
         _extract_entities,
     )

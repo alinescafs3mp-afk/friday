@@ -1,5 +1,5 @@
 [project]
-name = "jericho"
+name = "friday"
 version = "0.151.0"
 description = "Local-first personal Knowledge Operating System with a provenance-first knowledge graph."
 readme = "README.md"
@@ -30,8 +30,8 @@ dependencies = [
 [project.optional-dependencies]
 # The single deliberate exception to "zero new dependencies": local speech-to-text
 # and text-to-speech for voice notes and spoken replies. Both run entirely offline
-# (CTranslate2 for STT, onnxruntime for TTS); gated behind JERICHO_WHISPER_ENABLED /
-# JERICHO_TTS_ENABLED and lazy-imported, so the core runs without either installed.
+# (CTranslate2 for STT, onnxruntime for TTS); gated behind FRIDAY_WHISPER_ENABLED /
+# FRIDAY_TTS_ENABLED and lazy-imported, so the core runs without either installed.
 # piper-tts pulls in onnxruntime + pathvalidate, both lightweight; it reuses the
 # `av` (PyAV) package faster-whisper already brings in transitively to encode
 # speech to OGG/Opus for Telegram voice messages, so this adds no new heavy
@@ -42,7 +42,7 @@ voice = [
 ]
 # Accelerates corpus-wide dense recall: the pure-Python cosine scan becomes one
 # BLAS matmul. Lazy-imported with a pure-Python fallback, so the core runs without
-# it; install `jericho[vectors]` when semantic search over a large corpus is used.
+# it; install `friday[vectors]` when semantic search over a large corpus is used.
 vectors = [
     "numpy>=1.26,<3",
 ]
@@ -57,7 +57,11 @@ dev = [
 ]
 
 [project.scripts]
-jericho = "jericho.cli:main"
+friday = "friday.cli:main"
+# Прежнее имя команды остаётся рабочим: у владельца оно в systemd-юнитах, в
+# скриптах и в мышечной памяти. Переименование проекта не повод ломать чужие
+# запуски — «ex codename Jericho».
+jericho = "friday.cli:main"
 
 [build-system]
 requires = ["setuptools>=75", "wheel>=0.45"]
@@ -65,10 +69,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["jericho*"]
+include = ["friday*"]
 
 [tool.setuptools.package-data]
-"jericho.admin_ui" = ["static/*.html"]
+"friday.admin_ui" = ["static/*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

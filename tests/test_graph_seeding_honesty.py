@@ -21,9 +21,9 @@ import hashlib
 
 import pytest
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.retrieval import HybridSearcher
-from jericho.storage.models import Entity, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.retrieval import HybridSearcher
+from friday.storage.models import Entity, KnowledgeObject, RawObject, new_id
 
 
 def _seed_corpus(storage) -> dict[str, str]:
@@ -126,7 +126,7 @@ async def test_an_asserted_relation_still_carries_a_neighbour(storage):
     entities stop grounding. The distinction is the whole point: without it this
     filter would have cut the graph channel's real work along with its noise.
     """
-    from jericho.storage.models import RelationType
+    from friday.storage.models import RelationType
 
     ids = _seed_corpus(storage)
     kg = KnowledgeGraph(storage)

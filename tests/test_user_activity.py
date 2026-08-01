@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _arrival(storage, user_id: str, *, source: str, content: str, at: str, filename: str = "") -> str:
@@ -139,7 +139,7 @@ def test_an_empty_account_is_empty_rather_than_everyone(storage):
 
 
 def test_a_preview_is_bounded(storage):
-    from jericho.storage._oversight import _PREVIEW_CHARS
+    from friday.storage._oversight import _PREVIEW_CHARS
 
     storage.ensure_user("alice")
     _arrival(

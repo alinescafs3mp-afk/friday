@@ -5,11 +5,11 @@ from dataclasses import replace
 
 import pytest
 
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.web_surfer import WebSurfer
 from tests.conftest import run_with_approval
 
 
@@ -91,10 +91,10 @@ async def test_list_tags_gives_the_agent_what_the_telegram_command_already_has(s
     enumeration), and produced an answer that failed verification in
     rehearsal. Also checks the same tenant isolation every other tool gets.
     """
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
-    from jericho.web_surfer import WebSurfer
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.web_surfer import WebSurfer
 
     storage.ensure_user("alice", preset_key="user")
     storage.ensure_user("bob", preset_key="user")

@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _entity(storage, user_id: str, name: str) -> str:

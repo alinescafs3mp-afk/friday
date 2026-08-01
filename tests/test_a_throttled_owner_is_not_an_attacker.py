@@ -38,7 +38,7 @@ def test_throttling_a_signed_in_caller_is_not_an_authentication_failure(settings
     действительный актор. Записывать это как `auth.failed` значит смешивать «кого-то
     не пустили» с «своего придержали».
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     tuned = dataclasses.replace(settings, api_user_rate_limit_per_minute=2)
     app = create_app(tuned)
@@ -59,7 +59,7 @@ def test_throttling_a_signed_in_caller_is_not_an_authentication_failure(settings
 
 def test_a_wrong_token_is_still_an_authentication_failure(settings):
     """Разделение не должно ослабить настоящий сигнал."""
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -79,7 +79,7 @@ def test_the_health_check_from_the_runbook_answers_without_a_token(settings):
 
     Ничего нового наружу не открывается: `/api/health` публичен ровно так же.
     """
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(settings)
     with TestClient(app) as client:
@@ -96,8 +96,8 @@ def test_the_two_events_are_told_apart_by_the_burst_check(settings):
     Иначе порог выбирается собственной массовой работой владельца, и настоящее
     обращение с чужого адреса тонет в ней бесследно.
     """
-    from jericho.diagnostics import collect_diagnostics
-    from jericho.server import create_app
+    from friday.diagnostics import collect_diagnostics
+    from friday.server import create_app
 
     tuned = dataclasses.replace(settings, api_user_rate_limit_per_minute=2)
     app = create_app(tuned)

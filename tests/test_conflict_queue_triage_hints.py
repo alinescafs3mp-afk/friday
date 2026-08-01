@@ -13,18 +13,18 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.conflict_triage import (
+from friday.conflict_triage import (
     HINT_LIKELY_DIFFERENT,
     HINT_LIKELY_DUPLICATE,
     classify_near_duplicate_pair,
 )
-from jericho.execution_kernel import ExecutionKernel
-from jericho.ingestion import IngestionPipeline
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.permissions import AuthorizationService
-from jericho.server import create_app
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
-from jericho.web_surfer import WebSurfer
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import AuthorizationService
+from friday.server import create_app
+from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.web_surfer import WebSurfer
 
 # Shared HR form body — long enough that swapping only the surname still clears
 # Jaccard ≥0.95. That is the dangerous blank class: cosine + stem overlap both
@@ -81,7 +81,7 @@ def test_mutation_without_data_branch_mislabels_blank_as_duplicate(monkeypatch):
     That is the failure mode mass-confirm would hit: cosine and stem overlap both
     clear the cut, and keep_a/keep_b would deprecate a real distinct record.
     """
-    import jericho.conflict_triage as triage
+    import friday.conflict_triage as triage
 
     blank_a = _form("Сидоров")
     blank_b = _form("Козлов")
@@ -138,7 +138,7 @@ def _seed_pair(storage, user_id: str, title_a: str, text_a: str, title_b: str, t
 
 def test_http_conflict_list_includes_triage_hint(settings):
     with TestClient(create_app(settings)) as client:
-        from jericho.permissions import LEGACY_OWNER_USER_ID
+        from friday.permissions import LEGACY_OWNER_USER_ID
 
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         storage = client.app.state.storage

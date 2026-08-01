@@ -1,8 +1,8 @@
 """Bearer-token auth for the OpenAI-compatible LLM/embeddings endpoints.
 
-Lets Jericho talk to a model on the LAN (e.g. a vLLM started with ``--api-key``)
+Lets Friday talk to a model on the LAN (e.g. a vLLM started with ``--api-key``)
 without exposing the token in the public config. The token itself is redacted in
-logs by the existing ``JERICHO_*_API_KEY``-matching secret scrubber.
+logs by the existing ``FRIDAY_*_API_KEY``-matching secret scrubber.
 """
 
 from __future__ import annotations
@@ -14,16 +14,16 @@ from dataclasses import replace
 
 import pytest
 
-from jericho.agent_runtime.llm import LLMRouter
-from jericho.retrieval import EmbeddingBackend
+from friday.agent_runtime.llm import LLMRouter
+from friday.retrieval import EmbeddingBackend
 
 
 def test_config_loads_key_and_embeddings_defaults_to_llm(monkeypatch, tmp_path):
-    monkeypatch.setenv("JERICHO_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("JERICHO_LLM_API_KEY", "sk-lan-123")
-    monkeypatch.setenv("JERICHO_LLM_BASE_URL", "http://192.168.1.50:8001/v1")
-    monkeypatch.delenv("JERICHO_EMBEDDINGS_API_KEY", raising=False)
-    from jericho.config import load_settings
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("FRIDAY_LLM_API_KEY", "sk-lan-123")
+    monkeypatch.setenv("FRIDAY_LLM_BASE_URL", "http://192.168.1.50:8001/v1")
+    monkeypatch.delenv("FRIDAY_EMBEDDINGS_API_KEY", raising=False)
+    from friday.config import load_settings
 
     s = load_settings()
     assert s.llm_api_key == "sk-lan-123"
@@ -31,7 +31,7 @@ def test_config_loads_key_and_embeddings_defaults_to_llm(monkeypatch, tmp_path):
     # A separate embeddings service shares the LLM token unless overridden.
     assert s.embeddings_api_key == "sk-lan-123"
 
-    monkeypatch.setenv("JERICHO_EMBEDDINGS_API_KEY", "sk-emb-9")
+    monkeypatch.setenv("FRIDAY_EMBEDDINGS_API_KEY", "sk-emb-9")
     assert load_settings().embeddings_api_key == "sk-emb-9"
 
 
@@ -86,7 +86,7 @@ async def test_embedding_backend_sends_bearer_header(settings, monkeypatch):
             captured["url"] = url
             return _FakeResp()
 
-    monkeypatch.setattr("jericho.retrieval.httpx.AsyncClient", _FakeClient)
+    monkeypatch.setattr("friday.retrieval.httpx.AsyncClient", _FakeClient)
     out = await EmbeddingBackend(tuned).embed(["hi"])
     assert out == [[0.1, 0.2]]
     assert captured["headers"].get("Authorization") == "Bearer sk-emb-9"
@@ -128,13 +128,13 @@ async def test_embedding_backend_no_header_without_key(settings, monkeypatch):
         async def post(self, url, json=None):
             return _FakeResp()
 
-    monkeypatch.setattr("jericho.retrieval.httpx.AsyncClient", _FakeClient)
+    monkeypatch.setattr("friday.retrieval.httpx.AsyncClient", _FakeClient)
     await EmbeddingBackend(tuned).embed(["hi"])
     assert "Authorization" not in captured["headers"]
 
 
 def test_llm_endpoint_status_sends_authorization(settings, monkeypatch):
-    import jericho.diagnostics as diag
+    import friday.diagnostics as diag
 
     monkeypatch.setattr(diag, "_port_reachable", lambda *a, **k: {"reachable": True})
     captured: dict = {}
@@ -160,15 +160,15 @@ def test_llm_endpoint_status_sends_authorization(settings, monkeypatch):
 
 
 def test_init_env_template_includes_api_key_vars(tmp_path, monkeypatch):
-    from jericho.cli import _init_environment
+    from friday.cli import _init_environment
 
-    monkeypatch.setenv("JERICHO_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "home"))
     env_file = tmp_path / ".env.local"
     args = argparse.Namespace(home=str(tmp_path / "home"), env_file=str(env_file), force=False)
     assert _init_environment(args) == 0
     text = env_file.read_text(encoding="utf-8")
-    assert "JERICHO_LLM_API_KEY=" in text
-    assert "JERICHO_EMBEDDINGS_API_KEY=" in text
+    assert "FRIDAY_LLM_API_KEY=" in text
+    assert "FRIDAY_EMBEDDINGS_API_KEY=" in text
     # The token vars ship empty (local unauthenticated default).
-    assert "JERICHO_LLM_API_KEY=\n" in text
-    os.environ.pop("JERICHO_HOME", None)
+    assert "FRIDAY_LLM_API_KEY=\n" in text
+    os.environ.pop("FRIDAY_HOME", None)

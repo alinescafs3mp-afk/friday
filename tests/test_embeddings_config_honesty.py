@@ -1,8 +1,8 @@
 """Semantic search that is off must not report itself as on.
 
 `EmbeddingBackend.remote_enabled` needs the base URL AND the model name, but
-`JERICHO_EMBEDDINGS_MODEL` ships empty in both templates. So an operator who set
-`JERICHO_EMBEDDINGS_ENABLED=1` and nothing else got no dense recall at all, while
+`FRIDAY_EMBEDDINGS_MODEL` ships empty in both templates. So an operator who set
+`FRIDAY_EMBEDDINGS_ENABLED=1` and nothing else got no dense recall at all, while
 `validate_settings` returned clean, `/api/config` published `enabled: true`, and
 `jericho model-check` probed with `embeddings_model or llm_model` — hitting a real
 endpoint with the CHAT model and printing green dimensions for a channel that
@@ -13,14 +13,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from jericho.config import validate_settings
+from friday.config import validate_settings
 
 
 def test_enabled_without_a_model_is_an_error_not_a_warning(settings):
     broken = replace(settings, embeddings_enabled=True, embeddings_model="")
     problems = validate_settings(broken)
     hard_errors = [item for item in problems if not item.startswith("warning:")]
-    assert any("JERICHO_EMBEDDINGS_MODEL" in item for item in hard_errors), (
+    assert any("FRIDAY_EMBEDDINGS_MODEL" in item for item in hard_errors), (
         f"a configuration that cannot work passed validation: {problems}"
     )
 
@@ -55,7 +55,7 @@ def test_the_model_check_probe_fails_on_the_same_condition_the_runtime_does(sett
     """No substitution: the probe must not pass by asking a different model."""
     import inspect
 
-    from jericho import model_check
+    from friday import model_check
 
     source = inspect.getsource(model_check)
     assert "embeddings_model or settings.llm_model" not in source

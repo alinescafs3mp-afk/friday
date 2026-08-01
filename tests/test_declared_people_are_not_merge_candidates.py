@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.storage.models import Entity, EntityType, new_id
+from friday.storage.models import Entity, EntityType, new_id
 
 DECLARED = {"extraction_method": "explicit_person_patronymic", "created_by": "ingestion"}
 GUESSED = {"extraction_method": "capitalized_person_name", "created_by": "ingestion"}

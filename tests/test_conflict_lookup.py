@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _knowledge(storage, title: str) -> str:

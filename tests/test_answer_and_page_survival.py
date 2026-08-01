@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.agent_runtime.tool_protocol import classify_tool_turn
-from jericho.web_surfer import WebSurfer
+from friday.agent_runtime.tool_protocol import classify_tool_turn
+from friday.web_surfer import WebSurfer
 
 PAGE = """<html><head><title>Инструкция</title></head><body>
 <div class="sidebar"><ul><li><a href="#">меню</a></li><li>ещё пункт</li></ul></div>

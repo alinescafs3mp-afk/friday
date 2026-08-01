@@ -28,7 +28,7 @@ ARCHITECTURE = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
 
 
 def test_the_readme_states_the_version_the_package_has():
-    from jericho import __version__
+    from friday import __version__
 
     match = re.search(r"Текущая версия: \*\*([0-9.]+)\*\*", README)
     assert match, "в README больше нет строки с версией — поправьте тест вместе с ней"
@@ -36,7 +36,7 @@ def test_the_readme_states_the_version_the_package_has():
 
 
 def test_the_readme_states_the_schema_the_code_opens():
-    from jericho.storage._base import SCHEMA_VERSION
+    from friday.storage._base import SCHEMA_VERSION
 
     match = re.search(r"Схема SQLite — \*\*(\d+)\*\*", README)
     assert match, "в README больше нет строки со схемой"
@@ -47,7 +47,7 @@ def test_the_readme_states_the_schema_the_code_opens():
 
 
 def test_the_term_budget_in_the_docs_is_the_one_in_the_code():
-    from jericho.storage._knowledge import _FTS_TERM_BUDGET
+    from friday.storage._knowledge import _FTS_TERM_BUDGET
 
     match = re.search(r"Бюджет — \*\*(\d+)\*\* терма", ARCHITECTURE)
     assert match, "раздел про термы FTS переписан — сверьте число заново"
@@ -55,7 +55,7 @@ def test_the_term_budget_in_the_docs_is_the_one_in_the_code():
 
 
 def test_the_dense_evidence_default_in_the_docs_is_the_one_in_the_code(settings):
-    match = re.search(r"JERICHO_RETRIEVAL_DENSE_EVIDENCE_MIN` \(по умолчанию \*\*([0-9.]+)\*\*", ARCHITECTURE)
+    match = re.search(r"FRIDAY_RETRIEVAL_DENSE_EVIDENCE_MIN` \(по умолчанию \*\*([0-9.]+)\*\*", ARCHITECTURE)
     assert match, "раздел про плотное доказательство переписан — сверьте число заново"
     assert float(match.group(1)) == settings.retrieval_dense_evidence_min, (
         f"доки обещают {match.group(1)}, код берёт {settings.retrieval_dense_evidence_min}"
@@ -66,7 +66,7 @@ def test_every_module_path_named_in_the_architecture_exists():
     """Ссылка на несуществующий файл отправляет читателя искать то, чего нет."""
     referenced = set(re.findall(r"`((?:jericho/)?[\w/]+\.py)`", ARCHITECTURE))
     missing = sorted(
-        path for path in referenced if not (ROOT / path).exists() and not (ROOT / "jericho" / path).exists()
+        path for path in referenced if not (ROOT / path).exists() and not (ROOT / "friday" / path).exists()
     )
     assert not missing, f"ARCHITECTURE.md ссылается на несуществующие файлы: {missing}"
 
@@ -82,7 +82,7 @@ def test_a_guessed_attribution_is_not_called_a_source():
     утверждать проверенное там, где ничего не проверяли — а та же атрибуция кормит
     feedback и lifecycle.
     """
-    from jericho.agent_runtime import _citation_notice
+    from friday.agent_runtime import _citation_notice
 
     citations = [{"label": "K1", "title": "Договор аренды"}]
     explicit = _citation_notice(citations, True, inferred=False)
@@ -107,7 +107,7 @@ def test_the_trust_boundary_names_duckduckgo():
 
 def test_the_mission_tool_does_not_promise_the_model_it_never_runs_itself():
     """Модель пересказывает описание инструмента человеку как факт."""
-    source = (ROOT / "jericho" / "execution_kernel" / "__init__.py").read_text(encoding="utf-8")
+    source = (ROOT / "friday" / "execution_kernel" / "__init__.py").read_text(encoding="utf-8")
     assert "ждёт запуска пользователем, ничего не выполняя сама" not in source, (
         "обещание вернулось: при operator_full_autonomy миссия от агента создаётся "
         "сразу READY и подхватывается воркером mission_runner"
@@ -120,10 +120,10 @@ def test_a_server_without_tool_calling_still_answers():
     vLLM, запущенный без `--enable-auto-tool-choice` и `--tool-call-parser`,
     отвергает любой запрос с `tools` четырёхсотым. Агент шлёт инструменты всегда,
     поэтому на этой установке не работал ни один вызов с самого начала, а человек
-    видел «LLM сейчас недоступна» вместо ответа. Профиль, который Jericho сам
+    видел «LLM сейчас недоступна» вместо ответа. Профиль, который Friday сам
     предлагает для запуска, эти флаги не выставляет.
     """
-    from jericho.agent_runtime.llm import _tools_unsupported
+    from friday.agent_runtime.llm import _tools_unsupported
 
     vllm = (
         '{"error":{"message":"\\"auto\\" tool choice requires --enable-auto-tool-choice '
@@ -153,7 +153,7 @@ def test_the_readme_lists_every_cli_command():
     import re
     from pathlib import Path
 
-    from jericho.cli import build_parser
+    from friday.cli import build_parser
 
     parser = build_parser()
     names = sorted(

@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.execution_kernel import HIGH_RISK_TOOLS, POSTCONDITIONS, ExecutionKernel, ToolSpec
-from jericho.permissions import AuthorizationService
+from friday.execution_kernel import HIGH_RISK_TOOLS, POSTCONDITIONS, ExecutionKernel, ToolSpec
+from friday.permissions import AuthorizationService
 
 # Только читают. Ошибка в эту сторону дорога: инструмент, который на самом деле
 # пишет, но объявлен наблюдателем, обходит и гейт подтверждения, и проверку

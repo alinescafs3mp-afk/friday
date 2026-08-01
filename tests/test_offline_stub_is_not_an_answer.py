@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from jericho.agent_runtime import AgentContext, AgentRuntime
+from friday.agent_runtime import AgentContext, AgentRuntime
 
 
 def _context(**overrides) -> AgentContext:

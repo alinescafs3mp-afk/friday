@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.ingestion import IngestionPipeline, _extract_entities
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.retrieval import HybridSearcher, best_snippet
+from friday.ingestion import IngestionPipeline, _extract_entities
+from friday.knowledge_graph import KnowledgeGraph
+from friday.retrieval import HybridSearcher, best_snippet
 
 
 def test_entity_extraction_uses_boundaries_and_explicit_markers():
@@ -158,7 +158,7 @@ def test_best_snippet_ligatures_before_the_match_do_not_shift_the_window():
     лигатуры как есть. Позиции, найденные в свёрнутой строке, применялись как
     индексы исходной — каждая лигатура до совпадения сдвигала окно на символ, и
     выдержка приходила из СОСЕДНЕЙ записи, выглядя при этом валидной."""
-    from jericho.retrieval import _snippet_fold
+    from friday.retrieval import _snippet_fold
 
     prefix = "справка ﬁﬁﬁﬁﬁ о лигатурах в PDF. " * 20  # 100 лигатур до таблицы
     body = prefix + "\n" + _label_per_row_table()
@@ -235,7 +235,7 @@ def test_best_snippet_window_choice_matches_quadratic_oracle():
     import random
     from collections import Counter
 
-    from jericho.retrieval import (
+    from friday.retrieval import (
         _STOPWORDS,
         _record_line_segments,
         _search_form,
@@ -312,8 +312,8 @@ async def test_a_capped_recall_pool_says_so(storage):
     this reason; the lexical side now does too, and the count is paid only when
     the pool comes back full.
     """
-    from jericho.retrieval import HybridSearcher
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.retrieval import HybridSearcher
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     storage.ensure_user("owner")
     for index in range(40):
@@ -363,8 +363,8 @@ async def test_a_weak_dense_score_alone_is_not_evidence(storage):
     `tools/retrieval_bench.py` against the live model reads 0.8333 both before and
     after, category for category, so the tightening costs no recall on the gold set.
     """
-    from jericho.retrieval import HybridSearcher
-    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+    from friday.retrieval import HybridSearcher
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
 
     class _FixedCosine:
         """Returns vectors whose cosine with the query is exactly `similarity`."""
@@ -435,7 +435,7 @@ def test_the_dense_evidence_floor_is_configurable(settings):
     Тест держит не само число, а то, что настройка и константа не разъезжаются:
     разъехавшись, они дадут одно поведение в коде и другое в документации.
     """
-    from jericho.retrieval import _DENSE_EVIDENCE_MIN_DEFAULT
+    from friday.retrieval import _DENSE_EVIDENCE_MIN_DEFAULT
 
     assert settings.retrieval_dense_evidence_min == _DENSE_EVIDENCE_MIN_DEFAULT
     # Порог должен оставаться выше медианы шума, измеренной на настоящем корпусе.
@@ -503,6 +503,6 @@ def test_the_confident_threshold_is_configurable(settings):
     Тест держит не число, а то, что настройка и константа не разъезжаются: импорт из
     config в retrieval невозможен, там цикл, поэтому значение записано дважды.
     """
-    from jericho.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
+    from friday.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
 
     assert settings.rerank_confident_min == CONFIDENT_MIN_DEFAULT

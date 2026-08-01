@@ -16,23 +16,23 @@ from pathlib import Path
 async def main() -> None:
     td = tempfile.mkdtemp(prefix="jericho-g10-")
     home = Path(td) / "jericho-home"
-    os.environ["JERICHO_HOME"] = str(home)
-    os.environ["JERICHO_API_TOKEN"] = "A" * 48
-    os.environ["JERICHO_TELEGRAM_BRIDGE_SECRET"] = "B" * 48
-    os.environ["JERICHO_TELEGRAM_ALLOWED_CHAT_IDS"] = "42"
-    os.environ["JERICHO_LLM_ENABLED"] = "0"
-    os.environ["JERICHO_EMBEDDINGS_ENABLED"] = "0"
-    os.environ["JERICHO_WORKERS_ENABLED"] = "0"
-    os.environ["JERICHO_CODE_EXECUTION_ENABLED"] = "0"
-    os.environ["JERICHO_EMBEDDINGS_INDEX_REST_RATIO"] = "0"
-    os.environ.pop("JERICHO_ENV_FILE", None)
+    os.environ["FRIDAY_HOME"] = str(home)
+    os.environ["FRIDAY_API_TOKEN"] = "A" * 48
+    os.environ["FRIDAY_TELEGRAM_BRIDGE_SECRET"] = "B" * 48
+    os.environ["FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS"] = "42"
+    os.environ["FRIDAY_LLM_ENABLED"] = "0"
+    os.environ["FRIDAY_EMBEDDINGS_ENABLED"] = "0"
+    os.environ["FRIDAY_WORKERS_ENABLED"] = "0"
+    os.environ["FRIDAY_CODE_EXECUTION_ENABLED"] = "0"
+    os.environ["FRIDAY_EMBEDDINGS_INDEX_REST_RATIO"] = "0"
+    os.environ.pop("FRIDAY_ENV_FILE", None)
 
-    from jericho.agent_runtime import AgentRuntime
-    from jericho.config import ensure_runtime_dirs, load_settings
-    from jericho.ingestion import IngestionPipeline
-    from jericho.knowledge_graph import KnowledgeGraph
-    from jericho.retrieval import HybridSearcher
-    from jericho.storage import init_storage
+    from friday.agent_runtime import AgentRuntime
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.retrieval import HybridSearcher
+    from friday.storage import init_storage
 
     settings = load_settings()
     ensure_runtime_dirs(settings)

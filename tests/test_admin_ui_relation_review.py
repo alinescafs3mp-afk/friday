@@ -23,7 +23,7 @@ import time
 
 import pytest
 
-from jericho.storage.models import Entity, EntityType, new_id
+from friday.storage.models import Entity, EntityType, new_id
 
 pytest.importorskip("playwright.sync_api")
 
@@ -61,7 +61,7 @@ def live_admin(settings):
 
     import uvicorn
 
-    from jericho.server import create_app
+    from friday.server import create_app
 
     app = create_app(replace(settings, api_token=TOKEN, api_port=PORT))
     config = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error")

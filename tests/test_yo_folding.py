@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 
-from jericho.retrieval import lexical_vector, sparse_cosine, tokens_of
-from jericho.storage._knowledge import _fts_terms
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.retrieval import lexical_vector, sparse_cosine, tokens_of
+from friday.storage._knowledge import _fts_terms
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _store(storage, user_id: str, title: str, text: str) -> str:
@@ -114,7 +114,7 @@ def test_the_mirror_direction_is_covered_by_the_spelling_insensitive_legs():
 
 def test_a_long_word_is_not_expanded_into_a_thicket():
     """A word with many `е` would cost 2^k alternatives to chase a spelling nobody writes."""
-    from jericho.storage._knowledge import _yo_spellings
+    from friday.storage._knowledge import _yo_spellings
 
     assert _yo_spellings("предложение") == ["предложение"]
     assert len(_yo_spellings("перенес")) <= 4

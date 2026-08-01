@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
-from jericho.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.server import create_app
+from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 PHRASE = "autovacuum_vacuum_scale_factor"
 
@@ -91,7 +91,7 @@ def test_the_index_is_only_ever_read_through_the_filtered_helper():
     import ast
     from pathlib import Path
 
-    root = Path(__file__).parent.parent / "jericho"
+    root = Path(__file__).parent.parent / "friday"
     offenders: list[str] = []
     for path in root.rglob("*.py"):
         source = path.read_text(encoding="utf-8")
@@ -122,7 +122,7 @@ def test_the_agent_and_the_retriever_cannot_reach_source_text():
     """
     from pathlib import Path
 
-    root = Path(__file__).parent.parent / "jericho"
+    root = Path(__file__).parent.parent / "friday"
     for relative in ("retrieval/__init__.py", "agent_runtime/__init__.py", "execution_kernel/__init__.py"):
         source = (root / relative).read_text(encoding="utf-8")
         assert "search_raw_objects" not in source, f"{relative} reached into source text"
@@ -132,7 +132,7 @@ def test_source_search_over_http_excludes_rejected_material(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         storage = app.state.storage
-        from jericho.permissions import LEGACY_OWNER_USER_ID
+        from friday.permissions import LEGACY_OWNER_USER_ID
 
         storage.ensure_user(LEGACY_OWNER_USER_ID)
         kept = _ingest(storage, LEGACY_OWNER_USER_ID, f"оставлено {PHRASE}", status=InboxStatus.PENDING)
@@ -192,10 +192,10 @@ def test_the_index_is_rebuilt_over_rows_that_predate_it(settings, tmp_path):
     """
     from dataclasses import replace
 
-    from jericho.storage import JerichoStorage
+    from friday.storage import FridayStorage
 
     database = tmp_path / "predates.sqlite3"
-    first = JerichoStorage(replace(settings, database_path=database))
+    first = FridayStorage(replace(settings, database_path=database))
     try:
         first.ensure_user("owner")
         _ingest(first, "owner", f"записано до индекса {PHRASE}", status=InboxStatus.PENDING)
@@ -208,7 +208,7 @@ def test_the_index_is_rebuilt_over_rows_that_predate_it(settings, tmp_path):
     finally:
         first.close(final=True)
 
-    migrated = JerichoStorage(replace(settings, database_path=database))
+    migrated = FridayStorage(replace(settings, database_path=database))
     try:
         assert migrated.search_raw_objects("owner", PHRASE), "the index was not rebuilt over existing rows"
     finally:

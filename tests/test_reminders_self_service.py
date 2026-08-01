@@ -14,11 +14,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.organs import ServiceContext
-from jericho.organs.reminders import scan_reminders
-from jericho.server import create_app
-from jericho.storage.models import EntityType
+from friday.knowledge_graph import KnowledgeGraph
+from friday.organs import ServiceContext
+from friday.organs.reminders import scan_reminders
+from friday.server import create_app
+from friday.storage.models import EntityType
 from tests.test_api_vertical_slice import _bridge_get, _bridge_json
 from tests.test_telegram_and_profile import _FakeBackendClient, _FakeTelegramClient, _media_bridge
 

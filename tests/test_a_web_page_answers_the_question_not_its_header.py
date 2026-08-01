@@ -12,7 +12,7 @@ passage that matched, not the top of the document»), затем в инстру
 
 from __future__ import annotations
 
-from jericho.web_surfer import FetchResult
+from friday.web_surfer import FetchResult
 
 HEADER = "Главная Меню Навигация Мы используем cookie. Согласиться. Реклама. " * 30
 ANSWER = "Срок поверки весов ВЛТЭ-500 составляет двенадцать месяцев."

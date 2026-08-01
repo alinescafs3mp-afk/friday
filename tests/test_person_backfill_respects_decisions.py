@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 
-from jericho.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
 
 # Отчество делает эти строки ОБЪЯВЛЕНИЕМ имени, а не парой слов с большой буквы.
 BODY = (
@@ -55,7 +55,7 @@ def _store(storage, user_id: str, text: str) -> str:
 
 
 def _run(**overrides) -> int:
-    from jericho.cli import _backfill_entities
+    from friday.cli import _backfill_entities
 
     # Метод называется явно: команда обобщена под любое ОБЪЯВЛЯЮЩЕЕ правило, а не
     # только под ФИО — см. `backfill-entities` и правило войсковой части.

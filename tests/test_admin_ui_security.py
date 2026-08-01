@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from jericho.admin_ui import STATIC_DIR
+from friday.admin_ui import STATIC_DIR
 
 
 def test_dynamic_handler_payloads_use_json_argument_encoding():
@@ -43,7 +43,7 @@ def test_every_bulk_action_batches_below_the_server_cap() -> None:
     """
     from pathlib import Path
 
-    source = Path(__file__).parent.parent / "jericho" / "admin_ui" / "static" / "app.js"
+    source = Path(__file__).parent.parent / "friday" / "admin_ui" / "static" / "app.js"
     text = source.read_text(encoding="utf-8")
 
     assert "const BULK_BATCH=200" in text
@@ -76,7 +76,7 @@ def test_a_failure_midway_reports_progress_and_re_reads() -> None:
     """
     from pathlib import Path
 
-    source = Path(__file__).parent.parent / "jericho" / "admin_ui" / "static" / "app.js"
+    source = Path(__file__).parent.parent / "friday" / "admin_ui" / "static" / "app.js"
     text = source.read_text(encoding="utf-8")
     body = text[text.index("async function bulkApply") : text.index("async function bulkApply") + 900]
 

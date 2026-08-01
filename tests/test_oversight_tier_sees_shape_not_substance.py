@@ -22,8 +22,8 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
-from jericho.storage.models import RawObject, new_id
+from friday.server import create_app
+from friday.storage.models import RawObject, new_id
 
 SECRET = "Зарплата Иванова 145000 рублей, премия по итогам квартала"
 FILENAME = "ведомость-по-зарплате.xlsx"

@@ -24,8 +24,8 @@ import time
 
 import pytest
 
-from jericho.workers import WorkerSupervisor
-from jericho.workers._blocking import current_task, in_flight, run_blocking, snapshot
+from friday.workers import WorkerSupervisor
+from friday.workers._blocking import current_task, in_flight, run_blocking, snapshot
 
 
 def test_blocking_work_is_visible_while_it_runs():
@@ -150,8 +150,8 @@ def test_the_whole_document_vector_is_bounded_before_it_is_sent():
     all — reported as "backend returned no usable vectors", which reads like a broken
     endpoint rather than a document that is simply too long.
     """
-    from jericho.retrieval import knowledge_search_text
-    from jericho.workers import _DOC_VECTOR_MAX_CHARS
+    from friday.retrieval import knowledge_search_text
+    from friday.workers import _DOC_VECTOR_MAX_CHARS
 
     huge = {
         "title": "большой документ",

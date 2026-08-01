@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote
 
-from jericho.telemetry.logging import (
+from friday.telemetry.logging import (
     SecretRedactingFormatter,
     redact_text,
     secrets_from_environment,
@@ -44,9 +44,9 @@ def test_formatter_redacts_telegram_token_in_urls_and_tracebacks():
 
 
 def test_environment_secret_detection_does_not_treat_limits_as_credentials(monkeypatch):
-    monkeypatch.setenv("JERICHO_API_TOKEN", "real-api-token-value")
-    monkeypatch.setenv("JERICHO_LLM_MAX_TOKENS", "2048")
-    monkeypatch.setenv("JERICHO_API_REQUIRE_TOKEN_ON_LOOPBACK", "1")
+    monkeypatch.setenv("FRIDAY_API_TOKEN", "real-api-token-value")
+    monkeypatch.setenv("FRIDAY_LLM_MAX_TOKENS", "2048")
+    monkeypatch.setenv("FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK", "1")
     secrets = secrets_from_environment()
     assert "real-api-token-value" in secrets
     assert "2048" not in secrets
@@ -57,15 +57,15 @@ def test_split_packages_keep_their_logger_names() -> None:
     """Splitting a module into a package silently renames its logger.
 
     ``logging.getLogger(__name__)`` moved into ``_base.py`` starts emitting under
-    ``jericho.storage._base`` instead of ``jericho.storage``. Nothing here configures
+    ``friday.storage._base`` instead of ``friday.storage``. Nothing here configures
     loggers by name, so nothing breaks — but the name is what an operator greps for,
     and three refactors changed it without anyone asking. These are named explicitly
     for that reason; this test is what keeps the next split honest.
     """
-    from jericho.ingestion import _base as ingestion_base
-    from jericho.storage import _base as storage_base
-    from jericho.telegram_bridge import _base as bridge_base
+    from friday.ingestion import _base as ingestion_base
+    from friday.storage import _base as storage_base
+    from friday.telegram_bridge import _base as bridge_base
 
-    assert storage_base.LOGGER.name == "jericho.storage"
-    assert ingestion_base.LOGGER.name == "jericho.ingestion"
-    assert bridge_base.LOGGER.name == "jericho.telegram_bridge"
+    assert storage_base.LOGGER.name == "friday.storage"
+    assert ingestion_base.LOGGER.name == "friday.ingestion"
+    assert bridge_base.LOGGER.name == "friday.telegram_bridge"

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from jericho.server import create_app
+from friday.server import create_app
 
 
 def test_a_well_formed_id_is_honoured(settings):

@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import json
 
-from jericho.knowledge_graph import KnowledgeGraph
-from jericho.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
 
 
 def _knowledge(storage, user_id: str, title: str) -> str:
@@ -165,7 +165,7 @@ def test_undo_returns_the_pair_to_the_review_queue(storage):
     graph.link_knowledge_to_entity(document, source["id"], "alice")
     graph.link_knowledge_to_entity(document, target["id"], "alice")
 
-    from jericho.storage.models import EntityResolutionCandidate, new_id
+    from friday.storage.models import EntityResolutionCandidate, new_id
 
     candidate = storage.store_resolution_candidate(
         EntityResolutionCandidate(

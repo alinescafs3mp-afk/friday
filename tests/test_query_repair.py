@@ -20,9 +20,9 @@ import hashlib
 
 import pytest
 
-from jericho.retrieval import HybridSearcher
-from jericho.retrieval._keyboard import switched
-from jericho.storage.models import KnowledgeObject, RawObject, new_id
+from friday.retrieval import HybridSearcher
+from friday.retrieval._keyboard import switched
+from friday.storage.models import KnowledgeObject, RawObject, new_id
 
 
 def _make_ko(storage, user_id: str, title: str, content: str) -> str:
