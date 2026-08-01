@@ -84,7 +84,7 @@ async def test_the_search_runs_before_the_model_gets_a_turn(monkeypatch):
         data = {"results": [{"url": "https://cbr.ru/", "title": "Ставка 14,00%"}]}
 
         def to_llm_message(self) -> str:
-            return "Результат web_search:\nставка 14,00% на 31.07.2026"
+            return "Результат web_research:\nставка 14,00% на 31.07.2026"
 
     class _Kernel:
         async def execute(self, name, arguments, *, actor):
@@ -101,15 +101,20 @@ async def test_the_search_runs_before_the_model_gets_a_turn(monkeypatch):
         runtime,
         "найди в интернете, какая сейчас ключевая ставка ЦБ",
         actor=None,
-        tools=[{"function": {"name": "web_search"}}],
+        tools=[{"function": {"name": "web_research"}}],
         messages=messages,
         tools_used=used,
         tool_evidence=evidence,
     )
 
-    assert calls and calls[0][0] == "web_search", "поиск не выполнен при прямой просьбе"
+    # Именно `web_research`, а не `web_search`: он не только ищет, но и читает
+    # страницы. Замерено на пяти вопросах, ответ на которые — число (ставка,
+    # погода, курс, нефть, население): `web_search` называет конкретное значение
+    # в 3 случаях из 5 при медиане 5.2 с, `web_research` — в 5 из 5 при 6.0 с.
+    # Услужливый гугл называет значение, а не список ссылок на него.
+    assert calls and calls[0][0] == "web_research", "поиск не выполнен при прямой просьбе"
     assert calls[0][1]["query"] == "какая сейчас ключевая ставка ЦБ"
-    assert used == ["web_search"]
+    assert used == ["web_research"]
     assert messages and "14,00%" in messages[0]["content"], "выдача не дошла до модели"
     assert "не подменяй" in messages[0]["content"] or "не выдумывай" in messages[0]["content"]
 

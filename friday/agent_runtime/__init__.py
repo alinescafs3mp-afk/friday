@@ -1273,14 +1273,14 @@ class AgentRuntime:
         if not _ASKS_FOR_THE_WEB.search(message):
             return
         if not any(
-            str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_search"
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_research"
             for tool in tools
         ):
             return  # инструмент недоступен этому человеку — не обходим права
         query = self.web_query_from(message)
         try:
             result = await self.kernel.execute(
-                "web_search", {"query": query, "max_results": 5}, actor=actor
+                "web_research", {"query": query, "max_sources": 3}, actor=actor
             )
         except Exception:  # noqa: BLE001 — предварительный поиск не должен ронять ход
             LOGGER.exception("Prefetch web search failed")
@@ -1288,9 +1288,9 @@ class AgentRuntime:
         rendered = result.to_llm_message()
         if not rendered:
             return
-        tools_used.append("web_search")
+        tools_used.append("web_research")
         if result.success and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
-            tool_evidence.append({"tool": "web_search", "output": str(rendered)})
+            tool_evidence.append({"tool": "web_research", "output": str(rendered)})
         messages.append(
             {
                 "role": "system",
