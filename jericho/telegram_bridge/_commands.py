@@ -514,6 +514,34 @@ class CommandsMixin(BridgeShared):
             if not entity_id:
                 await self._send_message(telegram, chat_id, f"Объект «{entity_name}» не найден.")
                 return
+            # Псевдоним, который УЖЕ является именем другого объекта, — это не
+            # псевдоним, а заявка на слияние. Команда обещает «ничего не сливает»,
+            # и обещание надо держать: два разных человека под одним узлом это
+            # порча данных, а слияние делается отдельным решением в /merges.
+            try:
+                clash = await self._backend_json(
+                    backend,
+                    "GET",
+                    f"/api/kg/entity-profile?name={quote(alias, safe='')}",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                clash = {}
+            raw_clash = clash.get("entity") if isinstance(clash, dict) else None
+            clash_entity: dict[str, Any] = raw_clash if isinstance(raw_clash, dict) else {}
+            clash_id = str(clash_entity.get("id") or "")
+            if clash_id and clash_id != entity_id:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    f"«{alias}» — это уже отдельный объект, а не написание для «{entity_name}». "
+                    "Псевдонимом его сделать нельзя: это было бы скрытым слиянием двух узлов. "
+                    "Если это действительно один и тот же — объедините их в /merges, "
+                    f"а посмотреть второй: /profile {alias}",
+                )
+                return
             existing_aliases = found_entity.get("aliases_json")
             if isinstance(existing_aliases, str):
                 try:
@@ -521,9 +549,15 @@ class CommandsMixin(BridgeShared):
                 except json.JSONDecodeError:
                     existing_aliases = []
             aliases = [str(item) for item in (existing_aliases or []) if str(item).strip()]
-            if alias in aliases:
+            # Сравнение нормализованное: у объекта уже есть «Иванов И.И.», человек
+            # пишет «Иванов И. И.» — это то же самое написание, и второй записи
+            # быть не должно. Все потребители псевдонимов сравнивают именно так.
+            from jericho.storage._base import normalize_entity_name
+
+            known = {normalize_entity_name(item) for item in [*aliases, entity_name]}
+            if normalize_entity_name(alias) in known:
                 await self._send_message(
-                    telegram, chat_id, f"У объекта «{entity_name}» уже есть псевдоним «{alias}»."
+                    telegram, chat_id, f"У объекта «{entity_name}» уже есть такой псевдоним."
                 )
                 return
             await self._backend_json(
@@ -570,8 +604,8 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             raw_found = found.get("entity") if isinstance(found, dict) else None
-            found_entity: dict[str, Any] = raw_found if isinstance(raw_found, dict) else {}
-            entity_id = str(found_entity.get("id") or "")
+            renamed_target: dict[str, Any] = raw_found if isinstance(raw_found, dict) else {}
+            entity_id = str(renamed_target.get("id") or "")
             if not entity_id:
                 await self._send_message(telegram, chat_id, f"Объект «{old_name}» не найден.")
                 return

@@ -23,7 +23,14 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Request
 
-from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
+from jericho.organs import (
+    Organ,
+    OrganWorker,
+    ServiceContext,
+    in_quiet_hours,
+    may_push_to,
+    resolve_chat_id,
+)
 from jericho.permissions import CapabilityDefinition
 from jericho.storage.models import InboxStatus
 
@@ -160,10 +167,7 @@ async def reflection_digest(ctx: ServiceContext) -> None:
         chat_id = resolve_chat_id(ctx.storage, user_id)
         if not chat_id:
             continue
-        try:
-            if int(chat_id) not in allowed:
-                continue
-        except ValueError:
+        if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
         digest = build_reflection(ctx.storage, user_id)
         # An almost-empty base has nothing to reflect on; do not ping it.

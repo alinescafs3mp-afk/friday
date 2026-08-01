@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 import pytest
+from urllib.parse import quote
 
 from jericho.telegram_bridge import _UpdateInbox
 
@@ -2025,7 +2026,7 @@ async def test_an_alias_helps_search_without_merging_anything(tmp_path):
             "message_id": 20,
             "chat": {"id": 5001},
             "from": {"id": 5001},
-            "text": "/entity_alias Иванов Иван Иванович => Иванов И. И.",
+            "text": "/entity_alias Иванов Иван Иванович => Иван Иванов",
         },
     }
     try:
@@ -2037,7 +2038,7 @@ async def test_an_alias_helps_search_without_merging_anything(tmp_path):
     assert patches, "псевдоним не дошёл до backend"
     body = patches[0]["body"]
     assert "name" not in body, "команда переименовала объект вместо добавления псевдонима"
-    assert body["aliases"] == ["Иванов И.И.", "Иванов И. И."], "прежние псевдонимы потеряны"
+    assert body["aliases"] == ["Иванов И.И.", "Иван Иванов"], "прежние псевдонимы потеряны"
 
 
 @pytest.mark.asyncio
@@ -2069,5 +2070,97 @@ async def test_a_duplicate_alias_is_not_added_twice(tmp_path):
         bridge._inbox.close()
 
     assert not [call for call in backend.calls if call["method"] == "PATCH"], "псевдоним добавлен дважды"
+    sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+    assert sends and "уже есть" in str(sends[-1]["text"])
+
+
+@pytest.mark.asyncio
+async def test_an_alias_that_is_another_object_is_refused_not_silently_merged(tmp_path):
+    """«Псевдоним», который уже является ИМЕНЕМ другого узла, — заявка на слияние.
+
+    Команда обещает «ничего не сливает», и обещание надо держать: на корпусе из
+    4349 автоизвлечённых ФИО «Иванов И.И.» вполне может быть отдельным человеком,
+    а два разных человека под одним узлом — порча данных, которую нечем откатить,
+    кроме unmerge. Слияние делается отдельным решением в /merges.
+
+    Мутация: убрать проверку столкновения — тест обязан покраснеть.
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            f"/api/kg/entity-profile?name={quote('Иванов Иван Иванович', safe='')}": {
+                "entity": {"id": "ent_main", "name": "Иванов Иван Иванович", "aliases_json": "[]"},
+                "profile": {},
+                "edits": {"versions": 1, "restorable_version": None},
+            },
+            # Псевдоним резолвится в ДРУГОЙ объект — это заявка на слияние.
+            f"/api/kg/entity-profile?name={quote('Иванов И.И.', safe='')}": {
+                "entity": {"id": "ent_other", "name": "Иванов И.И.", "aliases_json": "[]"},
+                "profile": {},
+                "edits": {"versions": 1, "restorable_version": None},
+            },
+        }
+    )
+    update = {
+        "update_id": 962,
+        "message": {
+            "message_id": 22,
+            "chat": {"id": 5001},
+            "from": {"id": 5001},
+            "text": "/entity_alias Иванов Иван Иванович => Иванов И.И.",
+        },
+    }
+    try:
+        await bridge._process_update(telegram, backend, update, cached_response=None)
+    finally:
+        bridge._inbox.close()
+
+    assert not [call for call in backend.calls if call["method"] == "PATCH"], (
+        "псевдоним, совпадающий с именем другого объекта, применён — это скрытое слияние"
+    )
+    sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+    assert sends and "/merges" in str(sends[-1]["text"]), "человеку не сказано, где сливают по-настоящему"
+
+
+@pytest.mark.asyncio
+async def test_a_differently_spelled_duplicate_alias_is_recognised(tmp_path):
+    """«Иванов И.И.» и «Иванов И. И.» — одно написание для всех потребителей.
+
+    Точное сравнение строк добавило бы второй псевдоним, и человек получил бы
+    «готово» вместо «уже есть».
+
+    Мутация: сравнивать строки точно — тест обязан покраснеть.
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/entity-profile": {
+                "entity": {
+                    "id": "ent_abc123",
+                    "name": "Иванов Иван Иванович",
+                    "aliases_json": '["Иванов И.И."]',
+                },
+                "profile": {},
+                "edits": {"versions": 1, "restorable_version": None},
+            }
+        }
+    )
+    update = {
+        "update_id": 963,
+        "message": {
+            "message_id": 23,
+            "chat": {"id": 5001},
+            "from": {"id": 5001},
+            "text": "/entity_alias Иванов Иван Иванович => Иванов И. И.",
+        },
+    }
+    try:
+        await bridge._process_update(telegram, backend, update, cached_response=None)
+    finally:
+        bridge._inbox.close()
+
+    assert not [call for call in backend.calls if call["method"] == "PATCH"], "добавлен дубль псевдонима"
     sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
     assert sends and "уже есть" in str(sends[-1]["text"])

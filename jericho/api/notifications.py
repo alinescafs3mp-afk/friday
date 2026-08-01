@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query, Request
 
 from jericho.api.deps import _request_json, _require_bridge
 from jericho.config import JerichoSettings
+from jericho.organs import may_push_to
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -25,16 +26,16 @@ async def notifications_pending(
     _require_bridge(request)
     settings: JerichoSettings = request.app.state.settings
     storage = request.app.state.storage
-    allowed = settings.telegram_effective_allowed_chat_ids
     items = []
     undeliverable: list[str] = []
     for row in storage.list_pending_notifications(limit=limit):
-        # Defence in depth: never hand the bridge a de-allowlisted chat.
-        try:
-            if int(str(row.get("chat_id"))) not in allowed:
-                undeliverable.append(str(row["id"]))
-                continue
-        except (TypeError, ValueError):
+        # Defence in depth — но ТЕМ ЖЕ предикатом, что у органов, которые эту
+        # строку поставили. Пока здесь стоял только статический список,
+        # самозарегистрированный человек получал худший из возможных исходов:
+        # орган ставил ему уведомление, а выдача очереди объявляла строку
+        # недоставляемой и гасила её вместе с `dedup_key` — то есть тот же
+        # материал больше не мог быть предложен НИКОГДА, и всё это молча.
+        if not may_push_to(settings, storage, str(row.get("user_id") or ""), str(row.get("chat_id"))):
             undeliverable.append(str(row["id"]))
             continue
         items.append({"id": row["id"], "chat_id": row["chat_id"], "body": row["body"]})
