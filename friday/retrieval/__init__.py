@@ -1476,6 +1476,7 @@ class HybridSearcher:
         explain: bool = False,
         since: str | None = None,
         until: str | None = None,
+        record_usage: bool | None = None,
     ) -> dict[str, Any]:
         # Deferred: `friday.workers` (the package, not just `_blocking`) imports
         # FROM `friday.retrieval` — a module-level import here would be circular.
@@ -2043,7 +2044,15 @@ class HybridSearcher:
         # persist this optional, best-effort usage signal. An advisory harness turns
         # the write off entirely: ``usage_signal`` reads this counter back into the
         # blend, so measuring the corpus would otherwise change it.
-        if self._record_usage:
+        #
+        # Перекрытие НА ОДИН ВЫЗОВ нужно тем, кто наблюдает систему, а не пользуется
+        # ею: explain-трейс объявлен read-only, но ходил через общий поисковик и
+        # писал счётчик — то есть менял то, что показывал. Замерено прямым опытом:
+        # один запрос explain поднял `retrieval_count` с 1968 до 1970, а несколько
+        # диагностических прогонов по золотому набору сдвинули recall@10 с 0.5 до
+        # 0.4872 — «ухудшение», которого никто не вносил.
+        writes_usage = self._record_usage if record_usage is None else bool(record_usage)
+        if writes_usage:
             with suppress(Exception):
                 top_score = float(results[0].get("_score", 0.0) or 0.0) if results else 0.0
                 usage_floor = max(0.015, top_score * 0.32)

@@ -131,7 +131,12 @@ async def retrieval_explain(
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.eval.read", target)
     state = _services(request)
-    result = await state.hybrid_searcher.search(target, q, limit=limit, kg=state.kg, explain=True)
+    # `record_usage=False` — не украшение: без него объявленный здесь read-only
+    # писал счётчик обращений, который ранжирование читает обратно, и диагностика
+    # меняла ту самую выдачу, которую показывает.
+    result = await state.hybrid_searcher.search(
+        target, q, limit=limit, kg=state.kg, explain=True, record_usage=False
+    )
     trace = result.get("trace", [])
     discarded = [row for row in trace if row.get("status") == "discarded"]
     return {
