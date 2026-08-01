@@ -896,10 +896,15 @@ class ExecutionKernel:
 
     async def _entity_lookup(self, *, actor: ActorContext, name: str) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
-        entity = kg.find_entity(actor.user_id, name)
+        # Через поток, как и HTTP-двойник этой же карточки: профиль на широкой
+        # сущности — несколько SQL по 22 тысячам связей. Маршрут перевели на
+        # `run_blocking`, а этот путь забыли — и он ХУЖЕ, потому что инструмент
+        # зовётся внутри агентского цикла, где ждут все остальные разговоры.
+        entity = await run_blocking(kg.find_entity, actor.user_id, name)
         if not entity:
             return {"found": False, "entity": None}
-        return {"found": True, "entity": entity, **kg.entity_profile(entity["id"], actor.user_id)}
+        profile = await run_blocking(kg.entity_profile, entity["id"], actor.user_id)
+        return {"found": True, "entity": entity, **profile}
 
     async def _entity_create(
         self,

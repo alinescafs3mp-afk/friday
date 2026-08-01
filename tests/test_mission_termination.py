@@ -106,3 +106,62 @@ async def test_cancelling_a_mission_is_not_undone_by_a_step_in_flight(settings, 
     assert mission["status"] == MissionStatus.CANCELLED.value, (
         "the stop was overwritten by the tick that was already running"
     )
+
+
+def test_a_failed_step_does_not_hide_behind_a_successful_one(settings, storage):
+    """«Хоть один шаг сделан» — не успех миссии.
+
+    Типичная миссия — два шага: собрать материал и произвести результат. Провал
+    ВТОРОГО означает, что человек не получил ничего, а первый лишь сходил в
+    поиск. Правило `COMPLETED if done` отчитывалось «завершена» ровно в этом
+    случае — то есть система сообщала об успехе там, где его не было.
+
+    Спека v3 §5: успешный вызов инструмента не доказывает успех задачи. Минимум,
+    который из этого следует: провалившийся шаг не бывает частью «завершено».
+
+    Мутация: вернуть `status = COMPLETED if done else FAILED` — тест обязан
+    покраснеть.
+    """
+    storage.ensure_user("alice")
+    mission = Mission(
+        id=new_id("mis"),
+        user_id="alice",
+        goal="Собрать и произвести",
+        status=MissionStatus.RUNNING,
+    )
+    storage.create_mission(mission)
+    plan = [
+        MissionTask(
+            id=new_id("mst"),
+            mission_id=mission.id,
+            user_id="alice",
+            seq=1,
+            kind=TaskKind.GATHER,
+            instruction="Собрать материал",
+        ),
+        MissionTask(
+            id=new_id("mst"),
+            mission_id=mission.id,
+            user_id="alice",
+            seq=2,
+            kind=TaskKind.PRODUCE,
+            instruction="Произвести результат",
+            depends_on_json=[1],
+        ),
+    ]
+    storage.set_mission_plan(
+        mission.id, "alice", plan, plan_summary="сбор и результат", status=MissionStatus.RUNNING
+    )
+    storage.update_mission_task_fields(plan[0].id, "alice", status=TaskStatus.DONE.value)
+    storage.update_mission_task_fields(
+        plan[1].id, "alice", status=TaskStatus.FAILED.value, error="не удалось"
+    )
+
+    service = _service(settings, storage)
+    service._finalize(mission.id, "alice", storage.get_mission_tasks(mission.id, "alice"))  # noqa: SLF001
+
+    finished = storage.get_mission(mission.id, "alice")
+    assert finished["status"] == MissionStatus.FAILED.value, (
+        "миссия отчиталась «завершена», хотя результат не произведён"
+    )
+    assert finished["completed_at"], "миссия обязана быть терминальной в любом случае"

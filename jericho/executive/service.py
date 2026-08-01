@@ -646,7 +646,15 @@ class ExecutiveService:
         # A mission the user cancelled is finished, and finishing it again would
         # overwrite that decision with «completed».
         if tasks and all(task["status"] in terminal for task in tasks):
-            status = MissionStatus.COMPLETED if done else MissionStatus.FAILED
+            # «Хоть один шаг сделан» — не успех миссии. У миссии из двух шагов
+            # (собрать → произвести результат) провал ВТОРОГО означает, что
+            # человек не получил ничего, а первый шаг лишь сходил в поиск: старое
+            # правило `COMPLETED if done` отчитывалось «завершена» ровно в этом
+            # случае. Спека v3 §5: успешный вызов инструмента не доказывает успех
+            # задачи, а завершение миссии требует проверенных постусловий —
+            # минимум из этого: провалившийся шаг не бывает частью «завершено».
+            failed = any(task["status"] == TaskStatus.FAILED.value for task in tasks)
+            status = MissionStatus.COMPLETED if done and not failed else MissionStatus.FAILED
             self.storage.update_mission_fields(
                 mission_id,
                 user_id,

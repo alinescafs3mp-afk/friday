@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
+from jericho.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,23 +66,33 @@ async def scan_monitors(ctx: ServiceContext) -> None:
     storage = ctx.storage
     searcher = getattr(ctx, "hybrid_searcher", None)
     enqueued = 0
-    for monitor in storage.iter_active_monitors():
+    monitors = await run_blocking(storage.iter_active_monitors)
+    for monitor in monitors:
         user_id = str(monitor.get("user_id") or "")
         query = str(monitor.get("query") or "").strip()
         if not user_id or not query:
             continue
         cursor = int(monitor.get("last_seen_rowid") or 0)
         try:
+            # ВЕСЬ тяжёлый кусок уходит в поток: чтение страницы тел и сравнение
+            # по ним. Замерено на форме боевого корпуса — страница в 200 тел это
+            # 11.8 МБ текста и 3.5 с работы; на потолке в 20 слежений один аккаунт
+            # заморозил бы event loop на 71 секунду каждый проход. Объявленный
+            # `timeout_sec=300` при этом не спасал: корутину без точек ожидания
+            # отменить нечем. Ровно тот класс, что чинился этой же ночью в
+            # карточке объекта — и повторённый здесь.
+            #
             # Курсор по rowid, а не по времени: `utc_now()` секундной точности, и
             # документ, пришедший в ту же секунду, что и предыдущая проверка, при
             # сравнении по времени терялся бы навсегда.
-            fresh = storage.knowledge_bodies_after(after_rowid=cursor, user_id=user_id, limit=200)
+            fresh, checkpoint, candidates = await run_blocking(
+                _scan_one, storage, user_id, query, cursor, searcher
+            )
         except Exception:  # noqa: BLE001 - один сломанный монитор не валит проход
             LOGGER.warning("monitor %s failed to read knowledge", monitor.get("id"), exc_info=True)
             continue
-        checkpoint = max([int(item.get("rowid") or 0) for item in fresh], default=cursor)
-        candidates = [item for item in fresh if _matches(query, item, searcher)]
-        chat_id = _deliverable_chat(storage, monitor, user_id)
+        del fresh
+        chat_id = await run_blocking(_deliverable_chat, storage, monitor, user_id)
         if candidates and not chat_id:
             # Доставить некуда — курсор НЕ двигаем: иначе совпадение считалось бы
             # показанным и терялось навсегда. Монитор просто ждёт, пока чат
@@ -90,7 +101,8 @@ async def scan_monitors(ctx: ServiceContext) -> None:
             continue
         if candidates and chat_id:
             body = _format_match(query, candidates, len(candidates))
-            if storage.enqueue_notification(
+            if await run_blocking(
+                storage.enqueue_notification,
                 user_id,
                 chat_id,
                 body,
@@ -100,11 +112,35 @@ async def scan_monitors(ctx: ServiceContext) -> None:
                 dedup_key=f"monitor:{monitor.get('id')}:{checkpoint}",
             ):
                 enqueued += 1
-        storage.mark_monitor_checked(
-            str(monitor.get("id")), user_id, seen_rowid=checkpoint, reported=len(candidates)
+        await run_blocking(
+            storage.mark_monitor_checked,
+            str(monitor.get("id")),
+            user_id,
+            seen_rowid=checkpoint,
+            reported=len(candidates),
         )
     if enqueued:
         LOGGER.info("Monitors organ queued %d notification(s)", enqueued)
+
+
+def _scan_one(
+    storage: Any, user_id: str, query: str, cursor: int, searcher: Any
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+    """Чтение страницы и отбор совпадений — ОДНИМ синхронным куском.
+
+    Живёт отдельной функцией именно затем, чтобы уходить в поток целиком:
+    держать половину работы на event loop, а половину в потоке, значит не решить
+    задачу — а именно на сравнении по телам документов и уходит время.
+
+    Страница уменьшена с 200 до 50: на боевом корпусе средний документ — 16.6
+    тысяч знаков, то есть 200 тел это 11.8 МБ за раз ради одного монитора.
+    Хвост не теряется — курсор двигается на последнюю просмотренную строку, и
+    следующий проход продолжит с неё.
+    """
+    fresh = storage.knowledge_bodies_after(after_rowid=cursor, user_id=user_id, limit=50)
+    checkpoint = max([int(item.get("rowid") or 0) for item in fresh], default=cursor)
+    candidates = [item for item in fresh if _matches(query, item, searcher)]
+    return fresh, checkpoint, candidates
 
 
 def _deliverable_chat(storage: Any, monitor: dict[str, Any], user_id: str) -> str:

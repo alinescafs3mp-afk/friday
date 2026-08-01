@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from jericho.organs import ServiceContext
+import jericho.organs.monitors as monitors_module
 from jericho.organs.monitors import scan_monitors
 from jericho.server import create_app
 from jericho.storage.models import KnowledgeObject, RawObject, new_id
@@ -296,4 +297,59 @@ async def test_a_monitor_does_not_wake_anyone_at_night(settings, storage):
             "c"
         ]
         == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_monitor_pass_does_not_freeze_everyone_else(settings, storage):
+    """Проход мониторов не имеет права держать event loop.
+
+    Замерено на форме боевого корпуса: страница в 200 тел — это 11.8 МБ текста и
+    3.5 с работы, а на потолке в 20 слежений один аккаунт заморозил бы всех на 71
+    секунду каждый проход. Объявленный органом `timeout_sec=300` при этом не
+    спасал: корутину без единой точки ожидания отменить нечем.
+
+    Меряется наибольший РАЗРЫВ между тиками соседней корутины, а не их сумма:
+    сумма позволяет одному длинному замиранию спрятаться за быстрыми участками.
+
+    Мутация: вернуть чтение и сравнение прямо в `scan_monitors` (без
+    `run_blocking`) — тест обязан покраснеть.
+    """
+    import asyncio
+    import time
+    from dataclasses import replace
+
+    storage.ensure_user("alice")
+    storage.create_monitor("alice", "поверка весов", chat_id="5001")
+    for index in range(5):
+        _document(storage, "alice", f"Документ {index} про поверку весов", f"Акт {index}")
+
+    real_matches = monitors_module._matches
+
+    def _slow_matches(query, item, searcher=None):
+        time.sleep(0.06)
+        return real_matches(query, item, searcher)
+
+    monitors_module._matches = _slow_matches
+    ticks: list[float] = []
+
+    async def _ticker() -> None:
+        while True:
+            ticks.append(time.monotonic())
+            await asyncio.sleep(0.01)
+
+    ticker = asyncio.create_task(_ticker())
+    await asyncio.sleep(0)
+    try:
+        awake = replace(settings, quiet_hours_start=0, quiet_hours_end=0)
+        await scan_monitors(ServiceContext(settings=awake, storage=storage, kg=None, ingestion=None))
+    finally:
+        ticks.append(time.monotonic())
+        ticker.cancel()
+        monitors_module._matches = real_matches
+
+    assert len(ticks) >= 5, f"тиков всего {len(ticks)} — стенд сломан"
+    gaps = [second - first for first, second in zip(ticks, ticks[1:], strict=False)]
+    assert max(gaps) < 0.15, (
+        f"наибольший разрыв между тиками {max(gaps):.3f} с — проход мониторов держал event loop"
     )
