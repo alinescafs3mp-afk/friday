@@ -410,10 +410,19 @@ class ViewsMixin(BridgeShared):
             if occurred_at:
                 when = f"{occurred_at} — {occurred_end}" if occurred_end else occurred_at
                 lines.append(f"Когда произошло: {when}")
+        # Спека v3 §2: производное значение не выдаётся за свойство объекта.
+        # Теги и даты вычислены ИЗ ЕГО ДОКУМЕНТОВ, а не записаны на нём: «теги
+        # Иванова» и «теги в документах, где он упомянут» — разные утверждения, и
+        # второе честное. Пометка одна на весь блок, чтобы не сорить в каждой
+        # строке.
+        derived = data.get("profile_provenance") if isinstance(data.get("profile_provenance"), dict) else {}
         tags = profile.get("tags") or []
+        date_range = profile.get("document_date_range")
+        if tags or isinstance(date_range, dict):
+            source_count = int(derived.get("source_count") or 0)
+            lines.append(f"По его документам ({source_count}):" if source_count else "По его документам:")
         if tags:
             lines.append("Теги: " + ", ".join(f"#{tag}" for tag in tags[:15]))
-        date_range = profile.get("document_date_range")
         if isinstance(date_range, dict):
             earliest = date_range.get("earliest")
             latest = date_range.get("latest")

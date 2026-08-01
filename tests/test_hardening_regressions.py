@@ -309,9 +309,7 @@ def test_user_export_includes_versions_permissions_and_sessions(storage):
     # Слежения человек завёл сам — в архиве аккаунта они обязаны быть. Новая
     # таблица, забытая в экспорте, теряется молча: архив выглядит полным.
     storage.create_monitor("alice", "поверка весов")
-    reexported = json.loads(
-        Path(storage.export_user("alice")["path"]).read_text(encoding="utf-8")
-    )
+    reexported = json.loads(Path(storage.export_user("alice")["path"]).read_text(encoding="utf-8"))
     assert [row["query"] for row in reexported["monitors"]] == ["поверка весов"]
 
 

@@ -346,3 +346,30 @@ def test_http_entity_profile_by_name_matches_the_agent_tool_shape(settings):
 
         missing = client.get("/api/kg/entity-profile", params={"name": "Нет такой сущности"}, headers=owner)
         assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_derived_values_say_that_they_are_derived(kernel):
+    """Спека v3 §2: производное значение не выдаётся за свойство объекта.
+
+    Теги и диапазон дат НЕ записаны на сущности — они вычислены из её документов
+    прямо сейчас. Без пометки и человек, и модель читают их как факт об объекте:
+    «теги Иванова такие-то», хотя честно — «в документах, где он упомянут,
+    встречаются такие-то». Отсюда же берётся свежесть: значение верно на момент
+    вычисления, а не навсегда.
+
+    Мутация: убрать `profile_provenance` — тест обязан покраснеть.
+    """
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Атлас")
+    ko = _document(storage, "alice", "Отчёт", tags=["отчёт"], document_date="2026-01-15")
+    graph.link_knowledge_to_entity(ko, entity_id, "alice", status="accepted")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
+
+    provenance = result.data["profile_provenance"]
+    assert provenance["derived"] is True
+    assert provenance["source_count"] == 1, "не сказано, из скольких документов выведено"
+    assert provenance["computed_at"], "не сказано, когда посчитано — значит выглядит вечным"
+    assert provenance["calculation"], "нет версии расчёта: сравнить два ответа будет нечем"

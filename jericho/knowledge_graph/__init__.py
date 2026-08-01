@@ -1643,6 +1643,7 @@ class KnowledgeGraph:
         # равно обрезалась на 11 900 знаках.
         knowledge_objects = self.storage.get_entity_knowledge_cards(user_id, entity_id, limit=knowledge_limit)
         summary = self.storage.entity_knowledge_summary(user_id, entity_id)
+        knowledge_total = int(summary.get("total") or 0)
         return {
             "relations": self.get_entity_relations(entity_id, user_id),
             "pending_relations_count": self.count_pending_relations(entity_id, user_id),
@@ -1653,6 +1654,27 @@ class KnowledgeGraph:
             # неверным у 93 из 200 самых широких сущностей боевой копии.
             "knowledge_objects_total": summary.pop("total"),
             "profile": summary,
+            # Спека v3 §2: «derived properties identify their source objects,
+            # calculation version and freshness; a derived value is never
+            # presented as a sourced fact». Теги, диапазон дат и число «без своей
+            # даты» НЕ записаны на объекте — они вычислены из его документов
+            # прямо сейчас. Без этой пометки человек (и модель) читает их как
+            # свойства объекта: «у Иванова теги такие-то», хотя правильно —
+            # «в его документах встречаются такие-то».
+            # Спека v3 §2: «derived properties identify their source objects,
+            # calculation version and freshness; a derived value is never
+            # presented as a sourced fact». Теги, диапазон дат и число «без своей
+            # даты» НЕ записаны на объекте — они вычислены из его документов
+            # прямо сейчас. Без пометки человек (и модель) читает их как свойства
+            # объекта: «у Иванова теги такие-то», хотя правильно — «в его
+            # документах встречаются такие-то».
+            "profile_provenance": {
+                "derived": True,
+                "derived_from": "linked knowledge objects",
+                "source_count": knowledge_total,
+                "computed_at": utc_now(),
+                "calculation": "entity_knowledge_summary/1",
+            },
             "event_time": self.get_event_time(user_id, entity_id),
             # Четвёртый временной факт, теперь и для сущности: КОГДА ЕЁ ПРАВИЛИ —
             # отдельно от дат документов и от времени события (спека v3 §2). У
