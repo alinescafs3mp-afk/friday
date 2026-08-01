@@ -189,3 +189,42 @@ async def test_an_alias_is_not_added_when_the_clash_check_could_not_run(tmp_path
         f"команда не сказала, что проверка не состоялась: {text!r}"
     )
     assert "Псевдоним добавлен" not in text and "Псевдонимы" not in text
+
+
+@pytest.mark.asyncio
+async def test_approvals_are_not_listed_into_a_group(tmp_path):
+    """Список подтверждений — в личку, а не в общую комнату.
+
+    Строка заявки называет, ЧТО предлагается сделать с личными данными («слить
+    Иванова И.И. и Иванова Ивана»), то есть имена из чужого графа. Ровно это уже
+    приходилось убирать из проактивных сообщений: нажать кнопку чужой не сможет
+    (заявка привязана к владельцу), а прочитать строку может каждый в комнате.
+
+    Мутация: убрать проверку типа чата — тест краснеет.
+    """
+    bridge = _bridge(tmp_path)
+    telegram = _Telegram()
+    backend = _Backend({"/api/me/approvals": 200}, {"/api/me/approvals": {"items": [], "total": 0}})
+    try:
+        await bridge._process_update(  # noqa: SLF001
+            telegram,
+            backend,
+            {
+                "update_id": 2,
+                "message": {
+                    "message_id": 11,
+                    "chat": {"id": 5001, "type": "supergroup"},
+                    "from": {"id": 5001, "is_bot": False, "first_name": "Иван"},
+                    "text": "/approvals",
+                },
+            },
+            cached_response=None,
+        )
+        text = _texts(telegram)[-1]
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert "личной переписке" in text
+    assert not [path for path in backend.paths if "approvals" in path], (
+        "список запрошен у бэкенда, хотя показывать его в группе нельзя"
+    )

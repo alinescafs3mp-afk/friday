@@ -281,3 +281,42 @@ def test_the_bridge_receives_what_it_needs_to_draw_the_buttons(api):
     assert mine[0]["dedup_key"] == f"approval:{approval['id']}", (
         "мосту нечего подставить в callback_data — кнопка решения не построится"
     )
+
+
+def test_a_bystander_pressing_the_button_changes_nothing(api):
+    """Кнопка в общей комнате доступна всем, кто её видит.
+
+    Callback приходит от того, КТО НАЖАЛ, а маршрут решает от имени этого актора.
+    Значит защита — не в кнопке, а в том, что заявка принадлежит владельцу: чужому
+    маршрут обязан ответить «не найдено», не подтвердив даже её существования.
+
+    Мутация: искать заявку без `user_id` — тест краснеет.
+    """
+    app, client, headers, user_id = api
+    storage = app.state.storage
+    candidate_id = _candidate(storage, user_id)
+    approval = storage.create_action_approval(
+        user_id,
+        tool="entity_merge_decide",
+        payload={"candidate_id": candidate_id, "decision": "accept"},
+        summary="Слить два узла",
+        policy_epoch="1",
+    )
+
+    import hashlib
+    import secrets
+
+    storage.ensure_user("bystander", preset_key="user")
+    raw_token = secrets.token_urlsafe(32)
+    storage.create_api_token(
+        "bystander", hashlib.sha256(raw_token.encode()).hexdigest(), label="test", ttl_seconds=3600
+    )
+
+    response = client.post(
+        f"/api/approvals/{approval['id']}/decide",
+        json={"decision": "approve"},
+        headers={"Authorization": f"Bearer {raw_token}"},
+    )
+    assert response.status_code in {403, 404}
+    assert storage.get_action_approval(approval["id"], user_id)["status"] == "pending"
+    assert str(storage.get_resolution_candidate(candidate_id, user_id)["status"]) == "suggested"
