@@ -474,6 +474,15 @@ class AgentRuntime:
                 "had_attachments": True,
                 "attachment_count": len(attachment_list),
             }
+        if synthetic_document_notice:
+            # Тот же вид отметки, и по той же причине: «ещё раз» (POST
+            # /api/me/regenerate) берёт СОХРАНЁННЫЙ текст хода и зовёт `chat`
+            # заново. Без метки сгенерированное backend'ом «Загружен документ:
+            # …» на повторе судится классификатором как вопрос человека — и имя
+            # чужого файла с реляционной фразой включает графовое расширение,
+            # которого первый ход не получал. Признак — свойство хода, значит
+            # жить он должен на ходе, а не в памяти одного запроса.
+            user_metadata = {**(user_metadata or {}), "synthetic_document_notice": True}
         self.storage.store_message(
             conversation_id,
             user_id,

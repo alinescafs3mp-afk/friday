@@ -760,23 +760,23 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
     ensure_runtime_dirs(settings)
     storage = init_storage(settings)
     scanned = dated = missing = 0
-    # Объект, у которого даты в файле НЕТ, остаётся в выборке «без даты» навсегда:
-    # без этого множества цикл брал бы одну и ту же пачку бесконечно, а первый
-    # прогон завершился лишь потому, что дательных объектов случайно хватило.
-    # Прогресс считается по НОВЫМ объектам, а не по проставленным датам: пачка,
-    # целиком состоящая из файлов без дат, — законный конец работы, а не тупик.
-    seen: set[str] = set()
+    # Курсор, а не множество просмотренных. Объект, у которого даты в файле НЕТ,
+    # остаётся «без даты» навсегда, поэтому выборка «первые N без даты» отдаёт его
+    # снова и снова: прежний цикл отфильтровывал их по `seen`, получал пустую
+    # пачку и ВЫХОДИЛ — считая концом корпуса то, что было концом первой страницы.
+    # Повторный запуск начинал с той же головы и не двигался дальше никогда.
+    # Замер на копии боевой базы: 184 объекта без даты при batch=200 — сегодня
+    # укладывается, но ровно поэтому дефект и не проявился ни разу; корпус растёт.
+    cursor = 0
     try:
         while True:
-            batch = [
-                row
-                for row in storage.knowledge_missing_document_date(user_id=args.user, limit=args.batch)
-                if str(row["id"]) not in seen
-            ]
+            batch = storage.knowledge_missing_document_date(
+                user_id=args.user, limit=args.batch, after_rowid=cursor
+            )
             if not batch:
                 break
             for row in batch:
-                seen.add(str(row["id"]))
+                cursor = max(cursor, int(row["position"]))
                 scanned += 1
                 raw_path = str(row.get("stored_path") or "")
                 path = pathlib.Path(raw_path)

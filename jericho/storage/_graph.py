@@ -1194,6 +1194,22 @@ class GraphMixin(StorageShared):
                    WHERE id=? AND user_id=?""",
                 (target_id, now, now, source_id, user_id),
             )
+            # Какие именно строки очереди закрывает это слияние — записывается ДО
+            # апдейта, иначе откатывать нечего: без списка `unmerge` оставлял пару
+            # в статусе 'merged' навсегда. А `store_resolution_candidate` по
+            # правилу «решённое человеком не возвращается в очередь» отдаёт
+            # существующую строку не трогая, поэтому та же пара больше не
+            # предлагалась НИКОГДА и слить её заново было нечем: прямого «слей вот
+            # эти две» в системе нет, все пути идут через кандидатуру.
+            closed_candidates = [
+                str(item["id"])
+                for item in conn.execute(
+                    """SELECT id FROM entity_resolution_candidates
+                       WHERE user_id=? AND status='suggested'
+                         AND (entity_a_id=? OR entity_b_id=?)""",
+                    (user_id, source_id, source_id),
+                ).fetchall()
+            ]
             conn.execute(
                 """UPDATE entity_resolution_candidates SET status='merged', resolved_at=?, resolved_by=?
                    WHERE user_id=? AND status='suggested'
@@ -1205,6 +1221,7 @@ class GraphMixin(StorageShared):
                 "links_suppressed": links_suppressed,
                 "primary_moved": primary_moved,
                 "relations": relations_transfer,
+                "closed_candidates": closed_candidates,
             }
             merge_id = new_id("merge")
             conn.execute(
@@ -1445,6 +1462,26 @@ class GraphMixin(StorageShared):
                         original.get("metadata_json") or "{}",
                         original.get("created_at") or now,
                     ),
+                )
+
+            # 7. Очередь: пары, которые закрыло это слияние, возвращаются на
+            # разбор. Иначе откат хоронил их навсегда — строка оставалась
+            # 'merged', повторное предложение той же пары гасилось правилом
+            # «решённое человеком durable», а другого пути слить две сущности в
+            # системе нет. Возвращаются ТОЛЬКО те строки, что закрыло именно это
+            # слияние, и только если человек не решил по ним что-то ещё позже.
+            # 7. Очередь: пары, которые закрыло это слияние, возвращаются на
+            # разбор. Иначе откат хоронил их навсегда — строка оставалась
+            # 'merged', повторное предложение той же пары гасилось правилом
+            # «решённое человеком durable», а другого пути слить две сущности в
+            # системе нет. Возвращаются ТОЛЬКО те строки, что закрыло именно это
+            # слияние.
+            for candidate_id in transfer.get("closed_candidates") or []:
+                conn.execute(
+                    """UPDATE entity_resolution_candidates
+                       SET status='suggested', resolved_at=NULL, resolved_by=NULL
+                       WHERE id=? AND user_id=? AND status='merged'""",
+                    (str(candidate_id), user_id),
                 )
 
             conn.execute(

@@ -200,7 +200,14 @@ class AdviceMixin(PipelineShared):
             baseline = {
                 key: value
                 for key, value in current.items()
-                if key not in {"deterministic_baseline", "model_advice"}
+                # `model_advice_failures` — счётчик НЕУДАЧ воркера, а не свойство
+                # материала. Попав в базовый снимок, он переносился в новый
+                # `suggestions` при каждом УСПЕШНОМ совете и жил вечно; после трёх
+                # прошлых неудач объект навсегда выпадал из очереди советчика,
+                # хотя совет по нему уже получался. Комментарий у
+                # `_ADVICE_ITEM_ATTEMPTS` обещает ровно обратное — «обнуляется, как
+                # только совет получился».
+                if key not in {"deterministic_baseline", "model_advice", "model_advice_failures"}
             }
         baseline_entities = [
             dict(candidate)
@@ -390,6 +397,11 @@ class AdviceMixin(PipelineShared):
             "deterministic_baseline": baseline,
             "model_advice": model_advice,
         }
+        # И снимаем отметку явно: базовый снимок мог быть сохранён РАНЬШЕ, когда
+        # счётчик в него ещё попадал, и тогда он приехал бы сюда из базы.
+        merged.pop("model_advice_failures", None)
+        # И снимаем отметку явно: базовый снимок мог быть сохранён РАНЬШЕ, когда
+        # счётчик в него ещё попадал, и тогда он приехал бы сюда из базы.
         notes = str(item.get("classification_notes") or "").strip()
         advice_note = (
             f"local_model_advice={model_name}; recommendation={recommended_action}; "

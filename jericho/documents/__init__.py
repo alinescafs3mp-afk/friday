@@ -20,6 +20,7 @@ import lzma
 import mimetypes
 import re
 import tarfile
+import time
 import zipfile
 from contextlib import closing, suppress
 from dataclasses import dataclass, field
@@ -242,11 +243,20 @@ class DocumentExtractor:
         max_archive_uncompressed_bytes: int = 250 * 1024 * 1024,
         max_text_chars: int = 2_000_000,
         max_input_bytes: int = 50 * 1024 * 1024,
+        parse_budget_sec: float | None = None,
     ) -> None:
         self.max_archive_entries = max(1, int(max_archive_entries))
         self.max_archive_uncompressed_bytes = max(1024, int(max_archive_uncompressed_bytes))
         self.max_text_chars = max(10_000, int(max_text_chars))
         self.max_input_bytes = max(1, int(max_input_bytes))
+        # Срок, а не таймаут: он проверяется ВНУТРИ разбора, между страницами.
+        # Внешний `asyncio.timeout` вокруг `to_thread` возвращает управление
+        # вызывающему, но поток не останавливает — тот продолжает жечь ядро на
+        # патологической странице, и пул, общий со всей фоновой работой,
+        # вычерпывается по одному потоку на каждую такую ссылку.
+        self.deadline: float | None = (
+            None if parse_budget_sec is None else time.monotonic() + max(0.1, float(parse_budget_sec))
+        )
 
     def extract(
         self,
@@ -867,6 +877,16 @@ class DocumentExtractor:
         return DocumentResult(self._strip_xml_tags(self._decode(data)), metadata)
 
     def _extract_pdf(self, content: bytes) -> DocumentResult:
+        """Постранично, с потолком страниц, потолком знаков и — если задан —
+        СРОКОМ.
+
+        Срок нужен потому, что отмена снаружи здесь не работает: `asyncio.timeout`
+        вокруг `to_thread` возвращает управление вызывающему, но сам поток
+        продолжает молотить страницу столько, сколько ей нужно. Один
+        патологический content stream — и поток пула занят навсегда, а пул общий
+        со всем остальным, что уходит с event loop. Проверять срок можно только
+        МЕЖДУ страницами: прервать `pypdf` внутри одной страницы нечем.
+        """
         try:
             from pypdf import PdfReader
         except ImportError:
@@ -882,7 +902,12 @@ class DocumentExtractor:
         pages_read = 0
         text_chars = 0
         extraction_truncated = False
+        deadline_hit = False
         for page in itertools.islice(reader.pages, 250):
+            if self.deadline is not None and time.monotonic() >= self.deadline:
+                deadline_hit = True
+                extraction_truncated = True
+                break
             pages_read += 1
             page_text = page.extract_text() or ""
             if page_text.strip():
@@ -905,6 +930,10 @@ class DocumentExtractor:
         }
         if extraction_truncated:
             metadata["extraction_truncated"] = True
+        if deadline_hit:
+            # Отдаём то, что успели прочитать, и честно называем причину: пустой
+            # ответ был бы неотличим от «в этом PDF нет текста».
+            metadata["parse_deadline_reached"] = True
         return DocumentResult(
             "\n\n".join(pages),
             metadata,

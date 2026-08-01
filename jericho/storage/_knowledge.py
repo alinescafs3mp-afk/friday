@@ -412,7 +412,7 @@ class KnowledgeMixin(StorageShared):
         return obj
 
     def knowledge_missing_document_date(
-        self, *, user_id: str | None = None, limit: int = 500
+        self, *, user_id: str | None = None, limit: int = 500, after_rowid: int = 0
     ) -> list[dict[str, Any]]:
         """Объекты из файлов, у которых собственной даты документа ещё нет.
 
@@ -424,6 +424,14 @@ class KnowledgeMixin(StorageShared):
         Отдаётся только то, что нужно проходу: идентификатор, арендатор и путь к
         файлу. Тела не читаются — обход по всему корпусу с `content` уже однажды
         стоил 45 МБ на страницу из пятидесяти строк.
+
+        КУРСОР `after_rowid` — не удобство, а условие завершимости. Объект, у
+        которого даты в файле нет, остаётся «без даты» навсегда, поэтому выборка
+        «первые N без даты» возвращает его снова и снова: проход, дошедший до
+        такой пачки, видел одних и тех же и останавливался, считая, что корпус
+        кончился. Повторный запуск начинал с той же головы. Курсор по `rowid`
+        (не LIMIT/OFFSET: `id` здесь uuid4, порядок по нему случаен) делает
+        страницы непересекающимися — тот же приём, что у `knowledge_bodies_after`.
         """
         clauses = [
             "k.deleted_at IS NULL",
@@ -432,12 +440,15 @@ class KnowledgeMixin(StorageShared):
             "json_extract(r.metadata_json,'$.stored_path') IS NOT NULL",
         ]
         params: list[Any] = []
+        if after_rowid:
+            clauses.append("k.rowid > ?")
+            params.append(int(after_rowid))
         if user_id:
             clauses.append("k.user_id=?")
             params.append(user_id)
         params.append(max(1, min(int(limit), 5000)))
         rows = self.execute(
-            "SELECT k.id AS id, k.user_id AS user_id, "
+            "SELECT k.rowid AS position, k.id AS id, k.user_id AS user_id, "
             "json_extract(r.metadata_json,'$.stored_path') AS stored_path "
             "FROM knowledge_objects k JOIN raw_objects r ON r.id=k.raw_object_id "
             f"WHERE {' AND '.join(clauses)} ORDER BY k.rowid LIMIT ?",  # nosec B608 - фиксированные условия

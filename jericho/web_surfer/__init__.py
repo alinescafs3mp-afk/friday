@@ -586,11 +586,19 @@ class WebSurfer:
                 # the byte-stream ceiling, and parse_timeout must not look like a
                 # network Timeout (ingest/url would report «empty content»).
                 try:
-                    async with asyncio.timeout(_PDF_PARSE_BUDGET):
+                    # Два предохранителя, и оба нужны. Внутренний срок
+                    # (`parse_budget_sec`) реально ОСТАНАВЛИВАЕТ разбор между
+                    # страницами; внешний таймаут остаётся страховкой на случай,
+                    # когда одна страница молотит дольше всего бюджета — прервать
+                    # pypdf внутри страницы нечем. Запас внешнему даётся намеренно,
+                    # чтобы обычный случай завершался изнутри, с частичным текстом,
+                    # а не выглядел отказом.
+                    async with asyncio.timeout(_PDF_PARSE_BUDGET * 2):
                         text, title, parse_error = await asyncio.to_thread(
                             self._extract_pdf_text,
                             body,
                             max_text_chars=text_budget,
+                            parse_budget_sec=_PDF_PARSE_BUDGET,
                         )
                 except TimeoutError:
                     return FetchResult(
@@ -733,16 +741,26 @@ class WebSurfer:
         }
 
     @staticmethod
-    def _extract_pdf_text(content: bytes, *, max_text_chars: int) -> tuple[str, str, str]:
+    def _extract_pdf_text(
+        content: bytes, *, max_text_chars: int, parse_budget_sec: float | None = None
+    ) -> tuple[str, str, str]:
         """In-memory PDF → text via the existing DocumentExtractor.
 
         Returns ``(text, title, error)``. Scan-only and encrypted PDFs fail with a
         clear error rather than a silent empty body — same contract as office
         extractors used by the ingestion path.
+
+        `parse_budget_sec` едет ВНУТРЬ разбора, а не остаётся снаружи: таймаут
+        вокруг `to_thread` освобождает вызывающего, но не поток. Один PDF с
+        патологической страницей занимал поток общего пула до конца процесса, и
+        каждая повторная попытка модели добавляла ещё один.
         """
         from jericho.documents import DocumentExtractor
 
-        result = DocumentExtractor(max_text_chars=max(1_000, int(max_text_chars))).extract(
+        result = DocumentExtractor(
+            max_text_chars=max(1_000, int(max_text_chars)),
+            parse_budget_sec=parse_budget_sec,
+        ).extract(
             content,
             "document.pdf",
             "application/pdf",

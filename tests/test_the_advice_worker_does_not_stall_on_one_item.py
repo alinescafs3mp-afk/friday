@@ -126,3 +126,54 @@ def test_a_broken_channel_and_a_broken_document_are_told_apart():
     # А это беда объекта: модель ответила, ответ не разобрался.
     assert not _is_endpoint_failure(ValueError("Local model did not return a JSON object"))
     assert not _is_endpoint_failure(ValueError("Only pending Inbox items can receive model advice"))
+
+
+def test_a_successful_advice_clears_the_failure_mark(settings, storage):
+    """«Отметка обнуляется, как только совет получился» — это обещание кода.
+
+    На деле счётчик попадал в `deterministic_baseline`, а тот целиком
+    раскладывается в новые `suggestions` — то есть отметка переносилась через
+    каждый УСПЕХ и копилась вечно. После трёх давних неудач объект навсегда
+    выпадал из очереди советчика, хотя совет по нему уже получается: у
+    `_ADVICE_ITEM_ATTEMPTS` нет срока давности, он смотрит только на число.
+
+    Мутация: вернуть `model_advice_failures` в набор ключей базового снимка
+    (или убрать `merged.pop`) — тест обязан покраснеть.
+    """
+
+    class _RecoveringLLM(_PoisonLLM):
+        """Давится, пока `broken` — потом отвечает как здоровая."""
+
+        broken = True
+
+        async def chat(self, messages, **kwargs):
+            if self.broken:
+                del kwargs
+                self.seen.append(" ".join(str(item.get("content") or "") for item in messages))
+                return {"content": "проза вместо JSON", "finish_reason": "stop"}
+            return await super().chat(messages, **kwargs)
+
+    storage.ensure_user("alice")
+    item = _queue(storage, "alice", "обычный материал", 0.9)
+
+    llm = _RecoveringLLM()
+    manager = WorkersManager(settings, storage, IngestionPipeline(settings, storage), None, llm=llm)
+    _run_ticks(manager, "alice", 2)
+
+    stored = storage.get_inbox_item(item.id, "alice")
+    suggestions = stored.get("suggestions_json")
+    if isinstance(suggestions, str):
+        suggestions = json.loads(suggestions or "{}")
+    assert int((suggestions or {}).get("model_advice_failures") or 0) >= 1, "стенд не воспроизвёл неудачу"
+
+    llm.broken = False
+    _run_ticks(manager, "alice", 1)
+
+    stored = storage.get_inbox_item(item.id, "alice")
+    suggestions = stored.get("suggestions_json")
+    if isinstance(suggestions, str):
+        suggestions = json.loads(suggestions or "{}")
+    assert (suggestions or {}).get("model_advice"), "совет так и не записан — проба проверяет не то"
+    assert int((suggestions or {}).get("model_advice_failures") or 0) == 0, (
+        "отметка о неудачах пережила успешный совет и продолжит копиться"
+    )

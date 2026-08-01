@@ -142,3 +142,50 @@ def test_mutation_clearing_transfer_breaks_overlap_restore(storage):
     restored = _link_ids(storage, "alice", source["id"])
     assert shared not in restored
     assert only_source in restored
+
+
+def test_undo_returns_the_pair_to_the_review_queue(storage):
+    """Откат возвращает пару на разбор, а не хоронит её.
+
+    Слияние переводит все задетые кандидатуры в 'merged', а откат их не трогал —
+    строка оставалась решённой навсегда. Повторно предложить ту же пару очередь
+    не могла: `store_resolution_candidate` по правилу «решённое человеком
+    durable» отдаёт существующую строку не изменяя её. А прямого «слей вот эти
+    две» в системе нет вовсе — все поверхности (HTTP, админка, инструмент
+    агента, кнопка в Telegram) идут через кандидатуру. То есть человек, нажавший
+    «слить», а затем «откатить», терял возможность слить их когда-либо снова.
+
+    Мутация: убрать возврат `closed_candidates` в `unmerge_entities` — тест
+    обязан покраснеть.
+    """
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Дубликат Один", EntityType.PROJECT)
+    target = graph.create_entity("alice", "Дубликат Два", EntityType.PROJECT)
+    document = _knowledge(storage, "alice", "общий документ")
+    graph.link_knowledge_to_entity(document, source["id"], "alice")
+    graph.link_knowledge_to_entity(document, target["id"], "alice")
+
+    from jericho.storage.models import EntityResolutionCandidate, new_id
+
+    candidate = storage.store_resolution_candidate(
+        EntityResolutionCandidate(
+            id=new_id("res"),
+            user_id="alice",
+            entity_a_id=source["id"],
+            entity_b_id=target["id"],
+            confidence=0.9,
+            resolution_method="test",
+        )
+    )
+
+    merged = storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+    after_merge = storage.get_resolution_candidate(candidate.id, "alice")
+    assert str(after_merge["status"]) == "merged", "стенд не воспроизводит: пара не закрылась слиянием"
+
+    storage.unmerge_entities("alice", merged["_merge_id"], undone_by="owner")
+
+    after_undo = storage.get_resolution_candidate(candidate.id, "alice")
+    assert str(after_undo["status"]) == "suggested", (
+        "пара осталась решённой: слить её заново уже нечем — прямого пути к merge в системе нет"
+    )
+    assert after_undo.get("resolved_at") in (None, ""), "решение о паре не снято"

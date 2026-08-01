@@ -408,26 +408,43 @@ def _notify_owners_of_self_registration(
 
 
 def _ensure_newcomer_preset(auth_service: Any, storage: Any) -> str:
-    """Idempotently create the 'newcomer' custom preset and return its key.
+    """Привести системный пресет «newcomer» к константе и вернуть его ключ.
 
-    Bootstrapped lazily on first use rather than at startup: the preset is only
-    ever needed when open registration is on AND a genuinely new private chat
-    has just been admitted, which for most installs is rare or never. Presets
-    are content-addressed by their capability set (`upsert_custom_preset` is a
-    plain upsert), so calling this on every such event is harmless — it writes
-    only the first time and reads (via `preset_exists`) every time after.
+    Раньше здесь стояла охрана `if not preset_exists(...)`, и это была не
+    оптимизация, а тихая потеря контроля: набор писался в базу ОДИН раз, при
+    первой в жизни установки саморегистрации, и после этого правка
+    `NEWCOMER_PRESET_CAPABILITIES` в коде не решала ничего. Сужение прав новичка
+    (а это единственный пресет, который выдаётся человеку с улицы автоматически)
+    не доехало бы до боевой базы вовсе — притом что докстринг обещал обратное.
+
+    Расхождение не применяется молча: если набор в базе отличается от
+    константы, разница пишется событием. Ручная правка системного пресета через
+    админку так и остаётся обнаружимой — она не исчезает бесследно, а видна в
+    ленте событий как замещённая.
     """
-    if not auth_service.preset_exists("newcomer"):
-        storage.upsert_custom_preset(
-            "newcomer",
-            "Новичок (авторегистрация)",
-            set(NEWCOMER_PRESET_CAPABILITIES),
-            description=(
-                "Автоматически выдаётся при первом сообщении в личку, когда "
-                "включена открытая регистрация (JERICHO_TELEGRAM_OPEN_REGISTRATION). "
-                "Чат, свои знания, файлы, веб-поиск — без миссий и выполнения кода."
-            ),
-            created_by="system",
+    expected = set(NEWCOMER_PRESET_CAPABILITIES)
+    current = storage.get_custom_preset("newcomer") or {}
+    granted = set(current.get("capabilities") or [])
+    if current and granted == expected:
+        return "newcomer"
+    storage.upsert_custom_preset(
+        "newcomer",
+        "Новичок (авторегистрация)",
+        expected,
+        description=(
+            "Автоматически выдаётся при первом сообщении в личку, когда "
+            "включена открытая регистрация (JERICHO_TELEGRAM_OPEN_REGISTRATION). "
+            "Чат, свои знания, файлы, веб-поиск — без миссий и выполнения кода."
+        ),
+        created_by="system",
+    )
+    if current:
+        storage.record_event(
+            "presets.newcomer_synced",
+            {
+                "revoked": sorted(granted - expected),
+                "granted": sorted(expected - granted),
+            },
         )
     return "newcomer"
 
@@ -1318,6 +1335,12 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                 kg=state.kg,
                 hybrid_searcher=state.hybrid_searcher,
                 ingestion_result=None,
+                # Повтор не превращает сгенерированный текст в вопрос человека:
+                # признак берётся с самого хода, а не выводится заново из его
+                # букв. Иначе «Загружен документ: с кем работал иван отчёт.pdf»
+                # на повторе получал бы графовое расширение, которого первый ход
+                # не получал, — при одном и том же тексте.
+                synthetic_document_notice=bool(last_meta.get("synthetic_document_notice")),
             )
             if had_attachments:
                 # Вложения не переигрываются: transient-файлы физически негде

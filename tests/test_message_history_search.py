@@ -73,7 +73,22 @@ def test_search_messages_empty_query_is_safe(settings):
 
 
 def test_deleting_a_message_drops_it_from_messages_fts(settings):
-    """Orphan FTS rows after DELETE would make search invent missing turns."""
+    """Осиротевшая строка индекса после DELETE — это выдуманный ход в поиске.
+
+    Проверяется САМ ИНДЕКС, а не выдача поиска: `search_messages` соединяет
+    индекс с таблицей `messages`, и JOIN молча гасит осиротевшие строки. Прежняя
+    редакция теста смотрела только на выдачу и оставалась зелёной при полностью
+    удалённом триггере `messages_ad` — то есть охраняла не то, что обещает
+    названием. Проверено исполнением: с `DROP TRIGGER messages_ad` тест проходил.
+
+    Вторая половина — почему это не теория: rowid в SQLite переиспользуется.
+    Осиротевшая строка индекса указывает на номер, который достанется СЛЕДУЮЩЕМУ
+    сообщению, и тогда JOIN уже не спасает — чужой текст находится по слову из
+    удалённого.
+
+    Мутация: `DROP TRIGGER messages_ad` (или убрать его из схемы) — тест обязан
+    покраснеть на счётчике индекса.
+    """
     storage = init_storage(settings)
     try:
         storage.ensure_user("alice")
@@ -87,6 +102,20 @@ def test_deleting_a_message_drops_it_from_messages_fts(settings):
         assert storage.search_messages("alice", "уникальныймаркердежурств")
         with storage.transaction() as conn:
             conn.execute("DELETE FROM messages WHERE id=?", (message["id"],))
+
+        indexed = storage.execute(
+            "SELECT COUNT(*) AS count FROM messages_fts WHERE messages_fts MATCH ?",
+            ("уникальныймаркердежурств",),
+        ).fetchone()["count"]
+        assert indexed == 0, (
+            f"в индексе осталось {indexed} строк удалённого сообщения — "
+            "поиск скрывает их только JOIN'ом, до первого переиспользования rowid"
+        )
+        assert storage.search_messages("alice", "уникальныймаркердежурств") == []
+
+        # Следующее сообщение получает освободившийся rowid: если бы строка
+        # индекса пережила удаление, оно нашлось бы по чужому слову.
+        storage.store_message(conv["id"], "alice", "user", "совершенно другой текст")
         assert storage.search_messages("alice", "уникальныймаркердежурств") == []
     finally:
         storage.close(final=True)

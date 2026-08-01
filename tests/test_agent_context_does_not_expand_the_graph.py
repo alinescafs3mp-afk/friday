@@ -247,3 +247,68 @@ async def test_a_spoken_question_is_a_human_turn_not_a_generated_notice(settings
         "голосовой вопрос помечен как сгенерированное системой уведомление — "
         "он теряет графовый путь, который тот же вопрос текстом получает"
     )
+
+
+@pytest.mark.asyncio
+async def test_retry_of_a_generated_notice_stays_a_generated_notice(settings, monkeypatch):
+    """«Ещё раз» не превращает строку, сочинённую backend'ом, в вопрос человека.
+
+    `/api/me/regenerate` берёт СОХРАНЁННЫЙ текст последнего user-хода и зовёт
+    `chat` заново. Признак «этот текст сгенерирован» жил только в памяти того
+    запроса, где ход создавался, поэтому на повторе имя чужого файла с
+    реляционной фразой («Загружен документ: с кем работал иван отчёт.pdf»)
+    судилось классификатором как настоящий вопрос — и включало графовое
+    расширение, которого первый ход не получал. При одном и том же тексте.
+
+    Мутация: убрать `synthetic_document_notice=` из вызова `chat` в
+    `/api/me/regenerate` (или перестать писать метку на ход) — тест обязан
+    покраснеть.
+    """
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    app = create_app(settings)
+    calls: list[dict] = []
+
+    with TestClient(app) as client:
+        real_search = app.state.hybrid_searcher.search
+
+        async def _spy_search(user_id, query, **kwargs):
+            calls.append({"query": query, **kwargs})
+            return await real_search(user_id, query, **kwargs)
+
+        monkeypatch.setattr(app.state.hybrid_searcher, "search", _spy_search)
+
+        async def _fake_ingest_file(*_args, **_kwargs):
+            return {"queued_for_review": True, "knowledge_object": None}
+
+        monkeypatch.setattr(app.state.ingestion, "ingest_file", _fake_ingest_file)
+        headers = {"Authorization": f"Bearer {settings.api_token}"}
+
+        first = client.post(
+            "/api/chat",
+            json={
+                "message": "",
+                "document": {
+                    "filename": "с кем работал иван отчет.pdf",
+                    "content_base64": "JVBERi0=",
+                },
+            },
+            headers=headers,
+        )
+        assert first.status_code == 200, first.text
+        assert calls and calls[0].get("graph_expansion") is False, "первый ход уже пошёл не так"
+
+        calls.clear()
+        again = client.post(
+            "/api/me/regenerate",
+            json={"conversation_id": first.json()["conversation_id"]},
+            headers=headers,
+        )
+        assert again.status_code == 200, again.text
+
+    assert calls, "повтор не позвал поиск — проба проверяет не то"
+    assert calls[0].get("graph_expansion") is False, (
+        "на повторе сгенерированное уведомление о файле снова судится как вопрос человека"
+    )

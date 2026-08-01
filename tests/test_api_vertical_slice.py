@@ -834,7 +834,8 @@ def test_open_registration_provisions_a_stranger_with_the_newcomer_preset(settin
         telegram_owner_chat_ids=[],
         telegram_open_registration=True,
     )
-    with TestClient(create_app(scoped)) as client:
+    app = create_app(scoped)
+    with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {scoped.api_token}"}
         # Statically allowlisted private chat: unaffected, still 'user'.
         assert _bridge_get(client, scoped, "/api/me", user="5001", chat="5001").status_code == 200
@@ -849,13 +850,22 @@ def test_open_registration_provisions_a_stranger_with_the_newcomer_preset(settin
         assert presets["telegram:telegram:5001"] == "user"
         assert presets["telegram:telegram:7777"] == "newcomer"
 
-        # No missions, no code execution, no admin -- checked against the source
-        # of truth the preset was built from, not a hand-copied literal list.
-        assert "missions.create" not in NEWCOMER_PRESET_CAPABILITIES
-        assert "code.run" not in NEWCOMER_PRESET_CAPABILITIES
-        assert not any(item.startswith("admin.") for item in NEWCOMER_PRESET_CAPABILITIES)
-        assert "web.search" in NEWCOMER_PRESET_CAPABILITIES
-        assert "files.upload" in NEWCOMER_PRESET_CAPABILITIES
+        # Ни миссий, ни выполнения кода, ни админки — проверяется ВЫДАННОЕ, то
+        # есть то, что реально лежит в базе под ключом «newcomer», а не значение
+        # модульной константы. Прежняя редакция утверждала про саму константу, и
+        # потому оставалась зелёной, даже если под тем же ключом в базу записан
+        # набор с `admin.*` и `code.run`: ассерты о константе к выданным правам
+        # отношения не имеют.
+        granted = set((app.state.storage.get_custom_preset("newcomer") or {}).get("capabilities") or [])
+        assert granted, "пресет «newcomer» не записан в базу вовсе"
+        assert "missions.create" not in granted
+        assert "code.run" not in granted
+        assert not any(item.startswith("admin.") for item in granted)
+        assert "web.search" in granted
+        assert "files.upload" in granted
+        assert granted == set(NEWCOMER_PRESET_CAPABILITIES), (
+            "выданный набор разошёлся с константой — значит константа больше ничем не управляет"
+        )
 
 
 def test_open_registration_does_not_widen_a_group_chat(settings):
@@ -1032,3 +1042,47 @@ def test_custom_instructions_are_capped(settings):
             chat="5001",
         )
         assert len(response.json()["custom_instructions"]) == 500
+
+
+def test_narrowing_the_newcomer_preset_in_code_reaches_a_database_that_already_has_it(settings):
+    """Константа обязана управлять правами новичка и ПОСЛЕ первой саморегистрации.
+
+    Пресет писался в базу один раз, под охраной `if not preset_exists(...)`, и
+    дальше жил своей жизнью: сузить права новичка правкой кода было нельзя — в
+    боевой базе остался бы прежний набор. Это единственный пресет, который
+    выдаётся человеку с улицы автоматически, поэтому цена расхождения прямая.
+
+    Мутация: вернуть охрану `if not auth_service.preset_exists("newcomer")` —
+    тест обязан покраснеть.
+    """
+    from jericho.server import create_app
+
+    scoped = replace(
+        settings,
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[],
+        telegram_open_registration=True,
+    )
+    app = create_app(scoped)
+    with TestClient(app) as client:
+        assert _bridge_get(client, scoped, "/api/me", user="7777", chat="7777").status_code == 200
+        storage = app.state.storage
+
+        # База «из прошлого»: под тем же ключом лежит набор шире нынешней константы.
+        storage.upsert_custom_preset(
+            "newcomer",
+            "Новичок (авторегистрация)",
+            {"chat.use", "knowledge.read", "code.run"},
+            description="устаревший набор",
+            created_by="system",
+        )
+        assert "code.run" in set(storage.get_custom_preset("newcomer")["capabilities"])
+
+        # Следующий новичок — и набор снова тот, что объявлен в коде.
+        assert _bridge_get(client, scoped, "/api/me", user="7778", chat="7778").status_code == 200
+        granted = set(storage.get_custom_preset("newcomer")["capabilities"])
+        assert "code.run" not in granted, "правка константы не доехала до существующей базы"
+
+        # И расхождение не проходит молча: оно записано.
+        events = storage.list_events(event_type="presets.newcomer_synced", limit=5)
+        assert events, "набор заменён без следа — оператор не узнает, что правку затёрли"

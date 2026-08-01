@@ -379,6 +379,23 @@ def test_the_backfill_terminates_when_files_carry_no_dates(settings, storage):
     # Пачка меньше числа объектов: прежний цикл на этом не остановился бы.
     assert _backfill_document_dates(argparse.Namespace(user=None, batch=2, limit=0)) == 0
 
+    # И — главное — он обязан ПОСМОТРЕТЬ все семь, а не только первую пачку.
+    # Прежняя редакция теста проверяла лишь код возврата, и потому оставалась
+    # зелёной, когда проход осматривал 2 объекта из 7: выборка «первые N без
+    # даты» отдаёт одни и те же строки, отфильтрованные по «уже виденным» они
+    # дают пустую пачку, и цикл принимал конец первой страницы за конец корпуса.
+    # Счётчик берётся из события, которое проход и так пишет.
+    #
+    # Мутация: убрать курсор `after_rowid` из вызова в `_backfill_document_dates`
+    # — тест обязан покраснеть (осмотрено 2 вместо 7).
+    events = storage.list_events(event_type="documents.dates_backfilled", limit=5)
+    assert events, "проход не записал событие о своей работе"
+    payload = events[0].get("payload")
+    payload = payload if isinstance(payload, dict) else json.loads(str(payload or "{}"))
+    assert payload["scanned"] == 7, (
+        f"проход осмотрел {payload['scanned']} объектов из 7 — остальные для него не существуют"
+    )
+
 
 # --- ЖЁСТКИЙ предфильтр по периоду внутри поиска ------------------------------
 
