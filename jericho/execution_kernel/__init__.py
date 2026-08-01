@@ -222,6 +222,33 @@ def _count_user_tasks() -> int:
     return max(count, 1)
 
 
+def _merge_needs_a_person(arguments: dict[str, Any]) -> bool:
+    """Слияние — да, отказ — нет.
+
+    `reject` помечает пару «не дубликат»: пара уходит из очереди, но НИ ОДИН узел
+    не меняется, и решение переигрывается новым проходом дедупа. `accept` переносит
+    связи и оставляет от двух сущностей одну — ошибка здесь означает двух разных
+    людей под одним узлом.
+    """
+    return str(arguments.get("decision") or "").strip().casefold() == "accept"
+
+
+def _conflict_needs_a_person(arguments: dict[str, Any]) -> bool:
+    """`dismiss` ничего не трогает; `keep_a`/`keep_b` объявляют знание устаревшим."""
+    return str(arguments.get("decision") or "").strip().casefold() in {"keep_a", "keep_b"}
+
+
+# Какие вызовы модели не исполняются без человека. Ключ — имя инструмента,
+# значение — предикат по аргументам, потому что риск живёт в аргументах, а не в
+# инструменте: `entity_merge_decide` с `decision=reject` безопасен, с `accept` —
+# нет. Спека v3 §5: модель предлагает, служба авторизует и исполняет.
+HIGH_RISK_TOOLS: dict[str, Callable[[dict[str, Any]], bool]] = {
+    "entity_merge_decide": _merge_needs_a_person,
+    "conflict_decide": _conflict_needs_a_person,
+    "code_run": lambda _arguments: True,
+}
+
+
 @dataclass
 class ToolSpec:
     name: str
@@ -559,6 +586,10 @@ class ExecutionKernel:
             await self._audit(actor, name, False, "disabled", details=details)
             return ToolResult(name, False, error="Code execution is disabled by configuration")
 
+        needs_person = HIGH_RISK_TOOLS.get(name)
+        if needs_person and needs_person(arguments or {}):
+            return await self._request_approval(actor, name, arguments or {}, details)
+
         timeout = 30
         if self.settings:
             timeout = max(1, self.settings.code_execution_timeout_sec if name == "code_run" else 30)
@@ -584,6 +615,163 @@ class ExecutionKernel:
             LOGGER.exception("Tool %s failed", name)
             await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
+
+    async def _request_approval(
+        self,
+        actor: ActorContext,
+        name: str,
+        arguments: dict[str, Any],
+        details: dict[str, Any],
+    ) -> ToolResult:
+        """Опасное действие не выполняется, а становится заявкой на подтверждение.
+
+        Возвращается ОТКАЗ, а не успех: действие не произошло, и `success=True`
+        здесь был бы ровно тем ложным завершением, которое спека запрещает. Текст
+        отказа прямо говорит, что повтор ничего не изменит, — иначе модель, увидев
+        неудачу, попробует ещё раз, и человек получит очередь одинаковых заявок.
+        """
+        storage, _, _, _ = self._require_services()
+        try:
+            approval = await run_blocking(
+                storage.create_action_approval,
+                actor.user_id,
+                tool=name,
+                payload=arguments,
+                summary=self._approval_summary(name, arguments),
+                risk="high",
+                requested_by=actor.identity_id or actor.user_id,
+                policy_epoch=str(actor.policy_epoch),
+            )
+        except Exception as exc:  # noqa: BLE001 - отказ в заявке не должен выполнять действие
+            LOGGER.exception("Could not create an approval request for %s", name)
+            await self._audit(actor, name, False, "approval_request_failed", details=details)
+            return ToolResult(
+                name,
+                False,
+                error=f"Не удалось запросить подтверждение ({type(exc).__name__}); действие не выполнено",
+            )
+        await self._audit(
+            actor, name, False, "approval_required", details={**details, "approval_id": approval["id"]}
+        )
+        return ToolResult(
+            name,
+            False,
+            data={
+                "status": "approval_required",
+                "approval_id": approval["id"],
+                "summary": approval["summary"],
+            },
+            error=(
+                "Действие не выполнено: оно требует подтверждения человеком. "
+                f"Заявка {approval['id']} создана — скажи, что ждёшь решения, "
+                "и не повторяй вызов: повтор ничего не изменит."
+            ),
+        )
+
+    @staticmethod
+    def _approval_summary(name: str, arguments: dict[str, Any]) -> str:
+        """Одна строка, которую увидит человек. Аргументы показываются как есть."""
+        if name == "entity_merge_decide":
+            target = str(arguments.get("target_entity_id") or "").strip()
+            return (
+                f"Объединить сущности по кандидату {arguments.get('candidate_id')}"
+                + (f", оставить {target}" if target else "")
+            )
+        if name == "conflict_decide":
+            return f"Разрешить противоречие {arguments.get('conflict_id')}: {arguments.get('decision')}"
+        if name == "code_run":
+            code = str(arguments.get("code") or "")
+            return f"Выполнить код ({len(code)} знаков, sha256 {hashlib.sha256(code.encode()).hexdigest()[:12]})"
+        return f"Выполнить {name}"
+
+    async def execute_approved(self, approval_id: str, *, actor: ActorContext | None = None) -> ToolResult:
+        """Исполнить действие, которое человек подтвердил. Ровно один раз.
+
+        Заявление (`claim_action_approval`) само по себе является повторной
+        авторизацией непосредственно перед побочным эффектом: оно сверяет отпечаток
+        аргументов и эпоху политики прав и атомарно переводит заявку в
+        «исполняется». Если оно не удалось — действие НЕ выполняется, и это не
+        ошибка исполнения, а отказ.
+
+        Права проверяются здесь ЗАНОВО: между решением человека и исполнением
+        актор мог лишиться способности, и подтверждение не заменяет права.
+        """
+        actor = actor or current_actor()
+        storage, _, _, _ = self._require_services()
+        record = await run_blocking(storage.get_action_approval, approval_id, actor.user_id)
+        if not record:
+            return ToolResult("approval", False, error="Заявка не найдена")
+        name = str(record.get("tool") or "")
+        tool = self._tools.get(name)
+        if not tool or not tool.handler:
+            return ToolResult(name or "approval", False, error="Инструмент недоступен")
+        if self.authorization is None:
+            return ToolResult(name, False, error="Execution kernel has no authorization service")
+        try:
+            self.authorization.require(actor, tool.security_id)
+        except AuthorizationError as exc:
+            await self._audit(actor, name, False, "authorization_denied", details={"approval": approval_id})
+            return ToolResult(name, False, error=str(exc))
+
+        arguments = dict(record.get("payload") or {})
+        claimed = await run_blocking(
+            storage.claim_action_approval,
+            approval_id,
+            actor.user_id,
+            payload=arguments,
+            policy_epoch=str(actor.policy_epoch),
+        )
+        if not claimed:
+            await self._audit(actor, name, False, "approval_not_claimable", details={"approval": approval_id})
+            return ToolResult(
+                name,
+                False,
+                error=(
+                    "Подтверждение нельзя использовать: оно не одобрено, уже использовано, "
+                    "просрочено или аргументы изменились"
+                ),
+            )
+
+        details = self._audit_details(name, arguments)
+        timeout = 30
+        if self.settings:
+            timeout = max(1, self.settings.code_execution_timeout_sec if name == "code_run" else 30)
+        try:
+            async with asyncio.timeout(timeout):
+                data = await tool.handler(actor=actor, **arguments)
+        except TimeoutError:
+            # Отдельно от прочих сбоев: истёкшее время — это НЕИЗВЕСТНЫЙ исход, а
+            # не отказ. Обработчик мог довести побочный эффект до конца ровно в тот
+            # момент, когда его перестали ждать, поэтому заявка уходит в
+            # `uncertain` (сверка человеком), а не в `failed` (можно повторить).
+            await run_blocking(
+                storage.mark_action_approval_uncertain,
+                approval_id,
+                actor.user_id,
+                error="исполнение не уложилось во время: исход неизвестен",
+            )
+            await self._audit(actor, name, False, "timeout", details=details)
+            return ToolResult(name, False, error="Tool execution timed out")
+        except Exception as exc:  # noqa: BLE001 - исход обязан быть записан любым
+            LOGGER.exception("Approved tool %s failed", name)
+            await run_blocking(
+                storage.finish_action_approval,
+                approval_id,
+                actor.user_id,
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            await self._audit(actor, name, False, type(exc).__name__, details=details)
+            return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
+        await run_blocking(
+            storage.finish_action_approval,
+            approval_id,
+            actor.user_id,
+            success=True,
+            result=data if isinstance(data, dict) else {"result": data},
+        )
+        await self._audit(actor, name, True, "ok_approved", details={**details, "approval": approval_id})
+        return ToolResult(name, True, data=data)
 
     @staticmethod
     def _audit_details(tool_name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:

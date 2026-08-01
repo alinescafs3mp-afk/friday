@@ -27,6 +27,7 @@ from jericho.web_surfer import (
     _PinnedPublicNetworkBackend,
     validate_public_url,
 )
+from tests.conftest import run_with_approval
 
 
 @pytest.mark.asyncio
@@ -194,7 +195,9 @@ async def test_code_runner_stops_process_when_output_budget_is_exceeded(settings
     kernel.bind_services(storage, graph, web, ingestion)
     actor = auth.actor_for_user("operator", source="test")
     try:
-        result = await kernel.execute(
+        result = await run_with_approval(
+            kernel,
+            storage,
             "code_run",
             {"code": "import os\nwhile True:\n    os.write(1, b'x' * 8192)\n"},
             actor=actor,

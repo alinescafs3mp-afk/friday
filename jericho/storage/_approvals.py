@@ -276,6 +276,27 @@ class ApprovalsMixin(StorageShared):
             return None
         return self._approval_row(approval_id, user_id)
 
+    def mark_action_approval_uncertain(
+        self, approval_id: str, user_id: str, *, error: str = ""
+    ) -> dict[str, Any] | None:
+        """Исход неизвестен: побочный эффект мог случиться, а мог и нет.
+
+        Отдельно от `failed` по одной причине: провал можно повторить, неизвестность
+        повторять НЕЛЬЗЯ. Сюда попадает исполнение, оборванное по времени, — тот
+        случай, когда обработчик мог довести дело до конца ровно тогда, когда его
+        перестали ждать.
+        """
+        now = utc_now()
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE action_approvals SET status='uncertain', error=?, updated_at=?
+                   WHERE id=? AND user_id=? AND status='claimed'""",
+                (str(error or "исход неизвестен")[:2000], now, approval_id, user_id),
+            )
+        if cursor.rowcount != 1:
+            return None
+        return self._approval_row(approval_id, user_id)
+
     def expire_action_approvals(self) -> int:
         """Просроченные заявки и решения — в `expired`. Идёт по расписанию."""
         now = utc_now()

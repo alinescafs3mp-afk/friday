@@ -10,6 +10,7 @@ from jericho.ingestion import IngestionPipeline
 from jericho.knowledge_graph import KnowledgeGraph
 from jericho.permissions import AuthorizationService
 from jericho.web_surfer import WebSurfer
+from tests.conftest import run_with_approval
 
 
 def test_default_deny_presets_and_persistent_overrides(storage):
@@ -169,7 +170,7 @@ async def test_timed_out_code_execution_kills_child(settings, storage, tmp_path)
         "time.sleep(20)\n"
     )
     try:
-        result = await kernel.execute("code_run", {"code": code}, actor=actor)
+        result = await run_with_approval(kernel, storage, "code_run", {"code": code}, actor=actor)
         assert result.success is False
         assert "timed out" in result.error.casefold()
         await asyncio.sleep(1.5)
@@ -213,7 +214,7 @@ async def test_a_descendant_outliving_its_parent_is_killed_too(settings, storage
         # …and the direct child returns immediately.
     )
     try:
-        result = await kernel.execute("code_run", {"code": code}, actor=actor)
+        result = await run_with_approval(kernel, storage, "code_run", {"code": code}, actor=actor)
         await asyncio.sleep(3.5)
         assert not marker.exists(), f"the orphan outlived the tool (result.success={result.success})"
     finally:

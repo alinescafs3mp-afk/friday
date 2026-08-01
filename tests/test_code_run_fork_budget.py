@@ -21,6 +21,7 @@ from jericho.ingestion import IngestionPipeline
 from jericho.knowledge_graph import KnowledgeGraph
 from jericho.permissions import AuthorizationService
 from jericho.web_surfer import WebSurfer
+from tests.conftest import run_with_approval
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="rlimits are POSIX")
 
@@ -59,7 +60,7 @@ async def test_forking_cannot_multiply_the_memory_budget(settings, storage):
         "print(children)\n"
     )
     try:
-        result = await kernel.execute("code_run", {"code": code}, actor=actor)
+        result = await run_with_approval(kernel, storage, "code_run", {"code": code}, actor=actor)
     finally:
         await web.close()
 

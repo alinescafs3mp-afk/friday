@@ -45,3 +45,21 @@ def storage(settings):
         yield instance
     finally:
         instance.close()
+
+
+async def run_with_approval(kernel, storage, name: str, arguments: dict, *, actor):
+    """Пройти опасное действие целиком: запрос → решение человека → исполнение.
+
+    Спека v3 §5 развела предложение и исполнение, поэтому у опасных инструментов
+    (`code_run`, слияние сущностей, вердикт по противоречию) прямого пути от модели
+    к побочному эффекту больше нет. Тесты, которые проверяют САМ исполнитель — его
+    предохранители по памяти, выводу и времени, — идут этой цепочкой: подтверждение
+    здесь не предмет проверки, а предусловие.
+    """
+    requested = await kernel.execute(name, arguments, actor=actor)
+    assert requested.success is False, "опасное действие выполнилось без человека"
+    approval_id = requested.data["approval_id"]
+    assert storage.decide_action_approval(
+        approval_id, actor.user_id, decision="approve", decided_by=actor.user_id
+    )
+    return await kernel.execute_approved(approval_id, actor=actor)

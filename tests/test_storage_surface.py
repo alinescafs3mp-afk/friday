@@ -109,11 +109,12 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # курсор по rowid, а не время: `utc_now()` секундной точности, и документ,
 # пришедший в ту же секунду, при сравнении по времени терялся бы навсегда.
 # 278 → 289: подтверждение опасного действия (спека v3 §5) — create/get/list/count/
-# decide/claim/finish/expire/reconcile_stale_claims/approval_is_terminal/_approval_row.
+# decide/claim/finish/mark_uncertain/expire/reconcile_stale_claims/approval_is_terminal/
+# _approval_row.
 # Отдельный слой, а не поле в таблице миссий: все три его свойства — атомарность
 # заявления, привязка к отпечатку аргументов и различимость исходов (в том числе
 # `uncertain`, который НЕЛЬЗЯ повторять) — это свойства именно SQL.
-EXPECTED_MEMBER_COUNT = 289
+EXPECTED_MEMBER_COUNT = 290
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

@@ -21,6 +21,7 @@ from jericho.permissions import AuthorizationService
 from jericho.server import create_app
 from jericho.storage.models import KnowledgeObject, RawObject, new_id
 from jericho.web_surfer import WebSurfer
+from tests.conftest import run_with_approval
 
 
 def _knowledge(storage, user_id: str, title: str, content: str) -> str:
@@ -114,7 +115,13 @@ async def test_conflict_tools_list_and_keep_a(settings, storage):
         assert listed.data["total"] >= 1
         assert any(item["id"] == conflict_id for item in listed.data["items"])
 
-        decided = await kernel.execute(
+        # Вердикт по противоречию объявляет одно из знаний устаревшим, поэтому со
+        # спеки v3 §5 он идёт через подтверждение человеком: модель предлагает,
+        # служба исполняет. Здесь проверяется сам разбор, а не гейт, — цепочка
+        # пройдена целиком помощником.
+        decided = await run_with_approval(
+            kernel,
+            storage,
             "conflict_decide",
             {"conflict_id": conflict_id, "decision": "keep_a"},
             actor=actor,
