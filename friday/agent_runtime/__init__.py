@@ -1271,6 +1271,25 @@ class AgentRuntime:
                 LOGGER.warning("Final synthesis returned bare tool-call markup")
         except Exception:
             LOGGER.exception("Final LLM synthesis failed")
+
+        # Последний заход — с ЧИСТОЙ историей. Замерено на боевой переписке:
+        # 22 ответа из 381 (5.8%) были отказами «не удалось обработать запрос» /
+        # «не удалось безопасно завершить вызов инструмента». К этому моменту
+        # `messages` полны сломанных вызовов и ремонтных указаний, и модель,
+        # глядя на них, снова отвечает разметкой. Здесь она их не видит: только
+        # вопрос и собранный контекст, инструменты не предлагаются вовсе.
+        # Обычный ответ по архиву лучше отказа — человек хотя бы получит то, что
+        # система уже нашла.
+        salvaged = await self._answer_without_tools(context, message, attachments)
+        if salvaged:
+            return {
+                "content": salvaged,
+                "tools_used": tools_used,
+                "knowledge_object_ids": tool_knowledge_ids,
+                "tool_evidence": tool_evidence,
+                "voice_clip": voice_clip,
+                "file_clips": file_clips,
+            }
         return {
             "content": _TOOL_PROTOCOL_FAILURE,
             "tools_used": tools_used,
@@ -2051,6 +2070,32 @@ class AgentRuntime:
             f"В базе {context.kb_size} объектов, но надёжного совпадения нет.{suffix} "
             "Попробуйте уточнить формулировку. LLM сейчас недоступна."
         )
+
+    async def _answer_without_tools(
+        self,
+        context: AgentContext,
+        message: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> str:
+        """Ответить по уже собранному контексту, не предлагая инструментов.
+
+        Нужен как последняя ступень, когда протокол вызовов сломался: история
+        разговора к этому моменту засорена неудачными вызовами и ремонтными
+        указаниями, и модель, глядя на них, повторяет ту же ошибку. Здесь она
+        видит только вопрос и контекст.
+        """
+        if not self.llm.enabled:
+            return ""
+        try:
+            clean = self._build_initial_messages(context, message, attachments, tool_enabled=False)
+            result = await self.llm.chat(clean, tools=[])
+        except Exception:  # noqa: BLE001 — последняя ступень, падать здесь нечем
+            LOGGER.warning("Tool-free salvage failed", exc_info=True)
+            return ""
+        turn = classify_tool_turn(str(result.get("content") or ""))
+        if turn.kind != "answer":
+            return ""
+        return _strip_tool_call_markup(turn.text).strip()
 
     async def _repair_once(
         self,

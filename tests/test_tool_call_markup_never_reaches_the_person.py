@@ -99,3 +99,35 @@ def test_the_protocol_parser_still_sees_raw_markup():
     assert LLMRouter._strip_thinking(raw) == raw, (  # noqa: SLF001
         "разметка снята слишком рано — разбор протокола её больше не увидит"
     )
+
+
+def test_a_broken_protocol_falls_back_to_an_answer_without_tools():
+    """Мутация: убрать `_answer_without_tools` из финала — тест краснеет.
+
+    Замерено на боевой переписке: 22 ответа из 381 (5.8%) были отказами
+    «не удалось обработать запрос» / «не удалось безопасно завершить вызов
+    инструмента». К последнему шагу история полна сломанных вызовов и ремонтных
+    указаний, и модель, глядя на них, повторяет ту же ошибку. Обычный ответ по
+    уже собранному архиву лучше отказа.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._agentic_loop)  # noqa: SLF001
+    assert "_answer_without_tools(" in source, "после сломанного протокола нет попытки ответить"
+    tail = source[source.index("_answer_without_tools(") :]
+    assert "_TOOL_PROTOCOL_FAILURE" in tail, (
+        "отказ должен оставаться последним вариантом, а не исчезнуть совсем"
+    )
+
+
+def test_the_salvage_pass_offers_no_tools():
+    """Инструменты на этой ступени не предлагаются: именно они и сломались."""
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._answer_without_tools)  # noqa: SLF001
+    assert "tool_enabled=False" in source
+    assert "tools=[]" in source
