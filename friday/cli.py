@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from friday import __version__
+from friday.config import env as config_env
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -1132,7 +1133,7 @@ def _run_telegram_bridge() -> int:
     fatal = [item for item in problems if not item.startswith("warning:")]
     if fatal:
         raise ValueError("Invalid Friday configuration: " + "; ".join(fatal))
-    token = os.environ.get("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
+    token = config_env("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
     # This compares configured bind literals; it does not open a listener.
     host = (
         "127.0.0.1"  # nosec B104
@@ -1141,7 +1142,7 @@ def _run_telegram_bridge() -> int:
     )
     config = TelegramConfig(
         bot_token=token,
-        backend_url=os.environ.get(
+        backend_url=config_env(
             "FRIDAY_BACKEND_URL",
             f"http://{host}:{settings.api_port}",
         ).rstrip("/"),
@@ -1169,7 +1170,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Local-first personal Knowledge Operating System",
     )
     parser.add_argument("--version", action="version", version=f"Friday {__version__}")
-    parser.add_argument("--log-level", default=os.environ.get("FRIDAY_LOG_LEVEL", "INFO"))
+    parser.add_argument("--log-level", default=config_env("FRIDAY_LOG_LEVEL", "INFO"))
     parser.add_argument(
         "--env-file",
         help="Load configuration from this .env file (default: ./.env.local)",
@@ -1400,7 +1401,7 @@ def _up(args: argparse.Namespace) -> int:
         print(f"Backend уже запущен (pid {backend_lease.get('pid')}). Второй не нужен.")
         return 2
 
-    env_file = os.environ.get("FRIDAY_ENV_FILE", "")
+    env_file = config_env("FRIDAY_ENV_FILE", "")
     base_argv = [sys.executable, "-m", "friday.cli"]
     if env_file:
         base_argv += ["--env-file", env_file]
@@ -1413,7 +1414,7 @@ def _up(args: argparse.Namespace) -> int:
             cwd=settings.home,
         )
     ]
-    bot_token = os.environ.get("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
+    bot_token = config_env("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
     if args.no_bridge:
         print("Мост Telegram пропущен (--no-bridge).")
     elif not bot_token:
@@ -1463,7 +1464,7 @@ def _install_services(args: argparse.Namespace) -> int:
     target_dir = Path(args.dir or Path.home() / ".config" / "systemd" / "user").expanduser()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    env_file = os.environ.get("FRIDAY_ENV_FILE", "")
+    env_file = config_env("FRIDAY_ENV_FILE", "")
     env_arg = f" --env-file {env_file}" if env_file else ""
     environment = f"Environment=FRIDAY_HOME={settings.home}\n"
 

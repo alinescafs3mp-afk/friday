@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from friday.config import env as config_env
+
 # Ordered form fields: (env var, human label, is_secret).
 LLM_FIELDS: tuple[tuple[str, str, bool], ...] = (
     ("FRIDAY_LLM_BASE_URL", "LLM base URL", False),
@@ -118,7 +120,7 @@ def mask_secret(value: str) -> str:
 def env_path(env_file: str | None = None) -> Path:
     """Resolve the target ``.env.local`` (explicit → FRIDAY_ENV_FILE → cwd)."""
 
-    candidate = env_file or os.environ.get("FRIDAY_ENV_FILE") or str(Path.cwd() / ".env.local")
+    candidate = env_file or config_env("FRIDAY_ENV_FILE") or str(Path.cwd() / ".env.local")
     return Path(candidate).expanduser()
 
 
@@ -381,7 +383,6 @@ def _loop(stdscr, state: LauncherState, settings, target: Path) -> Command:
 
 
 def _exec_up(env_file: str | None) -> None:
-    import os
     import sys
 
     argv = [sys.executable, "-m", "friday.cli"]
