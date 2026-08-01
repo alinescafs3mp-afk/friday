@@ -248,3 +248,68 @@ def test_the_timeline_prefetch_is_wired_into_the_loop():
     assert "_prefetch_the_timeline_if_asked(" in loop_source, (
         "лента объявлена, но из агентского цикла не вызывается"
     )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "что было вчера",
+        "расскажи про 29 июля",
+        "покажи что происходило в понедельник",
+        "чем занимались 29го",
+        "что я делал позавчера",
+        "какие события были 30 июля",
+        "события за вчера",
+        "что нового появилось вчера",
+        "чем я занимался 3 дня назад",
+        "что случилось 26 июля в 15 часов",
+        "покажи ленту за вчера",
+    ],
+)
+def test_the_same_question_asked_differently_is_still_recognised(question):
+    """Замерено до правки: из двенадцати живых формулировок шаблон узнавал пять.
+
+    Владелец сказал прямо: «другая формулировка или опечатка не должны быть
+    препятствием». Перечислить все формы нельзя, поэтому шаблон покрывает частые,
+    а остальное решает модель — но частые обязаны ловиться без её участия, иначе
+    каждый второй вопрос стоит лишнего вызова.
+    """
+    from friday.agent_runtime import _ASKS_WHAT_HAPPENED, moment_from_question
+
+    assert moment_from_question(question), f"время в вопросе не найдено: {question}"
+    assert _ASKS_WHAT_HAPPENED.search(question), f"намерение не распознано: {question}"
+
+
+@pytest.mark.parametrize(
+    "weekday,expected",
+    [
+        ("понедельник", "2026-07-27"),
+        ("среду", "2026-07-29"),
+        ("пятницу", "2026-07-31"),
+        # Названный день недели, совпавший с сегодняшним, — это сегодня, а не
+        # неделю назад.
+        ("субботу", "2026-08-01"),
+        ("воскресенье", "2026-07-26"),
+    ],
+)
+def test_a_weekday_means_the_last_one_that_happened(weekday, expected):
+    assert _spoken_day(weekday, today=date(2026, 8, 1)) == expected
+
+
+def test_the_intent_check_asks_the_model_when_the_pattern_is_silent():
+    """Мутация: убрать `_is_a_timeline_question` из условия — тест краснеет.
+
+    Шаблон не может знать всех формулировок; когда время в вопросе уже найдено,
+    а фраза незнакомая, решать должен тот, кто понимает язык.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)  # noqa: SLF001
+    assert "_is_a_timeline_question(message)" in source, (
+        "незнакомая формулировка отбрасывается без попытки понять её"
+    )
+    assert source.index("moment_from_question") < source.index("_is_a_timeline_question"), (
+        "модель спрашивается даже когда времени в вопросе нет — это лишний вызов на каждом сообщении"
+    )

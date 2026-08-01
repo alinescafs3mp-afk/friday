@@ -232,6 +232,17 @@ _MONTHS_RU = {
 _DAY_MONTH_RE = re.compile(r"^(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?$", re.IGNORECASE)
 _DAYS_AGO_RE = re.compile(r"^(\d{1,3})\s+(?:дн\w*|сут\w*)\s+назад$", re.IGNORECASE)
 _RELATIVE_DAYS = {"сегодня": 0, "вчера": 1, "позавчера": 2}
+#: Дни недели: «в понедельник» значит ближайший ПРОШЕДШИЙ понедельник — о будущем
+#: архив ничего сказать не может, там ещё ничего не произошло.
+_WEEKDAYS_RU = (
+    ("понедельник", 0),
+    ("вторник", 1),
+    ("сред", 2),
+    ("четверг", 3),
+    ("пятниц", 4),
+    ("суббот", 5),
+    ("воскресен", 6),
+)
 
 
 def _spoken_day(text: str, *, today: date) -> str | None:
@@ -249,6 +260,12 @@ def _spoken_day(text: str, *, today: date) -> str | None:
         return None
     if lowered in _RELATIVE_DAYS:
         return (today - timedelta(days=_RELATIVE_DAYS[lowered])).isoformat()
+    for prefix, weekday in _WEEKDAYS_RU:
+        if lowered.startswith(prefix):
+            # Сегодняшний день недели засчитывается как сегодня, иначе «в субботу»,
+            # сказанное в субботу, уводило бы на неделю назад.
+            back = (today.weekday() - weekday) % 7
+            return (today - timedelta(days=back)).isoformat()
     ago = _DAYS_AGO_RE.match(lowered)
     if ago:
         return (today - timedelta(days=int(ago.group(1)))).isoformat()
