@@ -77,6 +77,11 @@ def tokens_of(text: str, *, fold_yo: bool = True) -> list[str]:
 # небо/нёбо). For recall over a personal archive that is the right trade, and it is
 # the same one every Russian search engine makes.
 _YO_FOLD = str.maketrans({"ё": "е", "Ё": "Е"})
+# Сколько идентификаторов запроса должен покрыть документ, когда их НЕСКОЛЬКО.
+# «Хотя бы один»: вопрос вида «чем X отличается от Y» законно отвечается
+# документом про одну из сторон, а требование покрыть обе оставляло человека с
+# пустой выдачей — то есть с неверным утверждением, что в архиве ничего нет.
+_MULTI_IDENTIFIER_MIN_COVERAGE = 0.01
 
 
 _RELATIONAL_QUERY_RE = re.compile(
@@ -1812,7 +1817,30 @@ class HybridSearcher:
             the explain-trace reports the exact same reasons the ranker applies."""
             # Exact identifiers are discrete evidence, not fuzzy language: a query
             # mentioning BRK.A must not be satisfied by a nearby BRK.B record.
-            if query_identifiers and identifier_coverage.get(document_id, 0.0) < 1.0:
+            #
+            # Но «все до одного» — правило для ОДНОГО идентификатора. Когда их в
+            # запросе несколько, это обычно вопрос СРАВНЕНИЯ, и требование покрыть
+            # оба гарантирует пустоту, если нет документа сразу про обе стороны.
+            # Замерено на боевом корпусе: «как АК-12 отличается от АК-74М» давало
+            # НОЛЬ результатов из 30 кандидатов — все отброшены, включая профильный
+            # «prezent АК 12_отличительные особенности v4.pdf», который шёл первым
+            # (embedding 0.66, coverage 0.5: один из двух). Пустая выдача здесь
+            # хуже частичной: документ про одну из сторон — законный ответ на
+            # сравнительный вопрос, а «ничего не нашлось» — неверное утверждение
+            # о содержимом архива.
+            #
+            # Защита от исходного случая цела: при ОДНОМ идентификаторе порог
+            # прежний, то есть запрос про BRK.A по-прежнему не удовлетворяется
+            # записью про BRK.B.
+            coverage = identifier_coverage.get(document_id, 0.0)
+            # Ветвление по числу идентификаторов оставлено намеренно, хотя сегодня
+            # оно избыточно: у ОДНОГО идентификатора покрытие бинарно (0 или 1), и
+            # оба порога дают один и тот же ответ — проверено мутацией. Явная
+            # запись правила стоит дешевле, чем разбор через год, почему запрос про
+            # одну бумагу вдруг стал удовлетворяться соседней, если у покрытия
+            # появятся промежуточные значения.
+            required = 1.0 if len(query_identifiers) < 2 else _MULTI_IDENTIFIER_MIN_COVERAGE
+            if query_identifiers and coverage < required:
                 return "identifier_mismatch"
             # Recent-pool records need real evidence; graph expansion or a strong
             # curated-field match can satisfy it without repeating body terms.

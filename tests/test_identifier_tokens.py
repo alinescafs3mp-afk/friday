@@ -191,3 +191,58 @@ def test_a_long_question_does_not_lose_the_term_that_identifies_the_answer(stora
     # the bench measures, and it must not change.
     short = "как чинить кластер"
     assert _fts_terms(short) == ["как", "чинить", "кластер"]
+
+
+def test_a_comparison_of_two_identifiers_is_not_answered_with_silence(settings, storage):
+    """«Чем X отличается от Y» отвечается документом про одну из сторон.
+
+    Правило «покрыть ВСЕ идентификаторы запроса» верно для одного идентификатора и
+    гарантирует пустоту для сравнительного вопроса: документа сразу про обе стороны
+    может не быть вовсе. Замерено на боевом корпусе — «как АК-12 отличается от
+    АК-74М» возвращало НОЛЬ результатов из тридцати кандидатов, включая профильный
+    «prezent АК 12_отличительные особенности v4.pdf», который шёл первым по
+    релевантности (embedding 0.66) и был отброшен с coverage 0.5.
+
+    Пустая выдача здесь хуже частичной: это утверждение «в архиве ничего нет», и
+    оно неверно.
+
+    Мутация: вернуть порог 1.0 для нескольких идентификаторов — тест краснеет.
+    """
+    storage.ensure_user("alice", source="upload")
+    about_first = _store(
+        storage,
+        "ak-12.md",
+        "АК-12 — отличительные особенности: новый приклад, планка Пикатинни, отдача.",
+    )
+    _store(storage, "kazan.md", "Попробовать эчпочмак и дойти до Свияжска.")
+
+    searcher = HybridSearcher(storage, record_usage=False)
+    results = asyncio.run(
+        searcher.search("alice", "как АК-12 отличается от АК-74М", limit=10, kg=KnowledgeGraph(storage))
+    )["results"]
+
+    assert results, "сравнительный вопрос получил пустую выдачу"
+    assert about_first in [hit["id"] for hit in results], (
+        "документ про одну из сравниваемых сторон не показан"
+    )
+
+
+def test_a_single_identifier_still_demands_a_full_match(settings, storage):
+    """Защита, ради которой правило существует, цела.
+
+    Послабление касается запросов с несколькими идентификаторами, но защита здесь
+    держится не на ветвлении по их числу: у ОДНОГО идентификатора покрытие бинарно
+    (он либо есть в документе целым токеном, либо нет), поэтому запрос про BRK.A не
+    удовлетворяется записью про BRK.B при любом пороге выше нуля. Проверено
+    мутацией: применение послабления к одиночному идентификатору этот тест НЕ
+    роняет — и это факт о механике, а не пробел в проверке.
+
+    Тест остаётся регрессией на саму защиту: BRK.A и BRK.B — разные бумаги.
+    """
+    storage.ensure_user("alice", source="upload")
+    _store(storage, "brk-b.md", "Отчёт по BRK.B за третий квартал: выкуп акций продолжен.")
+
+    searcher = HybridSearcher(storage, record_usage=False)
+    results = asyncio.run(searcher.search("alice", "BRK.A", limit=10, kg=KnowledgeGraph(storage)))["results"]
+
+    assert results == [], "запрос про BRK.A удовлетворён записью про BRK.B"
