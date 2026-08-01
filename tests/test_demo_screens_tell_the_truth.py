@@ -361,3 +361,43 @@ def test_the_answer_links_to_documents_from_grouped_markers():
 
     source = inspect.getsource(AgentRuntime._extract_cited_knowledge_ids)  # noqa: SLF001
     assert "_citation_labels(" in source, "метки из группы не доходят до привязки к документам"
+
+
+def test_clicking_a_graph_node_shows_the_same_number_as_its_circle(storage):
+    """Мутация: убрать обогащение узлов счётчиком — тест краснеет.
+
+    Радиус кружка и его подсказка берут `knowledge_count` из обзора графа, а
+    карточка по клику — из другого маршрута, где такого поля нет: в таблице
+    `entities` это агрегат по `knowledge_entity_links`, а не колонка. Человек
+    видел «Документов: —» рядом с кружком, размер которого задан числом 314.
+    """
+    from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("alice")
+    entity = Entity(id=new_id("ent"), user_id="alice", name="Хасанов", entity_type=EntityType.PERSON)
+    storage.create_entity(entity)
+    for index in range(3):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"документ {index}",
+            content_type="text",
+            content_hash=f"h{index}",
+        )
+        storage.store_raw_object(raw)
+        knowledge = KnowledgeObject(
+            id=new_id("ko"),
+            user_id="alice",
+            raw_object_id=raw.id,
+            content=f"документ {index}",
+            content_type="text",
+            title=f"Документ {index}",
+        )
+        storage.store_knowledge_object(knowledge)
+        storage.link_knowledge_entity("alice", knowledge.id, entity.id)
+
+    graph = storage.get_entity_graph("alice", entity.id, depth=1)
+    root = next(node for node in graph["nodes"] if node["id"] == entity.id)
+    assert root.get("knowledge_count") == 3, "карточка узла не знает числа документов"

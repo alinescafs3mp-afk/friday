@@ -746,7 +746,27 @@ class GraphMixin(StorageShared):
             frontier = next_frontier
             if not frontier:
                 break
-        return {"root": entity_id, "nodes": list(nodes.values()), "edges": list(edges.values())}
+        # `entities` не хранит числа документов — это агрегат по
+        # `knowledge_entity_links`. Без него карточка узла в панели показывала
+        # «Документов: —», хотя ровно это число стоит в подсказке кружка и задаёт
+        # его радиус: два экрана об одной сущности говорили разное.
+        counts = self._knowledge_counts_for(user_id, list(nodes))
+        enriched = [{**node, "knowledge_count": counts.get(str(node.get("id")), 0)} for node in nodes.values()]
+        return {"root": entity_id, "nodes": enriched, "edges": list(edges.values())}
+
+    def _knowledge_counts_for(self, user_id: str, entity_ids: list[str]) -> dict[str, int]:
+        """Сколько документов связано с каждой из названных сущностей."""
+        if not entity_ids:
+            return {}
+        holders = ", ".join("?" * len(entity_ids))
+        rows = self.execute(
+            f"""SELECT entity_id, COUNT(knowledge_object_id) AS total
+                FROM knowledge_entity_links
+                WHERE user_id = ? AND entity_id IN ({holders})
+                GROUP BY entity_id""",  # noqa: S608
+            (user_id, *entity_ids),
+        ).fetchall()
+        return {str(row["entity_id"]): int(row["total"]) for row in rows}
 
     def store_relation_candidate(
         self,
