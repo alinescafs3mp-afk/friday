@@ -439,6 +439,64 @@ class CommandsMixin(BridgeShared):
                 f"для этого /search {argument.strip()}",
             )
             return
+        if command == "/approvals":
+            data = await self._backend_json(
+                backend,
+                "GET",
+                "/api/me/approvals?status=pending",
+                {"telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            if not items:
+                # Второй вопрос важнее первого: «нечего подтверждать» и «есть
+                # действия с неизвестным исходом» — разные состояния, и второе
+                # молчать не должно.
+                unknown = await self._backend_json(
+                    backend,
+                    "GET",
+                    "/api/me/approvals?status=uncertain",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                pending_unknown = int(unknown.get("total") or 0)
+                tail = (
+                    f"\n\nНо есть действия с НЕИЗВЕСТНЫМ исходом: {pending_unknown}. "
+                    "Их исполнение оборвалось, и повторять их автоматически нельзя — "
+                    "проверьте результат вручную."
+                    if pending_unknown
+                    else ""
+                )
+                await self._send_message(
+                    telegram, chat_id, "Ничего не ждёт вашего решения." + tail
+                )
+                return
+            total = int(data.get("total") or len(items))
+            lines = [f"Ждут вашего решения: {total}." if total else "Ждут вашего решения:"]
+            rows: list[list[dict[str, str]]] = []
+            for index, item in enumerate(items[:10], start=1):
+                if not isinstance(item, dict):
+                    continue
+                approval_id = str(item.get("id") or "")
+                lines.append(f"{index}. {str(item.get('summary') or item.get('tool') or '')[:160]}")
+                if approval_id and CALLBACK_TARGET_RE.fullmatch(approval_id):
+                    rows.append(
+                        [
+                            {"text": f"✓ {index}", "callback_data": f"apr:yes:{approval_id}"},
+                            {"text": f"✕ {index}", "callback_data": f"apr:no:{approval_id}"},
+                        ]
+                    )
+            if total > len(rows):
+                lines.append(f"\nПоказаны первые {len(rows)} из {total}.")
+            await self._send_message(
+                telegram,
+                chat_id,
+                "\n".join(lines),
+                reply_markup={"inline_keyboard": rows} if rows else None,
+            )
+            return
         if command == "/watching":
             data = await self._backend_json(
                 backend,

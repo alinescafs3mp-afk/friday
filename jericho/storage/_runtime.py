@@ -47,7 +47,7 @@ class RuntimeMixin(StorageShared):
 
     def list_pending_notifications(self, *, limit: int = 20, max_attempts: int = 5) -> list[dict[str, Any]]:
         rows = self.execute(
-            "SELECT id, user_id, chat_id, kind, body FROM outbound_notifications "
+            "SELECT id, user_id, chat_id, kind, dedup_key, body FROM outbound_notifications "
             "WHERE status='pending' AND attempts < ? ORDER BY created_at ASC LIMIT ?",
             (max(1, int(max_attempts)), max(1, min(int(limit), 100))),
         ).fetchall()

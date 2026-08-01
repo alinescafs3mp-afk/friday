@@ -38,7 +38,19 @@ async def notifications_pending(
         if not may_push_to(settings, storage, str(row.get("user_id") or ""), str(row.get("chat_id"))):
             undeliverable.append(str(row["id"]))
             continue
-        items.append({"id": row["id"], "chat_id": row["chat_id"], "body": row["body"]})
+        items.append(
+            {
+                "id": row["id"],
+                "chat_id": row["chat_id"],
+                "body": row["body"],
+                # Тип и ключ нужны мосту, чтобы решение можно было принять прямо в
+                # уведомлении: заявка на подтверждение приходит с кнопками, иначе
+                # человеку пришлось бы идти за ней в /approvals — а весь смысл
+                # проактивного сообщения в том, что оно доходит само.
+                "kind": row.get("kind") or "",
+                "dedup_key": row.get("dedup_key") or "",
+            }
+        )
     # Skipping was not enough: the row stayed pending with attempts=0 and no way
     # to ever leave the queue, and the queue is drained oldest-first with a limit
     # of 20 — twenty such rows and every later notification stops being delivered,

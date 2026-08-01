@@ -46,7 +46,12 @@ from jericho.server import create_app
 # 163 → 164: PATCH /api/conversations/{id} — self-service rename (G18c).
 # 164 → 166: GET /api/me/reminders + POST /api/me/reminders/{id}/dismiss (G19).
 # 166 → 167: GET /api/conversations/{id}/export — plain-text transcript (G20).
-EXPECTED_OPERATIONS = 173
+# 173 → 175: GET /api/me/approvals + POST /api/approvals/{id}/decide — подтверждение
+# опасного действия (спека v3 §5). Оба под `chat.use`: это СВОИ решения о СВОИХ
+# данных, и отдельная способность означала бы, что подтверждать твои действия может
+# кто-то другой. Исполнение живёт в маршруте решения, а не отдельным вызовом, чтобы
+# между «человек согласился» и «действие случилось» не было места, где всё замирает.
+EXPECTED_OPERATIONS = 175
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

@@ -14,6 +14,7 @@ from jericho.telegram_bridge._base import (
     BACKOFF_MAX,
     BATCH_SIZE,
     BOT_COMMANDS,
+    CALLBACK_TARGET_RE,
     LOGGER,
     POLL_TIMEOUT,
     Any,
@@ -411,8 +412,24 @@ class TransportMixin(BridgeShared):
             except ValueError:
                 failed.append(notif_id)
                 continue
+            # Заявка на подтверждение приходит с кнопками решения: уведомление,
+            # которое лишь СООБЩАЕТ о необходимости решить, заставляет человека
+            # идти за ним в другую команду, и половина смысла проактивности теряется.
+            markup = None
+            dedup_key = str(item.get("dedup_key") or "")
+            if str(item.get("kind") or "") == "approval" and dedup_key.startswith("approval:"):
+                approval_id = dedup_key.split(":", 1)[1]
+                if CALLBACK_TARGET_RE.fullmatch(approval_id):
+                    markup = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "✓ Подтвердить", "callback_data": f"apr:yes:{approval_id}"},
+                                {"text": "✕ Отклонить", "callback_data": f"apr:no:{approval_id}"},
+                            ]
+                        ]
+                    }
             try:
-                await self._send_message(telegram, chat_id, body)
+                await self._send_message(telegram, chat_id, body, reply_markup=markup)
                 sent.append(notif_id)
             except Exception:
                 LOGGER.warning("Outbound notification delivery failed", exc_info=True)

@@ -279,6 +279,42 @@ class CallbacksMixin(BridgeShared):
                     f"Объект «{returned_name}» снова в графе." if returned_name else "Объект снова в графе.",
                 )
                 clear_markup = True
+            elif family == "apr" and action in {"yes", "no"}:
+                # Решение и исполнение — один запрос: между «человек согласился» и
+                # «действие случилось» не должно быть места, где всё замирает.
+                decided = await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/approvals/{target_id}/decide",
+                    {
+                        "telegram_user": user,
+                        "decision": "approve" if action == "yes" else "reject",
+                    },
+                    external_user_id,
+                    str(chat_id),
+                )
+                if action == "no":
+                    await self._answer_callback(telegram, callback_id, "Отклонено")
+                    await self._send_message(telegram, chat_id, "Действие отклонено — оно не выполнено.")
+                else:
+                    executed = bool(decided.get("executed"))
+                    await self._answer_callback(
+                        telegram, callback_id, "Выполнено" if executed else "Не выполнено"
+                    )
+                    # Согласие человека и успех исполнения — разные вещи, и вторую
+                    # нельзя выдавать за первую: подтверждённое действие могло не
+                    # состояться (право отобрали, аргументы изменились, сбой).
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Готово: действие выполнено."
+                        if executed
+                        else (
+                            "Решение записано, но действие НЕ выполнено: "
+                            + (str(decided.get("error") or "").strip() or "причина неизвестна")
+                        ),
+                    )
+                clear_markup = True
             elif family == "mon" and action == "stop":
                 await self._backend_json(
                     backend,

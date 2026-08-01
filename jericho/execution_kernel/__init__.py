@@ -653,6 +653,7 @@ class ExecutionKernel:
         await self._audit(
             actor, name, False, "approval_required", details={**details, "approval_id": approval["id"]}
         )
+        await run_blocking(self._notify_pending_approval, storage, actor, approval)
         return ToolResult(
             name,
             False,
@@ -667,6 +668,32 @@ class ExecutionKernel:
                 "и не повторяй вызов: повтор ничего не изменит."
             ),
         )
+
+    def _notify_pending_approval(self, storage, actor: ActorContext, approval: dict[str, Any]) -> None:
+        """Заявка сама идёт к человеку, а не ждёт, пока он о ней спросит.
+
+        Без этого механизм был бы наполовину мёртв: действие блокируется, а узнать
+        об этом можно только зайдя в `/approvals`. Доставка идёт тем же путём, что
+        у проактивных органов, и через тот же предохранитель — в личный чат, не в
+        группу: заявка называет, что именно предлагается сделать с личными данными.
+        """
+        from jericho.organs import may_push_to, resolve_chat_id
+
+        try:
+            chat_id = resolve_chat_id(storage, actor.user_id)
+            if not chat_id or not self.settings:
+                return
+            if not may_push_to(self.settings, storage, actor.user_id, chat_id):
+                return
+            storage.enqueue_notification(
+                actor.user_id,
+                chat_id,
+                f"Нужно ваше решение: {approval['summary']}\n\nОткрыть: /approvals",
+                kind="approval",
+                dedup_key=f"approval:{approval['id']}",
+            )
+        except Exception:  # noqa: BLE001 - недоставленное уведомление не отменяет заявку
+            LOGGER.warning("Could not queue an approval notification", exc_info=True)
 
     @staticmethod
     def _approval_summary(name: str, arguments: dict[str, Any]) -> str:

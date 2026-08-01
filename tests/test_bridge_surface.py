@@ -212,6 +212,7 @@ def test_every_button_namespace_has_a_handler() -> None:
 # первого совпадения делал записи остальных несуществующими.
 EXPECTED_CALLBACK_NAMESPACES = {
     "conflict",
+    "apr",
     "conv",
     "doc",
     "ent",
@@ -245,6 +246,7 @@ EXPECTED_COMMANDS = {
     "/entity_alias",
     "/watch",
     "/watching",
+    "/approvals",
     "/reminders",
     "/rename",
     "/research",

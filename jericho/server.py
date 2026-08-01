@@ -1467,6 +1467,68 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         _audit(request, "monitor.stop", "monitor", monitor_id)
         return {"stopped": True, "id": monitor_id}
 
+    @application.get("/api/me/approvals", tags=["chat"])
+    async def list_my_approvals(request: Request) -> dict[str, Any]:
+        """Свои заявки на подтверждение опасного действия (спека v3 §5).
+
+        Под `chat.use`, как мониторы и напоминания: это СВОИ решения о СВОИХ
+        данных. Отдельная способность означала бы, что подтверждать твои действия
+        может кто-то другой, — а весь смысл механизма в обратном.
+
+        `uncertain` показывается наравне с ожидающими намеренно: это исход, про
+        который никто не знает, случился ли эффект, и висеть невидимым он не должен.
+        """
+        actor = _require(request, "chat.use")
+        status = str(request.query_params.get("status") or "pending").strip() or None
+        rows = await run_blocking(
+            request.app.state.storage.list_action_approvals,
+            actor.user_id,
+            status=status,
+            limit=int(request.query_params.get("limit") or 20),
+        )
+        total = await run_blocking(
+            request.app.state.storage.count_action_approvals, actor.user_id, status=status
+        )
+        return {"count": len(rows), "total": total, "status": status, "items": rows}
+
+    @application.post("/api/approvals/{approval_id}/decide", tags=["chat"])
+    async def decide_my_approval(request: Request, approval_id: str) -> dict[str, Any]:
+        """Решение человека — и, если это «да», немедленное исполнение.
+
+        Исполнение стоит ЗДЕСЬ, а не отдельным вызовом, по той же причине, по
+        которой заявление атомарно: между «человек согласился» и «действие
+        случилось» не должно быть места, где всё замирает навсегда. Ошибка
+        исполнения при этом не отменяет решения — она записывается в саму заявку.
+        """
+        actor = _require(request, "chat.use")
+        body = await _request_json(request)
+        decision = str(body.get("decision") or "").strip().casefold()
+        if decision not in {"approve", "reject"}:
+            raise HTTPException(status_code=400, detail="Решение должно быть approve или reject")
+        decided = await run_blocking(
+            request.app.state.storage.decide_action_approval,
+            str(approval_id or ""),
+            actor.user_id,
+            decision=decision,
+            decided_by=actor.user_id,
+        )
+        if not decided:
+            # Одинаковый ответ на «нет такой», «чужая» и «уже решена»: существование
+            # чужой заявки не подтверждается, а повторное нажатие кнопки в чате —
+            # обычное дело и не должно выглядеть поломкой.
+            raise HTTPException(status_code=404, detail="Заявка не найдена или уже решена")
+        _audit(request, f"approval.{decision}", "action_approval", approval_id, after=decided)
+        if decision == "reject":
+            return {"approval": decided, "executed": False}
+        result = await request.app.state.kernel.execute_approved(str(approval_id), actor=actor)
+        return {
+            "approval": await run_blocking(
+                request.app.state.storage.get_action_approval, str(approval_id), actor.user_id
+            ),
+            "executed": bool(result.success),
+            "error": result.error,
+        }
+
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
         actor = _require(request, "chat.use")
