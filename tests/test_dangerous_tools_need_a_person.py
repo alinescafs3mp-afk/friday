@@ -327,3 +327,52 @@ async def test_a_real_merge_passes_the_postcondition(settings, storage):
     result = await kernel.execute_approved(approval_id, actor=actor)
     assert result.success is True, result.error
     assert storage.get_action_approval(approval_id, "alice")["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_the_request_names_what_will_be_merged(settings, storage):
+    """Человек решает по СМЫСЛУ, а не по идентификатору.
+
+    «Объединить сущности по кандидату res_7f3a…» не говорит ему ничего:
+    подтверждать по такой строке — значит подтверждать вслепую, а слепое
+    подтверждение хуже отсутствия подтверждения, потому что выглядит как контроль.
+
+    Мутация: вернуть идентификатор вместо имён — тест краснеет.
+    """
+    storage.ensure_user("alice", preset_key="owner")
+    candidate_id = _candidate(storage, "alice")
+    kernel, auth = _kernel(settings, storage)
+    actor = auth.actor_for_user("alice", source="test")
+
+    requested = await kernel.execute(
+        "entity_merge_decide", {"candidate_id": candidate_id, "decision": "accept"}, actor=actor
+    )
+    summary = storage.get_action_approval(requested.data["approval_id"], "alice")["summary"]
+
+    assert "Иванов И.И." in summary and "Иванов Иван" in summary, (
+        f"заявка не называет, что именно сольют: {summary!r}"
+    )
+    assert candidate_id not in summary, "человеку показан идентификатор вместо имён"
+    # Уверенность — вторая половина решения: 0.91 и 0.55 требуют разного внимания.
+    assert "0.91" in summary
+    # И сказано, что действие обратимо: это меняет цену ошибки.
+    assert "/merges" in summary
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_request_names_both_records(settings, storage):
+    """Вердикт объявляет одну запись устаревшей — обе должны быть названы."""
+    from tests.test_conflict_triage_in_chat import _seed_conflict
+
+    storage.ensure_user("alice", preset_key="owner")
+    conflict_id = _seed_conflict(storage, "alice")
+    kernel, auth = _kernel(settings, storage)
+    actor = auth.actor_for_user("alice", source="test")
+
+    requested = await kernel.execute(
+        "conflict_decide", {"conflict_id": conflict_id, "decision": "keep_a"}, actor=actor
+    )
+    summary = storage.get_action_approval(requested.data["approval_id"], "alice")["summary"]
+
+    assert "устаревшей" in summary, f"не сказано, что произойдёт с проигравшей записью: {summary!r}"
+    assert conflict_id not in summary

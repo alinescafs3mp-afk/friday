@@ -700,7 +700,7 @@ class ExecutionKernel:
                 actor.user_id,
                 tool=name,
                 payload=arguments,
-                summary=self._approval_summary(name, arguments),
+                summary=self._approval_summary(storage, actor.user_id, name, arguments),
                 risk="high",
                 requested_by=actor.identity_id or actor.user_id,
                 policy_epoch=str(actor.policy_epoch),
@@ -759,19 +759,56 @@ class ExecutionKernel:
             LOGGER.warning("Could not queue an approval notification", exc_info=True)
 
     @staticmethod
-    def _approval_summary(name: str, arguments: dict[str, Any]) -> str:
-        """Одна строка, которую увидит человек. Аргументы показываются как есть."""
+    def _approval_summary(storage, user_id: str, name: str, arguments: dict[str, Any]) -> str:
+        """Одна строка, по которой человек может ПРИНЯТЬ РЕШЕНИЕ, а не опознать запрос.
+
+        Идентификаторы («объединить по кандидату res_7f3a…») не говорят человеку
+        ничего: подтверждать по ним — значит подтверждать вслепую, а слепое
+        подтверждение хуже отсутствия подтверждения, потому что выглядит как
+        контроль. Поэтому здесь читаются имена — те самые, между которыми человек
+        и выбирает; при недоступности данных остаётся идентификатор, но тогда это
+        видно.
+        """
         if name == "entity_merge_decide":
-            target = str(arguments.get("target_entity_id") or "").strip()
-            return (
-                f"Объединить сущности по кандидату {arguments.get('candidate_id')}"
-                + (f", оставить {target}" if target else "")
-            )
+            candidate = None
+            with suppress(Exception):
+                candidate = storage.get_resolution_candidate(
+                    str(arguments.get("candidate_id") or ""), user_id
+                )
+            if candidate:
+                left = right = None
+                with suppress(Exception):
+                    left = storage.get_entity(str(candidate.get("entity_a_id") or ""), user_id)
+                    right = storage.get_entity(str(candidate.get("entity_b_id") or ""), user_id)
+                left_name = str((left or {}).get("name") or candidate.get("entity_a_id") or "?")
+                right_name = str((right or {}).get("name") or candidate.get("entity_b_id") or "?")
+                confidence = float(candidate.get("confidence") or 0.0)
+                return (
+                    f"Объединить «{left_name}» и «{right_name}» в один объект "
+                    f"(уверенность {confidence:.2f}, {candidate.get('resolution_method') or 'без метода'}). "
+                    "Отменить можно в /merges."
+                )
+            return f"Объединить сущности по кандидату {arguments.get('candidate_id')}"
         if name == "conflict_decide":
-            return f"Разрешить противоречие {arguments.get('conflict_id')}: {arguments.get('decision')}"
+            decision = str(arguments.get("decision") or "")
+            conflict = None
+            with suppress(Exception):
+                conflict = storage.get_knowledge_conflict(user_id, str(arguments.get("conflict_id") or ""))
+            if conflict:
+                keep_a = decision == "keep_a"
+                winner = str(conflict.get("knowledge_a_title" if keep_a else "knowledge_b_title") or "")
+                loser = str(conflict.get("knowledge_b_title" if keep_a else "knowledge_a_title") or "")
+                return (
+                    f"Признать верной запись «{winner[:70]}» и объявить устаревшей «{loser[:70]}»"
+                )
+            return f"Разрешить противоречие {arguments.get('conflict_id')}: {decision}"
         if name == "code_run":
             code = str(arguments.get("code") or "")
-            return f"Выполнить код ({len(code)} знаков, sha256 {hashlib.sha256(code.encode()).hexdigest()[:12]})"
+            first_line = next((line.strip() for line in code.splitlines() if line.strip()), "")
+            return (
+                f"Выполнить код ({len(code)} знаков, sha256 "
+                f"{hashlib.sha256(code.encode()).hexdigest()[:12]}): {first_line[:80]}"
+            )
         return f"Выполнить {name}"
 
     async def execute_approved(self, approval_id: str, *, actor: ActorContext | None = None) -> ToolResult:
