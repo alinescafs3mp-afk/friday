@@ -116,8 +116,13 @@ def local_env_file_path(path: str | Path | None = None) -> Path:
     """
     if path is not None:
         return Path(path).expanduser()
-    if env("FRIDAY_ENV_FILE"):
-        return Path(os.environ["FRIDAY_ENV_FILE"]).expanduser()
+    # Проверка и чтение — через ОДНУ функцию. Разошлись они ровно один раз, и
+    # этого хватило: `env()` видел прежнее имя `JERICHO_ENV_FILE`, а строкой ниже
+    # значение бралось напрямую из окружения по новому — и `friday model-check`
+    # падал с KeyError у любого, кто ещё не переименовал переменные.
+    configured = env("FRIDAY_ENV_FILE")
+    if configured:
+        return Path(configured).expanduser()
     return Path.cwd() / ".env.local"
 
 
