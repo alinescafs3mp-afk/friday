@@ -347,7 +347,12 @@ class ViewsMixin(BridgeShared):
                 "Тегов пока нет. Они появляются при разборе материалов в Inbox и при сохранении заметок.",
             )
             return
-        lines = ["Теги вашей базы знаний:"]
+        total = int(data.get("total") or 0)
+        shown = len([item for item in items if isinstance(item, dict) and str(item.get("tag") or "").strip()])
+        head = "Теги вашей базы знаний:"
+        if total > shown:
+            head = f"Теги вашей базы знаний — показаны {shown} самых частых из {total}:"
+        lines = [head]
         for item in items:
             if not isinstance(item, dict):
                 continue

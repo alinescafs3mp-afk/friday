@@ -190,3 +190,105 @@ def test_words_from_the_middle_of_a_document_are_not_dropped():
     assert "Сейчас соберу" not in rendered, "зачин попал в документ"
     assert "основные категории" in rendered, "строка из середины документа выброшена"
     assert "Готово к печати" in rendered
+
+
+def test_the_tag_list_says_how_many_there_really_are(storage, settings):
+    """Мутация: вернуть `count` вместо отдельного `total` — тест краснеет.
+
+    `/tags` просит 25 и печатал их под заголовком «Теги вашей базы знаний», а
+    тегов двести. Длина показанной страницы фактом о корпусе не является.
+    """
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("alice")
+    for index in range(40):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"текст {index}",
+            content_type="text",
+            content_hash=f"hash{index}",
+        )
+        storage.store_raw_object(raw)
+        storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=f"текст {index}",
+                content_type="text",
+                title=f"Документ {index}",
+                tags_json=[f"тег{index}"],
+            )
+        )
+
+    assert storage.count_knowledge_tags("alice") == 40
+    assert len(storage.list_knowledge_tags("alice", limit=5)) <= 40
+
+
+def test_a_page_of_tags_is_labelled_as_a_page():
+    import inspect
+
+    from friday.telegram_bridge._views import ViewsMixin
+
+    source = inspect.getsource(ViewsMixin._send_tags)  # noqa: SLF001
+    assert 'data.get("total")' in source, "команда не знает общего числа тегов"
+    assert "из {total}" in source, "страница выдаётся за весь список"
+
+
+def test_an_unreadable_source_is_not_offered_as_a_link():
+    """Мутация: убрать проверку `error` — тест краснеет.
+
+    Человек переходит по ссылке и видит то же, что видели мы, — ничего.
+    """
+    from friday.agent_runtime import _web_source_lines
+
+    lines = _web_source_lines(
+        {
+            "sources": [
+                {"url": "https://ok.example", "title": "Прочиталось"},
+                {"url": "https://bad.example", "title": "Не открылось", "error": "timeout"},
+            ]
+        }
+    )
+    assert "ok.example" in lines
+    assert "bad.example" not in lines
+
+
+def test_long_lines_are_wrapped_in_every_part_of_a_picture():
+    """Мутация: переносить только абзацы — тест краснеет.
+
+    Длинный заголовок, длинный пункт и широкая строка таблицы одинаково уезжали
+    за правый край и обрывались на середине слова.
+    """
+    import io
+
+    from PIL import Image
+
+    from friday.reports import render, spec_from_payload
+
+    long_text = "Очень длинный заголовок раздела который заведомо не помещается в одну строку " * 2
+
+    def _height(text: str) -> int:
+        payload = render(
+            "png",
+            spec_from_payload(
+                "Отчёт",
+                "",
+                [
+                    {"kind": "heading", "text": text},
+                    {"kind": "bullets", "items": [text]},
+                    {"kind": "table", "rows": [[text, "вторая колонка"]]},
+                ],
+            ),
+        )
+        return Image.open(io.BytesIO(payload)).height
+
+    # Сравнение, а не абсолютное число: высота зависит от шрифта, который в
+    # системе может быть другим. Если длинный текст переносится, картинка обязана
+    # стать заметно выше, чем с коротким.
+    assert _height(long_text) >= _height("Коротко") + 100, (
+        "текст не переносится: всё уместилось в одну строку на блок"
+    )

@@ -187,6 +187,11 @@ def _web_source_lines(data: Any, limit: int = 5) -> str:
         url = str(item.get("url") or "").strip()
         if not url or url in seen:
             continue
+        # Страница, которую не удалось прочитать, ссылкой в ответе быть не должна:
+        # человек переходит по ней и видит то же, что видели мы, — ничего.
+        # `web_research` кладёт такие источники в тот же список с полем `error`.
+        if str(item.get("error") or "").strip():
+            continue
         seen.add(url)
         title = str(item.get("title") or item.get("search_title") or "").strip()
         lines.append(f"- {title[:120]}: {url}" if title else f"- {url}")

@@ -1002,6 +1002,21 @@ class KnowledgeMixin(StorageShared):
         ]
         return items, int(total["count"] if total else 0)
 
+    def count_knowledge_tags(self, user_id: str) -> int:
+        """Сколько РАЗЛИЧНЫХ тегов в базе — отдельным счётом, без потолка.
+
+        Длина показанной страницы фактом о корпусе не является: команда `/tags`
+        просит 25 и печатала их под заголовком «Теги вашей базы знаний», а тегов
+        двести. Человек читает список как полный.
+        """
+        row = self.execute(
+            "SELECT COUNT(DISTINCT jericho_casefold(json_each.value)) AS total"
+            " FROM knowledge_objects, json_each(knowledge_objects.tags_json)"
+            " WHERE knowledge_objects.user_id=? AND knowledge_objects.deleted_at IS NULL",
+            (user_id,),
+        ).fetchone()
+        return int(row["total"]) if row else 0
+
     def list_knowledge_tags(self, user_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
         """Distinct tags with usage counts for browse-by-tag surfaces.
 

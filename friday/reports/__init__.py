@@ -329,12 +329,19 @@ def _render_png(spec: ReportSpec) -> bytes:
     lines.append(("", _font(10), 12))
     body_font, head_font = _font(20), _font(24, bold=True)
     for block in spec.blocks:
+        # Перенос нужен КАЖДОЙ ветке, а не только абзацам: длинный заголовок,
+        # длинный пункт списка и широкая строка таблицы одинаково уезжали за
+        # правый край картинки и обрывались на середине слова.
         if block.kind == "heading":
-            lines.append((block.text, head_font, 34))
+            lines.extend((chunk, head_font, 34) for chunk in _wrap(block.text, 64))
         elif block.kind == "bullets":
-            lines.extend((f"•  {item}", body_font, 28) for item in block.items)
+            for item in block.items:
+                wrapped = _wrap(item, 74)
+                lines.append((f"•  {wrapped[0]}", body_font, 28))
+                lines.extend((f"   {chunk}", body_font, 28) for chunk in wrapped[1:])
         elif block.kind == "table":
-            lines.extend(("   ".join(row), body_font, 28) for row in block.rows)
+            for row in block.rows:
+                lines.extend((chunk, body_font, 28) for chunk in _wrap("   ".join(row), 78))
         else:
             lines.extend((chunk, body_font, 28) for chunk in _wrap(block.text, 78))
         lines.append(("", body_font, 10))

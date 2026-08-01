@@ -76,7 +76,10 @@ async def list_knowledge_tags(
 ) -> dict[str, Any]:
     actor = _require(request, "knowledge.read")
     items = request.app.state.storage.list_knowledge_tags(actor.user_id, limit=limit)
-    return {"items": items, "count": len(items)}
+    # `total` считается отдельно: `count` — длина страницы, и выдавать её за
+    # число тегов в базе значит отвечать размером своего запроса.
+    total = request.app.state.storage.count_knowledge_tags(actor.user_id)
+    return {"items": items, "count": len(items), "total": total}
 
 
 @router.get("/by-date", tags=["knowledge"])
