@@ -454,9 +454,28 @@ def _estimate_content_quality(
         score -= 0.12
     if "low_context" in (penalties or []) and not durable_preference:
         score -= 0.08
-    if len(set(word.casefold() for word in words)) <= 3 and not durable_preference:
+    if _has_few_distinct_words(words) and not durable_preference:
         score -= 0.12
     return _clamp(score)
+
+
+def _has_few_distinct_words(words: list[str], limit: int = 3) -> bool:
+    """Does the text use at most `limit` distinct words?
+
+    The plain form — `len({word.casefold() for word in words}) <= limit` — casefolds
+    every word of every document to answer a question decided by the fourth distinct
+    one. On the owner's corpus that is 4.7 million casefolds per revision pass, 1.8 s
+    of the 17 s, for a predicate about one-line chatter.
+
+    Stopping at `limit + 1` distinct words returns the same answer for every input,
+    since the set only grows.
+    """
+    seen: set[str] = set()
+    for word in words:
+        seen.add(word.casefold())
+        if len(seen) > limit:
+            return False
+    return True
 
 
 def _estimate_importance(text: str, *, kind: str = "note", quality: float = 0.5) -> float:

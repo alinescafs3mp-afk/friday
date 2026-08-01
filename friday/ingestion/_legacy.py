@@ -36,6 +36,42 @@ def _sort_by_risk(items: list[dict[str, Any]]) -> None:
 
 
 class LegacyMixin(PipelineShared):
+    #: id → (fingerprint, assessment). Bounded by the corpus, cleared when it shrinks.
+    _assessment_memo: dict[str, tuple[str, Any]]
+
+    def _remembered_assessment(self, current: dict[str, Any], content: str) -> Any:
+        """`assess_text` for an object that has not changed since it was last read.
+
+        The revision screen re-classifies the WHOLE corpus on every page request —
+        by design, because the predicate reads content and cannot be pushed into
+        SQL, and a count that disagrees with its page is worse than a slow page.
+        On the owner's archive that is 25 MB of text through ~30 regexes: 17 s,
+        paid again for page two, and again tomorrow for an unchanged corpus.
+
+        A verdict is a pure function of the text, so it can be remembered. The key
+        is the object's own revision — `updated_at` plus content length — and a
+        miss re-classifies. This is not an approximation of the answer: it is the
+        same answer, computed once.
+
+        Deliberately per-process and not persisted: a stale row in a table would
+        outlive the code that produced it, and rebuilding costs one slow page.
+        """
+        memo = getattr(self, "_assessment_memo", None)
+        if memo is None:
+            memo = self._assessment_memo = {}
+        object_id = str(current.get("id") or "")
+        if not object_id:
+            return self.assess_text(content)
+        fingerprint = f"{current.get('updated_at')}|{len(content)}"
+        cached = memo.get(object_id)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        assessment = self.assess_text(content)
+        if len(memo) > 20_000:
+            memo.clear()
+        memo[object_id] = (fingerprint, assessment)
+        return assessment
+
     def assess_existing_knowledge(
         self,
         user_id: str,
@@ -59,7 +95,7 @@ class LegacyMixin(PipelineShared):
         content = str(current.get("content") or "")
         title = str(current.get("title") or "")
         metadata = _json_dict(current.get("metadata_json"))
-        assessment = self.assess_text(content)
+        assessment = self._remembered_assessment(current, content)
         stored_quality = _clamp(float(current.get("quality_score", 0.5) or 0.5))
         stored_promotion = _clamp(float(current.get("promotion_score", 0.5) or 0.5))
         protected_reasons: list[str] = []

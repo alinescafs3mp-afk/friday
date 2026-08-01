@@ -100,7 +100,7 @@ def test_public_names_stay_importable() -> None:
     )
 
 
-EXPECTED_MEMBER_COUNT = 41
+EXPECTED_MEMBER_COUNT = 42
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_apply_feedback_calibration": "(self, user_id: 'str', assessment: 'PromotionAssessment') -> 'PromotionAssessment'",
     "_commit_staged_file": "(self, target: 'Path', staged: 'Path | None', digest: 'str') -> 'Path'",
@@ -119,7 +119,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_sanitize_filename": "(filename: 'str') -> 'str'",
     "_stage_file": "(self, user_id: 'str', content: 'bytes', digest: 'str', filename: 'str') -> 'tuple[Path, Path | None]'",
     "_store_file": "(self, user_id: 'str', content: 'bytes', digest: 'str', filename: 'str') -> 'Path'",
-    "_store_review_inbox": "(self, raw: 'RawObject', assessment: 'PromotionAssessment', enrichment: 'KnowledgeEnrichment') -> 'InboxItem'",
+    "_remembered_assessment": "(self, current: 'dict[str, Any]', content: 'str') -> 'Any'",
+    "_store_review_inbox":"(self, raw: 'RawObject', assessment: 'PromotionAssessment', enrichment: 'KnowledgeEnrichment') -> 'InboxItem'",
     "_transcribe_audio": "(self, content: 'bytes', *, filename: 'str', mime_type: 'str', metadata: 'dict[str, Any] | None') -> 'dict[str, Any] | None'",
     "_validate_existing_file_source": "(self, existing: 'dict[str, Any]', digest: 'str') -> 'None'",
     "advise_inbox_item": "(self, user_id: 'str', inbox_id: 'str', *, llm: 'LLMRouter', requested_by: 'str' = '', force: 'bool' = False) -> 'dict[str, Any]'",
