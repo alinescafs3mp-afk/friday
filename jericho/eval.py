@@ -73,6 +73,25 @@ def precision_at_k(retrieved: list[str], expected: set[str], k: int) -> float:
     return hits / k
 
 
+def success_at_k(retrieved: list[str], expected: set[str], k: int) -> float:
+    """Нашёлся ли ХОТЬ ОДИН правильный ответ в первых k.
+
+    Существует рядом с `recall_at_k`, потому что тот отвечает на другой вопрос и
+    для части эталонов отвечает на него бессмысленно. Когда у вопроса много равно
+    верных ответов («сколько получил контрактник в декабре» — любой из 24
+    декабрьских листков), recall@10 не может превысить 10/24 = 0.42 ни при какой
+    работе поиска: потолок задан арифметикой, а не качеством. Проверено на этом
+    наборе — расширение списка ожидаемых с одного до двадцати четырёх опустило
+    общий recall с 0.474 до 0.453, хотя поиск не изменился ни на строку.
+
+    `success@k` не имеет этого потолка и совпадает с recall для эталонов с
+    единственным правильным ответом, поэтому обе метрики читаются вместе.
+    """
+    if not expected:
+        return 0.0
+    return 1.0 if set(retrieved[:k]) & expected else 0.0
+
+
 def reciprocal_rank(retrieved: list[str], expected: set[str]) -> float:
     for position, document_id in enumerate(retrieved, start=1):
         if document_id in expected:
@@ -118,7 +137,7 @@ async def _score_cases(
 
     per_case: list[dict[str, Any]] = []
     skipped_empty_expected = 0
-    recall_sum = precision_sum = rr_sum = 0.0
+    recall_sum = precision_sum = rr_sum = success_sum = 0.0
     for case in cases:
         expected = {str(item) for item in case.get("expected_ids", []) if str(item).strip()}
         if not expected:
@@ -139,6 +158,7 @@ async def _score_cases(
         )
         retrieved = [str(hit.get("id")) for hit in result.get("results", []) if hit.get("id")]
         case_recall = recall_at_k(retrieved, expected, k)
+        case_success = success_at_k(retrieved, expected, k)
         case_precision = precision_at_k(retrieved, expected, k)
         # Sliced to k, like recall and precision beside it. `limit=max(k, 20)` returns
         # up to twenty results, so an unsliced MRR measured a window the caller never
@@ -147,6 +167,7 @@ async def _score_cases(
         # p = 0.0, and a `reorders_within_k` verdict about a reorder outside k.
         case_rr = reciprocal_rank(retrieved[:k], expected)
         recall_sum += case_recall
+        success_sum += case_success
         precision_sum += case_precision
         rr_sum += case_rr
         per_case.append(
@@ -156,6 +177,7 @@ async def _score_cases(
                 "expected": len(expected),
                 "found": len(set(retrieved[:k]) & expected),
                 "recall_at_k": round(case_recall, 4),
+                "success_at_k": round(case_success, 4),
                 "precision_at_k": round(case_precision, 4),
                 "reciprocal_rank": round(case_rr, 4),
             }
@@ -171,6 +193,7 @@ async def _score_cases(
         "skipped_empty_expected": skipped_empty_expected,
         "k": k,
         "recall_at_k": round(recall_sum / scored, 4),
+        "success_at_k": round(success_sum / scored, 4),
         "precision_at_k": round(precision_sum / scored, 4),
         "mrr": round(rr_sum / scored, 4),
         "per_case": sorted(per_case, key=lambda item: item["recall_at_k"]),
