@@ -180,3 +180,32 @@ def test_approvals_do_not_cross_tenants(storage):
 def test_a_bad_risk_class_is_refused(storage):
     with pytest.raises(ValueError):
         storage.create_action_approval("alice", tool="entity_merge_decide", risk="whatever")
+
+
+def test_the_hygiene_worker_is_actually_registered(settings, storage):
+    """Механизм, который никто не зовёт, работает только в тестах.
+
+    `expire_action_approvals` и `reconcile_stale_claims` были написаны вместе с
+    подтверждениями — и не вызывались НИОТКУДА. Просроченное согласие продолжало бы
+    числиться действующим, а исполнение, прерванное смертью процесса, навсегда
+    осталось бы в статусе «исполняется»: человек не узнал бы, что про его действие
+    никто ничего не знает.
+
+    Проверяется РЕГИСТРАЦИЯ в супервизоре, а не сам метод: зелёный тест на метод
+    ничего не говорит о том, что продакшен его зовёт.
+
+    Мутация: убрать `supervisor.register("approval_hygiene", ...)` — тест краснеет.
+    """
+    from jericho.ingestion import IngestionPipeline
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.workers import WorkersManager
+
+    graph = KnowledgeGraph(storage)
+    workers = WorkersManager(settings, storage, IngestionPipeline(settings, storage, graph), graph)
+    workers.register_all()
+    # `snapshot()` показывает состояние ВЫПОЛНЕНИЯ и до первого тика пуст, поэтому
+    # смотрим сам список зарегистрированных задач.
+    names = {task.name for task in workers.supervisor._tasks}  # noqa: SLF001
+    assert "approval_hygiene" in names, (
+        "гигиена подтверждений не зарегистрирована — просроченное и оборванное висит вечно"
+    )

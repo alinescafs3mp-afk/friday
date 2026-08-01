@@ -626,6 +626,17 @@ class WorkersManager:
             timeout_sec=900,
         )
         self.supervisor.register(
+            "approval_hygiene",
+            self._approval_hygiene,
+            # Раз в пять минут. Обе операции — по одному UPDATE с индексом, и обе
+            # нужны РЕГУЛЯРНО, а не «когда-нибудь»: просроченное согласие, которое
+            # ещё числится действующим, и оборванное исполнение, о котором никто не
+            # знает, — это как раз то, что должно всплывать само.
+            300.0,
+            run_immediately=True,
+            timeout_sec=60,
+        )
+        self.supervisor.register(
             "scheduled_backup",
             self._scheduled_backup,
             3600,
@@ -1517,6 +1528,27 @@ class WorkersManager:
             # write at the very end would lose every group each time it expires.
             await run_blocking(self.storage.upsert_knowledge_vectors, items, chunks)
         return bool(items)
+
+    async def _approval_hygiene(self) -> None:
+        """Просроченные согласия гаснут, оборванные исполнения объявляются неизвестными.
+
+        Оба механизма были написаны вместе с самими подтверждениями и оба НЕ
+        вызывались ниоткуда — то есть работали ровно в тестах. Просроченное решение
+        продолжало бы числиться действующим сколько угодно долго, а исполнение,
+        прерванное смертью процесса, навсегда осталось бы в статусе «исполняется»:
+        человек не узнал бы, что про его действие никто ничего не знает.
+
+        Сверка НЕ повторяет действие — она лишь называет исход неизвестным. Повтор
+        здесь означал бы второй побочный эффект по одному решению.
+        """
+        expired = await run_blocking(self.storage.expire_action_approvals)
+        unknown = await run_blocking(self.storage.reconcile_stale_claims)
+        if expired or unknown:
+            LOGGER.info(
+                "Approval hygiene: %d expired, %d marked uncertain",
+                expired,
+                unknown,
+            )
 
     async def _database_optimize(self) -> None:
         await run_blocking(self.storage.optimize)
