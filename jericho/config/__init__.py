@@ -440,6 +440,8 @@ class JerichoSettings:
     reminders_enabled: bool
     reminders_lead_days: int
     reminders_poll_interval_sec: int
+    monitors_enabled: bool
+    monitors_poll_interval_sec: int
     reflection_enabled: bool
     reflection_interval_sec: int
     reflection_min_knowledge: int
@@ -552,6 +554,8 @@ class JerichoSettings:
                 "reminders_enabled": self.reminders_enabled,
                 "reminders_lead_days": self.reminders_lead_days,
                 "reminders_poll_interval_sec": self.reminders_poll_interval_sec,
+                "monitors_enabled": self.monitors_enabled,
+                "monitors_poll_interval_sec": self.monitors_poll_interval_sec,
                 "reflection_enabled": self.reflection_enabled,
                 "reflection_interval_sec": self.reflection_interval_sec,
                 "reflection_min_knowledge": self.reflection_min_knowledge,
@@ -798,6 +802,8 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         reminders_enabled=_bool_env("JERICHO_REMINDERS_ENABLED", True),
         reminders_lead_days=_int_env("JERICHO_REMINDERS_LEAD_DAYS", 1, minimum=0),
         reminders_poll_interval_sec=_int_env("JERICHO_REMINDERS_POLL_INTERVAL_SEC", 900, minimum=30),
+        monitors_enabled=_bool_env("JERICHO_MONITORS_ENABLED", True),
+        monitors_poll_interval_sec=_int_env("JERICHO_MONITORS_POLL_INTERVAL_SEC", 900, minimum=60),
         reflection_enabled=_bool_env("JERICHO_REFLECTION_ENABLED", True),
         reflection_interval_sec=_int_env("JERICHO_REFLECTION_INTERVAL_SEC", 86400, minimum=300),
         reflection_min_knowledge=_int_env("JERICHO_REFLECTION_MIN_KNOWLEDGE", 3, minimum=0),

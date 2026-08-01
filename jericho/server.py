@@ -33,6 +33,7 @@ from jericho.agent_runtime import AgentRuntime
 from jericho.agent_runtime.llm import LLMRouter
 from jericho.api.conversations import router as conversations_router
 from jericho.api.deps import (
+    _audit,
     _json_load,
     _parse_json_bool,
     _parse_json_float,
@@ -84,7 +85,7 @@ from jericho.storage.models import (
 )
 from jericho.web_surfer import WebSurfer
 from jericho.workers import IntervalTask, WorkersManager
-from jericho.workers._blocking import wait_until_idle
+from jericho.workers._blocking import run_blocking, wait_until_idle
 
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
@@ -1409,6 +1410,48 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
             # не подтверждаем существование чужой очереди.
             raise HTTPException(status_code=404, detail="Напоминание не найдено")
         return {"dismissed": True, "id": notification_id}
+
+    @application.get("/api/me/monitors", tags=["chat"])
+    async def list_my_monitors(request: Request) -> dict[str, Any]:
+        """Свои мониторы — сохранённые вопросы, за которыми система следит сама.
+
+        Self-service под `chat.use`, как напоминания: монитор смотрит СВОЙ корпус
+        владельца и сообщает ему же, поэтому отдельной способности не нужно —
+        новая способность здесь означала бы, что за человека решает кто-то ещё.
+        """
+        actor = _require(request, "chat.use")
+        rows = await run_blocking(request.app.state.storage.list_monitors, actor.user_id)
+        return {"count": len(rows), "items": rows}
+
+    @application.post("/api/me/monitors", tags=["chat"])
+    async def create_my_monitor(request: Request) -> dict[str, Any]:
+        actor = _require(request, "chat.use")
+        body = await _request_json(request)
+        chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
+        try:
+            monitor = await run_blocking(
+                request.app.state.storage.create_monitor,
+                actor.user_id,
+                str(body.get("query") or ""),
+                chat_id=chat_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Слишком короткий запрос для монитора") from exc
+        _audit(request, "monitor.create", "monitor", monitor.get("id"), after=monitor)
+        return {"monitor": monitor}
+
+    @application.post("/api/me/monitors/{monitor_id}/stop", tags=["chat"])
+    async def stop_my_monitor(request: Request, monitor_id: str) -> dict[str, Any]:
+        actor = _require(request, "chat.use")
+        stopped = await run_blocking(
+            request.app.state.storage.stop_monitor, str(monitor_id or ""), actor.user_id
+        )
+        if not stopped:
+            # 404, а не 403: чужой и уже снятый выглядят одинаково — существование
+            # чужого монитора не подтверждается.
+            raise HTTPException(status_code=404, detail="Монитор не найден")
+        _audit(request, "monitor.stop", "monitor", monitor_id)
+        return {"stopped": True, "id": monitor_id}
 
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:

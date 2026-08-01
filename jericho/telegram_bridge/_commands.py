@@ -14,6 +14,7 @@ from datetime import date, timedelta
 from jericho.retrieval._keyboard import switched
 from jericho.telegram_bridge._base import (
     BOT_COMMANDS,
+    CALLBACK_TARGET_RE,
     Any,
     BridgeShared,
     MediaTooLargeError,
@@ -405,6 +406,76 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/profile":
             await self._send_entity_profile(telegram, backend, chat_id, external_user_id, user, argument)
+            return
+        if command == "/watch":
+            # Монитор — сохранённый вопрос, за которым система следит сама
+            # (спека v3 §6). Условие это ТЕКСТ ЗАПРОСА: второй язык условий
+            # означал бы вторую реализацию «что считается совпадением».
+            if not argument.strip():
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Использование: /watch тема\n\n"
+                    "Например: /watch поверка весов. Сообщу, когда появится новое по теме. "
+                    "Список слежений: /watching",
+                )
+                return
+            created = await self._backend_json(
+                backend,
+                "POST",
+                "/api/me/monitors",
+                {"query": argument.strip(), "telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            raw_monitor = created.get("monitor") if isinstance(created, dict) else None
+            monitor: dict[str, Any] = raw_monitor if isinstance(raw_monitor, dict) else {}
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"Слежу за темой «{monitor.get('query') or argument.strip()}». Сообщу, когда "
+                "появится НОВОЕ по ней — то, что уже есть, показывать не буду: "
+                f"для этого /search {argument.strip()}",
+            )
+            return
+        if command == "/watching":
+            data = await self._backend_json(
+                backend,
+                "GET",
+                "/api/me/monitors",
+                {"telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            if not items:
+                await self._send_message(telegram, chat_id, "Пока ни за чем не слежу. Начать: /watch тема")
+                return
+            lines = [f"Слежу за темами: {len(items)}."]
+            stop_buttons: list[dict[str, str]] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                monitor_id = str(item.get("id") or "")
+                reported = int(item.get("matches_reported") or 0)
+                lines.append(
+                    f"• {str(item.get('query') or '')[:80]}"
+                    + (f" — сообщений: {reported}" if reported else "")
+                )
+                if monitor_id and CALLBACK_TARGET_RE.fullmatch(monitor_id):
+                    stop_buttons.append(
+                        {
+                            "text": f"✕ {len(stop_buttons) + 1}",
+                            "callback_data": f"mon:stop:{monitor_id}",
+                        }
+                    )
+            rows = [stop_buttons[index : index + 4] for index in range(0, len(stop_buttons), 4)]
+            await self._send_message(
+                telegram,
+                chat_id,
+                "\n".join([*lines, "", "Кнопкой ниже — снять слежение по номеру."]),
+                reply_markup={"inline_keyboard": rows} if rows else None,
+            )
             return
         if command == "/entity_rename":
             # Переименование — единственное действие над объектом, которое нельзя

@@ -157,6 +157,7 @@ def build_registry(settings: JerichoSettings) -> OrganRegistry:
     """Instantiate the built-in organs. New organs are added to this list."""
     from jericho.organs.chronicle import ChronicleOrgan
     from jericho.organs.importer import ImporterOrgan
+    from jericho.organs.monitors import MonitorsOrgan
     from jericho.organs.profile import ProfileOrgan
     from jericho.organs.reflection import ReflectionOrgan
     from jericho.organs.reminders import RemindersOrgan
@@ -168,6 +169,7 @@ def build_registry(settings: JerichoSettings) -> OrganRegistry:
         ProfileOrgan(),
         ChronicleOrgan(),
         ImporterOrgan(),
+        MonitorsOrgan(),
         SentinelOrgan(),
     ]
     return OrganRegistry(organs)
@@ -193,5 +195,6 @@ BUILTIN_ORGAN_NAMES: tuple[str, ...] = (
     "profile",
     "chronicle",
     "importer",
+    "monitors",
     "sentinel",
 )

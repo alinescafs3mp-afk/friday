@@ -279,6 +279,20 @@ class CallbacksMixin(BridgeShared):
                     f"Объект «{returned_name}» снова в графе." if returned_name else "Объект снова в графе.",
                 )
                 clear_markup = True
+            elif family == "mon" and action == "stop":
+                await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/me/monitors/{target_id}/stop",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(telegram, callback_id, "Слежение снято")
+                await self._send_message(
+                    telegram, chat_id, "Больше не слежу за этой темой. Список: /watching"
+                )
+                clear_markup = True
             elif family == "feedback" and action in {"up", "down", "search_off"}:
                 if action == "search_off":
                     feedback_type, score = "search_quality", -1.0

@@ -167,7 +167,15 @@ def test_import_endpoint_rejects_unknown_format_and_requires_auth(settings):
 
 def test_registry_has_all_organs(settings):
     names = {o.name for o in build_registry(settings).organs}
-    assert names == {"reminders", "reflection", "profile", "chronicle", "importer", "sentinel"}
+    assert names == {
+        "reminders",
+        "reflection",
+        "profile",
+        "chronicle",
+        "importer",
+        "monitors",
+        "sentinel",
+    }
 
 
 # --- mail (mbox / eml) ----------------------------------------------------

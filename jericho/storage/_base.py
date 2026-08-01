@@ -57,7 +57,7 @@ from jericho.storage.models import (
 # Named for the package, not this module: `__name__` here is "jericho.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("jericho.storage")
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -619,6 +619,33 @@ CREATE TABLE IF NOT EXISTS outbound_notifications (
     created_at TEXT NOT NULL,
     sent_at TEXT
 );
+
+-- Мониторы: сохранённый вопрос, за которым система следит сама (спека v3 §6,
+-- «monitors evaluate explicit conditions and produce deduplicated notifications»).
+--
+-- Условие хранится как ТЕКСТ ЗАПРОСА, а не как выражение на своём языке: у
+-- проекта уже есть один поиск, и второй язык условий означал бы вторую
+-- реализацию «что считается совпадением» — она бы разошлась с первой молча.
+--
+-- `last_seen_rowid` — граница «что уже показывали». Именно rowid, а не время:
+-- `utc_now()` здесь секундной точности, и документ, пришедший в ТУ ЖЕ секунду,
+-- что и создание монитора, при сравнении по времени терялся бы навсегда — а по
+-- курсору он честно оказывается «после». Тот же приём, что у проходов по корпусу
+-- (`knowledge_bodies_after`). Время рядом хранится для показа человеку.
+CREATE TABLE IF NOT EXISTS monitors (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    query TEXT NOT NULL,
+    chat_id TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    last_seen_rowid INTEGER NOT NULL DEFAULT 0,
+    last_seen_at TEXT NOT NULL,
+    last_checked_at TEXT,
+    matches_reported INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_monitors_user ON monitors(user_id, active);
 
 -- Retrieval eval gold set: a query paired with the Knowledge Objects that a
 -- good search must surface. Measured periodically to catch quality regressions.

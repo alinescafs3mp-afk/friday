@@ -478,7 +478,8 @@ class KnowledgeMixin(StorageShared):
             params.append(user_id)
         params.append(max(1, min(int(limit), 1000)))
         rows = self.execute(
-            "SELECT rowid AS rowid, id AS id, user_id AS user_id, content AS content "
+            "SELECT rowid AS rowid, id AS id, user_id AS user_id, title AS title, "
+            "tags_json AS tags_json, content AS content "
             f"FROM knowledge_objects WHERE {' AND '.join(clauses)} "  # nosec B608 - фиксированные условия
             "ORDER BY rowid LIMIT ?",
             tuple(params),

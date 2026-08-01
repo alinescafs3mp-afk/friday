@@ -470,3 +470,100 @@ class RuntimeMixin(StorageShared):
                 (f"{self._BRIDGE_NONCE_PREFIX}%", f"-{cutoff} seconds"),
             )
         return cursor.rowcount
+
+    # ------------------------------------------------------------------
+    # Мониторы: сохранённый вопрос, за которым система следит сама
+    # (спека v3 §6). Условие — текст запроса, а не выражение на своём языке:
+    # второй язык условий означал бы вторую реализацию «что считается
+    # совпадением», и она разошлась бы с поиском молча.
+
+    def create_monitor(self, user_id: str, query: str, *, chat_id: str = "") -> dict[str, Any]:
+        """Завести монитор.
+
+        Граница «что уже видели» ставится по КУРСОРУ (`rowid` последнего знания на
+        этот момент), а не по времени: `utc_now()` здесь секундной точности, и
+        документ, пришедший в ту же секунду, что и создание монитора, при
+        сравнении по времени потерялся бы навсегда — тихо и невоспроизводимо.
+        Заодно это и есть ответ на «не вываливать старое»: всё, что было до, имеет
+        меньший rowid.
+        """
+        clean = " ".join(str(query or "").split())[:500]
+        if len(clean) < 2:
+            raise ValueError("Запрос монитора слишком короткий")
+        self.ensure_user(user_id)
+        now = utc_now()
+        monitor_id = new_id("mon")
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(rowid), 0) AS cursor FROM knowledge_objects WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            conn.execute(
+                """INSERT INTO monitors(id, user_id, query, chat_id, active,
+                   last_seen_rowid, last_seen_at, last_checked_at, matches_reported, created_at)
+                   VALUES(?, ?, ?, ?, 1, ?, ?, NULL, 0, ?)""",
+                (monitor_id, user_id, clean, str(chat_id or ""), int(row["cursor"] or 0), now, now),
+            )
+        return self.get_monitor(monitor_id, user_id) or {}
+
+    def get_monitor(self, monitor_id: str, user_id: str) -> dict[str, Any] | None:
+        row = self.execute(
+            "SELECT * FROM monitors WHERE id=? AND user_id=?", (monitor_id, user_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_monitors(self, user_id: str, *, active_only: bool = True) -> list[dict[str, Any]]:
+        query = "SELECT * FROM monitors WHERE user_id=?"
+        params: list[Any] = [user_id]
+        if active_only:
+            query += " AND active=1"
+        rows = self.execute(query + " ORDER BY created_at DESC LIMIT 200", tuple(params)).fetchall()
+        return [dict(row) for row in rows]
+
+    def iter_active_monitors(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        """Все живые мониторы всех арендаторов — для фонового обхода.
+
+        Арендатор не теряется: каждая строка несёт свой `user_id`, и проверка
+        монитора идёт под ним же. Обход без него означал бы поиск от лица
+        воркера, то есть по чужим данным.
+        """
+        rows = self.execute(
+            "SELECT * FROM monitors WHERE active=1 ORDER BY COALESCE(last_checked_at, created_at) LIMIT ?",
+            (max(1, min(int(limit), 5000)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def stop_monitor(self, monitor_id: str, user_id: str) -> bool:
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE monitors SET active=0 WHERE id=? AND user_id=? AND active=1",
+                (monitor_id, user_id),
+            )
+        return cursor.rowcount == 1
+
+    def mark_monitor_checked(
+        self, monitor_id: str, user_id: str, *, seen_rowid: int, reported: int = 0
+    ) -> None:
+        """Подвинуть границу «что уже показывали».
+
+        Курсор двигается ТОЛЬКО вперёд и только до последней ПРОСМОТРЕННОЙ строки:
+        материал, появившийся во время прохода, имеет больший rowid и попадёт в
+        следующий проход, а не потеряется в щели между двумя.
+        """
+        now = utc_now()
+        with self.transaction() as conn:
+            conn.execute(
+                """UPDATE monitors
+                   SET last_checked_at=?, matches_reported=matches_reported+?, last_seen_at=?,
+                       last_seen_rowid=CASE WHEN ?>last_seen_rowid THEN ? ELSE last_seen_rowid END
+                   WHERE id=? AND user_id=?""",
+                (
+                    now,
+                    max(0, int(reported)),
+                    now,
+                    int(seen_rowid),
+                    int(seen_rowid),
+                    monitor_id,
+                    user_id,
+                ),
+            )

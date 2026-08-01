@@ -104,7 +104,11 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # обратный ход, без которого «мягкое удаление» было мягким только на словах.
 # 271 → 272: knowledge_impact — вторая половина lineage, «что затронет изменение»:
 # на живом корпусе 1168 сущностей из 4448 держатся на ЕДИНСТВЕННОМ документе.
-EXPECTED_MEMBER_COUNT = 272
+# 272 → 278: мониторы — сохранённый вопрос, за которым система следит сама
+# (create/get/list/iter_active/stop/mark_checked). Граница «что уже видели» —
+# курсор по rowid, а не время: `utc_now()` секундной точности, и документ,
+# пришедший в ту же секунду, при сравнении по времени терялся бы навсегда.
+EXPECTED_MEMBER_COUNT = 278
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
