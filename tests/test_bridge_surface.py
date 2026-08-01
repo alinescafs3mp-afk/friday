@@ -268,7 +268,10 @@ EXPECTED_COMMANDS = {
 # 53 → 55: speak tool + _send_voice + _deliver_voice_reply (Jericho voice output).
 # 55 → 56: /profile — вид объекта (спека v3 §6), +_send_entity_profile.
 # 56 → 57: lineage-подвал у doc:show (спека v3 §6), +_format_lineage_footer.
-EXPECTED_BRIDGE_COUNT = 57
+# 57 → 58: _may_message_chat — один предикат «кому боту позволено писать» вместо трёх
+# копий условия. Копия в уведомлении о неудаче отстала, и самозарегистрированный
+# newcomer не получал ни отказа, ни ответа на правку — только молчание.
+EXPECTED_BRIDGE_COUNT = 58
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",

@@ -149,7 +149,10 @@ class CommandsMixin(BridgeShared):
             raw_chat = edited.get("chat")
             edited_chat: dict[str, Any] = raw_chat if isinstance(raw_chat, dict) else {}
             edited_chat_id = int(edited_chat.get("id") or 0)
-            if edited_chat_id in self.config.allowed_chat_ids:
+            # Тот же предикат, что у исходящих и у кнопок: самозарегистрированный
+            # newcomer тоже правит свои сообщения, и молчание оставляло бы его с
+            # текстом в чате, отличным от того, что лежит в архиве.
+            if self._may_message_chat(edited_chat_id):
                 await self._send_message(
                     telegram,
                     edited_chat_id,
@@ -409,10 +412,12 @@ class CommandsMixin(BridgeShared):
             documents = await self._backend_json(
                 backend,
                 "GET",
-                # Просим на один больше, чем покажем: лишний нужен, чтобы честно сказать
-                # «показаны первые N из M», а не молча обрезать. Больше просить незачем —
-                # точное число за период человек увидит на экране «Хроника».
-                f"/api/knowledge/by-date?since={since}&until={until}&limit={_TIMELINE_SHOWN + 1}",
+                # Просим ровно столько, сколько покажем: «сколько всего за период»
+                # приходит отдельным полем `total`, посчитанным SQL без потолка.
+                # Прежде здесь просили на один больше и печатали длину полученного
+                # списка — из-за чего на марте с четырьмя сотнями документов человек
+                # читал «показаны первые 10 из 11».
+                f"/api/knowledge/by-date?since={since}&until={until}&limit={_TIMELINE_SHOWN}",
                 None,
                 external_user_id,
                 str(chat_id),

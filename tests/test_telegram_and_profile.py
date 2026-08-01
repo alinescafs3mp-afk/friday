@@ -1174,6 +1174,36 @@ async def test_dead_letter_notice_is_denied_for_unallowlisted_chat(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_self_registered_newcomer_hears_about_a_failure_instead_of_silence(tmp_path):
+    """Открытая регистрация впускает чат, которого нет в статическом списке.
+
+    Такому человеку бот уже шлёт исходящие и отвечает на кнопки — те две ветки
+    спрашивают «в списке ИЛИ уже впущен». Уведомление о неудаче спрашивало только
+    «в списке», поэтому у новичка сообщение просто исчезало: ни ответа, ни отказа.
+    Он единственный, кто не может знать, почему бот молчит.
+
+    Мутация: вернуть проверку `chat_id in self.config.allowed_chat_ids` — тест
+    обязан покраснеть.
+    """
+    bridge = _media_bridge(tmp_path)  # allowlist [5001]
+    telegram = _FakeTelegramClient()
+    newcomer = {"message": {"chat": {"id": 7777}, "from": {"id": 7777}}}
+    try:
+        # До регистрации — по-прежнему тишина: deny-by-default не ослаблен.
+        await bridge._notify_dead_letter(telegram, newcomer, permanent=True)
+        assert not any(u.endswith("/sendMessage") for u, _ in telegram.calls)
+
+        bridge._inbox.remember_registered_chat(7777)
+        await bridge._notify_dead_letter(telegram, newcomer, permanent=True)
+        sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+        assert sends, "впущенный открытой регистрацией чат остался без уведомления"
+        assert sends[0]["chat_id"] == 7777
+        assert "отклонено" in str(sends[0]["text"])
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_why_before_any_answer_explains_itself_instead_of_dead_letter(tmp_path):
     """/why в чате без единого ответа упирается в 404 бекенда.
 

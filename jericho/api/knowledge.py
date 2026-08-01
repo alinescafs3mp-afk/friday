@@ -97,10 +97,20 @@ async def knowledge_by_own_date(
     дат, и поставить его в ленту по любой из них значит соврать о времени.
     """
     actor = _require(request, "knowledge.read")
-    items = request.app.state.storage.list_documents_by_own_date(
-        actor.user_id, since=since, until=until, limit=limit
-    )
-    return {"items": items, "count": len(items), "since": since, "until": until}
+    storage = request.app.state.storage
+    items = storage.list_documents_by_own_date(actor.user_id, since=since, until=until, limit=limit)
+    # `count` — длина СТРАНИЦЫ, `total` — сколько документов в окне вообще. Пока
+    # второго не было, чат печатал «показаны первые 10 из 11» на периоде с
+    # четырьмя сотнями документов: размер собственного запроса подавался как
+    # факт о корпусе.
+    total = storage.count_documents_by_own_date(actor.user_id, since=since, until=until)
+    return {
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "since": since,
+        "until": until,
+    }
 
 
 @router.get("/{knowledge_id}", tags=["knowledge"])

@@ -65,7 +65,7 @@ class CallbacksMixin(BridgeShared):
         # only exists because the bot already sent this chat a message with
         # buttons, so it is never the first contact; no need to re-derive
         # "private" here, `registered_chats` is the record of that admission.
-        if chat_id not in self.config.allowed_chat_ids and not self._inbox.is_registered_chat(chat_id):
+        if not self._may_message_chat(chat_id):
             await self._answer_callback(telegram, callback_id, "Действие недоступно", alert=True)
             return
 

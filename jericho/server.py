@@ -1403,7 +1403,10 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         message = str(body.get("message") or body.get("caption") or "").strip()
+        # «Текст сочинил backend» и «файл уже принят отдельно» — разные факты; см.
+        # разбор ниже, где они расходятся у голосового вопроса.
         synthetic_document_notice = False
+        file_already_ingested = False
         attachments_value = body.get("attachments")
         attachments: list[dict[str, Any]] = (
             [dict(item) for item in attachments_value if isinstance(item, dict)]
@@ -1575,8 +1578,19 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
                     and voice_duration <= _VOICE_QUESTION_MAX_SEC
                 )
                 if not message:
+                    # Два РАЗНЫХ факта, которые до сих пор нёс один флаг:
+                    #  * «этот текст сочинил backend» — тогда его нельзя судить
+                    #    классификатором как вопрос человека;
+                    #  * «файл уже принят отдельно» — тогда его нельзя ингестить
+                    #    вторым заходом.
+                    # Для транскрипта голоса верен только второй: сказанное вслух —
+                    # это слова человека, и вопрос «кто с кем работал», заданный
+                    # голосом, обязан получать то же графовое расширение, что
+                    # набранный руками. Пока флаг был один, голосовой вопрос
+                    # объявлялся системным уведомлением и терял графовый путь.
                     message = transcript[:2000] if spoken_question else f"Загружен документ: {filename}"
-                    synthetic_document_notice = True
+                    file_already_ingested = True
+                    synthetic_document_notice = not spoken_question
                 elif spoken_question:
                     # Голос с подписью: подпись — вопрос человека, транскрипт — материал
                     # текущего хода.
@@ -1604,7 +1618,7 @@ def create_app(settings_override: JerichoSettings | None = None) -> FastAPI:
 
             ingestion_result = None
             if state.auth_service.authorize(actor, "knowledge.create").allowed:
-                if synthetic_document_notice:
+                if file_already_ingested:
                     # The uploaded file already has its own Raw Object and Knowledge Object. The
                     # generated chat text exists only so the agent can acknowledge the upload.
                     ingestion_result = {

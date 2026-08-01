@@ -377,9 +377,20 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
 
     remaining = max(0, _LLM_TOOL_PAYLOAD_MAX_CHARS - len(encoded_empty) - 64)
     per_source = remaining // max(1, len(sources))
+    # Резать надо ВОКРУГ СОВПАДЕНИЯ, а не с головы, и здесь — тоже. `to_dict`
+    # уже отдаёт выдержку по запросу, но её потолок (12 000) больше того, что
+    # реально влезает в бюджет слота (на трёх источниках это ~3600 знаков), и
+    # прежний `text[:per_source]` отрезал начало ЭТОЙ выдержки — то есть
+    # починка, сделанная на первом шаге, гасилась на втором. Замерено:
+    # искомое место на позиции 9500 доходило до модели через `to_dict` и
+    # терялось здесь.
+    query_for_snippet = str(root.get("query") or "").strip()
     compacted = False
     for source, text in zip(sources, source_texts, strict=False):
-        source["text"] = text[:per_source]
+        if query_for_snippet and len(text) > per_source:
+            source["text"] = best_snippet(query_for_snippet, text, max_chars=per_source)
+        else:
+            source["text"] = text[:per_source]
         if len(text) > len(source["text"]):
             source["truncated"] = True
             compacted = True

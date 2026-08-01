@@ -1091,18 +1091,7 @@ class KnowledgeMixin(StorageShared):
         для хронологии не годятся — документ может называть десяток чужих дат, и
         поставить его в ленту по любой из них значит соврать о времени.
         """
-        clauses = [
-            "user_id=?",
-            "deleted_at IS NULL",
-            "jericho_iso_date(json_extract(metadata_json,'$.document_date')) IS NOT NULL",
-        ]
-        params: list[Any] = [user_id]
-        if since:
-            clauses.append("jericho_iso_date(json_extract(metadata_json,'$.document_date')) >= ?")
-            params.append(since)
-        if until:
-            clauses.append("jericho_iso_date(json_extract(metadata_json,'$.document_date')) <= ?")
-            params.append(until)
+        clauses, params = self._own_date_window(user_id, since=since, until=until)
         params.append(max(1, min(int(limit), 500)))
         rows = self.execute(
             "SELECT id, title, knowledge_kind, "
@@ -1112,6 +1101,44 @@ class KnowledgeMixin(StorageShared):
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def _own_date_window(
+        self, user_id: str, *, since: str | None, until: str | None
+    ) -> tuple[list[str], list[Any]]:
+        """Условие «документ со своей датой попадает в окно» — одно на всех.
+
+        Список и его счётчик обязаны считать одно и то же: два определения окна
+        однажды разъедутся, и разъедутся молча — тот же принцип, что у
+        `_knowledge_filter`.
+        """
+        expression = "jericho_iso_date(json_extract(metadata_json,'$.document_date'))"
+        clauses = ["user_id=?", "deleted_at IS NULL", f"{expression} IS NOT NULL"]
+        params: list[Any] = [user_id]
+        if since:
+            clauses.append(f"{expression} >= ?")
+            params.append(since)
+        if until:
+            clauses.append(f"{expression} <= ?")
+            params.append(until)
+        return clauses, params
+
+    def count_documents_by_own_date(
+        self, user_id: str, *, since: str | None = None, until: str | None = None
+    ) -> int:
+        """Сколько документов в окне ВСЕГО — без потолка выборки.
+
+        Чат печатал «Показаны первые 10 из M», где M — длина полученного списка, а
+        список запрашивался с `limit=11`. То есть на марте с четырьмя сотнями
+        документов человек читал «показаны первые 10 из 11»: число выглядит как
+        факт о корпусе, а является размером собственной страницы. Ровно та же
+        ошибка, что была в карточке объекта («связанных документов: 10» при 314).
+        """
+        clauses, params = self._own_date_window(user_id, since=since, until=until)
+        row = self.execute(
+            f"SELECT COUNT(*) AS count FROM knowledge_objects WHERE {' AND '.join(clauses)}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        return int(row["count"]) if row else 0
 
     def knowledge_date_histogram(
         self,

@@ -229,6 +229,7 @@ class BridgeShared:
     _format_mission_created: Callable[..., Any]
     _format_response_message: Callable[..., Any]
     _inbox: Any
+    _may_message_chat: Callable[..., Any]
     _prepare_document: Callable[..., Any]
     _process_callback_query: Callable[..., Any]
     _process_update: Callable[..., Any]

@@ -180,3 +180,70 @@ async def test_generated_document_notice_never_reaches_relational_classifier(set
     assert spy.calls, "боевой путь вообще не позвал поиск — проба проверяет не то"
     assert spy.calls[0]["query"] == message
     assert spy.calls[0]["graph_expansion"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_question_is_a_human_turn_not_a_generated_notice(settings, monkeypatch, tmp_path):
+    """Сказанное вслух — слова человека, а не строка, сочинённая backend'ом.
+
+    Флаг `synthetic_document_notice` нёс сразу два факта: «текст сгенерирован
+    системой» и «файл уже принят отдельно». Для голосового сообщения верен только
+    второй — транскрипт это вопрос человека. Пока флаг был один, вопрос «с кем
+    работал Иван», заданный ГОЛОСОМ, объявлялся системным уведомлением и терял
+    графовое расширение, которое тот же вопрос, набранный руками, получает
+    (замерено: net_gain=2 на 12 реляционных кейсах).
+
+    Проверяется боевой путь `/api/chat` целиком, а не помощник: дефект был именно
+    в проводке, юнит-тест на классификаторе его не видел.
+
+    Мутация: вернуть `synthetic_document_notice = True` для голоса — тест обязан
+    покраснеть.
+    """
+    from fastapi.testclient import TestClient
+
+    from jericho.server import create_app
+
+    app = create_app(settings)
+    captured: dict[str, object] = {}
+
+    with TestClient(app) as client:
+        real_chat = app.state.agent.chat
+
+        async def _spy_chat(user_id, message, **kwargs):
+            captured["message"] = message
+            captured["synthetic"] = kwargs.get("synthetic_document_notice")
+            return await real_chat(user_id, message, **kwargs)
+
+        monkeypatch.setattr(app.state.agent, "chat", _spy_chat)
+
+        async def _fake_ingest_file(*_args, **_kwargs):
+            return {
+                "transcript_text": "С кем работал Иван Петров над проектом Аврора?",
+                "queued_for_review": True,
+                "knowledge_object": None,
+            }
+
+        monkeypatch.setattr(app.state.ingestion, "ingest_file", _fake_ingest_file)
+
+        response = client.post(
+            "/api/chat",
+            json={
+                "message": "",
+                "document": {
+                    "filename": "voice-42.oga",
+                    "content_base64": "T2dnUw==",
+                    "media_kind": "voice",
+                    "duration": 7,
+                },
+            },
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        assert response.status_code == 200, response.text
+
+    assert captured["message"] == "С кем работал Иван Петров над проектом Аврора?", (
+        "ходом разговора должен стать транскрипт, а не имя .oga-файла"
+    )
+    assert captured["synthetic"] is False, (
+        "голосовой вопрос помечен как сгенерированное системой уведомление — "
+        "он теряет графовый путь, который тот же вопрос текстом получает"
+    )

@@ -911,11 +911,17 @@ class ViewsMixin(BridgeShared):
             return "\n".join(lines)
         if doc_items:
             lines.append("")
-            if len(doc_items) > _TIMELINE_SHOWN:
+            # Общее число берётся с сервера (`total`), а не из длины полученного
+            # списка: список запрашивается с потолком, и печатать его длину значило
+            # бы писать «показаны первые 10 из 11» на периоде, где документов
+            # четыре сотни. Размер собственной страницы — не факт о корпусе.
+            total = documents.get("total") if isinstance(documents, dict) else None
+            total_documents = int(total) if isinstance(total, int) else len(doc_items)
+            if total_documents > _TIMELINE_SHOWN:
                 # Обрезка называет себя. Молчание читается как «это всё, что было в
                 # периоде», и документы за первую половину месяца для человека просто
                 # не существуют. Экран «Хроника» в такой же ситуации пишет то же самое.
-                lines.append(f"Показаны первые {_TIMELINE_SHOWN} из {len(doc_items)} — сузьте период.")
+                lines.append(f"Показаны первые {_TIMELINE_SHOWN} из {total_documents} — сузьте период.")
             lines.append("Кнопкой ниже — открыть документ целиком.")
         return "\n".join(lines)
 

@@ -192,30 +192,89 @@ def test_the_literal_route_is_not_shadowed_by_the_id_route(settings):
 def test_the_chat_says_how_much_of_the_period_it_showed():
     """Молчаливая обрезка читается как «это всё, что было в периоде».
 
-    На сорока документах марта человек видел десять последних, а первая половина
-    месяца для него не существовала. Экран «Хроника» в той же ситуации пишет
-    «Показаны первые N» — чат обязан говорить не хуже.
+    Форма конверта здесь — НАСТОЯЩАЯ: маршрут отдаёт страницу (десять документов)
+    и отдельным полем `total` — сколько их в периоде всего. Прежняя редакция теста
+    складывала в `items` сорок документов и радовалась, что «40» появилось в
+    тексте, — но такой выдачи маршрут не даёт никогда: мост просит десяток. На
+    настоящих данных строка читалась «Показаны первые 10 из 11», то есть тест
+    подтверждал честность, которой не было.
+
+    Мутация: печатать `len(doc_items)` вместо `total` — тест обязан покраснеть.
     """
     from jericho.telegram_bridge import TelegramBridge
     from jericho.telegram_bridge._views import _TIMELINE_SHOWN
 
-    many = {
+    page = {
         "items": [
             {
                 "id": f"ko_{index:016x}",
                 "title": f"акт {index}",
                 "document_date": f"2023-03-{index % 28 + 1:02d}",
             }
-            for index in range(40)
-        ]
+            for index in range(_TIMELINE_SHOWN)
+        ],
+        "count": _TIMELINE_SHOWN,
+        "total": 400,
     }
-    text = TelegramBridge._format_timeline("март 2023", many, {})  # noqa: SLF001
+    text = TelegramBridge._format_timeline("март 2023", page, {})  # noqa: SLF001
     assert f"первые {_TIMELINE_SHOWN}" in text, text
-    assert "40" in text, "не названо, из скольких показаны первые"
+    assert "из 400" in text, "названо число страницы, а не число документов периода"
+    assert "из 10" not in text
 
     # А когда показано всё — лишней строки быть не должно.
-    few = {"items": many["items"][:3]}
+    few = {"items": page["items"][:3], "count": 3, "total": 3}
     assert "первые" not in TelegramBridge._format_timeline("март 2023", few, {})  # noqa: SLF001
+
+
+def test_the_period_total_comes_from_the_route_not_from_the_page(settings):
+    """Сквозная проверка: `total` считает ВСЕ документы окна, `count` — страницу.
+
+    Тот же принцип, что уже поймали в карточке объекта: длина выборки — не факт о
+    корпусе. Здесь это проверяется настоящим маршрутом, а не выдуманным конвертом.
+    """
+    import hashlib
+
+    from fastapi.testclient import TestClient
+
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.server import create_app
+    from jericho.storage.models import KnowledgeObject, RawObject, new_id
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        for index in range(25):
+            body = f"акт номер {index}"
+            raw = RawObject(
+                id=new_id("raw"),
+                user_id=LEGACY_OWNER_USER_ID,
+                source="test",
+                source_ref=new_id("src"),
+                raw_content=body,
+                content_type="text",
+                content_hash=hashlib.sha256(f"{body}{index}".encode()).hexdigest(),
+            )
+            storage.store_raw_object(raw)
+            storage.store_knowledge_object(
+                KnowledgeObject(
+                    id=new_id("ko"),
+                    user_id=LEGACY_OWNER_USER_ID,
+                    raw_object_id=raw.id,
+                    content=body,
+                    content_type="text",
+                    title=f"акт {index}",
+                    metadata_json={"document_date": f"2023-03-{index % 28 + 1:02d}"},
+                )
+            )
+        response = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "2023-03-01", "until": "2023-03-31", "limit": 10},
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["count"] == 10, "страница осталась страницей"
+        assert payload["total"] == 25, "в окне двадцать пять документов, и число обязано быть настоящим"
 
 
 def test_the_timeline_buttons_are_laid_out_in_rows_of_four():

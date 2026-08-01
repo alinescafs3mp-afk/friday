@@ -126,3 +126,49 @@ async def test_research_does_not_swallow_cancelled_error_as_failed_source() -> N
     """
     with pytest.raises(asyncio.CancelledError):
         await _CancelledFetchHarness().research("same query", max_sources=1)
+
+
+def test_the_slot_budget_keeps_the_matching_passage_not_the_top_of_the_page() -> None:
+    """Выдержка по запросу обязана пережить ВТОРОЙ срез — бюджет слота.
+
+    Починка «кусок вокруг совпадения вместо шапки страницы» была сделана в
+    `FetchResult.to_dict`, но её потолок (12 000 знаков) больше того, что реально
+    влезает в слот источника: на трёх источниках это около 3 600 знаков. Второй
+    срез резал с ГОЛОВЫ, то есть отменял первую починку — заявление «модель
+    получает кусок вокруг совпадения» держалось только до момента, когда
+    источников становилось больше одного.
+
+    Сценарий — тот же, на котором мерили изначально: ответ лежит на позиции 9 500
+    страницы в 11 900 знаков.
+
+    Мутация: вернуть `source["text"] = text[:per_source]` — тест обязан
+    покраснеть.
+    """
+    filler = "верхнее меню и навигация. " * 380  # ~9 500 знаков шапки
+    page = filler + "MARKER-42 ответ на вопрос лежит здесь. " + "хвост страницы. " * 150
+    assert page.index("MARKER-42") > 9_000, "стенд не воспроизводит сценарий: маркер слишком близко к началу"
+
+    sources = [
+        {
+            "url": f"https://source-{number}.example/report",
+            "title": f"Source {number}",
+            "text": page,
+            "text_length": len(page),
+            "status_code": 200,
+        }
+        for number in (1, 2, 3)
+    ]
+    message = ToolResult(
+        tool_name="web_research",
+        success=True,
+        data={"query": "MARKER-42", "sources": sources, "summary": "3 источника"},
+    ).to_llm_message()
+
+    payload = json.loads(message.partition("\n")[2])
+    texts = [item["text"] for item in payload["sources"]]
+    assert len(texts) == 3
+    for index, text in enumerate(texts, start=1):
+        assert "MARKER-42" in text, (
+            f"источник {index}: до модели дошла шапка страницы, а не место совпадения "
+            f"(первые знаки: {text[:60]!r})"
+        )

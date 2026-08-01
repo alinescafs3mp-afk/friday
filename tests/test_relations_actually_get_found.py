@@ -391,3 +391,41 @@ def test_coach_phrase_maps_to_manages_not_related_to(storage, graph):
     suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
     assert suggestions, "фраза «тренирует» не дала ни одного кандидата"
     assert suggestions[0]["relation_type"] == "manages"
+
+
+def test_a_military_unit_is_not_a_part_of_relation(storage, graph):
+    """«Войсковая часть» — название организационной единицы, а не утверждение
+    «X является частью Y».
+
+    Замер на корпусе владельца: слово «часть/части» встречается 13 394 раза, и
+    9758 из них (72.9%) — «войсковая часть» или «в/ч». С той же стороны это
+    видно в собственной очереди: все 70 кандидатов, которые словарь вообще смог
+    произвести, оказались `part_of`, и не меньше 29 из них — этот ложный друг.
+    Списочный документ военного архива («Иванов, войсковая часть 12345, и
+    Петров включены в список») давал связь между двумя однополчанами только
+    потому, что между их фамилиями стояло слово «часть».
+
+    Мутация: вернуть голую альтернативу `часть` в запись PART_OF — тест обязан
+    покраснеть.
+    """
+    text = f"Рядовой Иванов {FILLER} войсковая часть 12345 {FILLER} рядовой Петров, список личного состава."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "Иванов", status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, "Петров", status="accepted")
+
+    assert graph.suggest_relations_for_knowledge("alice", ko_id) == [], (
+        "соседство двух фамилий со словом «часть» выдано за утверждение о связи"
+    )
+
+
+def test_an_explicit_part_of_phrase_still_produces_a_candidate(storage, graph):
+    """Обратная сторона того же: однозначная фраза обязана продолжать работать —
+    иначе правка не «убрала ложного друга», а выключила связь целиком."""
+    text = f"Отдел логистики {FILLER} входит в состав {FILLER} департамента снабжения Меркурий."
+    ko_id = _document(storage, "alice", text)
+    _linked_entity(storage, graph, "alice", ko_id, "логистики", status="accepted")
+    _linked_entity(storage, graph, "alice", ko_id, "Меркурий", status="accepted")
+
+    suggestions = graph.suggest_relations_for_knowledge("alice", ko_id)
+    assert suggestions, "однозначная фраза «входит в состав» перестала давать кандидата"
+    assert suggestions[0]["relation_type"] == "part_of"

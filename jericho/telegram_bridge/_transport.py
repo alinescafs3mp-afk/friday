@@ -404,9 +404,7 @@ class TransportMixin(BridgeShared):
             # self-registered account: their push always routes through here).
             try:
                 candidate = int(chat_raw)
-                if candidate not in self.config.allowed_chat_ids and not self._inbox.is_registered_chat(
-                    candidate
-                ):
+                if not self._may_message_chat(candidate):
                     failed.append(notif_id)
                     continue
                 chat_id = candidate
@@ -566,14 +564,30 @@ class TransportMixin(BridgeShared):
         except (TypeError, ValueError):
             return None
 
+    def _may_message_chat(self, chat_id: int) -> bool:
+        """Кому боту вообще позволено писать: статический список ИЛИ чат, который
+        уже впустила открытая регистрация.
+
+        Один предикат на все точки — исходящий цикл, обработчик кнопок и
+        уведомление о неудаче. Пока их было три копии, одна отстала: newcomer
+        получал кнопки и рассылки, но на неудачу ему не отвечал никто.
+        """
+        return chat_id in self.config.allowed_chat_ids or self._inbox.is_registered_chat(chat_id)
+
     async def _notify_dead_letter(
         self, telegram: httpx.AsyncClient, update: dict[str, Any], *, permanent: bool
     ) -> None:
-        """Tell the originating (allowlisted) chat its message could not be
-        processed, so a dead-lettered update is never pure silence. Deny-by-
-        default: only allowlisted chats are messaged; best-effort delivery."""
+        """Tell the originating chat its message could not be processed, so a
+        dead-lettered update is never pure silence. Deny-by-default, with the
+        SAME predicate the outbound loop and the callback handler already use:
+        an allowlisted chat, or one open registration already admitted.
+
+        Without the second half, a self-registered newcomer — the very account
+        open registration exists to create — got no notice at all: their message
+        vanished and the bot looked broken to the only person who cannot know
+        why. Best-effort delivery."""
         chat_id = self._update_chat_id(update)
-        if chat_id is None or chat_id not in self.config.allowed_chat_ids:
+        if chat_id is None or not self._may_message_chat(chat_id):
             return
         text = (
             "⚠️ Не удалось обработать это сообщение — оно отклонено."
