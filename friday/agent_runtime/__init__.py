@@ -2229,6 +2229,13 @@ def _title_from_request(request: str) -> str:
         after_colon,
         flags=re.IGNORECASE,
     ).strip()
+    # Название формата в заголовке — след просьбы, а не имя документа:
+    # «Pdf со сводкой по базе знаний» вместо «Сводка по базе знаний».
+    cleaned = re.sub(
+        r"^(?:pdf|docx?|xlsx?|word|ворд\w*|excel|эксель|png|картинк\w*|таблиц\w*)\s+", "", cleaned, flags=re.IGNORECASE
+    ).strip()
+    # Предлог после названия формата НЕ срезается: «по Хасанову Руслану» без него
+    # превращается в «Хасанову Руслану», и заголовок начинает хромать падежом.
     return (cleaned[:1].upper() + cleaned[1:])[:80] if cleaned else ""
 
 
