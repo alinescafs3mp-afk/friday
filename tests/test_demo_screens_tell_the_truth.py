@@ -401,3 +401,21 @@ def test_clicking_a_graph_node_shows_the_same_number_as_its_circle(storage):
     graph = storage.get_entity_graph("alice", entity.id, depth=1)
     root = next(node for node in graph["nodes"] if node["id"] == entity.id)
     assert root.get("knowledge_count") == 3, "карточка узла не знает числа документов"
+
+
+def test_an_empty_page_is_not_counted_as_a_readable_source():
+    """Мутация: считать источники только по полю `error` — тест краснеет.
+
+    HTML-ветка `fetch` при пустом извлечении не ставит ошибку: возвращает
+    text="" со статусом 200. Такие пустышки считались наравне с настоящими, и
+    сводка обещала «собрано 3 читаемых источника» при отсутствии текста хоть
+    где-нибудь. PDF-ветка тот же случай уже отмечает явной ошибкой.
+    """
+    import inspect
+
+    from friday.web_surfer import WebSurfer
+
+    source = inspect.getsource(WebSurfer.research)
+    marker = source.index("readable_sources = ")
+    branch = source[marker : marker + 260]
+    assert 'item.get("text")' in branch, "пустая страница считается читаемым источником"

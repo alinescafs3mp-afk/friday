@@ -941,7 +941,14 @@ class WebSurfer:
             item["source"] = search_result.source
             sources.append(item)
 
-        readable_sources = sum(1 for item in sources if not item["error"])
+        # «Читаемый» — это страница, из которой ЧТО-ТО извлеклось. HTML-ветка
+        # `fetch` при пустом извлечении не ставит ошибку и возвращает text="" со
+        # статусом 200, поэтому пустышки считались наравне с настоящими: сводка
+        # обещала «собрано 3 читаемых источника», а текста не было ни в одном.
+        # PDF-ветка тот же случай уже отмечает явной ошибкой.
+        readable_sources = sum(
+            1 for item in sources if not item["error"] and str(item.get("text") or "").strip()
+        )
         timed_out_sources = len(pending)
         if sources:
             summary = f"Collected {readable_sources} readable public sources."
