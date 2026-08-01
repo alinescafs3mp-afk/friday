@@ -305,6 +305,46 @@ class ExecutiveService:
                 LOGGER.exception("Mission tick failed for %s", mission.get("id"))
         return {"ran": ran, "active": len(active)}
 
+    def _offer_compensation(self, mission: dict[str, Any], task: dict[str, Any]) -> None:
+        """Предложить человеку откатить то, что могло случиться.
+
+        Спека v3 §5: «Side-effecting steps have checkpoints and rollback or
+        compensation where safe». Ключевое слово — «where safe». Исполнять откат
+        САМИ мы не можем: исход неизвестен, и автоматическая компенсация
+        несделанного действия — такой же необратимый шаг, как и его повтор.
+
+        Поэтому компенсация идёт тем же путём, что любое опасное действие: в
+        очередь подтверждений, с описанием и чекпойнтом. Человек видит, что
+        оборвалось и что предлагается вернуть, и решает сам.
+
+        Без описания компенсации предлагать нечего — молчим: пустая заявка
+        «сделайте что-нибудь» хуже её отсутствия.
+        """
+        compensation = str(task.get("compensation") or "").strip()
+        if not compensation:
+            return
+        try:
+            self.storage.create_action_approval(
+                mission["user_id"],
+                tool="mission_compensation",
+                payload={
+                    "mission_id": mission["id"],
+                    "task_id": task["id"],
+                    "checkpoint": str(task.get("checkpoint_json") or "{}"),
+                    "compensation": compensation,
+                },
+                summary=(
+                    f"Шаг миссии оборвался, и неизвестно, случился ли побочный эффект.\n"
+                    f"Шаг: {str(task.get('title') or task.get('instruction') or '')[:200]}\n"
+                    f"Предлагаемый откат: {compensation[:300]}"
+                ),
+                risk="high",
+                requested_by="executive",
+                mission_id=mission["id"],
+            )
+        except Exception:  # noqa: BLE001 — не сумели предложить откат, но шаг уже помечен
+            LOGGER.exception("Could not offer compensation for mission task %s", task["id"])
+
     @staticmethod
     def _budget_verdict(mission: dict[str, Any]) -> str:
         """Что мешает миссии продолжаться: срок или исчерпанный бюджет.
@@ -384,6 +424,7 @@ class ExecutiveService:
                     status=TaskStatus.UNCERTAIN.value,
                     error="исполнение прервано: неизвестно, случился ли побочный эффект",
                 )
+                self._offer_compensation(mission, task)
                 reclaimed += 1
                 continue
             LOGGER.warning(

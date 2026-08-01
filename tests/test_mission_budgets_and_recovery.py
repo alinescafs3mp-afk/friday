@@ -289,3 +289,58 @@ def test_uncertain_is_not_a_terminal_state():
 
     assert TaskStatus.UNCERTAIN not in TASK_TERMINAL_STATUSES
     assert TaskStatus.COMPENSATED in TASK_TERMINAL_STATUSES
+
+
+def test_compensation_is_offered_to_a_person_not_executed(storage, settings):
+    """Мутация: убрать вызов `_offer_compensation` — тест краснеет.
+
+    Спека v3 §5 разрешает откат «where safe». Здесь безопасного нет: исход
+    неизвестен, и автоматическая компенсация НЕСДЕЛАННОГО действия так же
+    необратима, как его повтор. Поэтому откат идёт человеку заявкой, тем же
+    путём, что любое опасное действие.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from friday.executive.service import ExecutiveService
+
+    mission_id = _mission(storage)
+    long_ago = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    _task(
+        storage,
+        mission_id,
+        side_effect=1,
+        status="running",
+        started_at=long_ago,
+        title="объединить сущности",
+        compensation="разъединить сущности ent_1 и ent_2",
+        checkpoint_json='{"entity_a": "ent_1", "entity_b": "ent_2"}',
+    )
+
+    service = object.__new__(ExecutiveService)
+    service.storage = storage
+    ExecutiveService._reclaim_stale_tasks(service, {"id": mission_id, "user_id": "alice"})  # noqa: SLF001
+
+    pending = storage.list_action_approvals("alice", status="pending")
+    assert pending, "откат не предложен человеку"
+    record = pending[0]
+    assert record["tool"] == "mission_compensation"
+    assert "разъединить" in str(record.get("summary") or "")
+    # Заявка — это ПРЕДЛОЖЕНИЕ: ничего ещё не выполнено.
+    assert record["status"] == "pending"
+
+
+def test_a_step_without_a_written_compensation_offers_nothing(storage, settings):
+    """Пустая заявка «сделайте что-нибудь» хуже её отсутствия."""
+    from datetime import UTC, datetime, timedelta
+
+    from friday.executive.service import ExecutiveService
+
+    mission_id = _mission(storage)
+    long_ago = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    _task(storage, mission_id, side_effect=1, status="running", started_at=long_ago, compensation="")
+
+    service = object.__new__(ExecutiveService)
+    service.storage = storage
+    ExecutiveService._reclaim_stale_tasks(service, {"id": mission_id, "user_id": "alice"})  # noqa: SLF001
+
+    assert storage.list_action_approvals("alice", status="pending") == []
