@@ -15,6 +15,7 @@ from jericho.telegram_bridge._base import (
     httpx,
     json,
     quote,
+    refusal_notice,
 )
 
 # Сколько документов хроники показывать в чате. Прежде их было десять, но лента
@@ -382,11 +383,15 @@ class ViewsMixin(BridgeShared):
                 external_user_id,
                 str(chat_id),
             )
-        except PermanentUpdateError:
+        except PermanentUpdateError as error:
+            # Отказ по правам — не утверждение о содержимом архива. Совет «/browse»
+            # тут вреден вдвойне: он ведёт на маршрут, который откажет так же.
+            notice = refusal_notice(error)
             await self._send_message(
                 telegram,
                 chat_id,
-                f"По имени «{clean}» ничего не нашлось. Список тегов: /tags, поиск: /browse {clean}",
+                notice
+                or f"По имени «{clean}» ничего не нашлось. Список тегов: /tags, поиск: /browse {clean}",
             )
             return
 

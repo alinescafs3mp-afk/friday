@@ -190,11 +190,43 @@ def _proxy_password(url: str) -> str:
 
 
 class PermanentUpdateError(RuntimeError):
-    """The update cannot become valid after a retry."""
+    """The update cannot become valid after a retry.
+
+    Несёт `status_code`, потому что «нельзя повторять» — это ещё не «нечего
+    показывать». 403 и 404 приходили сюда неразличимыми, и единственный обработчик
+    печатал «ничего не нашлось»: человеку без права `kg.read` бот утверждал, что
+    такого объекта в архиве НЕТ, — заявление о содержимом вместо отказа в доступе.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class MediaTooLargeError(PermanentUpdateError):
     """A media file exceeded the configured size limit; the user is told, not dead-lettered silently."""
+
+
+def refusal_notice(error: PermanentUpdateError) -> str:
+    """Текст для отказа, который НЕЛЬЗЯ печатать как «ничего не нашлось».
+
+    Пустая строка означает «это действительно про отсутствие» (404 или неизвестный
+    статус) — тогда вызывающий печатает своё обычное сообщение о ненайденном.
+
+    Разделение нужно потому, что «нет права смотреть» и «в архиве такого нет» —
+    утверждения о РАЗНЫХ вещах, а человек в чате принимает второе за факт о своём
+    архиве. У пользователя с кастомным пресетом без `kg.read` (ровно так устроен
+    «newcomer») `/profile Иванов` отвечал «По имени «Иванов» ничего не нашлось» и
+    советовал /browse — маршрут, который откажет так же.
+    """
+    status = getattr(error, "status_code", None)
+    if status == 403:
+        return "Смотреть объекты вам сейчас не разрешено — попросите доступ у владельца."
+    if status in {400, 422}:
+        return "Не понял запрос: проверьте написание имени."
+    if status == 413:
+        return "Запрос слишком большой — сократите имя."
+    return ""
 
 
 _SINGLE_MEDIA_FIELDS: tuple[tuple[str, str, str, str, bool], ...] = (
@@ -294,6 +326,7 @@ __all__ = [
     "logging",
     "quote",
     "re",
+    "refusal_notice",
     "sign_bridge_request",
     "sqlite3",
     "time",

@@ -22,6 +22,7 @@ from jericho.telegram_bridge._base import (
     asyncio,
     httpx,
     quote,
+    refusal_notice,
 )
 from jericho.telegram_bridge._views import _TIMELINE_SHOWN
 
@@ -503,9 +504,13 @@ class CommandsMixin(BridgeShared):
                     external_user_id,
                     str(chat_id),
                 )
-            except PermanentUpdateError:
+            except PermanentUpdateError as error:
+                notice = refusal_notice(error)
                 await self._send_message(
-                    telegram, chat_id, f"Объект «{entity_name}» не найден. Карточка: /profile {entity_name}"
+                    telegram,
+                    chat_id,
+                    notice
+                    or f"Объект «{entity_name}» не найден. Карточка: /profile {entity_name}",
                 )
                 return
             raw_found = found.get("entity") if isinstance(found, dict) else None
@@ -527,7 +532,20 @@ class CommandsMixin(BridgeShared):
                     external_user_id,
                     str(chat_id),
                 )
-            except PermanentUpdateError:
+            except PermanentUpdateError as error:
+                # 404 здесь — законный ответ: такого объекта нет, столкновения нет.
+                # Любой другой статус означает, что проверить НЕ УДАЛОСЬ, и пустой
+                # словарь молча отключал бы сторожа: команда обещает «узлы не
+                # слиты», а на деле дописала бы псевдоним, не посмотрев.
+                if getattr(error, "status_code", None) != 404:
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        refusal_notice(error)
+                        or "Не удалось проверить, не занято ли это написание другим объектом. "
+                        "Псевдоним не добавлен — повторите позже.",
+                    )
+                    return
                 clash = {}
             raw_clash = clash.get("entity") if isinstance(clash, dict) else None
             clash_entity: dict[str, Any] = raw_clash if isinstance(raw_clash, dict) else {}
@@ -598,9 +616,12 @@ class CommandsMixin(BridgeShared):
                     external_user_id,
                     str(chat_id),
                 )
-            except PermanentUpdateError:
+            except PermanentUpdateError as error:
+                notice = refusal_notice(error)
                 await self._send_message(
-                    telegram, chat_id, f"Объект «{old_name}» не найден. Карточка: /profile {old_name}"
+                    telegram,
+                    chat_id,
+                    notice or f"Объект «{old_name}» не найден. Карточка: /profile {old_name}",
                 )
                 return
             raw_found = found.get("entity") if isinstance(found, dict) else None

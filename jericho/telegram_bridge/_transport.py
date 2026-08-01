@@ -641,10 +641,13 @@ class TransportMixin(BridgeShared):
         )
         if response.status_code == 409 and not response.headers.get("Retry-After", "").strip():
             detail = response.text[:500]
-            raise PermanentUpdateError(f"Backend rejected update (409): {detail}")
+            raise PermanentUpdateError(f"Backend rejected update (409): {detail}", status_code=409)
         if response.status_code in {400, 403, 404, 413, 422}:
             detail = response.text[:500]
-            raise PermanentUpdateError(f"Backend rejected update ({response.status_code}): {detail}")
+            raise PermanentUpdateError(
+                f"Backend rejected update ({response.status_code}): {detail}",
+                status_code=response.status_code,
+            )
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
@@ -697,10 +700,13 @@ class TransportMixin(BridgeShared):
         )
         if response.status_code == 409 and not response.headers.get("Retry-After", "").strip():
             detail = response.text[:500]
-            raise PermanentUpdateError(f"Backend rejected update (409): {detail}")
+            raise PermanentUpdateError(f"Backend rejected update (409): {detail}", status_code=409)
         if response.status_code in {400, 403, 404, 413, 422}:
             detail = response.text[:500]
-            raise PermanentUpdateError(f"Backend rejected update ({response.status_code}): {detail}")
+            raise PermanentUpdateError(
+                f"Backend rejected update ({response.status_code}): {detail}",
+                status_code=response.status_code,
+            )
         response.raise_for_status()
         return response.text
 
