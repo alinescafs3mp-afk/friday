@@ -286,6 +286,21 @@ def _strip_tool_call_markup(content: str) -> str:
     return _TOOL_CALL_MARKUP.sub("", content).strip()
 
 
+#: Блок рассуждения модели: в переписке это служебный текст, а не ответ.
+_THINKING_MARKUP = re.compile(r"<think>.*?</think>|</?think>", re.IGNORECASE | re.DOTALL)
+
+
+def strip_service_markup(content: str) -> str:
+    """Убрать из сохранённого текста всё служебное перед показом человеку.
+
+    Нужна отдельно от `_strip_tool_call_markup`, потому что в базе уже лежат
+    сообщения, записанные ДО появления очистки на выходе модели: 21 штука с
+    `<tool_call>` или `</think>`. Сообщения чата неудаляемы, переписать их
+    нельзя — значит чистить надо на выводе, каждый раз.
+    """
+    return _THINKING_MARKUP.sub("", _strip_tool_call_markup(content or "")).strip()
+
+
 class LLMRouter:
     """Routes foreground/background requests to an OpenAI-compatible vLLM API."""
 

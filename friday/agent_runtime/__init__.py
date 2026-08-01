@@ -2167,7 +2167,11 @@ class AgentRuntime:
             },
         ]
         try:
-            result = await self.llm.chat(messages, temperature=0.0, max_tokens=256)
+            # 256 токенов не хватало: судья перечисляет замечания текстом, и на
+            # длинном ответе JSON обрывался на середине списка. Оборванный JSON —
+            # это `verdict not parseable`, то есть «не удалось проверить», и
+            # человек видел предупреждение там, где проверка на самом деле шла.
+            result = await self.llm.chat(messages, temperature=0.0, max_tokens=900)
         except Exception:
             LOGGER.warning("answer verification failed to run", exc_info=True)
             return _unknown_verdict("verifier unavailable")

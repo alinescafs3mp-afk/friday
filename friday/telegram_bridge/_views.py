@@ -7,6 +7,7 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+from friday.agent_runtime.llm import strip_service_markup
 from friday.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
     Any,
@@ -443,10 +444,22 @@ class ViewsMixin(BridgeShared):
         # «связанных документов: 10» про сущность, у которой их 314.
         total_documents = int(data.get("knowledge_objects_total") or len(knowledge_objects))
         lines.append(f"Связанных документов: {total_documents}")
-        lines.append(
-            f"Связей: {len(relations)} подтверждено"
-            + (f", {pending_count} ждут проверки" if pending_count else "")
-        )
+        # «Связей: 0 подтверждено» показывалось у КАЖДОГО объекта и означало не
+        # «у этого связей нет», а «связей нет ни у кого»: таблица `relations`
+        # (сущность↔сущность) на живой установке пуста и была пуста всегда — граф
+        # строится связями знание↔сущность, их 32 219. Число, которое не может
+        # быть иным, учит человека неправде о его данных: рядом со строкой
+        # «Связанных документов: 46» оно читается как «граф пустой».
+        #
+        # То же правило уже применено в `_format_status` и `_describe_merge_entity`;
+        # до карточки оно не доехало. Появятся связи — появится и строка.
+        if relations:
+            lines.append(
+                f"Связей: {len(relations)} подтверждено"
+                + (f", {pending_count} ждут проверки" if pending_count else "")
+            )
+        elif pending_count:
+            lines.append(f"Связей на проверке: {pending_count}")
         for item in knowledge_objects[:5]:
             if isinstance(item, dict):
                 title = str(item.get("title") or "Без названия")[:80]
@@ -742,7 +755,12 @@ class ViewsMixin(BridgeShared):
                 continue
             role = str(item.get("role") or "?")
             when = str(item.get("created_at") or "")[:19]
-            body = str(item.get("content") or "").strip().replace("\n", " ")
+            # Очистка нужна ИМЕННО ЗДЕСЬ, а не только при генерации: в базе уже
+            # лежит 21 старое сообщение со служебными маркерами `<tool_call>` и
+            # `</think>` — они записаны до того, как появилась чистка на выходе
+            # модели, и сообщения чата неудаляемы. Через `/history` они уходят
+            # человеку дословно.
+            body = strip_service_markup(str(item.get("content") or "")).replace("\n", " ")
             head = f"{position}. [{role}]"
             if when:
                 head = f"{head} {when}"
