@@ -313,6 +313,12 @@ def _is_declared_person(entity: dict[str, Any]) -> bool:
     return str(metadata.get("extraction_method") or "") == "explicit_person_patronymic"
 
 
+_NUMBER_RE = re.compile(r"\d+")
+# Окончания русских отчеств. Совпадение по ним ничего не говорит о тождестве:
+# у двух разных людей отчество совпадает сплошь и рядом.
+_PATRONYMIC_RE = re.compile(r"(ович|евич|ьевич|овна|евна|ична|инична|оглы|кызы)$", re.I)
+
+
 class KnowledgeMixin(StorageShared):
     def get_knowledge_by_raw(self, raw_id: str, user_id: str) -> dict[str, Any] | None:
         # The LIVE Knowledge Object for a Raw Object: soft-deleted rows (e.g. a
@@ -2181,8 +2187,16 @@ class KnowledgeMixin(StorageShared):
             return [normalize_entity_name(value) for value in values if normalize_entity_name(value)]
 
         def acronym(name: str) -> str:
-            tokens = [token for token in re.split(r"\s+", name) if token]
-            return "".join(token[0] for token in tokens if token).casefold() if len(tokens) >= 2 else ""
+            """Первые буквы слов — но только БУКВЫ и только если их хватает.
+
+            «Калининск 17» и «Кемерово 17» давали одинаковое «к1»: первая буква
+            слова плюс цифра. Это не аббревиатура, а совпадение первой буквы у
+            разных городов с одним индексом — и оно ставило паре 0.82.
+            """
+            tokens = [token for token in re.split(r"\s+", name) if token and token[0].isalpha()]
+            if len(tokens) < 2:
+                return ""
+            return "".join(token[0] for token in tokens).casefold()
 
         def overlap(left: set[str], right: set[str]) -> float:
             union = left | right
@@ -2345,6 +2359,36 @@ class KnowledgeMixin(StorageShared):
 
             left_tokens = set(left_name.split())
             right_tokens = set(right_name.split())
+            # Те же слова в другом порядке — правило про ОДНО имя, записанное иначе
+            # («Хасанов Руслан Рашитович» ⟷ «Руслан Рашитович Хасанов»). Считать его
+            # по морфологически свёрнутым токенам нельзя: свёртка тянет фамилию к
+            # имени того же корня — «Иванов» → «иван», «Сергеев» → «серг», — и два
+            # РАЗНЫХ человека получают одинаковый набор. Именно так «Иванов Сергей
+            # Александрович ⟷ Сергеев Иван Александрович» попадал в /merges третьей
+            # строкой с уверенностью 0.94.
+            #
+            # Сегодня эта пара отсекается и более сильным правилом ниже (общим должно
+            # быть содержательное слово, а не отчество), и на боевом корпусе замер даёт
+            # 19 кандидатур при обоих вариантах — проверено. Сырые токены оставлены
+            # намеренно: правило говорит «то же имя», и считать его по свёрнутым
+            # формам неверно по существу, независимо от того, страхует ли его сосед.
+            left_raw = {token.casefold() for token in str(left.get("name") or "").split()}
+            right_raw = {token.casefold() for token in str(right.get("name") or "").split()}
+            # Номер — это и есть различие. «в/ч 01688» и «в/ч 03079» совпадают всем,
+            # кроме единственного, что их различает, и общая похожесть строк ставила
+            # им 0.91: на боевом корпусе 149 таких сущностей, и очередь слияний
+            # заполнялась парами разных воинских частей. Пропускаем пару, если числа
+            # есть у ОБОИХ и не совпадают ни одно; когда номер только у одного
+            # («Отдел» и «Отдел 5»), правило молчит — там решает остальное.
+            left_numbers = set(_NUMBER_RE.findall(str(left.get("name") or "")))
+            right_numbers = set(_NUMBER_RE.findall(str(right.get("name") or "")))
+            if left_numbers and right_numbers and not (left_numbers & right_numbers):
+                continue
+            # У людей отчество — не улика: оно общее у множества неродственных ФИО
+            # («Анатольевич» встречается в архиве десятками), и пара, у которой
+            # совпало ТОЛЬКО оно, — это два разных человека. Замерено: из 878 пар с
+            # уверенностью ≥ 0.85 у 375 не было ни одного общего слова вовсе, а
+            # среди остальных заметная часть держалась на одном отчестве.
             token_jaccard = overlap(left_tokens, right_tokens)
             acronym_match = bool(
                 acronym(left_name)
@@ -2352,7 +2396,32 @@ class KnowledgeMixin(StorageShared):
                 and len(left_tokens) >= 2
                 and len(right_tokens) >= 2
             )
-            if not exact_alias and not (left_tokens == right_tokens and len(left_tokens) >= 2):
+            # Только для МНОГОСЛОВНЫХ имён: у однословных общих токенов нет по
+            # определению, и там решает посимвольное сходство — «Зюзюкинск» и
+            # «Зюзюкинец» это опечатка, а не два разных объекта.
+            if not exact_alias and not acronym_match and len(left_raw) > 1 and len(right_raw) > 1:
+                # Общим должно быть хоть одно СОДЕРЖАТЕЛЬНОЕ слово. Не в счёт:
+                #   • числа — «Калининск 17» и «Кемерово 17» это разные города,
+                #     совпавшие индексом;
+                #   • отчества — «Анатольевич» встречается в архиве десятками, и
+                #     пара, державшаяся только на нём, — два разных человека.
+                # У людей сравниваются СЫРЫЕ слова: морфология тянет фамилию к
+                # имени того же корня («Иванов»→«иван», «Сергеев»→«серг») и
+                # склеивает разных людей. У остальных — свёрнутые, потому что там
+                # она делает ровно свою работу: «ПОДПИСКА» и «ПОДПИСКУ» — одно.
+                both_people = (
+                    str(left.get("entity_type") or "") == "person"
+                    and str(right.get("entity_type") or "") == "person"
+                )
+                shared = (left_raw & right_raw) if both_people else (left_tokens & right_tokens)
+                meaningful = {
+                    token
+                    for token in shared
+                    if len(token) > 2 and not token.isdigit() and not _PATRONYMIC_RE.search(token)
+                }
+                if not meaningful:
+                    continue
+            if not exact_alias and not (left_raw == right_raw and len(left_raw) >= 2):
                 # Exact ceiling before spending three-plus SequenceMatcher calls.
                 # `ratio()` is 2·M/(len(a)+len(b)) and matched characters cannot
                 # exceed the shorter string, so `_ratio_ceiling` bounds it from above
@@ -2410,7 +2479,7 @@ class KnowledgeMixin(StorageShared):
             if exact_alias:
                 confidence = 0.995
                 method = "exact_name_or_alias"
-            elif left_tokens == right_tokens and len(left_tokens) >= 2:
+            elif left_raw == right_raw and len(left_raw) >= 2:
                 confidence = 0.94
                 method = "same_tokens_different_order"
             else:

@@ -25,8 +25,16 @@ def _entities(storage, user_id: str, count: int) -> None:
     """Имена с общими словами: именно на таком корпусе потолок и срабатывает."""
     storage.ensure_user(user_id)
     words = ("отдел", "склад", "проект", "смета", "закупка", "участок")
+    # Различитель — СЛОВО, а не число: пары, отличающиеся только номером
+    # («отдел склад 5» и «отдел склад 11»), с 2026-08-01 кандидатами не считаются —
+    # номер и есть то, чем такие названия различаются. Корпус должен порождать
+    # пары, иначе тест про потолок ничего не проверяет.
+    suffixes = ("альфа", "бета", "гамма", "дельта", "омега", "сигма")
     for index in range(count):
-        name = f"{words[index % len(words)]} {words[(index // 6) % len(words)]} {index}"
+        name = (
+            f"{words[index % len(words)]} {words[(index // 6) % len(words)]} "
+            f"{suffixes[index % len(suffixes)]}"
+        )
         storage.create_entity(
             Entity(id=new_id("ent"), user_id=user_id, name=name, entity_type=EntityType.CONCEPT)
         )
