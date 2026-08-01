@@ -1,0 +1,153 @@
+"""Найденное в интернете попадает в общий конвейер, а не живёт один ход.
+
+Требование владельца 2026-08-01: результаты поиска Пятницы должны считаться
+полноправным участником конвейера — связываться с людьми, тегами и сущностями,
+обрабатываться как документы.
+
+До этого страница показывалась модели и забывалась: на завтрашний вопрос про то
+же самое всё искалось заново, а в архиве не оставалось ни строки о том, что
+Пятница вообще куда-то ходила.
+
+Путь намеренно тот же, что у `POST /api/ingest/url`: Raw Object плюс Inbox, а не
+запись в знания молча. Иначе каждый гуглинг дописывал бы в личный архив
+содержимое чужих сайтов без ведома человека.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import ActorContext, AuthorizationService
+
+
+class _Surfer:
+    """Веб-слой, который «нашёл» две страницы: одну содержательную, одну пустую."""
+
+    def __init__(self, sources: list[dict] | None = None) -> None:
+        self.sources = (
+            sources
+            if sources is not None
+            else [
+                {
+                    "url": "https://cbr.ru/hd_base/KeyRate/",
+                    "title": "Ключевая ставка Банка России",
+                    "text": "Ключевая ставка Банка России составляет 14,00% годовых на 31.07.2026. "
+                    * 6,
+                },
+                {"url": "https://example.org/empty", "title": "Пусто", "text": ""},
+            ]
+        )
+        self.asked: list[str] = []
+
+    async def research(self, query: str, *, max_sources: int = 3) -> dict:
+        self.asked.append(query)
+        return {"query": query, "sources": self.sources, "summary": "ok"}
+
+
+def _kernel(settings, storage, surfer) -> ExecutionKernel:
+    graph = KnowledgeGraph(storage)
+    kernel = ExecutionKernel(AuthorizationService(storage), settings)
+    kernel.bind_services(storage, graph, surfer, IngestionPipeline(settings, storage, graph))
+    return kernel
+
+
+@pytest.mark.anyio
+async def test_a_found_page_lands_in_the_inbox_as_a_document(settings, storage):
+    """Мутация: убрать вызов `_capture_web_sources` — тест краснеет."""
+    storage.ensure_user("alice", preset_key="admin")
+    surfer = _Surfer()
+    kernel = _kernel(settings, storage, surfer)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute("web_research", {"query": "ключевая ставка"}, actor=actor)
+
+    assert result.success, result.error
+    captured = result.data.get("captured") or []
+    assert len(captured) == 1, f"в конвейер ушло {len(captured)} страниц вместо одной"
+    assert captured[0]["url"] == "https://cbr.ru/hd_base/KeyRate/"
+    assert captured[0]["raw_object_id"], "страница не стала Raw Object"
+
+    inbox = storage.list_inbox("alice")
+    assert inbox, "найденная страница не дошла до Inbox"
+
+
+@pytest.mark.anyio
+async def test_the_page_keeps_where_it_came_from(settings, storage):
+    """Провенанс: адрес страницы и запрос, ради которого её нашли."""
+    storage.ensure_user("alice", preset_key="admin")
+    kernel = _kernel(settings, storage, _Surfer())
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    await kernel.execute("web_research", {"query": "ключевая ставка ЦБ"}, actor=actor)
+
+    raw = storage.execute(
+        "SELECT source, source_ref, metadata_json FROM raw_objects "
+        "WHERE user_id='alice' ORDER BY created_at DESC"
+    ).fetchone()
+    assert raw["source"] == "web"
+    assert raw["source_ref"] == "https://cbr.ru/hd_base/KeyRate/"
+
+    # По метаданным должно быть видно не только откуда страница, но и ЗАЧЕМ её
+    # взяли: без запроса непонятно, почему чужой сайт лежит в личном архиве.
+    metadata = str(raw["metadata_json"] or "")
+    assert "web_research" in metadata, metadata
+    assert "ключевая ставка ЦБ" in metadata, metadata
+    assert "cbr.ru" in metadata, metadata
+
+
+@pytest.mark.anyio
+async def test_an_empty_page_is_not_work_for_a_human(settings, storage):
+    """Страница без текста в Inbox — работа на ровном месте."""
+    storage.ensure_user("alice", preset_key="admin")
+    surfer = _Surfer([{"url": "https://example.org/x", "title": "Пусто", "text": "коротко"}])
+    kernel = _kernel(settings, storage, surfer)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute("web_research", {"query": "что угодно"}, actor=actor)
+
+    assert not (result.data.get("captured") or []), "пустая страница ушла в Inbox"
+    assert storage.list_inbox("alice") == []
+
+
+@pytest.mark.anyio
+async def test_searching_is_allowed_without_the_right_to_write(settings, storage):
+    """Искать и запоминать — разные разрешения, и это не формальность.
+
+    Мутация: убрать проверку `knowledge.create` — тест краснеет, потому что
+    такой человек начнёт молча наполнять архив.
+
+    Пресета, где `web.research` есть, а `knowledge.create` нет, в наборе по
+    умолчанию не существует (первая редакция теста брала `guest` — у него нет и
+    самого поиска, поэтому до записи дело не доходило и мутация не ловилась).
+    Здесь запрет задан явным override — ровно так его и задаст администратор.
+    """
+    storage.ensure_user("reader", preset_key="moderator")
+    storage.set_permission_override("reader", "knowledge.create", "deny")
+    kernel = _kernel(settings, storage, _Surfer())
+    actor = ActorContext(user_id="reader", preset_key="moderator", source="test")
+
+    result = await kernel.execute("web_research", {"query": "ключевая ставка"}, actor=actor)
+
+    assert result.success, f"поиск запретили вместе с записью: {result.error}"
+    assert result.data.get("sources"), "выдача не дошла до того, кому искать можно"
+    assert not (result.data.get("captured") or []), (
+        "права на запись нет, а страница всё равно сохранена"
+    )
+    assert storage.list_inbox("reader") == []
+
+
+@pytest.mark.anyio
+async def test_the_answer_still_carries_the_sources(settings, storage):
+    """Сохранение — добавка, а не замена: модель по-прежнему видит выдачу."""
+    storage.ensure_user("alice", preset_key="admin")
+    kernel = _kernel(settings, storage, _Surfer())
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute("web_research", {"query": "ставка"}, actor=actor)
+
+    assert result.data.get("sources"), "выдача пропала из результата инструмента"
+    rendered = result.to_llm_message()
+    assert "cbr.ru" in rendered

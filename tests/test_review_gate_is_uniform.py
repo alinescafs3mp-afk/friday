@@ -157,6 +157,9 @@ EXPECTED_INGEST_CALLS = {
     ("friday/api/ingest.py", "ingest_text", False),  # вставленный текст — по политике
     ("friday/api/ingest.py", "ingest_text", True),  # /ingest/url — веб-страницу никто не читал
     ("friday/bulk_import.py", "ingest_file", True),  # папка — одно действие, файлов сотни
+    # Страницы, найденные поиском Пятницы: их не читал ни один человек, а нашла
+    # их модель по своему запросу — тем более через ревью, как и `/ingest/url`.
+    ("friday/execution_kernel/__init__.py", "ingest_text", True),
     ("friday/organs/importer/__init__.py", "ingest_text", True),  # импортёр — то же самое
     ("friday/server.py", "ingest_file", False),  # вложение в чате — по политике
     ("friday/server.py", "ingest_text", False),  # сообщение в чате — по политике

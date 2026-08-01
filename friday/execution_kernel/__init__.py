@@ -39,6 +39,9 @@ if TYPE_CHECKING:
     from friday.storage import FridayStorage
     from friday.web_surfer import WebSurfer
 
+#: Ниже этого объёма страница знанием не становится — сохранять нечего.
+_WEB_CAPTURE_MIN_CHARS = 200
+
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
 
@@ -1264,9 +1267,76 @@ class ExecutionKernel:
         return (await web.fetch(url)).to_dict(query=query)
 
     async def _web_research(self, *, actor: ActorContext, query: str, max_sources: int = 3) -> dict[str, Any]:
-        del actor
         _, _, web, _ = self._require_services()
-        return await web.research(query, max_sources=max(1, min(int(max_sources), 8)))
+        report = await web.research(query, max_sources=max(1, min(int(max_sources), 8)))
+        captured = await self._capture_web_sources(actor, query, report)
+        return {**report, "captured": captured} if captured else report
+
+    async def _capture_web_sources(
+        self, actor: ActorContext, query: str, report: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Найденное в интернете — такой же материал, как присланный файл.
+
+        Требование владельца (2026-08-01): результаты поиска Пятницы должны быть
+        полноправным участником общего конвейера — связываться с людьми, тегами и
+        сущностями, обрабатываться как документы. Раньше страница жила ровно один
+        ход: показали модели и забыли, и на завтрашний вопрос про то же самое всё
+        искалось заново.
+
+        Путь тот же, что у `POST /api/ingest/url`: страница становится Raw Object
+        и идёт через Inbox, а не в знания молча — `force_review=True`. Иначе
+        каждый гуглинг тихо дописывал бы в архив содержимое чужих сайтов.
+
+        Права проверяются честно: без `knowledge.create` поиск работает, а запись
+        не делается — искать и запоминать это разные разрешения.
+        """
+        sources = report.get("sources")
+        if not isinstance(sources, list) or not sources:
+            return []
+        if not (self.authorization and self.authorization.authorize(actor, "knowledge.create").allowed):
+            return []
+        _, _, _, ingestion = self._require_services()
+        captured: list[dict[str, Any]] = []
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            url = str(source.get("url") or "").strip()
+            text = str(source.get("text") or "").strip()
+            # Пустая страница знанием не становится: сохранять нечего, а строка
+            # в Inbox с одним заголовком — работа для человека на ровном месте.
+            if not url or len(text) < _WEB_CAPTURE_MIN_CHARS:
+                continue
+            title = str(source.get("title") or source.get("search_title") or url)
+            try:
+                outcome = await ingestion.ingest_text(
+                    actor.user_id,
+                    text,
+                    source="web",
+                    source_ref=url,
+                    force_review=True,
+                    metadata={
+                        "url": url,
+                        "title": title,
+                        "content_source": "web_research",
+                        # Запрос — часть провенанса: по нему видно, зачем эта
+                        # страница вообще попала в архив.
+                        "search_query": query,
+                        **({"content_truncated": True} if source.get("truncated") else {}),
+                    },
+                )
+            except Exception:  # noqa: BLE001 — сохранение не должно ронять ответ
+                LOGGER.exception("Failed to capture web source %s", url[:120])
+                continue
+            captured.append(
+                {
+                    "url": url,
+                    "title": title,
+                    "raw_object_id": outcome.get("raw_object_id"),
+                    "inbox_id": outcome.get("inbox_id"),
+                    "duplicate": bool(outcome.get("duplicate")),
+                }
+            )
+        return captured
 
     async def _entity_lookup(self, *, actor: ActorContext, name: str) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
