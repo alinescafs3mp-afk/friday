@@ -403,3 +403,63 @@ async def test_the_derived_marker_counts_all_sources_not_the_shown_page(kernel):
         "пометка о производности считает страницу, а не все документы"
     )
     assert result.data["knowledge_objects_total"] == 13
+
+
+@pytest.mark.asyncio
+async def test_the_summary_survives_the_tool_budget_not_just_the_dict(kernel):
+    """Сводка должна дойти ДО МОДЕЛИ, а не просто лежать в словаре.
+
+    Ответ инструмента режется на 12 000 знаках, и список документов — самая
+    длинная часть. Пока сводка стояла после него, у трети сущностей корпуса
+    (замерено: 34%, а среди 200 самых широких — у всех 200) модель не получала
+    ни тегов, ни диапазона дат, ни числа документов, ни пометки о производности.
+    Существующие тесты этого не видели: они смотрят `result.data`, то есть
+    НЕОБРЕЗАННЫЙ словарь — ровно «проверять механизм, а не то, что он подключён».
+
+    Мутация: вернуть `knowledge_objects` в начало словаря (или вернуть сырой
+    `metadata_json` в проекцию карточки) — тест обязан покраснеть.
+    """
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Атлас")
+    # Десять документов с тяжёлыми метаданными — форма живого корпуса.
+    for index in range(10):
+        ko = _document(
+            storage,
+            "alice",
+            f"Документ {index}. " + ("текст " * 200),
+            tags=[f"тег{index}", "общий"],
+            document_date=f"2026-0{index % 9 + 1}-15",
+        )
+        storage.update_knowledge_fields(
+            ko,
+            "alice",
+            metadata_json={
+                "document_date": f"2026-0{index % 9 + 1}-15",
+                "stored_path": f"alice/файл-{index}.docx",
+                "provenance": {"note": "служебные метаданные " * 60},
+            },
+        )
+        graph.link_knowledge_to_entity(ko, entity_id, "alice", status="accepted")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
+    message = result.to_llm_message()
+
+    assert "profile_provenance" in message, "пометка о производности не дошла до модели"
+    assert "document_date_range" in message, "диапазон дат не дошёл до модели"
+    assert "knowledge_objects_total" in message, "число документов не дошло до модели"
+
+    # И вторая половина той же защиты: сам ответ не должен упираться в потолок.
+    # Порядок ключей спасает факты о сущности, но если карточка снова начнёт
+    # таскать сырые метаданные документов, модель получит десяток обрезанных
+    # блобов вместо списка — замерено: один `metadata_json` на живом корпусе даёт
+    # медиану 13 253 знака на десять карточек при лимите 12 000.
+    #
+    # Мутация: вернуть `k.metadata_json` в `_ENTITY_CARD_COLUMNS` — этот ассерт
+    # обязан покраснеть.
+    import json as _json
+
+    payload = len(_json.dumps(result.data, ensure_ascii=False, indent=2))
+    assert payload < 12_000, (
+        f"ответ инструмента {payload} знаков при лимите 12 000 — список документов будет обрезан целиком"
+    )

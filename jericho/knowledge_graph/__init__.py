@@ -1644,28 +1644,25 @@ class KnowledgeGraph:
         knowledge_objects = self.storage.get_entity_knowledge_cards(user_id, entity_id, limit=knowledge_limit)
         summary = self.storage.entity_knowledge_summary(user_id, entity_id)
         knowledge_total = int(summary.get("total") or 0)
+        # ПОРЯДОК КЛЮЧЕЙ ЗДЕСЬ — ЧАСТЬ КОНТРАКТА. Ответ инструмента агента режется
+        # на 12 000 знаках (`ToolResult.to_llm_message`), а список документов —
+        # самая длинная часть словаря. Пока сводка стояла ПОСЛЕ него, у трети
+        # сущностей корпуса (замерено: 34%) модель не получала ни тегов, ни
+        # диапазона дат, ни числа документов, ни пометки о производности — они
+        # оставались за отсечкой. Факты о сущности идут первыми, список — последним.
         return {
-            "relations": self.get_entity_relations(entity_id, user_id),
-            "pending_relations_count": self.count_pending_relations(entity_id, user_id),
-            "knowledge_objects": knowledge_objects,
-            # Список выше — страница (`knowledge_limit`), сводка ниже из него НЕ
-            # выводится. Ровно это и делало карточку неверной: диапазон дат десяти
-            # самых важных документов подавался как диапазон сущности — замерено
-            # неверным у 93 из 200 самых широких сущностей боевой копии.
-            "knowledge_objects_total": summary.pop("total"),
+            # Сводка НЕ выводится из показанного списка: список — страница
+            # (`knowledge_limit`), а сводка посчитана по всем документам. Ровно это
+            # и делало карточку неверной: диапазон дат десяти самых важных
+            # документов подавался как диапазон сущности — замерено неверным у 93
+            # из 200 самых широких сущностей боевой копии.
             "profile": summary,
+            "knowledge_objects_total": knowledge_total,
             # Спека v3 §2: «derived properties identify their source objects,
             # calculation version and freshness; a derived value is never
             # presented as a sourced fact». Теги, диапазон дат и число «без своей
-            # даты» НЕ записаны на объекте — они вычислены из его документов
-            # прямо сейчас. Без этой пометки человек (и модель) читает их как
-            # свойства объекта: «у Иванова теги такие-то», хотя правильно —
-            # «в его документах встречаются такие-то».
-            # Спека v3 §2: «derived properties identify their source objects,
-            # calculation version and freshness; a derived value is never
-            # presented as a sourced fact». Теги, диапазон дат и число «без своей
-            # даты» НЕ записаны на объекте — они вычислены из его документов
-            # прямо сейчас. Без пометки человек (и модель) читает их как свойства
+            # даты» НЕ записаны на объекте — они вычислены из его документов прямо
+            # сейчас. Без пометки человек (и модель) читает их как свойства
             # объекта: «у Иванова теги такие-то», хотя правильно — «в его
             # документах встречаются такие-то».
             "profile_provenance": {
@@ -1675,14 +1672,18 @@ class KnowledgeGraph:
                 "computed_at": utc_now(),
                 "calculation": "entity_knowledge_summary/1",
             },
+            "relations": self.get_entity_relations(entity_id, user_id),
+            "pending_relations_count": self.count_pending_relations(entity_id, user_id),
             "event_time": self.get_event_time(user_id, entity_id),
             # Четвёртый временной факт, теперь и для сущности: КОГДА ЕЁ ПРАВИЛИ —
-            # отдельно от дат документов и от времени события (спека v3 §2). У
-            # документа он уже показывался в подвале lineage, у объекта — нет.
+            # отдельно от дат документов и от времени события (спека v3 §2).
             # `restorable_version` — та версия, к которой ведёт откат «отменить
             # последнюю правку»: предпоследняя, потому что последняя и есть
             # текущее состояние.
             "edits": self._entity_edit_history(user_id, entity_id),
+            # Список идёт ПОСЛЕДНИМ: если ответ и обрежется, потеряется он, а не
+            # факты о сущности.
+            "knowledge_objects": knowledge_objects,
         }
 
     def _entity_edit_history(self, user_id: str, entity_id: str) -> dict[str, Any]:

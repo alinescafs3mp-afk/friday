@@ -1733,8 +1733,15 @@ class KnowledgeMixin(StorageShared):
             ).fetchall()
         return [dict(row) for row in rows]
 
+    # Сырого `metadata_json` здесь НЕТ, и это замер, а не вкус: на живом корпусе
+    # его медиана — 13 253 знака на десять карточек, то есть один этот столбец
+    # перекрывает весь лимит инструмента (12 000), и до модели переставали
+    # доходить поля, стоящие в ответе ПОСЛЕ списка: сводка, число документов,
+    # пометка о производности. Замерено: так было у 34% сущностей корпуса.
+    # Из метаданных карточке нужна ровно одна вещь — собственная дата документа.
     _ENTITY_CARD_COLUMNS = (
-        "k.id, k.title, k.summary, k.tags_json, k.metadata_json, k.importance, "
+        "k.id, k.title, k.summary, k.tags_json, k.importance, "
+        "json_extract(k.metadata_json,'$.document_date') AS document_date, "
         "k.quality_score, k.lifecycle_stage, k.knowledge_kind, k.created_at, k.updated_at"
     )
 
