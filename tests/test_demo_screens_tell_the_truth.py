@@ -78,3 +78,115 @@ def test_history_output_goes_through_the_stripper():
     assert "strip_service_markup(" in source, (
         "история печатает сохранённый текст дословно, вместе со служебными маркерами"
     )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Пятница, что было по Хасанову?",
+        "пятница, что нового?",
+        "Пятница, покажи что происходило с проектом",
+    ],
+)
+def test_being_called_by_name_is_not_a_weekday(message):
+    """Мутация: убрать требование предлога у дней недели — тест краснеет.
+
+    Ассистента зовут Пятница. Обращение по имени разбиралось как день недели, и
+    вопрос «Пятница, что было по Хасанову?» уходил в ленту за прошлую пятницу
+    вместо ответа по делу. Найдено состязательным ревью перед показом.
+    """
+    from friday.agent_runtime import moment_from_question
+
+    assert moment_from_question(message) is None
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ("что было в пятницу", "пятницу"),
+        ("что происходило во вторник", "вторник"),
+        ("чем занимались в понедельник", "понедельник"),
+    ],
+)
+def test_a_weekday_with_a_preposition_is_still_a_period(message, expected):
+    """Обратная сторона: с предлогом это по-прежнему период."""
+    from friday.agent_runtime import moment_from_question
+
+    assert moment_from_question(message) == expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "запиши: встреча в интернет-кафе",
+        "в интернате новый распорядок",
+        "доступ онлайн выдан Иванову",
+        "отчёт по онлайн-обучению",
+    ],
+)
+def test_an_ordinary_note_is_not_a_request_to_search_the_web(message):
+    """Мутация: вернуть широкое «в интер\\w*» и «онлайн» — тест краснеет.
+
+    Заметка про интернат или интернет-кафе уходила в интернет-поиск: человек
+    диктовал факт, а получал выдачу поисковика.
+    """
+    from friday.agent_runtime import asks_for_the_web
+
+    assert not asks_for_the_web(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "найди в интернете ставку",
+        "поищи в интеренете погоду",
+        "глянь в инете",
+        "погугли расписание",
+    ],
+)
+def test_a_real_web_request_still_works(message):
+    from friday.agent_runtime import asks_for_the_web
+
+    assert asks_for_the_web(message)
+
+
+def test_a_report_title_with_forbidden_characters_still_builds():
+    """Мутация: убрать `_sheet_title` — тест краснеет.
+
+    Excel запрещает в имени листа `\\ / * ? : [ ]`, и openpyxl на таком заголовке
+    ПАДАЕТ. «Отчёт: июль/август» — обычная просьба, а человек вместо файла
+    получал сообщение об ошибке.
+    """
+    import io
+
+    import openpyxl
+
+    from friday.reports import render, spec_from_payload
+
+    blocks = [{"kind": "text", "text": "строка"}, {"kind": "text", "text": "вторая"}]
+    payload = render("xlsx", spec_from_payload("Отчёт: июль/август", "", blocks))
+    sheet = openpyxl.load_workbook(io.BytesIO(payload)).active
+    assert ":" not in sheet.title and "/" not in sheet.title
+    assert len(sheet.title) <= 31
+
+
+def test_words_from_the_middle_of_a_document_are_not_dropped():
+    """Мутация: применять фильтр обещаний к каждой строке — тест краснеет.
+
+    «Вот основные категории:» и «Готово к печати» — обычное содержимое, а
+    вырезались как служебные зачины, потому что фильтр шёл по всем строкам.
+    """
+    from friday.agent_runtime import _blocks_from_text
+
+    text = (
+        "Сейчас соберу сводку.\n\n"
+        "Сводка по базе\n"
+        "- Всего 1533\n"
+        "Вот основные категории:\n"
+        "- Люди\n"
+        "Готово к печати."
+    )
+    rendered = " ".join(str(block) for block in _blocks_from_text(text))
+    assert "Сейчас соберу" not in rendered, "зачин попал в документ"
+    assert "основные категории" in rendered, "строка из середины документа выброшена"
+    assert "Готово к печати" in rendered

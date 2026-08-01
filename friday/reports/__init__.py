@@ -160,7 +160,11 @@ def _render_xlsx(spec: ReportSpec) -> bytes:
 
     book = Workbook()
     sheet = book.active
-    sheet.title = (spec.title or "Отчёт")[:31] or "Отчёт"
+    # Имя листа пишет модель через заголовок отчёта, а Excel запрещает в нём
+    # `\ / * ? : [ ]` — openpyxl на таком заголовке ПАДАЕТ, и человек вместо
+    # файла получает сообщение об ошибке. «Отчёт: июль/август» — совершенно
+    # обычная просьба.
+    sheet.title = _sheet_title(spec.title)
     sheet.append([spec.title])
     sheet["A1"].font = Font(bold=True, size=14)
     if spec.subtitle:
@@ -193,6 +197,16 @@ def _render_xlsx(spec: ReportSpec) -> bytes:
     buffer = io.BytesIO()
     book.save(buffer)
     return buffer.getvalue()
+
+
+#: Знаки, запрещённые Excel в имени листа.
+_SHEET_FORBIDDEN = str.maketrans({char: " " for char in "\\/*?:[]"})
+
+
+def _sheet_title(title: str) -> str:
+    """Заголовок отчёта — в допустимое имя листа (не длиннее 31 знака)."""
+    cleaned = " ".join(str(title or "").translate(_SHEET_FORBIDDEN).split())
+    return cleaned[:31].strip() or "Отчёт"
 
 
 def _pdf_font() -> tuple[str, str]:
