@@ -221,3 +221,77 @@ def test_a_pdf_without_a_budget_is_parsed_to_the_end() -> None:
     result = DocumentExtractor().extract(_blank_pdf(3), "plain.pdf", "application/pdf")
     assert result.metadata.get("parse_deadline_reached") is None
     assert int(result.metadata.get("pages_read") or 0) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_partially_parsed_pdf_says_it_is_partial(settings) -> None:
+    """Срок разбора не имеет права превращать честный отказ в тихую обрезку.
+
+    До введения срока внешний таймаут давал `error='parse_timeout'`, и приём URL
+    отвечал человеку «не удалось получить читаемую страницу». После — разбор
+    останавливался между страницами и отдавал ПЕРВЫЕ страницы как весь документ:
+    ни ошибки, ни признака, ни строчки в ответе. Это хуже отказа: неполный
+    документ попадал бы в знания как полный.
+
+    Мутация: не проводить `parse_deadline_reached` через `_extract_pdf_text` —
+    тест обязан покраснеть.
+    """
+    surfer = WebSurfer(replace(settings, web_allow_private_networks=True))
+
+    def truncated_parse(
+        content: bytes, *, max_text_chars: int, parse_budget_sec: float | None = None
+    ) -> tuple[str, str, str]:
+        del content, max_text_chars, parse_budget_sec
+        return "первые страницы документа", "", "parse_truncated"
+
+    surfer._extract_pdf_text = truncated_parse  # type: ignore[method-assign]
+
+    async def fake_request(_url: str):
+        return _PDF_WITH_MARKER, _FakeResponse("application/pdf"), "http://example.invalid/long.pdf"
+
+    surfer._request_bytes = fake_request  # noqa: SLF001
+    try:
+        result = await surfer.fetch("http://example.invalid/long.pdf")
+    finally:
+        await surfer.close()
+
+    assert result.text == "первые страницы документа", "прочитанное выброшено вместо того, чтобы отдать"
+    assert result.truncated is True, "неполный разбор выдан за полный документ"
+    assert result.to_dict()["truncated"] is True, "признак не доехал до потребителя"
+
+
+def test_the_deadline_marker_crosses_the_extraction_boundary(monkeypatch) -> None:
+    """Пометка `parse_deadline_reached` обязана дойти до вызывающего.
+
+    Она жила в metadata `DocumentResult` и терялась в `_extract_pdf_text`, который
+    возвращает три строки: текст, заголовок, ошибку. Через границу не проходило
+    ничего — поэтому веб-путь не мог отличить полный разбор от оборванного и
+    отдавал первые страницы как весь документ.
+
+    Мутация: убрать ветку `parse_truncated` из `_extract_pdf_text` — тест обязан
+    покраснеть.
+    """
+    import jericho.documents as documents_module
+    from jericho.documents import DocumentResult
+    from jericho.web_surfer import WebSurfer as _Surfer
+
+    class _TruncatingExtractor:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def extract(self, *args, **kwargs):
+            del args, kwargs
+            return DocumentResult(
+                "первые две страницы",
+                {"format": "pdf", "pages_read": 2, "parse_deadline_reached": True},
+            )
+
+    monkeypatch.setattr(documents_module, "DocumentExtractor", _TruncatingExtractor)
+
+    text, _title, error = _Surfer._extract_pdf_text(  # noqa: SLF001
+        b"%PDF-1.4", max_text_chars=100_000, parse_budget_sec=0.3
+    )
+    assert text == "первые две страницы", "прочитанное выброшено"
+    assert error == "parse_truncated", (
+        f"оборванный по сроку разбор вернул {error!r} — вызывающий не отличит его от полного"
+    )

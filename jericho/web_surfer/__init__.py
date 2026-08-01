@@ -112,6 +112,11 @@ class FetchResult:
     text_length: int
     status_code: int | None = None
     error: str = ""
+    # Текст неполон по НАШЕЙ причине (сработал срок разбора), а не потому, что
+    # документ такой. Признак едет вместе с текстом: без него частичный разбор
+    # молча выдавался бы за весь документ — тот же класс, что «длина страницы
+    # как факт».
+    truncated: bool = False
 
     def to_dict(self, *, preview_chars: int = 12_000, query: str = "") -> dict[str, Any]:
         """Страница для модели: кусок ВОКРУГ совпадения, а не начало документа.
@@ -137,7 +142,10 @@ class FetchResult:
             "text_length": self.text_length,
             "status_code": self.status_code,
             "error": self.error,
-            "truncated": len(self.text) > len(text),
+            # Обрезали ли МЫ показ (кусок вокруг совпадения) ИЛИ разбор не дошёл
+            # до конца документа по сроку. Оба случая означают одно для читателя:
+            # это не весь текст.
+            "truncated": len(self.text) > len(text) or self.truncated,
         }
 
 
@@ -609,6 +617,20 @@ class WebSurfer:
                         status_code=status,
                         error="parse_timeout",
                     )
+                if parse_error == "parse_truncated":
+                    # Текст ЕСТЬ, но он неполон — и об этом говорится, а не
+                    # умалчивается. Отдавать его как целый значило бы принять
+                    # первые страницы за весь документ; отдавать пустоту —
+                    # выбросить прочитанное. Признак едет вместе с текстом.
+                    return FetchResult(
+                        url=final_url,
+                        title=title,
+                        text=text,
+                        text_length=len(text),
+                        status_code=status,
+                        error="",
+                        truncated=True,
+                    )
                 if parse_error:
                     return FetchResult(
                         url=final_url,
@@ -769,7 +791,18 @@ class WebSurfer:
             return "", "", result.error
         text = (result.text or "").strip()
         if not text:
+            # Срок разбора мог оборваться ДО первой прочитанной страницы. Пустой
+            # текст без объяснения читался бы как «в этом PDF нет текста» — то
+            # есть свойство документа вместо нашего ограничения.
+            if result.metadata.get("parse_deadline_reached"):
+                return "", "", "parse_timeout"
             return "", "", "No extractable text (empty or scanned PDF)"
+        if result.metadata.get("parse_deadline_reached"):
+            # Частичный текст — это ЧАСТИЧНЫЙ текст, и вызывающий обязан узнать
+            # об этом. До проведения пометки через границу срок разбора превращал
+            # честный отказ (`parse_timeout`) в тихую обрезку: `/api/ingest/url`
+            # принимал первые страницы как весь документ.
+            return text, "", "parse_truncated"
         return text, "", ""
 
     @staticmethod
