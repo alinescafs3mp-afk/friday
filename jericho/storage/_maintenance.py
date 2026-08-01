@@ -629,6 +629,13 @@ class MaintenanceMixin(StorageShared):
             "conversations": ("SELECT * FROM conversations WHERE user_id=?", (user_id,)),
             "messages": ("SELECT * FROM messages WHERE user_id=?", (user_id,)),
             "channel_sessions": ("SELECT * FROM channel_sessions WHERE user_id=?", (user_id,)),
+            # Слежения — тоже данные человека: он их завёл, и в архиве аккаунта
+            # они должны быть. Новая таблица, не попавшая сюда, теряется молча —
+            # экспорт при этом выглядит полным.
+            "monitors": ("SELECT * FROM monitors WHERE user_id=?", (user_id,)),
+            # Слежения — тоже данные человека: он их завёл, и в архиве аккаунта
+            # они должны быть. Новая таблица, не попавшая сюда, теряется молча —
+            # экспорт при этом выглядит полным.
             "request_idempotency": (
                 """SELECT user_id, request_key, request_hash, response_json, state, created_at, updated_at
                    FROM request_idempotency WHERE user_id=? AND state='complete'""",

@@ -306,6 +306,13 @@ def test_user_export_includes_versions_permissions_and_sessions(storage):
     assert "knowledge_usage" in payload
     assert "relation_candidates" in payload
     assert "knowledge_conflicts" in payload
+    # Слежения человек завёл сам — в архиве аккаунта они обязаны быть. Новая
+    # таблица, забытая в экспорте, теряется молча: архив выглядит полным.
+    storage.create_monitor("alice", "поверка весов")
+    reexported = json.loads(
+        Path(storage.export_user("alice")["path"]).read_text(encoding="utf-8")
+    )
+    assert [row["query"] for row in reexported["monitors"]] == ["поверка весов"]
 
 
 @pytest.mark.asyncio
