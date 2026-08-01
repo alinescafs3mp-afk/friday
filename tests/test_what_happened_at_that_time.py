@@ -160,3 +160,38 @@ def test_another_persons_hour_is_not_visible(storage):
         until=(now + timedelta(hours=1)).isoformat(),
     )
     assert events == []
+
+
+def test_the_model_is_told_what_day_it_is():
+    """Мутация: убрать `_today_line()` из сборки промпта — тест краснеет.
+
+    Замерено на живом экземпляре 2026-08-01: на «что происходило вчера?» модель
+    вызвала инструмент с датой **25 июля** и уверенно ответила, что вчера ничего
+    не было. Настоящее «вчера» — 31 июля, и события там были. Модель не знает
+    текущую дату и знать не может; без этой строки любой относительный вопрос
+    отвечается мимо, причём уверенно.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._build_initial_messages)  # noqa: SLF001
+    assert "_today_line()" in source, "промпт собирается без текущей даты"
+
+    line = AgentRuntime._today_line.__doc__ or ""
+    assert "вчера" in line
+
+
+def test_todays_line_names_the_date_and_the_hour(settings):
+    """Строка обязана называть и дату, и час: «сегодня в час ночи» без времени —
+    это угадывание."""
+    from friday.agent_runtime import AgentRuntime
+
+    runtime = object.__new__(AgentRuntime)
+    runtime.settings = settings
+    line = runtime._today_line()  # noqa: SLF001
+
+    today = datetime.now().astimezone()
+    assert today.strftime("%Y-%m-%d") in line
+    assert ":" in line, "час не назван"
+    assert "не полагайся на свою память" in line
