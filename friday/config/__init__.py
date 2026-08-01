@@ -541,6 +541,8 @@ class FridaySettings:
     brave_search_api_key: str
     tavily_api_key: str
     serper_api_key: str
+    yandex_search_api_key: str
+    yandex_search_type: str
     web_allow_private_networks: bool
     web_max_response_bytes: int
 
@@ -898,6 +900,9 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         brave_search_api_key=env("FRIDAY_BRAVE_SEARCH_API_KEY", ""),
         tavily_api_key=env("FRIDAY_TAVILY_API_KEY", ""),
         serper_api_key=env("FRIDAY_SERPER_API_KEY", ""),
+        yandex_search_api_key=env("FRIDAY_YANDEX_SEARCH_API_KEY", ""),
+        # SEARCH_TYPE_RU / _TR / _COM — какую языковую выдачу спрашивать.
+        yandex_search_type=env("FRIDAY_YANDEX_SEARCH_TYPE", "SEARCH_TYPE_RU"),
         web_allow_private_networks=_bool_env("FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS", False),
         web_max_response_bytes=_int_env("FRIDAY_WEB_MAX_RESPONSE_BYTES", 5 * 1024 * 1024, minimum=64 * 1024),
         max_upload_bytes=_int_env("FRIDAY_MAX_UPLOAD_BYTES", 50 * 1024 * 1024, minimum=1024),

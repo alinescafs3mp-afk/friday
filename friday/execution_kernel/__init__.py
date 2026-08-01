@@ -28,6 +28,7 @@ from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
 from friday.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
 from friday.tts import TTSUnavailable, synthesize_speech
+from friday.web_surfer import AllProvidersRefusedError
 from friday.workers._blocking import run_blocking
 
 if TYPE_CHECKING:
@@ -1236,7 +1237,23 @@ class ExecutionKernel:
     async def _web_search(self, *, actor: ActorContext, query: str, max_results: int = 5) -> dict[str, Any]:
         del actor
         _, _, web, _ = self._require_services()
-        results = await web.search(query, max_results=max(1, min(int(max_results), 10)))
+        try:
+            results = await web.search(query, max_results=max(1, min(int(max_results), 10)))
+        except AllProvidersRefusedError as exc:
+            # Отказ поисковиков — не факт об интернете. Модель обязана увидеть
+            # разницу, иначе она сообщит человеку «ничего не нашлось» о запросе,
+            # который никто не искал, либо ответит из своей памяти как из архива.
+            LOGGER.warning("Web search refused for %r: %s", query[:80], exc)
+            return {
+                "query": query,
+                "results": [],
+                "search_failed": True,
+                "error": "Поисковые системы не ответили — это сбой доступа, а не отсутствие результатов.",
+                "instruction": (
+                    "Скажи человеку, что поиск в интернете сейчас недоступен, и НЕ отвечай "
+                    "по памяти, выдавая это за найденное."
+                ),
+            }
         return {"query": query, "results": [item.to_dict() for item in results]}
 
     async def _web_fetch(self, *, actor: ActorContext, url: str, query: str = "") -> dict[str, Any]:
