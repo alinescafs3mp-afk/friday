@@ -284,12 +284,18 @@ class OversightMixin(StorageShared):
         return [dict(row) for row in rows]
 
     def _kinds(self, where: str, params: list[Any]) -> list[dict[str, Any]]:
-        """Что это за материал по типу, из метаданных поступления."""
+        """Что это за материал по типу, из метаданных поступления.
+
+        Записи без типа отбрасываются, как и в соседнем `_topics` с его
+        `tag.value <> ''`: строка с пустым именем на экране выглядит как
+        безымянная категория, у которой почему-то больше всего материалов, —
+        поступления без метки обычно самые многочисленные.
+        """
         rows = self.execute(
             f"""SELECT COALESCE(json_extract(r.metadata_json, '$.knowledge_kind'), '') AS kind,
                        COUNT(*) AS count
                 FROM raw_objects r WHERE {where}
-                GROUP BY kind ORDER BY count DESC, kind ASC""",  # nosec B608
+                GROUP BY kind HAVING kind <> '' ORDER BY count DESC, kind ASC""",  # nosec B608
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
