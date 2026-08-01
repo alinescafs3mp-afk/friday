@@ -1610,6 +1610,23 @@ class AgentRuntime:
         except Exception:  # noqa: BLE001 — лента не должна ронять ход
             LOGGER.exception("Prefetch timeline failed")
             return
+        # Момент, который ядро не разобрало, — это НЕ пустая лента. Разница
+        # решающая: во втором случае человеку говорят «в тот момент ничего не
+        # появилось», и это утверждение о его архиве, которого никто не проверял.
+        if isinstance(result.data, dict) and result.data.get("understood") is False:
+            LOGGER.warning("Timeline prefetch: момент %r не разобран", moment[:40])
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"Человек спрашивает про момент «{moment}», но разобрать его не удалось: "
+                        f"{result.data.get('error') or 'непонятная форма даты'}. "
+                        "НЕ утверждай, что в этот момент ничего не происходило — это неизвестно. "
+                        "Попроси назвать дату иначе (например «29 июля» или «2026-07-29»)."
+                    ),
+                }
+            )
+            return
         rendered = result.to_llm_message()
         if not rendered:
             return

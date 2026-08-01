@@ -231,6 +231,9 @@ _MONTHS_RU = {
 }
 _DAY_MONTH_RE = re.compile(r"^(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?$", re.IGNORECASE)
 _DAYS_AGO_RE = re.compile(r"^(\d{1,3})\s+(?:дн\w*|сут\w*)\s+назад$", re.IGNORECASE)
+#: «29го», «29-го», «3-е» — порядковый день без месяца. Так пишут в переписке,
+#: и на демо это одна из сценарных строк.
+_ORDINAL_DAY_RE = re.compile(r"^(\d{1,2})\s*-?\s*(?:го|е|ое|ым)$", re.IGNORECASE)
 _RELATIVE_DAYS = {"сегодня": 0, "вчера": 1, "позавчера": 2}
 #: Дни недели: «в понедельник» значит ближайший ПРОШЕДШИЙ понедельник — о будущем
 #: архив ничего сказать не может, там ещё ничего не произошло.
@@ -260,6 +263,25 @@ def _spoken_day(text: str, *, today: date) -> str | None:
         return None
     if lowered in _RELATIVE_DAYS:
         return (today - timedelta(days=_RELATIVE_DAYS[lowered])).isoformat()
+    ordinal = _ORDINAL_DAY_RE.match(lowered)
+    if ordinal:
+        # Число без месяца означает ближайшее ПРОШЕДШЕЕ такое число: о будущем
+        # архив ничего сказать не может, там ещё ничего не произошло.
+        day_number = int(ordinal.group(1))
+        if not 1 <= day_number <= 31:
+            return None
+        year, month = today.year, today.month
+        for _ in range(14):  # хватает, чтобы миновать февраль и короткие месяцы
+            try:
+                candidate = date(year, month, day_number)
+            except ValueError:
+                candidate = None
+            if candidate is not None and candidate <= today:
+                return candidate.isoformat()
+            month -= 1
+            if month == 0:
+                month, year = 12, year - 1
+        return None
     for prefix, weekday in _WEEKDAYS_RU:
         if lowered.startswith(prefix):
             # Сегодняшний день недели засчитывается как сегодня, иначе «в субботу»,

@@ -313,3 +313,67 @@ def test_the_intent_check_asks_the_model_when_the_pattern_is_silent():
     assert source.index("moment_from_question") < source.index("_is_a_timeline_question"), (
         "модель спрашивается даже когда времени в вопросе нет — это лишний вызов на каждом сообщении"
     )
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("29го", "2026-07-29"),
+        ("29-го", "2026-07-29"),
+        ("31го", "2026-07-31"),
+        # Сегодняшнее число засчитывается как сегодня, а не как месяц назад.
+        ("2го", "2026-08-02"),
+        ("3-е", "2026-07-03"),
+        # 31-е есть не в каждом месяце: разбор обязан отступить к тому, где оно есть.
+        ("31-го", "2026-07-31"),
+    ],
+)
+def test_an_ordinal_day_without_a_month(text, expected):
+    """Мутация: убрать разбор `_ORDINAL_DAY_RE` — тест краснеет.
+
+    Найдено состязательным ревью перед демо: «чем занимались 29го» —
+    СЦЕНАРНАЯ СТРОКА из DEMO.md. Извлечение момента её понимало, ядро — нет, и
+    человек получал «в тот момент в архиве ничего не появилось» при 1531
+    документе и 24 сообщениях за 29 июля. Число без месяца означает ближайшее
+    ПРОШЕДШЕЕ такое число: о будущем архив ничего сказать не может.
+    """
+    assert _spoken_day(text, today=date(2026, 8, 2)) == expected
+
+
+def test_an_impossible_ordinal_day_is_refused():
+    assert _spoken_day("32го", today=date(2026, 8, 2)) is None
+    assert _spoken_day("0го", today=date(2026, 8, 2)) is None
+
+
+def test_the_whole_chain_understands_an_ordinal_day():
+    """Проверяется СВЯЗКА, а не звенья: извлечение из вопроса плюс разбор ядром.
+
+    Прежний тест проверял только извлечение и оставался зелёным, пока ядро эту
+    же форму отвергало.
+    """
+    from friday.agent_runtime import _ASKS_WHAT_HAPPENED, moment_from_question
+
+    question = "чем занимались 29го"
+    moment = moment_from_question(question)
+    assert moment == "29го"
+    assert _ASKS_WHAT_HAPPENED.search(question)
+    since, bad = _moment_bounds(moment, edge="since")
+    assert bad is None and since, "ядро не разобрало момент, который извлекли из вопроса"
+
+
+def test_an_unparsed_moment_never_becomes_an_empty_timeline():
+    """Мутация: убрать ветку `understood is False` — тест краснеет.
+
+    «Не разобрал дату» и «в этот момент ничего не было» — разные вещи. Второе —
+    утверждение о личном архиве человека, которого никто не проверял.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)  # noqa: SLF001
+    assert 'get("understood") is False' in source, (
+        "неразобранный момент подаётся модели как пустая лента"
+    )
+    branch = source[source.index('get("understood") is False') :][:900]
+    assert "НЕ утверждай" in branch
