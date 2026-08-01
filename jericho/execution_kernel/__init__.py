@@ -238,6 +238,57 @@ def _conflict_needs_a_person(arguments: dict[str, Any]) -> bool:
     return str(arguments.get("decision") or "").strip().casefold() in {"keep_a", "keep_b"}
 
 
+def _merge_postcondition(storage, user_id: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+    """Слияние действительно случилось — прочитано из хранилища, а не из ответа.
+
+    Спека v3 §5: успешный вызов инструмента не доказывает успех задачи. Обработчик
+    возвращает то, что сам про себя думает; здесь проверяется ФАКТ — и на всякий
+    случай оба его следа сразу, потому что частично применённое слияние (кандидат
+    закрыт, а узел не помечен) выглядит как успех ровно до тех пор, пока кто-нибудь
+    не спросит про исходную сущность.
+    """
+    candidate = storage.get_resolution_candidate(str(arguments.get("candidate_id") or ""), user_id)
+    if not candidate:
+        return False, "кандидат слияния исчез"
+    status = str(candidate.get("status") or "")
+    if status != "merged":
+        return False, f"кандидат остался в статусе {status!r}"
+    source = storage.get_entity(str(candidate.get("entity_a_id") or ""), user_id)
+    target = storage.get_entity(str(candidate.get("entity_b_id") or ""), user_id)
+    merged_marks = [
+        str((row or {}).get("merged_into_id") or "") for row in (source, target) if row is not None
+    ]
+    if not any(merged_marks):
+        return False, "ни одна из сущностей не помечена слитой"
+    return True, ""
+
+
+def _conflict_postcondition(storage, user_id: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+    """Вердикт по противоречию: конфликт закрыт И проигравший помечен устаревшим."""
+    conflict = storage.get_knowledge_conflict(user_id, str(arguments.get("conflict_id") or ""))
+    if not conflict:
+        return False, "конфликт исчез"
+    status = str(conflict.get("status") or "")
+    if status == "suggested":
+        return False, "конфликт остался нерешённым"
+    decision = str(arguments.get("decision") or "").strip().casefold()
+    loser_id = str(conflict.get("knowledge_b_id" if decision == "keep_a" else "knowledge_a_id") or "")
+    loser = storage.get_knowledge_object(loser_id, user_id)
+    if loser and str(loser.get("lifecycle_stage") or "") != "deprecated":
+        return False, "проигравшая запись не помечена устаревшей"
+    return True, ""
+
+
+# Что должно стать правдой ПОСЛЕ действия, проверенное чтением хранилища заново.
+# Инструмента здесь может не быть: у `code_run` постусловия не существует — его
+# результат и есть вывод программы, проверять в базе нечего, и выдумывать проверку
+# ради симметрии значило бы проверять пустоту.
+POSTCONDITIONS: dict[str, Callable[[Any, str, dict[str, Any]], tuple[bool, str]]] = {
+    "entity_merge_decide": _merge_postcondition,
+    "conflict_decide": _conflict_postcondition,
+}
+
+
 # Какие вызовы модели не исполняются без человека. Ключ — имя инструмента,
 # значение — предикат по аргументам, потому что риск живёт в аргументах, а не в
 # инструменте: `entity_merge_decide` с `decision=reject` безопасен, с `accept` —
@@ -790,6 +841,35 @@ class ExecutionKernel:
             )
             await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
+        verifier = POSTCONDITIONS.get(name)
+        if verifier is not None:
+            try:
+                verified, reason = await run_blocking(verifier, storage, actor.user_id, arguments)
+            except Exception as exc:  # noqa: BLE001 - непроверенное не объявляется сделанным
+                verified, reason = False, f"проверку не удалось выполнить: {type(exc).__name__}: {exc}"
+            if not verified:
+                # НЕ `failed`: обработчик отработал без ошибки, а факт не
+                # подтвердился — значит неизвестно, что именно случилось, и
+                # повторять это нельзя. Спека v3 §5: успешный вызов инструмента не
+                # доказывает успех задачи.
+                await run_blocking(
+                    storage.mark_action_approval_uncertain,
+                    approval_id,
+                    actor.user_id,
+                    error=f"постусловие не подтвердилось: {reason}",
+                )
+                await self._audit(
+                    actor, name, False, "postcondition_failed", details={**details, "approval": approval_id}
+                )
+                return ToolResult(
+                    name,
+                    False,
+                    data=data if isinstance(data, dict) else None,
+                    error=(
+                        "Инструмент отработал, но результат не подтвердился проверкой: "
+                        f"{reason}. Исход неизвестен — проверьте вручную, не повторяйте."
+                    ),
+                )
         await run_blocking(
             storage.finish_action_approval,
             approval_id,

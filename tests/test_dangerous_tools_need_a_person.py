@@ -267,3 +267,63 @@ async def test_a_timed_out_execution_is_uncertain_not_failed(settings, storage):
     retry = await kernel.execute_approved(approval_id, actor=actor)
     assert retry.success is False
     assert storage.get_action_approval(approval_id, "alice")["status"] == "uncertain"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_that_reports_success_without_doing_it_is_not_believed(settings, storage):
+    """Спека v3 §5: успешный вызов инструмента не доказывает успех задачи.
+
+    Обработчик подменён на такой, который возвращает бодрое «merged» и не делает
+    ничего. До независимой проверки заявка закрылась бы как `done`, человек увидел
+    бы «готово», а два узла остались бы разными — и узнал бы он об этом случайно,
+    через месяц.
+
+    Проверка читает ХРАНИЛИЩЕ заново, а не ответ обработчика: в этом вся её суть.
+    Исход при расхождении — `uncertain`, а не `failed`: обработчик отработал без
+    ошибки, значит неизвестно, что именно случилось, и повторять нельзя.
+
+    Мутация: убрать блок POSTCONDITIONS в `execute_approved` — тест краснеет.
+    """
+    storage.ensure_user("alice", preset_key="owner")
+    candidate_id = _candidate(storage, "alice")
+    kernel, auth = _kernel(settings, storage)
+    actor = auth.actor_for_user("alice", source="test")
+
+    requested = await kernel.execute(
+        "entity_merge_decide", {"candidate_id": candidate_id, "decision": "accept"}, actor=actor
+    )
+    approval_id = requested.data["approval_id"]
+    storage.decide_action_approval(approval_id, "alice", decision="approve", decided_by="alice")
+
+    async def _lies(**_kwargs):
+        return {"status": "merged", "candidate_id": candidate_id}
+
+    kernel._tools["entity_merge_decide"].handler = _lies  # noqa: SLF001
+    result = await kernel.execute_approved(approval_id, actor=actor)
+
+    assert result.success is False, "система поверила инструменту на слово"
+    assert "не подтвердился проверкой" in result.error
+    after = storage.get_action_approval(approval_id, "alice")
+    assert after["status"] == "uncertain", f"исход записан как {after['status']!r}"
+    assert "постусловие" in after["error"]
+    # И слияния действительно не было.
+    assert str(storage.get_resolution_candidate(candidate_id, "alice")["status"]) == "suggested"
+
+
+@pytest.mark.asyncio
+async def test_a_real_merge_passes_the_postcondition(settings, storage):
+    """Обратная сторона: настоящее слияние проверку проходит и закрывается как done."""
+    storage.ensure_user("alice", preset_key="owner")
+    candidate_id = _candidate(storage, "alice")
+    kernel, auth = _kernel(settings, storage)
+    actor = auth.actor_for_user("alice", source="test")
+
+    requested = await kernel.execute(
+        "entity_merge_decide", {"candidate_id": candidate_id, "decision": "accept"}, actor=actor
+    )
+    approval_id = requested.data["approval_id"]
+    storage.decide_action_approval(approval_id, "alice", decision="approve", decided_by="alice")
+
+    result = await kernel.execute_approved(approval_id, actor=actor)
+    assert result.success is True, result.error
+    assert storage.get_action_approval(approval_id, "alice")["status"] == "done"
