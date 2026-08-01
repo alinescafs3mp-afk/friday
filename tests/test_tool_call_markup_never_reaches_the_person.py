@@ -61,6 +61,32 @@ def test_the_sanitiser_runs_where_the_answer_is_formed():
     )
 
 
+def test_the_sanitiser_also_runs_after_the_final_synthesis():
+    """Мутация: убрать очистку из ветки финального синтеза — тест краснеет.
+
+    Второй выход к человеку, и он обошёлся без очистки. Замерено на живом
+    экземпляре 2026-08-01: вопрос «какая погода завтра в Москве?» вернул в чат
+
+        Похоже, Яндекс.Погода не отдала текст напрямую. Попробую другой источник.
+        <tool_call> {"name": "web_fetch", "arguments": {...}} </tool_call>
+
+    — то есть ровно то, что прошлый тест запрещает, но другим путём: синтез
+    после инструментов возвращает свой текст сразу, минуя разобранную ветку.
+    """
+    import inspect
+
+    from friday import agent_runtime
+
+    source = inspect.getsource(agent_runtime)
+    synthesis = source[source.index("final_turn = classify_tool_turn") :][:900]
+    assert "_strip_tool_call_markup(final_turn.text)" in synthesis, (
+        "итог синтеза после инструментов уходит человеку без очистки"
+    )
+    assert '"content": clean' in synthesis, (
+        "очистка вычисляется, но человеку отдаётся неочищенный текст"
+    )
+
+
 def test_the_protocol_parser_still_sees_raw_markup():
     """А до разбора протокола текст не трогается.
 

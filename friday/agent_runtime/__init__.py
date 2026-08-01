@@ -1027,6 +1027,16 @@ class AgentRuntime:
                     "content": (
                         "Сформируй итоговый ответ на основе результатов. "
                         "Не копируй сырые данные и служебные структуры без необходимости. "
+                        # Замерено на живом: на вопрос про ключевую ставку поиск вернул
+                        # страницу ЦБ со значением 14,00% от 31.07.2026, а модель
+                        # ответила «21%, июль 2025» — из своей памяти, увереннно и
+                        # неверно. Найти правильный ответ и сказать неправильный хуже,
+                        # чем не найти, поэтому приоритет источника сказан прямо.
+                        "Числа, даты, имена и текущие состояния бери ИЗ результатов инструментов, "
+                        "а не из своей памяти: результат свежее и он относится к этому запросу. "
+                        "Если результат противоречит тому, что ты помнишь, верен результат. "
+                        "Если в результатах ответа нет — так и скажи, не подставляй известное тебе. "
+                        "Для сведений из интернета указывай источник ссылкой. "
                         "В knowledge_work верни цельный структурированный результат, пригодный для "
                         "последующей отправки в Inbox, но не утверждай, что он уже сохранён."
                     ),
@@ -1037,13 +1047,22 @@ class AgentRuntime:
             final = await self.llm.chat(messages, tools=[])
             final_turn = classify_tool_turn(str(final.get("content") or ""))
             if final_turn.kind == "answer" and final_turn.text:
-                return {
-                    "content": final_turn.text,
-                    "tools_used": tools_used,
-                    "knowledge_object_ids": tool_knowledge_ids,
-                    "tool_evidence": tool_evidence,
-                    "voice_clip": voice_clip,
-                }
+                # Этот текст уходит человеку напрямую, минуя основной цикл, где
+                # очистка уже стояла. Замерено на живом: вопрос про погоду вернул
+                # «Попробую другой источник. <tool_call>{"name": "web_fetch"…}»
+                # прямо в чат — снаружи неотличимо от поломки.
+                clean = _strip_tool_call_markup(final_turn.text)
+                if clean:
+                    return {
+                        "content": clean,
+                        "tools_used": tools_used,
+                        "knowledge_object_ids": tool_knowledge_ids,
+                        "tool_evidence": tool_evidence,
+                        "voice_clip": voice_clip,
+                    }
+                # Под разметкой не было ответа. Сбой, названный сбоем, лучше
+                # служебных маркеров на экране — падаем в общий возврат ниже.
+                LOGGER.warning("Final synthesis returned bare tool-call markup")
         except Exception:
             LOGGER.exception("Final LLM synthesis failed")
         return {
