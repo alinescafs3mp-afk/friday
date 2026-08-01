@@ -18,6 +18,7 @@ from friday.agent_runtime.tool_protocol import (
     normalize_native_tool_calls,
 )
 from friday.citation_check import CITATION_MARKER_RE as _KNOWLEDGE_CITATION_RE
+from friday.citation_check import citation_labels as _citation_labels
 from friday.citation_check import citation_overlap
 from friday.config import FridaySettings
 from friday.execution_kernel import ExecutionKernel
@@ -1336,7 +1337,7 @@ class AgentRuntime:
 
     @staticmethod
     def _extract_cited_knowledge_ids(content: str, context: AgentContext) -> list[str]:
-        labels = [match.upper() for match in _KNOWLEDGE_CITATION_RE.findall(content or "")]
+        labels = _citation_labels(content or "")
         return list(
             dict.fromkeys(
                 context.knowledge_citations[label] for label in labels if label in context.knowledge_citations

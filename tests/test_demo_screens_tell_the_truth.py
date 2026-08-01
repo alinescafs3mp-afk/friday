@@ -328,3 +328,36 @@ def test_the_archive_counter_is_wired_into_the_loop():
 
     source = inspect.getsource(AgentRuntime._agentic_loop)  # noqa: SLF001
     assert "_prefetch_archive_numbers(" in source, "числа базы снова берутся из контекста"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("текст [K1, K2] и [K3]", ["K1", "K2", "K3"]),
+        ("[K1,K2,K10]", ["K1", "K2", "K10"]),
+        ("[K1]", ["K1"]),
+        ("[K1] и снова [K1]", ["K1"]),
+        ("без меток", []),
+    ],
+)
+def test_grouped_citation_markers_are_all_counted(text, expected):
+    """Мутация: вернуть `\\[(K\\d{1,2})\\]` — тест краснеет.
+
+    Модель пишет и «[K1]», и «[K1, K2]». Вторая форма теряла ОБЕ метки: из
+    «текст [K1, K2] и [K3]» находилась только K3. Проверка цитат считала
+    предложение неподкреплённым, а ответ не связывался с документами, на которые
+    опирался.
+    """
+    from friday.citation_check import citation_labels
+
+    assert citation_labels(text) == expected
+
+
+def test_the_answer_links_to_documents_from_grouped_markers():
+    """Связь ответа с документами тоже должна видеть группу."""
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._extract_cited_knowledge_ids)  # noqa: SLF001
+    assert "_citation_labels(" in source, "метки из группы не доходят до привязки к документам"

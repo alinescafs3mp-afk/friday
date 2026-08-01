@@ -15,7 +15,26 @@ from typing import Any
 
 from friday.retrieval import lexical_vector, sparse_cosine
 
-CITATION_MARKER_RE = re.compile(r"\[(K\d{1,2})\]", re.IGNORECASE)
+#: Метка источника в ответе. Модель пишет и «[K1]», и «[K1, K2]» — вторая форма
+#: теряла ОБЕ метки: из «текст [K1, K2] и [K3]» находилась только K3. Проверка
+#: цитат считала предложение неподкреплённым, а `_extract_cited_knowledge_ids`
+#: не связывал ответ с документами, на которые он опирался.
+CITATION_MARKER_RE = re.compile(r"\[(K\d{1,2}(?:\s*,\s*K\d{1,2})*)\]", re.IGNORECASE)
+
+
+def citation_labels(text: str) -> list[str]:
+    """Все метки источников в тексте, включая записанные группой.
+
+    «[K1, K2]» — это две метки, а не одна: возвращаются обе, в порядке
+    появления и без повторов.
+    """
+    seen: list[str] = []
+    for match in CITATION_MARKER_RE.finditer(str(text or "")):
+        for label in re.split(r"\s*,\s*", match.group(1)):
+            upper = label.strip().upper()
+            if upper and upper not in seen:
+                seen.append(upper)
+    return seen
 _CLAIM_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
 # Below this the claim and the object share almost no vocabulary. Calibrated against
 # the measured gap between a supported claim (~0.25-0.51) and an unrelated one
@@ -78,7 +97,7 @@ def citation_overlap(
     weakest: list[dict[str, Any]] = []
 
     for unit in _units(answer):
-        labels = {match.group(1).upper() for match in CITATION_MARKER_RE.finditer(unit)}
+        labels = set(citation_labels(unit))
         if not labels:
             continue
         # The marker itself is not evidence: strip it before vectorising, or an object
