@@ -29,7 +29,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from friday import __version__
 from friday.admin_api import router as admin_router
-from friday.agent_runtime import AgentRuntime
+from friday.agent_runtime import AgentRuntime, asks_for_the_web
 from friday.agent_runtime.llm import LLMRouter
 from friday.api.conversations import router as conversations_router
 from friday.api.deps import (
@@ -1781,6 +1781,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "category": "system_notice",
                         "reason": "synthetic document acknowledgement; file ingestion handled separately",
                         "synthetic": True,
+                    }
+                elif asks_for_the_web(message):
+                    # «Найди в интернете курс доллара» — это команда, а не факт,
+                    # который надо запомнить. Замерено: пятнадцать таких просьб
+                    # подряд дали пятнадцать записей в Inbox — именная группа без
+                    # предиката классификатору неотличима от заголовка знания.
+                    # Само НАЙДЕННОЕ при этом сохраняется штатно, через
+                    # `web_research`: в архив попадает ответ, а не вопрос.
+                    ingestion_result = {
+                        "promoted": False,
+                        "queued_for_review": False,
+                        "action": "transient",
+                        "category": "web_request",
+                        "reason": "явная просьба поискать в интернете — команда, а не материал",
                     }
                 else:
                     ingestion_result = await state.ingestion.ingest_text(

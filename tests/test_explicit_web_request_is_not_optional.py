@@ -162,3 +162,64 @@ async def test_nothing_happens_without_the_tool(monkeypatch):
         tool_evidence=[],
     )
     assert messages == []
+
+
+def test_a_request_to_search_is_not_material_for_the_archive(settings):
+    """Просьба поискать не должна оседать в Inbox как кандидат в знания.
+
+    Замерено на живом экземпляре 2026-08-01: пятнадцать вопросов вида «найди в
+    интернете курс доллара» дали пятнадцать записей во «Входящих». Именная
+    группа без предиката классификатору неотличима от заголовка факта, и он
+    честно отправляет её человеку на решение — но решать тут нечего.
+
+    Найденное при этом сохраняется штатно, через `web_research`: в архив
+    попадает ответ, а не вопрос.
+
+    Мутация: убрать ветку `asks_for_the_web` из `/api/chat` — тест краснеет.
+    """
+    from fastapi.testclient import TestClient
+
+    from friday.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {settings.api_token}"}
+        before = len(app.state.storage.list_inbox_pending_for_tests()) if hasattr(
+            app.state.storage, "list_inbox_pending_for_tests"
+        ) else len(
+            [row for row in app.state.storage.execute("SELECT id FROM inbox WHERE status='pending'")]
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={"message": "найди в интернете курс доллара на сегодня"},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        ingestion = response.json().get("ingestion") or {}
+        assert ingestion.get("queued_for_review") is False
+        assert ingestion.get("category") == "web_request", ingestion
+
+        after = len(
+            [row for row in app.state.storage.execute("SELECT id FROM inbox WHERE status='pending'")]
+        )
+        assert after == before, "просьба поискать всё-таки осела во «Входящих»"
+
+
+def test_an_ordinary_message_still_reaches_the_archive(settings):
+    """Обратная сторона: обычное сообщение по-прежнему проходит приём."""
+    from fastapi.testclient import TestClient
+
+    from friday.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {settings.api_token}"}
+        response = client.post(
+            "/api/chat",
+            json={"message": "Договорились перенести поверку приборов на 12 мая, отвечает Проскурин."},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        ingestion = response.json().get("ingestion") or {}
+        assert ingestion.get("category") != "web_request", ingestion
