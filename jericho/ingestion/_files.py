@@ -551,6 +551,13 @@ class FilesMixin(PipelineShared):
         document_date = str((extraction.metadata or {}).get("document_date") or "")
         if document_date:
             file_metadata["document_date"] = document_date
+        # Оборванный по сроку разбор — это ЧАСТИЧНЫЙ документ, и это свойство самого
+        # хранимого объекта, а не подробность одного ответа. Без пометки в метаданных
+        # «первые 12 страниц» неотличимы от целого файла для всего, что придёт потом:
+        # поиска, повторного разбора, ответа модели о содержимом.
+        if (extraction.metadata or {}).get("parse_deadline_reached"):
+            file_metadata["parse_deadline_reached"] = True
+            file_metadata["parse_pages_read"] = int((extraction.metadata or {}).get("pages_read") or 0)
         if media_kind:
             file_metadata["media_kind"] = media_kind
         raw = RawObject(
@@ -689,6 +696,14 @@ class FilesMixin(PipelineShared):
                         "success": extraction_succeeded,
                         "text_success": extraction.success,
                         "error": extraction.error,
+                        # Успех и полнота — не одно и то же. Разбор, оборванный по
+                        # сроку, приходит сюда с `success=True` и частичным текстом;
+                        # без этой строки загрузивший узнаёт «файл принят» и ничего
+                        # о том, что принято лишь начало.
+                        "parse_deadline_reached": bool(
+                            (extraction.metadata or {}).get("parse_deadline_reached")
+                        ),
+                        "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
                         "vision": {
                             key: value
                             for key, value in (vision or {}).items()
@@ -763,6 +778,12 @@ class FilesMixin(PipelineShared):
             "extraction_error": extraction.error if not extraction.success else "",
             "text_preview": extraction.text[:limit],
             "text_truncated": len(extraction.text) > limit,
+            # Две РАЗНЫЕ обрезки, и путать их нельзя: `text_truncated` — это предпросмотр
+            # короче полного текста, а здесь оборвался сам разбор, и полного текста
+            # не существует ни у кого. Читателю, который увидит только первое,
+            # частичный документ покажется целым.
+            "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),
+            "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
         }
 
     @staticmethod

@@ -161,3 +161,73 @@ def test_an_article_shaped_page_still_waits_for_review(settings):
         assert not inbox["knowledge_object_id"]
     finally:
         client.__exit__(None, None, None)
+
+
+def test_a_truncated_page_is_recorded_as_truncated_on_the_raw_object(settings):
+    """Провенанс указывает на ПОЛНЫЙ адрес — значит неполноту надо назвать вслух.
+
+    Обрыв разбора PDF (срок, потолок знаков, потолок страниц) доезжал до маршрута
+    как обычный успех: `error` пуст, текст непуст. Ревьюер видел документ, который
+    выглядит целым, утверждал его — и в канонические знания уходило начало
+    документа со ссылкой на весь документ. Замерено, что случай не редкий: на
+    боевом маршруте `max_length=50 000`, то есть под обрезку попадает любой PDF
+    длиннее полусотни тысяч знаков.
+
+    Мутация: убрать `content_truncated` из metadata маршрута — тест краснеет.
+    """
+    partial = "Договор подряда, раздел 1. Предмет договора. " * 12
+    result = FetchResult(
+        url="https://example.com/contract.pdf",
+        title="Договор подряда",
+        text=partial,
+        text_length=len(partial),
+        status_code=200,
+        truncated=True,
+    )
+    app, client, _ = _client_with_surfer(settings, result)
+    try:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        response = client.post(
+            "/api/ingest/url", json={"url": "https://example.com/contract.pdf"}, headers=owner
+        )
+        assert response.status_code == 200, response.text
+        raw_id = response.json()["raw_object_id"]
+
+        import json
+
+        raw = app.state.storage.get_raw_object(raw_id, LEGACY_OWNER_USER_ID)
+        metadata = raw["metadata_json"]
+        metadata = json.loads(metadata) if isinstance(metadata, str) else metadata
+        assert metadata.get("content_truncated") is True, (
+            "частичная страница сохранена как целая — провенанс ведёт на полный документ"
+        )
+        # Соседние поля провенанса на месте.
+        assert metadata.get("url") == "https://example.com/contract.pdf"
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_a_complete_page_is_not_marked_truncated(settings):
+    """Обратная сторона: обычная страница не помечается частичной."""
+    text = "Полный текст статьи о миграции. " * 10
+    result = FetchResult(
+        url="https://example.com/full",
+        title="Статья",
+        text=text,
+        text_length=len(text),
+        status_code=200,
+    )
+    app, client, _ = _client_with_surfer(settings, result)
+    try:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        response = client.post("/api/ingest/url", json={"url": "https://example.com/full"}, headers=owner)
+        assert response.status_code == 200, response.text
+
+        import json
+
+        raw = app.state.storage.get_raw_object(response.json()["raw_object_id"], LEGACY_OWNER_USER_ID)
+        metadata = raw["metadata_json"]
+        metadata = json.loads(metadata) if isinstance(metadata, str) else metadata
+        assert "content_truncated" not in metadata
+    finally:
+        client.__exit__(None, None, None)

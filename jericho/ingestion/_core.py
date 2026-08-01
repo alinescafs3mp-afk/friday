@@ -44,6 +44,10 @@ class CoreMixin(PipelineShared):
             max_archive_uncompressed_bytes=settings.max_archive_uncompressed_bytes,
             max_text_chars=settings.max_extracted_text_chars,
             max_input_bytes=settings.max_upload_bytes,
+            # Тот же срок, что у веб-пути. Без него `ingest_file` держал поток пула
+            # столько, сколько попросит файл: замерено 35 с на PDF в 41 КБ, и это
+            # не потолок — стоимость растёт с числом операторов, а не с размером.
+            parse_budget_sec=settings.pdf_parse_budget_sec,
         )
 
     def bind_knowledge_graph(self, knowledge_graph: KnowledgeGraph) -> None:

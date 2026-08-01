@@ -4,9 +4,9 @@ import base64
 import json
 import sqlite3
 import time
+from urllib.parse import quote
 
 import pytest
-from urllib.parse import quote
 
 from jericho.telegram_bridge import _UpdateInbox
 

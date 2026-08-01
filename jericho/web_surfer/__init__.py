@@ -58,6 +58,10 @@ _RESEARCH_FETCH_BUDGET = 12.0
 # PDF allowlist (G22 / PROPOSALS №3): measured 9/10 public PDFs extracted clean
 # text in <0.5 s; 8 s leaves headroom for a multi-megabyte report without letting
 # a pathological file pin the event-loop thread pool.
+#
+# Запасное значение: боевой срок берётся из `settings.pdf_parse_budget_sec` —
+# одна ручка на веб-путь и на загрузку файла. Константа остаётся для стендов,
+# где в `settings` этого поля ещё нет.
 _PDF_PARSE_BUDGET = 8.0
 _DEFAULT_MAX_RESULTS = 5
 _DEFAULT_MAX_SOURCES = 3
@@ -601,12 +605,15 @@ class WebSurfer:
                     # pypdf внутри страницы нечем. Запас внешнему даётся намеренно,
                     # чтобы обычный случай завершался изнутри, с частичным текстом,
                     # а не выглядел отказом.
-                    async with asyncio.timeout(_PDF_PARSE_BUDGET * 2):
+                    parse_budget = getattr(
+                        self.settings, "pdf_parse_budget_sec", _PDF_PARSE_BUDGET
+                    )
+                    async with asyncio.timeout(parse_budget * 2):
                         text, title, parse_error = await asyncio.to_thread(
                             self._extract_pdf_text,
                             body,
                             max_text_chars=text_budget,
-                            parse_budget_sec=_PDF_PARSE_BUDGET,
+                            parse_budget_sec=parse_budget,
                         )
                 except TimeoutError:
                     return FetchResult(
@@ -797,11 +804,17 @@ class WebSurfer:
             if result.metadata.get("parse_deadline_reached"):
                 return "", "", "parse_timeout"
             return "", "", "No extractable text (empty or scanned PDF)"
-        if result.metadata.get("parse_deadline_reached"):
+        if result.metadata.get("parse_deadline_reached") or result.metadata.get("extraction_truncated"):
             # Частичный текст — это ЧАСТИЧНЫЙ текст, и вызывающий обязан узнать
             # об этом. До проведения пометки через границу срок разбора превращал
             # честный отказ (`parse_timeout`) в тихую обрезку: `/api/ingest/url`
             # принимал первые страницы как весь документ.
+            #
+            # Причин обрыва три, и все три теряются на этой границе одинаково: срок
+            # разбора, потолок знаков (на боевом маршруте `max_length=50 000` — то
+            # есть ЛЮБОЙ PDF длиннее полусотни тысяч знаков, случай куда более
+            # частый, чем срок) и потолок в 250 страниц. Чинить только редкий из
+            # трёх — значит оставить частый.
             return text, "", "parse_truncated"
         return text, "", ""
 

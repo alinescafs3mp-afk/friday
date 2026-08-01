@@ -467,6 +467,7 @@ class JerichoSettings:
 
     max_upload_bytes: int
     max_extracted_text_chars: int
+    pdf_parse_budget_sec: float
     max_archive_entries: int
     max_archive_uncompressed_bytes: int
     code_execution_enabled: bool
@@ -822,6 +823,12 @@ def load_settings(profile_name: str | None = None) -> JerichoSettings:
         web_max_response_bytes=_int_env("JERICHO_WEB_MAX_RESPONSE_BYTES", 5 * 1024 * 1024, minimum=64 * 1024),
         max_upload_bytes=_int_env("JERICHO_MAX_UPLOAD_BYTES", 50 * 1024 * 1024, minimum=1024),
         max_extracted_text_chars=_int_env("JERICHO_MAX_EXTRACTED_TEXT_CHARS", 2_000_000, minimum=10_000),
+        # Стенное время pypdf после того, как тело уже в памяти. Одна ручка на ОБА
+        # пути приёма: измерено на стенде — PDF в 41 КБ (250 страниц, у каждой
+        # content stream из 40 000 текстовых операторов) занимает поток на 35 с без
+        # бюджета и на 8.3 с с ним. Потолок страниц такой файл не ловит: дорога не
+        # каждая страница по отдельности, а разбор одной.
+        pdf_parse_budget_sec=_float_env("JERICHO_PDF_PARSE_BUDGET_SEC", 8.0, minimum=0.5),
         max_archive_entries=_int_env("JERICHO_MAX_ARCHIVE_ENTRIES", 500, minimum=1),
         max_archive_uncompressed_bytes=_int_env(
             "JERICHO_MAX_ARCHIVE_UNCOMPRESSED_BYTES", 250 * 1024 * 1024, minimum=1024

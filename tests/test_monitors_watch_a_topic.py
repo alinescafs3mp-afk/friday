@@ -16,8 +16,8 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
-from jericho.organs import ServiceContext
 import jericho.organs.monitors as monitors_module
+from jericho.organs import ServiceContext
 from jericho.organs.monitors import scan_monitors
 from jericho.server import create_app
 from jericho.storage.models import KnowledgeObject, RawObject, new_id

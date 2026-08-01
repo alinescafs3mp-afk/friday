@@ -103,8 +103,10 @@ async def test_web_fetch_reports_empty_scanned_pdf_honestly(settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_pdf_parse_timeout_is_not_network_timeout(settings, monkeypatch) -> None:
-    monkeypatch.setattr(web_surfer_module, "_PDF_PARSE_BUDGET", 0.05)
+async def test_web_fetch_pdf_parse_timeout_is_not_network_timeout(settings) -> None:
+    # Срок живёт в настройках — одна ручка на веб-путь и на загрузку файла.
+    # Раньше он был модульной константой, и тест крутил её через monkeypatch;
+    # после перенода так задать его нельзя, иначе тест меряет не то, что бой.
 
     def slow_parse(
         content: bytes, *, max_text_chars: int, parse_budget_sec: float | None = None
@@ -118,7 +120,9 @@ async def test_web_fetch_pdf_parse_timeout_is_not_network_timeout(settings, monk
         time.sleep(0.5)
         return "should-not-appear", "", ""
 
-    surfer = WebSurfer(replace(settings, web_allow_private_networks=True))
+    surfer = WebSurfer(
+        replace(settings, web_allow_private_networks=True, pdf_parse_budget_sec=0.05)
+    )
     surfer._extract_pdf_text = slow_parse  # type: ignore[method-assign]
 
     async def fake_request(_url: str):
@@ -294,4 +298,46 @@ def test_the_deadline_marker_crosses_the_extraction_boundary(monkeypatch) -> Non
     assert text == "первые две страницы", "прочитанное выброшено"
     assert error == "parse_truncated", (
         f"оборванный по сроку разбор вернул {error!r} — вызывающий не отличит его от полного"
+    )
+
+
+def test_a_page_limited_parse_also_says_it_is_partial() -> None:
+    """Три причины обрыва — один признак наружу.
+
+    Срок разбора чинился первым, но он же и самый редкий: замерено, что pypdf идёт
+    ~1.6 млн знаков/с, а боевой маршрут просит `max_length=50 000` — потолок знаков
+    срабатывает на 11-й странице обычного отчёта за 0.055 с и теряется на ТОЙ ЖЕ
+    границе. Починить только срок значило бы закрыть редкий случай и оставить
+    частый.
+
+    Мутация: убрать `extraction_truncated` из условия в `_extract_pdf_text` — тест
+    краснеет.
+    """
+    import jericho.documents as documents_module
+    from jericho.documents import DocumentResult
+    from jericho.web_surfer import WebSurfer as _Surfer
+
+    class _ClippedExtractor:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def extract(self, *args, **kwargs):
+            del args, kwargs
+            return DocumentResult(
+                "Раздел 1. Общие положения. " * 40,
+                {"format": "pdf", "pages_read": 11, "page_limit": 250, "extraction_truncated": True},
+            )
+
+    original = documents_module.DocumentExtractor
+    documents_module.DocumentExtractor = _ClippedExtractor  # type: ignore[misc]
+    try:
+        text, _title, error = _Surfer._extract_pdf_text(  # noqa: SLF001
+            b"%PDF-1.4", max_text_chars=50_000
+        )
+    finally:
+        documents_module.DocumentExtractor = original  # type: ignore[misc]
+
+    assert text.startswith("Раздел 1."), "прочитанное выброшено"
+    assert error == "parse_truncated", (
+        f"обрезка по потолку знаков вернула {error!r} — частичный документ неотличим от целого"
     )

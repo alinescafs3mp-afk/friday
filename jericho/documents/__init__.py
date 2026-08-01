@@ -254,8 +254,17 @@ class DocumentExtractor:
         # вызывающему, но поток не останавливает — тот продолжает жечь ядро на
         # патологической странице, и пул, общий со всей фоновой работой,
         # вычерпывается по одному потоку на каждую такую ссылку.
-        self.deadline: float | None = (
-            None if parse_budget_sec is None else time.monotonic() + max(0.1, float(parse_budget_sec))
+        #
+        # Хранится БЮДЖЕТ, а срок ставится на каждый разбор и едет по стеку вызовов
+        # — как `_ArchiveBudget`. Готовый `self.deadline` в конструкторе работал
+        # только там, где экстрактор одноразовый (веб-путь): `IngestionPipeline`
+        # строит его ОДИН раз на процесс, и такой срок сгорал бы через 8 секунд
+        # после старта — дальше каждый PDF отдавал бы ноль страниц навсегда.
+        # Инстанс-поле не годится и по второй причине: `ingest_file` разбирает в
+        # `asyncio.to_thread`, то есть два файла делят один экстрактор в двух
+        # потоках, и общий срок один затирал бы другому.
+        self.parse_budget_sec: float | None = (
+            None if parse_budget_sec is None else max(0.1, float(parse_budget_sec))
         )
 
     def extract(
@@ -266,6 +275,7 @@ class DocumentExtractor:
         *,
         _depth: int = 0,
         _budget: _ArchiveBudget | None = None,
+        _deadline: float | None = None,
     ) -> DocumentResult:
         if not isinstance(content, bytes):
             return DocumentResult("", success=False, error="Document content must be bytes")
@@ -276,6 +286,11 @@ class DocumentExtractor:
             previews=_MAX_ARCHIVE_PREVIEW_FILES,
             expanded_bytes=self.max_archive_uncompressed_bytes,
         )
+        # Один срок на весь приход, поставленный наверху и унесённый вглубь: архив
+        # из сотни PDF не должен получать по полному бюджету на каждый вложенный.
+        deadline = _deadline
+        if deadline is None and self.parse_budget_sec is not None:
+            deadline = time.monotonic() + self.parse_budget_sec
         if len(content) > self.max_input_bytes:
             return DocumentResult(
                 "",
@@ -294,7 +309,7 @@ class DocumentExtractor:
             elif ext in _HTML_EXTENSIONS or detected_mime in {"text/html", "application/xhtml+xml"}:
                 result = self._extract_html(content)
             elif ext == ".pdf" or detected_mime == "application/pdf":
-                result = self._extract_pdf(content)
+                result = self._extract_pdf(content, deadline=deadline)
             elif ext == ".docx":
                 result = self._extract_docx(content)
             elif ext == ".doc" or detected_mime == "application/msword":
@@ -308,7 +323,7 @@ class DocumentExtractor:
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
             elif ext in _ARCHIVE_EXTENSIONS or ext.startswith(".tar."):
-                result = self._extract_archive(content, safe_name, ext, _depth, budget)
+                result = self._extract_archive(content, safe_name, ext, _depth, budget, deadline)
             elif detected_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
             else:
@@ -876,7 +891,7 @@ class DocumentExtractor:
             metadata["source_truncated_for_parse"] = True
         return DocumentResult(self._strip_xml_tags(self._decode(data)), metadata)
 
-    def _extract_pdf(self, content: bytes) -> DocumentResult:
+    def _extract_pdf(self, content: bytes, *, deadline: float | None = None) -> DocumentResult:
         """Постранично, с потолком страниц, потолком знаков и — если задан —
         СРОКОМ.
 
@@ -904,7 +919,7 @@ class DocumentExtractor:
         extraction_truncated = False
         deadline_hit = False
         for page in itertools.islice(reader.pages, 250):
-            if self.deadline is not None and time.monotonic() >= self.deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 deadline_hit = True
                 extraction_truncated = True
                 break
@@ -940,23 +955,31 @@ class DocumentExtractor:
         )
 
     def _extract_archive(
-        self, content: bytes, filename: str, ext: str, depth: int, budget: _ArchiveBudget
+        self,
+        content: bytes,
+        filename: str,
+        ext: str,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
     ) -> DocumentResult:
         if ext == ".zip":
-            return self._extract_zip(content, depth, budget)
+            return self._extract_zip(content, depth, budget, deadline)
         if ext in {".tar", ".tar.gz", ".tar.bz2", ".tar.xz"}:
-            return self._extract_tar(content, ext, depth, budget)
+            return self._extract_tar(content, ext, depth, budget, deadline)
         if ext in {".gz", ".bz2", ".xz", ".zst"}:
             decompressed = self._decompress_single(content, ext, budget)
             inner_name = filename[: -len(ext)] or "decompressed.txt"
-            return self.extract(decompressed, inner_name, _depth=depth + 1, _budget=budget)
+            return self.extract(
+                decompressed, inner_name, _depth=depth + 1, _budget=budget, _deadline=deadline
+            )
         if ext == ".rar":
-            return self._extract_rar(content, depth, budget)
+            return self._extract_rar(content, depth, budget, deadline)
         if ext == ".7z":
             return self._extract_7z(content)
         if ext == ".tar.zst":
             decompressed = self._decompress_single(content, ".zst", budget)
-            return self._extract_tar(decompressed, ".tar", depth, budget)
+            return self._extract_tar(decompressed, ".tar", depth, budget, deadline)
         return DocumentResult("", {"format": ext.lstrip(".")}, False, "Unsupported archive format")
 
     def _decompress_single(self, content: bytes, ext: str, budget: _ArchiveBudget) -> bytes:
@@ -980,13 +1003,22 @@ class DocumentExtractor:
         budget.spend_bytes(len(data))
         return data
 
-    def _member_preview(self, name: str, data: bytes, depth: int, budget: _ArchiveBudget) -> str:
-        result = self.extract(data, name, _depth=depth + 1, _budget=budget)
+    def _member_preview(
+        self,
+        name: str,
+        data: bytes,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
+    ) -> str:
+        result = self.extract(data, name, _depth=depth + 1, _budget=budget, _deadline=deadline)
         if not result.success or not result.text:
             return ""
         return f"\n--- {name} ---\n{result.text[:20_000]}"
 
-    def _extract_zip(self, content: bytes, depth: int, budget: _ArchiveBudget) -> DocumentResult:
+    def _extract_zip(
+        self, content: bytes, depth: int, budget: _ArchiveBudget, deadline: float | None = None
+    ) -> DocumentResult:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_zip(archive)
             files = [member for member in members if not member.is_dir()]
@@ -1010,7 +1042,7 @@ class DocumentExtractor:
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 budget.spend_bytes(len(data))
-                preview = self._member_preview(member.filename, data, depth, budget)
+                preview = self._member_preview(member.filename, data, depth, budget, deadline)
                 if preview:
                     parts.append(preview)
         return DocumentResult(
@@ -1018,7 +1050,14 @@ class DocumentExtractor:
             {"format": "zip", "files": len(files), "previewed_files": previewed},
         )
 
-    def _extract_tar(self, content: bytes, ext: str, depth: int, budget: _ArchiveBudget) -> DocumentResult:
+    def _extract_tar(
+        self,
+        content: bytes,
+        ext: str,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
+    ) -> DocumentResult:
         # Streaming mode avoids materialising an attacker-controlled member
         # list before the configured entry limit can be enforced.
         with tarfile.open(fileobj=io.BytesIO(content), mode="r|*") as archive:
@@ -1063,7 +1102,7 @@ class DocumentExtractor:
                 previewed += 1  # decompressions, not successes — see _extract_zip
                 with stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
-                preview = self._member_preview(member.name, data, depth, budget)
+                preview = self._member_preview(member.name, data, depth, budget, deadline)
                 if preview:
                     previews.append(preview)
             parts = [f"TAR archive: {file_count} files", *names, *previews]
@@ -1078,7 +1117,9 @@ class DocumentExtractor:
             metadata["archive_budget_exhausted"] = True
         return DocumentResult("\n".join(parts), metadata)
 
-    def _extract_rar(self, content: bytes, depth: int, budget: _ArchiveBudget) -> DocumentResult:
+    def _extract_rar(
+        self, content: bytes, depth: int, budget: _ArchiveBudget, deadline: float | None = None
+    ) -> DocumentResult:
         try:
             import rarfile  # type: ignore[import-untyped]
         except ImportError:
@@ -1104,7 +1145,7 @@ class DocumentExtractor:
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 budget.spend_bytes(len(data))
-                preview = self._member_preview(member.filename, data, depth, budget)
+                preview = self._member_preview(member.filename, data, depth, budget, deadline)
                 if preview:
                     parts.append(preview)
         return DocumentResult(
