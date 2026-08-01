@@ -227,3 +227,63 @@ async def test_a_mission_step_cannot_call_a_tool_outside_its_allowed_set(setting
     await service._run_tool_loop("собери сведения", actor)  # noqa: SLF001
 
     assert "memory_save" not in executed, "шаг миссии исполнил инструмент вне разрешённого набора"
+
+
+def test_a_delivered_result_survives_a_failed_side_step(settings, storage):
+    """Провал вспомогательного шага не отменяет доставленный результат.
+
+    Типовой план местной модели: два независимых сбора и сведение. Интернета
+    нет — первый сбор падает, второй отрабатывает, результат сведён и лежит в
+    Inbox. Человек получил ровно то, ради чего просил; называть это провалом
+    значит прятать сделанную работу — ошибка в другую сторону от той, что чинили
+    первой правкой.
+
+    Мутация: `failed = any(...)` без учёта доставленного результата — тест обязан
+    покраснеть.
+    """
+    storage.ensure_user("alice")
+    mission = Mission(id=new_id("mis"), user_id="alice", goal="Сводка", status=MissionStatus.RUNNING)
+    storage.create_mission(mission)
+    plan = [
+        MissionTask(
+            id=new_id("mst"),
+            mission_id=mission.id,
+            user_id="alice",
+            seq=1,
+            kind=TaskKind.GATHER,
+            instruction="Поискать в интернете",
+        ),
+        MissionTask(
+            id=new_id("mst"),
+            mission_id=mission.id,
+            user_id="alice",
+            seq=2,
+            kind=TaskKind.GATHER,
+            instruction="Поискать в личной базе",
+        ),
+        MissionTask(
+            id=new_id("mst"),
+            mission_id=mission.id,
+            user_id="alice",
+            seq=3,
+            kind=TaskKind.PRODUCE,
+            instruction="Свести",
+            depends_on_json=[2],
+        ),
+    ]
+    storage.set_mission_plan(
+        mission.id, "alice", plan, plan_summary="сбор и сведение", status=MissionStatus.RUNNING
+    )
+    storage.update_mission_task_fields(
+        plan[0].id, "alice", status=TaskStatus.FAILED.value, error="сеть недоступна"
+    )
+    storage.update_mission_task_fields(plan[1].id, "alice", status=TaskStatus.DONE.value)
+    storage.update_mission_task_fields(plan[2].id, "alice", status=TaskStatus.DONE.value, inbox_id="inbox-1")
+
+    service = _service(settings, storage)
+    service._finalize(mission.id, "alice", storage.get_mission_tasks(mission.id, "alice"))  # noqa: SLF001
+
+    finished = storage.get_mission(mission.id, "alice")
+    assert finished["status"] == MissionStatus.COMPLETED.value, (
+        "результат доставлен в Inbox, но миссия объявлена провалом"
+    )

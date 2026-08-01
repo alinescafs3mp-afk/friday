@@ -676,8 +676,28 @@ class ExecutiveService:
             # случае. Спека v3 §5: успешный вызов инструмента не доказывает успех
             # задачи, а завершение миссии требует проверенных постусловий —
             # минимум из этого: провалившийся шаг не бывает частью «завершено».
+            # Успех меряется ДОСТАВЛЕННЫМ РЕЗУЛЬТАТОМ, а не числом сделанных
+            # шагов и не отсутствием любых провалов.
+            #
+            # Первая редакция считала успехом любой DONE-шаг: миссия «собрать →
+            # произвести», у которой упал ВТОРОЙ шаг, отчитывалась «завершена»,
+            # хотя человек не получил ничего. Вторая редакция (any failed →
+            # FAILED) ошибалась в другую сторону: типовой план местной модели —
+            # два независимых сбора и сведение; интернета нет, первый сбор упал,
+            # но результат сведён и лежит в Inbox — называть это провалом
+            # значит прятать сделанную работу.
+            produced = any(
+                task["kind"] == TaskKind.PRODUCE.value
+                and task["status"] == TaskStatus.DONE.value
+                and task.get("inbox_id")
+                for task in tasks
+            )
+            # План без produce-шага (так планировщик тоже иногда делает) судится
+            # по старому: хоть что-то сделано и ничего не упало.
+            has_produce = any(task["kind"] == TaskKind.PRODUCE.value for task in tasks)
             failed = any(task["status"] == TaskStatus.FAILED.value for task in tasks)
-            status = MissionStatus.COMPLETED if done and not failed else MissionStatus.FAILED
+            succeeded = produced if has_produce else (bool(done) and not failed)
+            status = MissionStatus.COMPLETED if succeeded else MissionStatus.FAILED
             self.storage.update_mission_fields(
                 mission_id,
                 user_id,

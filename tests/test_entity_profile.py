@@ -373,3 +373,33 @@ async def test_derived_values_say_that_they_are_derived(kernel):
     assert provenance["source_count"] == 1, "не сказано, из скольких документов выведено"
     assert provenance["computed_at"], "не сказано, когда посчитано — значит выглядит вечным"
     assert provenance["calculation"], "нет версии расчёта: сравнить два ответа будет нечем"
+
+
+@pytest.mark.asyncio
+async def test_the_derived_marker_counts_all_sources_not_the_shown_page(kernel):
+    """`source_count` — число ВСЕХ документов, из которых выведена сводка.
+
+    Ревью показало, что это утверждение не проверялось ничем: подмена на длину
+    показанной страницы оставляла тесты зелёными. А расхождение читается прямо в
+    карточке — «По его документам (10)» и через три строки «Связанных документов:
+    314»: пометка о производности врала бы именно про то, ИЗ ЧЕГО значение
+    выведено.
+
+    Мутация: `source_count: len(knowledge_objects)` — тест обязан покраснеть.
+    """
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Атлас")
+    for index in range(13):  # страница карточки — 10
+        ko = _document(
+            storage, "alice", f"Документ {index}", tags=[f"тег{index}"], document_date="2026-01-15"
+        )
+        graph.link_knowledge_to_entity(ko, entity_id, "alice", status="accepted")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
+
+    assert len(result.data["knowledge_objects"]) == 10, "стенд не воспроизводит: страница не полна"
+    assert result.data["profile_provenance"]["source_count"] == 13, (
+        "пометка о производности считает страницу, а не все документы"
+    )
+    assert result.data["knowledge_objects_total"] == 13

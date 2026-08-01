@@ -658,6 +658,13 @@ async def _authenticate(request: Request) -> ActorContext:
         metadata: dict[str, Any] = {"language_code": telegram_user.get("language_code")}
         if in_private_chat:
             metadata["chat_id"] = identity.chat_id
+        if in_private_chat and not chat_is_allowlisted and settings.telegram_open_registration:
+            # ФАКТ ВПУСКА, а не текущая роль. Проактивные органы должны понимать,
+            # что этот чат впустил сам backend: гейт по пресету («сейчас
+            # newcomer») отбирал у человека все уведомления в тот момент, когда
+            # владелец повышал его до обычного пресета — то есть ровно за то, что
+            # его признали своим. Признак пишется один раз и не меняется ролью.
+            metadata["self_registered"] = True
         if linked_id:
             # Аккаунт уже существует и принадлежит человеку, а не этому каналу.
             # `ensure_user` переписал бы `source` на 'telegram' и `external_id` на

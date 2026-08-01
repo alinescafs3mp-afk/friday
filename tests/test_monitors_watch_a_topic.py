@@ -263,7 +263,7 @@ def test_a_person_cannot_hoard_monitors(settings, storage):
 
 
 @pytest.mark.asyncio
-async def test_a_monitor_does_not_wake_anyone_at_night(settings, storage):
+async def test_a_monitor_does_not_wake_anyone_at_night(settings, storage, monkeypatch):
     """Тихие часы гейтят постановку в очередь — как у напоминаний.
 
     Монитор был единственным проактивным органом без этого гейта, то есть
@@ -278,9 +278,20 @@ async def test_a_monitor_does_not_wake_anyone_at_night(settings, storage):
     monitor = storage.create_monitor("alice", "поверка весов", chat_id="5001")
     _document(storage, "alice", "Поверка весов назначена", "Акт")
 
-    # Тихое окно, покрывающее любое время суток (23 часа: start != end).
+    # Час фиксируется, а не берётся из настоящих часов: окно 0..23 не покрывает
+    # час 23, и прогон между 23:00 и 23:59 UTC красил бы билд не из-за кода.
     quiet = replace(settings, quiet_hours_start=0, quiet_hours_end=23)
+
+    class _FixedDatetime:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime as _dt
+
+            return _dt(2026, 8, 1, 5, 0, tzinfo=tz)
+
+    monkeypatch.setattr(monitors_module, "datetime", _FixedDatetime)
     await scan_monitors(ServiceContext(settings=quiet, storage=storage, kg=None, ingestion=None))
+    monkeypatch.undo()
 
     queued = storage.execute(
         "SELECT COUNT(*) AS c FROM outbound_notifications WHERE kind='monitor'"

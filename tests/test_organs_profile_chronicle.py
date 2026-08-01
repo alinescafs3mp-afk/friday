@@ -253,3 +253,34 @@ def test_a_self_registered_newcomer_is_a_valid_push_target(settings, storage):
 
     # Чужой чат не проходит ни при каких настройках.
     assert may_push_to(opened, storage, "listed", "999999") is False
+
+
+def test_promoting_a_newcomer_does_not_silence_their_notifications(settings, storage):
+    """Повышение пресета — награда, а не наказание.
+
+    Первая редакция гейта смотрела на `preset_key == "newcomer"`, и человек терял
+    ВСЕ проактивные сообщения ровно в тот момент, когда владелец повышал его до
+    обычного пресета: то есть за то, что его признали своим. Спрашивать надо факт
+    ВПУСКА (`self_registered`, который пишет сам backend), а не текущую роль.
+
+    Мутация: убрать проверку `self_registered` — тест обязан покраснеть.
+    """
+    from dataclasses import replace
+
+    from jericho.organs import may_push_to
+
+    storage.ensure_user("promoted", preset_key="newcomer")
+    storage.update_user("promoted", metadata_json={"chat_id": "7777", "self_registered": True})
+    opened = replace(settings, telegram_allowed_chat_ids=[5001], telegram_open_registration=True)
+    assert may_push_to(opened, storage, "promoted", "7777") is True
+
+    # Владелец повышает его — ровно то, ради чего админка и делалась.
+    storage.update_user("promoted", preset_key="user")
+    assert may_push_to(opened, storage, "promoted", "7777") is True, (
+        "повышение пресета молча отключило человеку все проактивные сообщения"
+    )
+
+    # Посторонний аккаунт, которого backend не впускал, по-прежнему не проходит.
+    storage.ensure_user("stranger", preset_key="user")
+    storage.update_user("stranger", metadata_json={"chat_id": "8888"})
+    assert may_push_to(opened, storage, "stranger", "8888") is False

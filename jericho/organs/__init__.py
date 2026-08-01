@@ -160,8 +160,25 @@ def may_push_to(settings, storage, user_id: str, chat_id: str) -> bool:
         return True
     if not getattr(settings, "telegram_open_registration", False):
         return False
+    # Спрашивается ФАКТ ВПУСКА, а не текущая роль. Первая редакция смотрела на
+    # `preset_key == "newcomer"`, и человек терял все проактивные сообщения ровно
+    # в тот момент, когда владелец повышал его до обычного пресета — то есть в
+    # награду за то, что его признали своим. Признак `self_registered` пишет сам
+    # backend при впуске, и роль его не меняет.
+    import json
+
     user = storage.get_user(user_id)
-    return bool(user) and str(user.get("preset_key") or "") == "newcomer"
+    if not user:
+        return False
+    try:
+        metadata = json.loads(str(user.get("metadata_json") or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        metadata = {}
+    if isinstance(metadata, dict) and metadata.get("self_registered"):
+        return True
+    # Учётки, заведённые ДО появления признака: пресет остаётся единственным
+    # свидетельством впуска, и терять их уведомления тоже нельзя.
+    return str(user.get("preset_key") or "") == "newcomer"
 
 
 def in_quiet_hours(hour: int, start: int, end: int) -> bool:
