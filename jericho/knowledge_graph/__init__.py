@@ -1610,7 +1610,20 @@ class KnowledgeGraph:
         is exactly the mistake `document_date` vs `updated_at` already
         guards against elsewhere in this method.
         """
-        knowledge_objects = self.get_entity_knowledge(entity_id, user_id, limit=knowledge_limit)
+        if not self.storage.get_entity(entity_id, user_id):
+            return {
+                "relations": [],
+                "pending_relations_count": 0,
+                "knowledge_objects": [],
+                "knowledge_objects_total": 0,
+                "profile": {"tags": [], "document_date_range": None, "documents_without_own_date": 0},
+                "event_time": None,
+            }
+        # Карточка перечисляет документы, но не показывает их текст — поэтому
+        # проекция без `content`: полный `k.*` давал замеренные 2.4–4.9 МБ на один
+        # ответ, и та же тяжесть уходила модели через `entity_lookup`, где всё
+        # равно обрезалась на 11 900 знаках.
+        knowledge_objects = self.storage.get_entity_knowledge_cards(user_id, entity_id, limit=knowledge_limit)
         summary = self.storage.entity_knowledge_summary(user_id, entity_id)
         return {
             "relations": self.get_entity_relations(entity_id, user_id),

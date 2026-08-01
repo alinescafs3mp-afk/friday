@@ -814,10 +814,24 @@ class ViewsMixin(BridgeShared):
                 parts.append(f"версий: {version_count}, правка от {corrected_at}")
             else:
                 parts.append(f"версий: {version_count}")
-        entity_links = envelope.get("entity_links")
-        link_count = len(entity_links) if isinstance(entity_links, list) else 0
-        if link_count:
-            parts.append(f"связано сущностей: {link_count}")
+        # Счёт берётся с сервера по статусам, а не как длина списка: список
+        # ограничен сотней и содержит ОТКЛОНЁННЫЕ владельцем связи. Отклонённая
+        # связь — это его решение «нет», и показывать её как связь нельзя.
+        counts = envelope.get("entity_link_counts")
+        if isinstance(counts, dict):
+            accepted = int(counts.get("accepted") or 0)
+            suggested = int(counts.get("suggested") or 0)
+        else:  # старый конверт без счётчика — считаем по статусу, а не по длине
+            entity_links = envelope.get("entity_links")
+            items = entity_links if isinstance(entity_links, list) else []
+            accepted = sum(1 for item in items if isinstance(item, dict) and item.get("status") == "accepted")
+            suggested = sum(
+                1 for item in items if isinstance(item, dict) and item.get("status") == "suggested"
+            )
+        if accepted or suggested:
+            parts.append(
+                f"связано сущностей: {accepted}" + (f", {suggested} ждут проверки" if suggested else "")
+            )
         usage = envelope.get("usage")
         if isinstance(usage, dict):
             answer_count = int(usage.get("answer_count") or 0)

@@ -9,6 +9,7 @@ entity_lookup — не новый параллельный инструмент,
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -190,6 +191,36 @@ async def test_entity_profile_summary_covers_every_document_not_just_the_shown_p
     assert profile["documents_without_own_date"] == 1
     assert result.data["knowledge_objects_total"] == 13
     assert len(result.data["knowledge_objects"]) == 10, "показанный список остаётся страницей"
+
+
+@pytest.mark.asyncio
+async def test_entity_profile_lists_documents_without_carrying_their_bodies(kernel):
+    """Карточка перечисляет документы, а не показывает их текст.
+
+    Пока список брался как `k.*`, в ответ попадало полное содержимое каждого
+    документа: замерено 2.4–4.9 МБ на одну карточку боевого корпуса, из которых
+    читателю нужны заголовки. Та же тяжесть уходила в контекст модели через
+    `entity_lookup` и там всё равно обрезалась на 11 900 знаках — байты не
+    покупали ничего, но вытесняли начало списка.
+
+    Мутация: вернуть `get_entity_knowledge` (то есть `k.*`) — тест обязан
+    покраснеть.
+    """
+    built, auth, storage, graph = kernel
+    entity_id = _linked_entity(storage, graph, "alice", "Атлас")
+    body = "Секретное тело документа. " * 200
+    ko = _document(storage, "alice", body, tags=["отчёт"], document_date="2026-01-15")
+    graph.link_knowledge_to_entity(ko, entity_id, "alice", status="accepted")
+
+    actor = auth.actor_for_user("alice", source="test")
+    result = await built.execute("entity_lookup", {"name": "Атлас"}, actor=actor)
+
+    shown = result.data["knowledge_objects"]
+    assert len(shown) == 1
+    assert "content" not in shown[0], "тело документа в карточке не нужно и не должно уезжать модели"
+    assert shown[0]["title"] == "Документ", "заголовок — то, ради чего список существует"
+    assert "raw_content" not in shown[0]
+    assert body not in json.dumps(result.data, ensure_ascii=False)
 
 
 @pytest.mark.asyncio

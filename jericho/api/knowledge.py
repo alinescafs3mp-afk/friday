@@ -129,6 +129,10 @@ async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
             knowledge_object_id=knowledge_id,
             status=None,
         ),
+        # Список выше смешивает статусы и ограничен сотней: считать его длину
+        # значит выдавать отклонённые владельцем связи за связи и упираться в
+        # потолок молча. Счётчик — отдельный, по статусам, без потолка.
+        "entity_link_counts": storage.count_knowledge_entity_links(actor.user_id, knowledge_id),
         "raw_source": (
             {
                 "source": raw.get("source"),

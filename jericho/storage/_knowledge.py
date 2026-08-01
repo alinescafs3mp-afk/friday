@@ -1454,6 +1454,26 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 
+    def count_knowledge_entity_links(self, user_id: str, knowledge_object_id: str) -> dict[str, int]:
+        """Сколько сущностей связано с документом — по статусам и без потолка.
+
+        Список выше ограничен сотней и смешивает статусы, поэтому считать его
+        длину значит выдавать «связано сущностей: 100» на штатном расписании и
+        засчитывать в это число связи, которые владелец ОТКЛОНИЛ. Статус — это
+        решение человека; отклонённая связь не связь.
+        """
+        rows = self.execute(
+            "SELECT l.status AS status, COUNT(*) AS count FROM knowledge_entity_links l"
+            " JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id"
+            " WHERE l.user_id=? AND l.knowledge_object_id=? AND e.deleted_at IS NULL"
+            " GROUP BY l.status",
+            (user_id, knowledge_object_id),
+        ).fetchall()
+        counts = {"accepted": 0, "suggested": 0, "rejected": 0}
+        for row in rows:
+            counts[str(row["status"])] = int(row["count"] or 0)
+        return counts
+
     def set_knowledge_entity_link_status(
         self,
         link_id: str,
@@ -1634,6 +1654,41 @@ class KnowledgeMixin(StorageShared):
             rows = self.execute(
                 """SELECT * FROM knowledge_objects WHERE user_id=? AND entity_id=?
                    AND deleted_at IS NULL ORDER BY importance DESC, updated_at DESC LIMIT ?""",
+                (user_id, entity_id, max(1, min(limit, 1000))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    _ENTITY_CARD_COLUMNS = (
+        "k.id, k.title, k.summary, k.tags_json, k.metadata_json, k.importance, "
+        "k.quality_score, k.lifecycle_stage, k.knowledge_kind, k.created_at, k.updated_at"
+    )
+
+    def get_entity_knowledge_cards(
+        self, user_id: str, entity_id: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """The same rows as `get_entity_knowledge`, without the document bodies.
+
+        An object view lists documents; it never displays their text. Selecting
+        `k.*` for that list put the full `content` of every row into the reply —
+        measured at 2.4–4.9 MB for one card on this corpus, of which a reader
+        uses the titles. The same oversized payload also reached the model
+        through `entity_lookup`, where it was truncated at 11 900 characters
+        anyway, so the bytes bought nothing and cost the head of the list.
+        """
+        rows = self.execute(
+            f"""SELECT {self._ENTITY_CARD_COLUMNS}, l.confidence AS _link_confidence
+               FROM knowledge_entity_links l
+               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
+               ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
+            (user_id, entity_id, max(1, min(limit, 1000))),
+        ).fetchall()
+        if not rows:
+            rows = self.execute(
+                f"""SELECT {self._ENTITY_CARD_COLUMNS}, 1.0 AS _link_confidence
+                   FROM knowledge_objects k
+                   WHERE k.user_id=? AND k.entity_id=? AND k.deleted_at IS NULL
+                   ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
                 (user_id, entity_id, max(1, min(limit, 1000))),
             ).fetchall()
         return [dict(row) for row in rows]

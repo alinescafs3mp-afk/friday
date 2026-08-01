@@ -118,10 +118,14 @@ async def entity_profile_by_name(name: str, request: Request) -> dict[str, Any]:
     """
     actor = _require(request, "kg.read")
     kg = request.app.state.kg
-    entity = kg.find_entity(actor.user_id, name)
+    # Через поток, как соседние маршруты этого же файла: на широкой сущности
+    # профиль — это несколько SQL по 22 тысячам связей, и в `async def` они
+    # держали бы event loop, то есть ВСЕХ остальных пользователей.
+    entity = await run_blocking(kg.find_entity, actor.user_id, name)
     if not entity:
         raise HTTPException(status_code=404, detail="Сущность не найдена")
-    return {"entity": entity, **kg.entity_profile(entity["id"], actor.user_id)}
+    profile = await run_blocking(kg.entity_profile, entity["id"], actor.user_id)
+    return {"entity": entity, **profile}
 
 
 @router.get("/entities/{entity_id}", tags=["knowledge-graph"])

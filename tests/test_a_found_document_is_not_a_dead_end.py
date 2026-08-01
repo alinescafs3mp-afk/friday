@@ -169,7 +169,11 @@ def test_lineage_footer_shows_source_versions_links_and_usage():
             "item": {"title": "Приказ", "content": "Тело."},
             "raw_source": {"source": "telegram", "received_at": "2026-05-01T10:00:00Z"},
             "versions": [{"version": 2, "created_at": "2026-06-20T09:00:00Z"}, {"version": 1}],
-            "entity_links": [{"entity_name": "Атлас"}, {"entity_name": "Иванов"}],
+            "entity_links": [
+                {"entity_name": "Атлас", "status": "accepted"},
+                {"entity_name": "Иванов", "status": "accepted"},
+            ],
+            "entity_link_counts": {"accepted": 2, "suggested": 0, "rejected": 0},
             "usage": {"retrieval_count": 5, "answer_count": 3},
         }
     )
@@ -177,6 +181,53 @@ def test_lineage_footer_shows_source_versions_links_and_usage():
     assert "версий: 2, правка от 2026-06-20" in text
     assert "связано сущностей: 2" in text
     assert "использовано в ответах: 3" in text
+
+
+def test_lineage_footer_does_not_count_links_the_owner_rejected():
+    """Статус связи — это решение человека. Отклонённая связь не связь, а
+    неподтверждённая — ещё не связь; складывать их в одно число значило бы
+    показывать владельцу как факт то, что он сам забраковал.
+
+    Раньше подвал печатал ДЛИНУ списка, а список приходит с `status=None`, то
+    есть со всеми статусами сразу, и вдобавок ограничен сотней — на документе с
+    полусотней имён это одновременно и завышало, и упиралось в потолок.
+
+    Мутация: считать `len(entity_links)` — тест обязан покраснеть.
+    """
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Приказ", "content": "Тело."},
+            "raw_source": None,
+            "versions": [{"version": 1}],
+            "entity_links": [
+                {"entity_name": "Атлас", "status": "accepted"},
+                {"entity_name": "Ошибка распознавания", "status": "rejected"},
+                {"entity_name": "Кандидат", "status": "suggested"},
+            ],
+            "entity_link_counts": {"accepted": 1, "suggested": 1, "rejected": 1},
+            "usage": {},
+        }
+    )
+    assert "связано сущностей: 1, 1 ждут проверки" in text
+    assert "связано сущностей: 3" not in text
+
+
+def test_lineage_footer_counts_by_status_even_without_the_server_counter():
+    """Старый конверт (без `entity_link_counts`) не должен возвращать прежнее
+    враньё: считаем по статусу самих элементов, а не по длине списка."""
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Приказ", "content": "Тело."},
+            "raw_source": None,
+            "versions": [{"version": 1}],
+            "entity_links": [
+                {"entity_name": "Атлас", "status": "accepted"},
+                {"entity_name": "Ошибка", "status": "rejected"},
+            ],
+            "usage": {},
+        }
+    )
+    assert "связано сущностей: 1" in text
 
 
 def test_lineage_footer_omits_the_correction_date_when_the_snapshot_lacks_one():
@@ -268,6 +319,16 @@ def test_the_real_lineage_from_the_api_shows_a_real_edit_and_a_real_link(setting
         )
         storage.create_entity(entity)
         kg.link_knowledge_to_entity(ko.id, entity.id, LEGACY_OWNER_USER_ID, status="accepted")
+        # Вторая сущность, связь с которой владелец отклонил: в списке она есть
+        # (status=None отдаёт все), в счёте связей её быть не должно.
+        rejected_entity = Entity(
+            id=new_id("ent"),
+            user_id=LEGACY_OWNER_USER_ID,
+            name="Ошибка распознавания",
+            entity_type=EntityType.OTHER,
+        )
+        storage.create_entity(rejected_entity)
+        kg.link_knowledge_to_entity(ko.id, rejected_entity.id, LEGACY_OWNER_USER_ID, status="rejected")
         storage.record_knowledge_usage(LEGACY_OWNER_USER_ID, [ko.id], used_in_answer=True)
 
         response = client.get(
@@ -281,7 +342,8 @@ def test_the_real_lineage_from_the_api_shows_a_real_edit_and_a_real_link(setting
     assert "версий: 2, правка от" in text, (
         "настоящий снимок несёт created_at — дата правки не должна пропасть"
     )
-    assert "связано сущностей: 1" in text
+    assert "связано сущностей: 1" in text, "отклонённая владельцем связь в счёт не идёт"
+    assert len(response.json()["entity_links"]) == 2, "в СПИСКЕ отклонённая по-прежнему видна"
     assert "использовано в ответах: 1" in text
 
 
