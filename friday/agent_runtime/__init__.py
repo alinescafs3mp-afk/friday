@@ -65,6 +65,35 @@ _WEB_REQUEST_FILLER = re.compile(
     r")(?=$|\W)",
     re.IGNORECASE,
 )
+def _web_source_lines(data: Any, limit: int = 5) -> str:
+    """Ссылки из выдачи — готовым списком, по одной в строке.
+
+    Берётся и `sources` (это `web_research`), и `results` (`web_search`), чтобы
+    список не зависел от того, каким инструментом выполнен предварительный поиск.
+    """
+    if not isinstance(data, dict):
+        return ""
+    items = data.get("sources")
+    if not isinstance(items, list) or not items:
+        items = data.get("results")
+    if not isinstance(items, list):
+        return ""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        title = str(item.get("title") or item.get("search_title") or "").strip()
+        lines.append(f"- {title[:120]}: {url}" if title else f"- {url}")
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
+
+
 _TOOL_PROTOCOL_REPAIR = (
     "Предыдущий ответ нарушил протокол инструментов. Если нужен инструмент, верни его через "
     "native tool call либо одним полным JSON-объектом без пояснений. Иначе дай обычный ответ "
@@ -1291,15 +1320,22 @@ class AgentRuntime:
         tools_used.append("web_research")
         if result.success and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "web_research", "output": str(rendered)})
+        # Готовый список ссылок отдельной строкой. URL и так лежат внутри выдачи,
+        # но замерено: на десяти вопросах модель приводила источник лишь в 7
+        # ответах из 10 — она их видела и не выписывала. Списком копировать проще,
+        # чем выуживать из JSON.
+        sources = _web_source_lines(result.data)
+        source_block = ("\n\nИсточники, которые надо привести в ответе:\n" + sources) if sources else ""
         messages.append(
             {
                 "role": "system",
                 "content": (
                     f"Человек попросил посмотреть в интернете. Поиск уже выполнен по запросу "
-                    f"«{query}», вот выдача:\n\n{rendered}\n\n"
-                    "Отвечай по этой выдаче и указывай ссылки. Не подменяй её тем, что помнишь: "
-                    "она свежее. Если нужного в ней нет — скажи прямо или уточни запрос "
-                    "инструментом, но не выдумывай."
+                    f"«{query}», вот выдача:\n\n{rendered}{source_block}\n\n"
+                    "Отвечай по этой выдаче. Назови конкретные значения — числа, даты, "
+                    "названия, — а не только то, где их посмотреть. В конце ответа приведи "
+                    "ссылки на источники. Не подменяй выдачу тем, что помнишь: она свежее. "
+                    "Если нужного в ней нет — скажи прямо, но не выдумывай."
                 ),
             }
         )
