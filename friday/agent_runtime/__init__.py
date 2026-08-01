@@ -133,6 +133,27 @@ def moment_from_question(message: str) -> str | None:
 #: не вызван ни разу из трёх, ответ «Сейчас соберу сводку и оформлю её в PDF».
 #: Обещание вместо файла: снаружи это выглядит как выполненная просьба ровно до
 #: момента, когда человек лезет искать вложение.
+#: Вопрос о числах собственной базы или о списке тегов.
+#:
+#: Замерено на живом экземпляре: «сколько всего знаний в базе? посчитай точно» —
+#: инструмент не вызван, ответ «в базе 0 сохранённых знаний» при 1533; «какие
+#: теги есть в базе?» — счётчики по единице при сотнях. Модель отвечает из
+#: контекста, а контекст под такой вопрос не собирался. Уговаривать её бесполезно
+#: (проверено на веб-поиске и ленте), поэтому инструмент зовётся до её хода.
+_ASKS_ABOUT_THE_ARCHIVE = re.compile(
+    r"(?:^|\W)(?:"
+    r"сколько\s+(?:\S+\s+){0,3}?(?:знан\w*|документ\w*|записе?\w*|сущност\w*|объект\w*|файл\w*)|"
+    r"статистик\w*\s+(?:баз\w*|граф\w*|знан\w*)|"
+    r"(?:покажи|дай|выведи)\s+статистик\w*|"
+    r"размер\s+баз\w*|сколько\s+всего\s+у\s+меня"
+    r")",
+    re.IGNORECASE,
+)
+_ASKS_ABOUT_TAGS = re.compile(
+    r"(?:^|\W)(?:как\w*\s+тег\w*|список\s+тег\w*|тег\w*\s+(?:есть|в\s+баз\w*)|"
+    r"(?:покажи|выведи|дай)\s+тег\w*)",
+    re.IGNORECASE,
+)
 _ASKS_FOR_A_FILE = re.compile(
     r"(?:^|\W)(?:"
     r"в\s+word|в\s+ворде?|\bdocx\b|"
@@ -1082,6 +1103,7 @@ class AgentRuntime:
         await self._prefetch_the_timeline_if_asked(
             message, actor, tools, messages, tools_used, tool_evidence
         )
+        await self._prefetch_archive_numbers(message, actor, tools, messages, tools_used, tool_evidence)
         # Set by a successful `speak` call; last one wins (a turn ships at most one
         # voice message). Kept off `tool_evidence`/`messages` entirely — see
         # `ToolResult.attachment`.
@@ -1567,6 +1589,57 @@ class AgentRuntime:
         if not result.success or not result.attachment:
             return None
         return dict(result.attachment)
+
+    async def _prefetch_archive_numbers(
+        self,
+        message: str,
+        actor: ActorContext,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_evidence: list[dict[str, str]],
+    ) -> None:
+        """Спросили числа своей базы — берём их инструментом, а не из контекста.
+
+        Тот же приём, что с интернет-поиском и лентой, и по той же причине:
+        замерено, что на «сколько всего знаний в базе? посчитай точно» модель
+        инструмент не зовёт и отвечает «0 сохранённых знаний» при 1533, а на
+        «какие теги есть в базе?» показывает счётчики по единице при сотнях.
+        Ответ на вопрос о ЧИСЛАХ, взятый не из подсчёта, — это выдумка, и
+        выглядит она увереннее всего.
+        """
+        wants_stats = bool(_ASKS_ABOUT_THE_ARCHIVE.search(message))
+        wants_tags = bool(_ASKS_ABOUT_TAGS.search(message))
+        if not wants_stats and not wants_tags:
+            return
+        available = {
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
+        }
+        for wanted, tool_name in ((wants_stats, "kg_stats"), (wants_tags, "list_tags")):
+            if not wanted or tool_name not in available:
+                continue
+            try:
+                result = await self.kernel.execute(tool_name, {}, actor=actor)
+            except Exception:  # noqa: BLE001 — подсчёт не должен ронять ход
+                LOGGER.exception("Prefetch %s failed", tool_name)
+                continue
+            rendered = result.to_llm_message()
+            if not rendered:
+                continue
+            tools_used.append(tool_name)
+            if result.success and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
+                tool_evidence.append({"tool": tool_name, "output": str(rendered)})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"Человек спрашивает о содержимом своей базы. Точные данные уже "
+                        f"получены:\n\n{rendered}\n\n"
+                        "Отвечай ТОЛЬКО этими числами. Не пересчитывай их по контексту и не "
+                        "округляй: контекст — это несколько найденных записей, а не весь архив."
+                    ),
+                }
+            )
 
     async def _is_a_timeline_question(self, message: str) -> bool:
         """Спросить модель, о чём вопрос, когда шаблон молчит.

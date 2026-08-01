@@ -292,3 +292,39 @@ def test_long_lines_are_wrapped_in_every_part_of_a_picture():
     assert _height(long_text) >= _height("Коротко") + 100, (
         "текст не переносится: всё уместилось в одну строку на блок"
     )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "сколько всего знаний в базе? посчитай точно",
+        "покажи статистику базы знаний",
+        "сколько у меня документов",
+    ],
+)
+def test_a_question_about_numbers_reaches_the_counter(message):
+    """Мутация: убрать `_prefetch_archive_numbers` из цикла — тест краснеет.
+
+    Замерено на живом: «сколько всего знаний в базе? посчитай точно» — инструмент
+    не вызван, ответ «в базе 0 сохранённых знаний» при 1534. Ответ на вопрос о
+    ЧИСЛАХ, взятый не из подсчёта, — выдумка, и выглядит она увереннее всего.
+    """
+    from friday.agent_runtime import _ASKS_ABOUT_THE_ARCHIVE
+
+    assert _ASKS_ABOUT_THE_ARCHIVE.search(message)
+
+
+@pytest.mark.parametrize("message", ["сколько человек в роте", "кто такой Хасанов", "сколько стоит нефть"])
+def test_a_question_about_the_world_is_not_about_the_archive(message):
+    from friday.agent_runtime import _ASKS_ABOUT_THE_ARCHIVE
+
+    assert not _ASKS_ABOUT_THE_ARCHIVE.search(message)
+
+
+def test_the_archive_counter_is_wired_into_the_loop():
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._agentic_loop)  # noqa: SLF001
+    assert "_prefetch_archive_numbers(" in source, "числа базы снова берутся из контекста"
