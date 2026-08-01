@@ -242,6 +242,7 @@ EXPECTED_COMMANDS = {
     "/note",
     "/profile",
     "/entity_rename",
+    "/entity_alias",
     "/watch",
     "/watching",
     "/reminders",

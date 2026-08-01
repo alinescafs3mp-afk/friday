@@ -477,6 +477,70 @@ class CommandsMixin(BridgeShared):
                 reply_markup={"inline_keyboard": rows} if rows else None,
             )
             return
+        if command == "/entity_alias":
+            # Псевдоним — безопасная альтернатива слиянию, и на этом корпусе она
+            # важнее самого слияния: «Иванов И.И.» и «Иванов Иван Иванович» могут
+            # быть одним человеком, а могут и разными, и цена ошибки
+            # несимметрична — два дубликата это неудобство, а два разных
+            # человека в одном узле порча данных. Псевдоним чинит поиск, ничего
+            # не соединяя: узлы остаются разными.
+            entity_name, alias = _split_rename(argument)
+            if not entity_name or not alias:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Использование: /entity_alias объект => псевдоним\n\n"
+                    "Например: /entity_alias Иванов Иван Иванович => Иванов И.И.\n"
+                    "Псевдоним помогает найти объект по другому написанию и НИЧЕГО не сливает.",
+                )
+                return
+            try:
+                found = await self._backend_json(
+                    backend,
+                    "GET",
+                    f"/api/kg/entity-profile?name={quote(entity_name, safe='')}",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                await self._send_message(
+                    telegram, chat_id, f"Объект «{entity_name}» не найден. Карточка: /profile {entity_name}"
+                )
+                return
+            raw_found = found.get("entity") if isinstance(found, dict) else None
+            found_entity: dict[str, Any] = raw_found if isinstance(raw_found, dict) else {}
+            entity_id = str(found_entity.get("id") or "")
+            if not entity_id:
+                await self._send_message(telegram, chat_id, f"Объект «{entity_name}» не найден.")
+                return
+            existing_aliases = found_entity.get("aliases_json")
+            if isinstance(existing_aliases, str):
+                try:
+                    existing_aliases = json.loads(existing_aliases or "[]")
+                except json.JSONDecodeError:
+                    existing_aliases = []
+            aliases = [str(item) for item in (existing_aliases or []) if str(item).strip()]
+            if alias in aliases:
+                await self._send_message(
+                    telegram, chat_id, f"У объекта «{entity_name}» уже есть псевдоним «{alias}»."
+                )
+                return
+            await self._backend_json(
+                backend,
+                "PATCH",
+                f"/api/kg/entities/{entity_id}",
+                {"aliases": [*aliases, alias], "telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"«{alias}» теперь тоже находит объект «{entity_name}». Узлы не слиты — "
+                "это другое действие, оно в /merges.",
+            )
+            return
         if command == "/entity_rename":
             # Переименование — единственное действие над объектом, которое нельзя
             # сделать кнопкой: новое имя надо ввести. Формат «старое => новое»
