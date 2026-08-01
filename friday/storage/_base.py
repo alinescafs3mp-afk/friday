@@ -57,7 +57,43 @@ from friday.storage.models import (
 # Named for the package, not this module: `__name__` here is "friday.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("friday.storage")
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
+
+#: Определение таблицы шагов миссии отдельной константой: миграция схемы 24
+#: пересоздаёт её, чтобы расширить список состояний, и должна брать ровно это
+#: определение, а не свою копию — иначе две формы таблицы разойдутся.
+MISSION_TASKS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS mission_tasks (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL REFERENCES missions(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'gather' CHECK(kind IN ('gather', 'produce')),
+    title TEXT NOT NULL DEFAULT '',
+    instruction TEXT NOT NULL,
+    depends_on_json TEXT NOT NULL DEFAULT '[]',
+    -- `uncertain` и `compensated` — состояния восстановления после сбоя рядом с
+    -- побочным эффектом (спека v3 §5). `uncertain` значит «неизвестно, случился
+    -- ли эффект»: такой шаг требует сверки с миром, а не повтора вслепую.
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending', 'running', 'done', 'failed', 'skipped',
+                         'uncertain', 'compensated')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    -- Шаг с побочным эффектом: для него важны чекпойнт и компенсация.
+    side_effect INTEGER NOT NULL DEFAULT 0,
+    checkpoint_json TEXT NOT NULL DEFAULT '{}',
+    compensation TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT '',
+    inbox_id TEXT,
+    tools_used_json TEXT NOT NULL DEFAULT '[]',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    UNIQUE(mission_id, seq)
+);
+"""
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -520,6 +556,16 @@ CREATE TABLE IF NOT EXISTS missions (
     done_count INTEGER NOT NULL DEFAULT 0,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
+    -- Бюджеты и срок живут В БАЗЕ, а не в памяти исполнителя: миссия обязана
+    -- пережить перезапуск процесса вместе со своими ограничениями (спека v3 §5).
+    -- Ноль означает «без ограничения» — так же, как отсутствующий срок.
+    budget_seconds INTEGER NOT NULL DEFAULT 0,
+    budget_tool_calls INTEGER NOT NULL DEFAULT 0,
+    budget_retries INTEGER NOT NULL DEFAULT 0,
+    spent_seconds INTEGER NOT NULL DEFAULT 0,
+    spent_tool_calls INTEGER NOT NULL DEFAULT 0,
+    spent_retries INTEGER NOT NULL DEFAULT 0,
+    deadline_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     started_at TEXT,
@@ -535,8 +581,17 @@ CREATE TABLE IF NOT EXISTS mission_tasks (
     title TEXT NOT NULL DEFAULT '',
     instruction TEXT NOT NULL,
     depends_on_json TEXT NOT NULL DEFAULT '[]',
+    -- `uncertain` и `compensated` — состояния восстановления после сбоя рядом с
+    -- побочным эффектом (спека v3 §5). `uncertain` значит «неизвестно, случился
+    -- ли эффект»: такой шаг требует сверки с миром, а не повтора вслепую.
     status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending', 'running', 'done', 'failed', 'skipped')),
+        CHECK(status IN ('pending', 'running', 'done', 'failed', 'skipped',
+                         'uncertain', 'compensated')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    -- Шаг с побочным эффектом: для него важны чекпойнт и компенсация.
+    side_effect INTEGER NOT NULL DEFAULT 0,
+    checkpoint_json TEXT NOT NULL DEFAULT '{}',
+    compensation TEXT NOT NULL DEFAULT '',
     result TEXT NOT NULL DEFAULT '',
     inbox_id TEXT,
     tools_used_json TEXT NOT NULL DEFAULT '[]',

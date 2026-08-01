@@ -16,6 +16,7 @@ from friday.storage._base import (
     FTS_SCHEMA,
     FTS_VOCAB_SCHEMA,
     LOGGER,
+    MISSION_TASKS_SCHEMA,
     SCHEMA_VERSION,
     Any,
     FridaySettings,
@@ -396,6 +397,37 @@ class CoreMixin(StorageShared):
     def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
         return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
+    @staticmethod
+    def _widen_mission_task_states(conn: sqlite3.Connection, table_names: set[str]) -> None:
+        """Разрешить шагам миссии состояния восстановления.
+
+        `uncertain` («неизвестно, случился ли побочный эффект») и `compensated`
+        появились в схеме 24 вместе с чекпойнтами. SQLite не умеет менять CHECK
+        на месте, а `ALTER TABLE ADD COLUMN` его не трогает — поэтому база,
+        созданная прежней версией, молча отвергала бы новое состояние ровно в тот
+        момент, когда оно нужнее всего: при разборе сбоя.
+
+        Таблица пересоздаётся со строками: шаги миссии — рабочие записи, терять
+        их нельзя. Идёт только если старое ограничение действительно узкое.
+        """
+        if "mission_tasks" not in table_names:
+            return
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='mission_tasks'"
+        ).fetchone()
+        definition = str((row[0] if row else "") or "")
+        if "uncertain" in definition:
+            return
+        columns = [item[1] for item in conn.execute("PRAGMA table_info(mission_tasks)")]
+        shared = ", ".join(columns)
+        conn.execute("ALTER TABLE mission_tasks RENAME TO mission_tasks_pre24")
+        # `executescript` неявно коммитит открытую транзакцию — на середине
+        # миграции это означает половину применённой схемы при любой ошибке
+        # дальше. Здесь ровно одно выражение, поэтому обычный execute.
+        conn.execute(MISSION_TASKS_SCHEMA.strip().rstrip(";"))
+        conn.execute(f"INSERT INTO mission_tasks({shared}) SELECT {shared} FROM mission_tasks_pre24")  # nosec B608
+        conn.execute("DROP TABLE mission_tasks_pre24")
+
     def _migrate_legacy_schema(self, conn: sqlite3.Connection) -> None:
         """Upgrade pre-release databases without discarding personal data.
 
@@ -432,6 +464,22 @@ class CoreMixin(StorageShared):
                 "quality_score": "REAL NOT NULL DEFAULT 0.0",
             },
             "entities": {"normalized_name": "TEXT NOT NULL DEFAULT ''"},
+            # Бюджеты, срок и следы восстановления миссий (спека v3 §5, схема 24).
+            "missions": {
+                "budget_seconds": "INTEGER NOT NULL DEFAULT 0",
+                "budget_tool_calls": "INTEGER NOT NULL DEFAULT 0",
+                "budget_retries": "INTEGER NOT NULL DEFAULT 0",
+                "spent_seconds": "INTEGER NOT NULL DEFAULT 0",
+                "spent_tool_calls": "INTEGER NOT NULL DEFAULT 0",
+                "spent_retries": "INTEGER NOT NULL DEFAULT 0",
+                "deadline_at": "TEXT",
+            },
+            "mission_tasks": {
+                "attempts": "INTEGER NOT NULL DEFAULT 0",
+                "side_effect": "INTEGER NOT NULL DEFAULT 0",
+                "checkpoint_json": "TEXT NOT NULL DEFAULT '{}'",
+                "compensation": "TEXT NOT NULL DEFAULT ''",
+            },
             "entity_merge_history": {
                 "transfer_json": "TEXT NOT NULL DEFAULT '{}'",
                 "undone_at": "TEXT",
@@ -464,6 +512,8 @@ class CoreMixin(StorageShared):
             for column, declaration in columns.items():
                 if column not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+        self._widen_mission_task_states(conn, table_names)
 
         now = utc_now()
 
