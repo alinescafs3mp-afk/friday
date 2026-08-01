@@ -543,6 +543,7 @@ class FridaySettings:
     serper_api_key: str
     yandex_search_api_key: str
     yandex_search_type: str
+    local_timezone: str
     web_allow_private_networks: bool
     web_max_response_bytes: int
 
@@ -903,6 +904,11 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         yandex_search_api_key=env("FRIDAY_YANDEX_SEARCH_API_KEY", ""),
         # SEARCH_TYPE_RU / _TR / _COM — какую языковую выдачу спрашивать.
         yandex_search_type=env("FRIDAY_YANDEX_SEARCH_TYPE", "SEARCH_TYPE_RU"),
+        # Время в базе хранится в UTC, а человек спрашивает в своём: «что было
+        # 26 июля в 15 часов» — это пятнадцать по его часам. Пустое значение
+        # означает «часовой пояс машины», что для личного экземпляра и есть
+        # часовой пояс владельца.
+        local_timezone=env("FRIDAY_TIMEZONE", ""),
         web_allow_private_networks=_bool_env("FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS", False),
         web_max_response_bytes=_int_env("FRIDAY_WEB_MAX_RESPONSE_BYTES", 5 * 1024 * 1024, minimum=64 * 1024),
         max_upload_bytes=_int_env("FRIDAY_MAX_UPLOAD_BYTES", 50 * 1024 * 1024, minimum=1024),

@@ -18,8 +18,10 @@ import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from friday.people import resolve_person, unambiguous
 from friday.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
@@ -197,6 +199,115 @@ def _window_bound(value: str | None, *, edge: str) -> tuple[str | None, str | No
     if re.fullmatch(r"\d{4}", text) and 1900 <= int(text) <= 2200:
         return (f"{text}-01-01" if edge == "since" else f"{text}-12-31"), None
     return None, text
+
+
+#: «26 июля в 15 часов», «2026-07-26 15:00», «26.07.2026 15:30».
+_MOMENT_RE = re.compile(
+    r"^\s*(?P<date>\S+(?:\s+\S+){0,2}?)"
+    r"(?:\s*[, ]\s*(?:в\s+)?(?P<hour>\d{1,2})(?:[:.](?P<minute>\d{2}))?\s*(?:час\w*|ч|h)?)?\s*$",
+    re.IGNORECASE,
+)
+
+
+#: Месяцы прописью — по префиксу, чтобы падеж не имел значения («июля», «июле»).
+_MONTHS_RU = {
+    "янв": 1,
+    "фев": 2,
+    "мар": 3,
+    "апр": 4,
+    "ма": 5,
+    "июн": 6,
+    "июл": 7,
+    "авг": 8,
+    "сен": 9,
+    "окт": 10,
+    "ноя": 11,
+    "дек": 12,
+}
+_DAY_MONTH_RE = re.compile(r"^(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?$", re.IGNORECASE)
+_DAYS_AGO_RE = re.compile(r"^(\d{1,3})\s+(?:дн\w*|сут\w*)\s+назад$", re.IGNORECASE)
+_RELATIVE_DAYS = {"сегодня": 0, "вчера": 1, "позавчера": 2}
+
+
+def _spoken_day(text: str, *, today: date) -> str | None:
+    """«26 июля», «31 июля 2026», «вчера», «три дня назад» → `ГГГГ-ММ-ДД`.
+
+    Так люди и называют дни; требовать от человека ISO значит требовать от него
+    работы, которую машина делает лучше. Год без указания — текущий: спрашивают
+    почти всегда про этот.
+
+    Угадывать «весной» или «прошлым летом» здесь по-прежнему нельзя — это тот же
+    класс ошибки, что придумать дату документа.
+    """
+    lowered = " ".join(str(text or "").split()).casefold()
+    if not lowered:
+        return None
+    if lowered in _RELATIVE_DAYS:
+        return (today - timedelta(days=_RELATIVE_DAYS[lowered])).isoformat()
+    ago = _DAYS_AGO_RE.match(lowered)
+    if ago:
+        return (today - timedelta(days=int(ago.group(1)))).isoformat()
+    spoken = _DAY_MONTH_RE.match(lowered)
+    if not spoken:
+        return None
+    day, month_word, year_text = spoken.groups()
+    month = next(
+        (number for prefix, number in _MONTHS_RU.items() if month_word.startswith(prefix)), 0
+    )
+    if not month:
+        return None
+    year = int(year_text) if year_text else today.year
+    try:
+        return date(year, month, int(day)).isoformat()
+    except ValueError:
+        return None
+
+
+def _moment_bounds(value: str, *, edge: str, widen: bool = False) -> tuple[str | None, str | None]:
+    """Граница промежутка с точностью до часа, а не только до дня.
+
+    `_window_bound` понимает дни — этого хватает хронике архива, но не вопросу
+    «что было 26 июля в 15 часов»: там день целиком означал бы ответ не о том,
+    о чём спросили. Здесь к разобранному дню добавляется время, если оно названо:
+    для начала — начало часа, для конца — его последняя секунда.
+
+    Час без даты не принимается: «в 15 часов» без дня — это не момент.
+
+    `widen` расширяет названную минуту до конца её часа. Нужен там, где конец
+    промежутка не назван вовсе: «что было в 15:30» — это вопрос про пятнадцатый
+    час, а не про одну минуту.
+    """
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None, None
+    match = _MOMENT_RE.match(text)
+    if not match:
+        return _window_bound(text, edge=edge)
+    spoken_text = match.group("date")
+    day = _spoken_day(spoken_text, today=datetime.now().date())
+    if day is None:
+        day, bad = _window_bound(spoken_text, edge=edge)
+        if day is None:
+            return None, bad or text
+    hour_text = match.group("hour")
+    if hour_text is None:
+        # День целиком: с его начала до последней секунды.
+        return (f"{day}T00:00:00" if edge == "since" else f"{day}T23:59:59"), None
+    hour = int(hour_text)
+    if not 0 <= hour <= 23:
+        return None, text
+    minute_text = match.group("minute")
+    if minute_text is None:
+        # Час целиком — так это и слышится: «в 15 часов» значит с 15:00 до 15:59.
+        return (f"{day}T{hour:02d}:00:00" if edge == "since" else f"{day}T{hour:02d}:59:59"), None
+    minute = int(minute_text)
+    if not 0 <= minute <= 59:
+        return None, text
+    if edge == "since":
+        return f"{day}T{hour:02d}:{minute:02d}:00", None
+    if widen:
+        return f"{day}T{hour:02d}:59:59", None
+    return f"{day}T{hour:02d}:{minute:02d}:59", None
 
 
 def _count_user_tasks() -> int:
@@ -561,6 +672,7 @@ class ExecutionKernel:
             "entity_create": self._entity_create,
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
+            "what_happened": self._what_happened,
             "list_tags": self._list_tags,
             "speak": self._speak,
             "resolve_duplicates": self._resolve_duplicates,
@@ -1046,6 +1158,93 @@ class ExecutionKernel:
             "title": mission.get("title"),
             "task_count": mission.get("task_count"),
             "queued_for_review": mission.get("status") == "proposed",
+        }
+
+    def _zone(self) -> Any:
+        """Часовой пояс, в котором человек называет время.
+
+        Пустая настройка означает пояс машины: для личного экземпляра это и есть
+        пояс владельца. Неизвестное имя — не повод падать посреди ответа, но и
+        молча считать UTC нельзя: разница в три часа превращает «15 часов» в
+        «18 часов», поэтому о подмене говорится в логе.
+        """
+        name = str(getattr(self.settings, "local_timezone", "") or "").strip()
+        if not name:
+            return datetime.now().astimezone().tzinfo or UTC
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001 — кривое имя пояса не должно ронять ход
+            LOGGER.warning("Unknown timezone %r in settings; falling back to machine zone", name[:60])
+            return datetime.now().astimezone().tzinfo or UTC
+
+    async def _what_happened(
+        self,
+        *,
+        actor: ActorContext,
+        since: str,
+        until: str = "",
+        limit: int = 40,
+    ) -> dict[str, Any]:
+        """Что происходило в названный момент или промежуток.
+
+        Отдельный инструмент, а не фильтр к поиску: на вопрос «что было 26 июля в
+        15 часов» поиск ищет СЛОВА, а спрашивают о МОМЕНТЕ. По словам «26 июля» и
+        «15 часов» найдутся документы, где эти даты УПОМЯНУТЫ, — совсем не то,
+        что появилось тогда.
+
+        `until` необязателен: без него берётся тот же промежуток, что и `since`
+        («26 июля в 15 часов» — это час целиком, «26 июля» — день целиком).
+        """
+        storage = self.storage
+        if storage is None:
+            raise RuntimeError("Execution kernel storage is not initialized")
+        start_local, start_bad = _moment_bounds(since, edge="since")
+        # Без явного конца названное время означает промежуток вокруг себя, а не
+        # мгновение: «в 15:00» человек спрашивает про пятнадцатый час, и ответ
+        # «за 15:00:00–15:00:59» был бы пустым почти всегда.
+        end_local, end_bad = _moment_bounds(until or since, edge="until", widen=not until)
+        if start_bad or end_bad or not start_local or not end_local:
+            # Непонятая граница — отказ, а не «показать всё»: молча снятый фильтр
+            # выдаёт чужое время за спрошенное.
+            return {
+                "understood": False,
+                "error": f"Не понял момент: {start_bad or end_bad!r}. "
+                "Примеры: «2026-07-26 15:00», «26 июля 2026», «2026-07-26».",
+                "events": [],
+            }
+        zone = self._zone()
+        since_utc = datetime.fromisoformat(start_local).replace(tzinfo=zone).astimezone(UTC)
+        until_utc = datetime.fromisoformat(end_local).replace(tzinfo=zone).astimezone(UTC)
+        if until_utc < since_utc:
+            since_utc, until_utc = until_utc, since_utc
+        events = await run_blocking(
+            storage.what_happened,
+            actor.user_id,
+            since=since_utc.isoformat(),
+            until=until_utc.isoformat(),
+            limit=max(1, min(int(limit), 200)),
+        )
+        totals = await run_blocking(
+            storage.count_what_happened,
+            actor.user_id,
+            since=since_utc.isoformat(),
+            until=until_utc.isoformat(),
+        )
+        for event in events:
+            # Человеку — его время, а не UTC: иначе ответ на «в 15 часов» будет
+            # называть 12:00 и выглядеть как ошибка.
+            try:
+                event["at_local"] = (
+                    datetime.fromisoformat(str(event["at"])).astimezone(zone).strftime("%Y-%m-%d %H:%M")
+                )
+            except ValueError:
+                event["at_local"] = str(event["at"])
+        return {
+            "understood": True,
+            "asked_about": {"since": start_local, "until": end_local, "timezone": str(zone)},
+            "total": totals,
+            "shown": len(events),
+            "events": events,
         }
 
     async def _memory_search(
@@ -2120,6 +2319,30 @@ class ExecutionKernel:
             risk="mutate",
         )
         spec("kg_stats", "Статистика личного графа знаний.", "kg.read", {}, [], "observe")
+        spec(
+            "what_happened",
+            "Что происходило в названный момент или промежуток: сообщения переписки и "
+            "документы, появившиеся в архиве, одной лентой по времени. Используй для "
+            "вопросов «что было 26 июля в 15 часов», «что происходило вчера», «покажи "
+            "события за прошлую неделю». НЕ путать с memory_search: тот ищет слова, а "
+            "здесь спрашивают о моменте — по словам «26 июля» найдутся документы, где эта "
+            "дата упомянута, а не то, что было в тот день.",
+            "knowledge.read",
+            {
+                "since": {
+                    "type": "string",
+                    "description": "Начало: «2026-07-26 15:00», «26 июля 2026», «2026-07-26».",
+                },
+                "until": {
+                    "type": "string",
+                    "description": "Конец промежутка. Без него берётся тот же момент, что и since: "
+                    "названный час означает час целиком, названный день — день целиком.",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
+            ["since"],
+            risk="observe",
+        )
         spec(
             "list_tags",
             "Список всех тегов личной базы знаний с числом записей у каждого. "

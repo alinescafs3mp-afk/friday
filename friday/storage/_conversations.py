@@ -389,3 +389,92 @@ class ConversationsMixin(StorageShared):
                 (user_id, channel, channel_id),
             )
         return cursor.rowcount > 0
+
+    def what_happened(
+        self,
+        user_id: str,
+        *,
+        since: str,
+        until: str,
+        limit: int = 60,
+    ) -> list[dict[str, Any]]:
+        """Что происходило в промежутке времени — одной лентой, по часам.
+
+        Требование владельца (2026-08-01): «вся информация в чате, все файлы
+        фиксируются по времени и дате», и на вопрос «что было 26 июля в 15 часов»
+        Пятница обязана ответить уверенно.
+
+        Обычный поиск на такой вопрос не отвечает: он ищет СЛОВА, а спрашивают о
+        МОМЕНТЕ. Ключевые слова там — «26 июля» и «15 часов», и по ним найдутся
+        документы, где эти даты УПОМЯНУТЫ, а не те, что появились тогда.
+
+        Лента собирается из двух источников, потому что «происходило» — это и
+        разговор, и поступления:
+
+        * сообщения чата — что говорили;
+        * объекты знания — что появилось в архиве (файл, страница из интернета,
+          сохранённая заметка), с пометкой, откуда пришло.
+
+        Границы — строки ISO; сравнение строковое, что для ISO-времени совпадает
+        с хронологическим. Хранится всё в UTC, поэтому вызывающий обязан привести
+        границы к UTC сам — иначе «15 часов» будет чужим часом.
+        """
+        window = max(1, min(int(limit), 200))
+        events: list[dict[str, Any]] = []
+        for row in self.execute(
+            """SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title
+               FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id
+               WHERE m.user_id=? AND m.created_at >= ? AND m.created_at <= ?
+               ORDER BY m.created_at ASC LIMIT ?""",
+            (user_id, since, until, window),
+        ):
+            events.append(
+                {
+                    "kind": "message",
+                    "at": str(row["created_at"]),
+                    "role": str(row["role"] or ""),
+                    "text": str(row["content"] or "")[:600],
+                    "conversation_id": str(row["conversation_id"] or ""),
+                    "conversation": str(row["title"] or ""),
+                }
+            )
+        for row in self.execute(
+            """SELECT k.id, k.title, k.content_type, k.created_at, k.summary, r.source, r.source_ref
+               FROM knowledge_objects k LEFT JOIN raw_objects r ON r.id = k.raw_object_id
+               WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND k.created_at >= ? AND k.created_at <= ?
+               ORDER BY k.created_at ASC LIMIT ?""",
+            (user_id, since, until, window),
+        ):
+            events.append(
+                {
+                    "kind": "document",
+                    "at": str(row["created_at"]),
+                    "id": str(row["id"]),
+                    "title": str(row["title"] or ""),
+                    "content_type": str(row["content_type"] or ""),
+                    "summary": str(row["summary"] or "")[:300],
+                    "source": str(row["source"] or ""),
+                    "source_ref": str(row["source_ref"] or "")[:300],
+                }
+            )
+        events.sort(key=lambda item: (str(item["at"]), str(item.get("kind"))))
+        return events[:window]
+
+    def count_what_happened(self, user_id: str, *, since: str, until: str) -> dict[str, int]:
+        """Сколько всего событий в промежутке — отдельным счётом, без потолка.
+
+        Длина показанной страницы — не факт о промежутке: сказать «за этот час
+        было 60 событий», показав ровно свои 60, значит выдать размер запроса за
+        свойство архива.
+        """
+        messages = self.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE user_id=? AND created_at >= ? AND created_at <= ?",
+            (user_id, since, until),
+        ).fetchone()["c"]
+        documents = self.execute(
+            """SELECT COUNT(*) AS c FROM knowledge_objects
+               WHERE user_id=? AND deleted_at IS NULL AND created_at >= ? AND created_at <= ?""",
+            (user_id, since, until),
+        ).fetchone()["c"]
+        return {"messages": int(messages), "documents": int(documents), "total": int(messages) + int(documents)}
