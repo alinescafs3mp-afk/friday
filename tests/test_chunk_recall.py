@@ -402,7 +402,7 @@ def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path
         version = int(
             migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
         )
-        assert version == SCHEMA_VERSION == 21
+        assert version == SCHEMA_VERSION == 22
         # The pre-existing vector survived and reads as "never chunked".
         row = migrated.execute(
             "SELECT chunk_scheme FROM knowledge_embeddings WHERE knowledge_object_id=?", (note["id"],)

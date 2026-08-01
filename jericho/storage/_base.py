@@ -57,7 +57,7 @@ from jericho.storage.models import (
 # Named for the package, not this module: `__name__` here is "jericho.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("jericho.storage")
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 MAX_API_TOKEN_TTL_SECONDS = 100 * 365 * 24 * 3600
 EVAL_MINED_CASE_CAP = 200
 # Operational journal size. Roughly a month of transitions for this workload, and a
@@ -646,6 +646,53 @@ CREATE TABLE IF NOT EXISTS monitors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_monitors_user ON monitors(user_id, active);
+
+-- Спека v3 §5: подтверждение опасного действия — durable, привязано к ТОЧНОМУ
+-- нормализованному описанию действия и заявляется ровно один раз.
+--
+-- Модель — недоверенный источник предложений: сегодня она может сама слить две
+-- сущности (`entity_merge_decide` accept), объявить знание устаревшим
+-- (`conflict_decide`) или выполнить код. Право `kg.merge` отвечает на вопрос
+-- «этому актору вообще можно», но не на вопрос «человек видел ИМЕННО ЭТО
+-- действие и согласился».
+--
+-- `payload_hash` держит вторую половину: подтверждение годится только для того
+-- набора аргументов, который человеку показали. Подмена аргументов после решения
+-- не проходит проверку при заявлении.
+--
+-- Статусы различают исходы, которые спека требует различать при восстановлении
+-- после падения: `claimed` — исполняется, `done`/`failed` — известный исход,
+-- `uncertain` — процесс умер между заявлением и результатом, и повторять НЕЛЬЗЯ:
+-- побочный эффект мог уже случиться. Такие записи ждут сверки человеком.
+CREATE TABLE IF NOT EXISTS action_approvals (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    tool TEXT NOT NULL,
+    risk TEXT NOT NULL DEFAULT 'high' CHECK(risk IN ('mutate', 'high')),
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    payload_hash TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending', 'approved', 'rejected', 'expired',
+                         'claimed', 'done', 'failed', 'uncertain')),
+    requested_by TEXT NOT NULL DEFAULT '',
+    conversation_id TEXT,
+    mission_id TEXT,
+    policy_epoch TEXT NOT NULL DEFAULT '',
+    decided_by TEXT,
+    decided_at TEXT,
+    claimed_at TEXT,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT NOT NULL DEFAULT '',
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_approvals_user_status
+    ON action_approvals(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_approvals_pending_expiry
+    ON action_approvals(status, expires_at);
 
 -- Retrieval eval gold set: a query paired with the Knowledge Objects that a
 -- good search must surface. Measured periodically to catch quality regressions.

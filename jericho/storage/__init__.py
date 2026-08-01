@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from jericho.config import JerichoSettings
 from jericho.storage._accounts import AccountsMixin
+from jericho.storage._approvals import ApprovalsMixin
 from jericho.storage._base import (
     CONVERSATION_MODES,
     EVAL_MINED_CASE_CAP,
@@ -55,6 +56,7 @@ __all__ = [
 
 class JerichoStorage(
     AccountsMixin,
+    ApprovalsMixin,
     ConversationsMixin,
     CoreMixin,
     FeedbackMixin,
