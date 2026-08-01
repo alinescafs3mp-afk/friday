@@ -143,6 +143,10 @@ async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
         # значит выдавать отклонённые владельцем связи за связи и упираться в
         # потолок молча. Счётчик — отдельный, по статусам, без потолка.
         "entity_link_counts": storage.count_knowledge_entity_links(actor.user_id, knowledge_id),
+        # Вторая половина lineage (§6): не «откуда взялось», а «что затронет
+        # изменение». Практический смысл — на этом документе может держаться
+        # единственное упоминание сущности: на живом корпусе так у 1168 из 4448.
+        "impact": storage.knowledge_impact(actor.user_id, knowledge_id),
         "raw_source": (
             {
                 "source": raw.get("source"),

@@ -371,3 +371,106 @@ def test_nothing_is_said_when_nothing_was_filtered():
 def test_without_a_reranker_the_header_is_plain():
     text = TelegramBridge._format_search_results("поверка", _results(3), None)
     assert text.startswith("Найдено по запросу «поверка»:")
+
+
+def test_lineage_says_what_would_be_lost_with_this_document():
+    """Вторая половина lineage (спека v3 §6): не «откуда взялось», а «что
+    затронет изменение».
+
+    Практический смысл прямой: на живом корпусе 1168 сущностей из 4448 (26.3%)
+    держатся на ЕДИНСТВЕННОМ документе, то есть исчезнут из графа вместе с ним.
+    Человек, решающий судьбу документа, должен видеть это ДО решения, а не
+    обнаруживать потом.
+
+    Мутация: печатать `entities_confirmed` вместо `entities_without_another_source`
+    — тест обязан покраснеть (числа разные и означают разное).
+    """
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Приказ", "content": "Тело."},
+            "raw_source": None,
+            "versions": [{"version": 1}],
+            "entity_links": [],
+            "entity_link_counts": {"accepted": 7, "suggested": 0, "rejected": 0},
+            "impact": {"entities_confirmed": 7, "entities_without_another_source": 3},
+            "usage": {},
+        }
+    )
+    assert "без него останутся без источника: 3" in text
+    assert "без источника: 7" not in text
+
+
+def test_lineage_stays_quiet_when_nothing_would_be_lost():
+    """«0 останутся без источника» — не сведение, а шум: у большинства документов
+    все их сущности упомянуты ещё где-то."""
+    text = TelegramBridge._format_full_document(
+        {
+            "item": {"title": "Приказ", "content": "Тело."},
+            "raw_source": None,
+            "versions": [{"version": 1}],
+            "entity_links": [],
+            "entity_link_counts": {"accepted": 4, "suggested": 0, "rejected": 0},
+            "impact": {"entities_confirmed": 4, "entities_without_another_source": 0},
+            "usage": {},
+        }
+    )
+    assert "без источника" not in text
+
+
+def test_impact_counts_only_entities_this_document_alone_confirms(settings):
+    """Сквозная проверка на настоящем хранилище: сущность, упомянутая ДВУМЯ
+    документами, потерей не считается — она переживёт удаление любого из них."""
+    import hashlib
+
+    from jericho.knowledge_graph import KnowledgeGraph
+    from jericho.permissions import LEGACY_OWNER_USER_ID
+    from jericho.storage import init_storage
+    from jericho.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+
+    storage = init_storage(settings)
+    try:
+        storage.ensure_user(LEGACY_OWNER_USER_ID)
+        graph = KnowledgeGraph(storage)
+
+        def _document(text: str) -> str:
+            raw = RawObject(
+                id=new_id("raw"),
+                user_id=LEGACY_OWNER_USER_ID,
+                source="test",
+                source_ref=new_id("src"),
+                raw_content=text,
+                content_type="text",
+                content_hash=hashlib.sha256(text.encode()).hexdigest(),
+            )
+            storage.store_raw_object(raw)
+            ko = KnowledgeObject(
+                id=new_id("ko"),
+                user_id=LEGACY_OWNER_USER_ID,
+                raw_object_id=raw.id,
+                content=text,
+                content_type="text",
+                title=text[:40],
+            )
+            storage.store_knowledge_object(ko)
+            return ko.id
+
+        first, second = _document("первый документ"), _document("второй документ")
+        shared = Entity(
+            id=new_id("ent"), user_id=LEGACY_OWNER_USER_ID, name="Общая", entity_type=EntityType.OTHER
+        )
+        lonely = Entity(
+            id=new_id("ent"), user_id=LEGACY_OWNER_USER_ID, name="Единственная", entity_type=EntityType.OTHER
+        )
+        storage.create_entity(shared)
+        storage.create_entity(lonely)
+        graph.link_knowledge_to_entity(first, shared.id, LEGACY_OWNER_USER_ID, status="accepted")
+        graph.link_knowledge_to_entity(second, shared.id, LEGACY_OWNER_USER_ID, status="accepted")
+        graph.link_knowledge_to_entity(first, lonely.id, LEGACY_OWNER_USER_ID, status="accepted")
+
+        impact = storage.knowledge_impact(LEGACY_OWNER_USER_ID, first)
+        assert impact["entities_confirmed"] == 2
+        assert impact["entities_without_another_source"] == 1, (
+            "сущность, упомянутая двумя документами, засчитана как потеря"
+        )
+    finally:
+        storage.close(final=True)

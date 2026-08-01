@@ -935,6 +935,14 @@ class ViewsMixin(BridgeShared):
             answer_count = int(usage.get("answer_count") or 0)
             if answer_count:
                 parts.append(f"использовано в ответах: {answer_count}")
+        # Вторая половина lineage: что потеряется, если документ убрать. Строка
+        # появляется только когда потеря есть — «0 останутся без источника» это
+        # не сведение, а шум.
+        impact = envelope.get("impact")
+        if isinstance(impact, dict):
+            orphaned = int(impact.get("entities_without_another_source") or 0)
+            if orphaned:
+                parts.append(f"без него останутся без источника: {orphaned}")
         if not parts:
             return ""
         return "📜 " + " · ".join(parts)

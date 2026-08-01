@@ -102,7 +102,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # версию, порождённую слиянием (иначе «отменить последнюю правку» стирало
 # алиас-мост, а слитая сущность оставалась надгробием); второй даёт удалению
 # обратный ход, без которого «мягкое удаление» было мягким только на словах.
-EXPECTED_MEMBER_COUNT = 271
+# 271 → 272: knowledge_impact — вторая половина lineage, «что затронет изменение»:
+# на живом корпусе 1168 сущностей из 4448 держатся на ЕДИНСТВЕННОМ документе.
+EXPECTED_MEMBER_COUNT = 272
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
