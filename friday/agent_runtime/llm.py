@@ -310,6 +310,10 @@ class LLMRouter:
         self._background_sem = asyncio.Semaphore(1)
         # Помним отказ эндпоинта от инструментов, чтобы не платить за него каждый раз.
         self._tools_refused = False
+        # Видели ли мы у этого профиля рассуждение вслух. Пока не видели, обрыв
+        # по длине означает обрезанный ОТВЕТ, а не незакрытый монолог, и стирать
+        # его нельзя — см. `_strip_thinking`.
+        self._thinking_seen = False
 
     @property
     def enabled(self) -> bool:
@@ -515,7 +519,13 @@ class LLMRouter:
 
                 finish_reason = str(choice.get("finish_reason") or "stop")
                 if self.settings.profile.suppress_model_thinking and content:
-                    content = self._strip_thinking(content, finish_reason)
+                    content = self._strip_thinking(
+                        content, finish_reason, thinking_seen=self._thinking_seen
+                    )
+                if "</think>" in content or "<think>" in content:
+                    # Профиль всё-таки рассуждает вслух — значит обрыв по длине у
+                    # него действительно может оставить один монолог.
+                    self._thinking_seen = True
                 if detect_repeated_token_degeneration(content):
                     raise RuntimeError("LLM response rejected: repeated-token degeneration detected")
                 return {
@@ -597,7 +607,7 @@ class LLMRouter:
             yield {"type": "error", "error": str(exc)}
 
     @staticmethod
-    def _strip_thinking(content: str, finish_reason: str = "stop") -> str:
+    def _strip_thinking(content: str, finish_reason: str = "stop", thinking_seen: bool = True) -> str:
         """Remove a reasoning model's visible chain-of-thought from its answer.
 
         Runtimes that ignore ``enable_thinking=False`` emit the monologue in ``content``
@@ -626,7 +636,7 @@ class LLMRouter:
 
         if "</think>" in content:
             return content.rsplit("</think>", 1)[-1].strip()
-        if finish_reason == "length":
+        if finish_reason == "length" and thinking_seen:
             # Truncated before the model ever reached its answer. Verified on this
             # endpoint: an entity-extraction prompt spends 2000 tokens and still never
             # closes the tag. Empty lets the caller's own fallback speak.
@@ -638,6 +648,15 @@ class LLMRouter:
             # the tag intact. Reaching this line means the monologue never closed,
             # and there is no answer inside to rescue — only the model's notes,
             # which the enrichment paths would parse as content.
+            #
+            # ⚠️ Перемерено 2026-08-02: у профиля `qwen36-vl` рассуждение ОТКЛЮЧЕНО
+            # флагом (`enable_thinking: False`), и рантайм его соблюдает — в 15+
+            # живых ответах `</think>` не встретился ни разу. Значит для него
+            # ветка выше сработать не может, а «монолога» здесь не бывает: обрыв
+            # по длине означает обрезанный ОТВЕТ, и стирать его — терять то
+            # единственное, что модель успела сказать. Поэтому стирание теперь
+            # применяется, только если рассуждение в ответах этого профиля вообще
+            # встречается (`thinking_seen`).
             return ""
         markers = (
             "Here's a thinking process:",

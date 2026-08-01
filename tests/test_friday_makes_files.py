@@ -243,3 +243,29 @@ def test_grounds_come_from_the_context_not_from_thin_air(settings, storage):
     assert "1533" in grounds
     assert "4608" in grounds
     assert "Приказ 214" in grounds
+
+
+def test_a_sent_document_does_not_trigger_building_another_one():
+    """Мутация: убрать проверку `synthetic_document_notice` — тест краснеет.
+
+    Когда человек присылает файл без подписи, backend сочиняет за него текст
+    «Загружен документ: отчёт.docx». Слово «отчёт» в ЧУЖОМ имени файла попадало
+    под детектор просьбы о документе, и система собирала ещё один файл — на
+    пустом месте, в ответ на присланный.
+
+    Флаг `synthetic_document_notice` для этого и заведён: он уже отключает
+    графовое расширение по той же причине — имя чужого файла не является
+    просьбой человека.
+    """
+    import inspect
+
+    from friday.agent_runtime import _ASKS_FOR_A_FILE, AgentRuntime
+
+    # Сам детектор на такой строке срабатывает — в этом и была ловушка.
+    assert _ASKS_FOR_A_FILE.search("Загружен документ: отчёт по проверке.docx")
+
+    source = inspect.getsource(AgentRuntime.chat)
+    guard = source[: source.index("_file_for_a_request_that_wanted_one(")]
+    assert "not synthetic_document_notice" in guard, (
+        "сгенерированное уведомление о файле судится как просьба человека"
+    )

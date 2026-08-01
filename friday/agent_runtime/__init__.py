@@ -705,7 +705,15 @@ class AgentRuntime:
             response = await self._generate_response(context, clean_message, attachments)
 
         content = (response.get("content") or "").strip() or "Не удалось сформировать ответ."
-        if _ASKS_FOR_A_FILE.search(clean_message) and not response.get("file_clips"):
+        # `synthetic_document_notice` означает, что текст сочинил backend вместо
+        # человека («Загружен документ: отчёт.docx»), и просьбой о файле он не
+        # является: слово «отчёт» в ЧУЖОМ имени файла запускало сборку документа
+        # на пустом месте — человек прислал файл и получал в ответ ещё один.
+        if (
+            not synthetic_document_notice
+            and _ASKS_FOR_A_FILE.search(clean_message)
+            and not response.get("file_clips")
+        ):
             made = await self._file_for_a_request_that_wanted_one(
                 clean_message,
                 content,
