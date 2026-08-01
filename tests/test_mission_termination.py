@@ -165,3 +165,65 @@ def test_a_failed_step_does_not_hide_behind_a_successful_one(settings, storage):
         "миссия отчиталась «завершена», хотя результат не произведён"
     )
     assert finished["completed_at"], "миссия обязана быть терминальной в любом случае"
+
+
+@pytest.mark.asyncio
+async def test_a_mission_step_cannot_call_a_tool_outside_its_allowed_set(settings, storage):
+    """Список инструментов, отданный модели, — подсказка, а не ограничение.
+
+    Модель вольна назвать любое имя, и до проверки оно исполнялось: шаг миссии
+    наследует способности ВЛАДЕЛЬЦА, поэтому `memory_save`/`entity_create` прошли
+    бы гейт ядра — и миссия писала бы в канон мимо единственного предусмотренного
+    выхода (Inbox, один раз, руками исполнителя).
+
+    Мутация: убрать проверку `call.name not in GATHER_TOOLS` — тест обязан
+    покраснеть.
+    """
+    import json as _json
+
+    from jericho.executive.service import GATHER_TOOLS
+
+    storage.ensure_user("alice")
+    service = _service(settings, storage)
+    executed: list[str] = []
+
+    class _ToolHappyLLM:
+        enabled = True
+        model = "test-model"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, **kwargs):
+            del messages, kwargs
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "content": _json.dumps(
+                        {"tool": "memory_save", "arguments": {"content": "канон мимо ревью"}},
+                        ensure_ascii=False,
+                    ),
+                    "finish_reason": "stop",
+                }
+            return {"content": "Готово: сведения собраны.", "finish_reason": "stop"}
+
+    async def _spy_execute(name, arguments, *, actor):
+        del arguments, actor
+        executed.append(name)
+
+        class _Result:
+            def to_llm_message(self) -> str:
+                return "ok"
+
+        return _Result()
+
+    service.llm = _ToolHappyLLM()
+    service.kernel.execute = _spy_execute  # type: ignore[method-assign]
+    service.kernel.get_tool_definitions = lambda actor: [  # type: ignore[method-assign]
+        {"function": {"name": name}} for name in sorted(GATHER_TOOLS)
+    ]
+
+    actor = service.auth_service.actor_for_user("alice", source="test")
+    await service._run_tool_loop("собери сведения", actor)  # noqa: SLF001
+
+    assert "memory_save" not in executed, "шаг миссии исполнил инструмент вне разрешённого набора"

@@ -219,3 +219,37 @@ def _dummy_ctx():
 def test_registry_includes_profile_and_chronicle(settings):
     names = {o.name for o in build_registry(settings).organs}
     assert {"profile", "chronicle"} <= names
+
+
+def test_a_self_registered_newcomer_is_a_valid_push_target(settings, storage):
+    """Открытая регистрация впускает человека РЕШЕНИЕМ BACKEND — он же заводит
+    учётку и кладёт `chat_id` в её метаданные.
+
+    Мост это учитывал, а органы проверяли только статический список, и
+    самозарегистрированный человек не получал НИ ОДНОГО проактивного сообщения:
+    ни напоминаний, ни хроники, ни предупреждений sentinel. Молча — отказ
+    выглядел как «ему нечего сказать».
+
+    Мутация: вернуть проверку «только статический список» — тест обязан
+    покраснеть на первом же утверждении.
+    """
+    from dataclasses import replace
+
+    from jericho.organs import may_push_to
+
+    storage.ensure_user("newbie", preset_key="newcomer")
+    storage.update_user("newbie", metadata_json={"chat_id": "7777"})
+    storage.ensure_user("listed", preset_key="user")
+    storage.update_user("listed", metadata_json={"chat_id": "5001"})
+
+    opened = replace(settings, telegram_allowed_chat_ids=[5001], telegram_open_registration=True)
+    assert may_push_to(opened, storage, "newbie", "7777") is True
+    assert may_push_to(opened, storage, "listed", "5001") is True
+
+    # Открытую регистрацию выключили — новичкам больше не пишем, deny-by-default.
+    closed = replace(settings, telegram_allowed_chat_ids=[5001], telegram_open_registration=False)
+    assert may_push_to(closed, storage, "newbie", "7777") is False
+    assert may_push_to(closed, storage, "listed", "5001") is True
+
+    # Чужой чат не проходит ни при каких настройках.
+    assert may_push_to(opened, storage, "listed", "999999") is False

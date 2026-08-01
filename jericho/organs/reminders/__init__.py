@@ -13,7 +13,7 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
+from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, may_push_to, resolve_chat_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,10 +51,7 @@ async def scan_reminders(ctx: ServiceContext) -> None:
         if not chat_id:
             continue
         # Deny-by-default, re-checked here (bridge re-checks again at send time).
-        try:
-            if int(chat_id) not in allowed:
-                continue
-        except ValueError:
+        if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
         for event in ctx.storage.list_events_in_range(user_id, start=start, end=end):
             dedup_key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"

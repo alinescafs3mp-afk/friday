@@ -137,6 +137,33 @@ def resolve_chat_id(storage, user_id: str) -> str | None:
     return chat_id
 
 
+def may_push_to(settings, storage, user_id: str, chat_id: str) -> bool:
+    """Позволено ли проактивному органу писать в этот чат.
+
+    Статический список — не единственный законный источник адресата. Открытая
+    регистрация (`JERICHO_TELEGRAM_OPEN_REGISTRATION`) впускает человека РЕШЕНИЕМ
+    САМОГО BACKEND: он же заводит учётку и кладёт `chat_id` в её метаданные. Мост
+    это учитывает (`_may_message_chat`), а органы проверяли только список — и
+    самозарегистрированный человек не получал НИ ОДНОГО проактивного сообщения:
+    ни напоминаний, ни хроники, ни предупреждений sentinel. Молча, потому что
+    отказ выглядел как «ему нечего сказать».
+
+    Deny-by-default остаётся: чат новичка проходит, только пока открытая
+    регистрация ВКЛЮЧЕНА. Выключил владелец — новичкам больше не пишем, хотя
+    учётки остаются.
+    """
+    try:
+        number = int(str(chat_id).strip())
+    except (TypeError, ValueError):
+        return False
+    if number in settings.telegram_effective_allowed_chat_ids:
+        return True
+    if not getattr(settings, "telegram_open_registration", False):
+        return False
+    user = storage.get_user(user_id)
+    return bool(user) and str(user.get("preset_key") or "") == "newcomer"
+
+
 def in_quiet_hours(hour: int, start: int, end: int) -> bool:
     """Whether ``hour`` (0-23, UTC) falls in the quiet window, midnight-safe.
 
@@ -183,6 +210,7 @@ __all__ = [
     "ServiceContext",
     "build_registry",
     "in_quiet_hours",
+    "may_push_to",
     "resolve_chat_id",
 ]
 

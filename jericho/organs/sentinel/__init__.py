@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from jericho.diagnostics import collect_diagnostics
-from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
+from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, may_push_to, resolve_chat_id
 from jericho.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -134,10 +134,7 @@ async def scan_health(ctx: ServiceContext) -> None:
         if not chat_id:
             continue
         # Deny-by-default, re-checked here (the bridge re-checks again at send).
-        try:
-            if int(chat_id) not in allowed:
-                continue
-        except ValueError:
+        if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
         for action in alerts:
             code = str(action.get("code") or "issue")

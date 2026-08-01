@@ -597,6 +597,29 @@ class ExecutiveService:
             ]
             messages.append({"role": "assistant", "content": assistant_content, "tool_calls": openai_calls})
             for call, openai_call in zip(selected, openai_calls, strict=True):
+                if call.name not in GATHER_TOOLS:
+                    # Список инструментов, отданный модели, — это ПОДСКАЗКА, а не
+                    # ограничение: модель вольна назвать любое имя, и до этой
+                    # проверки оно исполнялось. Способности актора шаг миссии
+                    # наследует от владельца, то есть `memory_save`,
+                    # `entity_create`, `entity_link` прошли бы гейт ядра — и
+                    # миссия писала бы в канон в обход единственного
+                    # предусмотренного выхода (Inbox, один раз, руками
+                    # исполнителя). Спека v3 §5: модель предлагает, служба
+                    # авторизует и исполняет.
+                    LOGGER.warning("mission step proposed a tool outside GATHER_TOOLS: %s", call.name)
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": openai_call["id"],
+                            "content": (
+                                f"Инструмент {call.name} шагу миссии недоступен: "
+                                "шаг только собирает сведения, изменения делает исполнитель."
+                            ),
+                        }
+                    )
+                    total_calls += 1
+                    continue
                 tool_result = await self.kernel.execute(call.name, call.arguments, actor=actor)
                 tools_used.append(call.name)
                 total_calls += 1
