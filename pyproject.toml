@@ -21,6 +21,8 @@ dependencies = [
     "python-pptx>=1.0,<2",
     "py7zr>=1.0,<2",
     "rarfile>=4.2,<5",
+    # Сборка PDF-отчётов. Кириллица требует внешнего шрифта — см. friday/reports.
+    "reportlab>=4.2,<6",
     "striprtf>=0.0.29,<1",
     "uvicorn[standard]>=0.34,<1",
     "websockets>=15,<17",

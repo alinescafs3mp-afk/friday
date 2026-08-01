@@ -279,6 +279,7 @@ class BridgeShared:
     _send_conflicts: Callable[..., Any]
     _send_history: Callable[..., Any]
     _send_merges: Callable[..., Any]
+    _deliver_generated_files: Callable[..., Any]
     _send_reminders: Callable[..., Any]
     _send_message: Callable[..., Any]
     _send_document: Callable[..., Any]

@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from friday.people import resolve_person, unambiguous
 from friday.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
+from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import best_snippet
 from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
@@ -43,6 +44,10 @@ if TYPE_CHECKING:
 
 #: Ниже этого объёма страница знанием не становится — сохранять нечего.
 _WEB_CAPTURE_MIN_CHARS = 200
+
+#: Потолок собранного файла. Telegram принимает и больше, но отчёт на десятки
+#: мегабайт — это не отчёт, а выгрузка, и её место не во вложении к реплике.
+_MAX_GENERATED_FILE_BYTES = 12 * 1024 * 1024
 
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
@@ -672,6 +677,7 @@ class ExecutionKernel:
             "entity_create": self._entity_create,
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
+            "make_file": self._make_file,
             "what_happened": self._what_happened,
             "list_tags": self._list_tags,
             "speak": self._speak,
@@ -1680,6 +1686,59 @@ class ExecutionKernel:
             },
         }
 
+    async def _make_file(
+        self,
+        *,
+        actor: ActorContext,
+        kind: str,
+        title: str,
+        blocks: list[dict[str, Any]] | None = None,
+        subtitle: str = "",
+        filename: str = "",
+    ) -> dict[str, Any]:
+        """Собрать готовый файл: Word, Excel, PDF или картинку.
+
+        Требование владельца (2026-08-01): «сделай мне отчёт с выводом по тем-то
+        документам» должно заканчиваться файлом, а не текстом в чате.
+
+        Содержимое описывается структурой (заголовки, абзацы, списки, таблицы), а
+        не разметкой формата: иначе модель учила бы три разных языка разметки, и
+        форматы разошлись бы по возможностям в первый же день.
+
+        Инструмент НИЧЕГО не выдумывает и ничего не ищет: что писать, решает
+        модель по уже собранным основаниям. Здесь — только вёрстка.
+        """
+        del actor
+        spec = spec_from_payload(title, subtitle, blocks or [])
+        if not spec.blocks:
+            return {"created": False, "reason": "нечего писать: не передано ни одного блока"}
+        try:
+            payload = await run_blocking(render, kind, spec)
+        except ValueError as exc:
+            return {"created": False, "reason": str(exc)}
+        except Exception as exc:  # noqa: BLE001 — вёрстка не должна ронять ход
+            LOGGER.exception("Report rendering failed")
+            return {"created": False, "reason": f"не удалось собрать файл: {type(exc).__name__}"}
+        if len(payload) > _MAX_GENERATED_FILE_BYTES:
+            return {
+                "created": False,
+                "reason": f"файл получился {len(payload) // 1024} КБ — больше допустимого",
+            }
+        mime, extension = SUPPORTED_KINDS[str(kind).strip().casefold()]
+        name = _safe_filename(filename or spec.title, extension)
+        return {
+            "created": True,
+            "filename": name,
+            "kind": kind,
+            "bytes": len(payload),
+            "_attachment": {
+                "kind": "document",
+                "filename": name,
+                "mime_type": mime,
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+            },
+        }
+
     async def _resolve_duplicates(self, *, actor: ActorContext) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
         # Off the event loop: the scan is quadratic in entity count and this is a
@@ -2320,6 +2379,36 @@ class ExecutionKernel:
         )
         spec("kg_stats", "Статистика личного графа знаний.", "kg.read", {}, [], "observe")
         spec(
+            "make_file",
+            "Собрать готовый файл и отправить человеку: Word (docx), Excel (xlsx), PDF "
+            "или картинку (png). Используй, когда просят «сделай отчёт», «оформи в word», "
+            "«выгрузи таблицей», «пришли файлом». Содержимое передаёшь структурой блоков — "
+            "заголовки, абзацы, списки, таблицы; формат вёрстки тебя не касается. "
+            "Пиши только то, что подтверждено собранными основаниями: файл выглядит "
+            "весомее реплики в чате, и выдумка в нём живёт дольше.",
+            "knowledge.read",
+            {
+                "kind": {"type": "string", "enum": sorted(SUPPORTED_KINDS)},
+                "title": {"type": "string", "description": "Заголовок документа и имя файла."},
+                "subtitle": {"type": "string", "description": "Подзаголовок: дата, основание, автор."},
+                "blocks": {
+                    "type": "array",
+                    "description": (
+                        "Содержимое по порядку. Каждый блок — объект: "
+                        '{"kind":"heading","text":"..."} — раздел; '
+                        '{"kind":"text","text":"..."} — абзац; '
+                        '{"kind":"bullets","items":["...","..."]} — список; '
+                        '{"kind":"table","rows":[["шапка","шапка"],["ячейка","ячейка"]]} — '
+                        "таблица, первая строка считается шапкой."
+                    ),
+                    "items": {"type": "object"},
+                },
+                "filename": {"type": "string", "description": "Имя файла, если нужно своё."},
+            },
+            ["kind", "title", "blocks"],
+            risk="observe",
+        )
+        spec(
             "what_happened",
             "Что происходило в названный момент или промежуток: сообщения переписки и "
             "документы, появившиеся в архиве, одной лентой по времени. Используй для "
@@ -2502,3 +2591,16 @@ class ExecutionKernel:
             ["goal"],
             risk="mutate",
         )
+
+
+def _safe_filename(title: str, extension: str) -> str:
+    """Имя файла из заголовка — без путей и служебных знаков.
+
+    Заголовок пишет модель, а он становится именем на диске и в Telegram: слэш
+    или `..` в нём — это уже не косметика.
+    """
+    cleaned = "".join(
+        char if char.isalnum() or char in " -_()" else " " for char in str(title or "").strip()
+    )
+    cleaned = " ".join(cleaned.split())[:80].strip() or "Отчёт"
+    return f"{cleaned}.{extension}"

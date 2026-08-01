@@ -324,6 +324,7 @@ class CommandsMixin(BridgeShared):
                 reply_markup=self._response_reply_markup(response),
             )
             await self._deliver_voice_reply(telegram, chat_id, response)
+            await self._deliver_generated_files(telegram, chat_id, response)
             return
         if command == "/instructions":
             me = await register_backend_user()
@@ -1083,6 +1084,7 @@ class CommandsMixin(BridgeShared):
                 reply_markup=self._response_reply_markup(cached_response),
             )
             await self._deliver_voice_reply(telegram, chat_id, cached_response)
+            await self._deliver_generated_files(telegram, chat_id, cached_response)
             return
 
         # Forwarded-message provenance travels with the ingested content.
@@ -1153,3 +1155,4 @@ class CommandsMixin(BridgeShared):
             reply_markup=self._response_reply_markup(response),
         )
         await self._deliver_voice_reply(telegram, chat_id, response)
+        await self._deliver_generated_files(telegram, chat_id, response)

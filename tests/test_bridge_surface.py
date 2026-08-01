@@ -282,7 +282,7 @@ EXPECTED_COMMANDS = {
 # 57 → 58: _may_message_chat — один предикат «кому боту позволено писать» вместо трёх
 # копий условия. Копия в уведомлении о неудаче отстала, и самозарегистрированный
 # newcomer не получал ни отказа, ни ответа на правку — только молчание.
-EXPECTED_BRIDGE_COUNT = 60
+EXPECTED_BRIDGE_COUNT = 61
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -325,8 +325,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_reminders": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
-    "_send_document": "(self, client: 'httpx.AsyncClient', chat_id: 'int', filename: 'str', content_bytes: 'bytes', *, caption: 'str' = '') -> 'None'",
+    "_send_document": "(self, client: 'httpx.AsyncClient', chat_id: 'int', filename: 'str', content_bytes: 'bytes', *, caption: 'str' = '', mime_type: 'str' = 'text/plain; charset=utf-8') -> 'None'",
     "_send_voice": "(self, client: 'httpx.AsyncClient', chat_id: 'int', audio_bytes: 'bytes') -> 'None'",
+    "_deliver_generated_files": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
+    "_deliver_generated_files": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "_deliver_voice_reply": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "_send_message": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, reply_markup: 'dict[str, Any] | None' = None) -> 'None'",
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",

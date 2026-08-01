@@ -7,6 +7,8 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from friday.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
     LOGGER,
@@ -702,6 +704,54 @@ class CallbacksMixin(BridgeShared):
             await self._send_voice(telegram, chat_id, audio_bytes)
         except Exception:
             LOGGER.warning("tts: sendVoice failed", exc_info=True)
+
+    async def _deliver_generated_files(
+        self,
+        telegram: httpx.AsyncClient,
+        chat_id: int,
+        response: dict[str, Any],
+    ) -> None:
+        """Отправить файлы, собранные инструментом `make_file`, после текста.
+
+        Требование владельца: «сделай отчёт» должно заканчиваться файлом. Файл
+        уходит документом, а не голосом и не текстом: у `sendDocument` есть имя и
+        расширение, по которым человек его откроет.
+
+        Как и голос — по возможности: сбой доставки не должен превращать удачный
+        текстовый ответ в ошибку. Но, в отличие от голоса, о неудаче говорится
+        человеку: он ПРОСИЛ файл и молчания не поймёт.
+        """
+        files = response.get("files")
+        if not isinstance(files, list):
+            return
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            encoded = str(item.get("content_base64") or "")
+            if not encoded:
+                continue
+            try:
+                payload = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                LOGGER.warning("make_file: вложение не разобралось")
+                continue
+            filename = str(item.get("filename") or "report.bin")
+            try:
+                await self._send_document(
+                    telegram,
+                    chat_id,
+                    filename,
+                    payload,
+                    mime_type=str(item.get("mime_type") or "application/octet-stream"),
+                )
+            except Exception:
+                LOGGER.warning("make_file: sendDocument не удался", exc_info=True)
+                with suppress(Exception):
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        f"Файл «{filename}» собран, но отправить его не удалось. Попробуйте попросить ещё раз.",
+                    )
 
     async def _answer_callback(
         self,

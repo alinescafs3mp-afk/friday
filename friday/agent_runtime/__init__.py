@@ -771,6 +771,7 @@ class AgentRuntime:
             "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
             "voice": response.get("voice_clip"),
+            "files": response.get("file_clips") or [],
             "context": {
                 "kb_size": context.kb_size,
                 "entities": context.entity_count,
@@ -1030,6 +1031,8 @@ class AgentRuntime:
         # voice message). Kept off `tool_evidence`/`messages` entirely — see
         # `ToolResult.attachment`.
         voice_clip: dict[str, Any] | None = None
+        #: Собранные файлы: их может быть несколько за ход («сделай и word, и pdf»).
+        file_clips: list[dict[str, Any]] = []
         total_calls = 0
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
             context.interaction_mode,
@@ -1147,7 +1150,13 @@ class AgentRuntime:
                 tool_knowledge_ids = list(dict.fromkeys(tool_knowledge_ids))[:12]
                 total_calls += 1
                 if tool_result.success and tool_result.attachment:
-                    voice_clip = tool_result.attachment
+                    # Голос и собранный файл — разные вложения и разные способы
+                    # доставки: голосовое сообщение и документ. Складывать их в
+                    # одно поле значило бы, что отчёт отправится звуковым файлом.
+                    if str(tool_result.attachment.get("kind") or "") == "document":
+                        file_clips.append(tool_result.attachment)
+                    else:
+                        voice_clip = tool_result.attachment
                 rendered = tool_result.to_llm_message()
                 # Keep successful tool outputs as verification evidence: the answer
                 # may rest on these, not on personal notes.
@@ -1199,6 +1208,7 @@ class AgentRuntime:
                         "knowledge_object_ids": tool_knowledge_ids,
                         "tool_evidence": tool_evidence,
                         "voice_clip": voice_clip,
+                        "file_clips": file_clips,
                     }
                 # Под разметкой не было ответа. Сбой, названный сбоем, лучше
                 # служебных маркеров на экране — падаем в общий возврат ниже.
@@ -1211,6 +1221,7 @@ class AgentRuntime:
             "knowledge_object_ids": tool_knowledge_ids,
             "tool_evidence": tool_evidence,
             "voice_clip": voice_clip,
+            "file_clips": file_clips,
         }
 
     @staticmethod

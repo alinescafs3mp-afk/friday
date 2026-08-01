@@ -768,13 +768,19 @@ class TransportMixin(BridgeShared):
         content_bytes: bytes,
         *,
         caption: str = "",
+        mime_type: str = "text/plain; charset=utf-8",
     ) -> None:
-        """Upload a file to the chat (G20 export). Multipart, not JSON sendMessage."""
+        """Upload a file to the chat (G20 export). Multipart, not JSON sendMessage.
+
+        `mime_type` не косметика: Word, Excel и PDF, отправленные как
+        `text/plain`, Telegram показывает текстовым файлом, и на телефоне они
+        открываются кракозябрами вместо документа.
+        """
         safe_name = (filename or "export.txt").replace("/", "_").replace("\\", "_")[:128]
         response = await client.post(
             f"{self._api_url}/sendDocument",
             data={"chat_id": str(chat_id), "caption": (caption or "")[:1024]},
-            files={"document": (safe_name, content_bytes, "text/plain; charset=utf-8")},
+            files={"document": (safe_name, content_bytes, mime_type)},
         )
         response.raise_for_status()
 

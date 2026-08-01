@@ -29,6 +29,7 @@ OBSERVE = {
     "web_research",
     "entity_lookup",
     "kg_stats",
+    "make_file",
     "what_happened",
     "list_tags",
     "resolve_duplicates",
