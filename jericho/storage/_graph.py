@@ -124,6 +124,32 @@ class GraphMixin(StorageShared):
     # правки имени значило бы делать за человека то, о чём он не просил.
     _RESTORABLE_ENTITY_FIELDS = ("name", "entity_type", "aliases_json", "description", "metadata_json")
 
+    def merge_version_floor(self, entity_id: str, user_id: str) -> int:
+        """Ниже какой версии откат правки уже не «правка», а разрушение слияния.
+
+        Слияние правит ЦЕЛЬ (переносит имя источника в её алиасы) и пишет это
+        обычной новой версией — то есть в истории объекта появляется правка,
+        которую человек не делал. Откат «на одну назад» после слияния стирал
+        алиас-мост, а сама слитая сущность оставалась надгробием: слияние
+        распадалось наполовину и молча — поиск по прежнему имени переставал
+        находить объект, а очередь слияний считала пару решённой.
+
+        Слияние отменяется своим обратным ходом (`unmerge_entities`), и только им.
+        Поэтому версии, созданные ЖИВЫМИ (неотменёнными) слияниями, для отката
+        правки закрыты — возвращается наибольшая такая версия.
+        """
+        rows = self.execute(
+            """SELECT target_after_json FROM entity_merge_history
+               WHERE user_id=? AND target_entity_id=? AND undone_at IS NULL""",
+            (user_id, entity_id),
+        ).fetchall()
+        floor = 0
+        for row in rows:
+            snapshot = _json_load(row["target_after_json"], {})
+            if isinstance(snapshot, dict):
+                floor = max(floor, int(snapshot.get("version") or 0))
+        return floor
+
     def restore_entity_version(
         self, entity_id: str, user_id: str, version: int, *, reviewed_by: str | None = None
     ) -> dict[str, Any] | None:
@@ -157,6 +183,12 @@ class GraphMixin(StorageShared):
         current = self.get_entity(entity_id, user_id)
         if not current or current.get("deleted_at"):
             return None
+        floor = self.merge_version_floor(entity_id, user_id)
+        if floor and int(version) < floor:
+            raise ValueError(
+                "Эта версия объекта относится к слиянию — откатывать его надо разъединением, "
+                "иначе слитая сущность останется надгробием, а мост-алиас исчезнет"
+            )
         fields = {name: snapshot[name] for name in self._RESTORABLE_ENTITY_FIELDS if name in snapshot}
         if not fields:
             raise ValueError("Version snapshot carries no restorable fields")
@@ -474,6 +506,43 @@ class GraphMixin(StorageShared):
         """
         with self.transaction():
             return self._soft_delete_entity_locked(entity_id, user_id)
+
+    def undelete_entity(self, entity_id: str, user_id: str) -> dict[str, Any] | None:
+        """Вернуть мягко удалённую сущность в граф — новой версией, не перемоткой.
+
+        Удаление называлось мягким и было мягким по букве (строка с `deleted_at`
+        остаётся), но обратного хода не существовало НИ ОДНОГО: `restore` отвечал
+        404 (сущность считается несуществующей), `PATCH` — 200 с `entity: null`,
+        карточка по имени не открывалась. То есть узел с его связями выпадал из
+        графа до ручной правки SQLite, а кнопка в чате обещала обратимость.
+
+        Надгробие СЛИЯНИЯ этим путём не воскрешается: у него есть свой обратный
+        ход (`unmerge_entities`), и поднять его отдельно значило бы получить две
+        живые сущности там, где человек попросил одну.
+        """
+        with self.transaction():
+            current = self.get_entity(entity_id, user_id)
+            if not current or not current.get("deleted_at"):
+                return None
+            if current.get("merged_into_id"):
+                raise ValueError("Это след слияния, а не удалённый объект: возвращают его разъединением")
+            entity = Entity(
+                id=str(current["id"]),
+                user_id=str(current["user_id"]),
+                name=str(current.get("name") or ""),
+                entity_type=EntityType(str(current.get("entity_type") or EntityType.OTHER.value)),
+                aliases_json=_json_load(current.get("aliases_json"), []),
+                description=str(current.get("description") or ""),
+                metadata_json=_json_load(current.get("metadata_json"), {}),
+                canonical=True,
+                merged_into_id=None,
+                version=int(current.get("version", 1)),
+                created_at=str(current.get("created_at") or utc_now()),
+                updated_at=utc_now(),
+                deleted_at=None,
+            )
+            self.update_entity(entity)
+        return self.get_entity(entity_id, user_id)
 
     def _soft_delete_entity_locked(self, entity_id: str, user_id: str | None) -> bool:
         current = self.get_entity(entity_id, user_id)

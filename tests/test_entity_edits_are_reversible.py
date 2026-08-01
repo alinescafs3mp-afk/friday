@@ -206,3 +206,117 @@ async def test_telegram_undo_button_carries_the_version_it_was_shown_for(setting
     assert undo[0]["callback_data"] == "ent:undo:ent_abc123.2"
     for button in buttons:
         assert len(str(button["callback_data"]).encode()) <= 64, "Telegram: 64 байта на callback_data"
+
+
+def test_a_merge_version_is_not_offered_as_an_undoable_edit(settings, storage):
+    """Слияние тоже правит цель и тоже пишет версию — но откатывать его надо
+    разъединением.
+
+    Найдено состязательным ревью СВОЕЙ ЖЕ правки: `merge_entities` переносит имя
+    источника в алиасы цели и сохраняет это обычной версией. Карточка честно
+    показывала «Правок: 1» и кнопку «Отменить последнюю правку», а нажатие
+    стирало алиас-мост — при том что слитая сущность оставалась надгробием.
+    Слияние распадалось наполовину и молча: поиск по прежнему имени переставал
+    находить объект, а очередь считала пару решённой.
+
+    Мутация: убрать `merge_version_floor` из `_entity_edit_history` (или из
+    `restore_entity_version`) — тест обязан покраснеть.
+    """
+    from jericho.knowledge_graph import KnowledgeGraph
+
+    storage.ensure_user(LEGACY_OWNER_USER_ID)
+    kg = KnowledgeGraph(storage)
+    target = _entity(storage, "Иванов Иван Иванович")
+    source = _entity(storage, "Иванов И.И.")
+
+    storage.merge_entities(LEGACY_OWNER_USER_ID, source, target, merged_by="owner")
+    merged = storage.get_entity(target, LEGACY_OWNER_USER_ID)
+    assert "Иванов И.И." in str(merged.get("aliases_json") or ""), "стенд не воспроизводит: моста нет"
+
+    profile = kg.entity_profile(target, LEGACY_OWNER_USER_ID)
+    assert profile["edits"]["restorable_version"] is None, (
+        "карточка предлагает откатить слияние как обычную правку"
+    )
+
+    with pytest.raises(ValueError):
+        kg.restore_entity_version(LEGACY_OWNER_USER_ID, target, 1, reviewed_by="owner")
+
+    still = storage.get_entity(target, LEGACY_OWNER_USER_ID)
+    assert "Иванов И.И." in str(still.get("aliases_json") or ""), "мост-алиас всё-таки стёрт"
+
+
+def test_an_edit_made_after_a_merge_is_still_undoable(settings, storage):
+    """Обратная сторона: запрет не должен запирать НОРМАЛЬНЫЕ правки после слияния."""
+    from jericho.knowledge_graph import KnowledgeGraph
+
+    storage.ensure_user(LEGACY_OWNER_USER_ID)
+    kg = KnowledgeGraph(storage)
+    target = _entity(storage, "Иванов Иван Иванович")
+    source = _entity(storage, "Иванов И.И.")
+    storage.merge_entities(LEGACY_OWNER_USER_ID, source, target, merged_by="owner")
+
+    kg.update_entity(LEGACY_OWNER_USER_ID, target, description="уточнение после слияния")
+    kg.update_entity(LEGACY_OWNER_USER_ID, target, description="ещё одно уточнение")
+
+    profile = kg.entity_profile(target, LEGACY_OWNER_USER_ID)
+    restorable = profile["edits"]["restorable_version"]
+    assert restorable is not None, "после слияния перестали откатываться любые правки"
+    restored = kg.restore_entity_version(LEGACY_OWNER_USER_ID, target, restorable, reviewed_by="owner")
+    assert restored is not None and restored["description"] == "уточнение после слияния"
+    assert "Иванов И.И." in str(restored.get("aliases_json") or ""), "откат правки снёс мост слияния"
+
+
+def test_a_deleted_object_can_be_brought_back(settings):
+    """«Удаление мягкое» — значит у него есть обратный ход.
+
+    До этой правки не было НИ ОДНОГО: `restore` отвечал 404 (сущности как бы
+    нет), `PATCH` возвращал 200 с `entity: null` и молча ничего не менял,
+    карточка по имени не открывалась — то есть кнопку отката было негде нажать.
+    Узел с его связями выпадал из графа до ручной правки базы, а чат при этом
+    обещал мягкость.
+
+    Мутация: убрать маршрут `undelete` — тест обязан покраснеть.
+    """
+    app = create_app(settings)
+    with TestClient(app) as client:
+        storage = app.state.storage
+        entity_id = _entity(storage)
+        headers = {"Authorization": f"Bearer {settings.api_token}"}
+
+        assert client.delete(f"/api/kg/entities/{entity_id}", headers=headers).status_code == 200
+        assert storage.get_entity(entity_id, LEGACY_OWNER_USER_ID)["deleted_at"]
+
+        # Правка удалённого объекта — отказ, а не тихий успех.
+        patched = client.patch(
+            f"/api/kg/entities/{entity_id}", json={"entity_type": "person"}, headers=headers
+        )
+        assert patched.status_code == 404, "правка удалённого объекта отвечает успехом"
+        assert not any(
+            row.get("action") == "entity.update"
+            for row in storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=50)
+        ), "в аудит записана правка, которой не было"
+
+        back = client.post(f"/api/kg/entities/{entity_id}/undelete", headers=headers)
+        assert back.status_code == 200, back.text
+        assert back.json()["entity"]["name"] == "Атлас"
+        current = storage.get_entity(entity_id, LEGACY_OWNER_USER_ID)
+        assert not current["deleted_at"] and int(current["canonical"]) == 1
+        assert any(
+            row.get("action") == "entity.undelete"
+            for row in storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=50)
+        )
+
+        # Повтор — честный 404, а не второй «успех».
+        assert client.post(f"/api/kg/entities/{entity_id}/undelete", headers=headers).status_code == 404
+
+
+def test_a_merge_tombstone_is_not_resurrected_by_undelete(settings, storage):
+    """След слияния возвращают разъединением: поднять его отдельно значило бы
+    получить две живые сущности там, где человек попросил одну."""
+    storage.ensure_user(LEGACY_OWNER_USER_ID)
+    target = _entity(storage, "Иванов Иван Иванович")
+    source = _entity(storage, "Иванов И.И.")
+    storage.merge_entities(LEGACY_OWNER_USER_ID, source, target, merged_by="owner")
+
+    with pytest.raises(ValueError):
+        storage.undelete_entity(source, LEGACY_OWNER_USER_ID)

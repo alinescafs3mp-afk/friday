@@ -166,6 +166,11 @@ class CallbacksMixin(BridgeShared):
                 )
                 raw_updated = updated.get("entity") if isinstance(updated, dict) else None
                 updated_entity: dict[str, Any] = raw_updated if isinstance(raw_updated, dict) else {}
+                if not updated_entity:
+                    # Сервер ничего не изменил (объект удалён или это надгробие
+                    # слияния). Печатать «Тип изменён» на такой ответ значит врать
+                    # человеку о состоянии его же графа.
+                    raise PermanentUpdateError("Entity update returned no entity")
                 name = str(updated_entity.get("name") or "").strip()
                 await self._answer_callback(telegram, callback_id, "Тип изменён")
                 await self._send_message(
@@ -225,7 +230,53 @@ class CallbacksMixin(BridgeShared):
                 await self._send_message(
                     telegram,
                     chat_id,
-                    "Объект удалён из графа. Документы целы: удалён узел, а не то, из чего он был извлечён.",
+                    "Объект удалён из графа. Документы целы: удалён узел, а не то, из чего "
+                    "он был извлечён. Вернуть — кнопкой ниже.",
+                    reply_markup={
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "↩︎ Вернуть объект",
+                                    "callback_data": f"ent:undel:{entity_id}.{external_user_id}",
+                                }
+                            ]
+                        ]
+                    },
+                )
+                clear_markup = True
+            elif family == "ent" and action == "undel":
+                # Обратный ход к удалению — там же, где само удаление, и по тому же
+                # правилу «нажимает тот, кто вызвал»: кнопка видна всему чату.
+                # Без этой ветки «мягкое удаление» было мягким только на словах:
+                # вернуть узел не мог ни один маршрут, а карточка по имени больше
+                # не открывалась — то есть кнопки отката было негде нажать.
+                entity_id, _, invoker = target_id.partition(".")
+                if not entity_id or not invoker:
+                    raise PermanentUpdateError("Invalid entity undelete target")
+                if invoker != external_user_id:
+                    await self._answer_callback(
+                        telegram,
+                        callback_id,
+                        "Эта кнопка не ваша: вернуть может тот, кто удалял",
+                        alert=True,
+                    )
+                    return
+                returned = await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/kg/entities/{entity_id}/undelete",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                raw_returned = returned.get("entity") if isinstance(returned, dict) else None
+                returned_entity: dict[str, Any] = raw_returned if isinstance(raw_returned, dict) else {}
+                returned_name = str(returned_entity.get("name") or "").strip()
+                await self._answer_callback(telegram, callback_id, "Объект возвращён")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    f"Объект «{returned_name}» снова в графе." if returned_name else "Объект снова в графе.",
                 )
                 clear_markup = True
             elif family == "feedback" and action in {"up", "down", "search_off"}:

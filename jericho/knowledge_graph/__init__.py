@@ -1668,10 +1668,16 @@ class KnowledgeGraph:
         if not versions:
             return {"versions": 0, "last_edited_at": None, "restorable_version": None}
         numbers = sorted({int(row.get("version") or 0) for row in versions})
+        # Слияние тоже правит цель и тоже пишет версию — но откатывать его надо
+        # разъединением, а не «отменой последней правки»: иначе алиас-мост со
+        # старым именем исчезает, а слитая сущность остаётся надгробием. Версии,
+        # созданные живым слиянием, для этой кнопки закрыты.
+        floor = self.storage.merge_version_floor(entity_id, user_id)
+        restorable = [number for number in numbers[:-1] if number >= floor]
         return {
             "versions": len(numbers),
             "last_edited_at": str(versions[0].get("created_at") or "") or None,
-            "restorable_version": numbers[-2] if len(numbers) > 1 else None,
+            "restorable_version": restorable[-1] if restorable else None,
         }
 
     def review_knowledge_link(

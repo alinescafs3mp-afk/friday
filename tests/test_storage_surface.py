@@ -98,7 +98,11 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 267 → 269: count_documents_by_own_date + общий _own_date_window. Чат печатал
 # «показаны первые 10 из 11» на периоде с сотнями документов: длина собственной
 # страницы подавалась как число документов периода.
-EXPECTED_MEMBER_COUNT = 269
+# 269 → 271: merge_version_floor + undelete_entity. Первый закрывает откат через
+# версию, порождённую слиянием (иначе «отменить последнюю правку» стирало
+# алиас-мост, а слитая сущность оставалась надгробием); второй даёт удалению
+# обратный ход, без которого «мягкое удаление» было мягким только на словах.
+EXPECTED_MEMBER_COUNT = 271
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

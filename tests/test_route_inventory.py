@@ -46,12 +46,12 @@ from jericho.server import create_app
 # 163 → 164: PATCH /api/conversations/{id} — self-service rename (G18c).
 # 164 → 166: GET /api/me/reminders + POST /api/me/reminders/{id}/dismiss (G19).
 # 166 → 167: GET /api/conversations/{id}/export — plain-text transcript (G20).
-EXPECTED_OPERATIONS = 169
+EXPECTED_OPERATIONS = 170
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
     "/api/admin": 87,
-    "/api/kg": 20,
+    "/api/kg": 21,
     "/api/missions": 4,
 }
 

@@ -130,15 +130,29 @@ async def entity_profile_by_name(name: str, request: Request) -> dict[str, Any]:
 
 @router.get("/entities/{entity_id}", tags=["knowledge-graph"])
 async def get_entity(entity_id: str, request: Request) -> dict[str, Any]:
+    """Сущность с её связями, документами и историей версий.
+
+    Та же болезнь, что чинили у `/entity-profile`, жила и здесь: синхронные
+    запросы в `async def` (то есть остановка event loop для ВСЕХ) и список
+    документов, выбранный как `k.*` — с полными телами. Замерено на копии боевой
+    базы: 8.66 МБ JSON на самой широкой сущности, 79 мс SQL плюс 61 мс сериализации,
+    и всё это ради восьми заголовков, которые печатает вызывающий.
+    """
     actor = _require(request, "kg.read")
-    entity = request.app.state.kg.get_entity(entity_id, actor.user_id)
+    state = request.app.state
+    entity = await run_blocking(state.kg.get_entity, entity_id, actor.user_id)
     if not entity:
         raise HTTPException(status_code=404, detail="Сущность не найдена")
+    relations = await run_blocking(state.kg.get_entity_relations, entity_id, actor.user_id)
+    knowledge = await run_blocking(
+        state.storage.get_entity_knowledge_cards, actor.user_id, entity_id, limit=50
+    )
+    versions = await run_blocking(state.storage.list_entity_versions, entity_id, actor.user_id)
     return {
         "entity": entity,
-        "relations": request.app.state.kg.get_entity_relations(entity_id, actor.user_id),
-        "knowledge": request.app.state.kg.get_entity_knowledge(entity_id, actor.user_id),
-        "versions": request.app.state.storage.list_entity_versions(entity_id, actor.user_id),
+        "relations": relations,
+        "knowledge": knowledge,
+        "versions": versions,
     }
 
 
@@ -165,6 +179,12 @@ async def update_entity(entity_id: str, request: Request) -> dict[str, Any]:
         after = state.kg.update_entity(actor.user_id, entity_id, **fields)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if after is None:
+        # `update_entity` отдаёт None для удалённой сущности (и для надгробия
+        # после слияния). Прежде это возвращалось как 200 с `entity: null`: чат
+        # рапортовал «Тип изменён», а в аудит уходила строка о правке, которой не
+        # было. Отказ должен быть отказом.
+        raise HTTPException(status_code=404, detail="Объект удалён — править нечего")
     _audit(request, "entity.update", "entity", entity_id, before=before, after=after)
     return {"entity": after}
 
@@ -178,6 +198,33 @@ async def delete_entity(entity_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Сущность не найдена")
     _audit(request, "entity.delete", "entity", entity_id, before=before)
     return {"status": "soft_deleted"}
+
+
+@router.post("/entities/{entity_id}/undelete", tags=["knowledge-graph"])
+async def undelete_entity(entity_id: str, request: Request) -> dict[str, Any]:
+    """Вернуть удалённый объект в граф.
+
+    Удаление объявлено мягким — значит у него обязан быть обратный ход. Его не
+    было: `restore` для удалённой сущности отвечает 404 (её как бы нет), `PATCH`
+    менял `entity: null`, карточка по имени не открывалась. Кнопка в чате при
+    этом обещала мягкость, то есть обратимость, которой не существовало.
+    """
+    actor = _require(request, "kg.write")
+    state = request.app.state
+    try:
+        entity = await run_blocking(state.storage.undelete_entity, entity_id, actor.user_id)
+    except ValueError as exc:
+        # Текст пишется здесь, а не пробрасывается из исключения: наружу эта
+        # строка идёт человеку в Telegram, а исключение — служебное и однажды
+        # окажется английским.
+        raise HTTPException(
+            status_code=400,
+            detail="Это след слияния, а не удалённый объект: его возвращают разъединением",
+        ) from exc
+    if entity is None:
+        raise HTTPException(status_code=404, detail="Удалённый объект с таким идентификатором не найден")
+    _audit(request, "entity.undelete", "entity", entity_id, after=entity)
+    return {"entity": entity}
 
 
 @router.post("/entities/{entity_id}/restore", tags=["knowledge-graph"])
