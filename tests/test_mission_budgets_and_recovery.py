@@ -167,3 +167,81 @@ def test_attempts_are_counted_on_the_step_itself(storage):
         assert storage.execute(
             "SELECT attempts FROM mission_tasks WHERE id=?", (task_id,)
         ).fetchone()["attempts"] == expected
+
+
+def test_spend_accumulates_without_losing_a_tick(storage):
+    """Мутация: заменить `spent = spent + ?` чтением и записью — тест краснеет.
+
+    Два тика, прочитавшие одно значение, потеряли бы один из расходов, и бюджет
+    никогда бы не кончился.
+    """
+    mission_id = _mission(storage)
+    for _ in range(5):
+        storage.add_mission_spend(mission_id, "alice", seconds=3, tool_calls=2, retries=1)
+    row = storage.execute(
+        "SELECT spent_seconds, spent_tool_calls, spent_retries FROM missions WHERE id=?",
+        (mission_id,),
+    ).fetchone()
+    assert (row["spent_seconds"], row["spent_tool_calls"], row["spent_retries"]) == (15, 10, 5)
+
+
+def test_an_empty_spend_touches_nothing(storage):
+    mission_id = _mission(storage)
+    before = storage.execute("SELECT updated_at FROM missions WHERE id=?", (mission_id,)).fetchone()
+    storage.add_mission_spend(mission_id, "alice", seconds=0, tool_calls=0)
+    after = storage.execute("SELECT updated_at FROM missions WHERE id=?", (mission_id,)).fetchone()
+    assert before["updated_at"] == after["updated_at"]
+
+
+def test_attempts_are_counted_before_the_work(storage):
+    """Счёт до работы: процесс, умерший в середине шага, не должен обнулять его."""
+    mission_id = _mission(storage)
+    task_id = _task(storage, mission_id)
+    assert storage.bump_mission_task_attempt(task_id, "alice") == 1
+    assert storage.bump_mission_task_attempt(task_id, "alice") == 2
+
+
+@pytest.mark.parametrize(
+    "fields,expected",
+    [
+        ({}, ""),
+        ({"budget_seconds": 600, "spent_seconds": 10}, ""),
+        ({"budget_seconds": 600, "spent_seconds": 600}, "исчерпан бюджет «время»"),
+        ({"budget_tool_calls": 5, "spent_tool_calls": 9}, "исчерпан бюджет «вызовы инструментов»"),
+        ({"budget_retries": 2, "spent_retries": 2}, "исчерпан бюджет «повторы»"),
+        ({"deadline_at": "2020-01-01T00:00:00+00:00"}, "истёк срок миссии"),
+        # Ноль — «без ограничения», а не «нулевой бюджет».
+        ({"budget_seconds": 0, "spent_seconds": 10_000}, ""),
+    ],
+)
+def test_the_budget_verdict_names_what_ran_out(fields, expected):
+    """Мутация: сравнивать `spent > budget` вместо `>=` — тест краснеет.
+
+    «Потрачено ровно столько, сколько отпущено» — это исчерпанный бюджет, а не
+    последний разрешённый шаг.
+    """
+    from friday.executive.service import ExecutiveService
+
+    mission = {"id": "m1", "user_id": "alice", **fields}
+    verdict = ExecutiveService._budget_verdict(mission)  # noqa: SLF001
+    if expected:
+        assert expected in verdict
+    else:
+        assert verdict == ""
+
+
+def test_a_mission_out_of_budget_is_stopped_before_the_next_step():
+    """Мутация: убрать проверку из `_advance_mission` — тест краснеет.
+
+    Проверка стоит ПЕРЕД выбором шага: миссия, у которой кончилось время, иначе
+    сделает ещё один шаг, и именно он может оказаться с побочным эффектом.
+    """
+    import inspect
+
+    from friday.executive.service import ExecutiveService
+
+    source = inspect.getsource(ExecutiveService._advance_mission)  # noqa: SLF001
+    assert "_budget_verdict(mission)" in source, "бюджет миссии никто не проверяет"
+    assert source.index("_budget_verdict") < source.index("_pick_runnable"), (
+        "бюджет проверяется уже после выбора шага"
+    )

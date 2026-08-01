@@ -166,3 +166,55 @@ class MissionsMixin(StorageShared):
                 tuple(params),
             )
         return cursor.rowcount > 0
+
+    def add_mission_spend(
+        self,
+        mission_id: str,
+        user_id: str,
+        *,
+        seconds: float = 0.0,
+        tool_calls: int = 0,
+        retries: int = 0,
+    ) -> None:
+        """Записать израсходованное миссией — в базу, а не в память процесса.
+
+        Спека v3 §5 требует, чтобы бюджеты держались ниже модели и переживали
+        перезапуск. Счётчик, живущий в исполнителе, после падения начинается с
+        нуля, и вторая попытка тратит весь бюджет заново.
+
+        Прибавление идёт одним SQL-выражением (`spent = spent + ?`), а не
+        чтением с последующей записью: два тика, читающие одно значение,
+        потеряли бы один из расходов.
+        """
+        added_seconds = max(0, int(round(float(seconds))))
+        added_calls = max(0, int(tool_calls))
+        added_retries = max(0, int(retries))
+        if not (added_seconds or added_calls or added_retries):
+            return
+        with self.transaction() as conn:
+            conn.execute(
+                """UPDATE missions
+                   SET spent_seconds = spent_seconds + ?,
+                       spent_tool_calls = spent_tool_calls + ?,
+                       spent_retries = spent_retries + ?,
+                       updated_at = ?
+                   WHERE id = ? AND user_id = ?""",
+                (added_seconds, added_calls, added_retries, utc_now(), mission_id, user_id),
+            )
+
+    def bump_mission_task_attempt(self, task_id: str, user_id: str) -> int:
+        """Отметить ещё одну попытку шага и вернуть их общее число.
+
+        Попытка считается ДО работы: если процесс умрёт в середине шага, счётчик
+        уже увеличен. Иначе бесконечно падающий шаг выглядел бы после каждого
+        перезапуска как первая попытка.
+        """
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE mission_tasks SET attempts = attempts + 1, updated_at = ? WHERE id = ? AND user_id = ?",
+                (utc_now(), task_id, user_id),
+            )
+        row = self.execute(
+            "SELECT attempts FROM mission_tasks WHERE id = ? AND user_id = ?", (task_id, user_id)
+        ).fetchone()
+        return int(row["attempts"]) if row else 0

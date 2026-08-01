@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -304,6 +305,43 @@ class ExecutiveService:
                 LOGGER.exception("Mission tick failed for %s", mission.get("id"))
         return {"ran": ran, "active": len(active)}
 
+    @staticmethod
+    def _budget_verdict(mission: dict[str, Any]) -> str:
+        """Что мешает миссии продолжаться: срок или исчерпанный бюджет.
+
+        Пустая строка — можно работать дальше. Ноль в бюджете значит «без
+        ограничения»: миссия без бюджета и миссия с нулевым бюджетом — разные
+        вещи, и молча останавливать первую нельзя.
+
+        Причина возвращается ТЕКСТОМ и пишется в `error`: «миссия заблокирована»
+        без объяснения — это тупик для человека, который придёт разбираться.
+        """
+        deadline = str(mission.get("deadline_at") or "").strip()
+        if deadline:
+            try:
+                moment = datetime.fromisoformat(deadline)
+            except ValueError:
+                moment = None
+            if moment is not None:
+                if moment.tzinfo is None:
+                    moment = moment.replace(tzinfo=UTC)
+                if datetime.now(UTC) >= moment:
+                    return f"истёк срок миссии ({deadline})"
+        checks = (
+            ("budget_seconds", "spent_seconds", "время", "с"),
+            ("budget_tool_calls", "spent_tool_calls", "вызовы инструментов", ""),
+            ("budget_retries", "spent_retries", "повторы", ""),
+        )
+        for budget_key, spent_key, label, unit in checks:
+            budget = int(mission.get(budget_key) or 0)
+            if budget <= 0:
+                continue
+            spent = int(mission.get(spent_key) or 0)
+            if spent >= budget:
+                suffix = f" {unit}" if unit else ""
+                return f"исчерпан бюджет «{label}»: {spent}{suffix} из {budget}{suffix}"
+        return ""
+
     def _reclaim_stale_tasks(self, mission: dict[str, Any]) -> int:
         """Return long-RUNNING tasks to PENDING so the mission can move again.
 
@@ -344,6 +382,20 @@ class ExecutiveService:
     async def _advance_mission(self, mission: dict[str, Any]) -> bool:
         mission_id = mission["id"]
         user_id = mission["user_id"]
+        exhausted = self._budget_verdict(mission)
+        if exhausted:
+            # Спека v3 §5: бюджеты «enforced below the model». Проверка стоит
+            # ЗДЕСЬ, перед выбором шага, а не внутри инструмента: иначе миссия,
+            # у которой кончилось время, всё равно сделает ещё один шаг — и
+            # именно он может оказаться с побочным эффектом.
+            LOGGER.warning("Mission %s stopped: %s", mission_id, exhausted)
+            self.storage.update_mission_fields(
+                mission_id,
+                user_id,
+                status=MissionStatus.BLOCKED.value,
+                error=exhausted,
+            )
+            return False
         tasks = self.storage.get_mission_tasks(mission_id, user_id)
         by_seq = {int(task["seq"]): task for task in tasks}
         runnable = self._pick_runnable(user_id, tasks, by_seq)
@@ -411,12 +463,17 @@ class ExecutiveService:
         )
         actor = self.auth_service.actor_for_user(user_id, source="executive")
         upstream = self._upstream_context(task, by_seq)
+        # Попытка засчитывается ДО работы: если процесс умрёт в середине шага,
+        # счётчик уже увеличен, и после перезапуска бюджет повторов не обнулится.
+        self.storage.bump_mission_task_attempt(task_id, user_id)
+        began = time.monotonic()
         try:
             text, tools_used = await self._execute_task(mission, task, upstream, actor)
         except MissionStepUnavailable as exc:
             # Named separately from a crash so the operator can tell "the model was
             # down" from "the step is broken" without opening the logs.
             LOGGER.warning("Mission task could not run: %s (%s)", task_id, exc)
+            self.storage.add_mission_spend(mission["id"], user_id, seconds=time.monotonic() - began, retries=1)
             self.storage.update_mission_task_fields(
                 task_id,
                 user_id,
@@ -427,6 +484,7 @@ class ExecutiveService:
             return
         except Exception:
             LOGGER.exception("Mission task execution failed: %s", task_id)
+            self.storage.add_mission_spend(mission["id"], user_id, seconds=time.monotonic() - began, retries=1)
             self.storage.update_mission_task_fields(
                 task_id,
                 user_id,
@@ -492,6 +550,12 @@ class ExecutiveService:
         text = text.strip()[:_MAX_RESULT_CHARS]
         if task["kind"] == TaskKind.PRODUCE.value and text:
             inbox_id = await self._route_to_inbox(mission, task, text)
+        self.storage.add_mission_spend(
+            mission["id"],
+            user_id,
+            seconds=time.monotonic() - began,
+            tool_calls=len(tools_used),
+        )
         self.storage.update_mission_task_fields(
             task_id,
             user_id,
