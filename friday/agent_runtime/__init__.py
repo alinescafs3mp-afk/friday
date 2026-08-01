@@ -702,6 +702,14 @@ class AgentRuntime:
                 clean_message, content, context, tool_evidence=response.get("tool_evidence")
             )
         verification_status = str(verification.get("status") or VERDICT_SKIPPED)
+        if verification_status == VERDICT_FAILED:
+            repaired = await self._repair_once(clean_message, content, context, verification)
+            if repaired:
+                content = repaired
+                verification = await self._verify_response(
+                    clean_message, content, context, tool_evidence=response.get("tool_evidence")
+                )
+                verification_status = str(verification.get("status") or VERDICT_SKIPPED)
         answer_verified = verification_status == VERDICT_PASSED
         verification_caution = _verification_caution(
             verification_status, list(verification.get("issues") or [])
@@ -2036,6 +2044,63 @@ class AgentRuntime:
             f"В базе {context.kb_size} объектов, но надёжного совпадения нет.{suffix} "
             "Попробуйте уточнить формулировку. LLM сейчас недоступна."
         )
+
+    async def _repair_once(
+        self,
+        question: str,
+        answer: str,
+        context: AgentContext,
+        verification: dict[str, Any],
+    ) -> str:
+        """Один — и только один — заход на исправление ответа.
+
+        Спека v3 §5: «A result can receive AT MOST a bounded repair pass after
+        failed verification; the system must not loop until it can claim
+        success». Ключевое здесь не «починить», а «не крутиться»: система,
+        переписывающая ответ до тех пор, пока проверка не согласится, в конце
+        концов получит согласие — и это будет означать лишь то, что она
+        подобрала формулировку, а не то, что ответ стал верным.
+
+        Поэтому проход ровно один, повторная проверка после него ровно одна, и
+        её вердикт окончателен — каким бы он ни был. Если исправить не вышло,
+        человек увидит предупреждение, как и раньше.
+        """
+        issues = [str(item).strip() for item in (verification.get("issues") or []) if str(item).strip()]
+        if not issues or not self.llm.enabled:
+            return ""
+        records = "\n".join(
+            f"[K{index}] {str(hit.get('title') or '')}: "
+            f"{' '.join(str(hit.get('snippet') or hit.get('content') or '').split())[:400]}"
+            for index, hit in enumerate(context.knowledge_hits[:8], start=1)
+        )
+        try:
+            fixed = await self.llm.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Автопроверка нашла в ответе несоответствия записям человека. "
+                            "Перепиши ответ так, чтобы он им не противоречил: убери или поправь "
+                            "спорные утверждения, сохрани всё остальное. Не придумывай новых "
+                            "фактов и не расширяй ответ. Если запись чего-то не подтверждает — "
+                            "так и скажи, это лучше уверенной ошибки.\n\n"
+                            f"Записи:\n{records}\n\nЗамечания проверки:\n- " + "\n- ".join(issues)
+                        ),
+                    },
+                    {"role": "user", "content": question[:500]},
+                    {"role": "assistant", "content": answer[:4000]},
+                ],
+                tools=[],
+            )
+        except Exception:  # noqa: BLE001 — неудачная починка не должна ронять ответ
+            LOGGER.warning("Repair pass failed", exc_info=True)
+            return ""
+        text = _strip_tool_call_markup(str(fixed.get("content") or "")).strip()
+        # Пустой или обрубленный результат — это не исправление: лучше оставить
+        # исходный ответ с честным предупреждением.
+        if len(text) < max(40, len(answer) // 4):
+            return ""
+        return text
 
     async def _verify_response(
         self,
