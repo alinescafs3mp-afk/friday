@@ -38,6 +38,33 @@ _MODE_TOOL_BUDGETS = {
     "knowledge_work": (8, 3),
     "research": (12, 5),
 }
+#: Человек прямым текстом попросил посмотреть в интернете.
+#:
+#: Замерено на живом экземпляре 2026-08-01: на «найди в интернете, какая сейчас
+#: ключевая ставка ЦБ» модель `qwen36-vl` в одном прогоне позвала `web_search`, в
+#: следующем не позвала вовсе и ответила из памяти («21%, декабрь 2025» — при
+#: настоящих 14,00% от 31.07.2026). Уговаривать модель системным указанием
+#: бессмысленно: решение остаётся её, а просьба человека однозначна. Поэтому при
+#: явной просьбе поиск выполняется ДО первого хода модели, и выдача кладётся ей
+#: на стол.
+_ASKS_FOR_THE_WEB = re.compile(
+    r"(?:^|\W)(?:"
+    r"в\s+интернете|в\s+инете|в\s+сети\b|в\s+вебе|в\s+гугле|в\s+яндексе|"
+    r"погугли|загугли|нагугли|"
+    r"search\s+(?:the\s+)?(?:web|internet)|google\s+it"
+    r")",
+    re.IGNORECASE,
+)
+#: Вводные слова просьбы: в поисковую строку они не нужны.
+_WEB_REQUEST_FILLER = re.compile(
+    r"(?:^|\W)(?:"
+    r"найди|найти|поищи|поиши|искать|посмотри|глянь|проверь|погугли|загугли|нагугли|"
+    r"пожалуйста|плиз|мне|для\s+меня|"
+    r"в\s+интернете|в\s+инете|в\s+сети|в\s+вебе|в\s+гугле|в\s+яндексе|"
+    r"search\s+(?:the\s+)?(?:web|internet)|google\s+it"
+    r")(?=$|\W)",
+    re.IGNORECASE,
+)
 _TOOL_PROTOCOL_REPAIR = (
     "Предыдущий ответ нарушил протокол инструментов. Если нужен инструмент, верни его через "
     "native tool call либо одним полным JSON-объектом без пояснений. Иначе дай обычный ответ "
@@ -886,6 +913,7 @@ class AgentRuntime:
         tools_used: list[str] = []
         tool_knowledge_ids: list[str] = []
         tool_evidence: list[dict[str, str]] = []
+        await self._prefetch_the_web_if_asked(message, actor, tools, messages, tools_used, tool_evidence)
         # Set by a successful `speak` call; last one wins (a turn ships at most one
         # voice message). Kept off `tool_evidence`/`messages` entirely — see
         # `ToolResult.attachment`.
@@ -1213,6 +1241,68 @@ class AgentRuntime:
                     "counterpart_title": str(row.get("knowledge_a_title") or ""),
                 }
         return result
+
+    @staticmethod
+    def web_query_from(message: str) -> str:
+        """Поисковая строка из просьбы человека.
+
+        «найди в интернете, какая сейчас ключевая ставка ЦБ» → «какая сейчас
+        ключевая ставка ЦБ». Вводные слова просьбы поисковику не нужны, а если
+        от сообщения после чистки ничего не осталось, ищем по нему целиком —
+        пустой запрос хуже шумного.
+        """
+        cleaned = _WEB_REQUEST_FILLER.sub(" ", message)
+        cleaned = " ".join(cleaned.replace(",", " ").split()).strip(" ,.:;—-")
+        return cleaned or " ".join(message.split())
+
+    async def _prefetch_the_web_if_asked(
+        self,
+        message: str,
+        actor: ActorContext,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_evidence: list[dict[str, str]],
+    ) -> None:
+        """Просили посмотреть в интернете — смотрим, не спрашивая модель.
+
+        Вызов инструмента остаётся решением модели везде, КРОМЕ случая, когда
+        человек попросил прямо. Там решать нечего, а цена ошибки высокая: в
+        замере модель то звала поиск, то отвечала из памяти на тот же вопрос.
+        """
+        if not _ASKS_FOR_THE_WEB.search(message):
+            return
+        if not any(
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_search"
+            for tool in tools
+        ):
+            return  # инструмент недоступен этому человеку — не обходим права
+        query = self.web_query_from(message)
+        try:
+            result = await self.kernel.execute(
+                "web_search", {"query": query, "max_results": 5}, actor=actor
+            )
+        except Exception:  # noqa: BLE001 — предварительный поиск не должен ронять ход
+            LOGGER.exception("Prefetch web search failed")
+            return
+        rendered = result.to_llm_message()
+        if not rendered:
+            return
+        tools_used.append("web_search")
+        if result.success and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
+            tool_evidence.append({"tool": "web_search", "output": str(rendered)})
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"Человек попросил посмотреть в интернете. Поиск уже выполнен по запросу "
+                    f"«{query}», вот выдача:\n\n{rendered}\n\n"
+                    "Отвечай по этой выдаче и указывай ссылки. Не подменяй её тем, что помнишь: "
+                    "она свежее. Если нужного в ней нет — скажи прямо или уточни запрос "
+                    "инструментом, но не выдумывай."
+                ),
+            }
+        )
 
     def _build_initial_messages(
         self,
