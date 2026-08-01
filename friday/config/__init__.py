@@ -170,6 +170,25 @@ def default_home() -> Path:
     return _existing_home(Path.home() / ".friday", Path.home() / ".jericho")
 
 
+def _existing_database(state_dir: Path) -> Path:
+    """Файл базы: новое имя, но НЕ в ущерб существующим данным.
+
+    Та же осторожность, что и с каталогом, и по той же причине — только здесь она
+    уже была нужна: массовое переименование задело имя файла, живой экземпляр
+    создал рядом пустую `friday.sqlite3` (618 КБ) и отчитался «эталонов 0» при
+    целой `jericho.sqlite3` на 323 МБ рядом. Данные не пострадали, но система
+    выглядела исправной и пустой одновременно — ровно тот исход, ради которого
+    здесь стоит проверка, а не безусловное новое имя.
+    """
+    preferred = state_dir / "friday.sqlite3"
+    if preferred.exists():
+        return preferred
+    legacy = state_dir / "jericho.sqlite3"
+    if legacy.exists():
+        return legacy
+    return preferred
+
+
 def _existing_home(preferred: Path, legacy: Path) -> Path:
     """Новый каталог, но не в ущерб уже существующим данным."""
     if preferred.exists():
@@ -664,7 +683,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         model_root=model_root,
         model_dir=model_root / profile.model_dir_name,
         state_dir=state_dir,
-        database_path=Path(env("FRIDAY_DATABASE_PATH", state_dir / "friday.sqlite3"))
+        database_path=Path(env("FRIDAY_DATABASE_PATH", _existing_database(state_dir)))
         .expanduser()
         .resolve(),
         files_dir=Path(env("FRIDAY_FILES_DIR", data_dir / "files")).expanduser().resolve(),

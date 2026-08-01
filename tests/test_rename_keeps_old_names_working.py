@@ -63,6 +63,35 @@ def test_the_legacy_data_directory_is_used_while_it_exists(monkeypatch, tmp_path
     )
 
 
+def test_the_existing_database_file_is_not_abandoned(tmp_path):
+    """Файл базы не переименовывается молча — эту цену уже заплатили.
+
+    Массовая замена задела имя файла, и живой экземпляр создал рядом ПУСТУЮ
+    `friday.sqlite3` на 618 КБ при целой `jericho.sqlite3` на 323 МБ. Данные не
+    пострадали, но система выглядела исправной и пустой одновременно: диагностика
+    зелёная, знаний ноль, эталонов ноль. Хуже потери данных здесь только то, что
+    это молча.
+
+    Мутация: возвращать новое имя всегда — тест краснеет.
+    """
+    from friday.config import _existing_database
+
+    state = tmp_path / "state"
+    state.mkdir()
+    legacy = state / "jericho.sqlite3"
+    legacy.write_bytes(b"")
+    assert _existing_database(state) == legacy, "живая база брошена ради пустой новой"
+
+    (state / "friday.sqlite3").write_bytes(b"")
+    assert _existing_database(state) == state / "friday.sqlite3"
+
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    assert _existing_database(fresh) == fresh / "friday.sqlite3", (
+        "на чистой машине база должна создаваться с новым именем"
+    )
+
+
 def test_the_bridge_accepts_both_header_spellings(settings):
     """Мост и бэкенд — разные процессы и обновляются не одновременно.
 
