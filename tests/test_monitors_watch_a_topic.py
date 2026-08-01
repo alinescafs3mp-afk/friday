@@ -46,7 +46,16 @@ def _document(storage, user_id: str, text: str, title: str = "") -> str:
 
 
 def _context(settings, storage) -> ServiceContext:
-    return ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None)
+    """Контекст с ВЫКЛЮЧЕННЫМИ тихими часами (start == end).
+
+    Иначе тесты зависели бы от времени суток, в которое их запустили: ночью
+    орган молчит по договору, и половина проб «падала» бы не из-за кода.
+    Отдельный тест ниже проверяет как раз тихие часы, и он задаёт окно явно.
+    """
+    from dataclasses import replace
+
+    awake = replace(settings, quiet_hours_start=0, quiet_hours_end=0)
+    return ServiceContext(settings=awake, storage=storage, kg=None, ingestion=None)
 
 
 @pytest.mark.asyncio
@@ -250,3 +259,41 @@ def test_a_person_cannot_hoard_monitors(settings, storage):
     active = storage.list_monitors("alice")
     assert storage.stop_monitor(active[0]["id"], "alice") is True
     storage.create_monitor("alice", "тема после освобождения")
+
+
+@pytest.mark.asyncio
+async def test_a_monitor_does_not_wake_anyone_at_night(settings, storage):
+    """Тихие часы гейтят постановку в очередь — как у напоминаний.
+
+    Монитор был единственным проактивным органом без этого гейта, то есть
+    единственным, кто мог написать ночью. Совпадение не теряется: граница не
+    двигается, и утром сообщение приходит.
+
+    Мутация: убрать проверку `in_quiet_hours` — тест обязан покраснеть.
+    """
+    from dataclasses import replace
+
+    storage.ensure_user("alice")
+    monitor = storage.create_monitor("alice", "поверка весов", chat_id="5001")
+    _document(storage, "alice", "Поверка весов назначена", "Акт")
+
+    # Тихое окно, покрывающее любое время суток (23 часа: start != end).
+    quiet = replace(settings, quiet_hours_start=0, quiet_hours_end=23)
+    await scan_monitors(ServiceContext(settings=quiet, storage=storage, kg=None, ingestion=None))
+
+    queued = storage.execute(
+        "SELECT COUNT(*) AS c FROM outbound_notifications WHERE kind='monitor'"
+    ).fetchone()["c"]
+    assert queued == 0, "монитор написал в тихие часы"
+    assert int(storage.get_monitor(monitor["id"], "alice")["last_seen_rowid"]) == 0, (
+        "граница ушла вперёд в тихие часы — совпадение потеряно"
+    )
+
+    # Тихое окно кончилось — сообщение приходит.
+    await scan_monitors(_context(settings, storage))
+    assert (
+        storage.execute("SELECT COUNT(*) AS c FROM outbound_notifications WHERE kind='monitor'").fetchone()[
+            "c"
+        ]
+        == 1
+    )

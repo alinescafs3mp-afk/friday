@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
-from jericho.organs import Organ, OrganWorker, ServiceContext, resolve_chat_id
+from jericho.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +52,16 @@ def _format_match(query: str, items: list[dict[str, Any]], total: int) -> str:
 
 
 async def scan_monitors(ctx: ServiceContext) -> None:
-    """Один проход по всем живым мониторам всех арендаторов."""
+    """Один проход по всем живым мониторам всех арендаторов.
+
+    Тихие часы гейтят ПОСТАНОВКУ в очередь, как у напоминаний: совпадение,
+    случившееся ночью, просто ждёт конца тихого окна — граница не двигается, и
+    утром человек получит сообщение. Монитор был единственным проактивным
+    органом без этого гейта, то есть единственным, кто мог разбудить.
+    """
+    now = datetime.now(UTC)
+    if in_quiet_hours(now.hour, ctx.settings.quiet_hours_start, ctx.settings.quiet_hours_end):
+        return
     storage = ctx.storage
     searcher = getattr(ctx, "hybrid_searcher", None)
     enqueued = 0
