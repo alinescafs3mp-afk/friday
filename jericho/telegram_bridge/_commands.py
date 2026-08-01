@@ -20,8 +20,28 @@ from jericho.telegram_bridge._base import (
     PermanentUpdateError,
     asyncio,
     httpx,
+    quote,
 )
 from jericho.telegram_bridge._views import _TIMELINE_SHOWN
+
+
+def _split_rename(argument: str) -> tuple[str, str]:
+    """«старое имя => новое имя» → две части.
+
+    Отдельной функцией, а не внутри разбора команд: там структурный сторож
+    (`test_bridge_surface`) запрещает `partition`, потому что однажды им уже
+    разделили команду и аргумент по литеральному пробелу — и многострочная
+    команда потеряла всё, кроме первой строки. Здесь стрелка, а не пробел, и это
+    другой разбор, но правило пусть остаётся простым: в разборе команд —
+    никаких `partition`.
+
+    Стрелка нужна потому, что имена содержат пробелы: ФИО целиком, «в/ч 12345».
+    """
+    left, separator, right = argument.partition("=>")
+    if not separator:
+        return "", ""
+    return left.strip(), right.strip()
+
 
 _MONTHS_RU = {
     "янв": 1,
@@ -386,6 +406,57 @@ class CommandsMixin(BridgeShared):
         if command == "/profile":
             await self._send_entity_profile(telegram, backend, chat_id, external_user_id, user, argument)
             return
+        if command == "/entity_rename":
+            # Переименование — единственное действие над объектом, которое нельзя
+            # сделать кнопкой: новое имя надо ввести. Формат «старое => новое»
+            # выбран потому, что имена содержат пробелы (ФИО, «в/ч 12345»), и
+            # разделить их по пробелу нельзя.
+            old_name, new_name = _split_rename(argument)
+            if not old_name or not new_name:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Использование: /entity_rename старое имя => новое имя\n\n"
+                    "Например: /entity_rename Иванов И.И. => Иванов Иван Иванович",
+                )
+                return
+            try:
+                found = await self._backend_json(
+                    backend,
+                    "GET",
+                    f"/api/kg/entity-profile?name={quote(old_name, safe='')}",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError:
+                await self._send_message(
+                    telegram, chat_id, f"Объект «{old_name}» не найден. Карточка: /profile {old_name}"
+                )
+                return
+            raw_found = found.get("entity") if isinstance(found, dict) else None
+            found_entity: dict[str, Any] = raw_found if isinstance(raw_found, dict) else {}
+            entity_id = str(found_entity.get("id") or "")
+            if not entity_id:
+                await self._send_message(telegram, chat_id, f"Объект «{old_name}» не найден.")
+                return
+            renamed = await self._backend_json(
+                backend,
+                "PATCH",
+                f"/api/kg/entities/{entity_id}",
+                {"name": new_name, "telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            raw_renamed = renamed.get("entity") if isinstance(renamed, dict) else None
+            renamed_entity: dict[str, Any] = raw_renamed if isinstance(raw_renamed, dict) else {}
+            shown = str(renamed_entity.get("name") or new_name)
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"Объект переименован: «{shown}». Правку можно отменить в карточке: /profile {shown}",
+            )
+            return
         if command == "/search":
             query = argument
             await self._send_search(telegram, backend, chat_id, external_user_id, user, query)
@@ -444,8 +515,6 @@ class CommandsMixin(BridgeShared):
             if not argument:
                 await self._send_message(telegram, chat_id, "Использование: /source <фраза из документа>")
                 return
-            from urllib.parse import quote
-
             found = await self._backend_json(
                 backend,
                 "GET",

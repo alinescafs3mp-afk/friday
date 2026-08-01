@@ -143,6 +143,91 @@ class CallbacksMixin(BridgeShared):
                     + " Сам откат — тоже правка, его можно отменить так же.",
                 )
                 clear_markup = True
+            elif family == "ent" and action == "types":
+                await self._answer_callback(telegram, callback_id, "Выберите тип")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Каким объектом это является?",
+                    reply_markup=self._entity_type_markup(target_id),
+                )
+            elif family == "ent" and action == "type":
+                entity_id, _, new_type = target_id.partition(".")
+                allowed = {value for value, _ in self._ENTITY_TYPE_CHOICES}
+                if not entity_id or new_type not in allowed:
+                    raise PermanentUpdateError("Unknown entity type")
+                updated = await self._backend_json(
+                    backend,
+                    "PATCH",
+                    f"/api/kg/entities/{entity_id}",
+                    {"entity_type": new_type, "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                raw_updated = updated.get("entity") if isinstance(updated, dict) else None
+                updated_entity: dict[str, Any] = raw_updated if isinstance(raw_updated, dict) else {}
+                name = str(updated_entity.get("name") or "").strip()
+                await self._answer_callback(telegram, callback_id, "Тип изменён")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    (f"«{name}»: тип теперь «{new_type}». " if name else f"Тип теперь «{new_type}». ")
+                    + "Это правка объекта — её можно отменить в его карточке.",
+                )
+                clear_markup = True
+            elif family == "ent" and action == "del":
+                # Разрушительное действие подтверждается, и приглашение несёт id
+                # ВЫЗВАВШЕГО: в чате с несколькими способными аккаунтами кнопка,
+                # показанная одному, не должна срабатывать у другого. Этот же
+                # дефект уже ловили состязательным ревью на удалении разговора.
+                await self._answer_callback(telegram, callback_id, "Подтвердите")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Удалить объект из графа? Документы и их текст останутся на месте — "
+                    "исчезнет только сам узел и его связи. Удаление мягкое.",
+                    reply_markup={
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "Да, удалить",
+                                    "callback_data": f"ent:delyes:{target_id}.{external_user_id}",
+                                },
+                                {"text": "Нет", "callback_data": f"ent:delno:{target_id}"},
+                            ]
+                        ]
+                    },
+                )
+            elif family == "ent" and action == "delno":
+                await self._answer_callback(telegram, callback_id, "Отменено")
+                clear_markup = True
+            elif family == "ent" and action == "delyes":
+                entity_id, _, invoker = target_id.partition(".")
+                if not entity_id or not invoker:
+                    raise PermanentUpdateError("Invalid entity delete target")
+                if invoker != external_user_id:
+                    await self._answer_callback(
+                        telegram,
+                        callback_id,
+                        "Эта кнопка не ваша: удалить может только тот, кто открыл карточку",
+                        alert=True,
+                    )
+                    return
+                await self._backend_json(
+                    backend,
+                    "DELETE",
+                    f"/api/kg/entities/{entity_id}",
+                    {"telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(telegram, callback_id, "Объект удалён")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Объект удалён из графа. Документы целы: удалён узел, а не то, из чего он был извлечён.",
+                )
+                clear_markup = True
             elif family == "feedback" and action in {"up", "down", "search_off"}:
                 if action == "search_off":
                     feedback_type, score = "search_quality", -1.0

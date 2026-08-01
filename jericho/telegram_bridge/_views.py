@@ -453,23 +453,91 @@ class ViewsMixin(BridgeShared):
             )
 
         entity_id = str(entity.get("id") or "")
-        markup: dict[str, Any] | None = None
-        if entity_id and restorable is not None and CALLBACK_TARGET_RE.fullmatch(entity_id):
+        await self._send_message(
+            telegram,
+            chat_id,
+            "\n".join(lines),
+            reply_markup=self._entity_actions_markup(
+                entity_id,
+                external_user_id,
+                restorable_version=restorable,
+                entity_type=str(entity.get("entity_type") or ""),
+            ),
+        )
+
+    # Типы, которые вообще имеет смысл ставить руками с карточки. `collection`
+    # намеренно нет: контейнер заводится отдельной командой и живёт по своим
+    # правилам, а превращение в него обычной сущности — не исправление ошибки
+    # извлечения, а другое действие.
+    _ENTITY_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
+        ("person", "человек"),
+        ("organization", "организация"),
+        ("project", "проект"),
+        ("location", "место"),
+        ("event", "событие"),
+        ("document", "документ"),
+        ("concept", "понятие"),
+        ("other", "прочее"),
+    )
+
+    @classmethod
+    def _entity_actions_markup(
+        cls,
+        entity_id: str,
+        external_user_id: str,
+        *,
+        restorable_version: Any = None,
+        entity_type: str = "",
+    ) -> dict[str, Any] | None:
+        """Действия над объектом прямо в его карточке (спека v3 §6: «от объекта —
+        к разрешённым действиям»).
+
+        До этого карточка была тупиком на чтение: 4349 узлов-людей и 149
+        войсковых частей заведены АВТОМАТИЧЕСКИМИ правилами, и первая же ошибка
+        извлечения чинилась только уходом в админку. Правило проекта — максимум
+        функционала в Telegram.
+
+        Разрушительное действие (удаление) идёт через подтверждение и несёт id
+        вызвавшего: в чате с несколькими способными аккаунтами кнопка, показанная
+        одному, не должна срабатывать у другого — этот же дефект уже ловили на
+        `/delete` разговора.
+        """
+        if not entity_id or not CALLBACK_TARGET_RE.fullmatch(entity_id):
+            return None
+        rows: list[list[dict[str, str]]] = [
+            [
+                {"text": "📄 Документы", "callback_data": f"ent:browse:{entity_id}"},
+                {"text": "🏷 Тип", "callback_data": f"ent:types:{entity_id}"},
+            ]
+        ]
+        if restorable_version is not None:
             # Кнопка отката появляется только когда откатывать ЕСТЬ К ЧЕМУ.
             # Версия едет в самой кнопке: иначе между показом карточки и нажатием
             # могла бы вклиниться другая правка, и «отменить последнюю» отменило
             # бы уже не ту, которую человек видел.
-            markup = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "↩︎ Отменить последнюю правку",
-                            "callback_data": f"ent:undo:{entity_id}.{restorable}",
-                        }
-                    ]
+            rows.append(
+                [
+                    {
+                        "text": "↩︎ Отменить последнюю правку",
+                        "callback_data": f"ent:undo:{entity_id}.{restorable_version}",
+                    }
                 ]
-            }
-        await self._send_message(telegram, chat_id, "\n".join(lines), reply_markup=markup)
+            )
+        rows.append([{"text": "🗑 Удалить объект", "callback_data": f"ent:del:{entity_id}"}])
+        del entity_type  # текущий тип показан в карточке; кнопка ведёт к выбору
+        del external_user_id  # id вызвавшего нужен только на шаге подтверждения
+        return {"inline_keyboard": rows}
+
+    @classmethod
+    def _entity_type_markup(cls, entity_id: str) -> dict[str, Any]:
+        """Выбор типа — кнопками, а не вводом: тип это перечисление, и печатать
+        его руками означало бы ошибаться в написании там, где выбор конечен."""
+        buttons = [
+            {"text": label, "callback_data": f"ent:type:{entity_id}.{value}"}
+            for value, label in cls._ENTITY_TYPE_CHOICES
+        ]
+        rows = [buttons[index : index + 3] for index in range(0, len(buttons), 3)]
+        return {"inline_keyboard": rows}
 
     async def _send_browse(
         self,

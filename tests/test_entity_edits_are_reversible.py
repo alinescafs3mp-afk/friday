@@ -200,6 +200,9 @@ async def test_telegram_undo_button_carries_the_version_it_was_shown_for(setting
     assert "Правок: 2, последняя от 2026-07-30" in sent[0]["text"]
     markup = sent[0]["markup"]
     assert markup, "кнопка отката должна быть, откатывать есть к чему"
-    button = markup["inline_keyboard"][0][0]
-    assert button["callback_data"] == "ent:undo:ent_abc123.2"
-    assert len(button["callback_data"].encode()) <= 64, "Telegram: 64 байта на callback_data"
+    buttons = [button for row in markup["inline_keyboard"] for button in row]
+    undo = [button for button in buttons if str(button["callback_data"]).startswith("ent:undo:")]
+    assert undo, "среди действий карточки нет отката"
+    assert undo[0]["callback_data"] == "ent:undo:ent_abc123.2"
+    for button in buttons:
+        assert len(str(button["callback_data"]).encode()) <= 64, "Telegram: 64 байта на callback_data"

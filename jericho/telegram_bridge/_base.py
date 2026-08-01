@@ -55,6 +55,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("browse", "записи по тегу, проекту или сущности"),
     ("tags", "теги базы с количеством записей"),
     ("profile", "карточка сущности: документы, теги, даты, связи"),
+    ("entity_rename", "переименовать объект: старое имя => новое имя"),
     ("inbox", "разобрать ближайшие предложения"),
     ("conflicts", "разобрать конфликты знаний"),
     ("merges", "подтвердить объединение дубликатов"),
@@ -228,6 +229,8 @@ class BridgeShared:
     _timeline_reply_markup: Callable[..., Any]
     _format_mission_created: Callable[..., Any]
     _format_response_message: Callable[..., Any]
+    _ENTITY_TYPE_CHOICES: Any
+    _entity_type_markup: Callable[..., Any]
     _inbox: Any
     _may_message_chat: Callable[..., Any]
     _prepare_document: Callable[..., Any]

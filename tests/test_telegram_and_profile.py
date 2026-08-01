@@ -1769,3 +1769,223 @@ async def test_a_registered_chat_can_trigger_callbacks_without_being_statically_
         )
     finally:
         bridge._inbox.close()
+
+
+def _callback_update(data: str, *, chat_id: int = 5001, user_id: int = 5001) -> dict:
+    return {
+        "update_id": 900,
+        "callback_query": {
+            "id": "cbq-1",
+            "data": data,
+            "from": {"id": user_id},
+            "message": {"message_id": 77, "chat": {"id": chat_id}},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_object_card_offers_actions_not_just_a_read_out(tmp_path):
+    """Спека v3 §6: от объекта — к разрешённым действиям.
+
+    Карточка была тупиком на чтение, а 4349 узлов-людей и 149 войсковых частей
+    заведены АВТОМАТИЧЕСКИМИ правилами: первая же ошибка извлечения чинилась
+    только уходом в админку — при том что Telegram основной интерфейс.
+
+    Мутация: вернуть `reply_markup` только с кнопкой отката — тест обязан
+    покраснеть на «Тип» и «Удалить».
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/entity-profile": {
+                "entity": {"id": "ent_abc123", "name": "Иванов", "entity_type": "person"},
+                "profile": {"tags": [], "document_date_range": None, "documents_without_own_date": 0},
+                "relations": [],
+                "knowledge_objects": [],
+                "knowledge_objects_total": 0,
+                "pending_relations_count": 0,
+                "event_time": None,
+                "edits": {"versions": 1, "last_edited_at": None, "restorable_version": None},
+            }
+        }
+    )
+    try:
+        await bridge._send_entity_profile(telegram, backend, 5001, "5001", {"id": 5001}, "Иванов")
+    finally:
+        bridge._inbox.close()
+
+    sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+    assert sends, "карточка не отправлена"
+    markup = sends[0].get("reply_markup")
+    assert markup, "у карточки нет ни одного действия"
+    labels = [button["callback_data"] for row in markup["inline_keyboard"] for button in row]
+    assert any(item.startswith("ent:browse:") for item in labels), "нет перехода к документам"
+    assert any(item.startswith("ent:types:") for item in labels), "нельзя исправить тип"
+    assert any(item.startswith("ent:del:") for item in labels), "нельзя убрать ошибочный узел"
+    # Откатывать нечего — кнопки отката быть не должно.
+    assert not any(item.startswith("ent:undo:") for item in labels)
+    for item in labels:
+        assert len(item.encode()) <= 64, f"callback_data длиннее 64 байт: {item}"
+
+
+@pytest.mark.asyncio
+async def test_changing_the_object_type_goes_through_the_authorized_route(tmp_path):
+    """Кнопка не меняет данные сама — она зовёт тот же гейтованный маршрут.
+
+    Мутация: слать `PUT`/чужой путь или менять тип на стороне моста — тест
+    обязан покраснеть.
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {"/api/kg/entities/ent_abc123": {"entity": {"id": "ent_abc123", "name": "Меркурий"}}}
+    )
+    try:
+        await bridge._process_callback_query(
+            telegram, backend, _callback_update("ent:type:ent_abc123.organization")["callback_query"]
+        )
+    finally:
+        bridge._inbox.close()
+
+    patch_calls = [call for call in backend.calls if call["method"] == "PATCH"]
+    assert patch_calls, "тип менялся мимо backend"
+    assert patch_calls[0]["path"] == "/api/kg/entities/ent_abc123"
+    assert patch_calls[0]["body"]["entity_type"] == "organization"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_entity_type_is_refused_before_the_backend(tmp_path):
+    """Значение типа — перечисление; строка из кнопки не должна доезжать до
+    хранилища непроверенной."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    try:
+        # Обработчик сам превращает отказ в ответ человеку — проверяем результат,
+        # а не исключение: наружу оно и не должно выходить.
+        await bridge._process_callback_query(
+            telegram, backend, _callback_update("ent:type:ent_abc123.risk")["callback_query"]
+        )
+        assert not backend.calls, "непроверенный тип ушёл в backend"
+        answers = [payload for url, payload in telegram.calls if url.endswith("/answerCallbackQuery")]
+        assert answers and "недоступно" in str(answers[-1].get("text") or ""), "человеку не сказано об отказе"
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_object_asks_first_and_only_the_person_who_asked(tmp_path):
+    """Удаление подтверждается, и чужая кнопка не срабатывает.
+
+    Тот же дефект уже ловили на удалении разговора: приглашение видно всему
+    чату, а открытая регистрация делает второй способный аккаунт достижимым.
+
+    Мутация: убрать проверку `invoker != external_user_id` — тест обязан
+    покраснеть.
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({"/api/kg/entities/ent_abc123": {"status": "soft_deleted"}})
+    try:
+        # Шаг 1: спрашиваем подтверждение, ничего не удаляя.
+        await bridge._process_callback_query(
+            telegram, backend, _callback_update("ent:del:ent_abc123")["callback_query"]
+        )
+        assert not [call for call in backend.calls if call["method"] == "DELETE"], (
+            "объект удалён без подтверждения"
+        )
+        confirm = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")][-1]
+        buttons = [b["callback_data"] for row in confirm["reply_markup"]["inline_keyboard"] for b in row]
+        assert "ent:delyes:ent_abc123.5001" in buttons, "приглашение не несёт id вызвавшего"
+
+        # Шаг 2: жмёт ДРУГОЙ человек — отказ.
+        await bridge._process_callback_query(
+            telegram,
+            backend,
+            _callback_update("ent:delyes:ent_abc123.5001", user_id=6002)["callback_query"],
+        )
+        assert not [call for call in backend.calls if call["method"] == "DELETE"], (
+            "чужая кнопка удалила объект"
+        )
+
+        # Шаг 3: жмёт тот, кто открыл карточку.
+        await bridge._process_callback_query(
+            telegram,
+            backend,
+            _callback_update("ent:delyes:ent_abc123.5001", user_id=5001)["callback_query"],
+        )
+        deletes = [call for call in backend.calls if call["method"] == "DELETE"]
+        assert deletes and deletes[0]["path"] == "/api/kg/entities/ent_abc123"
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_renaming_an_object_keeps_names_with_spaces_whole(tmp_path):
+    """Переименование объекта — единственное действие, которое нельзя сделать
+    кнопкой: новое имя надо ввести.
+
+    Разделитель — стрелка, а не пробел, и это не украшение: имена в этом архиве
+    состоят из пробелов целиком («Иванов Иван Иванович», «в/ч 12345»), и по
+    пробелу их разделить нельзя в принципе.
+
+    Мутация: разделять аргумент по первому пробелу — тест обязан покраснеть.
+    """
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/kg/entity-profile": {
+                "entity": {"id": "ent_abc123", "name": "Иванов И.И."},
+                "profile": {},
+                "edits": {"versions": 1, "restorable_version": None},
+            },
+            "/api/kg/entities/ent_abc123": {"entity": {"id": "ent_abc123", "name": "Иванов Иван Иванович"}},
+        }
+    )
+    update = {
+        "update_id": 950,
+        "message": {
+            "message_id": 12,
+            "chat": {"id": 5001},
+            "from": {"id": 5001},
+            "text": "/entity_rename Иванов И.И. => Иванов Иван Иванович",
+        },
+    }
+    try:
+        await bridge._process_update(telegram, backend, update, cached_response=None)
+    finally:
+        bridge._inbox.close()
+
+    patches = [call for call in backend.calls if call["method"] == "PATCH"]
+    assert patches, "переименование не дошло до backend"
+    assert patches[0]["path"] == "/api/kg/entities/ent_abc123"
+    assert patches[0]["body"]["name"] == "Иванов Иван Иванович", "новое имя обрезано по пробелу"
+    lookups = [call for call in backend.calls if "entity-profile" in call["path"]]
+    assert lookups and "%D0%98" in lookups[0]["path"], "старое имя искалось не целиком"
+
+
+@pytest.mark.asyncio
+async def test_rename_without_the_arrow_explains_the_format(tmp_path):
+    """Без стрелки команда не гадает, где кончается старое имя, — она объясняет."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({})
+    update = {
+        "update_id": 951,
+        "message": {
+            "message_id": 13,
+            "chat": {"id": 5001},
+            "from": {"id": 5001},
+            "text": "/entity_rename Иванов Иван",
+        },
+    }
+    try:
+        await bridge._process_update(telegram, backend, update, cached_response=None)
+    finally:
+        bridge._inbox.close()
+
+    assert not [call for call in backend.calls if call["method"] == "PATCH"], "переименовало наугад"
+    sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+    assert sends and "=>" in str(sends[-1]["text"]), "формат не объяснён"
