@@ -49,6 +49,73 @@ _MODE_TOOL_BUDGETS = {
 #: бессмысленно: решение остаётся её, а просьба человека однозначна. Поэтому при
 #: явной просьбе поиск выполняется ДО первого хода модели, и выдача кладётся ей
 #: на стол.
+#: Вопрос о том, что происходило в названное время.
+#:
+#: Замерено на живом экземпляре 2026-08-01: «что было 29 июля?» — инструмент
+#: времени НЕ вызван, ответ построен по документам, где 29 июля лишь УПОМЯНУТО
+#: («29 июля 2024 года зафиксировано прибытие военнослужащих…»), то есть ровно та
+#: подмена момента словами, ради которой инструмент и появился. Контекст к этому
+#: моменту уже собран поиском, и модели «есть что ответить» — своё решение звать
+#: инструмент она принимает против готового текста и обычно проигрывает.
+_ASKS_WHAT_HAPPENED = re.compile(
+    r"(?:^|\W)(?:"
+    r"что\s+(?:было|происходило|случилось|делал[аи]?)|"
+    r"чем\s+заним|"
+    r"покажи\s+(?:события|ленту|хронику)|"
+    r"какие\s+события"
+    r")",
+    re.IGNORECASE,
+)
+#: Само временное выражение внутри вопроса: день, относительный день или час.
+_MOMENT_IN_QUESTION = re.compile(
+    r"(?P<day>"
+    r"\d{4}-\d{2}-\d{2}|"
+    r"\d{1,2}\s+(?:янв|фев|мар|апр|ма|июн|июл|авг|сен|окт|ноя|дек)[а-яё]*(?:\s+\d{4})?|"
+    r"позавчера|вчера|сегодня|"
+    r"\d{1,3}\s+(?:дн\w*|сут\w*)\s+назад"
+    r")"
+    # Час засчитывается либо когда названы минуты («в 10:30»), либо когда рядом
+    # стоит слово «час»/«ч» («в 15 часов»). Без одного из этих признаков число в
+    # вопросе — это что угодно, а не время.
+    r"(?:[^0-9]{0,12}?(?:в\s+)?(?:"
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})|"
+    r"(?P<hour_word>\d{1,2})\s*(?:час\w*|ч\b)"
+    r"))?",
+    re.IGNORECASE,
+)
+#: Часы, названные словами. «В час ночи» — это 01:00, и человек говорит именно так.
+_SPOKEN_HOURS = (
+    (re.compile(r"\bполноч\w*", re.IGNORECASE), 0),
+    (re.compile(r"\bполд(?:ень|ня)", re.IGNORECASE), 12),
+    (re.compile(r"\bчас\w*\s+ночи", re.IGNORECASE), 1),
+    (re.compile(r"\bутра\b", re.IGNORECASE), None),
+)
+
+
+def moment_from_question(message: str) -> str | None:
+    """Временное выражение из вопроса — в том виде, в каком его сказал человек.
+
+    Вычислять дату здесь нельзя: разбор живёт в ядре и понимает и «вчера», и «26
+    июля», и час. Задача этой функции — только вырезать нужный кусок вопроса,
+    ничего к нему не добавляя. Дописанный год промахивается мимо архива: на живом
+    прогоне модель превратила «29 июля» в «29 июля 2024» и ответила про пустоту
+    там, где было полторы тысячи событий.
+    """
+    text = message or ""
+    match = _MOMENT_IN_QUESTION.search(text)
+    if not match:
+        return None
+    moment = match.group("day")
+    hour_text = match.group("hour") or match.group("hour_word")
+    if hour_text is not None and 0 <= int(hour_text) <= 23:
+        minute = match.group("minute")
+        return f"{moment} {int(hour_text):02d}:{minute or '00'}"
+    for pattern, spoken_hour in _SPOKEN_HOURS:
+        if spoken_hour is not None and pattern.search(text):
+            return f"{moment} {spoken_hour:02d}:00"
+    return moment
+
+
 _ASKS_FOR_THE_WEB = re.compile(
     r"(?:^|\W)(?:"
     r"в\s+интернете|в\s+инете|в\s+сети\b|в\s+вебе|в\s+гугле|в\s+яндексе|"
@@ -956,6 +1023,9 @@ class AgentRuntime:
         tool_knowledge_ids: list[str] = []
         tool_evidence: list[dict[str, str]] = []
         await self._prefetch_the_web_if_asked(message, actor, tools, messages, tools_used, tool_evidence)
+        await self._prefetch_the_timeline_if_asked(
+            message, actor, tools, messages, tools_used, tool_evidence
+        )
         # Set by a successful `speak` call; last one wins (a turn ships at most one
         # voice message). Kept off `tool_evidence`/`messages` entirely — see
         # `ToolResult.attachment`.
@@ -1296,6 +1366,59 @@ class AgentRuntime:
         cleaned = _WEB_REQUEST_FILLER.sub(" ", message)
         cleaned = " ".join(cleaned.replace(",", " ").split()).strip(" ,.:;—-")
         return cleaned or " ".join(message.split())
+
+    async def _prefetch_the_timeline_if_asked(
+        self,
+        message: str,
+        actor: ActorContext,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_evidence: list[dict[str, str]],
+    ) -> None:
+        """Спросили «что было тогда-то» — берём ленту, не спрашивая модель.
+
+        Та же причина, что у предварительного веб-поиска, только острее: к этому
+        моменту контекст уже собран обычным поиском, и у модели «есть что
+        ответить». Замерено: на «что было 29 июля?» она не позвала инструмент и
+        рассказала про 29 июля **2024** года по документу, где эта дата
+        упомянута, — при полутора тысячах событий 29 июля 2026-го в архиве.
+        """
+        if not _ASKS_WHAT_HAPPENED.search(message):
+            return
+        moment = moment_from_question(message)
+        if not moment:
+            return  # «что было» без времени — обычный вопрос, не лента
+        if not any(
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "what_happened"
+            for tool in tools
+        ):
+            return
+        try:
+            result = await self.kernel.execute(
+                "what_happened", {"since": moment, "limit": 40}, actor=actor
+            )
+        except Exception:  # noqa: BLE001 — лента не должна ронять ход
+            LOGGER.exception("Prefetch timeline failed")
+            return
+        rendered = result.to_llm_message()
+        if not rendered:
+            return
+        tools_used.append("what_happened")
+        if result.success and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
+            tool_evidence.append({"tool": "what_happened", "output": str(rendered)})
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"Человек спрашивает, что происходило в момент «{moment}». Лента уже "
+                    f"получена:\n\n{rendered}\n\n"
+                    "Отвечай по ней. Это записи, СДЕЛАННЫЕ в то время, а не документы, где "
+                    "эта дата упомянута, — не подменяй одно другим. Если лента пуста, так и "
+                    "скажи: в тот момент в архиве ничего не появилось."
+                ),
+            }
+        )
 
     async def _prefetch_the_web_if_asked(
         self,

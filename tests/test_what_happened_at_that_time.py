@@ -195,3 +195,56 @@ def test_todays_line_names_the_date_and_the_hour(settings):
     assert today.strftime("%Y-%m-%d") in line
     assert ":" in line, "час не назван"
     assert "не полагайся на свою память" in line
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("что было 29 июля?", "29 июля"),
+        ("что происходило вчера?", "вчера"),
+        ("что было сегодня в час ночи?", "сегодня 01:00"),
+        ("что было 26 июля в 15 часов?", "26 июля 15:00"),
+        ("что было позавчера в 10:30?", "позавчера 10:30"),
+        ("что было вчера в полдень?", "вчера 12:00"),
+        ("что было 3 дня назад?", "3 дня назад"),
+        ("что было 2026-07-29?", "2026-07-29"),
+    ],
+)
+def test_the_moment_is_taken_from_the_question_as_said(question, expected):
+    """Год не дописывается: на живом прогоне модель превратила «29 июля» в
+    «29 июля 2024» и ответила про пустоту там, где было 1555 событий."""
+    from friday.agent_runtime import moment_from_question
+
+    assert moment_from_question(question) == expected
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "что нового по проекту?",
+        "что было решено по штатному расписанию?",
+        "какие документы есть про АК-12?",
+    ],
+)
+def test_a_question_without_a_moment_is_not_a_timeline_question(question):
+    from friday.agent_runtime import moment_from_question
+
+    assert moment_from_question(question) is None
+
+
+def test_the_timeline_prefetch_is_wired_into_the_loop():
+    """Мутация: убрать вызов из `_agentic_loop` — тест краснеет.
+
+    Замерено: на «что было 29 июля?» модель НЕ звала инструмент и отвечала по
+    документу, где эта дата лишь упомянута («29 июля 2024 года зафиксировано
+    прибытие военнослужащих»). К этому моменту контекст уже собран поиском, и
+    своё решение звать инструмент модель принимает против готового текста.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    loop_source = inspect.getsource(AgentRuntime._agentic_loop)  # noqa: SLF001
+    assert "_prefetch_the_timeline_if_asked(" in loop_source, (
+        "лента объявлена, но из агентского цикла не вызывается"
+    )
