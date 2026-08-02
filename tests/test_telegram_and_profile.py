@@ -1989,7 +1989,12 @@ async def test_rename_without_the_arrow_explains_the_format(tmp_path):
 
     assert not [call for call in backend.calls if call["method"] == "PATCH"], "переименовало наугад"
     sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
-    assert sends and "=>" in str(sends[-1]["text"]), "формат не объяснён"
+    # Смотрим на то, что УВИДИТ человек: с `parse_mode=HTML` стрелка уходит по
+    # проводу как `=&gt;` и отрисовывается как `=>`. Проверять сырой запрос —
+    # значит проверять транспорт вместо смысла.
+    import html as _html
+
+    assert sends and "=>" in _html.unescape(str(sends[-1]["text"])), "формат не объяснён"
 
 
 @pytest.mark.asyncio

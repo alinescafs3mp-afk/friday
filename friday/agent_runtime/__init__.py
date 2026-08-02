@@ -456,6 +456,36 @@ _NOT_A_NAME = frozenset(
 )
 
 
+#: Ниже этого совпадения архив считается ответившим случайно, и вердикт арбитра
+#: «интернет» его перебивает. Граница не угадана, а замерена на живом корпусе
+#: (2026-08-02, 1533 объекта, переранжировщик включён):
+#:
+#:   «что там по поверке приборов»    верх 0.719   — свои документы, архив прав
+#:   «мои документы по подготовке»    верх 0.953   — свои документы, архив прав
+#:   «что известно про приказ 214»    верх 0.028   — приказа в архиве нет, сеть права
+#:   «характеристики 5090»            найдено 0    — сеть
+#:   «курс евро сегодня»              найдено 0    — сеть
+#:   «погода в Москве на выходные»    найдено 0    — сеть
+#:
+#: Между 0.028 и 0.719 нет ничего, так что середина шкалы разделяет случаи с
+#: запасом в обе стороны.
+_ARCHIVE_IS_SURE = 0.5
+
+
+def _archive_is_weak(hits: list[dict[str, Any]]) -> bool:
+    """Отвечает ли архив уверенно — или просто что-то нашёл.
+
+    Возвращает False (то есть «архив силён»), когда оценки переранжировщика нет
+    вовсе: сервис бывает выключен или недоступен, и его отказ не должен открывать
+    дорогу наружу. Тогда действует прежнее правило «нашлось — значит про своё».
+    """
+    scored = [item.get("_rerank_score") for item in hits]
+    known = [float(score) for score in scored if score is not None]
+    if not known:
+        return False
+    return max(known) < _ARCHIVE_IS_SURE
+
+
 def _might_be_a_question(message: str) -> bool:
     text = " ".join((message or "").split())
     if not text or len(text) > _QUESTION_LENGTH_LIMIT:
@@ -665,12 +695,40 @@ def _normalize_verdict(content: str) -> dict[str, Any]:
     }
 
 
+#: Сколько знаков отдаётся под перечень замечаний автопроверки и сколько — под
+#: одно замечание. Пределы есть (предупреждение не должно вытеснить сам ответ),
+#: но теперь они РЕЖУТ ПО ЦЕЛЫМ замечаниям и говорят, сколько осталось за кадром.
+_CAUTION_DETAIL_LIMIT = 600
+_CAUTION_ITEM_LIMIT = 200
+
+
 def _verification_caution(status: str, issues: list[Any]) -> str:
     """User-facing warning for a failed or unverifiable answer (empty otherwise)."""
     if status == VERDICT_FAILED:
         head = "⚠️ Автопроверка нашла возможные несоответствия с вашими данными — перепроверьте факты."
-        detail = "; ".join(str(item).strip() for item in issues if str(item).strip())[:200]
-        return f"{head} {detail}".strip() if detail else head
+        # Замечания перечисляются ЦЕЛИКОМ, по одному в строке, и обрыв виден.
+        #
+        # Найдено владельцем 2026-08-02: «сообщения обрезаются в последнем блоке,
+        # где автопроверка нашла возможные несоответствия». Прежняя редакция
+        # склеивала замечания через «; » и рубила строку на двухсотом знаке —
+        # посреди слова, без единого признака, что дальше было ещё. Человек
+        # читал оборванную претензию к собственным данным и не мог узнать, в чём
+        # она состояла.
+        clean = [str(item).strip() for item in issues if str(item).strip()]
+        if not clean:
+            return head
+        shown: list[str] = []
+        budget = _CAUTION_DETAIL_LIMIT
+        for item in clean:
+            piece = item if len(item) <= _CAUTION_ITEM_LIMIT else item[: _CAUTION_ITEM_LIMIT - 1] + "…"
+            if shown and len(piece) > budget:
+                break
+            shown.append(piece)
+            budget -= len(piece)
+        lines = "\n".join(f"• {piece}" for piece in shown)
+        hidden = len(clean) - len(shown)
+        tail = f"\n…и ещё {hidden} — целиком в админке." if hidden > 0 else ""
+        return f"{head}\n{lines}{tail}"
     if status == VERDICT_UNKNOWN:
         # Internal reasons (e.g. "verifier unavailable") are diagnostic, not shown.
         return (
@@ -1274,7 +1332,16 @@ class AgentRuntime:
             and self.llm.enabled
             and _might_be_a_question(message)
         ):
-            arbiter = asyncio.create_task(self._web_query_by_arbiter(message))
+            # Последняя реплика человека до этой: вопрос-продолжение («а сроки
+            # какие?») без неё читается как чужой.
+            previous = ""
+            for item in reversed(context.conversation_history or []):
+                if str(item.get("role") or "") == "user":
+                    previous = str(item.get("content") or "")[:400]
+                    break
+            arbiter = asyncio.create_task(
+                self._web_query_by_arbiter(message, previous_turn=previous)
+            )
         if context.small_talk or looking_outward:
             # Ни гибридным поиском, ни запасным SQL: обнулять `searcher` было
             # мало — запасная ветка ниже всё равно шла в `search_knowledge`, и
@@ -2325,7 +2392,9 @@ class AgentRuntime:
         verdict = str(answer.get("content") or "").strip().casefold()
         return verdict.startswith("разговор")
 
-    async def _web_query_by_arbiter(self, message: str) -> tuple[str, str | None]:
+    async def _web_query_by_arbiter(
+        self, message: str, *, previous_turn: str = ""
+    ) -> tuple[str, str | None]:
         """Спросить модель, не нужен ли тут интернет, когда шаблон молчит.
 
         Владелец сформулировал требование прямо: другая формулировка или опечатка
@@ -2394,6 +2463,18 @@ class AgentRuntime:
                             "Никаких пояснений, только JSON."
                         ),
                     },
+                    # Предыдущий ход — чтобы вопрос-продолжение читался целиком.
+                    #
+                    # Замерено на недельном прогоне: «А сроки какие?» после
+                    # разговора о поверке приборов ушло в поисковик строкой
+                    # «текущие сроки доставки». Арбитр видел четыре слова без
+                    # темы и достроил её сам — наружу ушла бессмыслица, а
+                    # человек получил ответ не о том, что спрашивал.
+                    *(
+                        [{"role": "system", "content": f"Предыдущий ход разговора: {previous_turn[:400]}"}]
+                        if previous_turn.strip()
+                        else []
+                    ),
                     {"role": "user", "content": message[:600]},
                 ],
                 tools=[],
@@ -2469,7 +2550,11 @@ class AgentRuntime:
             not asked_outright
             and context is not None
             and context.knowledge_hits
-            and not (verdict and str(verdict[0]).startswith(("интернет", "знание")))
+            and not (
+                verdict
+                and str(verdict[0]).startswith(("интернет", "знание"))
+                and _archive_is_weak(context.knowledge_hits)
+            )
         ):
             return
         # Имя человека из архива наружу не уходит. Найдено сквозным прогоном на

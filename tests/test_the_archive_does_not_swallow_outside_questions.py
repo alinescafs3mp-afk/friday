@@ -34,7 +34,13 @@ def _context(**overrides) -> AgentContext:
     return context
 
 
-HITS = [{"id": "ko_1", "title": "Приказ 214", "summary": "о порядке доступа"}]
+#: Сильное совпадение: свои документы по теме. Замерено на живом корпусе —
+#: «что там по поверке приборов» даёт верх 0.719, «мои документы по подготовке»
+#: 0.953.
+HITS = [{"id": "ko_1", "title": "Приказ 214", "summary": "о порядке доступа", "_rerank_score": 0.72}]
+#: Слабое: поиск что-то принёс, но мимо. «Что известно про приказ 214» на этом же
+#: корпусе даёт 0.028 — приказа там нет, и уход в сеть верен.
+WEAK_HITS = [{"id": "ko_2", "title": "Наставление", "summary": "не о том", "_rerank_score": 0.03}]
 
 
 class _Result:
@@ -102,13 +108,38 @@ def test_the_signature_is_the_one_the_turn_uses() -> None:
 def test_a_question_about_the_world_still_goes_out_when_the_archive_matched() -> None:
     """Мутация: вернуть проверку только на `knowledge_hits` — тест краснеет."""
     runtime = _Runtime(verdict=("интернет", "характеристики RTX 5090"))
-    context = _context(knowledge_hits=HITS, outward_verdict=("интернет", "характеристики RTX 5090"))
+    context = _context(knowledge_hits=WEAK_HITS, outward_verdict=("интернет", "характеристики RTX 5090"))
 
     queries = _decide(runtime, "Подскажи пожалуйста характеристики 5090", context)
 
     assert queries == ["характеристики RTX 5090"], (
         "вопрос о видеокарте снова разобран по личному архиву вместо интернета"
     )
+
+
+def test_a_strong_archive_match_beats_the_internet_verdict() -> None:
+    """Обратная сторона той же границы, найденная недельным прогоном.
+
+    «Подскажи, что там по поверке приборов» ушло в интернет и вернулось рассказом
+    про счётчики воды за 34 секунды — при том что нужные документы лежат в архиве
+    и находятся уверенно (верх 0.719). Вердикт «интернет» перебивает архив только
+    там, где архив ответил случайно.
+    """
+    runtime = _Runtime(verdict=("интернет", "сроки поверки приборов учёта"))
+    context = _context(knowledge_hits=HITS, outward_verdict=("интернет", "сроки поверки приборов учёта"))
+
+    queries = _decide(runtime, "Подскажи, что там по поверке приборов", context)
+
+    assert queries == [], "своя тема с уверенным совпадением ушла в поисковик"
+
+
+def test_without_a_rerank_score_the_archive_keeps_priority() -> None:
+    """Отказ переранжировщика не должен открывать дорогу наружу."""
+    runtime = _Runtime(verdict=("интернет", "что угодно"))
+    unscored = [{"id": "ko_3", "title": "Документ", "summary": "без оценки"}]
+    context = _context(knowledge_hits=unscored, outward_verdict=("интернет", "что угодно"))
+
+    assert _decide(runtime, "что там по поверке", context) == []
 
 
 def test_a_question_about_my_own_papers_still_prefers_the_archive() -> None:
@@ -129,13 +160,28 @@ def test_a_question_about_my_own_papers_still_prefers_the_archive() -> None:
 def test_a_settled_fact_is_answered_from_memory_even_with_archive_hits() -> None:
     """«Знание» тоже перебивает архив: иначе устоявшийся факт тонет так же."""
     runtime = _Runtime(verdict=("знание", None))
+    context = _context(knowledge_hits=WEAK_HITS, outward_verdict=("знание", None))
+    notice: list[str] = []
+
+    queries = _decide(runtime, "чем отличается лизинг от аренды?", context, notice=notice)
+
+    assert queries == [], "за объяснением всё же пошли в интернет"
+    assert any("собственных знаний" in item for item in notice), notice
+
+
+def test_a_strong_archive_match_beats_the_knowledge_verdict_too() -> None:
+    """Свои документы важнее общего объяснения.
+
+    Если человек спрашивает о том, что у него лежит в архиве, отвечать общими
+    словами из головы модели — значит не заметить его собственный материал.
+    """
+    runtime = _Runtime(verdict=("знание", None))
     context = _context(knowledge_hits=HITS, outward_verdict=("знание", None))
     notice: list[str] = []
 
-    queries = _decide(runtime, "кто был вторым президентом США?", context, notice=notice)
+    _decide(runtime, "какой у нас порядок поверки?", context, notice=notice)
 
-    assert queries == [], "за устоявшимся фактом всё же пошли в интернет"
-    assert any("собственных знаний" in item for item in notice), notice
+    assert notice == [], "уверенное совпадение в архиве подменили рассказом по памяти"
 
 
 def test_the_ready_verdict_is_not_recomputed() -> None:
@@ -165,10 +211,12 @@ def test_without_a_ready_verdict_the_arbiter_is_still_asked() -> None:
 def test_the_arbiter_runs_next_to_the_search_not_after_it() -> None:
     """Проверяется подключённое: задача арбитра создаётся до ожидания поиска."""
     source = inspect.getsource(AgentRuntime._prepare_context)
-    assert "asyncio.create_task(self._web_query_by_arbiter" in source, (
+    # Проверка по смыслу, а не по одной строке: вызов законно переносится на
+    # несколько строк, когда у арбитра появляются аргументы.
+    assert "asyncio.create_task(" in source and "_web_query_by_arbiter" in source, (
         "арбитр снова считается последовательно — его секунды прибавятся к ответу"
     )
-    created = source.index("asyncio.create_task(self._web_query_by_arbiter")
+    created = source.index("asyncio.create_task(")
     awaited = source.index("await arbiter")
     searched = source.index("await searcher.search(")
     assert created < searched < awaited, "поиск и арбитр перестали идти одновременно"

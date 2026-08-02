@@ -36,6 +36,7 @@ from friday.telegram_bridge._base import (
     time,
     uuid,
 )
+from friday.telegram_bridge._markup import to_telegram_html
 from friday.telegram_bridge._queue import _UpdateInbox
 from friday.telemetry.logging import redact_text
 
@@ -748,16 +749,33 @@ class TransportMixin(BridgeShared):
         *,
         reply_markup: dict[str, Any] | None = None,
     ) -> None:
+        # Режем СЫРОЙ текст, размечаем каждый кусок отдельно. Наоборот было бы
+        # опаснее: граница в 4096 знаков попала бы внутрь тега, и Telegram
+        # отверг бы кусок целиком. При разрыве абзаца пополам жирное начертание
+        # в этом месте теряется — это видно, но сообщение доходит.
         chunks = split_for_telegram(text)
         for index, chunk in enumerate(chunks):
             payload: dict[str, Any] = {
                 "chat_id": chat_id,
-                "text": chunk,
+                "text": to_telegram_html(chunk) or chunk,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }
             if reply_markup and index == len(chunks) - 1:
                 payload["reply_markup"] = reply_markup
             response = await client.post(f"{self._api_url}/sendMessage", json=payload)
+            if response.status_code == 400:
+                # Разметка важна, но доставка важнее. Любая неожиданная
+                # последовательность — незакрытый тег на границе куска, экзотика
+                # из ответа модели — не должна стоить человеку СООБЩЕНИЯ: именно
+                # «ничего не приходит» владелец и разбирал сегодня.
+                LOGGER.warning(
+                    "Telegram rejected formatted message (%s); resending as plain text",
+                    response.text[:200],
+                )
+                payload.pop("parse_mode", None)
+                payload["text"] = chunk
+                response = await client.post(f"{self._api_url}/sendMessage", json=payload)
             response.raise_for_status()
 
     async def _send_document(
