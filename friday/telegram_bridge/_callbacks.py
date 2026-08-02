@@ -56,9 +56,16 @@ def _file_fate_line(file_ingestion: Any) -> str:
     # говорили просто «ждёт разбора», и он не знал, что содержимого не видно.
     nothing_came_out = not text_missing and extraction.get("chars") == 0
     partial = bool(extraction.get("parse_deadline_reached"))
+    # Текст не поместился в потолок: принято начало, остальное отброшено.
+    over_the_cap = bool(extraction.get("text_truncated"))
     if file_ingestion.get("promoted"):
         line = "✅ Файл стал знанием — можно спрашивать."
-        if partial:
+        if over_the_cap:
+            line += (
+                " Документ длиннее, чем помещается целиком, — принято начало;"
+                " по концу файла спрашивать бесполезно."
+            )
+        elif partial:
             pages = int(extraction.get("parse_pages_read") or 0)
             read = f" Прочитано страниц: {pages}." if pages else ""
             line += f" Разбор остановлен по сроку — принято только начало.{read}"
@@ -67,6 +74,11 @@ def _file_fate_line(file_ingestion: Any) -> str:
         line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
         if text_missing:
             line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
+        elif over_the_cap:
+            line += (
+                " Документ длиннее, чем помещается целиком, — принято начало;"
+                " по концу файла спрашивать бесполезно."
+            )
         elif nothing_came_out:
             line += " Текста в файле не оказалось — разбор прошёл, а содержимого нет."
         elif partial:

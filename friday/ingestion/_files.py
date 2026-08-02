@@ -379,8 +379,19 @@ class FilesMixin(PipelineShared):
         text_content = extraction.text if extraction.success else ""
         if not text_content.strip():
             text_content = ""
+        # Обрезка по потолку — это ПОТЕРЯ, и молчать о ней нельзя. Замерено:
+        # документ на 3.75 млн знаков принимался как 2 млн, и человеку
+        # говорилось ровно «✅ Файл стал знанием — можно спрашивать» — половина
+        # текста отброшена, спрашивать по ней бесполезно, и узнать об этом
+        # неоткуда. Тот же класс, что немой обрыв голоса и разбор по сроку.
+        #
+        # Признак не вычисляется здесь заново: разборщик уже обрезал текст своим
+        # потолком и честно записал это в метаданные — вычисление на этой стороне
+        # всегда давало False, потому что мерило уже обрезанное.
+        text_truncated = bool((extraction.metadata or {}).get("text_truncated"))
         if len(text_content) > self.settings.max_extracted_text_chars:
             text_content = text_content[: self.settings.max_extracted_text_chars]
+            text_truncated = True
         vision: dict[str, Any] | None = None
         if len(text_content.strip()) < 160:
             vision = await self._extract_visual_document(
@@ -726,6 +737,8 @@ class FilesMixin(PipelineShared):
                         # знаков. Человеку тогда говорили просто «ждёт разбора»,
                         # и он не знал, что содержимого система не видит вовсе.
                         "chars": len(text_content or ""),
+                        # Текст не поместился в потолок и обрезан.
+                        "text_truncated": text_truncated,
                         # Успех и полнота — не одно и то же. Разбор, оборванный по
                         # сроку, приходит сюда с `success=True` и частичным текстом;
                         # без этой строки загрузивший узнаёт «файл принят» и ничего

@@ -323,3 +323,31 @@ def test_an_unreadable_file_says_the_content_is_invisible(pipeline, name, payloa
     result = _ingest(pipeline, payload, name, "")
     assert result["promoted"] is False
     assert "Текст извлечь не удалось" in _file_fate_line(result)
+
+
+def test_a_document_too_long_to_hold_says_only_the_beginning_was_taken(pipeline):
+    """Мутация: брать `text_truncated` не из метаданных разборщика — тест краснеет.
+
+    Замерено: документ на 3.75 млн знаков принимался как 2 млн, и человеку
+    говорилось ровно «✅ Файл стал знанием — можно спрашивать». Половина текста
+    отброшена, спрашивать по ней бесполезно, и узнать об этом было неоткуда —
+    тот же класс, что немой обрыв голоса и разбор, оборванный по сроку.
+
+    Первая редакция правки вычисляла признак на приёмной стороне и всегда
+    получала False: разборщик к тому моменту уже обрезал текст своим потолком,
+    и мерилось обрезанное.
+    """
+    huge = ("Строка отчёта. " * 250_000).encode()
+    result = _ingest(pipeline, huge, "huge.txt", "text/plain")
+    extraction = result["extraction"]
+    assert extraction["text_truncated"] is True
+    assert extraction["chars"] < len(huge.decode())
+    line = _file_fate_line(result)
+    assert "принято начало" in line
+    assert "по концу файла спрашивать бесполезно" in line
+
+
+def test_an_ordinary_document_carries_no_truncation_notice(pipeline):
+    result = _ingest(pipeline, "Приказ №5 от 1 августа.".encode(), "small.txt", "text/plain")
+    assert result["extraction"]["text_truncated"] is False
+    assert _file_fate_line(result) == "✅ Файл стал знанием — можно спрашивать."
