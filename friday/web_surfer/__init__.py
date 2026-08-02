@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 
 from friday.config import FridaySettings
 from friday.retrieval import best_snippet
+from friday.web_surfer._direct import direct_answers
 
 LOGGER = logging.getLogger(__name__)
 
@@ -988,6 +989,18 @@ class WebSurfer:
                 "summary": "No search results found.",
             }
 
+        # Прямые источники — впереди страниц. Котировка и прогноз на обычных
+        # сайтах рисуются скриптом, и в тексте их нет: замерено на «сколько
+        # стоит нефть Brent» и «какой курс биткоина» — одиннадцать из двенадцати
+        # вопросов дали конкретное значение, а эти два вернули «цифра в тексте
+        # не раскрылась». Здесь ЧИСЛА приходят числами, из официальных и
+        # общепризнанных источников, со ссылкой для человека.
+        direct: list[dict[str, Any]] = []
+        try:
+            direct = await direct_answers(query, await self._get_client())
+        except Exception:  # noqa: BLE001 — прямой источник не должен ронять исследование
+            LOGGER.warning("Прямые источники данных не ответили", exc_info=True)
+
         selected = results[:source_limit]
         tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in selected]
         done: set[asyncio.Task[FetchResult]] = set()
@@ -1003,8 +1016,9 @@ class WebSurfer:
             if unfinished:
                 await asyncio.gather(*unfinished, return_exceptions=True)
 
-        sources: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = list(direct)
         failed_sources = 0
+        requested_sources = len(selected)
         for search_result, task in zip(selected, tasks, strict=False):
             if task not in done:
                 continue
@@ -1033,6 +1047,50 @@ class WebSurfer:
             1 for item in sources if not item["error"] and str(item.get("text") or "").strip()
         )
         timed_out_sources = len(pending)
+
+        # Запас из выдачи наконец используется. `search` спрашивает ВДВОЕ больше
+        # результатов, чем читает, и хвост просто лежал: первые три страницы
+        # оказались нечитаемыми — ответ уходил без фактуры, хотя четвёртая
+        # ссылка в той же выдаче отвечала. Замерено на «сколько стоит нефть
+        # Brent»: TradingView отдаёт котировку скриптом, текста нет, и человек
+        # получал «точная цифра в текстовом фрагменте не раскрылась» при
+        # одиннадцати из двенадцати остальных вопросов с конкретным значением.
+        spare = results[len(selected) :]
+        remaining = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+        if readable_sources == 0 and spare and remaining > 2.0:
+            extra = spare[:source_limit]
+            requested_sources += len(extra)
+            extra_tasks = [
+                asyncio.create_task(self.fetch(item.url, max_length=20_000)) for item in extra
+            ]
+            try:
+                extra_done, extra_pending = await asyncio.wait(
+                    extra_tasks, timeout=min(_RESEARCH_FETCH_BUDGET, remaining - 1.0)
+                )
+            finally:
+                for task in extra_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*extra_tasks, return_exceptions=True)
+            for search_result, task in zip(extra, extra_tasks, strict=False):
+                if task not in extra_done:
+                    continue
+                try:
+                    fetch_result = task.result()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 — нечитаемый запасной источник не беда
+                    failed_sources += 1
+                    continue
+                item = fetch_result.to_dict(preview_chars=20_000, query=query)
+                item["search_title"] = search_result.title
+                item["snippet"] = search_result.snippet
+                item["source"] = search_result.source
+                sources.append(item)
+            timed_out_sources += len(extra_pending)
+            readable_sources = sum(
+                1 for item in sources if not item["error"] and str(item.get("text") or "").strip()
+            )
         if sources:
             summary = f"Collected {readable_sources} readable public sources."
         else:
@@ -1046,7 +1104,7 @@ class WebSurfer:
         return {
             "query": query,
             "sources": sources,
-            "requested_sources": len(selected),
+            "requested_sources": requested_sources,
             "completed_sources": len(sources),
             "timed_out_sources": timed_out_sources,
             "failed_sources": failed_sources,

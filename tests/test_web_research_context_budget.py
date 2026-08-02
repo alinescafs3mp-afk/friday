@@ -172,3 +172,67 @@ def test_the_slot_budget_keeps_the_matching_passage_not_the_top_of_the_page() ->
             f"источник {index}: до модели дошла шапка страницы, а не место совпадения "
             f"(первые знаки: {text[:60]!r})"
         )
+
+
+class _UnreadableFirstPagesHarness:
+    """Первые три страницы отдают 200 и пустой текст — как сайты на скриптах."""
+
+    research = WebSurfer.research
+
+    def __init__(self) -> None:
+        self.fetched: list[str] = []
+
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query, max_results
+        return [
+            SearchResult(f"Source {n}", f"https://source-{n}.example/", "", "fixture")
+            for n in range(1, 7)
+        ]
+
+    async def fetch(self, url: str, *, max_length: int) -> FetchResult:
+        del max_length
+        self.fetched.append(url)
+        number = int(url.split("source-", 1)[1].split(".", 1)[0])
+        if number <= 3:
+            return FetchResult(url, "", "", 0, status_code=200)
+        text = "Нефть Brent торгуется по 78,40 доллара за баррель."
+        return FetchResult(url, f"Source {number}", text, len(text), status_code=200)
+
+
+@pytest.mark.anyio
+async def test_the_spare_results_are_used_when_the_first_pages_are_unreadable() -> None:
+    """Мутация: убрать вторую волну чтения — тест краснеет.
+
+    `search` спрашивает ВДВОЕ больше результатов, чем читает, и хвост просто
+    лежал. Замерено на «сколько стоит нефть Brent»: TradingView отдаёт котировку
+    скриптом, текста нет — человек получал «точная цифра в текстовом фрагменте
+    не раскрылась», хотя следующая ссылка той же выдачи отвечала. Одиннадцать из
+    двенадцати остальных вопросов при этом дали конкретное значение.
+    """
+    harness = _UnreadableFirstPagesHarness()
+    result = await harness.research("цена нефти Brent", max_sources=3)
+
+    assert len(harness.fetched) > 3, "запас из выдачи так и не прочитан"
+    readable = [
+        item
+        for item in result["sources"]
+        if not item["error"] and str(item.get("text") or "").strip()
+    ]
+    assert readable, "все источники пусты, хотя четвёртая ссылка отвечала"
+    assert "78,40" in readable[0]["text"]
+    assert result["requested_sources"] >= 4
+
+
+class _ReadableHarness(_UnreadableFirstPagesHarness):
+    async def fetch(self, url: str, *, max_length: int) -> FetchResult:
+        del max_length
+        self.fetched.append(url)
+        return FetchResult(url, "", "Ставка 14,00%", 13, status_code=200)
+
+
+@pytest.mark.anyio
+async def test_a_readable_first_page_needs_no_second_wave() -> None:
+    """Контроль: лишних чтений не делаем, когда фактура уже есть."""
+    harness = _ReadableHarness()
+    await harness.research("ключевая ставка", max_sources=3)
+    assert len(harness.fetched) == 3, f"прочитано лишнее: {harness.fetched}"
