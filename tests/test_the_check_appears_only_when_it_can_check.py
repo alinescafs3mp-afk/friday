@@ -26,20 +26,28 @@ from friday.agent_runtime import AgentRuntime, _grounding_warning
 
 
 def test_a_web_answer_is_not_scolded_for_ignoring_the_archive() -> None:
-    """Мутация: убрать ветку `from_the_web` — тест краснеет."""
-    assert _grounding_warning("Курс доллара — 79,46 ₽.", False, from_the_web=True) == ""
+    """Мутация: снять условие — тест краснеет.
+
+    Владелец просил убрать эту пометку дважды. Своей записи о курсе доллара у
+    него нет, и упрекать ответ в том, что он на неё не опирается, — бессмыслица.
+    """
+    assert _grounding_warning("Курс доллара — 79,46 ₽.", False, about_his_own_papers=False) == ""
 
 
-def test_an_archive_answer_still_gets_the_warning() -> None:
-    """Защита остаётся там, где она осмысленна: записи нашлись, ссылок нет."""
-    text = _grounding_warning("Срок — четыре года.", False, from_the_web=False)
+def test_the_warning_survives_only_for_his_own_papers() -> None:
+    """Единственный случай, ради которого пометка и оставлена.
+
+    Человек спросил о СВОИХ данных, архив ответил уверенно, а модель его не
+    использовала — то есть сочинила про документы, лежащие перед ней.
+    """
+    text = _grounding_warning("Срок — четыре года.", False, about_his_own_papers=True)
     assert "не опирается ни на одну запись" in text
 
 
-def test_a_retelling_is_still_flagged_even_from_the_web() -> None:
+def test_a_retelling_is_still_flagged_anywhere() -> None:
     """Пересказ прежних ходов — отдельный случай, он опаснее и остаётся."""
     body = "По его данным (источник вне текущей выборки) срок — четыре года."
-    assert "пересказ" in _grounding_warning(body, None, from_the_web=True)
+    assert "пересказ" in _grounding_warning(body, None, about_his_own_papers=False)
 
 
 def test_a_cited_answer_says_nothing() -> None:
@@ -59,9 +67,12 @@ def test_the_verification_needs_something_to_compare_against() -> None:
     assert "not context.small_talk" in checks, "болтовню снова проверяют на обоснованность"
 
 
-def test_the_web_flag_reaches_both_notices() -> None:
-    """Один признак — обе пометки: и предупреждение об опоре, и текст автопроверки."""
+def test_both_notices_know_where_the_answer_came_from() -> None:
+    """Признак «ответ из сети» доходит и до текста автопроверки, и до пометки."""
     source = inspect.getsource(AgentRuntime.chat)
-    assert source.count("from_the_web=from_the_web") >= 2, (
-        "признак «ответ из сети» доходит не до всех пометок"
-    )
+    assert "from_the_web=from_the_web" in source, "автопроверка не знает про сеть"
+    assert "about_his_own_papers=about_his_own_papers" in source, "пометка не знает про сеть"
+    # Пометка сужена до личного вопроса с уверенным совпадением.
+    narrowing = source[source.index("about_his_own_papers = ") : source.index("_grounding_warning(")]
+    assert 'context.answer_mode == "personal_knowledge"' in narrowing
+    assert "_archive_is_weak(context.knowledge_hits)" in narrowing

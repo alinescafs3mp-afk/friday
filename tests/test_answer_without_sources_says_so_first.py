@@ -87,9 +87,20 @@ def test_the_warning_does_not_fire_when_the_answer_cites_the_archive():
 
 
 def test_retrieval_found_records_but_the_answer_used_none_of_them():
-    """Второй случай из тех пяти: поиск нашёл, ответ не сослался ни на что."""
-    warning = _grounding_warning("Досье без единой метки.", False)
+    """Второй случай из тех пяти: поиск нашёл, ответ не сослался ни на что.
+
+    С 2026-08-02 пометка сужена до вопроса о СВОИХ документах с уверенным
+    совпадением: владелец дважды просил убрать её, потому что она появлялась под
+    ответами о внешнем мире и под случайными слабыми совпадениями. Случай,
+    ради которого она существует, — здесь.
+    """
+    warning = _grounding_warning("Досье без единой метки.", False, about_his_own_papers=True)
     assert warning and "не опирается" in warning, warning
+
+
+def test_the_warning_stays_silent_outside_his_own_papers():
+    """А вот вне этого случая — молчит, как и просил владелец."""
+    assert _grounding_warning("Курс доллара — 79,46 ₽.", False, about_his_own_papers=False) == ""
 
 
 def test_a_plain_answer_is_left_alone():

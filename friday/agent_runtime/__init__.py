@@ -771,7 +771,9 @@ def _verification_caution(status: str, issues: list[Any], *, from_the_web: bool 
     return ""
 
 
-def _grounding_warning(content: str, answer_grounded: bool | None, *, from_the_web: bool = False) -> str:
+def _grounding_warning(
+    content: str, answer_grounded: bool | None, *, about_his_own_papers: bool = False
+) -> str:
     """Предупреждение, которое обязано стоять ПЕРЕД ответом, а не после него.
 
     Замерено на переписке владельца за 2026-07-30: из 15 ответов ассистента 10 несли
@@ -805,14 +807,17 @@ def _grounding_warning(content: str, answer_grounded: bool | None, *, from_the_w
             "утверждения сейчас не найдено ни одного источника. Проверьте по документам."
         )
     if answer_grounded is False:
-        if from_the_web:
-            # Ответ о внешнем мире и НЕ ДОЛЖЕН опираться на личные записи: у
-            # человека нет своей заметки про курс доллара или новости Европы.
-            # Замерено на недельном прогоне — пометка появлялась под каждым
-            # ответом из интернета; владелец попросил её убрать, и он прав:
-            # предупреждение, которое всегда некстати, обесценивает те, что по
-            # делу. Источники у такого ответа свои — ссылки идут отдельной
-            # строкой.
+        if not about_his_own_papers:
+            # Пометка осталась ровно для одного случая: человек спросил о СВОИХ
+            # данных, архив ответил УВЕРЕННО, а модель его не использовала — то
+            # есть сочинила про документы, лежащие перед ней.
+            #
+            # Владелец просил убрать её дважды, и он прав. Она появлялась под
+            # каждым ответом о внешнем мире («ответ про курс доллара не опирается
+            # на вашу базу» — своей записи о курсе у него и нет), под смешанными
+            # ответами и под случайными слабыми совпадениями. Предупреждение,
+            # которое всегда некстати, обесценивает те, что по делу: их
+            # перестают читать.
             return ""
         return (
             "⚠️ Ответ не опирается ни на одну запись вашей базы, хотя записи по запросу "
@@ -1223,7 +1228,21 @@ class AgentRuntime:
         # собранный из прежних ходов, приходит с пометками «вне выборки» и без единой
         # живой ссылки — при этом поиск в текущем ходе мог не найти ничего и не поднять
         # ни одного признака. См. `_grounding_warning`.
-        grounding_warning = _grounding_warning(content, answer_grounded, from_the_web=from_the_web)
+        # Пометка «ответ не опирается на вашу базу» оставлена ровно для одного
+        # случая: человек спросил о СВОИХ данных, архив ответил УВЕРЕННО, а модель
+        # его не использовала — то есть сочинила про его же документы, лежащие
+        # перед ней. Владелец просил убрать её дважды, и он прав: во всех прочих
+        # случаях («mixed», слабое совпадение, ответ о внешнем мире) она
+        # появлялась не по делу и обесценивала себя же.
+        about_his_own_papers = (
+            not from_the_web
+            and context.answer_mode == "personal_knowledge"
+            and bool(context.knowledge_hits)
+            and not _archive_is_weak(context.knowledge_hits)
+        )
+        grounding_warning = _grounding_warning(
+            content, answer_grounded, about_his_own_papers=about_his_own_papers
+        )
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.
