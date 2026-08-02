@@ -1554,12 +1554,19 @@ class ExecutionKernel:
             if not url or len(text) < _WEB_CAPTURE_MIN_CHARS:
                 continue
             title = str(source.get("title") or source.get("search_title") or url)
+            # Ключ несёт и адрес, и содержимое. Страница живая: курс ЦБ, прогноз
+            # погоды, лента новостей меняются между двумя чтениями, и адрес,
+            # взятый ключом в одиночку, конфликтовал сам с собой — замерено на
+            # живом экземпляре, пять срывов за сутки, каждый со стеком в журнале
+            # и потерянной страницей. Неизменная страница по-прежнему не
+            # задваивается: у неё тот же хеш.
+            fingerprint = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
             try:
                 outcome = await ingestion.ingest_text(
                     actor.user_id,
                     text,
                     source="web",
-                    source_ref=url,
+                    source_ref=f"{url}#{fingerprint}",
                     force_review=True,
                     metadata={
                         "url": url,

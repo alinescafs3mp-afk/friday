@@ -88,7 +88,10 @@ async def test_the_page_keeps_where_it_came_from(settings, storage):
         "WHERE user_id='alice' ORDER BY created_at DESC"
     ).fetchone()
     assert raw["source"] == "web"
-    assert raw["source_ref"] == "https://cbr.ru/hd_base/KeyRate/"
+    # Ключ несёт адрес И отпечаток содержимого: страница живая, и адрес в
+    # одиночку конфликтовал сам с собой при втором чтении. Адрес по-прежнему
+    # читается — и он же лежит чистым в метаданных.
+    assert raw["source_ref"].startswith("https://cbr.ru/hd_base/KeyRate/#")
 
     # По метаданным должно быть видно не только откуда страница, но и ЗАЧЕМ её
     # взяли: без запроса непонятно, почему чужой сайт лежит в личном архиве.
@@ -151,3 +154,40 @@ async def test_the_answer_still_carries_the_sources(settings, storage):
     assert result.data.get("sources"), "выдача пропала из результата инструмента"
     rendered = result.to_llm_message()
     assert "cbr.ru" in rendered
+
+
+@pytest.mark.anyio
+async def test_a_page_that_changed_between_two_readings_is_saved_anyway(settings, storage):
+    """Мутация: вернуть `source_ref=url` — тест краснеет.
+
+    Замерено на живом экземпляре: пять срывов за сутки со стеком в журнале.
+    Страница живая — курс ЦБ, прогноз погоды, лента новостей меняются между
+    двумя чтениями, — и адрес, взятый ключом в одиночку, конфликтовал сам с
+    собой: `source_ref is already bound to different text content`. Страница при
+    этом терялась молча для человека и шумно для журнала.
+    """
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    kernel = _kernel(settings, storage, _Surfer())
+    actor = auth.actor_for_user("alice", source="test")
+
+    async def _capture(text: str) -> list[dict]:
+        return await kernel._capture_web_sources(  # noqa: SLF001
+            actor,
+            "ключевая ставка",
+            {"sources": [{"url": "https://cbr.ru/", "title": "Ключевая ставка", "text": text}]},
+        )
+
+    first = await _capture("Ключевая ставка составляет 14,00% годовых. " * 12)
+    assert len(first) == 1, "первая версия страницы не сохранилась"
+
+    second = await _capture("Ключевая ставка составляет 13,50% годовых. " * 12)
+    assert len(second) == 1, "обновившаяся страница потеряна"
+
+    # Неизменная страница по-прежнему не задваивается.
+    third = await _capture("Ключевая ставка составляет 13,50% годовых. " * 12)
+    assert len(third) <= 1
+    rows = storage.execute(
+        "SELECT COUNT(*) AS c FROM raw_objects WHERE source='web' AND deleted_at IS NULL"
+    ).fetchone()["c"]
+    assert rows == 2, f"ожидалось две версии страницы, в архиве {rows}"
