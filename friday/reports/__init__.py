@@ -92,11 +92,7 @@ def _as_blocks(raw: Any) -> list[Block]:
                 blocks.append(Block("bullets", items=items))
         elif kind == "table":
             rows_raw = item.get("rows")
-            rows = (
-                [[str(cell) for cell in row] for row in rows_raw if isinstance(row, list)]
-                if isinstance(rows_raw, list)
-                else []
-            )
+            rows = _table_rows(rows_raw)
             if rows:
                 blocks.append(Block("table", rows=rows))
         else:
@@ -104,6 +100,34 @@ def _as_blocks(raw: Any) -> list[Block]:
             if text.strip():
                 blocks.append(Block("text", text=text))
     return blocks
+
+
+def _table_rows(raw: Any) -> list[list[str]]:
+    """Строки таблицы, как бы модель их ни записала.
+
+    Прежде брались только списки, а строки-словари ({"фамилия": …, "сумма": …})
+    отбрасывались ВСЕ до одной: блок таблицы тихо исчезал, соседние оставались,
+    и человек получал отчёт без главного — без самой таблицы, без единого следа
+    в ответе. Словари — естественная форма для модели, и терять их нельзя.
+
+    У словарей первая строка становится шапкой из ключей; порядок ключей берётся
+    от первой строки, чтобы колонки не разъезжались.
+    """
+    if not isinstance(raw, list) or not raw:
+        return []
+    rows: list[list[str]] = []
+    header: list[str] = []
+    for item in raw:
+        if isinstance(item, list):
+            rows.append([str(cell) for cell in item])
+        elif isinstance(item, dict):
+            if not header:
+                header = [str(key) for key in item]
+                rows.append(header)
+            rows.append([str(item.get(key, "")) for key in header])
+        elif item is not None and str(item).strip():
+            rows.append([str(item)])
+    return rows
 
 
 def spec_from_payload(title: str, subtitle: str, blocks: Any) -> ReportSpec:

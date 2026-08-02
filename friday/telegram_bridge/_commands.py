@@ -282,7 +282,7 @@ class CommandsMixin(BridgeShared):
                 "/why — почему был такой ответ\n"
                 "/new — начать новый диалог\n"
                 "/archive — архивировать текущий разговор\n"
-                "/delete — удалить текущий разговор (с подтверждением)\n"
+                "/delete — убрать текущий разговор из списка (переписка сохраняется)\n"
                 "/rename название — переименовать текущий разговор\n"
                 "/note текст — явно сохранить заметку\n"
                 "/instructions — как отвечать: показать, задать или очистить\n"
@@ -915,7 +915,7 @@ class CommandsMixin(BridgeShared):
                     "inline_keyboard": [
                         [
                             {
-                                "text": "Да, удалить",
+                                "text": "Да, убрать",
                                 "callback_data": f"conv:delete:current.{external_user_id}",
                             },
                             {

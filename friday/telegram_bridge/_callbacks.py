@@ -197,7 +197,7 @@ class CallbacksMixin(BridgeShared):
                         "inline_keyboard": [
                             [
                                 {
-                                    "text": "Да, удалить",
+                                    "text": "Да, убрать",
                                     "callback_data": f"ent:delyes:{target_id}.{external_user_id}",
                                 },
                                 {"text": "Нет", "callback_data": f"ent:delno:{target_id}"},
@@ -495,7 +495,8 @@ class CallbacksMixin(BridgeShared):
                     await self._send_message(
                         telegram,
                         chat_id,
-                        "Разговор удалён. Следующее сообщение начнёт новый; база знаний не тронута.",
+                        "Разговор убран из списка. Переписка сохранена — сказанное в чате не удаляется. "
+                        "Следующее сообщение начнёт новый разговор; база знаний не тронута.",
                     )
                     clear_markup = True
             elif family == "remind" and action == "dismiss":

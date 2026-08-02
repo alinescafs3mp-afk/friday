@@ -84,6 +84,14 @@ class FridayStorage(
             "done_count",
             "started_at",
             "completed_at",
+            # Бюджеты и срок (схема 24). Без них колонки существовали, но задать
+            # их было нечем: `create_mission` их не пишет, а этот список молча
+            # отбрасывал неизвестные поля — механизм ограничений оставался
+            # декоративным.
+            "budget_seconds",
+            "budget_tool_calls",
+            "budget_retries",
+            "deadline_at",
         }
     )
     _MISSION_TASK_UPDATABLE = frozenset(
@@ -95,6 +103,10 @@ class FridayStorage(
             "error",
             "started_at",
             "completed_at",
+            # Следы восстановления шага (схема 24).
+            "side_effect",
+            "checkpoint_json",
+            "compensation",
         }
     )
 

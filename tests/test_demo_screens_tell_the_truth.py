@@ -616,3 +616,84 @@ def test_the_file_is_built_after_the_answer_is_final():
     assert source.index("_repair_once") < source.index("_file_for_a_request_that_wanted_one"), (
         "файл собирается раньше, чем ответ стал окончательным"
     )
+
+
+def test_a_table_of_dicts_still_becomes_a_table():
+    """Мутация: брать только строки-списки — тест краснеет.
+
+    Словарь — естественная форма строки для модели. Прежде такие строки
+    отбрасывались ВСЕ до одной, блок таблицы тихо исчезал, а соседние абзацы
+    оставались: человек получал отчёт без главного и без единого следа о том,
+    что таблица потерялась.
+    """
+    from friday.reports import spec_from_payload
+
+    spec = spec_from_payload(
+        "Отчёт",
+        "",
+        [
+            {
+                "kind": "table",
+                "rows": [
+                    {"Фамилия": "Бутко", "Начислено": "87 450"},
+                    {"Фамилия": "Проскурин", "Начислено": "91 200"},
+                ],
+            }
+        ],
+    )
+    table = next(block for block in spec.blocks if block.kind == "table")
+    assert table.rows[0] == ["Фамилия", "Начислено"], "шапка не построена из ключей"
+    assert table.rows[1] == ["Бутко", "87 450"]
+    assert len(table.rows) == 3
+
+
+def test_mission_budgets_can_actually_be_set(storage):
+    """Мутация: убрать бюджеты из `_MISSION_UPDATABLE` — тест краснеет.
+
+    Колонки схемы 24 существовали, но задать их было нечем: `create_mission` их
+    не пишет, а список разрешённых полей молча отбрасывал неизвестные — механизм
+    ограничений оставался декоративным.
+    """
+    from friday.storage.models import new_id, utc_now
+
+    storage.ensure_user("alice")
+    mission_id = new_id("mis")
+    now = utc_now()
+    with storage.transaction() as conn:
+        conn.execute(
+            "INSERT INTO missions(id, user_id, goal, created_at, updated_at) VALUES(?, ?, ?, ?, ?)",
+            (mission_id, "alice", "цель", now, now),
+        )
+
+    assert storage.update_mission_fields(
+        mission_id,
+        "alice",
+        budget_seconds=600,
+        budget_tool_calls=20,
+        budget_retries=3,
+        deadline_at="2026-08-02T12:00:00+00:00",
+    )
+    row = storage.execute(
+        "SELECT budget_seconds, budget_tool_calls, budget_retries, deadline_at FROM missions WHERE id=?",
+        (mission_id,),
+    ).fetchone()
+    assert row["budget_seconds"] == 600
+    assert row["budget_tool_calls"] == 20
+    assert row["deadline_at"].startswith("2026-08-02")
+
+
+def test_removing_a_conversation_does_not_promise_deletion():
+    """Мутация: вернуть «Это необратимо» — тест краснеет.
+
+    Со схемы 23 сказанное в чате неудаляемо, и кнопка убирает диалог из списка.
+    Текст, обещающий удаление, заставляет человека нажать её с другими
+    ожиданиями.
+    """
+    from pathlib import Path
+
+    app_js = Path("friday/admin_ui/static/app.js").read_text(encoding="utf-8")
+    assert "Это необратимо" not in app_js
+    assert "Переписка сохранится" in app_js
+
+    commands = Path("friday/telegram_bridge/_commands.py").read_text(encoding="utf-8")
+    assert "убрать текущий разговор" in commands
