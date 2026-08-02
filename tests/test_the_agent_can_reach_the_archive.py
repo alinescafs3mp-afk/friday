@@ -218,8 +218,13 @@ def test_the_chat_model_is_told_similar_records_were_cut(settings, storage):
     messages = runtime._build_initial_messages(context, "какой номер у Иванова?", None, tool_enabled=False)  # noqa: SLF001
 
     joined = "\n".join(str(item.get("content")) for item in messages if item.get("role") == "system")
-    assert "отсеяны порогом" in joined
+    # Проверяется СМЫСЛ указания, а не служебная формулировка: её пришлось
+    # переписать, когда модель пересказала её человеку дословно («отсеяны
+    # порогом уверенности» в ответе на вопрос о поручениях).
+    assert "похожие записи" in joined.casefold()
+    assert "не отвечает" in joined
     assert "5" in joined
+    assert "своими словами" in joined.casefold(), "не сказано говорить своими словами"
 
     silent = AgentContext(conversation_id="conv", user_id="alice", answer_mode="personal_knowledge_missing")
     messages = runtime._build_initial_messages(silent, "какой номер у Иванова?", None, tool_enabled=False)  # noqa: SLF001
