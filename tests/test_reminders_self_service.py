@@ -9,7 +9,7 @@ the next scan_reminders re-inserts the same push via INSERT OR IGNORE.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,7 +24,9 @@ from tests.test_telegram_and_profile import _FakeBackendClient, _FakeTelegramCli
 
 
 def _today_iso(offset_days: int = 0) -> str:
-    return (datetime.now(UTC).date() + timedelta(days=offset_days)).isoformat()
+    # МЕСТНАЯ дата: «сегодня» у напоминаний — день человека, и между 21:00 и
+    # полуночью в Москве UTC-дата уже вчерашняя.
+    return (datetime.now().astimezone().date() + timedelta(days=offset_days)).isoformat()
 
 
 def _reminders_settings(settings):
@@ -129,37 +131,45 @@ async def test_dismiss_blocks_scan_reminders_rescan(settings):
 
 
 def test_list_and_dismiss_are_tenant_scoped(settings):
-    """Foreign notification_id → 404 (not 403). Own list never shows foreign rows."""
+    """Чужое событие → 404 (не 403). Свой список никогда не показывает чужие строки.
+
+    Список строится по СОБЫТИЯМ человека, поэтому и проверка изоляции идёт по
+    ним: у каждого своё событие на сегодня, и ни один не должен увидеть или
+    снять чужое.
+    """
     tuned = _reminders_settings(settings)
     with TestClient(create_app(tuned)) as client:
         storage = client.app.state.storage
+        graph = KnowledgeGraph(storage)
         alice = "telegram:telegram:5001"
         bob = "telegram:telegram:5002"
         storage.ensure_user(alice, source="telegram", metadata={"chat_id": "5001"})
         storage.ensure_user(bob, source="telegram", metadata={"chat_id": "5002"})
-        assert storage.enqueue_notification(
-            alice, "5001", "alice reminder", kind="reminder", dedup_key="rem:a"
-        )
-        assert storage.enqueue_notification(bob, "5002", "bob reminder", kind="reminder", dedup_key="rem:b")
-        bob_id = storage.list_pending_reminders(bob)[0]["id"]
+        alice_event = graph.create_entity(alice, "Совещание у Алисы", EntityType.EVENT)
+        graph.set_event_time(alice, alice_event["id"], _today_iso(0))
+        bob_event = graph.create_entity(bob, "Поверка у Боба", EntityType.EVENT)
+        graph.set_event_time(bob, bob_event["id"], _today_iso(0))
 
         response = _bridge_get(client, tuned, "/api/me/reminders", user="5001", chat="5001")
         assert response.status_code == 200, response.text
         bodies = [item["body"] for item in response.json()["items"]]
-        assert bodies == ["alice reminder"]
+        assert bodies == ["🔔 «Совещание у Алисы» — сегодня."]
         assert response.json()["count"] == 1
 
         foreign = _bridge_json(
             client,
             tuned,
             "POST",
-            f"/api/me/reminders/{bob_id}/dismiss",
+            f"/api/me/reminders/{bob_event['id']}/dismiss",
             {},
             user="5001",
             chat="5001",
         )
         assert foreign.status_code == 404, foreign.text
-        assert storage.list_pending_reminders(bob)[0]["id"] == bob_id
+        # Напоминание Боба не заглушено: чужое «Снять» его не коснулось.
+        # Проверяется в базе, а не через мост: чат Боба не в белом списке.
+        key = f"reminder:{bob_event['id']}:{_today_iso(0)}"
+        assert storage.reminder_states(bob, [key]) == {}
 
 
 def test_dismiss_notification_rejects_non_reminder_kind(settings):
@@ -295,3 +305,101 @@ async def test_reminders_command_lists_and_dismiss_callback_hits_api(tmp_path):
         ), backend.calls
     finally:
         bridge._inbox.close()
+
+
+def test_the_list_survives_the_bridge_draining_the_queue(settings):
+    """Мутация: вернуть `list_pending_reminders` в маршрут — тест краснеет.
+
+    Замерено: команда читала `outbound_notifications` со статусом `pending`, а
+    мост дренирует очередь каждые пятнадцать секунд и переводит строку в `sent`.
+    Окно, в котором /reminders мог что-то показать, было не длиннее этих
+    пятнадцати секунд; всё остальное время человек на вопрос «что мне
+    предстоит» получал «Предстоящих напоминаний нет» — при событии завтра.
+    """
+    tuned = _reminders_settings(settings)
+    with TestClient(create_app(tuned)) as client:
+        storage = client.app.state.storage
+        graph = KnowledgeGraph(storage)
+        user_id = "telegram:telegram:5001"
+        storage.ensure_user(user_id, source="telegram", metadata={"chat_id": "5001"})
+        event = graph.create_entity(user_id, "Совещание по поверке", EntityType.EVENT)
+        graph.set_event_time(user_id, event["id"], _today_iso(1))
+
+        # Мост забрал очередь и отчитался об отправке — ровно то, что он делает
+        # каждые пятнадцать секунд.
+        storage.enqueue_notification(
+            user_id,
+            "5001",
+            "🔔 Напоминание: «Совещание по поверке» — завтра.",
+            kind="reminder",
+            dedup_key=f"reminder:{event['id']}:{_today_iso(1)}",
+        )
+        queued = storage.list_pending_reminders(user_id)
+        storage.mark_notifications(sent_ids=[row["id"] for row in queued])
+        assert storage.list_pending_reminders(user_id) == [], "очередь должна быть пуста"
+
+        response = _bridge_get(client, tuned, "/api/me/reminders", user="5001", chat="5001")
+        assert response.status_code == 200, response.text
+        items = response.json()["items"]
+        assert len(items) == 1, "после дренажа очереди список опустел — команда бесполезна"
+        assert items[0]["body"] == "🔔 «Совещание по поверке» — завтра."
+        assert items[0]["id"] == event["id"]
+
+
+def test_dismiss_works_after_the_reminder_was_already_sent(settings):
+    """«Снять» обязано работать не только в пятнадцатисекундное окно.
+
+    `dismiss_notification` умеет гасить только строку `pending`. Человек нажимает
+    кнопку под сообщением, которое ему УЖЕ доставили, — то есть строка `sent`, и
+    гасить нечего. Проверяется, что напоминание после этого не возвращается.
+    """
+    tuned = _reminders_settings(settings)
+    with TestClient(create_app(tuned)) as client:
+        storage = client.app.state.storage
+        graph = KnowledgeGraph(storage)
+        user_id = "telegram:telegram:5001"
+        storage.ensure_user(user_id, source="telegram", metadata={"chat_id": "5001"})
+        event = graph.create_entity(user_id, "Ненужное напоминание", EntityType.EVENT)
+        graph.set_event_time(user_id, event["id"], _today_iso(0))
+        key = f"reminder:{event['id']}:{_today_iso(0)}"
+        storage.enqueue_notification(user_id, "5001", "старое", kind="reminder", dedup_key=key)
+        storage.mark_notifications(sent_ids=[row["id"] for row in storage.list_pending_reminders(user_id)])
+
+        dismissed = _bridge_json(
+            client,
+            tuned,
+            "POST",
+            f"/api/me/reminders/{event['id']}/dismiss",
+            {},
+            user="5001",
+            chat="5001",
+        )
+        assert dismissed.status_code == 200, dismissed.text
+        assert storage.reminder_states(user_id, [key]) == {key: "dismissed"}
+
+        after = _bridge_get(client, tuned, "/api/me/reminders", user="5001", chat="5001")
+        assert after.json()["items"] == [], "снятое напоминание вернулось в список"
+
+
+def test_silencing_blocks_the_next_scan(settings):
+    """Снятое напоминание не ставится заново — дедуп-ключ занят.
+
+    Иначе кнопка «Снять» превращается в «отложить на один тик скана».
+    """
+    import asyncio
+
+    tuned = _reminders_settings(settings)
+    with TestClient(create_app(tuned)) as client:
+        storage = client.app.state.storage
+        graph = KnowledgeGraph(storage)
+        user_id = "telegram:telegram:5001"
+        storage.ensure_user(user_id, source="telegram", metadata={"chat_id": "5001"})
+        event = graph.create_entity(user_id, "Событие", EntityType.EVENT)
+        graph.set_event_time(user_id, event["id"], _today_iso(0))
+        key = f"reminder:{event['id']}:{_today_iso(0)}"
+
+        # Гасим ДО того, как орган что-либо поставил: строки ещё нет вовсе.
+        assert storage.silence_reminder(user_id, key, chat_id="5001") is True
+        ctx = ServiceContext(settings=tuned, storage=storage, kg=graph, ingestion=None)
+        asyncio.run(scan_reminders(ctx))
+        assert storage.list_pending_reminders(user_id) == [], "снятое напоминание поставлено заново"

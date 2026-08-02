@@ -500,7 +500,9 @@ class CallbacksMixin(BridgeShared):
                     )
                     clear_markup = True
             elif family == "remind" and action == "dismiss":
-                # G19: снять pending reminder, не очищая dedup_key (делает backend).
+                # G19: снять напоминание, не очищая dedup_key (делает backend).
+                # `target_id` — идентификатор СОБЫТИЯ: список строится по событиям,
+                # а не по очереди отправки, которую мост же и опустошает.
                 await self._backend_json(
                     backend,
                     "POST",

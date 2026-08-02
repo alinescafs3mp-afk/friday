@@ -71,6 +71,64 @@ class RuntimeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def silence_reminder(self, user_id: str, dedup_key: str, *, chat_id: str = "") -> bool:
+        """«Не напоминай мне об этом» — независимо от того, отправлено уже или нет.
+
+        `dismiss_notification` умеет гасить только строку в состоянии `pending`, а
+        мост дренирует очередь раз в пятнадцать секунд. То есть кнопка «Снять»
+        работала в пятнадцатисекундном окне после скана и промахивалась всё
+        остальное время: строка уже `sent`, гасить нечего, а следующий скан
+        поставит напоминание снова, пока живёт событие.
+
+        Здесь снимается САМО напоминание, а не строка очереди: если гасить нечего,
+        заводится запись с тем же `dedup_key` сразу в состоянии `dismissed`.
+        Частичный уникальный индекс по `(user_id, dedup_key)` после этого не даст
+        `scan_reminders` поставить его заново — ровно тем же механизмом, каким
+        держится обычный дедуп.
+        """
+        user_id = validate_user_id(user_id)
+        dedup_key = str(dedup_key or "").strip()
+        if not dedup_key:
+            return False
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE outbound_notifications
+                   SET status='dismissed'
+                   WHERE user_id=? AND dedup_key=? AND kind='reminder'
+                     AND status IN ('pending', 'sent')""",
+                (user_id, dedup_key),
+            )
+            if cursor.rowcount > 0:
+                return True
+            inserted = conn.execute(
+                """INSERT OR IGNORE INTO outbound_notifications(
+                       id, user_id, chat_id, kind, dedup_key, body, status, attempts, created_at)
+                   VALUES(?, ?, ?, 'reminder', ?, ?, 'dismissed', 0, ?)""",
+                (
+                    new_id("notif"),
+                    user_id,
+                    str(chat_id),
+                    dedup_key,
+                    "снято до отправки",
+                    utc_now(),
+                ),
+            )
+        return inserted.rowcount > 0
+
+    def reminder_states(self, user_id: str, dedup_keys: Sequence[str]) -> dict[str, str]:
+        """Состояние напоминания по каждому ключу: pending / sent / dismissed."""
+        user_id = validate_user_id(user_id)
+        keys = [str(key) for key in dedup_keys if str(key)]
+        if not keys:
+            return {}
+        placeholders = ",".join("?" for _ in keys)
+        rows = self.execute(
+            f"SELECT dedup_key, status FROM outbound_notifications "  # noqa: S608 — плейсхолдеры по счёту
+            f"WHERE user_id=? AND kind='reminder' AND dedup_key IN ({placeholders})",
+            (user_id, *keys),
+        ).fetchall()
+        return {str(row["dedup_key"]): str(row["status"]) for row in rows}
+
     def dismiss_notification(self, user_id: str, notification_id: str) -> bool:
         """Mark a pending reminder dismissed without releasing its dedup key.
 

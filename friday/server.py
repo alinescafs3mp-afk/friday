@@ -17,6 +17,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -65,7 +66,7 @@ from friday.ingestion import (
 )
 from friday.knowledge_graph import KnowledgeGraph
 from friday.memory import MemoryVault
-from friday.organs import ServiceContext, build_registry
+from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
     ActorContext,
@@ -1400,29 +1401,81 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         request: Request,
         limit: int = Query(20, ge=1, le=100),
     ) -> dict[str, Any]:
+        """Что человеку предстоит — по его событиям, а не по очереди отправки.
+
+        Прежняя редакция читала `outbound_notifications` со статусом `pending`,
+        то есть НЕДОСТАВЛЕННУЮ очередь, которую мост дренирует каждые пятнадцать
+        секунд. Окно, в котором команда могла что-то показать, было не длиннее
+        этих пятнадцати секунд; всё остальное время на вопрос «что мне
+        предстоит» приходило «Предстоящих напоминаний нет», хотя событие завтра.
+        А раз строк нет — недостижима и кнопка «Снять», которую обещает /help.
+        """
         actor = _require(request, "chat.use")
-        rows = request.app.state.storage.list_pending_reminders(actor.user_id, limit=limit)
-        return {
-            "count": len(rows),
-            "items": [
+        storage = request.app.state.storage
+        settings = request.app.state.settings
+        today = local_now(settings).date()
+        lead_days = max(0, int(getattr(settings, "reminders_lead_days", 1)))
+        events = storage.list_events_in_range(
+            actor.user_id,
+            start=today.isoformat(),
+            end=(today + timedelta(days=lead_days)).isoformat(),
+            limit=limit,
+        )
+        keys = [f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}" for event in events]
+        states = storage.reminder_states(actor.user_id, keys)
+        items = []
+        for event, key in zip(events, keys, strict=True):
+            occurred_at = str(event.get("occurred_at") or "")
+            if occurred_at == today.isoformat():
+                when = "сегодня"
+            elif occurred_at == (today + timedelta(days=1)).isoformat():
+                when = "завтра"
+            else:
+                when = occurred_at
+            items.append(
                 {
-                    "id": str(row.get("id") or ""),
-                    "body": str(row.get("body") or ""),
-                    "dedup_key": str(row.get("dedup_key") or ""),
-                    "created_at": row.get("created_at"),
-                    "chat_id": str(row.get("chat_id") or ""),
+                    "id": str(event.get("entity_id") or ""),
+                    "body": f"🔔 «{str(event.get('name') or 'событие').strip()}» — {when}.",
+                    "dedup_key": key,
+                    "occurred_at": occurred_at,
+                    "state": states.get(key, "new"),
                 }
-                for row in rows
-            ],
-        }
+            )
+        # Снятое человеком в списке не показывается: он уже сказал «не напоминай».
+        items = [item for item in items if item["state"] != "dismissed"]
+        return {"count": len(items), "items": items}
 
     @application.post("/api/me/reminders/{notification_id}/dismiss", tags=["chat"])
     async def dismiss_my_reminder(request: Request, notification_id: str) -> dict[str, Any]:
+        """«Снять» принимает и строку очереди, и само событие.
+
+        Список теперь строится по событиям, поэтому кнопка присылает `entity_id`.
+        Идентификатор строки очереди по-прежнему принимается: старые сообщения с
+        кнопкой живут в чате и после обновления.
+        """
         actor = _require(request, "chat.use")
+        storage = request.app.state.storage
         notification_id = str(notification_id or "").strip()
         if not notification_id:
             raise HTTPException(status_code=404, detail="Напоминание не найдено")
-        ok = request.app.state.storage.dismiss_notification(actor.user_id, notification_id)
+        ok = storage.dismiss_notification(actor.user_id, notification_id)
+        if not ok:
+            settings = request.app.state.settings
+            today = local_now(settings).date()
+            lead_days = max(0, int(getattr(settings, "reminders_lead_days", 1)))
+            for event in storage.list_events_in_range(
+                actor.user_id,
+                start=today.isoformat(),
+                end=(today + timedelta(days=lead_days)).isoformat(),
+                limit=100,
+            ):
+                if str(event.get("entity_id") or "") != notification_id:
+                    continue
+                key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"
+                ok = storage.silence_reminder(
+                    actor.user_id, key, chat_id=resolve_chat_id(storage, actor.user_id) or ""
+                )
+                break
         if not ok:
             # 404, не 403: чужой id и уже снятый/отправленный выглядят одинаково —
             # не подтверждаем существование чужой очереди.

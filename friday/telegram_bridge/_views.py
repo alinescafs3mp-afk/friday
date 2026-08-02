@@ -239,7 +239,12 @@ class ViewsMixin(BridgeShared):
         external_user_id: str,
         telegram_user: dict[str, Any],
     ) -> None:
-        """Pending reminder list with a dismiss button per row (G19)."""
+        """Что предстоит, с кнопкой «Снять» у каждой строки (G19).
+
+        Список приходит по СОБЫТИЯМ, а не по недоставленной очереди: очередь
+        мост же и опустошает раз в пятнадцать секунд, поэтому команда почти
+        всегда отвечала «Предстоящих напоминаний нет», даже когда событие завтра.
+        """
         data = await self._backend_json(
             backend,
             "GET",
