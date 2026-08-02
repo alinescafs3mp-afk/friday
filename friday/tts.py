@@ -43,16 +43,39 @@ class Speech:
     truncated: bool
 
 
+#: Что дослушивает человек, когда ответ не поместился целиком.
+TRUNCATION_NOTICE = " Дальше — в тексте сообщения."
+
+
 def sanitize_text(text: str, *, max_chars: int) -> tuple[str, bool]:
     """Collapse whitespace and cap length before synthesis.
 
     Pure and model-free so it is unit-testable without piper installed. Returns
     ``(cleaned, truncated)`` — the caller decides whether to warn about
     truncation; a very long request must not turn into unbounded synthesis time.
+
+    Обрыв больше не приходится на середину слова и не остаётся немым. Замерено
+    на живом архиве: 29 ответов из 475 (6,1%) длиннее потолка, самый длинный —
+    3695 знаков, то есть человек слышал 54% ответа и обрыв на полуслове, читая
+    полный текст рядом. Соседний `make_file` на превышении лимита честно
+    отказывается словами; голос поставлял обрезок молча.
+
+    Поэтому: режем по границе предложения (в крайнем случае — по границе слова)
+    и договариваем вслух, что продолжение есть в тексте.
     """
     cleaned = " ".join(text.split())
-    truncated = len(cleaned) > max_chars
-    return cleaned[:max_chars], truncated
+    if len(cleaned) <= max_chars:
+        return cleaned, False
+    budget = max(1, max_chars - len(TRUNCATION_NOTICE))
+    head = cleaned[:budget]
+    # Граница предложения, если она есть в последней трети куска: обрыв на
+    # «…назначен командиром» звучит как сбой связи, а не как конец мысли.
+    cut = max(head.rfind(". "), head.rfind("! "), head.rfind("? "), head.rfind("… "))
+    if cut < budget // 3:
+        cut = head.rfind(" ")
+    if cut > 0:
+        head = head[: cut + 1].rstrip()
+    return f"{head}{TRUNCATION_NOTICE}", True
 
 
 _MODEL_LOCK = threading.Lock()

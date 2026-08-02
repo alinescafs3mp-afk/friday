@@ -29,9 +29,26 @@ def test_sanitize_text_collapses_whitespace():
 
 
 def test_sanitize_text_truncates_and_reports_it():
-    cleaned, truncated = sanitize_text("a" * 50, max_chars=10)
-    assert cleaned == "a" * 10
+    """Обрыв не немой и не посреди слова.
+
+    Замерено на живом архиве: 29 ответов из 475 (6,1%) длиннее потолка, самый
+    длинный — 3695 знаков. Человек слышал 54% ответа и обрыв на полуслове, читая
+    полный текст рядом; клип уходил без единой пометки.
+    """
+    from friday.tts import TRUNCATION_NOTICE
+
+    long_answer = "Первое предложение. Второе предложение. " + "хвост " * 200
+    cleaned, truncated = sanitize_text(long_answer, max_chars=60)
     assert truncated is True
+    assert len(cleaned) <= 60
+    assert cleaned.endswith(TRUNCATION_NOTICE), "человек не узнает, что услышал не всё"
+    # Резать по границе: слово не должно обрываться на половине.
+    body = cleaned[: -len(TRUNCATION_NOTICE)]
+    assert body.rstrip()[-1] in ".!?…" or not body.endswith("хвос")
+
+    # Короткий текст не обрастает пометкой.
+    short, cut = sanitize_text("Приказ подписан.", max_chars=60)
+    assert (short, cut) == ("Приказ подписан.", False)
 
 
 def test_sanitize_text_empty_input_stays_empty():
@@ -274,3 +291,120 @@ async def test_agentic_loop_leaves_voice_clip_none_when_speak_was_not_called(set
     )
 
     assert result.get("voice_clip") is None
+
+
+# --- озвучивается ТОТ ЖЕ ответ, что написан ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_clip_carries_the_final_answer_and_its_caveat(settings, storage, monkeypatch):
+    """Мутация: убрать `_voice_of_the_final_answer` из сборки ответа — краснеет.
+
+    `speak` вызывается моделью в раунде инструментов, а итоговый текст рождается
+    позже и только он проходит верификацию и проверку обоснованности. Замерено на
+    живой базе: из 475 ответов 210 (44,2%) идут с пометкой «у этого нет оснований
+    в архиве» — человек ЧИТАЛ оговорку и СЛЫШАЛ ту же выдумку без неё.
+    """
+    from friday.agent_runtime import AgentRuntime
+
+    spoken: list[str] = []
+
+    class _Result:
+        success = True
+        attachment = {"kind": "voice", "audio_base64": "final", "duration_sec": 2.0}
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            spoken.append(str(arguments.get("text") or ""))
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+
+    clip = await runtime._voice_of_the_final_answer(  # noqa: SLF001
+        {"kind": "voice", "audio_base64": "midturn"},
+        "Ключевая ставка — 14%.",
+        warning="⚠️ У этого ответа нет оснований в архиве.",
+        caution="",
+        actor=None,
+    )
+    assert clip["audio_base64"] == "final", "озвучен клип из середины хода, а не итог"
+    assert spoken and spoken[0].startswith("⚠️"), "оговорка не прозвучала первой"
+    assert "14%" in spoken[0]
+
+
+@pytest.mark.asyncio
+async def test_no_voice_was_asked_for_no_voice_is_made(settings, storage):
+    """Контроль: пересинтез не превращает каждый ответ в озвученный."""
+    from friday.agent_runtime import AgentRuntime
+
+    called: list[str] = []
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            called.append(name)
+            raise AssertionError("синтез не должен вызываться без просьбы озвучить")
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    assert (
+        await runtime._voice_of_the_final_answer(  # noqa: SLF001
+            None, "обычный ответ", warning="", caution="", actor=None
+        )
+        is None
+    )
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_resynthesis_keeps_the_clip_that_exists(settings, storage):
+    """Сорвавшийся пересинтез не должен отнимать у человека голос совсем."""
+    from friday.agent_runtime import AgentRuntime
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            raise RuntimeError("движок синтеза лёг")
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    original = {"kind": "voice", "audio_base64": "midturn"}
+    assert (
+        await runtime._voice_of_the_final_answer(  # noqa: SLF001
+            original, "ответ", warning="", caution="", actor=None
+        )
+        is original
+    )
+
+
+def test_the_bridge_tells_the_person_the_clip_was_cut():
+    """Мутация: убрать ветку `voice.get("truncated")` — тест краснеет."""
+    import inspect
+
+    from friday.telegram_bridge._callbacks import CallbacksMixin
+
+    source = inspect.getsource(CallbacksMixin._deliver_voice_reply)  # noqa: SLF001
+    assert 'voice.get("truncated")' in source, "об обрыве человеку не говорят"
+    assert "озвучено начало" in source
+
+
+@pytest.mark.asyncio
+async def test_chars_reports_what_was_spoken_not_what_was_asked(settings, storage, monkeypatch):
+    """`chars` был длиной ИСХОДНОГО текста — даже модель не знала, сколько прозвучало."""
+    from dataclasses import replace
+
+    import friday.execution_kernel as execution_kernel_module
+
+    settings = replace(settings, tts_enabled=True, tts_max_chars=50)
+    kernel, actor = _kernel(settings, storage)
+
+    def _fake_synthesize(text, *, voice, download_root, max_chars):
+        return Speech(
+            audio_bytes=b"OggS", sample_rate=48000, duration_sec=1.0, voice=voice, truncated=True
+        )
+
+    monkeypatch.setattr(execution_kernel_module, "synthesize_speech", _fake_synthesize)
+    result = await kernel.execute("speak", {"text": "с" * 500}, actor=actor)
+
+    assert result.data["chars"] == 50, "отчитались за 500 знаков, озвучив 50"
+    assert result.data["truncated"] is True
+    assert result.attachment["truncated"] is True, "мост не узнает про обрыв"

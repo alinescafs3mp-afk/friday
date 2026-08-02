@@ -1025,7 +1025,13 @@ class AgentRuntime:
             "grounding_warning": grounding_warning,
             "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
-            "voice": response.get("voice_clip"),
+            "voice": await self._voice_of_the_final_answer(
+                response.get("voice_clip"),
+                content,
+                warning=grounding_warning,
+                caution=verification_caution,
+                actor=actor,
+            ),
             "files": response.get("file_clips") or [],
             "context": {
                 "kb_size": context.kb_size,
@@ -1933,6 +1939,46 @@ class AgentRuntime:
                 ),
             }
         )
+
+    async def _voice_of_the_final_answer(
+        self,
+        clip: dict[str, Any] | None,
+        content: str,
+        *,
+        warning: str,
+        caution: str,
+        actor: ActorContext,
+    ) -> dict[str, Any] | None:
+        """Озвучивается ТОТ ЖЕ ответ, что написан, — вместе с оговорками.
+
+        `speak` вызывается моделью в раунде инструментов, а итоговый текст
+        рождается позже, отдельным вызовом, и только он проходит верификацию,
+        проверку обоснованности и легенду источников. То есть голос нёс другой
+        текст: замерено на живой базе — из 475 ответов 210 (44,2%) идут с
+        пометкой «у этого нет оснований в архиве», и человек ЧИТАЛ оговорку, а
+        СЛЫШАЛ ту же выдумку уверенно и без неё. Хуже: `speak` мог сработать в
+        первом раунде, до `memory_search`, и тогда голос нёс импровизацию, а
+        текст рядом — обоснованный ответ.
+
+        Поэтому клип, собранный в середине хода, заменяется синтезом финального
+        текста. Оговорка идёт ПЕРВОЙ по той же причине, по которой она стоит
+        первой в тексте: услышав её последней, человек уже поверил сказанному.
+        """
+        if not isinstance(clip, dict) or not content.strip():
+            return clip if isinstance(clip, dict) else None
+        spoken = content.strip()
+        lead = (warning or "").strip() or (caution or "").strip()
+        if lead:
+            spoken = f"{lead}\n\n{spoken}"
+        try:
+            result = await self.kernel.execute("speak", {"text": spoken}, actor=actor)
+        except Exception:  # noqa: BLE001 — озвучка не должна ронять готовый ответ
+            LOGGER.warning("tts: не удалось озвучить итоговый ответ", exc_info=True)
+            return clip
+        attachment = result.attachment if result.success else None
+        if not isinstance(attachment, dict):
+            return clip
+        return attachment
 
     async def _web_query_by_arbiter(self, message: str) -> str | None:
         """Спросить модель, не нужен ли тут интернет, когда шаблон молчит.

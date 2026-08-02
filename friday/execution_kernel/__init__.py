@@ -1717,7 +1717,10 @@ class ExecutionKernel:
             return {"spoken": False, "reason": "nothing to speak"}
         return {
             "spoken": True,
-            "chars": len(text),
+            # Длина ОЗВУЧЕННОГО, а не исходного: раньше здесь стояла длина текста,
+            # который передали на синтез, и даже модель не знала, сколько из него
+            # прозвучало.
+            "chars": min(len(text), int(self.settings.tts_max_chars)),
             "duration_sec": speech.duration_sec,
             "truncated": speech.truncated,
             "_attachment": {
@@ -1725,6 +1728,9 @@ class ExecutionKernel:
                 "mime_type": "audio/ogg",
                 "audio_base64": base64.b64encode(speech.audio_bytes).decode("ascii"),
                 "duration_sec": speech.duration_sec,
+                # Мост дописывает человеку строку об обрыве: услышать половину
+                # ответа и не узнать об этом хуже, чем прочитать оговорку.
+                "truncated": speech.truncated,
             },
         }
 

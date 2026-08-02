@@ -739,6 +739,17 @@ class CallbacksMixin(BridgeShared):
             await self._send_voice(telegram, chat_id, audio_bytes)
         except Exception:
             LOGGER.warning("tts: sendVoice failed", exc_info=True)
+            return
+        if voice.get("truncated"):
+            # Ответ не поместился в клип целиком. Молчать об этом нельзя: рядом
+            # лежит полный текст, и человек должен знать, что услышал не всё.
+            with suppress(Exception):
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Ответ длиннее, чем помещается в голосовое, — озвучено начало. "
+                    "Полный текст выше.",
+                )
 
     async def _deliver_generated_files(
         self,
