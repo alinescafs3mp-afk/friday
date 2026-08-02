@@ -138,3 +138,46 @@ def test_an_explicit_web_request_skips_the_archive_search():
     assert "context.small_talk or looking_outward" in source, (
         "явная просьба поискать в интернете по-прежнему обыскивает архив"
     )
+
+
+def test_hits_with_no_relevance_at_all_are_not_material():
+    """Мутация: убрать порог шума — тест краснеет.
+
+    Замерено на живой переписке: короткое обращение приносило девять документов
+    с ЛУЧШИМ счётом 0.000, режим ответа становился «личные знания», и модель
+    разворачивала этот шум в килобайт текста — от 36 до 92 секунд на реплику,
+    которую человек написал одним словом. После правки: ноль попаданий,
+    разговорный режим, 389 знаков, 15.7 с.
+
+    Порог не ранжирует, а отсекает пустоту: recall@10 на 78 эталонах не
+    изменился (0.7436), MRR тоже.
+    """
+    import inspect
+
+    from friday.agent_runtime import _NOISE_FLOOR, AgentRuntime
+
+    assert 0 < _NOISE_FLOOR < 0.01, "порог должен отсекать ноль, а не ранжировать"
+
+    source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
+    assert "_NOISE_FLOOR" in source
+    assert 'float(item["score"]) > _NOISE_FLOOR' in source
+    # `None` и `0.0` — разные вещи: первое значит «счёт не вычислялся»
+    # (упрощённая сборка поиска), второе — «вычислен и равен нулю». Первая
+    # редакция их не различала и выбрасывала законные совпадения.
+    assert 'item.get("score") is not None' in source
+    # Достаточно ОДНОГО осмысленного попадания, чтобы список остался целым:
+    # отбрасывается только выдача, где нет ни одного.
+    assert "not any(" in source, "порог применяется к каждому попаданию вместо всей выдачи"
+
+
+def test_a_single_real_hit_keeps_the_whole_list():
+    """Контроль: слабые соседи полезны рядом с настоящим совпадением."""
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
+    marker = source.index("_NOISE_FLOOR")
+    tail = source[marker : marker + 400]
+    assert "found = []" in tail
+    assert "context.knowledge_hits = found" in tail
