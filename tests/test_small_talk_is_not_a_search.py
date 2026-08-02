@@ -87,7 +87,7 @@ def test_small_talk_skips_retrieval_entirely():
 
     source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
     marker = source.index("_is_small_talk(message)")
-    tail = source[marker : marker + 800]
+    tail = source[marker : marker + 1400]
     assert "context.knowledge_hits = []" in tail, "поиск всё ещё выполняется на болтовне"
     assert "elif searcher:" in tail, "запасная ветка поиска осталась достижимой"
 
@@ -119,3 +119,22 @@ def test_the_archive_comes_before_the_internet():
     guard = source[: source.index("_web_query_by_arbiter(message)")]
     assert "context.knowledge_hits" in guard, "интернет спрашивается раньше собственного архива"
     assert "not asked_outright" in guard, "прямая просьба поискать в интернете должна исполняться"
+
+
+def test_an_explicit_web_request_skips_the_archive_search():
+    """Мутация: убрать `looking_outward` — тест краснеет.
+
+    Замерено на боевом корпусе: сам поиск стоит 2.7 секунды, и на «найди в
+    интернете курс евро» они тратятся впустую — ответ придёт из выдачи, а
+    найденные документы в контекст даже не попадут. Проверка шаблонная, без
+    обращения к модели.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
+    assert "_ASKS_FOR_THE_WEB.search(message)" in source
+    assert "context.small_talk or looking_outward" in source, (
+        "явная просьба поискать в интернете по-прежнему обыскивает архив"
+    )
