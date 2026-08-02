@@ -51,6 +51,10 @@ def _file_fate_line(file_ingestion: Any) -> str:
         or extraction.get("success") is False
         or extraction.get("text_success") is False
     )
+    # Разбор без ошибки — ещё не текст. Пустой .txt и .docx, где всё написанное
+    # лежит в колонтитуле, приходят с `success=True` и нулём знаков: человеку
+    # говорили просто «ждёт разбора», и он не знал, что содержимого не видно.
+    nothing_came_out = not text_missing and extraction.get("chars") == 0
     partial = bool(extraction.get("parse_deadline_reached"))
     if file_ingestion.get("promoted"):
         line = "✅ Файл стал знанием — можно спрашивать."
@@ -63,6 +67,8 @@ def _file_fate_line(file_ingestion: Any) -> str:
         line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
         if text_missing:
             line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
+        elif nothing_came_out:
+            line += " Текста в файле не оказалось — разбор прошёл, а содержимого нет."
         elif partial:
             # Успех и полнота — разные вещи: разбор, оборванный по сроку, приходит
             # с `success=True` и частичным текстом. Флаг для этого случая писался

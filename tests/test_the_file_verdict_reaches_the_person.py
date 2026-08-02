@@ -216,3 +216,110 @@ def test_one_persons_file_is_not_another_persons_replay(pipeline):
     )
     assert theirs.get("idempotent_replay") is not True, "чужой файл воспроизведён как свой"
     assert theirs["raw_object_id"] != mine["raw_object_id"]
+
+
+def _docx(paragraphs: list[str], *, header: str = "", table: list[list[str]] | None = None) -> bytes:
+    import io
+
+    from docx import Document
+
+    document = Document()
+    if header:
+        document.sections[0].header.paragraphs[0].text = header
+    for text in paragraphs:
+        document.add_paragraph(text)
+    if table:
+        grid = document.add_table(rows=len(table), cols=len(table[0]))
+        for row_index, row in enumerate(table):
+            for column_index, value in enumerate(row):
+                grid.cell(row_index, column_index).text = value
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _xlsx(rows: list[list[str]], *, sheet: str = "Лист") -> bytes:
+    import io
+
+    from openpyxl import Workbook
+
+    book = Workbook()
+    page = book.active
+    page.title = sheet
+    for row in rows:
+        page.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+def test_a_word_document_gives_up_its_paragraphs_and_its_table(pipeline):
+    """Таблица — часть документа, а не украшение: в приказах в ней самое важное."""
+    payload = _docx(
+        ["С 1 августа назначить ответственным Проскурина В.А.", "Срок — 15 августа 2026 года."],
+        table=[["Должность", "ФИО"], ["Начальник", "Проскурин В.А."]],
+    )
+    result = _ingest(pipeline, payload, "prikaz.docx", "")
+    raw = pipeline.storage.get_raw_object(result["raw_object_id"], "alice")
+    body = " ".join(str(raw.get("raw_content") or "").split())
+    assert "Проскурина В.А." in body
+    assert "15 августа 2026" in body
+    assert "Начальник" in body and "ФИО" in body, "таблица не попала в текст"
+
+
+def test_a_spreadsheet_gives_up_every_row(pipeline):
+    payload = _xlsx(
+        [["Дата", "ФИО", "Тип"], ["2026-07-11", "Зайцев М.", "увольнение"], ["2026-08-07", "Целио Ю.Ю.", "выходные"]],
+        sheet="Рапорты",
+    )
+    result = _ingest(pipeline, payload, "raporty.xlsx", "")
+    raw = pipeline.storage.get_raw_object(result["raw_object_id"], "alice")
+    body = " ".join(str(raw.get("raw_content") or "").split())
+    assert "Рапорты" in body
+    assert "Зайцев М." in body and "Целио Ю.Ю." in body, "часть строк потеряна"
+    assert "2026-08-07" in body
+
+
+def test_an_archive_gives_up_what_is_inside(pipeline):
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("inner.txt", "Смета на поверку весов: 42 000 рублей.")
+    result = _ingest(pipeline, buffer.getvalue(), "arhiv.zip", "")
+    raw = pipeline.storage.get_raw_object(result["raw_object_id"], "alice")
+    body = " ".join(str(raw.get("raw_content") or "").split())
+    assert "42 000 рублей" in body
+    assert "inner.txt" in body
+
+
+def test_a_document_whose_text_lives_in_the_header_says_so(pipeline):
+    """Мутация: убрать `chars` из ответа приёма — тест краснеет.
+
+    Разбор без ошибки — ещё не текст. Пустой .txt и .docx, где всё написанное
+    лежит в колонтитуле, приходят с `success=True` и нулём знаков; человеку
+    говорили просто «ждёт разбора», и он не знал, что содержимого не видно.
+    """
+    result = _ingest(pipeline, _docx([], header="Только колонтитул"), "header.docx", "")
+    assert result["extraction"]["success"] is True, "разбор должен был пройти без ошибки"
+    assert result["extraction"]["chars"] == 0
+    assert result["promoted"] is False
+    line = _file_fate_line(result)
+    assert "Текста в файле не оказалось" in line
+    # Это НЕ то же самое, что «разобрать не удалось»: там файл нечитаем вовсе.
+    assert "Текст извлечь не удалось" not in line
+
+
+@pytest.mark.parametrize(
+    "name,payload",
+    [
+        ("broken.docx", b"PK\x03\x04" + b"\x00" * 200),
+        ("fake.doc", b"not really a word file"),
+        ("qr.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64),
+    ],
+)
+def test_an_unreadable_file_says_the_content_is_invisible(pipeline, name, payload):
+    result = _ingest(pipeline, payload, name, "")
+    assert result["promoted"] is False
+    assert "Текст извлечь не удалось" in _file_fate_line(result)
