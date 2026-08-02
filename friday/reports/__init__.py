@@ -42,6 +42,9 @@ _PDF_FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
 )
+#: Потолок высоты картинки. Примерно 130 строк — столько человек ещё
+#: разглядывает; дальше формат перестаёт быть картинкой и становится обузой.
+_PNG_MAX_HEIGHT = 4000
 _PDF_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -329,6 +332,20 @@ def _escape(text: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class _Line:
+    """Строка картинки: текст либо ячейки таблицы с координатами колонок.
+
+    Колонки нужны потому, что шрифт пропорциональный: склейка пробелами
+    превращала таблицу в лесенку, по которой не прочитать, где чьё значение.
+    """
+
+    text: str | list[str]
+    font: Any
+    step: int
+    columns: list[float] | None = None
+
+
 def _render_png(spec: ReportSpec) -> bytes:
     """Картинка — тот же документ, нарисованный на холсте.
 
@@ -347,37 +364,101 @@ def _render_png(spec: ReportSpec) -> bytes:
         return ImageFont.load_default()
 
     width, margin = 1200, 48
-    lines: list[tuple[str, Any, int]] = [(spec.title, _font(34, bold=True), 46)]
+    lines: list[_Line] = [_Line(spec.title, _font(34, bold=True), 46)]
     if spec.subtitle:
-        lines.append((spec.subtitle, _font(20), 30))
-    lines.append(("", _font(10), 12))
+        lines.append(_Line(spec.subtitle, _font(20), 30))
+    lines.append(_Line("", _font(10), 12))
     body_font, head_font = _font(20), _font(24, bold=True)
     for block in spec.blocks:
         # Перенос нужен КАЖДОЙ ветке, а не только абзацам: длинный заголовок,
         # длинный пункт списка и широкая строка таблицы одинаково уезжали за
         # правый край картинки и обрывались на середине слова.
         if block.kind == "heading":
-            lines.extend((chunk, head_font, 34) for chunk in _wrap(block.text, 64))
+            lines.extend(_Line(chunk, head_font, 34) for chunk in _wrap(block.text, 64))
         elif block.kind == "bullets":
             for item in block.items:
                 wrapped = _wrap(item, 74)
-                lines.append((f"•  {wrapped[0]}", body_font, 28))
-                lines.extend((f"   {chunk}", body_font, 28) for chunk in wrapped[1:])
+                lines.append(_Line(f"•  {wrapped[0]}", body_font, 28))
+                lines.extend(_Line(f"   {chunk}", body_font, 28) for chunk in wrapped[1:])
         elif block.kind == "table":
-            for row in block.rows:
-                lines.extend((chunk, body_font, 28) for chunk in _wrap("   ".join(row), 78))
+            # Колонки — по координатам, а не через склейку пробелами: шрифт
+            # пропорциональный, и «Тип Штук / Рапорты 42» превращалось в лесенку,
+            # по которой не прочитать, где чьё значение. Ширина колонки — самая
+            # широкая ячейка в ней, с отступом.
+            rows = [[str(cell) for cell in row] for row in block.rows if row]
+            if not rows:
+                continue
+            column_count = max(len(row) for row in rows)
+            # Шапка меряется ЖИРНЫМ шрифтом, которым и рисуется: измерение
+            # обычным давало колонку уже реального заголовка, и «Тип документа»
+            # налезал на «Штук».
+            widths = [
+                max(
+                    (
+                        (head_font if row_index == 0 else body_font).getlength(row[index])
+                        if index < len(row)
+                        else 0.0
+                    )
+                    for row_index, row in enumerate(rows)
+                )
+                for index in range(column_count)
+            ]
+            offsets: list[float] = []
+            running = 0.0
+            for width_value in widths:
+                offsets.append(running)
+                running += width_value + 28
+            for index, row in enumerate(rows):
+                cells = [(row[column] if column < len(row) else "") for column in range(column_count)]
+                lines.append(_Line(cells, head_font if index == 0 else body_font, 30, offsets))
         else:
-            lines.extend((chunk, body_font, 28) for chunk in _wrap(block.text, 78))
-        lines.append(("", body_font, 10))
+            lines.extend(_Line(chunk, body_font, 28) for chunk in _wrap(block.text, 78))
+        lines.append(_Line("", body_font, 10))
 
-    height = margin * 2 + sum(step for _, _, step in lines)
+    # Картинка не может расти бесконечно. Замерено: 500 строк таблицы дают
+    # 15164 пикселя и 1.1 МБ, 2000 строк — 60164 пикселя и 4.7 МБ. Telegram
+    # такую не покажет, а человек просил «картинку со сводкой», а не файл,
+    # который не открывается. Обрезаем — и ГОВОРИМ об этом прямо на картинке:
+    # молчаливый обрез это ровно тот случай, который система уже чинила в
+    # голосе и в разборе документов.
+    # Место под саму оговорку резервируется заранее: иначе она выталкивает
+    # картинку за собственный потолок.
+    budget = _PNG_MAX_HEIGHT - margin * 2 - 40
+    kept: list[_Line] = []
+    used = 0
+    for line in lines:
+        if used + line.step > budget:
+            break
+        kept.append(line)
+        used += line.step
+    if len(kept) < len(lines):
+        dropped = len(lines) - len(kept)
+        kept.append(_Line("", body_font, 8))
+        kept.append(
+            _Line(
+                f"…показано не всё: не поместилось строк — {dropped}. "
+                "Попросите тот же отчёт в Word или Excel.",
+                _font(18, bold=True),
+                30,
+            )
+        )
+        lines = kept
+    else:
+        lines = kept
+    height = margin * 2 + sum(line.step for line in lines)
     image = Image.new("RGB", (width, max(height, 200)), "white")
     draw = ImageDraw.Draw(image)
     offset = margin
-    for text, font_obj, step in lines:
-        if text:
-            draw.text((margin, offset), text, font=font_obj, fill=(24, 24, 24))
-        offset += step
+    for line in lines:
+        if line.columns is not None and isinstance(line.text, list):
+            for cell, column_offset in zip(line.text, line.columns, strict=False):
+                if cell:
+                    draw.text(
+                        (margin + column_offset, offset), cell, font=line.font, fill=(24, 24, 24)
+                    )
+        elif isinstance(line.text, str) and line.text:
+            draw.text((margin, offset), line.text, font=line.font, fill=(24, 24, 24))
+        offset += line.step
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()

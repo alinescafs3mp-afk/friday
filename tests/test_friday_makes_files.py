@@ -360,3 +360,120 @@ def test_the_question_guard_is_wired_before_the_file_is_built():
     source = inspect.getsource(AgentRuntime._file_for_a_request_that_wanted_one)  # noqa: SLF001
     assert "_answer_is_a_question(answer)" in source
     assert source.index("_answer_is_a_question(answer)") < source.index("_blocks_from_text(answer)")
+
+
+def test_a_table_in_a_picture_keeps_its_columns():
+    """Мутация: вернуть склейку `"   ".join(row)` — тест краснеет.
+
+    Шрифт пропорциональный, поэтому склеенная пробелами таблица превращалась в
+    лесенку: «Тип Штук / Рапорты 42 / Приказы 17» — прочитать, где чьё значение,
+    нельзя. Колонки рисуются по координатам, а ширина шапки меряется тем же
+    жирным шрифтом, которым она рисуется (иначе заголовок налезает на соседа).
+    """
+    import inspect
+
+    from friday import reports
+
+    source = inspect.getsource(reports._render_png)  # noqa: SLF001
+    assert '"   ".join(row)' not in source, "таблица снова склеивается пробелами"
+    assert "head_font if row_index == 0 else body_font" in source, (
+        "ширина шапки меряется не тем шрифтом, которым она рисуется"
+    )
+
+    # И картинка действительно строится: широкая таблица не роняет отрисовку.
+    payload = reports.render(
+        "png",
+        reports.ReportSpec(
+            title="Отчёт",
+            blocks=[
+                reports.Block(
+                    "table",
+                    rows=[
+                        ["Тип документа", "Штук", "Ответственный"],
+                        ["Рапорты", "42", "Проскурин В.А."],
+                        ["Приказы", "17", "Шматов Р."],
+                    ],
+                )
+            ],
+        ),
+    )
+    assert payload[:8] == b"\x89PNG\r\n\x1a\n"
+    import io
+
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(payload))
+    assert image.width == 1200
+    assert image.height > 150
+
+
+def test_a_ragged_table_does_not_break_any_format():
+    """Строки разной длины — обычное дело у модели; падать на них нельзя."""
+    from friday import reports
+
+    spec = reports.ReportSpec(
+        title="Неровная таблица",
+        blocks=[
+            reports.Block("table", rows=[["A", "B", "C"], ["1"], ["2", "3"], []]),
+        ],
+    )
+    for kind in sorted(reports.SUPPORTED_KINDS):
+        payload = reports.render(kind, spec)
+        assert payload, f"{kind}: пустой файл"
+
+
+def test_an_empty_table_is_skipped_not_crashed():
+    from friday import reports
+
+    spec = reports.ReportSpec(title="Пусто", blocks=[reports.Block("table", rows=[])])
+    for kind in sorted(reports.SUPPORTED_KINDS):
+        assert reports.render(kind, spec)
+
+
+def test_a_picture_that_cannot_hold_everything_says_so():
+    """Мутация: убрать потолок высоты — тест краснеет.
+
+    Замерено: 500 строк таблицы дают картинку 1200×15164 и 1.1 МБ, 2000 строк —
+    1200×60164 и 4.7 МБ. Telegram такую не покажет, а человек просил картинку,
+    а не файл, который не открывается. Обрезать молча нельзя — это ровно тот
+    случай, который система уже чинила в голосе и в разборе документов.
+    """
+    import inspect
+    import io
+
+    from PIL import Image
+
+    from friday import reports
+
+    spec = reports.ReportSpec(
+        title="Длинная сводка",
+        blocks=[
+            reports.Block(
+                "table", rows=[["№", "строка"]] + [[str(i), f"значение-{i}"] for i in range(300)]
+            )
+        ],
+    )
+    payload = reports.render("png", spec)
+    image = Image.open(io.BytesIO(payload))
+    assert image.height <= reports._PNG_MAX_HEIGHT, "картинка растёт без предела"  # noqa: SLF001
+    assert len(payload) < 1_000_000, "картинка тяжелее мегабайта"
+
+    source = inspect.getsource(reports._render_png)  # noqa: SLF001
+    assert "показано не всё" in source
+    assert "Word или Excel" in source
+
+
+def test_a_short_report_is_not_capped():
+    """Контроль: обычный отчёт не обрастает предупреждением."""
+    import io
+
+    from PIL import Image
+
+    from friday import reports
+
+    spec = reports.ReportSpec(
+        title="Короткая сводка",
+        blocks=[reports.Block("table", rows=[["№", "строка"], ["1", "значение"]])],
+    )
+    image = Image.open(io.BytesIO(reports.render("png", spec)))
+    assert image.height < 500
