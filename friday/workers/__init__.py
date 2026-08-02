@@ -545,6 +545,19 @@ class WorkersManager:
             run_immediately=False,
             timeout_sec=900,
         )
+        # Прогрев экрана «Ревизия». Первый заход после перезапуска стоит ~17 с:
+        # предикат читает содержимое всех документов и в SQL не выражается,
+        # поэтому проход честно классифицирует весь архив. Вердикты помнятся по
+        # ревизии объекта, так что достаточно сделать проход ОДИН раз — дальше
+        # страница открывается за 0.2 с. В фоне это никому не мешает, а человек,
+        # открывший раздел, не ждёт.
+        self.supervisor.register(
+            "revision_warmup",
+            self._revision_warmup_all,
+            24 * 3600,
+            run_immediately=True,
+            timeout_sec=600,
+        )
         self.supervisor.register(
             "inbox_model_advice",
             self._inbox_model_advice_all,
@@ -823,6 +836,13 @@ class WorkersManager:
                 report.get("keys_examined", 0),
                 report.get("keys_total", 0),
             )
+
+    async def _revision_warmup_all(self) -> None:
+        await self._for_each_user(self._revision_warmup)
+
+    async def _revision_warmup(self, user_id: str) -> None:
+        """Один проход ревизии, только чтение — чтобы страница открывалась сразу."""
+        await run_blocking(self.ingestion.scan_legacy_quality_page, user_id, limit=25, offset=0)
 
     async def _knowledge_quality_scan_all(self) -> None:
         await self._for_each_user(self._knowledge_quality_scan)
