@@ -496,3 +496,123 @@ def test_a_question_about_the_whole_archive_still_reaches_the_counter(message):
     from friday.agent_runtime import _ASKS_ABOUT_THE_ARCHIVE
 
     assert _ASKS_ABOUT_THE_ARCHIVE.search(message)
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("что было вчера в 9 ночи", "вчера 21:00"),
+        ("что было вчера в 11 ночи", "вчера 23:00"),
+        ("что было вчера в 12 ночи", "вчера 00:00"),
+        ("что было вчера в час ночи", "вчера 01:00"),
+        ("что было вчера в 3 ночи", "вчера 03:00"),
+    ],
+)
+def test_night_hours_land_in_the_night(question, expected):
+    """Мутация: переводить в вечер только полночь — тест краснеет.
+
+    Найдено ревью собственных правок: «9 ночи» давало 09:00, то есть девять
+    вечера превращались в девять утра. Ночь идёт с вечера в утро.
+    """
+    from friday.agent_runtime import moment_from_question
+
+    assert moment_from_question(question) == expected
+
+
+def test_the_graph_card_counts_exactly_like_the_circle(storage):
+    """Мутация: убрать `status='accepted'` из подсчёта — тест краснеет.
+
+    Моя же правка часом раньше считала ВСЕ связи, а обзор графа — только
+    подтверждённые. Два экрана снова назвали бы разные числа, ради чего правка и
+    делалась.
+    """
+    from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user("alice")
+    entity = Entity(id=new_id("ent"), user_id="alice", name="Проскурин", entity_type=EntityType.PERSON)
+    storage.create_entity(entity)
+    for index, status in enumerate(("accepted", "accepted", "suggested", "rejected")):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"документ {index}",
+            content_type="text",
+            content_hash=f"hh{index}",
+        )
+        storage.store_raw_object(raw)
+        knowledge = KnowledgeObject(
+            id=new_id("ko"),
+            user_id="alice",
+            raw_object_id=raw.id,
+            content=f"документ {index}",
+            content_type="text",
+            title=f"Документ {index}",
+        )
+        storage.store_knowledge_object(knowledge)
+        storage.link_knowledge_entity("alice", knowledge.id, entity.id, status=status)
+
+    overview = {node["id"]: node["knowledge_count"] for node in storage.graph_overview("alice")["nodes"]}
+    card = next(
+        node for node in storage.get_entity_graph("alice", entity.id, depth=1)["nodes"]
+        if node["id"] == entity.id
+    )
+    assert card["knowledge_count"] == 2, "предложенные и отклонённые связи попали в счёт"
+    assert card["knowledge_count"] == overview.get(entity.id)
+
+
+def test_a_personal_report_is_not_grounded_in_archive_totals():
+    """Мутация: всегда добавлять счётчики архива — тест краснеет.
+
+    Отчёт «по Хасанову» начинался строками «Записей в базе: 1533, Сущностей:
+    4608»: числа верные, но не про то, о чём документ, и в готовом файле они
+    читаются как характеристика человека.
+    """
+    from friday.agent_runtime import AgentContext, _grounds_from_context
+
+    with_hits = AgentContext(
+        conversation_id="c",
+        user_id="u",
+        kb_size=1533,
+        entity_count=4608,
+        knowledge_hits=[{"title": "Расчётный листок", "snippet": "Бутко начислено 87 450 рублей"}],
+    )
+    grounds = _grounds_from_context(with_hits)
+    assert "1533" not in grounds and "4608" not in grounds
+    assert "87 450" in grounds
+
+    # Когда находок нет, числа архива — единственное, что можно сказать честно.
+    empty = AgentContext(conversation_id="c", user_id="u", kb_size=1533, entity_count=4608)
+    assert "1533" in _grounds_from_context(empty)
+
+
+def test_a_snippet_is_cut_on_a_word_boundary():
+    """Срез на 300-м знаке рассекал число: «начислено 87 4» вместо «87 450»."""
+    from friday.agent_runtime import AgentContext, _grounds_from_context
+
+    long_text = "слово " * 60 + "87 450 рублей"
+    context = AgentContext(
+        conversation_id="c",
+        user_id="u",
+        knowledge_hits=[{"title": "Листок", "snippet": long_text}],
+    )
+    line = _grounds_from_context(context)
+    assert line.endswith("…")
+    assert not line.rstrip("…").endswith(" ")
+
+
+def test_the_file_is_built_after_the_answer_is_final():
+    """Мутация: собирать файл до проверки — тест краснеет.
+
+    Иначе в документ уходит текст, который автопроверка забраковала, а человеку
+    приходит уже исправленный ответ: файл и реплика расходятся.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime.chat)
+    assert source.index("_repair_once") < source.index("_file_for_a_request_that_wanted_one"), (
+        "файл собирается раньше, чем ответ стал окончательным"
+    )

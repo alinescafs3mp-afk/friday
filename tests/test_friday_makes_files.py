@@ -240,9 +240,15 @@ def test_grounds_come_from_the_context_not_from_thin_air(settings, storage):
         knowledge_hits=[{"title": "Приказ 214", "snippet": "О назначении Хасанова"}],
     )
     grounds = _grounds_from_context(context)
-    assert "1533" in grounds
-    assert "4608" in grounds
+    # Числа архива идут в основания только когда находок нет: в отчёте про
+    # человека они читаются как характеристика человека. Проверка этого — в
+    # tests/test_demo_screens_tell_the_truth.py.
     assert "Приказ 214" in grounds
+    assert "О назначении Хасанова" in grounds
+
+    empty = AgentContext(conversation_id="c1", user_id="alice", kb_size=1533, entity_count=4608)
+    fallback = _grounds_from_context(empty)
+    assert "1533" in fallback and "4608" in fallback
 
 
 def test_a_sent_document_does_not_trigger_building_another_one():

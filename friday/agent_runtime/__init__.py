@@ -129,7 +129,12 @@ def _hour_with_part_of_day(hour: int, text: str) -> int:
         return hour
     name = part.group(1).casefold()
     if name == "ночи":
-        return 0 if hour == 12 else hour
+        # Ночь идёт с вечера в утро: «9 ночи» — это 21:00, «12 ночи» — полночь,
+        # «час ночи» — 01:00. Прежняя редакция переводила только полночь, и
+        # девять вечера превращались в девять утра.
+        if hour == 12:
+            return 0
+        return hour + 12 if 9 <= hour <= 11 else hour
     if name == "утра":
         return hour
     if hour == 12:
@@ -825,20 +830,6 @@ class AgentRuntime:
         # человека («Загружен документ: отчёт.docx»), и просьбой о файле он не
         # является: слово «отчёт» в ЧУЖОМ имени файла запускало сборку документа
         # на пустом месте — человек прислал файл и получал в ответ ещё один.
-        if (
-            not synthetic_document_notice
-            and _ASKS_FOR_A_FILE.search(clean_message)
-            and not response.get("file_clips")
-        ):
-            made = await self._file_for_a_request_that_wanted_one(
-                clean_message,
-                content,
-                actor,
-                evidence=response.get("tool_evidence") or [],
-                context=context,
-            )
-            if made:
-                response = {**response, "file_clips": [made]}
         verification: dict[str, Any] = {"status": VERDICT_SKIPPED, "ok": True, "score": None, "issues": []}
         if (
             self.settings.verify_answers
@@ -865,6 +856,23 @@ class AgentRuntime:
                     clean_message, content, context, tool_evidence=response.get("tool_evidence")
                 )
                 verification_status = str(verification.get("status") or VERDICT_SKIPPED)
+        # Файл собирается ПОСЛЕ проверки и возможного исправления: иначе в
+        # документ уходил текст, который автопроверка забраковала, а человеку
+        # ответ пришёл бы уже исправленным — файл и реплика разошлись бы.
+        if (
+            not synthetic_document_notice
+            and _ASKS_FOR_A_FILE.search(clean_message)
+            and not response.get("file_clips")
+        ):
+            made = await self._file_for_a_request_that_wanted_one(
+                clean_message,
+                content,
+                actor,
+                evidence=response.get("tool_evidence") or [],
+                context=context,
+            )
+            if made:
+                response = {**response, "file_clips": [made]}
         answer_verified = verification_status == VERDICT_PASSED
         verification_caution = _verification_caution(
             verification_status, list(verification.get("issues") or [])
@@ -2539,16 +2547,25 @@ def _grounds_from_context(context: AgentContext) -> str:
     документов. Ничего нового здесь не появляется — иначе файл снова начал бы
     сообщать сведения, которых никто не проверял.
     """
-    lines = [
-        f"Записей в базе: {context.kb_size}",
-        f"Сущностей в графе: {context.entity_count}",
-        f"Связей в графе: {context.relation_count}",
-        f"Ожидают разбора во «Входящих»: {context.pending_inbox}",
-    ]
+    lines: list[str] = []
+    # Счётчики всего архива идут в основания ТОЛЬКО когда нашлось что-то ещё
+    # нечего сказать. Иначе отчёт «по Хасанову» начинался строками «Записей в
+    # базе: 1533, Сущностей: 4608» — числа верные, но не про то, о чём документ,
+    # и в готовом файле они читаются как характеристика человека.
     for index, hit in enumerate(context.knowledge_hits[:12], start=1):
         title = str(hit.get("title") or "").strip()
-        snippet = " ".join(str(hit.get("snippet") or hit.get("content") or "").split())[:300]
+        # Выдержка режется по границе слова: срез на 300-м знаке рассекал число
+        # пополам, и в документ попадало «начислено 87 4» вместо «87 450».
+        raw = " ".join(str(hit.get("snippet") or hit.get("content") or "").split())
+        snippet = raw if len(raw) <= 300 else raw[:300].rsplit(" ", 1)[0] + "…"
         lines.append(f"[K{index}] {title}: {snippet}")
+    if not lines:
+        lines = [
+            f"Записей в базе: {context.kb_size}",
+            f"Сущностей в графе: {context.entity_count}",
+            f"Связей в графе: {context.relation_count}",
+            f"Ожидают разбора во «Входящих»: {context.pending_inbox}",
+        ]
     return "\n".join(lines)
 
 

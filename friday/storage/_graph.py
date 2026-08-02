@@ -759,10 +759,15 @@ class GraphMixin(StorageShared):
         if not entity_ids:
             return {}
         holders = ", ".join("?" * len(entity_ids))
+        # Условие ровно то же, что в `graph_overview`: только подтверждённые
+        # связи и без повторов. Иначе карточка узла и кружок, который её открыл,
+        # снова назвали бы разные числа — а правка затевалась именно против
+        # этого. Предложенные и отклонённые связи в счёт не идут: подтверждённых
+        # 32 189 против 30 прочих, но верность числа от размера не зависит.
         rows = self.execute(
-            f"""SELECT entity_id, COUNT(knowledge_object_id) AS total
+            f"""SELECT entity_id, COUNT(DISTINCT knowledge_object_id) AS total
                 FROM knowledge_entity_links
-                WHERE user_id = ? AND entity_id IN ({holders})
+                WHERE user_id = ? AND status = 'accepted' AND entity_id IN ({holders})
                 GROUP BY entity_id""",  # noqa: S608
             (user_id, *entity_ids),
         ).fetchall()
