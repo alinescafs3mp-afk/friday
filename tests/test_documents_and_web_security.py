@@ -160,3 +160,51 @@ def test_the_archive_preview_cap_counts_decompressions_not_successes():
     assert result.success
     assert result.metadata["previewed_files"] <= 24
     assert elapsed < 10.0, f"archive preview took {elapsed:.1f}s — is the cap counting successes again?"
+
+
+@pytest.mark.anyio
+async def test_a_redirect_into_the_local_network_is_blocked(settings):
+    """Мутация: проверять адрес только один раз перед циклом — тест краснеет.
+
+    Классическая дыра: внешний адрес проходит проверку и отвечает 302 на
+    `http://127.0.0.1:8000/api/admin/users`. Если адрес проверяется только на
+    входе, ассистент послушно сходит во внутреннюю сеть от имени машины
+    владельца. Здесь адрес валидируется на КАЖДОМ шаге цепочки.
+    """
+    import httpx
+
+    from friday.web_surfer import WebSurfer
+
+    hops: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hops.append(str(request.url))
+        if request.url.host == "example.org":
+            return httpx.Response(302, headers={"location": "http://127.0.0.1:8000/api/admin/users"})
+        return httpx.Response(200, text="СЕКРЕТ внутренней сети")
+
+    surfer = WebSurfer(settings)
+    surfer._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # noqa: SLF001
+    result = await surfer.fetch("https://example.org/start")
+    await surfer.close()
+
+    assert "СЕКРЕТ" not in result.text, "ассистент сходил во внутреннюю сеть по редиректу"
+    assert result.error, "переход внутрь сети прошёл молча"
+    assert not any("127.0.0.1" in hop for hop in hops), "запрос к локальному адресу всё-таки ушёл"
+
+
+@pytest.mark.anyio
+async def test_a_redirect_chain_cannot_run_forever(settings):
+    """Цикл редиректов — это отказ, а не бесконечная работа."""
+    import httpx
+
+    from friday.web_surfer import WebSurfer
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": "https://example.org/next"})
+
+    surfer = WebSurfer(settings)
+    surfer._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # noqa: SLF001
+    result = await surfer.fetch("https://example.org/start")
+    await surfer.close()
+    assert result.error, "бесконечная цепочка редиректов прошла как успех"
