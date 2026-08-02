@@ -348,6 +348,19 @@ _LOOKS_LIKE_A_QUESTION = re.compile(
 )
 _QUESTION_LENGTH_LIMIT = 300
 
+#: Просьба ответить голосом. Та же болезнь, что у файлов: модель «решает» звать
+#: инструмент и половину раз не зовёт — а после предварительного веб-поиска
+#: забывает почти всегда (замерено: «что такое ключевая ставка? ответь голосом»
+#: вернуло текст по выдаче и ни одного клипа).
+_ASKS_FOR_VOICE = re.compile(
+    r"(?:^|\W)(?:"
+    r"ответь\s+голос\w*|скажи\s+голос\w*|озвуч\w+|голосом\s+ответь|"
+    r"проговори|надиктуй|наговори|прочитай\s+вслух|скажи\s+вслух|"
+    r"голосов\w+\s+сообщени\w+"
+    r")(?=$|\W)",
+    re.IGNORECASE,
+)
+
 #: Слова, которые именем человека не бывают: спрашивать про них граф незачем.
 _NOT_A_NAME = frozenset(
     {
@@ -1046,6 +1059,7 @@ class AgentRuntime:
                 warning=grounding_warning,
                 caution=verification_caution,
                 actor=actor,
+                asked_for_voice=bool(_ASKS_FOR_VOICE.search(clean_message)),
             ),
             "files": response.get("file_clips") or [],
             "context": {
@@ -2009,6 +2023,7 @@ class AgentRuntime:
         warning: str,
         caution: str,
         actor: ActorContext,
+        asked_for_voice: bool = False,
     ) -> dict[str, Any] | None:
         """Озвучивается ТОТ ЖЕ ответ, что написан, — вместе с оговорками.
 
@@ -2025,7 +2040,14 @@ class AgentRuntime:
         текста. Оговорка идёт ПЕРВОЙ по той же причине, по которой она стоит
         первой в тексте: услышав её последней, человек уже поверил сказанному.
         """
-        if not isinstance(clip, dict) or not content.strip():
+        # Просили голос — голос будет, даже если модель не позвала инструмент.
+        # Та же болезнь, что у файлов, и то же лекарство: синтез вынесен ЗА цикл.
+        # Замерено — «что такое ключевая ставка? ответь голосом» после
+        # предварительного веб-поиска вернуло текст по выдаче и ни одного клипа:
+        # внимание модели ушло в протокол инструментов.
+        if not isinstance(clip, dict) and not asked_for_voice:
+            return None
+        if not content.strip():
             return clip if isinstance(clip, dict) else None
         spoken = content.strip()
         lead = (warning or "").strip() or (caution or "").strip()

@@ -408,3 +408,72 @@ async def test_chars_reports_what_was_spoken_not_what_was_asked(settings, storag
     assert result.data["chars"] == 50, "отчитались за 500 знаков, озвучив 50"
     assert result.data["truncated"] is True
     assert result.attachment["truncated"] is True, "мост не узнает про обрыв"
+
+
+@pytest.mark.asyncio
+async def test_a_request_to_speak_is_honoured_even_if_the_model_forgot(settings, storage):
+    """Мутация: убрать `asked_for_voice` — тест краснеет.
+
+    Та же болезнь, что у файлов, и то же лекарство. Замерено сквозным прогоном:
+    «что такое ключевая ставка? ответь голосом» после предварительного веб-поиска
+    вернуло текст по выдаче и НИ ОДНОГО клипа — внимание модели ушло в протокол
+    инструментов, и `speak` она не позвала.
+    """
+    from friday.agent_runtime import _ASKS_FOR_VOICE, AgentRuntime
+
+    spoken: list[str] = []
+
+    class _Result:
+        success = True
+        attachment = {"kind": "voice", "audio_base64": "made-after-the-loop"}
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            spoken.append(str(arguments.get("text") or ""))
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+
+    clip = await runtime._voice_of_the_final_answer(  # noqa: SLF001
+        None,
+        "Ключевая ставка — это процент, под который ЦБ даёт деньги банкам.",
+        warning="",
+        caution="",
+        actor=None,
+        asked_for_voice=True,
+    )
+    assert clip is not None and clip["audio_base64"] == "made-after-the-loop"
+    assert spoken and "Ключевая ставка" in spoken[0]
+
+    # Без просьбы — по-прежнему ничего не синтезируется.
+    spoken.clear()
+    assert (
+        await runtime._voice_of_the_final_answer(  # noqa: SLF001
+            None, "обычный ответ", warning="", caution="", actor=None, asked_for_voice=False
+        )
+        is None
+    )
+    assert spoken == []
+
+    for phrase in (
+        "что такое ставка? ответь голосом",
+        "озвучь ответ",
+        "скажи голосом, сколько документов",
+        "проговори это",
+        "надиктуй сводку",
+    ):
+        assert _ASKS_FOR_VOICE.search(phrase), f"просьба не узнана: {phrase!r}"
+    for phrase in ("сколько документов в базе?", "запиши голосовое сообщение от Петрова"):
+        assert not _ASKS_FOR_VOICE.search(phrase) or "голосов" in phrase
+
+
+def test_the_voice_request_is_read_from_the_person_s_message():
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime.chat)
+    assert "asked_for_voice=bool(_ASKS_FOR_VOICE.search(clean_message))" in source, (
+        "просьба озвучить не доходит до сборки ответа"
+    )
