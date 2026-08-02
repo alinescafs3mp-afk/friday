@@ -87,7 +87,7 @@ def test_small_talk_skips_retrieval_entirely():
 
     source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
     marker = source.index("_is_small_talk(message)")
-    tail = source[marker : marker + 1400]
+    tail = source[marker : marker + 2600]
     assert "context.knowledge_hits = []" in tail, "поиск всё ещё выполняется на болтовне"
     assert "elif searcher:" in tail, "запасная ветка поиска осталась достижимой"
 
@@ -160,11 +160,11 @@ def test_hits_with_no_relevance_at_all_are_not_material():
 
     source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
     assert "_NOISE_FLOOR" in source
-    assert 'float(item["score"]) > _NOISE_FLOOR' in source
+    assert 'float(item["_score"]) > _NOISE_FLOOR' in source
     # `None` и `0.0` — разные вещи: первое значит «счёт не вычислялся»
     # (упрощённая сборка поиска), второе — «вычислен и равен нулю». Первая
     # редакция их не различала и выбрасывала законные совпадения.
-    assert 'item.get("score") is not None' in source
+    assert 'item.get("_score") is not None' in source
     # Достаточно ОДНОГО осмысленного попадания, чтобы список остался целым:
     # отбрасывается только выдача, где нет ни одного.
     assert "not any(" in source, "порог применяется к каждому попаданию вместо всей выдачи"
@@ -181,3 +181,46 @@ def test_a_single_real_hit_keeps_the_whole_list():
     tail = source[marker : marker + 400]
     assert "found = []" in tail
     assert "context.knowledge_hits = found" in tail
+
+
+def test_a_one_word_request_gets_a_question_back_not_a_dump():
+    """Мутация: убрать `terse_request` — тест краснеет.
+
+    Замерено на живой переписке: на слово из пяти букв приходило десять
+    документов и ответ на килобайт. Порогом счёта это не лечится — у такой
+    реплики совпадение оказалось ВЫШЕ, чем у настоящего вопроса (0.83 против
+    0.26): слово короткое и совпадает с документами целиком.
+
+    Помощник в таком случае переспрашивает, а не гадает по документам.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    prepare = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
+    assert "context.terse_request" in prepare
+    assert ") <= 2" in prepare or "<= 2\n" in prepare, "признак не привязан к длине обращения"
+
+    prompt = inspect.getsource(AgentRuntime._build_initial_messages)  # noqa: SLF001
+    assert "переспроси" in prompt
+    assert "пересказывай найденное списком" in prompt
+
+
+def test_the_noise_floor_reads_the_field_that_exists():
+    """Мутация: вернуть `item.get("score")` — тест краснеет.
+
+    Поле называется `_score`, со служебным подчёркиванием. Первая редакция
+    читала `score`, всегда получала None — и порог не применялся вовсе. Хуже:
+    замер, которым я его проверяла, печатал `float(item.get("score") or 0)` и
+    показывал ровные нули, то есть подтверждал несуществующий эффект.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
+    assert 'item.get("_score") is not None' in source
+    assert 'float(item["_score"]) > _NOISE_FLOOR' in source
+    # Проверяется ЧТЕНИЕ правильного поля, а не отсутствие строки: упоминание
+    # старого имени осталось в пояснении к правке, и это правильно — из него
+    # понятно, чем ошибка была.

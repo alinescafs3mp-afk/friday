@@ -114,13 +114,15 @@ def _runtime_with(content: str) -> tuple[AgentRuntime, _FakeLLM]:
 
 def test_the_arbiter_returns_a_query_only_for_the_outside_world():
     runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс биткоина сегодня"}')
-    assert asyncio.run(runtime._web_query_by_arbiter("а что там по биткоину?")) == (  # noqa: SLF001
+    # Возвращается пара «вид, запрос»: вид нужен, чтобы отличить «ответ надо
+    # искать» от «ответ модель знает сама».
+    assert asyncio.run(runtime._web_query_by_arbiter("а что там по биткоину?"))[1] == (  # noqa: SLF001
         "курс биткоина сегодня"
     )
 
     for verdict in ("архив", "материал", "другое"):
         runtime, _ = _runtime_with(f'{{"вид": "{verdict}", "запрос": "приказ 214"}}')
-        assert asyncio.run(runtime._web_query_by_arbiter("найди приказ 214")) is None  # noqa: SLF001
+        assert asyncio.run(runtime._web_query_by_arbiter("найди приказ 214"))[1] is None  # noqa: SLF001
 
 
 def test_the_query_is_capped_so_a_mistake_stays_cheap():
@@ -132,7 +134,7 @@ def test_the_query_is_capped_so_a_mistake_stays_cheap():
     """
     long_query = " ".join(f"слово{i}" for i in range(40))
     runtime, _ = _runtime_with(f'{{"вид": "интернет", "запрос": "{long_query}"}}')
-    query = asyncio.run(runtime._web_query_by_arbiter("что это?"))  # noqa: SLF001
+    _, query = asyncio.run(runtime._web_query_by_arbiter("что это?"))  # noqa: SLF001
     assert query is not None
     assert len(query.split()) <= 14
     assert len(query) <= 140
@@ -141,7 +143,7 @@ def test_the_query_is_capped_so_a_mistake_stays_cheap():
 def test_a_broken_verdict_does_not_send_anything_anywhere():
     for content in ("", "не знаю", "{сломанный json", '{"вид": "интернет", "запрос": ""}'):
         runtime, _ = _runtime_with(content)
-        assert asyncio.run(runtime._web_query_by_arbiter("что это?")) is None  # noqa: SLF001
+        assert asyncio.run(runtime._web_query_by_arbiter("что это?"))[1] is None  # noqa: SLF001
 
 
 def test_the_prefetch_actually_asks_the_arbiter():
@@ -310,3 +312,44 @@ def test_a_person_found_in_the_graph_stops_the_search():
     assert not asyncio.run(
         runtime._mentions_someone_from_the_archive("какая погода в Москве?", _Actor())  # noqa: SLF001
     )
+
+
+def test_a_settled_fact_is_answered_from_memory_not_the_web():
+    """Мутация: убрать вид «знание» — тест краснеет.
+
+    Владелец: «кто был вторым президентом США» и «кто был первым президентом
+    России» уходили в интернет, хотя модель это знает. Делить надо не по теме, а
+    по одному признаку: изменился ли ответ с тех пор, как модель училась.
+
+    Замерено после правки, 6/6: устойчивые факты отвечаются без интернета за
+    6.6–13.9 с и верно (Джон Адамс, Ельцин, 1 сентября 1939, 29 дней), а погода
+    и курс по-прежнему идут в сеть за 23–26 с.
+    """
+    runtime, _ = _runtime_with('{"вид": "знание", "запрос": ""}')
+    kind, query = asyncio.run(runtime._web_query_by_arbiter("кто был вторым президентом США?"))  # noqa: SLF001
+    assert kind.startswith("знание")
+    assert query is None, "по устоявшемуся факту поиск не нужен"
+
+
+def test_the_answer_from_memory_says_so_out_loud():
+    """Мутация: убрать пометку — человек не отличит память от источника.
+
+    У ответа из головы нет ссылки, которую можно открыть, и человек должен это
+    видеть — как он видит оговорку о необоснованности ответа по архиву.
+    """
+    import inspect
+
+    source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
+    assert 'kind.startswith("знание")' in source
+    assert "Отвечаю из собственных знаний" in source
+    assert "НЕ уверена" in source, "модели не сказано сомневаться вслух"
+    # Прямая просьба поискать перекрывает: сомневаешься — попроси проверить.
+    assert 'kind.startswith("знание") and not asked_outright' in source
+
+
+def test_a_changing_fact_still_goes_to_the_web():
+    """Контроль: «сейчас», «сегодня», «сколько стоит» — только из сети."""
+    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс доллара сегодня"}')
+    kind, query = asyncio.run(runtime._web_query_by_arbiter("какой сейчас курс доллара?"))  # noqa: SLF001
+    assert "интернет" in kind
+    assert query == "курс доллара сегодня"
