@@ -544,6 +544,7 @@ class FridaySettings:
     yandex_search_api_key: str
     yandex_search_type: str
     local_timezone: str
+    llm_foreground_slots: int
     web_allow_private_networks: bool
     web_max_response_bytes: int
 
@@ -909,6 +910,15 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # означает «часовой пояс машины», что для личного экземпляра и есть
         # часовой пояс владельца.
         local_timezone=env("FRIDAY_TIMEZONE", ""),
+        # Сколько разговоров модель ведёт одновременно.
+        #
+        # ⚠️ Четыре — это ЗАМЕРЕННЫЙ оптимум, а не осторожность. Семь
+        # одновременных вопросов на живом эндпойнте: при 4 слотах всё заняло
+        # 38.5 с, при 7 — 57.1 с. Узкое место не в очереди Friday, а в самой
+        # модели: больше одновременных запросов делят её ресурсы и замедляют
+        # каждый. Настройка оставлена для эндпойнтов помощнее, но поднимать её
+        # без замера — вредить.
+        llm_foreground_slots=_int_env("FRIDAY_LLM_FOREGROUND_SLOTS", 4, minimum=1),
         web_allow_private_networks=_bool_env("FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS", False),
         web_max_response_bytes=_int_env("FRIDAY_WEB_MAX_RESPONSE_BYTES", 5 * 1024 * 1024, minimum=64 * 1024),
         max_upload_bytes=_int_env("FRIDAY_MAX_UPLOAD_BYTES", 50 * 1024 * 1024, minimum=1024),

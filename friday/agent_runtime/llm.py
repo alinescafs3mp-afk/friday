@@ -306,7 +306,7 @@ class LLMRouter:
 
     def __init__(self, settings: FridaySettings) -> None:
         self.settings = settings
-        self._foreground_sem = asyncio.Semaphore(4)
+        self._foreground_sem = asyncio.Semaphore(max(1, int(settings.llm_foreground_slots)))
         self._background_sem = asyncio.Semaphore(1)
         # Помним отказ эндпоинта от инструментов, чтобы не платить за него каждый раз.
         self._tools_refused = False
