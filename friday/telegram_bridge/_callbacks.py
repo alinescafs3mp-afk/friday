@@ -704,6 +704,10 @@ class CallbacksMixin(BridgeShared):
         caution = str(response.get("verification_caution") or "").strip()
         if caution:
             body = f"{body}\n\n{caution}"
+        # Что ушло в поисковик — рядом с ответом, а не в журнале.
+        web_notice = str(response.get("web_query_notice") or "").strip()
+        if web_notice:
+            body = f"{body}\n\n{web_notice}"
         legend = str(response.get("citation_notice") or "").strip()
         if legend:
             body = f"{body}\n\n{legend}"

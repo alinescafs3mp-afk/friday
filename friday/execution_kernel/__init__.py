@@ -1100,8 +1100,13 @@ class ExecutionKernel:
         """What a tool invocation should leave behind besides its name.
 
         `audit_log` is append-only at the database level and not even purge clears it,
-        so it must never hold content — only fingerprints (`sha256` + length), hosts
-        and counts. The same pairing `admin.knowledge.purge` already uses.
+        so it holds fingerprints (`sha256` + length), hosts and counts rather than
+        content. The same pairing `admin.knowledge.purge` already uses.
+
+        Запрос сюда НЕ кладётся сознательно: в него попадает всё, что человек
+        набрал, вплоть до «пароль от роутера …», а журнал не чистится ничем.
+        Видимость «что ушло наружу» обеспечивается иначе — строкой в самом
+        ответе, которую человек читает сразу и может возразить.
 
         `code_run` was the first tool fingerprinted this way: without it the audit
         row said only that code ran, and the body was reachable only through the

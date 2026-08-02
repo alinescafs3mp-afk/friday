@@ -1053,6 +1053,10 @@ class AgentRuntime:
             "grounding_warning": grounding_warning,
             "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
+            # По какому запросу система ходила наружу. Человек читает это вместе
+            # с ответом и может сразу сказать «так искать не надо»; в неудаляемый
+            # журнал запрос класть нельзя — туда попадёт и «пароль от роутера …».
+            "web_query_notice": str(response.get("web_query_notice") or ""),
             "voice": await self._voice_of_the_final_answer(
                 response.get("voice_clip"),
                 content,
@@ -1313,7 +1317,10 @@ class AgentRuntime:
         tools_used: list[str] = []
         tool_knowledge_ids: list[str] = []
         tool_evidence: list[dict[str, str]] = []
-        await self._prefetch_the_web_if_asked(message, actor, tools, messages, tools_used, tool_evidence)
+        web_notice: list[str] = []
+        await self._prefetch_the_web_if_asked(
+            message, actor, tools, messages, tools_used, tool_evidence, web_notice
+        )
         await self._prefetch_the_timeline_if_asked(
             message, actor, tools, messages, tools_used, tool_evidence
         )
@@ -1367,6 +1374,7 @@ class AgentRuntime:
                 return {
                     "content": self._offline_response(context),
                     "tools_used": tools_used,
+                    "web_query_notice": " ".join(web_notice),
                     "tool_evidence": tool_evidence,
                     "llm_failed": True,
                     "voice_clip": voice_clip,
@@ -1406,6 +1414,7 @@ class AgentRuntime:
                     return {
                         "content": clean_answer or "Не удалось обработать запрос.",
                         "tools_used": tools_used,
+                        "web_query_notice": " ".join(web_notice),
                         "knowledge_object_ids": tool_knowledge_ids,
                         "tool_evidence": tool_evidence,
                         "voice_clip": voice_clip,
@@ -1497,6 +1506,7 @@ class AgentRuntime:
                     return {
                         "content": clean,
                         "tools_used": tools_used,
+                        "web_query_notice": " ".join(web_notice),
                         "knowledge_object_ids": tool_knowledge_ids,
                         "tool_evidence": tool_evidence,
                         "voice_clip": voice_clip,
@@ -1521,6 +1531,7 @@ class AgentRuntime:
             return {
                 "content": salvaged,
                 "tools_used": tools_used,
+                "web_query_notice": " ".join(web_notice),
                 "knowledge_object_ids": tool_knowledge_ids,
                 "tool_evidence": tool_evidence,
                 "voice_clip": voice_clip,
@@ -1529,6 +1540,7 @@ class AgentRuntime:
         return {
             "content": _TOOL_PROTOCOL_FAILURE,
             "tools_used": tools_used,
+            "web_query_notice": " ".join(web_notice),
             "knowledge_object_ids": tool_knowledge_ids,
             "tool_evidence": tool_evidence,
             "voice_clip": voice_clip,
@@ -2149,6 +2161,7 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
+        notice: list[str] | None = None,
     ) -> None:
         """Просили посмотреть в интернете — смотрим, не спрашивая модель.
 
@@ -2156,6 +2169,7 @@ class AgentRuntime:
         человек попросил прямо. Там решать нечего, а цена ошибки высокая: в
         замере модель то звала поиск, то отвечала из памяти на тот же вопрос.
         """
+        notice = notice if notice is not None else []
         asked_outright = bool(_ASKS_FOR_THE_WEB.search(message))
         if not asked_outright and not _might_be_a_question(message):
             return
@@ -2202,6 +2216,13 @@ class AgentRuntime:
         if not rendered:
             return
         tools_used.append("web_research")
+        # Что именно ушло в поисковик — человеку, сразу, в самом ответе. В
+        # неудаляемый журнал запрос класть нельзя (туда попадёт и «пароль от
+        # роутера …»), но и хеш никого не спасает: когда детектор намерения
+        # ошибается — а он ошибался дважды за двое суток, утащив наружу
+        # пересланный приказ и фамилию сотрудника, — владелец должен УВИДЕТЬ это
+        # и возразить, а не узнать через месяц. Строка живёт ровно один ответ.
+        notice.append(f"🔎 Искала в интернете по запросу: «{query}»")
         if result.success and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "web_research", "output": str(rendered)})
         # Готовый список ссылок отдельной строкой. URL и так лежат внутри выдачи,

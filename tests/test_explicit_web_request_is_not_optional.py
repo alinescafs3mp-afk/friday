@@ -144,8 +144,11 @@ def test_the_prefetch_is_wired_into_the_loop():
         "предварительный поиск объявлен, но из агентского цикла не вызывается"
     )
     body = loop_source[loop_source.index("_prefetch_the_web_if_asked(") :]
-    assert body.startswith("_prefetch_the_web_if_asked(message"), (
-        "в предварительный поиск уходит не сообщение человека"
+    # Вызов многострочный: сообщение человека — первый аргумент, а не какая-то
+    # переработанная строка.
+    first_argument = body.split("(", 1)[1].lstrip().split(",", 1)[0].strip()
+    assert first_argument == "message", (
+        f"в предварительный поиск уходит не сообщение человека, а {first_argument!r}"
     )
 
 
@@ -327,3 +330,72 @@ async def test_an_ordinary_result_carries_no_encyclopedia_caveat(monkeypatch):
         tool_evidence=[],
     )
     assert messages and "ЭНЦИКЛОПЕДИИ" not in messages[0]["content"]
+
+
+@pytest.mark.anyio
+async def test_the_person_sees_what_went_out_to_the_search_engine(monkeypatch):
+    """Мутация: убрать `web_query_notice` — тест краснеет.
+
+    В неудаляемый журнал запрос класть нельзя: туда попадёт и «пароль от роутера
+    …». Но хеш никого не спасает — когда детектор намерения ошибается (а он
+    ошибался дважды за двое суток, утащив наружу пересланный приказ и фамилию
+    сотрудника), владелец должен УВИДЕТЬ это рядом с ответом и возразить, а не
+    узнать через месяц.
+    """
+    import friday.agent_runtime as runtime_module
+
+    class _Result:
+        success = True
+        attachment = None
+        data = {"results": [{"url": "https://cbr.ru/", "title": "Ставка"}]}
+
+        def to_llm_message(self) -> str:
+            return "Результат web_research: 14%"
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            return _Result()
+
+    class _NoLLM:
+        enabled = False
+
+    runtime = object.__new__(runtime_module.AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.llm = _NoLLM()
+    notice: list[str] = []
+    await runtime_module.AgentRuntime._prefetch_the_web_if_asked(  # noqa: SLF001
+        runtime,
+        "найди в интернете ключевую ставку ЦБ",
+        actor=None,
+        tools=[{"function": {"name": "web_research"}}],
+        messages=[],
+        tools_used=[],
+        tool_evidence=[],
+        notice=notice,
+    )
+    assert notice, "человеку не сказали, что именно ушло наружу"
+    assert "ключевую ставку ЦБ" in notice[0]
+    assert notice[0].startswith("🔎")
+
+
+def test_the_notice_reaches_the_answer_and_the_bridge():
+    """Работающее уведомление, которое никто не показывает, — не уведомление."""
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+    from friday.telegram_bridge._callbacks import CallbacksMixin
+
+    chat_source = inspect.getsource(AgentRuntime.chat)
+    # Именно в ВОЗВРАЩАЕМОМ словаре, а не где-то в теле. Первая редакция этого
+    # теста проверяла просто наличие строки — и осталась зелёной, когда ключ по
+    # ошибке попал в метаданные сохраняемого сообщения: уведомление писалось в
+    # базу и не доходило до человека ни одним из путей.
+    last_return = chat_source.rindex("return {")
+    assert '"web_query_notice": str(response.get("web_query_notice") or "")' in chat_source[last_return:], (
+        "уведомление не попало в ответ, который получает человек"
+    )
+
+    bridge_source = inspect.getsource(CallbacksMixin._format_response_message)  # noqa: SLF001
+    assert 'response.get("web_query_notice")' in bridge_source, (
+        "мост не показывает человеку, что ушло в поисковик"
+    )
