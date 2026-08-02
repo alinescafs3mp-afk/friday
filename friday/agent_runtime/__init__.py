@@ -1686,6 +1686,10 @@ class AgentRuntime:
         # инструменты в этом ходе могли отработать, и основания есть. Замерено:
         # чаще всего срывается сам протокол вызова («bare tool-call markup»), а
         # данные при этом собраны.
+        if _answer_is_a_question(answer):
+            # Модель переспросила — значит просьба расплывчата, и человеку нужен
+            # ответ на его уточнение, а не документ из этого уточнения.
+            return None
         failed = bool(_ANSWER_IS_A_FAILURE.search(answer))
         blocks = [] if failed else _blocks_from_text(answer)
         grounds = "\n\n".join(str(item.get("output") or "")[:4000] for item in (evidence or []))
@@ -1725,7 +1729,13 @@ class AgentRuntime:
                 )
                 text = str(filled.get("content") or "")
                 if text.strip():
-                    blocks = _blocks_from_text(_strip_tool_call_markup(text) or text)
+                    clean = _strip_tool_call_markup(text) or text
+                    blocks = _blocks_from_text(clean)
+                    # Заголовок — из ТОГО ЖЕ текста, из которого собраны блоки.
+                    # Иначе документ, собранный вторым заходом, получал имя по
+                    # реплике из чата: «Собираю отчёт по документам которые
+                    # появились в архиве в июле 2026 года.docx».
+                    answer = clean
             except Exception:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
                 LOGGER.warning("Could not obtain document content", exc_info=True)
         if not blocks:
@@ -2725,9 +2735,28 @@ _ANSWER_IS_A_FAILURE = re.compile(
     r"не удалось (?:обработать|сформировать|безопасно)|произошла ошибка", re.IGNORECASE
 )
 
+def _answer_is_a_question(answer: str) -> bool:
+    """Ответ — уточняющий вопрос к человеку, а не содержимое документа.
+
+    Замерено на живом архиве: на «сделай сводку в excel по рапортам» модель
+    справедливо переспросила, каких именно, — и рантайм всё равно собрал файл с
+    именем «Давай уточню что именно нужно собрать в Excel чтобы не выдумывать».
+    Уточнение — законный ответ на расплывчатую просьбу, и подменять его пустым
+    документом хуже, чем не собрать документ вовсе.
+    """
+    lines = [line.strip() for line in str(answer or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    if not lines[-1].endswith("?"):
+        return False
+    # Длинный ответ, заканчивающийся вопросом, — это ответ с вопросом в конце.
+    return len(" ".join(lines)) <= 400
+
+
 #: Служебные обещания, которые модель пишет перед работой: в файл им не место.
 _IS_A_PROMISE = re.compile(
-    r"^(?:сейчас|сча[сз]|готово|вот|сделаю|соберу|оформлю|подготовлю|создам|формирую|"
+    r"^(?:сейчас|сча[сз]|готово|вот|сделаю|соберу|собираю|оформлю|оформляю|подготовлю|"
+    r"подготавливаю|составлю|составляю|создам|создаю|формирую|сформирую|готовлю|делаю|"
     # Дежурные зачины ответа: заголовком документа они быть не должны —
     # «Нашёл в личной базе.docx» ничего не говорит о содержимом.
     r"нашёл|нашел|нашлось|найдено|по\s+данным\s+из\s+базы|в\s+личной\s+базе)\b",
@@ -2824,8 +2853,15 @@ def _title_from_text(text: str) -> str:
     «Сейчас соберу сводку и оформлю её в PDF» заголовком быть не должно: это не
     название документа, а реплика.
     """
-    for line in str(text or "").splitlines():
-        stripped = _clean_markup(line).strip(" -•*#\t")
+    for raw_line in str(text or "").splitlines():
+        line = _clean_markup(raw_line)
+        # Пункт списка заголовком документа быть не может. Замерено на живом
+        # архиве: отчёт по июльским документам получил имя «1 Рапорт на премии
+        # (файл Рапорт на премии май 2024 _ _ копия (2) docx).docx» — первая
+        # строка содержимого оказалась первым пунктом перечня.
+        if re.match(r"^\s*(?:[-•*]|\d+[.)])\s+", line):
+            continue
+        stripped = line.strip(" -•*#\t")
         if len(stripped) < 4 or _IS_A_PROMISE.match(stripped):
             continue
         return stripped[:80]

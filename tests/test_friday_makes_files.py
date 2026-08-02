@@ -275,3 +275,88 @@ def test_a_sent_document_does_not_trigger_building_another_one():
     assert "not synthetic_document_notice" in guard, (
         "сгенерированное уведомление о файле судится как просьба человека"
     )
+
+
+def test_a_list_item_never_becomes_the_document_title():
+    """Мутация: убрать пропуск пунктов списка — тест краснеет.
+
+    Замерено на живом архиве: отчёт по июльским документам получил имя
+    «1 Рапорт на премии (файл Рапорт на премии май 2024 _ _ копия (2) docx).docx»
+    — первая строка содержимого оказалась первым пунктом перечня. Внутри был
+    настоящий отчёт, а имя выглядело как сбой.
+    """
+    from friday.agent_runtime import _title_from_text
+
+    content = (
+        "1. Рапорт на премии (файл: Рапорт на премии май 2024.docx)\n"
+        "Суть: ходатайство о выплате премии личному составу.\n"
+    )
+    assert _title_from_text(content) == "Суть: ходатайство о выплате премии личному составу."
+
+    # Маркеры тоже не заголовок.
+    assert _title_from_text("- первый пункт\nОтчёт по документам за июль") == (
+        "Отчёт по документам за июль"
+    )
+
+
+def test_a_promise_in_the_present_tense_is_still_a_promise():
+    """«Собираю отчёт…» — реплика в чате, а не название документа.
+
+    В списке было «соберу», но не «собираю», и файл получил имя «Собираю отчёт по
+    документам которые появились в архиве в июле 2026 года.docx».
+    """
+    from friday.agent_runtime import _title_from_text
+
+    answer = "Собираю отчёт по документам за июль.\nОтчёт по июльским документам"
+    assert _title_from_text(answer) == "Отчёт по июльским документам"
+    for verb in ("Составляю", "Оформляю", "Готовлю", "Создаю", "Подготавливаю", "Делаю"):
+        assert _title_from_text(f"{verb} документ сейчас.\nСводка за июль") == "Сводка за июль"
+
+
+def test_the_title_comes_from_the_text_the_blocks_came_from():
+    """Мутация: убрать `answer = clean` — тест краснеет.
+
+    Блоки собирались вторым заходом, а заголовок брался из первой реплики: два
+    разных текста, и в имя файла попадал не тот.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._file_for_a_request_that_wanted_one)  # noqa: SLF001
+    marker = source.index("blocks = _blocks_from_text(clean)")
+    assert "answer = clean" in source[marker : marker + 500], (
+        "заголовок берётся не из того текста, из которого собраны блоки"
+    )
+
+
+def test_a_clarifying_question_is_not_packed_into_a_document():
+    """Мутация: убрать проверку `_answer_is_a_question` — тест краснеет.
+
+    Замерено: на «сделай сводку в excel по рапортам» модель справедливо
+    переспросила, каких именно, — и рантайм собрал файл с именем «Давай уточню
+    что именно нужно собрать в Excel чтобы не выдумывать.xlsx».
+    """
+    from friday.agent_runtime import _answer_is_a_question
+
+    assert _answer_is_a_question("Давай уточню, что именно собрать в Excel?") is True
+    assert _answer_is_a_question("Каких рапортов — на премии или на увольнение?") is True
+    # Ответ по существу, заканчивающийся вопросом, документом быть может.
+    long_answer = (
+        "Отчёт по документам за июль.\n"
+        + "В архиве 42 рапорта, 17 приказов и 8 актов. " * 12
+        + "\nНужно ли добавить сводку по подписантам?"
+    )
+    assert _answer_is_a_question(long_answer) is False
+    assert _answer_is_a_question("Сводка за июль: 42 рапорта, 17 приказов.") is False
+    assert _answer_is_a_question("") is False
+
+
+def test_the_question_guard_is_wired_before_the_file_is_built():
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._file_for_a_request_that_wanted_one)  # noqa: SLF001
+    assert "_answer_is_a_question(answer)" in source
+    assert source.index("_answer_is_a_question(answer)") < source.index("_blocks_from_text(answer)")
