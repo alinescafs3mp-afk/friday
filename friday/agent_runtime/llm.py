@@ -464,6 +464,11 @@ class LLMRouter:
         # The deadline stops a NEW attempt from starting, rather than interrupting one
         # in flight — a request that is answering must not be killed mid-stream.
         deadline = time.monotonic() + self.total_budget_sec
+        # Начало отсчёта для строки замера ниже. Без неё вопрос «почему ответ
+        # идёт полторы минуты» не имеет ответа: один ход человека делает
+        # несколько вызовов модели, и до этого ни один из них не был измерен —
+        # чинить приходилось бы вслепую.
+        call_started = time.monotonic()
         for attempt in range(MAX_RETRIES):
             if attempt and time.monotonic() >= deadline:
                 LOGGER.warning("LLM budget of %.0fs is spent; not retrying", self.total_budget_sec)
@@ -528,6 +533,15 @@ class LLMRouter:
                     self._thinking_seen = True
                 if detect_repeated_token_degeneration(content):
                     raise RuntimeError("LLM response rejected: repeated-token degeneration detected")
+                usage = data.get("usage") or {}
+                LOGGER.info(
+                    "LLM call: %.1fs, промпт %s ток., ответ %s ток., инструментов %d, повод %s",
+                    time.monotonic() - call_started,
+                    usage.get("prompt_tokens", "?"),
+                    usage.get("completion_tokens", "?"),
+                    len(payload.get("tools") or []),
+                    finish_reason,
+                )
                 return {
                     "content": content,
                     "tool_calls": tool_calls,
@@ -545,6 +559,23 @@ class LLMRouter:
                 delay = min(max(0.0, delay), RETRY_MAX_DELAY)
                 LOGGER.warning("LLM HTTP %d, retrying in %.1fs (attempt %d)", status, delay, attempt + 1)
                 await asyncio.sleep(delay)
+            except httpx.ReadTimeout as exc:
+                # Сервер ПРИНЯЛ запрос и молчал весь таймаут — повтор не поможет.
+                #
+                # Замерено на живом отказе 2026-08-02: сервер модели отвечал на
+                # служебные запросы за 30 мс, а генерацию не начинал вовсе.
+                # Пятница отработала два полных таймаута по 240 с подряд, и
+                # человек ждал ответа 8 минут 40 секунд вместо четырёх — второй
+                # заход был обречён ровно так же, как первый.
+                #
+                # Отказ соединения — другое дело: он мгновенный, и повтор через
+                # две секунды нередко попадает в поднявшийся сервер. Поэтому
+                # разделены именно эти два случая, а не «сеть» целиком.
+                last_error = exc
+                LOGGER.warning(
+                    "LLM read timeout after %.0fs; not retrying a silent endpoint", self.timeout_sec
+                )
+                raise
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 last_error = exc
                 if attempt >= MAX_RETRIES - 1:

@@ -27,6 +27,7 @@ from friday.organs import (
     OrganWorker,
     ServiceContext,
     in_quiet_hours,
+    is_service_recipient,
     local_now,
     may_push_to,
     resolve_chat_id,
@@ -77,23 +78,14 @@ def _format_alert(action: dict) -> str:
 
 
 def _is_service_recipient(settings: Any, chat_id: str) -> bool:
-    """Кому уходят СЛУЖЕБНЫЕ сообщения — диагностика хоста и состояние системы.
+    """Правило получателя служебных сообщений — общее на все органы.
 
-    Заказ владельца 2026-08-02: «все служебные сообщения уходят только мне в
-    телеграм, другим участникам их слать не надо».
-
-    До этого адресатов выбирало право `admin.diagnostics`. Границей оно быть
-    перестало: владелец же попросил заводить каждого написавшего с полным
-    набором прав, и рассылка молча расширилась бы на всех — вместе с состоянием
-    воркеров, резервных копий и отчётом о гигиене секретов ЕГО машины.
-
-    Пустой список owner-чатов оставляет прежнее правило: молчать совсем хуже,
-    чем сказать тому, кто и так всё видит через админку.
+    Жило здесь, пока служебным считалась одна диагностика хоста. Тотальный аудит
+    показал, что недельная сводка и хроника дня — такие же служебные сообщения, а
+    в общем архиве ещё и пересказывают чужой материал; правило переехало в
+    `friday.organs`, к остальным двум органам.
     """
-    owners = [str(item) for item in (getattr(settings, "telegram_owner_chat_ids", None) or [])]
-    if not owners:
-        return True
-    return str(chat_id) in owners
+    return is_service_recipient(settings, chat_id)
 
 
 def _may_see_diagnostics(ctx: ServiceContext, user_id: str) -> bool:

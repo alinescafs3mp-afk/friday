@@ -27,7 +27,9 @@ from friday.organs import (
     Organ,
     OrganWorker,
     ServiceContext,
+    archive_tenant,
     in_quiet_hours,
+    is_service_recipient,
     local_now,
     may_push_to,
     resolve_chat_id,
@@ -175,7 +177,12 @@ async def reflection_digest(ctx: ServiceContext) -> None:
             continue
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
-        digest = build_reflection(ctx.storage, user_id, settings)
+        # Недельная сводка — служебное сообщение, а в общем архиве ещё и пересказ
+        # ЧУЖОГО материала: она перечисляет метки, конфликты и свежие записи всех
+        # участников сразу. Уходит только владельцу.
+        if not is_service_recipient(settings, chat_id):
+            continue
+        digest = build_reflection(ctx.storage, archive_tenant(settings, user_id), settings)
         # An almost-empty base has nothing to reflect on; do not ping it.
         if digest["knowledge_total"] < settings.reflection_min_knowledge:
             continue

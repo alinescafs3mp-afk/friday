@@ -17,6 +17,7 @@ from friday.organs import (
     Organ,
     OrganWorker,
     ServiceContext,
+    archive_tenant,
     in_quiet_hours,
     local_now,
     may_push_to,
@@ -35,6 +36,23 @@ def _format_reminder(event: dict, today) -> str:
     elif occurred_at == (today + timedelta(days=1)).isoformat():
         when = "завтра"
     return f"🔔 Напоминание: «{name}» — {when}."
+
+
+def _belongs_to(event: dict, *, person: str, tenant: str) -> bool:
+    """Кому напоминать об этом событии.
+
+    Просьба человека («напомни завтра забрать пропуск») несёт отметку автора в
+    источнике временной привязки — она принадлежит ему одному. Событие из
+    документа отметки не имеет: это общий материал, и напоминает о нём хозяин
+    архива, как и до общего архива.
+
+    Замерено на живой настройке: без этого различения личная просьба уходила в
+    чужой чат, а автор не получал ничего.
+    """
+    source = str(event.get("source") or "")
+    if source.startswith("reminder:"):
+        return source[len("reminder:") :] == person
+    return person == tenant
 
 
 async def scan_reminders(ctx: ServiceContext) -> None:
@@ -65,7 +83,10 @@ async def scan_reminders(ctx: ServiceContext) -> None:
         # Deny-by-default, re-checked here (bridge re-checks again at send time).
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
-        for event in ctx.storage.list_events_in_range(user_id, start=start, end=end):
+        tenant = archive_tenant(settings, user_id)
+        for event in ctx.storage.list_events_in_range(tenant, start=start, end=end):
+            if not _belongs_to(event, person=user_id, tenant=tenant):
+                continue
             dedup_key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"
             if ctx.storage.enqueue_notification(
                 user_id,

@@ -729,6 +729,21 @@ class WorkersManager:
             return
         await self.executive.maybe_propose_from_backlog(user_id)
 
+    async def _tenants(self) -> list[str]:
+        """Арендаторы, чей МАТЕРИАЛ обрабатывают фоновые работники.
+
+        В общем архиве (`FRIDAY_SHARED_ARCHIVE`) материал у всех один, и список
+        людей арендаторами быть перестал. Перебор по людям означал N−1 холостых
+        проходов дедупа, разрешения сущностей, качества и жизненного цикла — и,
+        что хуже, `_knowledge_dedup_all` делил на это N бюджет времени: работа
+        есть у одного арендатора, а секунд ему доставалась 1/N.
+        """
+        from friday.permissions import LEGACY_OWNER_USER_ID
+
+        if getattr(self.settings, "shared_archive", False):
+            return [LEGACY_OWNER_USER_ID]
+        return list(await run_blocking(self.storage.list_user_ids, active_only=True))
+
     async def _for_each_user(self, operation: Callable[[str], Awaitable[Any]]) -> None:
         failures = 0
         # Every storage call a worker makes from coroutine context goes through
@@ -738,7 +753,7 @@ class WorkersManager:
         # measured at 3.00 s while one batch of embedding vectors was committing.
         # The rule is worth more than each individual saving: "no storage call on
         # the loop" is checkable, "this particular one is cheap" is not.
-        for user_id in await run_blocking(self.storage.list_user_ids, active_only=True):
+        for user_id in await self._tenants():
             try:
                 await operation(user_id)
             except asyncio.CancelledError:
@@ -794,7 +809,7 @@ class WorkersManager:
         # tick past the supervisor's timeout — asyncio.to_thread is not interruptible,
         # and an over-long scan would show up as a recurring `timeout` in worker health
         # while quietly still doing the work.
-        tenants = max(1, len(await run_blocking(self.storage.list_user_ids, active_only=True)))
+        tenants = max(1, len(await self._tenants()))
         share = max(1.0, float(self.settings.dedup_scan_max_seconds) / tenants)
         await self._for_each_user(functools.partial(self._knowledge_dedup, max_seconds=share))
 

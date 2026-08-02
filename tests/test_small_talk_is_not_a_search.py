@@ -86,10 +86,15 @@ def test_small_talk_skips_retrieval_entirely():
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
-    marker = source.index("_is_small_talk(message)")
-    tail = source[marker : marker + 2600]
-    assert "context.knowledge_hits = []" in tail, "поиск всё ещё выполняется на болтовне"
-    assert "elif searcher:" in tail, "запасная ветка поиска осталась достижимой"
+    # Проверяется СВЯЗЬ признака с обнулением, а не расстояние между строками:
+    # первая редакция брала фиксированный срез в 2600 знаков после признака и
+    # покраснела, когда между ними появился (совершенно законный) блок запуска
+    # арбитра. Тест должен ловить возвращение поиска на болтовне, а не любую
+    # правку по соседству.
+    guard = source.index("if context.small_talk or looking_outward:")
+    branch = source[guard : source.index("elif searcher:", guard)]
+    assert "context.knowledge_hits = []" in branch, "поиск всё ещё выполняется на болтовне"
+    assert source.index("_is_small_talk(message)") < guard, "признак болтовни считается позже проверки"
 
 
 def test_the_model_is_told_this_is_a_conversation():

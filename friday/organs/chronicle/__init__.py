@@ -26,7 +26,9 @@ from friday.organs import (
     Organ,
     OrganWorker,
     ServiceContext,
+    archive_tenant,
     in_quiet_hours,
+    is_service_recipient,
     local_now,
     may_push_to,
     resolve_chat_id,
@@ -130,7 +132,11 @@ async def chronicle_on_this_day(ctx: ServiceContext) -> None:
             continue
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
-        memories = build_on_this_day(ctx.storage, user_id, now)
+        # «В этот день» пересказывает записи архива — в общем архиве чужие.
+        # Служебная рассылка, адресат один: владелец.
+        if not is_service_recipient(settings, chat_id):
+            continue
+        memories = build_on_this_day(ctx.storage, archive_tenant(settings, user_id), now)
         if not memories:  # nothing from a past year today — say nothing.
             continue
         if ctx.storage.enqueue_notification(

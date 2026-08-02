@@ -39,7 +39,10 @@ def _context(**overrides) -> AgentContext:
 
 def test_the_stub_carries_no_citation_markers():
     text = AgentRuntime._offline_response(_context())  # noqa: SLF001
-    assert "LLM сейчас недоступна" in text
+    # «Модель», а не «LLM»: это текст для человека в Telegram, и владелец —
+    # руководитель, а не разработчик. Смысл проверки прежний — заглушка обязана
+    # назвать себя заглушкой.
+    assert "Модель сейчас недоступна" in text
     assert not re.search(r"\[K\d+\]", text), f"the stub still speaks the citation vocabulary: {text}"
 
 

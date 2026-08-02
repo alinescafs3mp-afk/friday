@@ -969,13 +969,18 @@ class ExecutionKernel:
         from friday.organs import may_push_to, resolve_chat_id
 
         try:
-            chat_id = resolve_chat_id(storage, actor.user_id)
+            # Чат — у ЧЕЛОВЕКА, а не у арендатора. В общем архиве
+            # (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и заявка
+            # уходила бы в чат владельца архива: тот, кто попросил, о своей же
+            # заявке не узнавал, а посторонний получал описание действия с
+            # чужими данными.
+            chat_id = resolve_chat_id(storage, actor.own_id)
             if not chat_id or not self.settings:
                 return
-            if not may_push_to(self.settings, storage, actor.user_id, chat_id):
+            if not may_push_to(self.settings, storage, actor.own_id, chat_id):
                 return
             storage.enqueue_notification(
-                actor.user_id,
+                actor.own_id,
                 chat_id,
                 f"Нужно ваше решение: {approval['summary']}\n\nОткрыть: /approvals",
                 kind="approval",
@@ -1270,7 +1275,8 @@ class ExecutionKernel:
             actor.user_id,
             goal,
             origin="agent",
-            created_by=f"agent:{actor.user_id}",
+            # Автор миссии — человек: в общем архиве `user_id` у всех один.
+            created_by=f"agent:{actor.own_id}",
         )
         return {
             "mission_id": mission.get("id"),
@@ -1364,7 +1370,15 @@ class ExecutionKernel:
                     "hint": "Напоминание можно поставить только на будущее.",
                 }
         entity = knowledge_graph.create_entity(actor.user_id, text[:120], EntityType.EVENT)
-        knowledge_graph.set_event_time(actor.user_id, entity["id"], occurred_at, source="reminder")
+        # Автор напоминания — в источнике временной привязки. В общем архиве
+        # (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и без этой
+        # отметки орган рассылки не мог узнать, чья это просьба: замерено — она
+        # уходила ХОЗЯИНУ архива, а тот, кто просил, не получал ничего.
+        # События из документов остаются без отметки: у них автора нет, и
+        # напоминает о них по-прежнему хозяин архива.
+        knowledge_graph.set_event_time(
+            actor.user_id, entity["id"], occurred_at, source=f"reminder:{actor.own_id}"
+        )
         # Час не теряется: он остаётся в названии, потому что напоминания
         # рассылаются по календарным дням — точное время человек прочитает в
         # тексте, а не пропустит из-за того, что система его выбросила.
@@ -1578,7 +1592,13 @@ class ExecutionKernel:
 
         ``memory_search`` only sees confirmed knowledge_objects. People ask
         «что я спрашивал про X» and expect the conversation, so this tool
-        hits ``messages`` (FTS) under the same tenant as every other self-path.
+        hits ``messages`` (FTS).
+
+        Ищется по `own_id`, а не по арендатору. Общими владелец сделал документы
+        и записи — не разговоры. В общем архиве (`FRIDAY_SHARED_ARCHIVE`)
+        `actor.user_id` у всех один, и поиск по нему означал бы, что любой
+        участник читает переписку всех остальных словом из неё. Найдено тотальным
+        аудитом; та же ошибка уже ловилась в привязке каналов и в напоминаниях.
         """
         storage = self.storage
         if storage is None:
@@ -1586,7 +1606,7 @@ class ExecutionKernel:
         limit = max(1, min(int(limit), 50))
         conv = " ".join(str(conversation_id or "").split()).strip() or None
         rows = storage.search_messages(
-            actor.user_id,
+            actor.own_id,
             query,
             limit=limit,
             conversation_id=conv,
@@ -1626,7 +1646,11 @@ class ExecutionKernel:
             candidate_type="memory",
             metadata={
                 "tool": "memory_save",
-                "requested_by": actor.user_id,
+                # Кто попросил сохранить — ЧЕЛОВЕК. В общем архиве арендатор у
+                # всех один, и запись «кто это добавил» стала бы одинаковой у
+                # всех участников: владелец разбирает входящие и должен видеть
+                # автора.
+                "requested_by": actor.own_id,
                 "review_boundary": "inbox",
             },
             suggestion_overrides={
@@ -2048,7 +2072,7 @@ class ExecutionKernel:
                 actor.user_id,
                 conflict_id,
                 "dismissed",
-                reviewed_by=actor.user_id,
+                reviewed_by=actor.own_id,
                 resolution_note="telegram/agent: dismissed",
             )
             return {"status": "dismissed", "conflict_id": conflict_id, "item": result}
@@ -2058,7 +2082,7 @@ class ExecutionKernel:
             actor.user_id,
             conflict_id,
             winner_id,
-            reviewed_by=actor.user_id,
+            reviewed_by=actor.own_id,
             resolution_note=f"telegram/agent: {choice}",
         )
         return {"status": "resolved", "conflict_id": conflict_id, "winner_id": winner_id, "item": result}
@@ -2081,7 +2105,7 @@ class ExecutionKernel:
                 kg.resolver.reject_resolution,
                 candidate_id,
                 actor.user_id,
-                resolved_by=actor.user_id,
+                resolved_by=actor.own_id,
             )
             return {"status": "rejected", "candidate_id": candidate_id}
         merged = await run_blocking(
@@ -2089,7 +2113,7 @@ class ExecutionKernel:
             candidate_id,
             actor.user_id,
             target_entity_id=target_entity_id,
-            resolved_by=actor.user_id,
+            resolved_by=actor.own_id,
         )
         return {"status": "merged", "candidate_id": candidate_id, "result": merged}
 
@@ -2105,7 +2129,7 @@ class ExecutionKernel:
             kg.resolver.unmerge,
             actor.user_id,
             merge_id,
-            undone_by=actor.user_id,
+            undone_by=actor.own_id,
         )
         return {"status": "undone", "merge_id": merge_id, "result": result}
 
