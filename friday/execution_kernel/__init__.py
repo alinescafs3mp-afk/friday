@@ -6,6 +6,7 @@ import asyncio
 import base64
 import calendar
 import hashlib
+import io
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
+import zipfile
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -55,6 +57,22 @@ _WEB_CAPTURE_MIN_CHARS = 200
 #: Потолок собранного файла. Telegram принимает и больше, но отчёт на десятки
 #: мегабайт — это не отчёт, а выгрузка, и её место не во вложении к реплике.
 _MAX_GENERATED_FILE_BYTES = 12 * 1024 * 1024
+
+#: Потолок ЗАПАКОВАННОГО архива. Отдельный от отчётного: архив по определению
+#: везёт чужие файлы как есть, и двенадцати мегабайт на день загрузок мало.
+#:
+#: Telegram-бот принимает 50 МБ, но вложение едет к мосту внутри JSON в base64
+#: (+33%), поэтому потолок ставится по каналу, а не по Telegram: 20 МБ на диске
+#: — это 27 МБ строки в одном ответе.
+#:
+#: Замерено на живом архиве: 28 июля пришло 1605 файлов на 710 МБ. Потолок здесь
+#: не формальность — он сработает на первом же массовом импорте, и потому обязан
+#: сообщать о себе вслух.
+_MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
+
+#: Сколько файлов кладётся в один архив. Не ради размера — ради времени сборки:
+#: полторы тысячи файлов одного дня человек в чате не ждёт.
+_MAX_ARCHIVE_FILES = 300
 
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
@@ -957,6 +975,7 @@ class ExecutionKernel:
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
             "make_file": self._make_file,
+            "collect_files": self._collect_files,
             "what_happened": self._what_happened,
             "upcoming": self._upcoming,
             "remind": self._remind,
@@ -1020,10 +1039,14 @@ class ExecutionKernel:
             "user_knowledge_search",
             "inbox_list",
             "make_file",
+            "collect_files",
             "speak",
             "remind",
         },
         "материал": {"memory_save", "entity_create", "entity_link", "inbox_list", "make_file"},
+        # Просьба о файле — это и «сочини документ» (make_file), и «собери
+        # присланное» (collect_files). Какой из двух, решает модель по формулировке.
+        "файл": {"make_file", "collect_files", "memory_search", "what_happened", "speak"},
     }
 
     def get_tool_definitions(
@@ -2247,6 +2270,157 @@ class ExecutionKernel:
             },
         }
 
+    def _days_meant(self, days: list[str]) -> tuple[list[str], list[str]]:
+        """Что человек назвал числами — в полные даты. Возврат: (даты, непонятое).
+
+        Владелец просит «за 10, 13 и 25 число», а не «с 2026-08-10 по
+        2026-08-25»: между этими числами лежат две недели чужих файлов. Поэтому
+        дни идут списком и достраиваются поштучно.
+
+        Голое число — ПОСЛЕДНЕЕ такое число, уже наступившее. «Собери за 25-е»,
+        сказанное 3 августа, означает 25 июля: 25 августа ещё не было, и пустой
+        архив был бы формально правильным и бесполезным ответом.
+
+        Непонятое возвращается отдельно, а не отбрасывается: человек назвал
+        что-то, чего он в архиве не увидит, и должен об этом узнать.
+        """
+        today = datetime.now(self._zone()).date()
+        out: list[str] = []
+        unclear: list[str] = []
+        for raw in days:
+            token = str(raw or "").strip()
+            if not token:
+                continue
+            try:
+                out.append(date.fromisoformat(token).isoformat())
+                continue
+            except ValueError:
+                pass
+            digits = token.strip(" -.,;«»\"'()числаго")
+            if digits.isdigit() and 1 <= int(digits) <= 31:
+                number = int(digits)
+                year, month = today.year, today.month
+                if number > today.day:
+                    # Этого числа в текущем месяце ещё не было — значит речь о
+                    # прошлом месяце. Декабрь предыдущего года считается тем же
+                    # правилом, а не отдельной веткой.
+                    month -= 1
+                    if month == 0:
+                        month, year = 12, year - 1
+                try:
+                    out.append(date(year, month, number).isoformat())
+                except ValueError:
+                    # 31-е в тридцатидневном месяце. Такого дня не было, и
+                    # придумывать ему замену — врать о том, что человек просил.
+                    unclear.append(token)
+                continue
+            unclear.append(token)
+        # Порядок сохранён, повторы убраны: «10, 13 и снова 10» не должно
+        # положить один и тот же день дважды.
+        seen: set[str] = set()
+        unique: list[str] = []
+        for day in out:
+            if day not in seen:
+                seen.add(day)
+                unique.append(day)
+        return unique, unclear
+
+    async def _collect_files(
+        self,
+        *,
+        actor: ActorContext,
+        days: list[str] | None = None,
+        name: str = "",
+    ) -> dict[str, Any]:
+        """Собрать пришедшие файлы в один архив и отдать человеку.
+
+        Владелец 2026-08-03: «Пятница же не умеет архивы собирать? Надо, чтобы
+        умела: собрать документы, пришедшие за 10, 13 и 25 число».
+
+        Кладутся ИСХОДНЫЕ файлы, а не пересказ: просили документы. `make_file`
+        рядом решает другую задачу — сочинить новый документ по основаниям.
+
+        Что не поместилось, перечисляется поимённо. Молчаливый обрез за сутки
+        2026-08-01 нашёлся четырежды в разных подсистемах, и здесь он опаснее
+        обычного: человек унесёт архив с собой, считая его полным.
+        """
+        storage, _, _, _ = self._require_services()
+        settings = self.settings
+        if settings is None:
+            return {"collected": False, "reason": "хранилище файлов не настроено"}
+        wanted, unclear = self._days_meant(list(days or []))
+        if not wanted:
+            return {
+                "collected": False,
+                "reason": "не понял, за какие дни собирать",
+                "unclear_days": unclear,
+            }
+        offset = int(datetime.now(self._zone()).utcoffset().total_seconds() // 60)  # type: ignore[union-attr]
+        rows = await run_blocking(
+            storage.list_files_received_on,
+            actor.user_id,
+            days=wanted,
+            utc_offset_minutes=offset,
+            limit=_MAX_ARCHIVE_FILES + 1,
+        )
+        # Счёт отдельным запросом: длина страницы — не факт о корпусе.
+        total = await run_blocking(
+            storage.count_files_received_on,
+            actor.user_id,
+            days=wanted,
+            utc_offset_minutes=offset,
+        )
+        if not rows:
+            return {
+                "collected": False,
+                "reason": "за эти дни файлов не приходило",
+                "days": wanted,
+                "unclear_days": unclear,
+                "found": 0,
+            }
+        # Выборка берётся на один больше потолка — чтобы отличить «ровно потолок»
+        # от «больше потолка», — а пакуется ровно потолок. Без среза в архив
+        # уезжал 301-й файл, и «вошли первые 300» было бы неправдой.
+        page = rows[:_MAX_ARCHIVE_FILES]
+        packed, skipped, size = await run_blocking(
+            _pack_archive, Path(settings.files_dir), page, name or "archive"
+        )
+        if not packed:
+            return {
+                "collected": False,
+                "reason": "не удалось собрать архив",
+                "days": wanted,
+                "found": total,
+            }
+        filename = _safe_filename(name or f"Документы за {', '.join(wanted)}", "zip")
+        result: dict[str, Any] = {
+            "collected": True,
+            "days": wanted,
+            "files_in_archive": len(page) - len(skipped),
+            "found_total": total,
+            "bytes": size,
+            "filename": filename,
+            "_attachment": {
+                "kind": "document",
+                "filename": filename,
+                "mime_type": "application/zip",
+                "content_base64": base64.b64encode(packed).decode("ascii"),
+            },
+        }
+        if unclear:
+            result["unclear_days"] = unclear
+        if skipped:
+            # Поимённо, а не числом: «пропущено 12» человек прочитает как мелочь,
+            # а среди этих двенадцати может лежать именно тот документ, за
+            # которым он и пришёл.
+            result["left_out"] = skipped[:20]
+            result["left_out_count"] = len(skipped)
+        if total > len(page):
+            result["not_all"] = (
+                f"за эти дни файлов {total}, в архив вошли первые {len(page) - len(skipped)}"
+            )
+        return result
+
     async def _resolve_duplicates(self, *, actor: ActorContext) -> dict[str, Any]:
         _, kg, _, _ = self._require_services()
         # Off the event loop: the scan is quadratic in entity count and this is a
@@ -2982,6 +3156,31 @@ class ExecutionKernel:
             risk="observe",
         )
         spec(
+            "collect_files",
+            "Собрать ПРИШЕДШИЕ файлы в один архив (zip) и отправить человеку. Используй, "
+            "когда просят собрать, выгрузить или прислать документы за какие-то дни: "
+            "«собери документы за 10, 13 и 25 число», «скинь всё, что приходило вчера "
+            "архивом», «выгрузи файлы за 29 июля». Кладутся ИСХОДНЫЕ файлы как есть. "
+            "Не путай с make_file: тот сочиняет новый документ, этот пакует уже "
+            "имеющиеся.",
+            "knowledge.read",
+            {
+                "days": {
+                    "type": "array",
+                    "description": (
+                        "Дни, за которые собирать. Каждый — либо полная дата «2026-07-29», "
+                        "либо число месяца «25» (означает последнее такое число, которое "
+                        "уже наступило). Перечисляй ровно те дни, что назвал человек: «за "
+                        "10, 13 и 25» — это три дня, а не отрезок между ними."
+                    ),
+                    "items": {"type": "string"},
+                },
+                "name": {"type": "string", "description": "Имя архива, если нужно своё."},
+            },
+            ["days"],
+            risk="observe",
+        )
+        spec(
             "remind",
             "Поставить напоминание. Используй, когда человек просит напомнить, не "
             "забыть, разбудить, предупредить: «напомни завтра в 15:00 про совещание», "
@@ -3211,6 +3410,55 @@ class ExecutionKernel:
             ["goal"],
             risk="mutate",
         )
+
+
+def _pack_archive(
+    root: Path, rows: list[dict[str, Any]], name: str
+) -> tuple[bytes, list[str], int]:
+    """Сложить исходные файлы в zip. Возврат: (архив, что не вошло, размер).
+
+    Синхронная и блокирующая: вызывается через `run_blocking`, потому что читает
+    сотни файлов с диска, а делать это в цикле событий значит подвесить всех
+    остальных собеседников на время сборки.
+
+    Файлы кладутся под ЧЕЛОВЕЧЕСКИМИ именами, а не под хешами хранилища:
+    `dded8fc9….ogg` в архиве бесполезен. Совпадения имён разводятся номером —
+    иначе второй `Отчёт.docx` молча затёр бы первый.
+    """
+    del name
+    buffer = io.BytesIO()
+    left_out: list[str] = []
+    used: set[str] = set()
+    size = 0
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for row in rows:
+            stored = str(row.get("stored_path") or "")
+            source = (root / stored).resolve()
+            # Путь пришёл из базы, но проверяется всё равно: запись могла быть
+            # сделана иначе, а `..` в ней увёл бы чтение за пределы хранилища.
+            if not str(source).startswith(str(root.resolve())) or not source.is_file():
+                left_out.append(f"{row.get('filename') or row.get('title') or stored} — файла нет")
+                continue
+            try:
+                payload = source.read_bytes()
+            except OSError as error:
+                left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
+                continue
+            if size + len(payload) > _MAX_ARCHIVE_BYTES:
+                left_out.append(f"{row.get('filename') or stored} — не поместился по размеру")
+                continue
+            base = str(row.get("filename") or row.get("title") or source.name).strip() or source.name
+            base = base.replace("/", "_").replace("\\", "_").lstrip(".") or source.name
+            entry = base
+            counter = 2
+            while entry.casefold() in used:
+                stem, dot, suffix = base.rpartition(".")
+                entry = f"{stem} ({counter}){dot}{suffix}" if dot else f"{base} ({counter})"
+                counter += 1
+            used.add(entry.casefold())
+            archive.writestr(entry, payload)
+            size += len(payload)
+    return buffer.getvalue(), left_out, size
 
 
 def _safe_filename(title: str, extension: str) -> str:

@@ -1273,6 +1273,92 @@ class KnowledgeMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
+    def list_files_received_on(
+        self,
+        user_id: str,
+        *,
+        days: Sequence[str],
+        utc_offset_minutes: int = 0,
+        limit: int = 400,
+    ) -> list[dict[str, Any]]:
+        """Файлы, ПРИШЕДШИЕ в названные дни, — материал для архива.
+
+        Владелец 2026-08-03: «Пятница же не умеет архивы собирать? Надо, чтобы
+        умела: собрать документы, пришедшие за 10, 13 и 25 число». Дни идут
+        списком, а не диапазоном: между 10-м и 25-м лежит две недели чужих
+        файлов, и «с 10 по 25» — не то, о чём просили.
+
+        Берутся ИСХОДНЫЕ файлы (`raw_objects.metadata_json.stored_path`), а не
+        извлечённый из них текст: человек просил документы, а не пересказ.
+
+        `utc_offset_minutes` переводит метку в сутки ЧЕЛОВЕКА. Без этого «за 25
+        число» отдало бы файлы, пришедшие 25-го по Гринвичу, — а вечер 25-го в
+        Москве это уже 25-е и там, и там, зато вечер 24-го по МСК попал бы в
+        выборку 24-го, но час с 21:00 до полуночи уехал бы в 25-е. Тот же класс,
+        что чинили в хронике, напоминаниях и тихих часах.
+        """
+        wanted = [str(day).strip() for day in days if str(day).strip()]
+        if not wanted:
+            return []
+        shift = f"{int(utc_offset_minutes):+d} minutes"
+        placeholders = ",".join("?" for _ in wanted)
+        rows = self.execute(
+            "SELECT r.id AS raw_id, r.metadata_json AS metadata_json, r.received_at AS received_at,"
+            " k.id AS ko_id, k.title AS title, k.knowledge_kind AS knowledge_kind"
+            " FROM raw_objects AS r"
+            " LEFT JOIN knowledge_objects AS k"
+            "   ON k.raw_object_id = r.id AND k.deleted_at IS NULL"
+            " WHERE r.user_id=? AND r.deleted_at IS NULL AND r.content_type='file'"
+            f"   AND date(datetime(r.received_at, ?)) IN ({placeholders})"  # nosec B608 - только плейсхолдеры
+            " ORDER BY r.received_at ASC LIMIT ?",
+            (user_id, shift, *wanted, max(1, min(int(limit), 2000))),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            meta = _json_dict_safe(row["metadata_json"])
+            stored = str(meta.get("stored_path") or "")
+            if not stored:
+                # Запись есть, файла за ней нет. Молча пропустить нельзя — иначе
+                # архив тихо недосчитается документов, а человек будет думать,
+                # что получил всё.
+                continue
+            out.append(
+                {
+                    "raw_id": str(row["raw_id"]),
+                    "ko_id": str(row["ko_id"] or ""),
+                    "title": str(row["title"] or meta.get("filename") or ""),
+                    "filename": str(meta.get("filename") or ""),
+                    "stored_path": stored,
+                    "mime_type": str(meta.get("mime_type") or ""),
+                    "size_bytes": int(meta.get("size_bytes") or 0),
+                    "received_at": str(row["received_at"] or ""),
+                    "knowledge_kind": str(row["knowledge_kind"] or ""),
+                }
+            )
+        return out
+
+    def count_files_received_on(
+        self, user_id: str, *, days: Sequence[str], utc_offset_minutes: int = 0
+    ) -> int:
+        """Сколько файлов в этих днях ВСЕГО — отдельным счётом, не длиной страницы.
+
+        «Длина страницы — не факт о корпусе»: за ночь 2026-08-01 эта ошибка
+        нашлась трижды в разных подсистемах. Архиву она обошлась бы дороже
+        обычного — человек унесёт файл с собой, считая его полным.
+        """
+        wanted = [str(day).strip() for day in days if str(day).strip()]
+        if not wanted:
+            return 0
+        shift = f"{int(utc_offset_minutes):+d} minutes"
+        placeholders = ",".join("?" for _ in wanted)
+        row = self.execute(
+            "SELECT COUNT(*) AS count FROM raw_objects"
+            " WHERE user_id=? AND deleted_at IS NULL AND content_type='file'"
+            f"   AND date(datetime(received_at, ?)) IN ({placeholders})",  # nosec B608 - только плейсхолдеры
+            (user_id, shift, *wanted),
+        ).fetchone()
+        return int(row["count"]) if row else 0
+
     def list_knowledge_on_this_day(
         self,
         user_id: str,

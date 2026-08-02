@@ -118,7 +118,11 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: этого читал только загруженные материалы, и на «что писал JBL?» отвечал
 #: «сообщений 42, но записи не загрузились»: у того, кто просто переписывается,
 #: загрузок ноль.
-EXPECTED_MEMBER_COUNT = 303
+#: +2 к 303: `list_files_received_on` и `count_files_received_on` — файлы,
+#: пришедшие в названные дни, и их полное число. Материал для сборки архива:
+#: «собери документы за 10, 13 и 25 число». Список и счёт разведены намеренно —
+#: длина страницы не должна выдавать себя за размер дня.
+EXPECTED_MEMBER_COUNT = 305
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

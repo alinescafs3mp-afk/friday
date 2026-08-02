@@ -121,6 +121,50 @@ def test_another_verdict_does_not_trigger_the_person_tool() -> None:
     assert messages == []
 
 
+def test_a_short_name_question_never_reaches_a_search_engine() -> None:
+    """Замерено на живом экземпляре, СРАЗУ после того как короткая форма ожила.
+
+    «А Пегас?» подняла инструмент надзора — и в том же ходе `web_research`. Имя
+    участника ушло в чужой поисковик. Прежняя защита стояла на шаблоне, а эту
+    форму шаблон не ловит: починили одну половину развилки, вторая осталась на
+    старом условии. Дефект «Пегас Туристик» вернулся через новую дверь.
+
+    Владелец просил режим полной приватности прямым текстом.
+    """
+    runtime = _runtime(PEOPLE)
+    context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("человек", "Пегас"))
+    tools_used: list[str] = []
+    bound = AgentRuntime._prefetch_the_web_if_asked.__get__(runtime, AgentRuntime)
+    asyncio.run(
+        bound(
+            "а Пегас?",
+            None,
+            [{"function": {"name": "web_research"}}],
+            [],
+            tools_used,
+            [],
+            [],
+            context,
+        )
+    )
+    assert runtime.kernel.calls == [], "имя участника снова уходит в поисковик"
+    assert tools_used == []
+
+
+def test_the_model_is_not_even_offered_the_web_for_a_person_question() -> None:
+    """Веб-инструменты УБИРАЮТСЯ, а не отговариваются.
+
+    Запрет на предварительный вызов такое не ловит: `web_research` в живом
+    замере позвала САМА модель. Проверено дважды на других поверхностях (голос,
+    поиск) — уговорами это не лечится, только тем, чего нет в списке.
+    """
+    source = inspect.getsource(AgentRuntime.chat)
+    at = source.index('if topic.startswith("человек")')
+    guard = source[at : at + 1800]
+    assert "web_research" in guard, "инструмент снова предлагается модели"
+    assert "web_search" in guard and "web_fetch" in guard, "закрыт не весь выход наружу"
+
+
 def test_the_archive_hint_is_dropped_when_understanding_says_person() -> None:
     """Половина, без которой первая бесполезна.
 
