@@ -79,6 +79,32 @@ async def scan_monitors(ctx: ServiceContext) -> None:
         if not user_id or not query:
             continue
         cursor = int(monitor.get("last_seen_rowid") or 0)
+        monitor_id = str(monitor.get("id") or "")
+        # Что стало с прошлым сообщением этого монитора. Курсор двигается по
+        # факту ДОСТАВКИ, а не постановки в очередь: иначе любое терминальное
+        # завершение строки (Telegram недоступен и попытки исчерпаны, чат
+        # оказался недоставляемым) означало потерю совпадения навсегда —
+        # материал с rowid не больше курсора больше не читается.
+        last = await run_blocking(storage.latest_monitor_notification, user_id, monitor_id)
+        status = str((last or {}).get("status") or "")
+        if status == "pending":
+            # Сообщение ещё не ушло. Двигать границу нечем и незачем: следующая
+            # порция подождёт, пока человек получит эту.
+            continue
+        if status == "sent":
+            delivered = _checkpoint_from_key(str((last or {}).get("dedup_key") or ""))
+            if delivered > cursor:
+                await run_blocking(
+                    storage.mark_monitor_checked,
+                    monitor_id,
+                    user_id,
+                    seen_rowid=delivered,
+                    # Счётчик растёт здесь, а не при постановке: `/watching`
+                    # показывал «сообщений: 1» для сообщения, которое человеку
+                    # так и не пришло.
+                    reported=1,
+                )
+                cursor = delivered
         try:
             # ВЕСЬ тяжёлый кусок уходит в поток: чтение страницы тел и сравнение
             # по ним. Замерено на форме боевого корпуса — страница в 200 тел это
@@ -115,18 +141,33 @@ async def scan_monitors(ctx: ServiceContext) -> None:
                 kind="monitor",
                 # Ключ несёт границу окна: тот же монитор с тем же окном не
                 # напишет дважды, а следующее окно — уже другое сообщение.
-                dedup_key=f"monitor:{monitor.get('id')}:{checkpoint}",
+                dedup_key=f"monitor:{monitor_id}:{checkpoint}",
             ):
                 enqueued += 1
+            # Курсор здесь НЕ двигается. Он сдвинется на следующем проходе, когда
+            # строка окажется `sent`; если она умрёт, совпадение найдётся снова.
+            await run_blocking(
+                storage.mark_monitor_checked, monitor_id, user_id, seen_rowid=cursor, reported=0
+            )
+            continue
         await run_blocking(
             storage.mark_monitor_checked,
-            str(monitor.get("id")),
+            monitor_id,
             user_id,
             seen_rowid=checkpoint,
-            reported=len(candidates),
+            reported=0,
         )
     if enqueued:
         LOGGER.info("Monitors organ queued %d notification(s)", enqueued)
+
+
+def _checkpoint_from_key(dedup_key: str) -> int:
+    """Граница окна из ключа дедупа `monitor:{id}:{checkpoint}`."""
+    tail = dedup_key.rsplit(":", 1)[-1] if dedup_key else ""
+    try:
+        return int(tail)
+    except ValueError:
+        return 0
 
 
 def _scan_one(

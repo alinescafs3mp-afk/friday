@@ -611,6 +611,26 @@ class RuntimeMixin(StorageShared):
             )
         return cursor.rowcount == 1
 
+    def latest_monitor_notification(self, user_id: str, monitor_id: str) -> dict[str, Any] | None:
+        """Последняя строка очереди этого монитора: что с ней стало.
+
+        Курсор монитора двигался по факту ПОСТАНОВКИ в очередь, а не доставки.
+        Любое терминальное завершение строки — исчерпанные попытки при
+        недоступном Telegram, недоставляемый чат — означало потерю совпадения
+        навсегда: материал с rowid не больше курсора больше не читается. При этом
+        `/watching` бодро показывал «сообщений: 1». У напоминаний этот случай
+        закрыт (они выводятся из таймлайна заново каждый скан), у мониторов
+        эквивалента не было.
+        """
+        user_id = validate_user_id(user_id)
+        row = self.execute(
+            "SELECT id, status, dedup_key, attempts FROM outbound_notifications "
+            "WHERE user_id=? AND kind='monitor' AND dedup_key LIKE ? "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (user_id, f"monitor:{monitor_id}:%"),
+        ).fetchone()
+        return dict(row) if row else None
+
     def mark_monitor_checked(
         self, monitor_id: str, user_id: str, *, seen_rowid: int, reported: int = 0
     ) -> None:

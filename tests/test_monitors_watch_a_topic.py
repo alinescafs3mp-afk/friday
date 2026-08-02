@@ -365,3 +365,88 @@ async def test_the_monitor_pass_does_not_freeze_everyone_else(settings, storage)
     assert max(gaps) < 0.15, (
         f"наибольший разрыв между тиками {max(gaps):.3f} с — проход мониторов держал event loop"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_match_survives_a_delivery_that_never_happened(settings, storage, monkeypatch):
+    """Мутация: двигать курсор сразу после `enqueue_notification` — тест краснеет.
+
+    Курсор двигался по факту ПОСТАНОВКИ в очередь, а мост дренирует её каждые
+    пятнадцать секунд. Замерено: Telegram недоступен ~75 секунд, пять попыток
+    исчерпаны, строка становится `failed` и теряет dedup_key — а материал с rowid
+    не больше курсора больше никогда не читается. Совпадение потеряно навсегда,
+    и при этом `/watching` показывал «сообщений: 1».
+    """
+    from dataclasses import replace
+
+    awake = replace(settings, quiet_hours_start=0, quiet_hours_end=0)
+    storage.ensure_user("alice", metadata={"chat_id": "5001"})
+    storage.create_monitor("alice", "поверка весов", chat_id="5001")
+    _document(storage, "alice", "Поверка весов назначена на завтра", "Акт поверки")
+
+    ctx = ServiceContext(settings=awake, storage=storage, kg=None, ingestion=None)
+    await scan_monitors(ctx)
+    queued = storage.list_pending_notifications(limit=10)
+    assert len(queued) == 1, "совпадение не поставлено в очередь"
+
+    # Пять неудачных отправок — ровно то, что делает мост при недоступном Telegram.
+    for _ in range(5):
+        storage.mark_notifications(failed_ids=[queued[0]["id"]])
+    dead = storage.execute(
+        "SELECT status, dedup_key FROM outbound_notifications WHERE id=?", (queued[0]["id"],)
+    ).fetchone()
+    assert dead["status"] == "failed" and dead["dedup_key"] == ""
+
+    # Следующий проход обязан найти то же совпадение снова.
+    await scan_monitors(ctx)
+    again = storage.list_pending_notifications(limit=10)
+    assert len(again) == 1, "совпадение потеряно навсегда после сбоя доставки"
+    assert "поверка весов" in again[0]["body"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_watching_counts_what_was_delivered_not_what_was_queued(settings, storage):
+    """`/watching` показывал «сообщений: 1» для сообщения, которое не пришло."""
+    from dataclasses import replace
+
+    awake = replace(settings, quiet_hours_start=0, quiet_hours_end=0)
+    storage.ensure_user("alice", metadata={"chat_id": "5001"})
+    monitor = storage.create_monitor("alice", "поверка", chat_id="5001")
+    _document(storage, "alice", "Поверка назначена", "Акт")
+    ctx = ServiceContext(settings=awake, storage=storage, kg=None, ingestion=None)
+
+    await scan_monitors(ctx)
+    row = storage.execute(
+        "SELECT matches_reported, last_seen_rowid FROM monitors WHERE id=?", (monitor["id"],)
+    ).fetchone()
+    assert row["matches_reported"] == 0, "отчитались о доставке до доставки"
+    assert row["last_seen_rowid"] == 0, "граница сдвинута до доставки"
+
+    queued = storage.list_pending_notifications(limit=10)
+    storage.mark_notifications(sent_ids=[queued[0]["id"]])
+    await scan_monitors(ctx)
+
+    after = storage.execute(
+        "SELECT matches_reported, last_seen_rowid FROM monitors WHERE id=?", (monitor["id"],)
+    ).fetchone()
+    assert after["matches_reported"] == 1, "доставленное сообщение не сосчитано"
+    assert after["last_seen_rowid"] > 0, "граница не сдвинулась после доставки"
+    assert storage.list_pending_notifications(limit=10) == [], "доставленное поставлено повторно"
+
+
+@pytest.mark.asyncio
+async def test_nothing_new_is_queued_while_the_previous_message_waits(settings, storage):
+    """Пока сообщение не ушло, монитор не копит вторую строку в очереди."""
+    from dataclasses import replace
+
+    awake = replace(settings, quiet_hours_start=0, quiet_hours_end=0)
+    storage.ensure_user("alice", metadata={"chat_id": "5001"})
+    storage.create_monitor("alice", "поверка", chat_id="5001")
+    _document(storage, "alice", "Поверка назначена", "Акт")
+    ctx = ServiceContext(settings=awake, storage=storage, kg=None, ingestion=None)
+
+    await scan_monitors(ctx)
+    _document(storage, "alice", "Поверка перенесена", "Уведомление")
+    await scan_monitors(ctx)
+
+    assert len(storage.list_pending_notifications(limit=10)) == 1, "очередь задвоилась"
