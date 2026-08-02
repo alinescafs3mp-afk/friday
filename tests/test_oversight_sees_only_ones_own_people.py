@@ -141,5 +141,7 @@ def test_the_tool_still_serves_ones_own_people(settings, company) -> None:
 
     result = asyncio.run(core.execute("user_activity", {"person": "Первый"}, actor=actor))
 
+    # Форма ответа человеческая: служебные поля (`resolved`, `display_name`,
+    # `confidence`) убраны — модель пересказывала их человеку дословно.
     assert not result.data.get("denied"), result.data
-    assert result.data.get("resolved")
+    assert result.data.get("человек") == "Первый", result.data

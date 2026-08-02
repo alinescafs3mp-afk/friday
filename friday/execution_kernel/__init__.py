@@ -636,6 +636,74 @@ _LLM_TOOL_PAYLOAD_MAX_CHARS = 11_900
 _TAGS_SHOWN_TO_LLM = 40
 
 
+def _person_answer_for_llm(answer: dict[str, Any], *, zone: Any) -> dict[str, Any]:
+    """Ответ о человеке в том виде, в каком его можно ПЕРЕСКАЗАТЬ вслух.
+
+    Найдено владельцем 2026-08-03, когда инструмент уже вызывался и данные
+    приходили. Он получил в чат: «в личной базе знаний записей от пользователя
+    Пегас не найдено. Однако в данных активности видно, что у пользователя с
+    display_name Пегас есть 92 сообщения».
+
+    Причина в форме. Модели уходил служебный JSON — `display_name`, `username`,
+    `confidence`, `method`, `matched_on`, `user_id`, `conversation_id`, — и она
+    честно пересказывала эти слова человеку. А поля `knowledge_objects: 0` и
+    `arrivals: 0` (это про ЗАГРУЖЕННЫЕ ФАЙЛЫ, которых у переписывающегося
+    человека нет) читались как «в базе ничего нет», и ответ начинался с
+    оправдания вместо ответа.
+
+    Здесь остаётся то, что человек и так знает: имя, сколько сообщений, когда
+    писал и что именно. Время — местное, потому что спрашивают про свой день.
+    """
+    resolved = answer.get("resolved")
+    resolved = resolved if isinstance(resolved, dict) else {}
+    summary = answer.get("summary")
+    summary = summary if isinstance(summary, dict) else {}
+    name = str(resolved.get("display_name") or resolved.get("username") or "").strip()
+
+    def local(stamp: str) -> str:
+        try:
+            return datetime.fromisoformat(str(stamp)).astimezone(zone).strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            return str(stamp or "")
+
+    messages = []
+    for item in answer.get("messages") or []:
+        row = item if isinstance(item, dict) else {}
+        messages.append({"когда": local(str(row.get("at") or "")), "текст": row.get("text", "")})
+
+    trimmed: dict[str, Any] = {
+        "человек": name,
+        "сообщений всего": summary.get("messages", 0),
+        "что писал": messages,
+        # Уровень доступа остаётся в ответе: он говорит модели, почему текстов
+        # нет, — иначе она объявит, что человек ничего не писал, хотя сообщения
+        # есть, просто их содержание закрыто.
+        "доступ": "полный" if str(answer.get("content") or "") == "full" else "без содержания",
+    }
+    # Как именно опознан человек. Неточное совпадение имени — это риск ответить
+    # ПРО ДРУГОГО, и модель обязана знать, что уверенности нет.
+    if resolved and str(resolved.get("method") or "") not in {"exact", ""}:
+        trimmed["опознан приблизительно"] = (
+            f"по написанию «{resolved.get('matched_on') or ''}» — если это не тот человек, уточни"
+        )
+    if answer.get("denied"):
+        return {"человек": name, "отказано": True, "причина": answer.get("reason")}
+    # Файлы упоминаются ТОЛЬКО когда они есть: ноль загрузок у человека, который
+    # просто переписывается, — это норма, а не отсутствие данных.
+    files = answer.get("items") or []
+    if files:
+        trimmed["присылал файлов"] = summary.get("arrivals", len(files))
+        trimmed["файлы"] = [
+            {"когда": local(str((row or {}).get("at") or "")), "что": (row or {}).get("title")}
+            for row in files[:10]
+        ]
+    if answer.get("analysis"):
+        trimmed["разбор"] = answer["analysis"]
+    if not messages and not files:
+        trimmed["ничего не найдено"] = "за этот период человек ничего не писал и не присылал"
+    return trimmed
+
+
 def _timeline_event_for_llm(event: dict[str, Any]) -> dict[str, Any]:
     """Одно событие ленты без того, что модели не нужно.
 
@@ -2503,7 +2571,7 @@ class ExecutionKernel:
                 # vocabulary and the schema drift apart. Say which values exist
                 # rather than failing the whole call.
                 answer["analysis_error"] = str(exc)
-        return answer
+        return _person_answer_for_llm(answer, zone=self._zone())
 
     async def _user_knowledge_search(
         self,

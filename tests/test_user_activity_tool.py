@@ -76,9 +76,9 @@ async def test_an_admin_can_ask_by_the_name_they_use(kernel, spelling):
     result = await runtime.execute("user_activity", {"person": spelling}, actor=boss)
 
     assert result.success is True, result.error
-    assert result.data["resolved"]["user_id"] == "usr_ivan"
-    assert result.data["summary"]["arrivals"] == 2
-    assert len(result.data["items"]) == 2
+    assert result.data["человек"] == "Иван"  # форма ответа человеческая: см. `_person_answer_for_llm`
+    assert result.data["присылал файлов"] == 2
+    assert len(result.data["файлы"]) == 2
 
 
 @pytest.mark.asyncio
@@ -88,9 +88,10 @@ async def test_the_answer_says_which_account_it_picked_and_how(kernel):
     result = await runtime.execute("user_activity", {"person": "Иавну"}, actor=boss)
 
     assert result.success is True
-    resolved = result.data["resolved"]
-    assert resolved["display_name"] == "Иван"
-    assert resolved["method"] and resolved["method"] != "exact", "a tolerant match reported itself as exact"
+    assert result.data["человек"] == "Иван"
+    # Неточное совпадение имени обязано себя объявить: иначе ответ про другого
+    # человека выглядит так же уверенно, как про нужного.
+    assert result.data.get("опознан приблизительно"), result.data
 
 
 @pytest.mark.asyncio
@@ -150,8 +151,8 @@ async def test_a_window_narrows_what_comes_back(kernel):
         actor=boss,
     )
     assert result.success is True
-    assert result.data["summary"]["arrivals"] == 1
-    assert len(result.data["items"]) == 1
+    assert result.data["присылал файлов"] == 1
+    assert len(result.data["файлы"]) == 1
 
 
 @pytest.mark.asyncio
@@ -161,7 +162,7 @@ async def test_it_never_returns_a_second_accounts_rows(kernel):
     boss = auth.actor_for_user("boss", source="test")
     result = await runtime.execute("user_activity", {"person": "Иван"}, actor=boss)
 
-    previews = " ".join(str(item.get("preview") or "") for item in result.data["items"])
+    previews = " ".join(str(item.get("что") or "") for item in result.data["файлы"])
     assert "Чужая" not in previews
 
 
@@ -182,8 +183,8 @@ async def test_denying_the_wide_capability_takes_away_the_content(kernel):
     result = await runtime.execute("user_activity", {"person": "Иван"}, actor=boss)
 
     assert result.success is True, result.error
-    assert result.data["content"] == "redacted"
-    body = " ".join(str(value) for item in result.data["items"] for value in item.values())
+    assert result.data["доступ"] == "без содержания"
+    body = " ".join(str(value) for item in result.data["файлы"] for value in item.values())
     assert "склад" not in body and "Смета" not in body
 
 
@@ -229,9 +230,9 @@ async def test_the_metadata_tier_reaches_the_tool_but_not_the_text(kernel):
     result = await runtime.execute("user_activity", {"person": "Иван"}, actor=watcher)
 
     assert result.success is True, result.error
-    assert result.data["content"] == "redacted"
-    assert result.data["summary"]["arrivals"] == 2, "объём активности наблюдателю виден"
-    body = " ".join(str(value) for item in result.data["items"] for value in item.values())
+    assert result.data["доступ"] == "без содержания"
+    assert result.data["присылал файлов"] == 2, "объём активности наблюдателю виден"
+    body = " ".join(str(value) for item in result.data["файлы"] for value in item.values())
     for secret in ("склад", "Смета", "ремонт"):
         assert secret not in body, f"инструмент отдал наблюдателю {secret!r}"
 

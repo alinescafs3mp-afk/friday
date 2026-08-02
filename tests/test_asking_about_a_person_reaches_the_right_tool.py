@@ -111,7 +111,12 @@ def test_the_tool_runs_before_the_model_gets_the_turn() -> None:
     assert runtime.kernel.calls, "инструмент не вызван — модель снова решает сама"
     assert runtime.kernel.calls[0][0] == "user_activity"
     assert runtime.kernel.calls[0][1]["person"] == "JBL"
-    assert messages and "деятельности человека" in str(messages[0]["content"])
+    # Имя названо ЯВНО: на «а JBL что писал?» сразу после вопроса про Пегаса
+    # модель повторяла прошлый ответ слово в слово — в контексте лежали и он, и
+    # новые данные.
+    said = str(messages[0]["content"])
+    assert "JBL" in said, said
+    assert "НЕ повторяй предыдущий ответ" in said, said
 
 
 def test_the_second_name_works_too() -> None:
