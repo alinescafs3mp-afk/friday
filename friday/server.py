@@ -1778,11 +1778,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # Неразборчивая длительность от стороннего клиента — не повод
                     # ронять запрос; считаем голос длинным и идём прежним путём.
                     voice_duration = float("inf")
+                is_voice = str(document.get("media_kind") or "") == "voice"
                 spoken_question = bool(
-                    transcript
-                    and str(document.get("media_kind") or "") == "voice"
-                    and voice_duration <= _VOICE_QUESTION_MAX_SEC
+                    transcript and is_voice and voice_duration <= _VOICE_QUESTION_MAX_SEC
                 )
+                # Голос, который не распознался, обязан быть НАЗВАН нераспознанным.
+                # Иначе ход молча превращается в «Загружен документ: voice-7.ogg»:
+                # человек наговорил вопрос, получил ответ про какой-то документ и
+                # ни слова о том, что его не расслышали. Единственный текст,
+                # написанный на этот случай, был недостижим — он проверял ключ,
+                # которого приёмный путь не возвращает.
+                if is_voice and not transcript and isinstance(file_ingestion, dict):
+                    file_ingestion["voice_unrecognised"] = True
                 if not message:
                     # Два РАЗНЫХ факта, которые до сих пор нёс один флаг:
                     #  * «этот текст сочинил backend» — тогда его нельзя судить

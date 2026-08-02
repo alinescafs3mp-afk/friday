@@ -366,7 +366,12 @@ class FilesMixin(PipelineShared):
         # still allows seconds of unpacking, and seconds of a frozen backend is
         # not a thing to leave in place.
         extraction = await asyncio.to_thread(self._doc_extractor.extract, file_content, filename, mime_type)
+        # Пробелы — не текст. Разбор пустого .txt возвращает `success=True` и
+        # строку из переводов строки, и дальше она проходит как содержимое: ветка
+        # «из файла не вышло ни знака» не срабатывает, потому что строка непустая.
         text_content = extraction.text if extraction.success else ""
+        if not text_content.strip():
+            text_content = ""
         if len(text_content) > self.settings.max_extracted_text_chars:
             text_content = text_content[: self.settings.max_extracted_text_chars]
         vision: dict[str, Any] | None = None
@@ -638,10 +643,22 @@ class FilesMixin(PipelineShared):
                     # inside — the person has not read the hundred pages either.
                     # That asymmetry is the whole reason the policy exists, so a
                     # file never exempts itself from it.
+                    #
+                    # `assessment.action` читается здесь, а не только показывается
+                    # человеку. Ветка выше собирает вердикт `review` для файла, из
+                    # которого не вышло ни знака, — с объяснением, почему такой
+                    # объект нельзя делать знанием. Гейт этот вердикт игнорировал:
+                    # скан-PDF и .docx с текстом в колонтитуле разбираются БЕЗ
+                    # ошибки, значит `extraction_succeeded=True`, ассетов для vision
+                    # нет — и файл продвигался. Замерено на «АКТ приёма-передачи
+                    # №17»: создан Knowledge Object, всё содержимое которого —
+                    # `[File: akt.docx; type=…; size=37211]`, а человеку сказано
+                    # «✅ Файл стал знанием — можно спрашивать». Спрашивать не о чем.
                     needs_review = (
                         self.review_required(force_review=force_review, explicit_intent=False)
                         or not extraction_succeeded
                         or bool(vision)
+                        or assessment.action == "review"
                     )
                     if needs_review:
                         inbox_item = self._store_review_inbox(raw, assessment, file_enrichment)

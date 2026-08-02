@@ -32,12 +32,44 @@ def _file_fate_line(file_ingestion: Any) -> str:
         return ""
     if file_ingestion.get("action") == "transient":
         return "📄 Файл разобран, но по вашей просьбе НЕ сохранён."
+    # Приёмный путь кладёт исход разбора ВЛОЖЕННЫМ словарём `extraction`, а
+    # верхнеуровневый `extraction_success` производит только осмотр без
+    # сохранения (`inspect_file_transient`) — и тот уходит веткой выше. То есть
+    # предупреждение «текст извлечь не удалось» было физически недостижимо:
+    # проверено прогоном настоящего `ingest_file` на .png и на .ogg. Человек
+    # присылал картинку или наговаривал вопрос, который не расслышали, и получал
+    # «📥 Файл ждёт разбора в /inbox» — ни слова о том, что содержимого не видно.
+    if file_ingestion.get("voice_unrecognised"):
+        return (
+            "🎤 Голос не распознался — я сохранила запись, но слов в ней не разобрала. "
+            "Повторите текстом или наговорите ещё раз поближе к микрофону."
+        )
+    extraction = file_ingestion.get("extraction")
+    extraction = extraction if isinstance(extraction, dict) else {}
+    text_missing = (
+        file_ingestion.get("extraction_success") is False
+        or extraction.get("success") is False
+        or extraction.get("text_success") is False
+    )
+    partial = bool(extraction.get("parse_deadline_reached"))
     if file_ingestion.get("promoted"):
-        return "✅ Файл стал знанием — можно спрашивать."
+        line = "✅ Файл стал знанием — можно спрашивать."
+        if partial:
+            pages = int(extraction.get("parse_pages_read") or 0)
+            read = f" Прочитано страниц: {pages}." if pages else ""
+            line += f" Разбор остановлен по сроку — принято только начало.{read}"
+        return line
     if file_ingestion.get("queued_for_review") or file_ingestion.get("inbox_id"):
         line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
-        if file_ingestion.get("extraction_success") is False:
+        if text_missing:
             line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
+        elif partial:
+            # Успех и полнота — разные вещи: разбор, оборванный по сроку, приходит
+            # с `success=True` и частичным текстом. Флаг для этого случая писался
+            # в ответ, но не читался ни одним потребителем.
+            pages = int(extraction.get("parse_pages_read") or 0)
+            read = f" Прочитано страниц: {pages}." if pages else ""
+            line += f" Разбор остановлен по сроку — принято только начало.{read}"
         return line
     return ""
 
