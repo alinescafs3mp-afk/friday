@@ -264,6 +264,19 @@ class MaintenanceMixin(StorageShared):
         Only complete ``(database, manifest)`` pairs are eligible. A database without
         a manifest is left alone: that is the shape of an interrupted mirror write,
         and deleting it would destroy evidence rather than reclaim space.
+
+        «Verified» в этой строке долго было обещанием без проверки: тело считало
+        только дату из имени. Воспроизведено — испорченная страница в НОВЕЙШЕЙ
+        копии, исправная старая, `prune_backups(keep=1)` удалял исправную и
+        оставлял битую. Незаметность полная: доктор читает первый валидный
+        манифест и печатает «Latest backup: verified». Порча носителя на свежей
+        копии означала, что суточный воркер сам удаляет последнюю годную.
+
+        Поэтому счёт `keep` ведётся по копиям, ПРОШЕДШИМ проверку, а битые
+        удаляются сверх этого счёта — место они занимают, а восстановиться из них
+        нельзя. Единственная копия не трогается никогда, даже не пройдя проверку:
+        битый архив лучше, чем никакого, и удалять последнее свидетельство —
+        решение человека, а не суточного воркера.
         """
         keep = int(keep)
         if keep <= 0:
@@ -271,8 +284,29 @@ class MaintenanceMixin(StorageShared):
         # `list_backups` is already newest-first (the stem carries a sortable UTC
         # timestamp) and already refuses symlinks and paths outside backups_dir.
         backups = self.list_backups()
+        healthy: list[dict[str, Any]] = []
+        broken: list[dict[str, Any]] = []
+        for entry in backups:
+            name = Path(str(entry.get("path") or "")).name
+            try:
+                ok = bool(self.verify_backup(name).get("ok"))
+            except (OSError, FileNotFoundError, ValueError) as exc:
+                LOGGER.warning("Could not verify backup %s: %s", name, exc)
+                ok = False
+            (healthy if ok else broken).append(entry)
+        doomed = healthy[keep:] + broken
+        if len(backups) - len(doomed) < 1 and backups:
+            # Ни одной копии не остаётся — оставляем новейшую, какой бы она ни была.
+            keeper = backups[0]
+            doomed = [entry for entry in doomed if entry is not keeper]
+            LOGGER.warning(
+                "Every backup failed verification; keeping the newest one (%s) anyway",
+                Path(str(keeper.get("path") or "")).name,
+            )
+        if broken:
+            LOGGER.warning("Backup verification failed for %d copy/copies", len(broken))
         removed: list[str] = []
-        for entry in backups[keep:]:
+        for entry in doomed:
             database = Path(str(entry.get("path") or ""))
             manifest = Path(str(entry.get("manifest_path") or ""))
             try:
@@ -290,7 +324,14 @@ class MaintenanceMixin(StorageShared):
             removed.append(database.name)
         if removed:
             LOGGER.info("Pruned %d backup(s), keeping the newest %d", len(removed), keep)
-        return {"enabled": True, "removed": len(removed), "kept": min(len(backups), keep)}
+        return {
+            "enabled": True,
+            "removed": len(removed),
+            "kept": len(backups) - len(removed),
+            # Сколько копий не прошли проверку — это то, о чём владелец должен
+            # узнать раньше, чем в день восстановления.
+            "unverified": len(broken),
+        }
 
     def list_backups(self) -> list[dict[str, Any]]:
         self.settings.backups_dir.mkdir(parents=True, exist_ok=True)
@@ -491,6 +532,11 @@ class MaintenanceMixin(StorageShared):
         # Stop using the active database before taking exact rollback copies.
         self.close()
         rollback_snapshots: dict[Path, Path] = {}
+        # Дошли ли мы до подмены активной базы. Без этого различения ветка отказа
+        # не могла отличить «нечего откатывать, потому что базы не было» от
+        # «нечего откатывать, потому что снимок не снялся» — и во втором случае
+        # удаляла живую базу, которой сбой ещё не коснулся.
+        replaced = False
         staged: Path | None = None
         safety_backup: dict[str, Any] | None = None
         recovery_snapshot: dict[str, Any] | None = None
@@ -527,6 +573,7 @@ class MaintenanceMixin(StorageShared):
             for active_path in active_paths[1:]:
                 active_path.unlink(missing_ok=True)
             os.replace(staged, database_path)
+            replaced = True
             _chmod_private(database_path)
             _fsync_directory(database_path.parent)
 
@@ -563,12 +610,28 @@ class MaintenanceMixin(StorageShared):
             self.close()
             rollback_error: BaseException | None = None
             try:
-                for active_path in active_paths:
-                    active_path.unlink(missing_ok=True)
-                for original, snapshot in rollback_snapshots.items():
-                    os.replace(snapshot, original)
-                    _chmod_private(original)
-                _fsync_directory(database_path.parent)
+                # Удалять активные файлы можно ТОЛЬКО когда есть чем их заменить
+                # либо когда мы сами их и положили. Прежняя редакция делала это
+                # безусловно: ошибка на подготовке — нехватка места (restore
+                # требует тройного размера базы), EIO на умирающем диске,
+                # перемонтирование в read-only — уводила сюда ДО того, как снят
+                # откатный снимок, и живая база, WAL и SHM удалялись. Следующее
+                # обращение молча создавало пустую базу со схемой: Friday
+                # поднималась с нулевым архивом, а не с ошибкой, и повторный
+                # restore проходил — человек получал данные из копии и никогда не
+                # узнавал, что потерял всё записанное после неё.
+                if rollback_snapshots:
+                    for active_path in active_paths:
+                        active_path.unlink(missing_ok=True)
+                    for original, snapshot in rollback_snapshots.items():
+                        os.replace(snapshot, original)
+                        _chmod_private(original)
+                    _fsync_directory(database_path.parent)
+                elif replaced:
+                    # Базы раньше не было, но неудачная замена уже легла на место.
+                    for active_path in active_paths:
+                        active_path.unlink(missing_ok=True)
+                    _fsync_directory(database_path.parent)
             except BaseException as exc:
                 rollback_error = exc
             if rollback_error is not None:
@@ -577,11 +640,20 @@ class MaintenanceMixin(StorageShared):
                     f"restore={type(restore_error).__name__}: {restore_error}; "
                     f"rollback={type(rollback_error).__name__}: {rollback_error}"
                 ) from restore_error
-            recovery = (
-                "the exact previous database files were restored automatically"
-                if rollback_snapshots
-                else "the failed replacement was removed; no previous database existed"
-            )
+            if rollback_snapshots:
+                recovery = "the exact previous database files were restored automatically"
+            elif replaced:
+                recovery = "the failed replacement was removed; no previous database existed"
+            elif database_path.is_file():
+                # Самое важное сообщение из трёх: восстановление не начиналось, и
+                # база на месте. Раньше здесь безусловно печаталось «no previous
+                # database existed» — прямая ложь ровно в тот момент, когда база
+                # была и только что была удалена этой же веткой.
+                recovery = (
+                    "the restore never started and the active database was left untouched"
+                )
+            else:
+                recovery = "no database was present and none was created"
             raise RuntimeError(
                 f"Database restore failed; {recovery}: {type(restore_error).__name__}: {restore_error}"
             ) from restore_error

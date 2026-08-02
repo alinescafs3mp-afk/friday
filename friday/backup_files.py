@@ -15,14 +15,33 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
 from typing import Any
 
 LOGGER = logging.getLogger(__name__)
+
+#: Имя файла в хранилище — это sha256 его содержимого (плюс расширение).
+_SHA256_NAME = re.compile(r"^([0-9a-f]{64})(\.[a-z0-9]{1,16})?$")
+
+
+def _digest_from_name(name: str) -> str | None:
+    """sha256 из имени файла, если оно так устроено. Иначе — None (проверять нечем)."""
+    match = _SHA256_NAME.match(name)
+    return match.group(1) if match else None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 # Потолок одного прогона. Первая синхронизация корпуса владельца (~1.3 ГБ на
 # SSD) укладывается с большим запасом; потолок существует, чтобы аномалия
@@ -44,7 +63,7 @@ def backup_files_incremental(
     if not files_dir.is_dir():
         return {"enabled": False, "reason": "files_dir_missing", "complete": True}
     started = time.monotonic()
-    total = copied = pending = failed = 0
+    total = copied = pending = failed = repaired = corrupt_sources = 0
     copied_bytes = 0
     target_dir.mkdir(parents=True, exist_ok=True)
     for source in sorted(files_dir.rglob("*")):
@@ -53,9 +72,26 @@ def backup_files_incremental(
         total += 1
         relative = source.relative_to(files_dir)
         destination = target_dir / relative
+        expected = _digest_from_name(source.name)
         try:
             source_size = source.stat().st_size
             if destination.is_file() and destination.stat().st_size == source_size:
+                # Совпадение размера — не совпадение содержимого. Замерено: один
+                # перевёрнутый байт в копии не менял длину, и следующий прогон
+                # отчитывался «copied: 0, failed: 0, complete: True», оставляя
+                # документ испорченным навсегда. Оригиналы живут в одном
+                # экземпляре, и это дерево — единственная вторая копия.
+                #
+                # Проверка бесплатна: имя файла И ЕСТЬ sha256 его содержимого.
+                if expected is None or _sha256_file(destination) == expected:
+                    continue
+                LOGGER.warning("Копия %s испорчена — перезаписываю из оригинала", relative)
+                repaired += 1
+            # Испорченный ОРИГИНАЛ поверх годной копии не кладём: иначе зеркало
+            # аккуратно увозит порчу и подтверждает её целостность.
+            if expected is not None and _sha256_file(source) != expected:
+                corrupt_sources += 1
+                LOGGER.error("Оригинал %s не сходится со своим sha256 — копия не тронута", relative)
                 continue
         except OSError:
             failed += 1
@@ -71,6 +107,13 @@ def backup_files_incremental(
                 staged.unlink(missing_ok=True)
                 failed += 1
                 continue
+            # Копию проверяем сразу, пока она в кеше: тогда «скопировано» значит
+            # «скопировано верно», а не «столько байт прошло мимо».
+            if expected is not None and _sha256_file(staged) != expected:
+                staged.unlink(missing_ok=True)
+                failed += 1
+                LOGGER.error("Копия %s не сошлась по sha256 сразу после записи", relative)
+                continue
             os.replace(staged, destination)
             copied += 1
             copied_bytes += source_size
@@ -84,7 +127,11 @@ def backup_files_incremental(
         "copied_bytes": copied_bytes,
         "pending": pending,
         "failed": failed,
-        "complete": pending == 0 and failed == 0,
+        # Порча, найденная и починенная, и порча в самих оригиналах — разные вещи,
+        # и обе должны быть видны доктору отдельно от «скопировано».
+        "repaired": repaired,
+        "corrupt_sources": corrupt_sources,
+        "complete": pending == 0 and failed == 0 and corrupt_sources == 0,
         "target_dir": str(target_dir),
     }
     if copied or pending or failed:

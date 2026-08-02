@@ -123,7 +123,9 @@ def test_backups_are_pruned_to_the_retention_window(storage, settings):
 
     assert len(storage.list_backups()) == 6
     report = storage.prune_backups(keep=3)
-    assert report == {"enabled": True, "removed": 3, "kept": 3}
+    # `unverified` — новое поле: сколько копий не прошли проверку. Здесь все
+    # исправны, и счёт `keep` ведётся именно по ним.
+    assert report == {"enabled": True, "removed": 3, "kept": 3, "unverified": 0}
 
     survivors = [entry["database"] for entry in storage.list_backups()]
     assert len(survivors) == 3
