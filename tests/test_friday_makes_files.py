@@ -340,6 +340,12 @@ def test_a_clarifying_question_is_not_packed_into_a_document():
     from friday.agent_runtime import _answer_is_a_question
 
     assert _answer_is_a_question("Давай уточню, что именно собрать в Excel?") is True
+    # Вопросительного знака может и не быть: замерено сквозным прогоном —
+    # «Сначала уточню, что именно подразумевается под актом 77.» упаковалось в
+    # документ, причём с заголовком из ЧУЖОГО документа архива.
+    assert _answer_is_a_question("Сначала уточню, что именно подразумевается под актом 77.") is True
+    assert _answer_is_a_question("Не совсем понятно, о каком акте речь.") is True
+    assert _answer_is_a_question("Каких именно рапортов — на премии или на увольнение.") is True
     assert _answer_is_a_question("Каких рапортов — на премии или на увольнение?") is True
     # Ответ по существу, заканчивающийся вопросом, документом быть может.
     long_answer = (
