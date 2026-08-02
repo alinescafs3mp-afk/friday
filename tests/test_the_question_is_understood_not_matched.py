@@ -227,3 +227,86 @@ def test_a_failed_search_is_not_passed_off_as_results():
 
     source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
     assert "if not result.success:" in source
+
+
+def test_a_name_from_the_archive_never_leaves_for_a_search_engine():
+    """Мутация: убрать `_mentions_someone_from_the_archive` — тест краснеет.
+
+    Найдено сквозным прогоном на копии живого архива: «что известно про
+    Хасанова?» арбитр счёл вопросом о внешнем мире, и фамилия сотрудника ушла
+    поисковой строкой в Яндекс. Ответ при этом пришёл ИЗ АРХИВА — то есть поход
+    наружу не дал ничего, кроме утечки, а в аудите остаётся только хеш запроса.
+    """
+    import inspect
+
+    source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
+    guard = source[: source.index("_web_query_by_arbiter(message)")]
+    assert "_mentions_someone_from_the_archive(message, actor)" in guard, (
+        "имя человека из архива доходит до арбитра и уходит в поисковик"
+    )
+    assert "not asked_outright" in guard, (
+        "прямая просьба «найди в интернете про X» должна остаться исполненной"
+    )
+
+
+def test_the_graph_is_asked_only_about_words_that_could_be_a_name():
+    """Служебные слова не должны дёргать граф на каждом вопросе."""
+    import asyncio
+
+    asked: list[str] = []
+
+    class _Graph:
+        def search_entities(self, user_id, query, *, limit=3):  # noqa: ANN001, ARG002
+            asked.append(query)
+            return []
+
+    class _Kernel:
+        kg = _Graph()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+
+    class _Actor:
+        user_id = "alice"
+
+    asyncio.run(
+        runtime._mentions_someone_from_the_archive(  # noqa: SLF001
+            "что известно про Хасанова сегодня?", _Actor()
+        )
+    )
+    assert "Хасанова" in asked
+    for stop_word in ("что", "известно", "сегодня"):
+        assert stop_word not in asked, f"граф спрошен про служебное слово {stop_word!r}"
+
+
+def test_a_person_found_in_the_graph_stops_the_search():
+    import asyncio
+
+    class _Graph:
+        def search_entities(self, user_id, query, *, limit=3):  # noqa: ANN001, ARG002
+            if query.casefold().startswith("хасан"):
+                return [{"name": "Хасанова Уркия Хадиевна", "entity_type": "person"}]
+            return []
+
+    class _Kernel:
+        kg = _Graph()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+
+    class _Actor:
+        user_id = "alice"
+
+    assert asyncio.run(
+        runtime._mentions_someone_from_the_archive("расскажи про Хасанову", _Actor())  # noqa: SLF001
+    )
+    # Не человек — не повод отменять поиск: «Москва» в графе как локация не
+    # должна запрещать вопрос о погоде в Москве.
+    class _Places:
+        def search_entities(self, user_id, query, *, limit=3):  # noqa: ANN001, ARG002
+            return [{"name": "Москва", "entity_type": "location"}]
+
+    runtime.kernel = type("K", (), {"kg": _Places()})()
+    assert not asyncio.run(
+        runtime._mentions_someone_from_the_archive("какая погода в Москве?", _Actor())  # noqa: SLF001
+    )

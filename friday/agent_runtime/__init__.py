@@ -27,6 +27,7 @@ from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval import best_snippet, is_relational_query
 from friday.storage import FridayStorage, normalize_conversation_mode
 from friday.storage.models import FeedbackItem, FeedbackType, new_id
+from friday.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
 _SMALL_KB_THRESHOLD = 10
@@ -346,6 +347,20 @@ _LOOKS_LIKE_A_QUESTION = re.compile(
     re.IGNORECASE,
 )
 _QUESTION_LENGTH_LIMIT = 300
+
+#: Слова, которые именем человека не бывают: спрашивать про них граф незачем.
+_NOT_A_NAME = frozenset(
+    {
+        "что", "кто", "где", "когда", "сколько", "какой", "какая", "какие", "какое",
+        "почему", "зачем", "чем", "куда", "откуда", "известно", "расскажи", "покажи",
+        "напомни", "найди", "поищи", "посмотри", "скажи", "можешь", "нужно", "хочу",
+        "пожалуйста", "сегодня", "вчера", "завтра", "сейчас", "потом", "тогда",
+        "документ", "документы", "документов", "файл", "файлы", "база", "базе",
+        "архив", "архиве", "интернет", "интернете", "поиск", "погода", "курс",
+        "новости", "цена", "стоит", "такое", "такой", "этот", "эта", "тебе", "меня",
+        "него", "неё", "нас", "вас", "them", "what", "who", "when", "where",
+    }
+)
 
 
 def _might_be_a_question(message: str) -> bool:
@@ -1950,6 +1965,42 @@ class AgentRuntime:
             }
         )
 
+    async def _mentions_someone_from_the_archive(self, message: str, actor: ActorContext) -> bool:
+        """Есть ли в вопросе имя человека, который живёт в графе ЭТОГО человека.
+
+        Такой вопрос — про архив, чем бы он ни выглядел для арбитра. Проверка
+        нужна не ради точности намерения, а ради того, чтобы фамилия сотрудника
+        не уезжала поисковой строкой в публичный поисковик: аудит остаётся с
+        хешем запроса, и владелец не увидит, что именно ушло.
+
+        Стоп-слова отсеиваются до обращения к графу, иначе «что» и «известно»
+        сами станут поводом для поиска по графу на каждом вопросе.
+        """
+        graph = getattr(self.kernel, "kg", None)
+        if graph is None or not hasattr(graph, "search_entities"):
+            return False
+        words = [
+            word.strip(".,!?…«»\"'()[]:;")
+            for word in str(message or "").split()
+            if len(word.strip(".,!?…«»\"'()[]:;")) >= 4
+        ]
+        candidates = [word for word in words if word.casefold() not in _NOT_A_NAME][:6]
+        for word in candidates:
+            try:
+                found = await run_blocking(graph.search_entities, actor.user_id, word, limit=3)
+            except Exception:  # noqa: BLE001 — проверка не должна ронять ход
+                LOGGER.warning("Could not check the graph for a personal name", exc_info=True)
+                return False
+            for item in found or []:
+                if str(item.get("entity_type") or "") != "person":
+                    continue
+                name = str(item.get("name") or "").casefold()
+                # Совпасть должно именно слово из вопроса, а не «похожее»:
+                # поиск морфологический, и по «завтра» он находит что угодно.
+                if word.casefold()[:5] in name:
+                    return True
+        return False
+
     async def _voice_of_the_final_answer(
         self,
         clip: dict[str, Any] | None,
@@ -2085,6 +2136,14 @@ class AgentRuntime:
         """
         asked_outright = bool(_ASKS_FOR_THE_WEB.search(message))
         if not asked_outright and not _might_be_a_question(message):
+            return
+        # Имя человека из архива наружу не уходит. Найдено сквозным прогоном на
+        # копии живой базы: «что известно про Хасанова?» арбитр счёл вопросом о
+        # внешнем мире, и фамилия сотрудника ушла поисковой строкой в Яндекс.
+        # Ответ при этом пришёл из архива — то есть поход наружу не дал ничего,
+        # кроме утечки. Проверяется структурой, а не моделью: если слово из
+        # вопроса — имя человека в ЭТОМ графе, вопрос личный.
+        if not asked_outright and await self._mentions_someone_from_the_archive(message, actor):
             return
         # «Что было 26 июля в 15 часов» — вопрос о собственной ленте, и время в нём
         # названо прямо. Арбитр на такой вопрос отвечал «интернет» (замерено), а
