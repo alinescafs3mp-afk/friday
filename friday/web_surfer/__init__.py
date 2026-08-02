@@ -73,6 +73,9 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 )
+#: Wikimedia требует осмысленный User-Agent с адресом проекта, а не подделку под
+#: браузер. Их правило: клиент, который представляется честно, не блокируется.
+_WIKIPEDIA_USER_AGENT = "Friday/1.0 (local knowledge assistant; +https://github.com/alinescafs3mp/friday)"
 _DROP_TAGS = {"nav", "footer", "header", "aside", "script", "style", "svg", "noscript", "form"}
 _DROP_CLASS_RE = re.compile(
     r"(?:^|[-_\s])(sidebar|navigation|nav|menu|footer|header|advert|ads?|cookie|consent|popup)(?:$|[-_\s])",
@@ -486,6 +489,75 @@ class WebSurfer:
         except Exception as exc:
             raise ProviderRefusedError(f"duckduckgo failed: {type(exc).__name__}") from exc
 
+    async def _search_wikipedia(self, query: str, limit: int) -> list[SearchResult]:
+        """Последнее звено цепочки: энциклопедия вместо пустоты.
+
+        Замерено 2026-08-02, тем же набором из двадцати запросов и тем же
+        критерием (доля непустых выдач):
+
+            бесплатные HTML-провайдеры при СЕРИИ запросов разваливаются —
+            brave-html упирается в 429 и даёт 1/20, lite-версия DuckDuckGo
+            2/20 (18 ответов — 202). Поодиночке они отвечают (9/10 и 10/10),
+            и первый замер это скрыл: провайдер надо мерить нагрузкой, а не
+            одним запросом.
+
+            Wikipedia API — 10/10, стабильно, без ключа и без анти-бота.
+
+        Она отвечает не на всё: «курс доллара сегодня» и «погода завтра» —
+        не её вопросы. Но «кто такой», «что такое», «высота», «население» —
+        именно её, и на них она отвечает всегда. Когда все поисковики отказали,
+        энциклопедическая статья лучше, чем «до интернета не дотянуться».
+
+        Правило Wikimedia про User-Agent соблюдается: осмысленное имя и адрес
+        проекта, а не подделка под браузер.
+        """
+        client = await self._get_client()
+        for language in ("ru", "en"):
+            try:
+                response = await client.get(
+                    f"https://{language}.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "list": "search",
+                        "srsearch": query,
+                        "srlimit": max(1, min(limit, 10)),
+                        "format": "json",
+                    },
+                    headers={"User-Agent": _WIKIPEDIA_USER_AGENT},
+                    timeout=_SEARCH_TIMEOUT,
+                )
+            except Exception as exc:  # noqa: BLE001 — сетевой сбой это отказ, не пустота
+                raise ProviderRefusedError(f"wikipedia failed: {type(exc).__name__}") from exc
+            if response.status_code in _REFUSAL_STATUS or response.status_code >= 500:
+                raise ProviderRefusedError(f"wikipedia answered {response.status_code}")
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise ProviderRefusedError("wikipedia answered with non-JSON") from exc
+            hits = ((payload.get("query") or {}).get("search")) or []
+            results: list[SearchResult] = []
+            for hit in hits:
+                title = str(hit.get("title") or "").strip()
+                if not title:
+                    continue
+                # Сниппет приходит с разметкой подсветки — человеку и модели она
+                # не нужна, а в поисковую выдачу попадёт как мусор.
+                snippet = re.sub(r"<[^>]+>", "", str(hit.get("snippet") or "")).strip()
+                results.append(
+                    SearchResult(
+                        title=title,
+                        url=f"https://{language}.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}",
+                        snippet=snippet,
+                        source=f"wikipedia-{language}",
+                    )
+                )
+                if len(results) >= limit:
+                    break
+            if results:
+                return results
+        # Обе языковые версии ответили честным нулём — это не отказ.
+        return []
+
     def _provider_chain(
         self, query: str, limit: int
     ) -> list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]]:
@@ -496,12 +568,20 @@ class WebSurfer:
 
             Яндекс (ключ владельца)   20/20
             Brave по ключу              — ключа нет, но ветка сохранена
-            Brave по HTML             6/20
+            Brave по HTML             1/20 при серии (9/10 поодиночке — 429)
             DuckDuckGo                1/20  (19 ответов — HTTP 202)
+            DuckDuckGo lite           2/20  (18 ответов — HTTP 202)
+            Wikipedia API            10/10  — без ключа, без анти-бота
             Mojeek / Bing / Startpage 0/20  — в цепочку не берутся
 
-        Слабые провайдеры оставлены намеренно: 30% лучше, чем ничего, когда
-        первый отказал.
+        Главный урок замера 2026-08-02: провайдера надо мерить СЕРИЕЙ, а не
+        одним запросом. Поодиночке brave-html давал 9 из 10 и выглядел рабочим
+        резервом; на двадцати подряд он упирается в 429, и вся цепочка отдаёт
+        1/20. То есть настоящего резерва у бесплатных HTML-провайдеров нет.
+
+        Слабые провайдеры оставлены намеренно: они отвечают на ПЕРВЫЕ запросы,
+        а этого хватает, когда Яндекс отказал ненадолго. Настоящий резерв —
+        ключ Brave/Tavily/Serper: ветки готовы, нужен только ключ.
         """
         chain: list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]] = []
         if self.settings.yandex_search_api_key:
@@ -514,6 +594,9 @@ class WebSurfer:
             chain.append(("serper", lambda: self._search_serper(query, limit)))
         chain.append(("brave-html", lambda: self._search_brave_html(query, limit)))
         chain.append(("duckduckgo", lambda: self._search_duckduckgo_html(query, limit)))
+        # Последним — энциклопедия: она отвечает не на всё, но отвечает ВСЕГДА,
+        # тогда как бесплатные HTML-провайдеры при серии запросов дают 1-2 из 20.
+        chain.append(("wikipedia", lambda: self._search_wikipedia(query, limit)))
         return chain
 
     async def _search_brave_html(self, query: str, limit: int) -> list[SearchResult]:

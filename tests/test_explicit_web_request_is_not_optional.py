@@ -243,3 +243,87 @@ def test_an_ordinary_message_still_reaches_the_archive(settings):
         assert response.status_code == 200, response.text
         ingestion = response.json().get("ingestion") or {}
         assert ingestion.get("category") != "web_request", ingestion
+
+
+@pytest.mark.anyio
+async def test_an_encyclopedia_fallback_is_never_passed_off_as_fresh(monkeypatch):
+    """Мутация: убрать оговорку про энциклопедию — тест краснеет.
+
+    Wikipedia — последнее звено цепочки: она отвечает 10/10, когда бесплатные
+    HTML-провайдеры при серии запросов дают 1-2 из 20. Но на «какая завтра
+    погода» её статья не ответ, и выдавать справочник за свежую выдачу нельзя.
+    """
+    import friday.agent_runtime as runtime_module
+
+    class _Result:
+        success = True
+        attachment = None
+        data = {
+            "sources": [
+                {"url": "https://ru.wikipedia.org/wiki/Погода", "title": "Погода", "text": "…"}
+            ]
+        }
+
+        def to_llm_message(self) -> str:
+            return "Результат web_research: статья «Погода»"
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            return _Result()
+
+    class _NoLLM:
+        enabled = False
+
+    runtime = object.__new__(runtime_module.AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.llm = _NoLLM()
+    messages: list[dict] = []
+    await runtime_module.AgentRuntime._prefetch_the_web_if_asked(  # noqa: SLF001
+        runtime,
+        "найди в интернете, какая завтра погода",
+        actor=None,
+        tools=[{"function": {"name": "web_research"}}],
+        messages=messages,
+        tools_used=[],
+        tool_evidence=[],
+    )
+    assert messages
+    content = messages[0]["content"]
+    assert "ЭНЦИКЛОПЕДИИ" in content, "справочная статья выдана за свежую выдачу"
+    assert "свежих данных получить не удалось" in content
+
+
+@pytest.mark.anyio
+async def test_an_ordinary_result_carries_no_encyclopedia_caveat(monkeypatch):
+    """Контроль: обычная выдача не обрастает оговоркой."""
+    import friday.agent_runtime as runtime_module
+
+    class _Result:
+        success = True
+        attachment = None
+        data = {"sources": [{"url": "https://cbr.ru/", "title": "Ставка", "text": "14%"}]}
+
+        def to_llm_message(self) -> str:
+            return "Результат web_research: ставка 14%"
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            return _Result()
+
+    class _NoLLM:
+        enabled = False
+
+    runtime = object.__new__(runtime_module.AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.llm = _NoLLM()
+    messages: list[dict] = []
+    await runtime_module.AgentRuntime._prefetch_the_web_if_asked(  # noqa: SLF001
+        runtime,
+        "найди в интернете ключевую ставку",
+        actor=None,
+        tools=[{"function": {"name": "web_research"}}],
+        messages=messages,
+        tools_used=[],
+        tool_evidence=[],
+    )
+    assert messages and "ЭНЦИКЛОПЕДИИ" not in messages[0]["content"]

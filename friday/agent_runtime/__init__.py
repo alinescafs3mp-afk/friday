@@ -2228,6 +2228,19 @@ class AgentRuntime:
             return
         sources = _web_source_lines(result.data)
         source_block = ("\n\nИсточники, которые надо привести в ответе:\n" + sources) if sources else ""
+        # Энциклопедия — последнее звено цепочки: она отвечает, когда поисковики
+        # отказали. Но на «какая завтра погода» и «курс на сегодня» её статья не
+        # ответ, и выдавать её за свежую выдачу нельзя.
+        encyclopedia_only = bool(sources) and all(
+            "wikipedia.org" in line for line in sources.splitlines() if line.strip()
+        )
+        if encyclopedia_only:
+            source_block += (
+                "\n\nВНИМАНИЕ: поисковики не ответили, это выдача ЭНЦИКЛОПЕДИИ. "
+                "Если вопрос про сегодняшнее — курс, погоду, новости, — прямо скажи, "
+                "что свежих данных получить не удалось, и не выдавай справочную "
+                "статью за нынешнее положение дел."
+            )
         messages.append(
             {
                 "role": "system",

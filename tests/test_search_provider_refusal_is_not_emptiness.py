@@ -172,3 +172,118 @@ async def test_duckduckgo_200_without_markup_is_also_a_refusal(settings):
     with pytest.raises(ProviderRefusedError):
         await surfer._search_duckduckgo_html("что угодно", 5)  # noqa: SLF001
     await surfer.close()
+
+
+_WIKIPEDIA_JSON = {
+    "query": {
+        "search": [
+            {"title": "Эльбрус", "snippet": "<span class=\"searchmatch\">Эльбру́с</span> — стратовулкан"},
+            {"title": "Эльбрус (микропроцессор)", "snippet": "Серия микропроцессоров"},
+        ]
+    }
+}
+
+
+@pytest.mark.anyio
+async def test_the_encyclopedia_answers_when_every_search_engine_refuses(settings):
+    """Мутация: убрать wikipedia из цепочки — тест краснеет.
+
+    Замер 2026-08-02, тот же набор из двадцати запросов, критерий объявлен до
+    замера: бесплатные HTML-провайдеры при СЕРИИ запросов дают 1-2 из 20
+    (brave-html упирается в 429, DuckDuckGo отвечает 202), а поодиночке — 9/10
+    и выглядят рабочим резервом. Провайдера надо мерить нагрузкой. Wikipedia на
+    том же наборе — 10/10, без ключа и без анти-бота.
+    """
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        seen.append(host)
+        if "wikipedia.org" in host:
+            return httpx.Response(200, json=_WIKIPEDIA_JSON)
+        return httpx.Response(429, text="Too Many Requests")
+
+    surfer = _surfer(settings, handler, yandex_search_api_key="")
+    results = await surfer.search("высота Эльбруса", max_results=2)
+    await surfer.close()
+
+    assert results, "энциклопедия не спасла цепочку"
+    assert results[0].source == "wikipedia-ru"
+    assert results[0].url == "https://ru.wikipedia.org/wiki/%D0%AD%D0%BB%D1%8C%D0%B1%D1%80%D1%83%D1%81"
+    # Разметка подсветки в сниппет не попадает: это мусор и для модели, и для человека.
+    assert "<span" not in results[0].snippet
+    assert "Эльбру́с" in results[0].snippet
+    assert any("wikipedia.org" in host for host in seen)
+
+
+@pytest.mark.anyio
+async def test_the_encyclopedia_is_asked_last_not_first(settings):
+    """Свежая выдача важнее справочника: энциклопедия — последнее звено."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "wikipedia.org" in request.url.host:
+            return httpx.Response(200, json=_WIKIPEDIA_JSON)
+        return httpx.Response(
+            200,
+            text=(
+                "<div class='result'><a class='result__a' href='https://cbr.ru/'>Ставка</a>"
+                "<div class='result__snippet'>14%</div></div>"
+            ),
+        )
+
+    surfer = _surfer(settings, handler, yandex_search_api_key="")
+    results = await surfer.search("ключевая ставка")
+    await surfer.close()
+    assert results and results[0].source != "wikipedia-ru", (
+        "энциклопедия обогнала поисковики"
+    )
+
+
+@pytest.mark.anyio
+async def test_the_encyclopedia_falls_back_to_english(settings):
+    """Русской статьи нет — спрашиваем английскую, а не сдаёмся."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host.startswith("ru."):
+            return httpx.Response(200, json={"query": {"search": []}})
+        if request.url.host.startswith("en."):
+            return httpx.Response(
+                200, json={"query": {"search": [{"title": "Raft (algorithm)", "snippet": "consensus"}]}}
+            )
+        return httpx.Response(429, text="nope")
+
+    surfer = _surfer(settings, handler, yandex_search_api_key="")
+    results = await surfer.search("RAFT consensus")
+    await surfer.close()
+    assert results and results[0].source == "wikipedia-en"
+
+
+@pytest.mark.anyio
+async def test_a_refusing_encyclopedia_is_a_refusal_too(settings):
+    """429 от энциклопедии — отказ, а не «в интернете ничего нет»."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="Too Many Requests")
+
+    surfer = _surfer(settings, handler, yandex_search_api_key="")
+    with pytest.raises(AllProvidersRefusedError):
+        await surfer.search("что угодно")
+    await surfer.close()
+
+
+@pytest.mark.anyio
+async def test_the_encyclopedia_introduces_itself_honestly(settings):
+    """Wikimedia просит не подделываться под браузер — и не блокирует честных."""
+    agents: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "wikipedia.org" in request.url.host:
+            agents.append(request.headers.get("user-agent", ""))
+            return httpx.Response(200, json=_WIKIPEDIA_JSON)
+        return httpx.Response(429, text="nope")
+
+    surfer = _surfer(settings, handler, yandex_search_api_key="")
+    await surfer.search("Эльбрус")
+    await surfer.close()
+    assert agents and "Friday" in agents[0]
+    assert "Mozilla" not in agents[0], "подделка под браузер против правил Wikimedia"
