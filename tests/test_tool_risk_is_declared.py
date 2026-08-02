@@ -31,6 +31,8 @@ OBSERVE = {
     "kg_stats",
     "make_file",
     "what_happened",
+    # Смотрит вперёд, в поставленные напоминания и события: ничего не меняет.
+    "upcoming",
     "list_tags",
     "resolve_duplicates",
     "conflict_list",

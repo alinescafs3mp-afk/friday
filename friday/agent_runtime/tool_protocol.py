@@ -279,6 +279,33 @@ def contains_internal_tool_output(content: str) -> bool:
     return envelope_chars >= len(text) * _ENVELOPE_DOMINANCE
 
 
+#: Вызов инструмента, записанный как код: `memory_search.search(query="…")`.
+#:
+#: Замерено на недельном прогоне 2026-08-02: на вопрос «Стоит ли брать 5090 под
+#: локальные модели?» человек получил ответом ровно строку
+#: `memory_search.search(query="Стоит ли брать 5090 под локальные модели?")`.
+#: Распознавались только JSON-конверт и `<tool_call>`, а эта форма — ни то, ни
+#: другое, и она уходила человеку как готовый ответ.
+#:
+#: Требуется полное совпадение со всем текстом: объяснение, В КОТОРОМ упомянут
+#: вызов, — законный ответ, и терять его нельзя (ровно эту цену платил прежний
+#: детектор конвертов, забраковывавший любой рассказ про JSON).
+_CODE_STYLE_CALL_RE = re.compile(
+    r"^[a-z_][a-z0-9_]{2,}(?:\.[a-z_][a-z0-9_]*)?"  # имя инструмента, при желании с методом
+    r"\(\s*[a-z_][a-z0-9_]*\s*=.*\)$",  # и хотя бы один именованный аргумент
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def looks_like_a_code_style_call(content: str) -> bool:
+    """Является ли ответ целиком вызовом инструмента, записанным как код."""
+    text = (content or "").strip()
+    if not text or "\n" in text.strip().strip("\n"):
+        # Многострочный текст — это уже не одно выражение, а рассказ.
+        return False
+    return bool(_CODE_STYLE_CALL_RE.fullmatch(text))
+
+
 def classify_tool_turn(content: str) -> ToolTurn:
     """Classify a complete assistant response without leaking control payloads."""
 
@@ -297,6 +324,6 @@ def classify_tool_turn(content: str) -> ToolTurn:
         if is_tool_envelope(decoded):
             return ToolTurn(kind="protocol_error")
 
-    if contains_internal_tool_output(text):
+    if contains_internal_tool_output(text) or looks_like_a_code_style_call(text):
         return ToolTurn(kind="protocol_error")
     return ToolTurn(kind="answer", text=text)

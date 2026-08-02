@@ -38,6 +38,12 @@ _MAX_TOOL_ROUNDS = 3
 # so a tool-grounded answer is judged against what it actually used — not only the
 # user's personal notes (which it may not rest on at all).
 _MAX_TOOL_EVIDENCE = 6
+#: Сколько знаков КАЖДОГО результата инструмента видит судья обоснованности.
+#: Было 500 — на выдаче веб-поиска в несколько тысяч знаков это вырезка, по
+#: которой ни один названный в ответе факт не подтверждается. Шесть записей по
+#: 2500 знаков — 15 тысяч, что для судьи с контекстом в десятки тысяч токенов
+#: посильно и стоит одного вызова.
+_TOOL_EVIDENCE_CHARS = 2500
 _MODE_TOOL_BUDGETS = {
     "dialogue": (4, 2),
     "knowledge_work": (8, 3),
@@ -621,6 +627,30 @@ def _relabel_history_citations(
     return _KNOWLEDGE_CITATION_RE.sub(rewrite, content)
 
 
+#: Метка, ПОХОЖАЯ на ссылку, но ссылкой не являющаяся: `[K_source]`, `[K источник]`,
+#: `[KB]`. Настоящие — только `[K1]`…`[K99]`, их разбирает `CITATION_MARKER_RE`.
+_INVENTED_CITATION_RE = re.compile(r"\[\s*K[_\-\s]*(?![0-9])[^\]\n]{0,24}\]", re.IGNORECASE)
+
+
+def _strip_invented_citations(content: str) -> str:
+    """Убрать ссылки, которые модель придумала: открыть их всё равно нельзя.
+
+    Замерено на недельном прогоне 2026-08-02: отвечая по веб-выдаче, модель
+    ставила `[K_source]` — по образцу настоящих `[K1]`, но ни на что не
+    указывающую. Человек видел в тексте служебный мусор, а «ссылка», которую
+    невозможно открыть, ещё и врёт про обоснованность ответа.
+
+    Настоящие метки не трогаются: они номерные и разбираются отдельно.
+    """
+    text = str(content or "")
+    if "[K" not in text and "[k" not in text:
+        return text
+    cleaned = _INVENTED_CITATION_RE.sub("", text)
+    # Пробел перед знаком препинания, оставшийся от вырезанной метки.
+    cleaned = re.sub(r"[ \t]+([,.;:!?])", r"\1", cleaned)
+    return re.sub(r"[ \t]{2,}", " ", cleaned)
+
+
 def _unknown_verdict(reason: str) -> dict[str, Any]:
     """Fail-closed verdict: a verifier that cannot vouch never reports success."""
     return {"status": VERDICT_UNKNOWN, "ok": False, "score": None, "issues": [reason]}
@@ -702,10 +732,14 @@ _CAUTION_DETAIL_LIMIT = 600
 _CAUTION_ITEM_LIMIT = 200
 
 
-def _verification_caution(status: str, issues: list[Any]) -> str:
+def _verification_caution(status: str, issues: list[Any], *, from_the_web: bool = False) -> str:
     """User-facing warning for a failed or unverifiable answer (empty otherwise)."""
     if status == VERDICT_FAILED:
-        head = "⚠️ Автопроверка нашла возможные несоответствия с вашими данными — перепроверьте факты."
+        head = (
+            "⚠️ Часть сказанного не подтвердилась найденными источниками — перепроверьте факты."
+            if from_the_web
+            else "⚠️ Автопроверка нашла возможные несоответствия с вашими данными — перепроверьте факты."
+        )
         # Замечания перечисляются ЦЕЛИКОМ, по одному в строке, и обрыв виден.
         #
         # Найдено владельцем 2026-08-02: «сообщения обрезаются в последнем блоке,
@@ -737,7 +771,7 @@ def _verification_caution(status: str, issues: list[Any]) -> str:
     return ""
 
 
-def _grounding_warning(content: str, answer_grounded: bool | None) -> str:
+def _grounding_warning(content: str, answer_grounded: bool | None, *, from_the_web: bool = False) -> str:
     """Предупреждение, которое обязано стоять ПЕРЕД ответом, а не после него.
 
     Замерено на переписке владельца за 2026-07-30: из 15 ответов ассистента 10 несли
@@ -771,6 +805,15 @@ def _grounding_warning(content: str, answer_grounded: bool | None) -> str:
             "утверждения сейчас не найдено ни одного источника. Проверьте по документам."
         )
     if answer_grounded is False:
+        if from_the_web:
+            # Ответ о внешнем мире и НЕ ДОЛЖЕН опираться на личные записи: у
+            # человека нет своей заметки про курс доллара или новости Европы.
+            # Замерено на недельном прогоне — пометка появлялась под каждым
+            # ответом из интернета; владелец попросил её убрать, и он прав:
+            # предупреждение, которое всегда некстати, обесценивает те, что по
+            # делу. Источники у такого ответа свои — ссылки идут отдельной
+            # строкой.
+            return ""
         return (
             "⚠️ Ответ не опирается ни на одну запись вашей базы, хотя записи по запросу "
             "нашлись — проверьте ключевые факты."
@@ -1076,6 +1119,22 @@ class AgentRuntime:
             # second full retry budget — 726 seconds on top of 726, one message
             # holding a foreground slot for 24 minutes.
             and len(content) >= self.settings.verify_min_answer_chars
+            # Проверять есть смысл только там, где есть С ЧЕМ сверять.
+            #
+            # Судья складывает данные из личных записей и результатов
+            # инструментов; если нет ни того, ни другого, он получает строку
+            # «(нет данных)» и обязан забраковать КАЖДОЕ утверждение — иного
+            # вердикта у него быть не может. Замерено на недельном прогоне:
+            # рассказ о принципах работы, совет по ужину, объяснение из
+            # собственных знаний модели — всё это уходило человеку с пометкой
+            # «не подтверждается вашими данными», хотя своих данных на эту тему у
+            # него нет и не предполагается.
+            #
+            # Предупреждение, которое появляется не по делу, обесценивает те, что
+            # по делу: человек перестаёт их читать — и пропустит настоящее
+            # расхождение с документом.
+            and (context.knowledge_hits or response.get("tool_evidence"))
+            and not context.small_talk
         ):
             verification = await self._verify_response(
                 clean_message, content, context, tool_evidence=response.get("tool_evidence")
@@ -1107,9 +1166,23 @@ class AgentRuntime:
             if made:
                 response = {**response, "file_clips": [made]}
         answer_verified = verification_status == VERDICT_PASSED
-        verification_caution = _verification_caution(
-            verification_status, list(verification.get("issues") or [])
+        # Ответ из интернета сверяется с ВЫДАЧЕЙ, а не с личным архивом, и
+        # говорить о «несоответствии с вашими данными» здесь неправда: своих
+        # данных по курсу доллара у человека и нет.
+        from_the_web = any(
+            str(entry.get("tool") or "").startswith("web_")
+            for entry in (response.get("tool_evidence") or [])
         )
+        verification_caution = _verification_caution(
+            verification_status,
+            list(verification.get("issues") or []),
+            from_the_web=from_the_web,
+        )
+
+        # Выдуманные ссылки убираются ПОСЛЕ проверки и ремонта, но ДО разбора
+        # настоящих: судья должен видеть ответ таким, каким его написала модель,
+        # а человек — без меток, которые никуда не ведут.
+        content = _strip_invented_citations(content)
 
         cited_knowledge_ids = self._extract_cited_knowledge_ids(content, context)
         tool_knowledge_ids = [
@@ -1150,7 +1223,7 @@ class AgentRuntime:
         # собранный из прежних ходов, приходит с пометками «вне выборки» и без единой
         # живой ссылки — при этом поиск в текущем ходе мог не найти ничего и не поднять
         # ни одного признака. См. `_grounding_warning`.
-        grounding_warning = _grounding_warning(content, answer_grounded)
+        grounding_warning = _grounding_warning(content, answer_grounded, from_the_web=from_the_web)
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.
@@ -2453,6 +2526,13 @@ class AgentRuntime:
                             "другое — разговор, просьба сделать что-то в системе.\n"
                             "Поле «запрос» заполняй только для вида «интернет»: коротко, до десяти слов, "
                             "как человек набрал бы в поисковой строке.\n"
+                            # Дату арбитр знать обязан. Замерено на недельном прогоне: на
+                            # «какие новые дроны применяются?» он составил запрос
+                            # «new drones used in Ukraine war 2024» — год из своего
+                            # обучения, — и человек получил позапрошлогоднюю сводку под
+                            # видом свежей. Год в запросе пишется только когда он нужен.
+                            f"{self._today_line().strip()}\n"
+                            "Если в запрос просится год — бери ТЕКУЩИЙ, а не тот, что помнишь.\n"
                             "ЯЗЫК ЗАПРОСА выбирай по тому, где лежит ответ. Просят зарубежные, "
                             "иностранные, мировые источники или новости не из рунета — пиши запрос "
                             "ПО-АНГЛИЙСКИ: русская формулировка приводит на русские сайты, чем бы "
@@ -3193,9 +3273,17 @@ class AgentRuntime:
             f"{best_snippet(query, str(item.get('content') or item.get('summary') or ''), max_chars=360)}"
             for item in evidence_hits[:5]
         )
+        # Судье нужна ВЫДАЧА, а не пятьсот знаков из неё.
+        #
+        # Замерено на недельном прогоне 2026-08-02: почти каждый ответ, собранный
+        # из интернета, получал предупреждение «факты не подтверждены» — новости,
+        # цены на видеокарты, сводки. Ответ строится по всей выдаче на несколько
+        # тысяч знаков, а судья видел вырезку в 500 и честно не находил в ней ни
+        # одного названного факта. Ложная тревога на каждом внешнем ответе
+        # обесценивает и настоящие: человек перестаёт читать предупреждения.
         tool_lines = [
             f"- {entry.get('tool', 'tool')}: "
-            f"{best_snippet(query, str(entry.get('output') or ''), max_chars=500)}"
+            f"{best_snippet(query, str(entry.get('output') or ''), max_chars=_TOOL_EVIDENCE_CHARS)}"
             for entry in (tool_evidence or [])[:_MAX_TOOL_EVIDENCE]
             if str(entry.get("output") or "").strip()
         ]
@@ -3215,6 +3303,10 @@ class AgentRuntime:
             {
                 "role": "system",
                 "content": (
+                    # Судья тоже живёт в своём году, если ему не сказать. Ответ
+                    # «курс ЦБ на 1 августа 2026» без этой строки выглядит для
+                    # него выдумкой о будущем — и он честно бракует правильное.
+                    f"{self._today_line().strip()}\n"
                     "Проверь ответ на несоответствие приведённым данным и выдуманные факты, "
                     "не подтверждённые ни личными заметками, ни результатами инструментов. "
                     "Факт, подтверждённый результатом инструмента, считается обоснованным. "

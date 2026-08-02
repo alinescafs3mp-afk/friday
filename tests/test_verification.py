@@ -33,6 +33,35 @@ class _EmptySearcher:
         return {"results": [], "entity_matches": []}
 
 
+class _SearcherWithOneRecord:
+    """Поиск, который что-то нашёл, — иначе проверять нечего.
+
+    С 2026-08-02 автопроверка запускается только там, где есть С ЧЕМ сверять:
+    личные записи или результаты инструментов. Без этого судья получал строку
+    «(нет данных)» и обязан был забраковать любое утверждение — предупреждение
+    приходило человеку на совет по ужину и на объяснение общего принципа.
+
+    Эти тесты про поведение СУДЬИ, а не про условие запуска, поэтому контекст им
+    нужен непустой.
+    """
+
+    async def search(self, user_id, query, **kwargs):
+        del user_id, query, kwargs
+        return {
+            "results": [
+                {
+                    "id": "ko_atlas",
+                    "title": "База Atlas",
+                    "summary": "Кластер PostgreSQL 16.",
+                    "content": "Кластер PostgreSQL 16.",
+                    "_score": 0.61,
+                    "_rerank_score": 0.74,
+                }
+            ],
+            "entity_matches": [],
+        }
+
+
 class _ScriptedLLM:
     """Answers generation, then replies to the verification prompt on demand."""
 
@@ -74,7 +103,7 @@ async def _run_chat(settings, storage, llm, *, verify_min_chars=1, verify_answer
         "Что известно про базу Atlas?",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         enable_tools=False,
-        hybrid_searcher=_EmptySearcher(),
+        hybrid_searcher=_SearcherWithOneRecord(),
     )
 
 

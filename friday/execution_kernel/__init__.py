@@ -780,6 +780,7 @@ class ExecutionKernel:
             "kg_stats": self._kg_stats,
             "make_file": self._make_file,
             "what_happened": self._what_happened,
+            "upcoming": self._upcoming,
             "remind": self._remind,
             "list_tags": self._list_tags,
             "speak": self._speak,
@@ -1389,6 +1390,54 @@ class ExecutionKernel:
             "on": occurred_at,
             "at": clock,
             "entity_id": entity["id"],
+        }
+
+    async def _upcoming(self, *, actor: ActorContext, days: int = 7) -> dict[str, Any]:
+        """Что человеку предстоит: напоминания и события с датами впереди.
+
+        Найдено недельным прогоном 2026-08-02. На «Доброе утро! Какие планы на
+        сегодня?» Пятница вызвала `what_happened` и пересказала ВЧЕРАШНЮЮ
+        переписку человека: «в 00:37 смотрел статистику базы, в 02:31 спрашивал,
+        как меня зовут». Инструмента, смотрящего вперёд, у неё просто не было —
+        а утренний вопрос о планах для помощника руководителя основной.
+
+        Читается та же лента, по которой рассылает орган напоминаний, и та же
+        отметка автора: чужие напоминания в чужие планы не попадают.
+        """
+        storage, _, _, _ = self._require_services()
+        horizon = max(1, min(int(days or 7), 60))
+        today = datetime.now(self._zone()).date()
+        rows = await run_blocking(
+            storage.list_events_in_range,
+            actor.user_id,
+            start=today.isoformat(),
+            end=(today + timedelta(days=horizon)).isoformat(),
+            limit=100,
+        )
+        items = []
+        for row in rows:
+            source = str(row.get("source") or "")
+            # Напоминание принадлежит тому, кто его поставил; событие из
+            # документа — общее. То же правило, что у органа рассылки.
+            if source.startswith("reminder:") and source[len("reminder:") :] != actor.own_id:
+                continue
+            occurred_at = str(row.get("occurred_at") or "")
+            when = "сегодня" if occurred_at == today.isoformat() else occurred_at
+            if occurred_at == (today + timedelta(days=1)).isoformat():
+                when = "завтра"
+            items.append(
+                {
+                    "what": str(row.get("name") or ""),
+                    "on": occurred_at,
+                    "when": when,
+                    "mine": source.startswith("reminder:"),
+                }
+            )
+        return {
+            "days": horizon,
+            "total": len(items),
+            "items": items[:40],
+            "note": "" if items else f"На ближайшие {horizon} дн. ничего не запланировано.",
         }
 
     async def _what_happened(
@@ -2668,6 +2717,23 @@ class ExecutionKernel:
             # безобидно — класс риска должен отвечать на вопрос «что останется
             # после вызова», а не «страшно ли это».
             risk="mutate",
+        )
+        spec(
+            "upcoming",
+            "Что человеку ПРЕДСТОИТ: поставленные напоминания и события с датами "
+            "впереди. Используй на вопросы «какие планы», «что у меня сегодня», "
+            "«что на неделе», «что предстоит», «о чём я просил напомнить». Это НЕ "
+            "what_happened: тот смотрит назад, в уже случившееся, и на вопрос о "
+            "планах пересказывает старую переписку.",
+            "kg.read",
+            {
+                "days": {
+                    "type": "integer",
+                    "description": "На сколько дней вперёд смотреть. По умолчанию 7.",
+                },
+            },
+            [],
+            risk="observe",
         )
         spec(
             "what_happened",

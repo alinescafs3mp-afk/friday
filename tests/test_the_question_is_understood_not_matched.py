@@ -106,9 +106,15 @@ class _FakeLLM:
 
 
 def _runtime_with(content: str) -> tuple[AgentRuntime, _FakeLLM]:
+    from friday.config import load_settings
+
     runtime = AgentRuntime.__new__(AgentRuntime)
     llm = _FakeLLM(content)
     runtime.llm = llm
+    # Настройки нужны по-настоящему: арбитру передаётся сегодняшняя дата (иначе
+    # он составляет запросы с годом из своего обучения — замерено на недельном
+    # прогоне, «drones ... 2024» в 2026 году).
+    runtime.settings = load_settings()
     return runtime, llm
 
 

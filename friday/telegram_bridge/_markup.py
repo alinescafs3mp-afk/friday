@@ -62,8 +62,10 @@ def to_telegram_html(text: str) -> str:
     stash: list[str] = []
 
     def _stash_block(match: re.Match[str]) -> str:
-        body = match.group(2)
-        stash.append(f"<pre><code>{html.escape(body.strip('\n'))}</code></pre>")
+        # Перевод строки вынесен в переменную: обратный слэш внутри f-строки
+        # появился только в Python 3.12, а проект держит совместимость с 3.11.
+        body = match.group(2).strip("\n")
+        stash.append(f"<pre><code>{html.escape(body)}</code></pre>")
         return _PLACEHOLDER.format(len(stash) - 1)
 
     def _stash_span(match: re.Match[str]) -> str:
