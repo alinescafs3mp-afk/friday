@@ -32,6 +32,44 @@ from friday.people import resolve_person, unambiguous
 
 router = APIRouter()
 
+#: Ключи метаданных, которые нужны панели и не являются написанным человеком.
+_METADATA_KEYS_FOR_OVERSIGHT = ("self_registered", "language_code", "source", "created_by")
+
+
+def _has_capability(request: Request, capability: str) -> bool:
+    """Есть ли у обращающегося эта способность — без отказа, если нет."""
+    actor = getattr(request.state, "actor", None)
+    service = getattr(request.app.state, "auth_service", None)
+    if actor is None or service is None:
+        return False
+    return bool(service.authorize(actor, capability).allowed)
+
+
+def _redact_user_metadata(user: dict[str, Any]) -> dict[str, Any]:
+    """Оставить в метаданных факты об учётке и убрать написанное человеком.
+
+    Различаются две вещи: «у этого аккаунта есть чат для уведомлений» — факт
+    администрирования, и «вот что человек написал о себе в инструкциях» — его
+    личный текст. Первое остаётся, второе уходит.
+    """
+    import json
+
+    try:
+        metadata = json.loads(str(user.get("metadata_json") or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    safe = {key: metadata[key] for key in _METADATA_KEYS_FOR_OVERSIGHT if key in metadata}
+    # Факт наличия личного чата виден, номер — нет: это адрес человека в Telegram.
+    if str(metadata.get("chat_id") or "").strip():
+        safe["has_chat"] = True
+    instructions = str(metadata.get("custom_instructions") or "").strip()
+    if instructions:
+        # Факт, что инструкции заданы, для надзора осмысленный; их текст — нет.
+        safe["has_custom_instructions"] = True
+    return {"metadata_json": json.dumps(safe, ensure_ascii=False), "metadata_redacted": True}
+
 
 @router.get("/users")
 async def list_users(
@@ -39,11 +77,35 @@ async def list_users(
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
+    """Список учётных записей. Личное содержимое метаданных — только с полным доступом.
+
+    `metadata_json` уходил клиенту целиком, потому что `list_users` делает
+    `SELECT *`. А туда `PATCH /api/me/instructions` кладёт `custom_instructions` —
+    свободный текст, который человек пишет О СЕБЕ, — и `_authenticate` кладёт
+    `chat_id` личного чата и язык. Проверено: подчинённый написал себе «у меня
+    развод, пиши мягче», и начальник с одним лишь надзором (`admin.activity.read`
+    + `admin.users.read`) прочитал это в первом же запросе панели.
+
+    Соседний `/users/{id}/activity` для того же начальника честно отдаёт
+    `content: "redacted"` — уровень «вижу объём, не вижу написанного» построен
+    аккуратно и тут же обходился списком аккаунтов. Здесь остаётся то, ради чего
+    список и нужен: кто есть, какой пресет, когда заходил, есть ли чат для
+    уведомлений. Само содержимое личных инструкций — нет.
+    """
     _require(request, "admin.users.read")
     state = _services(request)
+    granted_full = _has_capability(request, "admin.all_data.read")
     users = state.storage.list_users(limit=limit, offset=offset)
     for user in users:
         user["permission_overrides"] = state.storage.get_permission_overrides(user["id"])
+        if not granted_full:
+            user.update(_redact_user_metadata(user))
+    if not granted_full:
+        # Читать чужой список учёток без полного доступа — событие для следа:
+        # соседний `/identities` пишет его ровно по этой причине.
+        _audit_cross_tenant_read(
+            request, "admin.users.list", None, content="redacted", count=len(users)
+        )
     return {
         "items": users,
         "count": len(users),

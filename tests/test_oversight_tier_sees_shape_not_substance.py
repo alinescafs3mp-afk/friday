@@ -158,3 +158,70 @@ def test_the_overseer_cannot_grant_itself_the_wider_level(instance):
         headers=watcher,
     )
     assert response.status_code == 403, response.text
+
+
+PRIVATE_NOTE = "у меня развод, пиши мягче"
+
+
+def test_the_account_list_does_not_hand_over_what_a_person_wrote_about_themselves(instance):
+    """Мутация: убрать вычистку метаданных из `/users` — тест краснеет.
+
+    Уровень «вижу объём, не вижу написанного» построен аккуратно на маршруте
+    активности и обходился соседним списком аккаунтов, который панель дёргает при
+    первой отрисовке: `list_users` делает `SELECT *`, а в `metadata_json` лежат
+    личные инструкции человека («у меня развод, пиши мягче»), номер его чата и
+    язык. Проверено — начальник читал это в первом же запросе.
+    """
+    client, storage, _, watcher = instance
+    storage.update_user(
+        "subject",
+        metadata_json={
+            "custom_instructions": PRIVATE_NOTE,
+            "chat_id": "778899",
+            "language_code": "ru",
+        },
+    )
+
+    response = client.get("/api/admin/users", headers=watcher)
+    assert response.status_code == 200, response.text
+    blob = response.text
+    assert PRIVATE_NOTE not in blob, "личные инструкции человека ушли надзору"
+    assert "778899" not in blob, "личный номер чата ушёл надзору"
+
+    subject = next(row for row in response.json()["items"] if row["id"] == "subject")
+    assert subject["metadata_redacted"] is True
+    import json
+
+    metadata = json.loads(subject["metadata_json"])
+    # Факты об учётке остаются: без них список аккаунтов бесполезен.
+    assert metadata["has_chat"] is True
+    assert metadata["has_custom_instructions"] is True
+    assert metadata["language_code"] == "ru"
+    assert "custom_instructions" not in metadata
+    assert "chat_id" not in metadata
+
+
+def test_the_full_administrator_still_sees_the_metadata(instance):
+    """Контроль: владелец не потерял ничего — он решил видеть всё."""
+    client, storage, owner, _ = instance
+    storage.update_user(
+        "subject", metadata_json={"custom_instructions": PRIVATE_NOTE, "chat_id": "778899"}
+    )
+    payload = client.get("/api/admin/users", headers=owner).json()
+    subject = next(row for row in payload["items"] if row["id"] == "subject")
+    assert PRIVATE_NOTE in subject["metadata_json"]
+    assert "metadata_redacted" not in subject
+
+
+def test_reading_the_account_list_without_full_access_is_recorded(instance):
+    """Чтение чужого списка учёток попадает в след.
+
+    Соседний `/identities` пишет это событие ровно по той же причине: иначе
+    «посмотрел, кто есть» и «прочитал личные данные» неотличимы в журнале.
+    """
+    client, storage, owner, watcher = instance
+    client.get("/api/admin/users", headers=watcher)
+    rows = client.get("/api/admin/audit?limit=50", headers=owner).json()["items"]
+    assert any(str(row.get("action") or "") == "admin.users.list" for row in rows), (
+        "чтение чужого списка учёток не оставило следа"
+    )
