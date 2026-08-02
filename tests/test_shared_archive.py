@@ -187,3 +187,37 @@ def test_the_trail_still_says_who_acted(shared, storage):
     assert rows, "след не записан"
     assert str(rows[0]["user_id"]) == "kolya", "в следе арендатор вместо человека"
     assert LEGACY_OWNER_USER_ID in str(rows[0]["after_json"]), "потерян арендатор, в котором шла работа"
+
+
+def test_a_telegram_turn_survives_the_shared_archive(shared):
+    """Мутация: вернуть `actor.user_id` в привязку канала — тест краснеет.
+
+    Замерено на живом мосте: `/api/chat` отвечал 500 «Conversation does not
+    belong to user», мост откладывал сообщение и крутил его по кругу, а человек
+    не получал НИЧЕГО — при том что ответ был сформирован и лежал в базе,
+    владелец видел его в админке.
+
+    Причина — в общем архиве `user_id` у всех один, разговор создаётся под
+    личным идентификатором, и привязка канала к разговору не проходила проверку
+    принадлежности.
+    """
+    import inspect
+
+    from friday import server
+
+    source = inspect.getsource(server)
+    assert "get_channel_session(\n                actor.own_id" in source or (
+        "actor.own_id,\n                \"telegram\"," in source
+    ), "сессия канала ищется по арендатору, а не по человеку"
+    # И привязка, и чтение — обе стороны, иначе ход рвётся на второй реплике.
+    bindings = source.count('set_channel_conversation(\n                    actor.own_id')
+    assert bindings == 2, f"привязок канала на личный идентификатор: {bindings}, ожидалось 2"
+
+
+def test_the_channel_session_round_trips_for_a_person(shared, storage):
+    """Поведением: привязали разговор к чату — нашли его обратно."""
+    storage.ensure_user("kolya", preset_key="user")
+    conversation = storage.create_conversation("kolya", title="Из телеграма")
+    storage.set_channel_conversation("kolya", "telegram", "5001", conversation["id"], mode="dialogue")
+    session = storage.get_channel_session("kolya", "telegram", "5001")
+    assert session and str(session["conversation_id"]) == conversation["id"]

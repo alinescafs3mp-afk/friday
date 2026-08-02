@@ -207,6 +207,14 @@ def _window_bound(value: str | None, *, edge: str) -> tuple[str | None, str | No
 
 
 #: «26 июля в 15 часов», «2026-07-26 15:00», «26.07.2026 15:30».
+#: Человек назвал день недели, а не дату. Для напоминания это значит ближайший
+#: БУДУЩИЙ такой день: разбор времени писался для вопросов о прошлом и берёт
+#: прошедший.
+_NAMES_A_WEEKDAY = re.compile(
+    r"\bпонедельник\w*|\bвторник\w*|\bсред[уые]\b|\bчетверг\w*|\bпятниц\w*|"
+    r"\bсуббот\w*|\bвоскресен\w*",
+    re.IGNORECASE,
+)
 _MOMENT_RE = re.compile(
     r"^\s*(?P<date>\S+(?:\s+\S+){0,2}?)"
     r"(?:\s*[, ]\s*(?:в\s+)?(?P<hour>\d{1,2})(?:[:.](?P<minute>\d{2}))?\s*(?:час\w*|ч|h)?)?\s*$",
@@ -308,6 +316,57 @@ def _spoken_day(text: str, *, today: date) -> str | None:
         return date(year, month, int(day)).isoformat()
     except ValueError:
         return None
+
+
+#: Час в словах человека: «в 15:00», «в 15 часов», «к 9». Минуты необязательны.
+_CLOCK_IN_TEXT = re.compile(
+    r"(?:^|\D)(?:в|к|на)?\s*(?P<hour>[01]?\d|2[0-3])[:.](?P<minute>[0-5]\d)"
+    r"|(?:^|\D)(?:в|к)\s*(?P<hour2>[01]?\d|2[0-3])\s*час",
+    re.IGNORECASE,
+)
+
+
+#: Дни недели по-русски → номер в неделе, как их считает `date.weekday()`.
+_WEEKDAY_NUMBERS = (
+    ("понедельник", 0), ("вторник", 1), ("сред", 2), ("четверг", 3),
+    ("пятниц", 4), ("суббот", 5), ("воскресен", 6),
+)
+
+
+def _future_day(text: str, *, today: date) -> str | None:
+    """«завтра», «в понедельник», «через неделю» → `ГГГГ-ММ-ДД` в БУДУЩЕМ.
+
+    Разбор времени в этом модуле писался для вопросов о прошлом: «вчера»,
+    «три дня назад», число без месяца — ближайшее ПРОШЕДШЕЕ. Для напоминания всё
+    ровно наоборот, и на живом прогоне это стоило дефекта: «не дай забыть в
+    понедельник позвонить» поставило событие на прошлую неделю, то есть не
+    сработало бы никогда. Отдельная функция, а не флаг в общей: два разных
+    вопроса — «когда это было» и «когда напомнить» — и путать их нельзя.
+    """
+    lowered = " ".join(str(text or "").split()).casefold()
+    if not lowered:
+        return None
+    if "послезавтра" in lowered:
+        return (today + timedelta(days=2)).isoformat()
+    if "завтра" in lowered:
+        return (today + timedelta(days=1)).isoformat()
+    if "сегодня" in lowered or "вечером" in lowered or "к вечеру" in lowered:
+        return today.isoformat()
+    through = re.search(r"через\s+(\d+|неделю|день|дня|дней|месяц)\s*(день|дня|дней|недел\w*|месяц\w*)?", lowered)
+    if through:
+        amount_text, unit_text = through.group(1), through.group(2) or ""
+        amount = 1 if not amount_text.isdigit() else int(amount_text)
+        unit = unit_text or amount_text
+        if unit.startswith("недел"):
+            return (today + timedelta(weeks=max(1, amount))).isoformat()
+        if unit.startswith("месяц"):
+            return (today + timedelta(days=30 * max(1, amount))).isoformat()
+        return (today + timedelta(days=max(1, amount))).isoformat()
+    for name, number in _WEEKDAY_NUMBERS:
+        if name in lowered:
+            ahead = (number - today.weekday()) % 7
+            return (today + timedelta(days=ahead or 7)).isoformat()
+    return None
 
 
 def _moment_bounds(value: str, *, edge: str, widen: bool = False) -> tuple[str | None, str | None]:
@@ -721,6 +780,7 @@ class ExecutionKernel:
             "kg_stats": self._kg_stats,
             "make_file": self._make_file,
             "what_happened": self._what_happened,
+            "remind": self._remind,
             "list_tags": self._list_tags,
             "speak": self._speak,
             "resolve_duplicates": self._resolve_duplicates,
@@ -1236,6 +1296,86 @@ class ExecutionKernel:
         except Exception:  # noqa: BLE001 — кривое имя пояса не должно ронять ход
             LOGGER.warning("Unknown timezone %r in settings; falling back to machine zone", name[:60])
             return datetime.now().astimezone().tzinfo or UTC
+
+    async def _remind(
+        self,
+        *,
+        actor: ActorContext,
+        what: str,
+        when: str,
+    ) -> dict[str, Any]:
+        """Поставить напоминание: событие с датой, которое орган напоминаний найдёт сам.
+
+        Просьба «напомни мне завтра в 15:00 про совещание» — базовая для
+        помощника, и до этого инструмента она не работала вовсе: замерено на
+        живом прогоне — модель уходила в `memory_search`, отвечала пересказом
+        найденных документов, а событие в графе не появлялось. В другой раз
+        отвечала «Запомнил» и не делала ничего: обещание без действия.
+
+        Ничего нового изобретать не пришлось — орган напоминаний каждый день
+        читает события из графа и шлёт по ним сообщения. Не хватало одного:
+        способа положить туда событие словами человека.
+        """
+        storage, knowledge_graph, _, _ = self._require_services()
+        text = str(what or "").strip()
+        if not text:
+            return {"created": False, "reason": "не сказано, о чём напомнить"}
+        # Тот же разбор времени, что у вопросов «что было 26 июля»: одна пара
+        # правил на всю систему, иначе «завтра» здесь и там означало бы разное.
+        today = datetime.now(self._zone()).date()
+        # Сначала будущее — «завтра», «в понедельник», «через неделю»; общий
+        # разбор их не знает, он писался для вопросов о прошлом.
+        ahead = _future_day(str(when or ""), today=today)
+        stamp, bad = (f"{ahead}T00:00:00", None) if ahead else _moment_bounds(str(when or ""), edge="since")
+        if not stamp:
+            return {
+                "created": False,
+                "reason": f"не разобрала, когда напомнить: {bad or when!r}",
+                "hint": "Скажи день прямо: «завтра», «3 августа», «в понедельник».",
+            }
+        occurred_at = stamp[:10]
+        # Час читается из слов человека, а не из штампа: разбор будущего даёт
+        # только день, а «в 15:00» человек сказал и ждёт увидеть это в тексте
+        # напоминания — рассылка идёт по календарным дням.
+        clock = ""
+        spoken_clock = _CLOCK_IN_TEXT.search(str(when or ""))
+        if spoken_clock:
+            hour = int(spoken_clock.group("hour") or spoken_clock.group("hour2") or 0)
+            minute = int(spoken_clock.group("minute") or 0)
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                clock = f"{hour:02d}:{minute:02d}"
+        elif len(stamp) >= 16 and stamp[11:16] != "00:00":
+            clock = stamp[11:16]
+        # Напоминание смотрит ВПЕРЁД, а разбор времени писался для вопросов о
+        # прошлом («что было в понедельник») и берёт ближайший ПРОШЕДШИЙ день.
+        # Замерено: «не дай забыть в понедельник позвонить» поставило событие на
+        # 27 июля — на прошлую неделю, то есть не сработает никогда.
+        planned = date.fromisoformat(occurred_at)
+        if planned < today:
+            if _NAMES_A_WEEKDAY.search(str(when or "")):
+                # День недели без даты — человек имеет в виду ближайший будущий.
+                while planned < today:
+                    planned += timedelta(days=7)
+                occurred_at = planned.isoformat()
+            else:
+                return {
+                    "created": False,
+                    "reason": f"названный день уже прошёл: {occurred_at}",
+                    "hint": "Напоминание можно поставить только на будущее.",
+                }
+        entity = knowledge_graph.create_entity(actor.user_id, text[:120], EntityType.EVENT)
+        knowledge_graph.set_event_time(actor.user_id, entity["id"], occurred_at, source="reminder")
+        # Час не теряется: он остаётся в названии, потому что напоминания
+        # рассылаются по календарным дням — точное время человек прочитает в
+        # тексте, а не пропустит из-за того, что система его выбросила.
+        del storage
+        return {
+            "created": True,
+            "what": text[:120],
+            "on": occurred_at,
+            "at": clock,
+            "entity_id": entity["id"],
+        }
 
     async def _what_happened(
         self,
@@ -2474,6 +2614,36 @@ class ExecutionKernel:
             },
             ["kind", "title", "blocks"],
             risk="observe",
+        )
+        spec(
+            "remind",
+            "Поставить напоминание. Используй, когда человек просит напомнить, не "
+            "забыть, разбудить, предупредить: «напомни завтра в 15:00 про совещание», "
+            "«не дай забыть про отчёт в пятницу», «напомни через неделю позвонить». "
+            "НЕ ищи такие просьбы в архиве: человек не спрашивает, что там записано, "
+            "он просит запомнить на будущее. Напоминание придёт в чат в назначенный "
+            "день.",
+            "kg.write",
+            {
+                "what": {
+                    "type": "string",
+                    "description": "О чём напомнить, словами человека: «совещание по поверке».",
+                },
+                "when": {
+                    "type": "string",
+                    "description": (
+                        "Когда. Передавай ТАК ЖЕ, как сказал человек: «завтра», «завтра в "
+                        "15:00», «3 августа», «в понедельник», «через неделю». Год не "
+                        "дописывай, если его не назвали."
+                    ),
+                },
+            },
+            ["what", "when"],
+            # Меняет данные: в графе появляется событие, по которому орган
+            # напоминаний потом напишет человеку. Не «наблюдение», хотя и
+            # безобидно — класс риска должен отвечать на вопрос «что останется
+            # после вызова», а не «страшно ли это».
+            risk="mutate",
         )
         spec(
             "what_happened",

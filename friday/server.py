@@ -1320,7 +1320,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         channel_chat_id = getattr(request.state, "bridge_chat_id", None)
         if actor.source == "telegram-bridge" and channel_chat_id:
             session = state.storage.get_channel_session(
-                actor.user_id,
+                # Переписка личная даже в общем архиве: там `user_id` у всех
+                # один, и разговор, созданный под личным идентификатором, не
+                # прошёл бы проверку принадлежности. Замерено на живом мосте:
+                # `/api/chat` отвечал 500 «Conversation does not belong to
+                # user», мост крутил сообщение по кругу, и человек не получал
+                # ничего — при том что ответ был сформирован и лежал в базе.
+                actor.own_id,
                 "telegram",
                 str(channel_chat_id),
             )
@@ -1418,7 +1424,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     result["grounding_warning"] = notice
             if actor.source == "telegram-bridge" and channel_chat_id:
                 state.storage.set_channel_conversation(
-                    actor.user_id,
+                    actor.own_id,
                     "telegram",
                     str(channel_chat_id),
                     result["conversation_id"],
@@ -1875,7 +1881,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             channel_chat_id = getattr(request.state, "bridge_chat_id", None)
             if actor.source == "telegram-bridge" and channel_chat_id:
                 session = state.storage.get_channel_session(
-                    actor.user_id,
+                    actor.own_id,
                     "telegram",
                     str(channel_chat_id),
                 )
@@ -1942,7 +1948,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             if actor.source == "telegram-bridge" and channel_chat_id:
                 state.storage.set_channel_conversation(
-                    actor.user_id,
+                    actor.own_id,
                     "telegram",
                     str(channel_chat_id),
                     result["conversation_id"],
