@@ -279,17 +279,18 @@ async def test_a_monitor_does_not_wake_anyone_at_night(settings, storage, monkey
     _document(storage, "alice", "Поверка весов назначена", "Акт")
 
     # Час фиксируется, а не берётся из настоящих часов: окно 0..23 не покрывает
-    # час 23, и прогон между 23:00 и 23:59 UTC красил бы билд не из-за кода.
+    # час 23, и прогон между 23:00 и 23:59 по местному времени красил бы билд не
+    # из-за кода. Подменяется `local_now`, а не `datetime`: час тихого окна —
+    # местный, потому что ночь у человека своя (по UTC на машине в МСК тихие
+    # часы 22→8 закрывали утро и открывали полночь).
     quiet = replace(settings, quiet_hours_start=0, quiet_hours_end=23)
 
-    class _FixedDatetime:
-        @staticmethod
-        def now(tz=None):
-            from datetime import datetime as _dt
+    def _five_in_the_morning(_settings):
+        from datetime import datetime as _dt
 
-            return _dt(2026, 8, 1, 5, 0, tzinfo=tz)
+        return _dt(2026, 8, 1, 5, 0).astimezone()
 
-    monkeypatch.setattr(monitors_module, "datetime", _FixedDatetime)
+    monkeypatch.setattr(monitors_module, "local_now", _five_in_the_morning)
     await scan_monitors(ServiceContext(settings=quiet, storage=storage, kg=None, ingestion=None))
     monkeypatch.undo()
 

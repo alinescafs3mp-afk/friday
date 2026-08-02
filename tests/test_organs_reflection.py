@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -134,7 +134,8 @@ async def test_reflection_worker_skips_almost_empty_base(storage):
 
 @pytest.mark.asyncio
 async def test_reflection_worker_respects_quiet_hours(storage):
-    now_hour = datetime.now(UTC).hour
+    # Час МЕСТНЫЙ: тихие часы теперь про ночь человека, а не про UTC.
+    now_hour = datetime.now().astimezone().hour
     settings = _reflection_settings(min_knowledge=1, quiet_start=now_hour, quiet_end=(now_hour + 1) % 24)
     user_id = _seed_telegram_user(storage, "5001")
     _seed_knowledge(storage, user_id, "Ночью", "текст", [])

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -28,6 +28,7 @@ from friday.organs import (
     OrganWorker,
     ServiceContext,
     in_quiet_hours,
+    local_now,
     may_push_to,
     resolve_chat_id,
 )
@@ -46,8 +47,13 @@ REFLECTION_CAPABILITY = CapabilityDefinition(
 )
 
 
-def build_reflection(storage, user_id: str) -> dict[str, Any]:
-    """Deterministic snapshot of a tenant's knowledge state (no model needed)."""
+def build_reflection(storage, user_id: str, settings=None) -> dict[str, Any]:
+    """Deterministic snapshot of a tenant's knowledge state (no model needed).
+
+    ``settings`` нужны ровно для одного: назвать «сегодня» тем днём, который
+    сегодня у человека. Без них берётся системный пояс машины — по UTC сводка
+    после 21:00 МСК теряла события текущего дня и показывала завтрашние.
+    """
     lifecycle = storage.get_lifecycle_stats(user_id)
     knowledge_total = storage.count_knowledge_objects(user_id)
     # Counted, not measured by the length of a page. These four go into a digest the
@@ -60,7 +66,7 @@ def build_reflection(storage, user_id: str) -> dict[str, Any]:
     aging = storage.count_lifecycle_candidates(user_id, days_threshold=90)
     top_tags = storage.list_knowledge_tags(user_id, limit=6)
 
-    today = datetime.now(UTC).date()
+    today = local_now(settings).date() if settings is not None else datetime.now().astimezone().date()
     upcoming = storage.list_events_in_range(
         user_id,
         start=today.isoformat(),
@@ -152,7 +158,7 @@ async def reflection_digest(ctx: ServiceContext) -> None:
     settings = ctx.settings
     if not settings.reflection_enabled:
         return
-    now = datetime.now(UTC)
+    now = local_now(settings)
     if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):
         return
     allowed = settings.telegram_effective_allowed_chat_ids
@@ -169,7 +175,7 @@ async def reflection_digest(ctx: ServiceContext) -> None:
             continue
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
-        digest = build_reflection(ctx.storage, user_id)
+        digest = build_reflection(ctx.storage, user_id, settings)
         # An almost-empty base has nothing to reflect on; do not ping it.
         if digest["knowledge_total"] < settings.reflection_min_knowledge:
             continue
@@ -193,7 +199,7 @@ def _router() -> APIRouter:
     async def get_reflection(request: Request, synthesize: bool = Query(False)) -> dict[str, Any]:
         actor = _require(request, "reflection.read")
         state = request.app.state
-        digest = build_reflection(state.storage, actor.user_id)
+        digest = build_reflection(state.storage, actor.user_id, state.settings)
         # The narrative is opt-in: a plain GET stays fast and never blocks on the
         # model unless the caller explicitly asks for synthesis.
         narrative = await _synthesize_narrative(state.llm, digest) if synthesize else ""

@@ -19,10 +19,17 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
-from datetime import UTC, datetime
 
 from friday.diagnostics import collect_diagnostics
-from friday.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, may_push_to, resolve_chat_id
+from friday.organs import (
+    Organ,
+    OrganWorker,
+    ServiceContext,
+    in_quiet_hours,
+    local_now,
+    may_push_to,
+    resolve_chat_id,
+)
 from friday.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -85,7 +92,7 @@ async def scan_health(ctx: ServiceContext) -> None:
     settings = ctx.settings
     if not settings.sentinel_enabled:
         return
-    now = datetime.now(UTC)
+    now = local_now(settings)
     # Quiet hours gate the push; a fault simply waits until the window ends and
     # the next tick re-detects it (dedup is per calendar day, so nothing is lost).
     if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):

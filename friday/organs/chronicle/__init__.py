@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -27,6 +27,7 @@ from friday.organs import (
     OrganWorker,
     ServiceContext,
     in_quiet_hours,
+    local_now,
     may_push_to,
     resolve_chat_id,
 )
@@ -59,9 +60,13 @@ def _years_ago(iso: str, now: datetime) -> str:
     return f"{delta} года назад" if 2 <= delta <= 4 else f"{delta} лет назад"
 
 
-def build_window(storage, kg, user_id: str, *, days: int) -> dict[str, Any]:
-    """Episodic view of the recent past: knowledge captured + events in ``days``."""
-    now = datetime.now(UTC)
+def build_window(storage, kg, user_id: str, *, days: int, settings=None) -> dict[str, Any]:
+    """Episodic view of the recent past: knowledge captured + events in ``days``.
+
+    ``settings`` задают пояс: границы окна событий — календарные даты, и по UTC
+    вечером в Москве сегодняшний день из окна выпадал.
+    """
+    now = local_now(settings) if settings is not None else datetime.now().astimezone()
     since = (now - timedelta(days=max(1, days))).isoformat()
     recent = storage.list_recent_knowledge(user_id, since_iso=since, limit=50)
     events = storage.list_events_in_range(
@@ -109,7 +114,7 @@ async def chronicle_on_this_day(ctx: ServiceContext) -> None:
     settings = ctx.settings
     if not settings.chronicle_enabled:
         return
-    now = datetime.now(UTC)
+    now = local_now(settings)
     if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):
         return
     allowed = settings.telegram_effective_allowed_chat_ids
@@ -148,8 +153,10 @@ def _router() -> APIRouter:
     async def get_chronicle(request: Request, days: int = Query(7, ge=1, le=365)) -> dict[str, Any]:
         actor = _require(request, "chronicle.read")
         state = request.app.state
-        window = build_window(state.storage, state.kg, actor.user_id, days=days)
-        on_this_day = build_on_this_day(state.storage, actor.user_id, datetime.now(UTC))
+        window = build_window(state.storage, state.kg, actor.user_id, days=days, settings=state.settings)
+        # «В этот день» — про календарь человека: по UTC после 21:00 МСК хроника
+        # показывала бы воспоминания завтрашнего числа.
+        on_this_day = build_on_this_day(state.storage, actor.user_id, local_now(state.settings))
         return {"window": window, "on_this_day": on_this_day}
 
     return router

@@ -11,9 +11,17 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
-from friday.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, may_push_to, resolve_chat_id
+from friday.organs import (
+    Organ,
+    OrganWorker,
+    ServiceContext,
+    in_quiet_hours,
+    local_now,
+    may_push_to,
+    resolve_chat_id,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +41,11 @@ async def scan_reminders(ctx: ServiceContext) -> None:
     settings = ctx.settings
     if not settings.reminders_enabled:
         return
-    now = datetime.now(UTC)
+    # Часы и календарная дата — местные: «сегодня»/«завтра» и тишина ночью суть
+    # свойства дня человека, а не UTC. По UTC на боевой машине (МСК) событие
+    # сегодняшнего дня подписывалось «завтра» после 21:00, а тихие часы
+    # инвертировались на шесть часов из двадцати четырёх.
+    now = local_now(settings)
     # Quiet hours gate enqueue, so nothing lands in the user's chat overnight;
     # a due event simply waits until the quiet window ends.
     if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):

@@ -125,7 +125,8 @@ async def test_reminders_scan_skips_unallowlisted_chats(storage):
 
 @pytest.mark.asyncio
 async def test_reminders_scan_respects_quiet_hours(storage):
-    now_hour = datetime.now(UTC).hour
+    # Час МЕСТНЫЙ: тихие часы теперь про ночь человека, а не про UTC.
+    now_hour = datetime.now().astimezone().hour
     # A quiet window covering the current hour blocks all enqueues.
     quiet = _reminders_settings(quiet_start=now_hour, quiet_end=(now_hour + 1) % 24)
     user_id = _seed_telegram_user(storage, "5001")

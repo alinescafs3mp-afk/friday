@@ -118,7 +118,8 @@ async def test_sentinel_skips_unallowlisted_chat(storage):
 
 @pytest.mark.asyncio
 async def test_sentinel_respects_quiet_hours(storage):
-    now_hour = datetime.now(UTC).hour
+    # Час МЕСТНЫЙ: тихие часы теперь про ночь человека, а не про UTC.
+    now_hour = datetime.now().astimezone().hour
     settings = _sentinel_settings(quiet_start=now_hour, quiet_end=(now_hour + 1) % 24)
     _seed_telegram_user(storage, "5001")
     _seed_degraded_worker(storage)

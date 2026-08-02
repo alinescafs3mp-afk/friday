@@ -19,15 +19,20 @@ other write path — they never turn material into canonical knowledge silently.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:  # avoid import cycles at module import time
     from fastapi import APIRouter
 
     from friday.config import FridaySettings
     from friday.permissions import CapabilityDefinition
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -181,8 +186,33 @@ def may_push_to(settings, storage, user_id: str, chat_id: str) -> bool:
     return str(user.get("preset_key") or "") == "newcomer"
 
 
+def local_now(settings: FridaySettings) -> datetime:
+    """Текущее время в поясе человека, а не в UTC.
+
+    Проактивные органы решают две вещи по часам: молчать ли сейчас (тихие часы) и
+    как назвать день («сегодня», «завтра»). Обе — про человека, а часы брались из
+    `datetime.now(UTC)`.
+
+    Замерено на боевой машине (МСК, тихие часы 22→8): шесть часов из двадцати
+    четырёх работали наоборот. UTC 05–07 — это МСК 08–10, и утром бот молчал;
+    UTC 19–21 — это МСК 22–00, и ночью он писал. Сквозной прогон настоящего
+    `scan_reminders`: в 09:00 МСК в очередь ушло 0 напоминаний, в 00:30 МСК — 2.
+    Ровно обратная картина тому, ради чего тихие часы вводились.
+
+    Пояс берётся из настроек, а при пустом значении — системный: тот же порядок,
+    что у агента, который сообщает модели сегодняшнюю дату.
+    """
+    zone_name = str(getattr(settings, "local_timezone", "") or "").strip()
+    if zone_name:
+        try:
+            return datetime.now(ZoneInfo(zone_name))
+        except Exception:  # noqa: BLE001 — кривое имя пояса не должно ронять орган
+            LOGGER.warning("Unknown timezone %r, falling back to system zone", zone_name)
+    return datetime.now().astimezone()
+
+
 def in_quiet_hours(hour: int, start: int, end: int) -> bool:
-    """Whether ``hour`` (0-23, UTC) falls in the quiet window, midnight-safe.
+    """Whether ``hour`` (0-23, local) falls in the quiet window, midnight-safe.
 
     Shared by every proactive organ so quiet hours mean one thing system-wide.
     ``start == end`` disables the window.

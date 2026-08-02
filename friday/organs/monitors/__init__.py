@@ -27,10 +27,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from typing import Any
 
-from friday.organs import Organ, OrganWorker, ServiceContext, in_quiet_hours, resolve_chat_id
+from friday.organs import (
+    Organ,
+    OrganWorker,
+    ServiceContext,
+    in_quiet_hours,
+    local_now,
+    resolve_chat_id,
+)
 from friday.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -60,7 +66,7 @@ async def scan_monitors(ctx: ServiceContext) -> None:
     утром человек получит сообщение. Монитор был единственным проактивным
     органом без этого гейта, то есть единственным, кто мог разбудить.
     """
-    now = datetime.now(UTC)
+    now = local_now(ctx.settings)
     if in_quiet_hours(now.hour, ctx.settings.quiet_hours_start, ctx.settings.quiet_hours_end):
         return
     storage = ctx.storage
