@@ -492,6 +492,24 @@ def _archive_is_weak(hits: list[dict[str, Any]]) -> bool:
     return max(known) < _ARCHIVE_IS_SURE
 
 
+#: Просьба поставить напоминание. Наружу такое не уходит НИКОГДА.
+#:
+#: Замерено на недельном прогоне 2026-08-02: «Напомни мне в среду созвон с
+#: подрядчиком» ушло в поисковик строкой «созвон с подрядчиком среда» — арбитр
+#: счёл это вопросом о внешнем мире. Цена двойная: напоминание не поставлено, а
+#: дело человека вместе с днём недели ушло в чужой поисковик.
+#:
+#: Здесь решает структура, а не модель: если человек просит не забыть — это
+#: просьба к помощнику, и обсуждать нечего.
+_ASKS_FOR_A_REMINDER = re.compile(
+    r"(?:^|\W)(?:"
+    r"напомн\w+|не\s+дай\s+забыть|не\s+забудь|разбуди\w*|"
+    r"поставь\s+напоминани\w+|запланируй|предупреди\s+меня"
+    r")(?=$|\W)",
+    re.IGNORECASE,
+)
+
+
 def _might_be_a_question(message: str) -> bool:
     text = " ".join((message or "").split())
     if not text or len(text) > _QUESTION_LENGTH_LIMIT:
@@ -1445,11 +1463,21 @@ class AgentRuntime:
         ):
             # Последняя реплика человека до этой: вопрос-продолжение («а сроки
             # какие?») без неё читается как чужой.
-            previous = ""
+            # Берутся ДВЕ последние реплики человека, а не одна.
+            #
+            # Замерено на недельном прогоне: после «что там по поверке приборов»
+            # → «а сроки какие?» → «кто этим занимается?» арбитр, видя только
+            # предыдущую реплику («а сроки какие?»), составил запрос «кто
+            # занимается сроками доставки» — тему он достроил сам, и не ту. Одна
+            # реплика-продолжение так же безтемна, как и текущая: тема живёт
+            # раньше по разговору.
+            spoken: list[str] = []
             for item in reversed(context.conversation_history or []):
                 if str(item.get("role") or "") == "user":
-                    previous = str(item.get("content") or "")[:400]
-                    break
+                    spoken.append(str(item.get("content") or "")[:200])
+                    if len(spoken) == 2:
+                        break
+            previous = " → ".join(reversed(spoken))
             arbiter = asyncio.create_task(
                 self._web_query_by_arbiter(message, previous_turn=previous)
             )
@@ -2646,6 +2674,13 @@ class AgentRuntime:
         """
         notice = notice if notice is not None else []
         asked_outright = bool(_ASKS_FOR_THE_WEB.search(message))
+        # Просьба поставить напоминание наружу не уходит НИКОГДА, даже если
+        # человек упомянул в ней слово «найди». Замерено: «Напомни мне в среду
+        # созвон с подрядчиком» ушло в поисковик строкой «созвон с подрядчиком
+        # среда» — и напоминание не поставилось, и дело человека вместе с днём
+        # недели оказалось в чужом поисковике.
+        if _ASKS_FOR_A_REMINDER.search(message):
+            return
         if not asked_outright and not _might_be_a_question(message):
             return
         # Вердикт арбитра посчитан параллельно поиску (см. `_prepare_context`) и
