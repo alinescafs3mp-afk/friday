@@ -24,6 +24,7 @@ from friday.citation_check import citation_overlap
 from friday.config import FridaySettings
 from friday.execution_kernel import ExecutionKernel
 from friday.knowledge_graph import build_user_model
+from friday.people import resolve_person, unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval import best_snippet, is_relational_query
 from friday.storage import FridayStorage, normalize_conversation_mode
@@ -505,6 +506,28 @@ def _archive_is_weak(hits: list[dict[str, Any]]) -> bool:
 #:
 #: Здесь решает структура, а не модель: если человек просит не забыть — это
 #: просьба к помощнику, и обсуждать нечего.
+#: «Что писал JBL?», «чем занимался Пегас», «что скидывал Иванов» — вопрос о
+#: деятельности ЧЕЛОВЕКА, а не о содержимом архива.
+#:
+#: Найдено владельцем 2026-08-03 на живой переписке. У Пятницы есть отдельный
+#: инструмент `user_activity` («что один аккаунт писал и загружал, по имени,
+#: которым человек пользуется»), но модель его не позвала: «что писал JBL?»
+#: ушло в поиск по архиву и вернулось «похожее есть, но не по делу». Владелец
+#: объяснил прямым текстом — «JBL это пользователь, как и Пегас», — и следующий
+#: вопрос «Что писал Пегас?» получил ровно тот же ответ.
+#:
+#: Уговаривать модель бесполезно: это уже известно про веб-поиск и про голос —
+#: лечится ТОЛЬКО выполнением до её хода.
+_ASKS_WHAT_A_PERSON_WROTE = re.compile(
+    r"(?:^|\W)(?:"
+    r"(?:что|чего|о\s+чём)\s+(?:\w+\s+){0,2}?(?:писал\w*|пишет|скидывал\w*|скинул\w*|"
+    r"присылал\w*|прислал\w*|загружал\w*|загрузил\w*|говорил\w*|спрашивал\w*|делал\w*)"
+    r"|чем\s+(?:\w+\s+){0,2}?(?:занимал\w*|занят\w*)"
+    r"|активность\s+\w+"
+    r")",
+    re.IGNORECASE,
+)
+
 _ASKS_FOR_A_REMINDER = re.compile(
     r"(?:^|\W)(?:"
     r"напомн\w+|не\s+дай\s+забыть|не\s+забудь|разбуди\w*|"
@@ -1779,6 +1802,7 @@ class AgentRuntime:
             message, actor, tools, messages, tools_used, tool_evidence
         )
         await self._prefetch_archive_numbers(message, actor, tools, messages, tools_used, tool_evidence)
+        await self._prefetch_person_activity(message, actor, tools, messages, tools_used, tool_evidence)
         # Set by a successful `speak` call; last one wins (a turn ships at most one
         # voice message). Kept off `tool_evidence`/`messages` entirely — see
         # `ToolResult.attachment`.
@@ -2300,6 +2324,80 @@ class AgentRuntime:
         if not result.success or not result.attachment:
             return None
         return dict(result.attachment)
+
+    async def _prefetch_person_activity(
+        self,
+        message: str,
+        actor: ActorContext,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_evidence: list[dict[str, str]],
+    ) -> None:
+        """«Что писал JBL?» — вопрос о ЧЕЛОВЕКЕ, и отвечать надо инструментом.
+
+        Найдено владельцем 2026-08-03 на живой переписке. `user_activity`
+        существует и делает ровно это, но модель его не позвала: вопрос ушёл в
+        поиск по архиву и вернулся «похожее есть, но не по делу». Владелец
+        объяснил прямым текстом — «JBL это пользователь, как и Пегас», — и
+        следующий вопрос «Что писал Пегас?» получил тот же ответ.
+
+        Тот же приём, что с интернетом, лентой и числами архива: уговаривать
+        модель бесполезно, решение остаётся её. Здесь решает структура.
+
+        Имя ищется среди УЧЁТОК, и если такой не нашлось — ничего не происходит:
+        «что писал Иванов» про человека из документов останется обычным поиском
+        по архиву, как и было.
+        """
+        if not _ASKS_WHAT_A_PERSON_WROTE.search(message):
+            return
+        available = {
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
+        }
+        if "user_activity" not in available:
+            return  # инструмент недоступен этому человеку — не обходим права
+        storage = self.storage
+        # Слова вопроса, которые могут оказаться именем учётки. Служебные
+        # («что», «писал») отсеиваются тем же списком, что и в поиске имён.
+        candidates = [
+            word.strip(" ?!.,:;«»\"'()")
+            for word in str(message or "").split()
+            if len(word.strip(" ?!.,:;«»\"'()")) >= 3
+        ]
+        chosen = None
+        for word in candidates:
+            if word.casefold() in _NOT_A_NAME:
+                continue
+            matches = resolve_person(storage.list_users(limit=5000), word)
+            found = unambiguous(matches)
+            if found is not None:
+                chosen = found
+                break
+        if chosen is None:
+            return
+        try:
+            result = await self.kernel.execute(
+                "user_activity", {"person": chosen.display_name or chosen.user_id}, actor=actor
+            )
+        except Exception:  # noqa: BLE001 — надзорный вызов не должен ронять ход
+            LOGGER.exception("Prefetch user activity failed")
+            return
+        rendered = result.to_llm_message()
+        if not rendered:
+            return
+        tools_used.append("user_activity")
+        if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
+            tool_evidence.append({"tool": "user_activity", "output": str(rendered)})
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"Спросили о деятельности человека, и она уже получена:\n{rendered}\n\n"
+                    "Отвечай по этим данным. Если доступ к этому человеку не разрешён — скажи "
+                    "об этом прямо, не пересказывая ничего из архива вместо ответа."
+                ),
+            }
+        )
 
     async def _prefetch_archive_numbers(
         self,

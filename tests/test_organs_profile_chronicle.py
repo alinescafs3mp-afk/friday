@@ -148,7 +148,13 @@ def test_on_this_day_finds_past_year_anniversaries(storage):
 async def test_chronicle_worker_pushes_on_this_day_and_dedups(storage):
     settings = _chronicle_settings()
     user_id = _seed_telegram_user(storage, "5001")
-    now = datetime.now(UTC)
+    # МЕСТНАЯ дата, а не UTC: орган спрашивает «в этот день» по времени человека,
+    # и после 21:00 по Москве это уже другое число. Час берётся дневной, чтобы
+    # перевод в UTC не сдвинул его обратно.
+    from friday.organs import local_now
+
+    local_today = local_now(settings).date()
+    now = datetime(local_today.year, local_today.month, local_today.day, 12, 0, tzinfo=UTC)
     _seed_knowledge(
         storage,
         user_id,

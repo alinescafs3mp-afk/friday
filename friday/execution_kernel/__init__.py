@@ -23,8 +23,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
+from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
-from friday.permissions import ActorContext, AuthorizationError, AuthorizationService, current_actor
+from friday.permissions import (
+    LEGACY_OWNER_USER_ID,
+    ActorContext,
+    AuthorizationError,
+    AuthorizationService,
+    current_actor,
+)
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import best_snippet
 from friday.storage._core import iso_date
@@ -2416,6 +2423,32 @@ class ExecutionKernel:
                 "reason": "ambiguous" if matches else "not_found",
             }
 
+        # Право надзора говорит «можно смотреть чужое», но не «можно смотреть
+        # ЛЮБОГО». Владелец просил заводить каждого написавшего с полными
+        # правами — значит право надзора есть у всех, и без этой проверки любой
+        # участник читал бы деятельность любого другого.
+        if hierarchy_is_configured(storage) and not may_oversee(
+            storage, actor.own_id, chosen.user_id, owner_id=LEGACY_OWNER_USER_ID
+        ):
+            storage.log_audit(
+                AuditEntry(
+                    id=new_id("audit"),
+                    user_id=actor.own_id,
+                    action="tool.user_activity.out_of_scope",
+                    target_type="user",
+                    target_id=chosen.user_id,
+                    after_json={"asked_for": person[:200]},
+                )
+            )
+            return {
+                "resolved": chosen.to_dict(),
+                "denied": True,
+                "reason": (
+                    "Это не ваш подчинённый. Смотреть деятельность можно у себя и у тех, "
+                    "кто вам подчинён; полный доступ есть у владельца архива."
+                ),
+            }
+
         storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
@@ -2527,6 +2560,31 @@ class ExecutionKernel:
                 "resolved": None,
                 "candidates": [match.to_dict() for match in matches[:5]],
                 "reason": "ambiguous" if matches else "not_found",
+            }
+
+        # Тот же предел, что у `user_activity`: право надзора не означает право
+        # на ЛЮБОГО. Иначе поиск по чужому архиву обходил бы проверку, которую
+        # соседний инструмент уже делает.
+        if hierarchy_is_configured(storage) and not may_oversee(
+            storage, actor.own_id, chosen.user_id, owner_id=LEGACY_OWNER_USER_ID
+        ):
+            storage.log_audit(
+                AuditEntry(
+                    id=new_id("audit"),
+                    user_id=actor.own_id,
+                    action="tool.user_knowledge_search.out_of_scope",
+                    target_type="user",
+                    target_id=chosen.user_id,
+                    after_json={"asked_for": person[:200]},
+                )
+            )
+            return {
+                "resolved": chosen.to_dict(),
+                "denied": True,
+                "reason": (
+                    "Это не ваш подчинённый. Искать по чужим материалам можно у тех, кто вам "
+                    "подчинён; полный доступ есть у владельца архива."
+                ),
             }
 
         # Clamp on both branches: execute() does not enforce JSON-schema max, so

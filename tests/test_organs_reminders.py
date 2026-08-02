@@ -9,7 +9,7 @@ chat-id resolution), and the organ registry composition.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +22,17 @@ from friday.storage.models import EntityType
 
 
 def _today_iso(offset_days: int = 0) -> str:
-    return (datetime.now(UTC).date() + timedelta(days=offset_days)).isoformat()
+    """Сегодня по МЕСТНОМУ времени — как его понимает орган напоминаний.
+
+    Прежняя редакция брала `datetime.now(UTC)`, и после 21:00 по Москве тест
+    краснел на ровном месте: у человека уже следующий день, а событие «на
+    сегодня» ставилось вчерашним числом и в окно рассылки не попадало. Ровно та
+    ошибка, которую в самих органах чинили отдельно («время — время ЧЕЛОВЕКА»).
+    """
+    from friday.config import load_settings
+    from friday.organs import local_now
+
+    return (local_now(load_settings()).date() + timedelta(days=offset_days)).isoformat()
 
 
 def _seed_telegram_user(storage, chat_id: str) -> str:

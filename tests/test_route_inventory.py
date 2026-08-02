@@ -51,11 +51,14 @@ from friday.server import create_app
 # данных, и отдельная способность означала бы, что подтверждать твои действия может
 # кто-то другой. Исполнение живёт в маршруте решения, а не отдельным вызовом, чтобы
 # между «человек согласился» и «действие случилось» не было места, где всё замирает.
-EXPECTED_OPERATIONS = 177
+#: +1 к прежним 177: добавлен `POST /api/admin/users/{user_id}/supervisor` —
+#: назначение руководителя, от которого зависит, чью деятельность человек вправе
+#: смотреть (см. `friday/oversight_scope.py`).
+EXPECTED_OPERATIONS = 178
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 89,
+    "/api/admin": 90,
     "/api/kg": 21,
     "/api/missions": 4,
 }

@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 import pytest
 
 from friday.knowledge_graph import KnowledgeGraph
-from friday.organs import ServiceContext, archive_tenant, is_service_recipient
+from friday.organs import ServiceContext, archive_tenant, is_service_recipient, local_now
 from friday.organs.chronicle import chronicle_on_this_day
 from friday.organs.reflection import reflection_digest
 from friday.permissions import LEGACY_OWNER_USER_ID
@@ -120,8 +120,17 @@ async def test_on_this_day_reaches_the_owner_alone(settings, storage):
     tuned = _settings(settings)
     _seed_person(storage, OWNER_CHAT, user_id=LEGACY_OWNER_USER_ID)
     _seed_person(storage, OTHER_CHAT)
-    now = datetime.now(UTC)
-    a_year_ago = now.replace(year=now.year - 1).isoformat()
+    # Запись кладётся так, как её кладёт живая система: метка в БАЗЕ — UTC.
+    # А день, в который её ищет орган, — МЕСТНЫЙ. Между 21:00 и 24:00 по Москве
+    # это разные числа, и первая редакция теста краснела после полуночи на ровном
+    # месте: «год назад» считалось от UTC, а «в этот день» — от местной даты.
+    #
+    # Здесь берётся местная дата (её и спросит орган), а час выбирается заведомо
+    # дневной, чтобы перевод в UTC не сдвинул число.
+    local_today = local_now(_settings(settings)).date()
+    a_year_ago = datetime(
+        local_today.year - 1, local_today.month, local_today.day, 12, 0, tzinfo=UTC
+    ).isoformat()
     _seed_knowledge(storage, LEGACY_OWNER_USER_ID, "разговор о поверке", created_at=a_year_ago)
 
     ctx = ServiceContext(settings=tuned, storage=storage, kg=KnowledgeGraph(storage), ingestion=None)

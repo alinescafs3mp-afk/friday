@@ -1,0 +1,144 @@
+"""«Что писал JBL?» — вопрос о человеке, а не о содержимом архива.
+
+Найдено владельцем 2026-08-03 на живой переписке. У Пятницы есть `user_activity`
+— «что один аккаунт писал и загружал, по имени, которым человек пользуется», — но
+модель его не позвала: вопрос ушёл в поиск по архиву и вернулся ответом «похожее
+есть, но не по делу». Владелец объяснил прямым текстом: «JBL это пользователь, как
+и Пегас». Следующий вопрос — «Что писал Пегас?» — получил ровно тот же ответ.
+
+Уговаривать модель бесполезно, это уже проверено на веб-поиске и на голосе:
+решение звать инструмент остаётся её, и половину раз она его не принимает.
+Лечится только выполнением ДО её хода.
+
+Имя ищется среди УЧЁТОК: «что писал Иванов» про человека из документов останется
+обычным поиском по архиву, как и было.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+
+import pytest
+
+from friday.agent_runtime import _ASKS_WHAT_A_PERSON_WROTE, AgentRuntime
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "что писал JBL?",
+        "Что писал Пегас?",
+        "чем занимался Иванов на прошлой неделе",
+        "что скидывал Пегас",
+        "о чём спрашивал JBL",
+        "активность Пегаса",
+        "что загружал Yato вчера",
+    ],
+)
+def test_a_question_about_a_person_is_recognised(message: str) -> None:
+    assert _ASKS_WHAT_A_PERSON_WROTE.search(message), message
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["какая погода в Москве", "что там по поверке приборов", "напомни завтра позвонить"],
+)
+def test_other_questions_are_left_alone(message: str) -> None:
+    assert not _ASKS_WHAT_A_PERSON_WROTE.search(message), message
+
+
+class _Kernel:
+    def __init__(self, rendered: str = "Активность: 3 документа, 12 сообщений.") -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._rendered = rendered
+
+    async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+        self.calls.append((tool, params))
+
+        class _Result:
+            success = True
+
+            def to_llm_message(self_inner) -> str:  # noqa: N805
+                return self._rendered
+
+        return _Result()
+
+
+class _Storage:
+    def __init__(self, users: list[dict]) -> None:
+        self._users = users
+
+    def list_users(self, limit: int = 5000):  # noqa: ANN001, ARG002
+        return self._users
+
+
+def _runtime(users: list[dict], rendered: str = "Активность: 3 документа."):
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel(rendered)
+    runtime.storage = _Storage(users)
+    return runtime
+
+
+PEOPLE = [
+    {"id": "telegram:telegram:2051783036", "display_name": "JBL", "username": "jbl", "status": "active"},
+    {"id": "telegram:telegram:5344917795", "display_name": "Пегас", "username": "pegas", "status": "active"},
+]
+
+
+def _ask(runtime, message: str) -> list[dict]:
+    messages: list[dict] = []
+    bound = AgentRuntime._prefetch_person_activity.__get__(runtime, AgentRuntime)
+    asyncio.run(
+        bound(
+            message,
+            None,
+            [{"function": {"name": "user_activity"}}],
+            messages,
+            [],
+            [],
+        )
+    )
+    return messages
+
+
+def test_the_tool_runs_before_the_model_gets_the_turn() -> None:
+    """Мутация: убрать предварительный вызов — тест краснеет."""
+    runtime = _runtime(PEOPLE)
+
+    messages = _ask(runtime, "что писал JBL?")
+
+    assert runtime.kernel.calls, "инструмент не вызван — модель снова решает сама"
+    assert runtime.kernel.calls[0][0] == "user_activity"
+    assert runtime.kernel.calls[0][1]["person"] == "JBL"
+    assert messages and "деятельности человека" in str(messages[0]["content"])
+
+
+def test_the_second_name_works_too() -> None:
+    """Владелец спросил про двоих подряд — сработать должно на обоих."""
+    runtime = _runtime(PEOPLE)
+    _ask(runtime, "Что писал Пегас?")
+    assert runtime.kernel.calls[0][1]["person"] == "Пегас"
+
+
+def test_an_unknown_name_changes_nothing() -> None:
+    """«Что писал Иванов» про человека из документов — обычный поиск по архиву."""
+    runtime = _runtime(PEOPLE)
+    messages = _ask(runtime, "что писал Иванов")
+    assert runtime.kernel.calls == []
+    assert messages == []
+
+
+def test_a_missing_tool_is_not_bypassed() -> None:
+    """Нет права — нет вызова: предварительное выполнение прав не обходит."""
+    runtime = _runtime(PEOPLE)
+    messages: list[dict] = []
+    bound = AgentRuntime._prefetch_person_activity.__get__(runtime, AgentRuntime)
+    asyncio.run(bound("что писал JBL?", None, [], messages, [], []))
+    assert runtime.kernel.calls == []
+
+
+def test_the_prefetch_is_wired_into_the_loop() -> None:
+    """Проверяется подключённое: вызов стоит в боевом цикле, а не рядом."""
+    source = inspect.getsource(AgentRuntime._agentic_loop)
+    assert "_prefetch_person_activity(" in source

@@ -17,6 +17,7 @@ from friday.admin_api._deps import (
     Request,
     _audit,
     _audit_cross_tenant_read,
+    _json_value,
     _protect_owner_target,
     _request_json,
     _require,
@@ -28,6 +29,7 @@ from friday.admin_api._deps import (
     secrets,
     validate_user_id,
 )
+from friday.oversight_scope import supervisor_of
 from friday.people import resolve_person, unambiguous
 
 router = APIRouter()
@@ -420,6 +422,58 @@ async def set_user_preset(user_id: str, request: Request) -> dict[str, Any]:
     after = state.storage.get_user(user_id)
     _audit(request, "admin.user.preset", "user", user_id, before=before, after=after)
     return {"user": after}
+
+
+@router.post("/users/{user_id}/supervisor")
+async def set_user_supervisor(user_id: str, request: Request) -> dict[str, Any]:
+    """Назначить человеку руководителя — или снять, передав пустое значение.
+
+    От этого зависит, чью деятельность он вправе смотреть: право надзора говорит
+    «можно смотреть чужое», но не «можно смотреть ЛЮБОГО». Владелец архива видит
+    всех и так; для остальных граница — их подчинённые.
+
+    Кольцо запрещено на записи, а не только на чтении: проверка прав переживёт
+    его (у неё есть предел глубины), но «А подчинён Б, Б подчинён А» — это
+    испорченные данные, и лучше не дать их создать.
+    """
+    _require(request, "admin.users.manage")
+    state = _services(request)
+    body = await _request_json(request)
+    supervisor_id = str(body.get("supervisor_id") or "").strip()
+
+    before = state.storage.get_user(user_id)
+    if not before:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    # Владельца нельзя подчинить никому — иначе делегированный админ назначает
+    # себя его начальником и получает доступ ко всему через надзор. Поймано
+    # тестом границ владельца: моя первая редакция этой проверки не делала.
+    _protect_owner_target(request, user_id)
+    if supervisor_id:
+        if supervisor_id == user_id:
+            raise HTTPException(status_code=400, detail="Человек не может быть руководителем самому себе")
+        if not state.storage.get_user(supervisor_id):
+            raise HTTPException(status_code=404, detail="Руководитель не найден")
+        # Идём вверх от НАЗНАЧАЕМОГО: если по пути встретился сам подчинённый —
+        # получилось бы кольцо.
+        current = supervisor_id
+        seen = {user_id}
+        for _ in range(16):
+            if current in seen:
+                raise HTTPException(status_code=400, detail="Так получается кольцо подчинения")
+            seen.add(current)
+            current = supervisor_of(state.storage, current)
+            if not current:
+                break
+
+    metadata = _json_value(before.get("metadata_json"), {})
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    if supervisor_id:
+        metadata["supervisor_id"] = supervisor_id
+    else:
+        metadata.pop("supervisor_id", None)
+    after = state.storage.update_user(user_id, metadata_json=metadata)
+    _audit(request, "admin.user.supervisor", "user", user_id, before=before, after=after)
+    return {"user": after, "supervisor_id": supervisor_id}
 
 
 @router.put("/users/{user_id}/permissions/{security_id}")
