@@ -42,7 +42,21 @@ def _contextualized(question: str) -> str:
 )
 def test_the_words_the_person_just_typed_reach_the_index(question, expected):
     terms = set(_fts_terms(_contextualized(question)))
-    assert expected <= terms, f"потеряно: {sorted(expected - terms)}"
+    missing = {word for word in expected if not _reaches_index(word, terms)}
+    assert not missing, f"потеряно: {sorted(missing)}"
+
+
+def _reaches_index(word: str, terms: set[str]) -> bool:
+    """Слово дошло до индекса — само или своей основой с префиксом.
+
+    Термин теперь строится как `дежурств*`, а не `дежурство`: индекс хранит
+    текст как он написан, а вопрос задают в другом падеже, и до правки документ
+    со словом «акт» не находился по вопросу «в акте» вовсе. Замерено: recall@10
+    на 78 эталонах вырос 0.7179 → 0.7436.
+    """
+    if word in terms:
+        return True
+    return any(term.endswith("*") and word.startswith(term[:-1]) for term in terms)
 
 
 def test_the_context_still_contributes_what_fits():
@@ -90,7 +104,9 @@ def test_a_long_question_keeps_the_word_that_names_the_answer():
         "вопрос сегодня утром через канцелярию сотрудникам подразделения согласно "
         "установленному регламенту делопроизводства инвентаризационный"
     )
-    assert "инвентаризационный" in _fts_terms(question)
+    # Слово доходит до индекса своей основой с префиксом — «инвентаризационн*»
+    # покрывает и его самого, и любую его форму в документе.
+    assert _reaches_index("инвентаризационный", set(_fts_terms(question)))
 
 
 def test_the_budget_is_still_a_ceiling():

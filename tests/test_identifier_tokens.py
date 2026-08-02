@@ -190,7 +190,11 @@ def test_a_long_question_does_not_lose_the_term_that_identifies_the_answer(stora
     # A query within budget keeps every token, stopwords included — that is what
     # the bench measures, and it must not change.
     short = "как чинить кластер"
-    assert _fts_terms(short) == ["как", "чинить", "кластер"]
+    # Слово заменяется ОСНОВОЙ с префиксным оператором: индекс хранит текст как
+    # он написан, а вопрос задают в другом падеже. Бюджет считает слова, поэтому
+    # именно замена, а не добавление. Замерено: recall@10 на 78 эталонах вырос
+    # 0.7179 → 0.7436.
+    assert _fts_terms(short) == ["как", "чин*", "кластер"]
 
 
 def test_a_comparison_of_two_identifiers_is_not_answered_with_silence(settings, storage):

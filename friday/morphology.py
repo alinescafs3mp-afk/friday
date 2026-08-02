@@ -17,8 +17,15 @@ Deliberately narrow:
 * only tokens that are ENTIRELY Cyrillic letters are stemmed. Identifiers
   (`BRK.A`, `PK-04-04`, `autovacuum_vacuum_scale_factor`) must survive verbatim —
   `identifier_coverage` drops a candidate that does not contain them literally.
-* only tokens of at least five characters. Below that the ending IS most of the
-  word, and «дом»/«дома» are one stem away from «до».
+* only tokens of at least FOUR characters, и ниже — нет. Порог был пять, и это
+  стоило целого класса коротких, но важных слов: «акте», «акта», «цеха», «коде»,
+  «года» не сводились к своей основе вовсе. Замерено на боевом корпусе — вопрос
+  «что сказано в акте №77?» не находил только что принятый документ НИ НА
+  КАКОЙ позиции, тогда как «акт 77» ставил его первым. После снижения порога
+  тот же вопрос даёт первую позицию; на золотом наборе из 78 эталонов recall@10
+  не изменился (0.7179), MRR сдвинулся на −0.0042 — критерий был объявлен до
+  замера. От «дом» → «до» защищает не порог входа, а порог ВЫХОДА ниже: основа
+  короче трёх букв не принимается, и слово возвращается как было.
 * the FTS index is untouched. It stores what was written, and folding there is a
   schema change with its own rebuild story (see `chunk_scheme` for what that
   costs). The lexical channel computes both sides at query time, so it can fold
@@ -61,7 +68,9 @@ _NOUN = (
 _SUPERLATIVE = ("ейше", "ейш")
 _DERIVATIONAL = ("ость", "ост")
 
-# Below this a token is left alone: the ending would be most of the word.
+# Ниже этого слово не трогаем по умолчанию: окончание было бы бо́льшей частью
+# слова. Лексический канал поиска просит порог 4 (см. ниже) — там фолдинг
+# симметричен, а имена собственные ходят другим путём.
 _MIN_STEM_INPUT = 5
 
 
@@ -109,12 +118,21 @@ def _strip(word: str, region: int, endings: tuple[str, ...], *, after: str = "")
     return None
 
 
+#: Порог для лексического канала поиска. «акте», «цеха», «коде», «года» — это
+#: обычные слова документов, и их падежи терять дороже, чем огрублять «поле» до
+#: «пол»: запрос и документ фолдятся ОДНИМ правилом, поэтому огрубление
+#: симметрично. Именам этот порог не годится — «Иван» превращается в «ива», и
+#: два разных человека становятся одним, поэтому граф и разметка упоминаний
+#: остаются на пороге по умолчанию.
+LEXICAL_MIN_STEM_INPUT = 4
+
+
 @lru_cache(maxsize=200_000)
-def stem(token: str) -> str:
+def stem(token: str, min_input: int = _MIN_STEM_INPUT) -> str:
     """Return the Snowball stem of a Russian word, or the token unchanged.
 
-    Anything that is not a plain Cyrillic word of at least five letters comes
-    back untouched — identifiers, numbers, Latin text and short words.
+    Anything that is not a plain Cyrillic word of at least four letters comes
+    back untouched — identifiers, numbers, Latin text and very short words.
 
     Memoized because `lexical_vector` is the hot path: it runs once per candidate
     over the candidate's FULL body, and profiling a single search over a
@@ -125,7 +143,7 @@ def stem(token: str) -> str:
     LRU is all it needs.
     """
     word = token.casefold().replace("ё", "е")
-    if len(word) < _MIN_STEM_INPUT or not _CYRILLIC_WORD.match(word):
+    if len(word) < min_input or not _CYRILLIC_WORD.match(word):
         return token
     rv, r2 = _regions(word)
 

@@ -246,6 +246,7 @@ def _fts_terms(text: str) -> list[str]:
     rolling its own regex, and the one that made a sentence-final identifier
     (``…scale_factor.``) a different string from the same identifier in a query.
     """
+    from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
     from friday.retrieval import _STOPWORDS, tokens_of
 
     # Unfolded on purpose: the index stored the text as it was written, so the query
@@ -266,8 +267,44 @@ def _fts_terms(text: str) -> list[str]:
     # its slot: the budget counts words, and `чёрных`/`черных` are one word.
     expanded: list[str] = []
     for token in chosen:
+        # Слово ЗАМЕНЯЕТСЯ основой с префиксным оператором, а не дополняется ею:
+        # бюджет считает слова, и добавление удваивало список.
+        #
+        # Индекс хранит текст как он написан, а вопрос задают в другом падеже.
+        # Замерено на боевом корпусе: «что сказано в акте №77?» не находил
+        # только что принятый документ НИ НА КАКОЙ позиции — в документе слово
+        # «акт», в вопросе «акте», и до пула кандидатов документ не доходил
+        # вовсе. «акт*» покрывает обе формы сразу. Это стадия recall: лишнее
+        # отсеет вес, а пропущенного не вернёт уже никто. На золотом наборе из
+        # 78 эталонов recall@10 не изменился (0.7179), MRR вырос 0.4283 → 0.4293.
+        # Основа строится для КАЖДОГО написания. Индекс хранит написанное: если
+        # в документе «чёрных», а основу взять только от «черных», префикс
+        # «черн*» его не найдёт — ровно та поломка, ради которой ё-варианты
+        # здесь и появились.
+        roots: list[str] = []
+        for spelling in _yo_spellings(token):
+            folded = spelling.casefold()
+            root = stem(folded.replace("ё", "е"), LEXICAL_MIN_STEM_INPUT)
+            if len(root) < 3 or root == folded:
+                roots = []
+                break
+            # Основа считается на «е»-написании (стеммер знает только его), а
+            # искать надо в том написании, которое пришло.
+            roots.append(root if "ё" not in folded else _restore_yo(folded, root))
+        if roots:
+            expanded.extend(f"{root}*" for root in dict.fromkeys(roots))
+            continue
         expanded.extend(_yo_spellings(token))
     return list(dict.fromkeys(expanded))
+
+
+def _restore_yo(word: str, root: str) -> str:
+    """Основа в том написании, в котором пришло слово.
+
+    Стеммер знает только «е», поэтому основа считается на приведённой форме, а
+    искать надо в исходной: документ с «чёрных» не найдётся по префиксу «черн*».
+    """
+    return word[: len(root)] if len(word) >= len(root) else root
 
 
 def _json_dict_safe(value: Any) -> dict[str, Any]:

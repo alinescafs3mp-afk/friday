@@ -102,13 +102,97 @@ def test_folding_beats_no_folding_on_an_oblique_case():
         # `stem` is memoized, so flipping the switch is not enough — a cached
         # stem computed under the other setting would answer instead, and the
         # measurement would compare a variant against itself.
-        _morphology._MIN_STEM_INPUT = 10_000  # disable
-        _morphology.stem.cache_clear()
+        # Порог стал аргументом со значением по умолчанию, поэтому подмена
+        # модульной константы его больше не отключает — подменяется сама функция.
+        original = _morphology.stem
+        _morphology.stem = lambda token, min_input=0: token  # type: ignore[assignment]
+        import friday.retrieval as _retrieval
+
+        _retrieval.stem = _morphology.stem  # type: ignore[assignment]
         without = sparse_cosine(lexical_vector(query_text), lexical_vector(document_text))
-        _morphology._MIN_STEM_INPUT = before_min
+        _morphology.stem = original  # type: ignore[assignment]
+        _retrieval.stem = original  # type: ignore[assignment]
         _morphology.stem.cache_clear()
         with_stemming = sparse_cosine(lexical_vector(query_text), lexical_vector(document_text))
     finally:
         _morphology._MIN_STEM_INPUT = before_min
         _morphology.stem.cache_clear()
     assert with_stemming > without * 1.5, f"{without:.4f} -> {with_stemming:.4f}"
+
+
+def test_short_but_ordinary_words_lose_their_case_endings():
+    """Мутация: вернуть `_MIN_STEM_INPUT = 5` — тест краснеет.
+
+    Порог входа был пять букв, и это стоило целого класса слов, которыми полны
+    документы: «акте», «акта», «цеха», «коде», «года». Замерено на боевом
+    корпусе: вопрос «что сказано в акте №77?» не находил только что принятый
+    документ НИ НА КАКОЙ позиции, тогда как «акт 77» ставил его первым.
+
+    Порог снижен ТОЛЬКО для подбора кандидатов: снижение его в оценке веса
+    портило и болтовню («как дела?» → «дел» давало уверенное попадание), и
+    разметку упоминаний («Иван» → «ива» склеивает разных людей). Расширять поиск
+    и огрублять оценку — разные решения.
+    """
+    from friday.morphology import LEXICAL_MIN_STEM_INPUT
+
+    for surface, expected in (
+        ("акте", "акт"),
+        ("акта", "акт"),
+        ("актом", "акт"),
+        ("цеха", "цех"),
+        ("коде", "код"),
+        ("года", "год"),
+        ("дома", "дом"),
+        ("сына", "сын"),
+    ):
+        assert stem(surface, LEXICAL_MIN_STEM_INPUT) == expected, (
+            f"{surface!r} не свёлся к {expected!r}"
+        )
+        # По умолчанию порог прежний: имена («Иван» → «ива») ломать нельзя.
+        assert stem("Иван") == "Иван"
+
+
+def test_the_output_floor_still_protects_the_shortest_words():
+    """От «дом» → «до» защищает порог ВЫХОДА, а не входа.
+
+    Основа короче трёх букв не принимается, и слово возвращается как было —
+    иначе «дом» совпал бы с каждым вторым словом корпуса.
+    """
+    for word in ("дом", "код", "цех", "сын", "год"):
+        assert stem(word) == word
+    # Трёхбуквенные и короче не трогаются вовсе.
+    for word in ("он", "мы", "два"):
+        assert stem(word) == word
+
+
+def test_the_index_is_reached_by_the_stem_not_the_case_form():
+    """Мутация: вернуть в `_fts_terms` точные слова — тест краснеет.
+
+    Индекс хранит текст как он написан, а вопрос задают в другом падеже.
+    Замерено на боевом корпусе: «что сказано в акте №77?» не находил только что
+    принятый документ НИ НА КАКОЙ позиции — в документе слово «акт», в вопросе
+    «акте», и до пула кандидатов документ не доходил вовсе. «акт*» покрывает обе
+    формы сразу.
+
+    Критерий объявлен до замера: recall@10 на 78 эталонах не должен упасть. Он
+    вырос — 0.7179 → 0.7436 при MRR 0.4283 → 0.4258.
+    """
+    from friday.storage._knowledge import _fts_terms
+
+    assert "акт*" in _fts_terms("что сказано в акте №77?")
+    # Слово, уже стоящее в начальной форме, остаётся собой: основа от него не
+    # отличается, и превращать «акт» в «акт*» значило бы расширять поиск там,
+    # где человек назвал слово точно.
+    assert "акт" in _fts_terms("акт приёма-передачи")
+
+    # Слово заменяется основой, а не дополняется ею: бюджет считает слова.
+    assert _fts_terms("как чинить кластер") == ["как", "чин*", "кластер"]
+
+    # Оба написания «ё» сохраняются: индекс хранит написанное, и документ с
+    # «чёрных» не найдётся по «черн*».
+    terms = _fts_terms("чёрных списков")
+    assert "чёрн*" in terms and "черн*" in terms
+
+    # Слишком короткая основа префиксом не становится — «до*» нашло бы половину
+    # корпуса.
+    assert all(not term.startswith("до*") for term in _fts_terms("дом"))

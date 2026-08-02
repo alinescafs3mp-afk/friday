@@ -71,15 +71,17 @@ def test_the_fts_query_carries_both_spellings():
     costs one alternative.
     """
     terms = _fts_terms("что выбрать для чёрных списков")
-    assert "чёрных" in terms and "черных" in terms
+    # Слово доходит основой с префиксом, но ОБА написания сохраняются: индекс
+    # хранит написанное, и документ с «чёрных» не найдётся по «черн*».
+    assert "чёрн*" in terms and "черн*" in terms
     # A word without the letter is not duplicated.
-    assert terms.count("списков") == 1
+    assert terms.count("списк*") == 1
 
 
 def test_a_variant_never_costs_a_distinct_word_its_budget_slot():
     query = "ёлка " + " ".join(f"слово{index}" for index in range(30))
     terms = _fts_terms(query)
-    assert "ёлка" in terms and "елка" in terms
+    assert "ёлк*" in terms and "елк*" in terms
     # Every distinct word that made the budget is still one word, not one slot lost
     # to its own second spelling.
     assert len({term.replace("ё", "е") for term in terms}) >= 12

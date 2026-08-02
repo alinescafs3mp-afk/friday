@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from friday.config import FridaySettings
-from friday.morphology import stem
+from friday.morphology import _MIN_STEM_INPUT as _MORPHOLOGY_DEFAULT
+from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.retrieval._dense_cache import DenseVectorCache, matrix_scores
 from friday.retrieval._repair import _MIN_MEANINGFUL_TERM, Repair, repair_query
 from friday.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
@@ -296,7 +297,7 @@ def _snippet_fold(body: str) -> str:
     return folded.replace("ё", "е")
 
 
-def _search_form(token: str) -> str:
+def _search_form(token: str, min_input: int = _MORPHOLOGY_DEFAULT) -> str:
     """What is actually searched in the body for a query token.
 
     «личный номер Иванова» names the row's owner in genitive while the table
@@ -307,7 +308,13 @@ def _search_form(token: str) -> str:
     the alphabet, so it is not used as a search term.
     """
     folded = token.casefold().replace("ё", "е")
-    stemmed = stem(folded)
+    # `min_input` по умолчанию прежний. Подбор кандидатов зовёт эту функцию с
+    # порогом 4: «акте», «цеха», «коде», «года» — обычные слова документов, и по
+    # ним не находилось НИЧЕГО (замерено: «что сказано в акте №77?» не находил
+    # только что принятый документ ни на какой позиции, «акт 77» ставил его
+    # первым). Разметка упоминаний зовёт с порогом по умолчанию: там имена, а
+    # «Иван» при пороге 4 превращается в «ива» и склеивает разных людей.
+    stemmed = stem(folded, min_input)
     if stemmed != folded and folded.startswith(stemmed) and len(stemmed) >= 3:
         return stemmed
     return folded
@@ -466,7 +473,10 @@ def best_snippet(query: str, text: str, *, max_chars: int = 520) -> str:
     for token in tokens_of(query):
         folded = token.casefold()
         if len(token) > 1 and folded not in _STOPWORDS:
-            forms.setdefault(_search_form(folded), token)
+            # Подбор кандидатов — с более низким порогом стемминга: пропустить
+            # документ вовсе хуже, чем принести лишнего, а вес всё равно считает
+            # `lexical_vector` со своим порогом.
+            forms.setdefault(_search_form(folded, LEXICAL_MIN_STEM_INPUT), token)
     if not forms:
         return body[:max_chars].rstrip() + "…"
     lowered = _snippet_fold(body)
