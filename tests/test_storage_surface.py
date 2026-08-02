@@ -259,7 +259,9 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_knowledge_missing_embedding": "(self, model: 'str', *, limit: 'int' = 64, chunk_scheme: 'str' = '', chunk_threshold: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_live_knowledge_ids": "(self, user_id: 'str') -> 'set[str]'",
     "list_knowledge_objects": "(self, user_id: 'str', *, limit: 'int' = 100, offset: 'int' = 0, lifecycle_stage: 'str | None' = None, tag: 'str | None' = None, entity_id: 'str | None' = None, query: 'str | None' = None, since: 'str | None' = None, until: 'str | None' = None) -> 'list[dict[str, Any]]'",
-    "list_knowledge_on_this_day": "(self, user_id: 'str', *, month_day: 'str', before_iso: 'str', limit: 'int' = 10) -> 'list[dict[str, Any]]'",
+    # +`utc_offset_minutes`: годовщина считается в сутках ЧЕЛОВЕКА. День приходил
+    # из местного времени, а `created_at` лежит в UTC — две разные шкалы.
+    "list_knowledge_on_this_day": "(self, user_id: 'str', *, month_day: 'str', before_iso: 'str', limit: 'int' = 10, utc_offset_minutes: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_knowledge_tags": "(self, user_id: 'str', *, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_knowledge_versions": "(self, ko_id: 'str', user_id: 'str') -> 'list[dict[str, Any]]'",
     "list_lifecycle_candidates": "(self, user_id: 'str', *, days_threshold: 'int' = 90, limit: 'int' = 500, offset: 'int' = 0) -> 'list[dict[str, Any]]'",

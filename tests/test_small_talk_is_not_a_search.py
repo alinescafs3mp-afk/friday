@@ -91,7 +91,9 @@ def test_small_talk_skips_retrieval_entirely():
     # покраснела, когда между ними появился (совершенно законный) блок запуска
     # арбитра. Тест должен ловить возвращение поиска на болтовне, а не любую
     # правку по соседству.
-    guard = source.index("if context.small_talk or looking_outward:")
+    # Условие расширилось: поиск пропускается ещё и на вопросах о деятельности
+    # участника — на них отвечает инструмент надзора, архив там ни при чём.
+    guard = source.index("if context.small_talk or looking_outward")
     branch = source[guard : source.index("elif searcher:", guard)]
     assert "context.knowledge_hits = []" in branch, "поиск всё ещё выполняется на болтовне"
     assert source.index("_is_small_talk(message)") < guard, "признак болтовни считается позже проверки"

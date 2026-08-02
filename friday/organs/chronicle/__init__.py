@@ -88,11 +88,16 @@ def build_window(storage, kg, user_id: str, *, days: int, settings=None) -> dict
 
 
 def build_on_this_day(storage, user_id: str, now: datetime) -> list[dict[str, Any]]:
+    # `now` — местное время человека, а метки в базе UTC. Смещение передаётся
+    # явно, чтобы сравнивались одни и те же сутки; иначе запись, созданная
+    # поздним вечером, показывала бы годовщину на день раньше.
+    offset = now.utcoffset()
     memories = storage.list_knowledge_on_this_day(
         user_id,
         month_day=now.strftime("%m-%d"),
         before_iso=now.date().isoformat(),
         limit=5,
+        utc_offset_minutes=int(offset.total_seconds() // 60) if offset else 0,
     )
     return [
         {

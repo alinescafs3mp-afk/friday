@@ -1274,19 +1274,41 @@ class KnowledgeMixin(StorageShared):
         return int(row["count"] if row else 0)
 
     def list_knowledge_on_this_day(
-        self, user_id: str, *, month_day: str, before_iso: str, limit: int = 10
+        self,
+        user_id: str,
+        *,
+        month_day: str,
+        before_iso: str,
+        limit: int = 10,
+        utc_offset_minutes: int = 0,
     ) -> list[dict[str, Any]]:
         """Knowledge captured on the same calendar day (MM-DD) in an earlier year.
 
         ``created_at`` is an ISO string, so ``strftime('%m-%d', …)`` selects the
         anniversary and the ``created_at < before_iso`` bound keeps only the past.
+
+        `utc_offset_minutes` переводит метку в ВРЕМЯ ЧЕЛОВЕКА перед сравнением.
+        Без этого сравнивались две разные шкалы: день приходит из `local_now`
+        (у человека уже 3 августа), а `created_at` лежит в UTC (там ещё 2-е).
+        Замерено на живом архиве: в это окно (21:00–24:00 UTC при МСК) попадают
+        2 записи из 1533 — редко, но годовщина такой записи показалась бы не в
+        свой день, а найти причину по одному сообщению в чате невозможно.
+
+        Тот же класс, что уже чинили в тихих часах и напоминаниях: «время —
+        время ЧЕЛОВЕКА, а не UTC».
         """
+        shift = f"{int(utc_offset_minutes):+d} minutes"
+        # Обе половины условия считаются в ОДНИХ сутках — местных. Сдвинуть
+        # только выбор месяца-дня было мало: сегодняшняя вечерняя запись
+        # проходила границу «строго прошлое» (её UTC-метка меньше местной даты) и
+        # показывалась как собственная годовщина в день создания.
         rows = self.execute(
             "SELECT id, title, knowledge_kind, created_at FROM knowledge_objects"
             " WHERE user_id=? AND deleted_at IS NULL"
-            " AND strftime('%m-%d', created_at) = ? AND created_at < ?"
+            " AND strftime('%m-%d', datetime(created_at, ?)) = ?"
+            " AND date(datetime(created_at, ?)) < ?"
             " ORDER BY created_at DESC LIMIT ?",
-            (user_id, month_day, before_iso, max(1, min(int(limit), 200))),
+            (user_id, shift, month_day, shift, before_iso, max(1, min(int(limit), 200))),
         ).fetchall()
         return [dict(row) for row in rows]
 
