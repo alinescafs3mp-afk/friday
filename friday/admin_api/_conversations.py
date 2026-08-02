@@ -28,6 +28,92 @@ from friday.admin_api._deps import (
 router = APIRouter()
 
 
+@router.get("/chats")
+async def chat_feed(request: Request, limit: int = Query(100, ge=1, le=500)) -> dict[str, Any]:
+    """Мир глазами Пятницы: кто ей писал и что скидывал, свежие сверху.
+
+    Заказ владельца — видеть переписку так, как её видит она сама. Сводки по
+    людям не было: были разговоры по одному человеку и активность по одному
+    человеку, поэтому «кто вообще писал сегодня» собиралось перебором учёток.
+
+    Читается ПОД полным доступом и пишется в след: это чужая переписка, и
+    «посмотрел ленту» должно быть отличимо от «ничего не делал».
+    """
+    _require(request, "admin.all_data.read")
+    _audit_cross_tenant_read(request, "admin.chat_feed.read", None, limit=limit)
+    storage = _services(request).storage
+    items = []
+    for row in storage.list_chat_feed(limit=limit):
+        metadata = _json_value(row.get("metadata_json"), {})
+        metadata = metadata if isinstance(metadata, dict) else {}
+        items.append(
+            {
+                "user_id": row.get("user_id"),
+                "display_name": row.get("display_name") or row.get("username") or row.get("user_id"),
+                "username": row.get("username") or "",
+                "preset_key": row.get("preset_key") or "",
+                "status": row.get("status") or "",
+                # Есть ли куда ответить: без чата кнопка ответа бессмысленна, и
+                # человек должен видеть это заранее, а не после нажатия.
+                "chat_id": str(metadata.get("chat_id") or ""),
+                "last_content": row.get("last_content") or "",
+                "last_role": row.get("last_role") or "",
+                "last_at": row.get("last_at"),
+                "last_conversation_id": row.get("last_conversation_id") or "",
+                "message_count": int(row.get("message_count") or 0),
+                "file_count": int(row.get("file_count") or 0),
+            }
+        )
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/chats/{user_id}/reply")
+async def reply_to_person(user_id: str, request: Request) -> dict[str, Any]:
+    """Ответить человеку в его чат прямо из админки.
+
+    Доставка — той же очередью, которой пользуются проактивные органы: мост
+    дренирует её каждые пятнадцать секунд, поэтому отдельного транспорта не
+    заводится. Сообщение помечается как ответ владельца — человек должен
+    понимать, что это не Пятница сочинила.
+    """
+    _require(request, "admin.all_data.read")
+    body = await _request_json(request)
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Пустой ответ отправить нельзя")
+    if len(text) > 4000:
+        raise HTTPException(status_code=400, detail="Ответ длиннее 4000 знаков не поместится в сообщение")
+    storage = _services(request).storage
+    user = storage.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    metadata = _json_value(user.get("metadata_json"), {})
+    metadata = metadata if isinstance(metadata, dict) else {}
+    chat_id = str(metadata.get("chat_id") or "").strip()
+    if not chat_id:
+        raise HTTPException(status_code=409, detail="У этого человека нет чата — отвечать некуда")
+    actor = request.state.actor
+    # Ключ дедупа несёт время: два одинаковых ответа подряд — законное действие
+    # («повторяю: жду отчёт»), и глушить второй нельзя.
+    from friday.storage._base import new_id, utc_now
+
+    queued = storage.enqueue_notification(
+        user_id,
+        chat_id,
+        f"💬 Ответ от владельца:\n\n{text}",
+        kind="owner_reply",
+        dedup_key=f"owner_reply:{new_id('r')}:{utc_now()}",
+    )
+    _audit(
+        request,
+        "admin.chat.reply",
+        target_type="user",
+        target_id=user_id,
+        after={"chars": len(text), "chat_id": chat_id, "queued": bool(queued), "by": actor.own_id},
+    )
+    return {"queued": bool(queued), "user_id": user_id, "chat_id": chat_id}
+
+
 @router.get("/conversations")
 async def list_all_conversations(
     request: Request,

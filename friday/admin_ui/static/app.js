@@ -1,6 +1,6 @@
 'use strict';
-const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],usersTotal:0,presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',conflictStatus:'suggested',relationStatus:'suggested',knowledgeSince:'',knowledgeUntil:'',timelineSince:'',timelineUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,resolutionsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0};
-const views=[['dashboard','Обзор','◈'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['timeline','Хроника','◴'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
+const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],usersTotal:0,presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',conflictStatus:'suggested',relationStatus:'suggested',knowledgeSince:'',knowledgeUntil:'',timelineSince:'',timelineUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,resolutionsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0,chatFeed:[],chatPerson:null,chatMessages:[]};
+const views=[['dashboard','Обзор','◈'],['chats','Переписка','✉'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['timeline','Хроника','◴'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const q=v=>encodeURIComponent(v??'').replace(/'/g,'%27').replace(/%20/g,'+');
 const fmtDate=v=>v?new Date(v).toLocaleString('ru-RU'):'—';
@@ -73,6 +73,93 @@ actions.dismissGroup=async(key,status)=>{const g=state.inboxGroups.find(x=>x.key
   const verb=status==='ignored'?'игнорировать':'архивировать';
   if(!confirm(`${verb[0].toUpperCase()+verb.slice(1)} ${g.inbox_ids.length} из ${g.total} материалов группы «${key}»?`))return;
   await bulkApply(g.inbox_ids,batch=>api('/api/admin/inbox/bulk',{method:'POST',body:JSON.stringify({user_id:selectedUser(),inbox_ids:batch,status,promote:false,notes:`групповой разбор: ${state.inboxAxis}=${key}`})}))};
+// Мир глазами Пятницы: кто ей писал и что скидывал, в виде списка чатов, с
+// возможностью ответить. Сводки по людям в системе не было — были разговоры по
+// одному человеку и активность по одному человеку, поэтому «кто вообще писал
+// сегодня» собиралось перебором учёток.
+renderers.chats = async gen => {
+  const data = await api('/api/admin/chats?limit=100');
+  if (gen !== renderGen) return;
+  state.chatFeed = data.items || [];
+  const active = state.chatPerson;
+  const rows = state.chatFeed.map(p => {
+    const when = p.last_at ? fmtDate(p.last_at) : '—';
+    const who = p.last_role === 'assistant' ? 'Пятница' : (p.display_name || p.user_id);
+    const preview = String(p.last_content || '').replace(/\s+/g, ' ').slice(0, 90);
+    return `<button class="chat-row ${active === p.user_id ? 'active' : ''}" ${call('openChat', p.user_id)}>
+      <div class="chat-top"><b>${esc(p.display_name || p.user_id)}</b>
+        <span class="muted">${esc(when)}</span></div>
+      <div class="chat-preview"><span class="muted">${esc(who)}:</span> ${esc(preview)}</div>
+      <div class="chat-meta"><span class="badge">${p.message_count} сообщ.</span>
+        <span class="badge">${p.file_count} файлов</span>
+        ${p.chat_id ? '' : '<span class="badge warn">нет чата</span>'}</div>
+    </button>`;
+  });
+  const list = rows.length ? rows.join('') : empty('Пятнице пока никто не писал');
+  setApp(gen, `<div class="chat-layout">
+    <section class="card chat-list"><h2>Кто писал Пятнице</h2>${list}</section>
+    <section class="card chat-thread" id="chatThread">${
+      active ? '<div class="empty">Загружаю переписку…</div>' : empty('Выберите человека слева')
+    }</section>
+  </div>`);
+  if (active) await loadChatThread(active);
+};
+
+async function openChat(userId) {
+  state.chatPerson = userId;
+  await refresh();
+}
+
+// Переписка человека: все его разговоры одной лентой, старые сверху — так же,
+// как её видит он сам в Telegram.
+async function loadChatThread(userId) {
+  const person = (state.chatFeed || []).find(p => p.user_id === userId) || {};
+  const box = document.getElementById('chatThread');
+  if (!box) return;
+  try {
+    const convs = await api(`/api/admin/conversations?user_id=${q(userId)}&include_archived=true&limit=20`);
+    const items = [];
+    for (const conv of (convs.items || []).slice(0, 5)) {
+      const page = await api(`/api/admin/conversations/${q(conv.id)}/messages?user_id=${q(userId)}&limit=200`);
+      for (const message of page.items || []) items.push({ ...message, conversation_title: conv.title });
+    }
+    items.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    state.chatMessages = items;
+    const bubbles = items.map(m => {
+      const mine = m.role === 'assistant';
+      return `<div class="bubble ${mine ? 'from-friday' : 'from-person'}">
+        <div class="bubble-head">${mine ? 'Пятница' : esc(person.display_name || userId)}
+          <span class="muted">${esc(fmtDate(m.created_at))}</span></div>
+        <div class="bubble-body">${esc(String(m.content || '')).replace(/\n/g, '<br>')}</div>
+      </div>`;
+    }).join('');
+    const canReply = Boolean(person.chat_id);
+    box.innerHTML = `<div class="toolbar"><h2 class="grow">${esc(person.display_name || userId)}</h2>
+        <span class="badge">${items.length} сообщений</span></div>
+      <div class="thread">${bubbles || empty('Сообщений нет')}</div>
+      ${canReply
+        ? `<div class="reply-box"><textarea id="replyText" class="field" rows="3"
+             placeholder="Ответить человеку в Telegram…"></textarea>
+           <button class="btn primary" ${call('sendReply', userId)}>Отправить</button></div>`
+        : '<div class="notice">У этого человека нет привязанного чата — ответить некуда.</div>'}`;
+  } catch (error) {
+    box.innerHTML = `<div class="notice bad">${esc(String(error.message || error))}</div>`;
+  }
+}
+
+async function sendReply(userId) {
+  const field = document.getElementById('replyText');
+  const text = String(field?.value || '').trim();
+  if (!text) { toast('Пустой ответ отправить нельзя'); return; }
+  try {
+    await api(`/api/admin/chats/${q(userId)}/reply`, { method: 'POST', body: JSON.stringify({ text }) });
+    field.value = '';
+    toast('Ответ поставлен в очередь — мост доставит его в течение 15 секунд');
+  } catch (error) {
+    toast(String(error.message || error));
+  }
+}
+
 renderers.inbox=async gen=>{
   const uid=selectedUser();
   const data=await api(`/api/admin/inbox?user_id=${q(uid)}&limit=${PAGE}&offset=${state.inboxOffset}`);if(gen!==renderGen)return;
@@ -770,6 +857,9 @@ renderers.diagnostics=async gen=>{
 async function health(){try{const d=await fetch('/api/health').then(r=>r.json());const dot=document.getElementById('healthDot');dot.classList.remove('health-bad');dot.classList.add('health-ok');document.getElementById('healthText').textContent=`${d.status} · ${d.version}`;}catch{const dot=document.getElementById('healthDot');dot.classList.remove('health-ok');dot.classList.add('health-bad');document.getElementById('healthText').textContent='сервер недоступен'}}
 async function bootstrap(){renderNav();await health();if(!state.token){openTokenDialog();return}await loadUsers();await refresh();handleSaveHash()}
 function handleSaveHash(){const m=/[#&]save=([^&]*)/.exec(location.hash||'');if(!m||!m[1])return;let url='';try{url=decodeURIComponent(m[1])}catch(e){return}history.replaceState(null,'',location.pathname+location.search);if(/^https?:\/\//i.test(url))actions.ingestUrlDialog(url)}
-Object.assign(actions,{navigate,refresh,toggleMenu,openTokenDialog,saveToken,clearToken,closeModal,download});
+// Обработчики регистрируются ЯВНО: без этой строки кнопка рисуется, клик
+// доходит до диспетчера и молча теряется — поймано браузерным прогоном,
+// строка ленты не открывала переписку и ошибок в консоли не было.
+Object.assign(actions,{navigate,refresh,toggleMenu,openTokenDialog,saveToken,clearToken,closeModal,download,openChat,sendReply});
 bootstrap();setInterval(health,30000);
 

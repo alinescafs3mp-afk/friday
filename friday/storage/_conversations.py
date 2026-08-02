@@ -295,6 +295,53 @@ class ConversationsMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
+    def list_chat_feed(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Кто писал Пятнице — по одной строке на человека, свежие сверху.
+
+        Владелец попросил «видеть мир глазами Пятницы»: кто и что ей скидывал и
+        писал, в виде списка чатов. Сводки по людям в системе не было вовсе —
+        были разговоры (по одному человеку за раз) и активность (по одному
+        человеку за раз), то есть чтобы узнать, кто вообще писал за день,
+        приходилось перебирать учётки руками.
+
+        Одним запросом: последнее сообщение каждого человека, сколько всего
+        сообщений и сколько файлов он прислал.
+        """
+        rows = self.execute(
+            """
+            WITH last_message AS (
+                SELECT m.user_id,
+                       m.content,
+                       m.role,
+                       m.created_at,
+                       m.conversation_id,
+                       ROW_NUMBER() OVER (PARTITION BY m.user_id ORDER BY m.created_at DESC) AS rn
+                FROM messages m
+            )
+            SELECT u.id AS user_id,
+                   u.display_name,
+                   u.username,
+                   u.preset_key,
+                   u.status,
+                   u.metadata_json,
+                   lm.content AS last_content,
+                   lm.role AS last_role,
+                   lm.created_at AS last_at,
+                   lm.conversation_id AS last_conversation_id,
+                   (SELECT COUNT(*) FROM messages WHERE user_id=u.id) AS message_count,
+                   (SELECT COUNT(*) FROM raw_objects
+                     WHERE user_id=u.id AND content_type='file' AND deleted_at IS NULL) AS file_count
+            FROM users u
+            LEFT JOIN last_message lm ON lm.user_id = u.id AND lm.rn = 1
+            WHERE lm.created_at IS NOT NULL
+               OR (SELECT COUNT(*) FROM raw_objects WHERE user_id=u.id) > 0
+            ORDER BY COALESCE(lm.created_at, u.created_at) DESC
+            LIMIT ?
+            """,
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_conversations(
         self,
         user_id: str,
