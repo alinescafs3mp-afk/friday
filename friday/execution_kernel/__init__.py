@@ -597,6 +597,83 @@ class ToolResult:
 
 
 _LLM_TOOL_PAYLOAD_MAX_CHARS = 11_900
+#: Сколько меток показывается модели. Список отсортирован по частоте, поэтому
+#: сорок первых отвечают на вопрос «какие у меня темы»; общее число возвращается
+#: отдельным полем, чтобы «показаны не все» не выглядело как «их столько».
+_TAGS_SHOWN_TO_LLM = 40
+
+
+def _timeline_event_for_llm(event: dict[str, Any]) -> dict[str, Any]:
+    """Одно событие ленты без того, что модели не нужно.
+
+    Замерено на живом архиве 2026-08-02: `what_happened` отдавал 11 939 знаков —
+    предел инструмента, — и обрезался посреди структуры, теряя хвост дня молча.
+    Внутри при этом лежало лишнее: время в двух форматах (UTC и местное),
+    внутренний `conversation_id`, а заголовок разговора у первого сообщения
+    ДОСЛОВНО повторял его же текст.
+
+    Остаётся местное время (о нём и спрашивают), роль, вид и текст.
+    """
+    text = str(event.get("text") or "")
+    conversation = str(event.get("conversation") or "")
+    trimmed: dict[str, Any] = {
+        "kind": event.get("kind"),
+        "at": event.get("at_local") or event.get("at"),
+        # 200 знаков: этого хватает узнать реплику, а сорок реплик по 400 снова
+        # упирались в предел инструмента и обрезались посреди дня.
+        "text": text[:200],
+    }
+    if event.get("role"):
+        trimmed["role"] = event.get("role")
+    # Заголовок разговора — только если он что-то добавляет к самому тексту.
+    if conversation and conversation[:60] != text[:60]:
+        trimmed["conversation"] = conversation[:80]
+    if event.get("title"):
+        trimmed["title"] = str(event.get("title"))[:120]
+    return trimmed
+
+
+def _inbox_row_for_llm(row: dict[str, Any]) -> dict[str, Any]:
+    """Одна строка входящих в том виде, в каком она полезна модели.
+
+    Замерено на живом архиве 2026-08-02: `inbox_list` отдавал модели 11 936
+    знаков — почти весь бюджет инструмента — и бо́льшую часть занимала внутренняя
+    кухня, сериализованная в строку: `enrichment_version`, `policy_version`,
+    `promotion_assessment` со штрафами и сигналами, `suggestions_json` целиком.
+    Ответить на вопрос «что у меня во входящих» это не помогает, зато вытесняет
+    из контекста сами материалы и оплачивается временем ответа.
+
+    Хуже: на 11 900-м знаке результат обрезается посреди структуры, и последние
+    строки списка не доходят вовсе — молча.
+    """
+    suggestions = row.get("suggestions_json")
+    if isinstance(suggestions, str):
+        try:
+            suggestions = json.loads(suggestions)
+        except (TypeError, ValueError):
+            suggestions = {}
+    suggestions = suggestions if isinstance(suggestions, dict) else {}
+    tags = row.get("suggested_tags_json")
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except (TypeError, ValueError):
+            tags = []
+    title = str(row.get("title") or suggestions.get("title") or "").strip()
+    preview = str(row.get("preview") or row.get("content") or suggestions.get("summary") or "").strip()
+    return {
+        "id": row.get("id"),
+        "status": row.get("status"),
+        "title": title[:120],
+        # Достаточно, чтобы человек узнал материал, и мало, чтобы весь список
+        # уместился целиком: с превью в 300 знаков двадцать строк снова упирались
+        # в предел инструмента и обрезались посреди структуры.
+        "preview": preview[:180],
+        "tags": [str(tag) for tag in (tags if isinstance(tags, list) else [])][:8],
+        "importance": suggestions.get("importance"),
+        "kind": suggestions.get("knowledge_kind"),
+        "created_at": row.get("created_at"),
+    }
 _WEB_SOURCE_STRING_LIMITS = {
     "id": 120,
     "url": 800,
@@ -1502,6 +1579,7 @@ class ExecutionKernel:
                 )
             except ValueError:
                 event["at_local"] = str(event["at"])
+        events = [_timeline_event_for_llm(event) for event in events]
         return {
             "understood": True,
             "asked_about": {"since": start_local, "until": end_local, "timezone": str(zone)},
@@ -1922,7 +2000,20 @@ class ExecutionKernel:
         """
         storage, _, _, _ = self._require_services()
         items = storage.list_knowledge_tags(actor.user_id)
-        return {"tags": items, "count": len(items)}
+        # Показываются САМЫЕ ЧАСТЫЕ, а общее число называется отдельно.
+        #
+        # Замерено на живом архиве 2026-08-02: полный список занимал 11 075 знаков
+        # из 12 000 бюджета инструмента и обрезался посреди структуры — хвост
+        # меток не доходил до модели вовсе, молча. Вопрос «какие у меня метки»
+        # человек задаёт про заметные, а не про все восемьсот: `total` честно
+        # говорит, сколько их всего, `truncated` — что показаны не все.
+        shown = items[:_TAGS_SHOWN_TO_LLM]
+        return {
+            "tags": shown,
+            "count": len(shown),
+            "total": len(items),
+            "truncated": len(shown) < len(items),
+        }
 
     async def _speak(self, *, actor: ActorContext, text: str) -> dict[str, Any]:
         """Synthesize `text` as a voice clip. Call this only when the user has
@@ -2185,16 +2276,20 @@ class ExecutionKernel:
     async def _inbox_list(self, *, actor: ActorContext, status: str | None = None) -> dict[str, Any]:
         storage, _, _, _ = self._require_services()
         status_value = InboxStatus(status) if status else None
-        items = storage.list_inbox(actor.user_id, status_value, limit=20)
+        # Двенадцать, а не двадцать: разбирают входящие по одному, и вопрос «что
+        # там накопилось» требует обзора, а не всей очереди. Сколько её на самом
+        # деле, говорит `total`.
+        rows = storage.list_inbox(actor.user_id, status_value, limit=12)
         # `count` — сколько ПОКАЗАНО, `total` — сколько есть. Возвращать длину среза
         # под именем count значит сказать модели «у вас 20 входящих» при двухстах, а
         # модель перескажет это человеку прозой, где оговорку уже не восстановить.
         # Соседний инструмент в этом же файле решает ровно эту задачу явно.
+        total = storage.count_inbox(actor.user_id, status_value)
         return {
-            "items": items,
-            "count": len(items),
-            "total": storage.count_inbox(actor.user_id, status_value),
-            "truncated": len(items) < storage.count_inbox(actor.user_id, status_value),
+            "items": [_inbox_row_for_llm(row) for row in rows],
+            "count": len(rows),
+            "total": total,
+            "truncated": len(rows) < total,
         }
 
     async def _user_activity(
