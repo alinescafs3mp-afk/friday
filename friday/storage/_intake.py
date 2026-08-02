@@ -54,6 +54,29 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def find_file_by_content_hash(self, user_id: str, content_hash: str) -> dict[str, Any] | None:
+        """Тот же файл этого человека, принятый раньше под другим `source_ref`.
+
+        Ключ происхождения у Telegram содержит `update_id`, уникальный для каждой
+        отправки, поэтому пересланный второй раз документ не совпадал сам с собой
+        по `source_ref` НИКОГДА. Замерено: одна и та же строка байт дала два Raw
+        Object с одинаковым `content_hash`, два элемента Inbox и два одинаковых
+        Knowledge Object. Файл на диске один (адресация по содержимому), а очередь
+        разбора и корпус — задвоены.
+
+        Берётся самая ранняя запись: повтор должен воспроизводить первое решение,
+        а не последнее.
+        """
+        content_hash = str(content_hash or "").strip()
+        if not content_hash:
+            return None
+        row = self.execute(
+            "SELECT * FROM raw_objects WHERE user_id=? AND content_type='file' AND content_hash=? "
+            "AND deleted_at IS NULL ORDER BY received_at ASC, id ASC LIMIT 1",
+            (user_id, content_hash),
+        ).fetchone()
+        return dict(row) if row else None
+
     def store_raw_object(self, obj: RawObject) -> RawObject:
         self.ensure_user(obj.user_id)
         if not obj.content_hash:

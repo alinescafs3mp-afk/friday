@@ -150,3 +150,69 @@ def test_a_whole_file_says_nothing_extra():
         {"promoted": True, "extraction": {"success": True, "text_success": True}}
     )
     assert line == "✅ Файл стал знанием — можно спрашивать."
+
+
+def test_the_same_file_sent_twice_is_accepted_once(pipeline):
+    """Мутация: убрать запасной ключ по содержимому — тест краснеет.
+
+    Мост строил `source_ref` из `update_id`, уникального у КАЖДОЙ отправки,
+    поэтому один и тот же файл не совпадал сам с собой никогда. Замерено: одна и
+    та же строка байт под двумя ключами дала два Raw Object с одинаковым
+    content_hash, два элемента Inbox и два одинаковых Knowledge Object. Файл на
+    диске один — задваивались очередь разбора и корпус.
+    """
+    payload = "Договор №7 от 1 августа 2026 года. Стороны: ООО «Заря» и ИП Кузнецов.".encode()
+    first = asyncio.run(
+        pipeline.ingest_file(
+            "alice", None, payload, filename="dogovor.txt", mime_type="text/plain",
+            source_ref="telegram-file:AAA:111",
+        )
+    )
+    second = asyncio.run(
+        pipeline.ingest_file(
+            "alice", None, payload, filename="dogovor.txt", mime_type="text/plain",
+            source_ref="telegram-file:BBB:222",  # другая отправка того же файла
+        )
+    )
+    assert second.get("idempotent_replay") is True, "тот же файл принят вторым объектом"
+    assert second["raw_object_id"] == first["raw_object_id"]
+
+    rows = pipeline.storage.execute(
+        "SELECT COUNT(*) AS c FROM raw_objects WHERE user_id='alice' AND content_type='file'"
+    ).fetchone()["c"]
+    assert rows == 1, f"в архиве {rows} записи об одном файле"
+
+
+def test_a_different_file_is_still_a_different_file(pipeline):
+    """Контроль: дедуп по содержимому не склеивает разные документы."""
+    one = asyncio.run(
+        pipeline.ingest_file(
+            "alice", None, b"first document body", filename="a.txt", mime_type="text/plain",
+            source_ref="telegram-file:AAA:1",
+        )
+    )
+    two = asyncio.run(
+        pipeline.ingest_file(
+            "alice", None, b"second document body", filename="b.txt", mime_type="text/plain",
+            source_ref="telegram-file:BBB:2",
+        )
+    )
+    assert two.get("idempotent_replay") is not True
+    assert one["raw_object_id"] != two["raw_object_id"]
+
+
+def test_one_persons_file_is_not_another_persons_replay(pipeline):
+    """Дедуп по содержимому — в границах одного человека, а не по всей базе."""
+    payload = b"shared text that two people happen to send"
+    mine = asyncio.run(
+        pipeline.ingest_file(
+            "alice", None, payload, filename="общий.txt", mime_type="text/plain", source_ref="a:1"
+        )
+    )
+    theirs = asyncio.run(
+        pipeline.ingest_file(
+            "bob", None, payload, filename="общий.txt", mime_type="text/plain", source_ref="b:1"
+        )
+    )
+    assert theirs.get("idempotent_replay") is not True, "чужой файл воспроизведён как свой"
+    assert theirs["raw_object_id"] != mine["raw_object_id"]

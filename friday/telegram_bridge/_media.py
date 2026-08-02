@@ -127,7 +127,12 @@ class MediaMixin(BridgeShared):
             "filename": Path(filename).name,
             "mime_type": mime_type,
             "content_base64": base64.b64encode(content).decode("ascii"),
-            "source_ref": f"telegram-file:{update['update_id']}:{file_id}",
+            # Без `update_id`: он уникален у КАЖДОЙ отправки, поэтому один и тот
+            # же файл никогда не совпадал сам с собой, и повторная пересылка
+            # заводила второй Raw Object, второй Inbox и второй Knowledge Object.
+            # `file_id` у Telegram стабилен для одного файла и одного бота — это
+            # и есть ключ происхождения. Содержимое проверяется вторым ключом.
+            "source_ref": f"telegram-file:{file_id}",
             "media_kind": media_kind,
         }
         duration = descriptor.get("duration")

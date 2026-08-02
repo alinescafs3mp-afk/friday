@@ -351,6 +351,13 @@ class FilesMixin(PipelineShared):
 
         self.storage.ensure_user(user_id, source="upload")
         existing = self.storage.find_raw_by_source_ref(user_id, "upload", effective_source_ref)
+        if not existing:
+            # Запасной ключ — само содержимое. Он применялся только при пустом
+            # `source_ref`, то есть из Telegram не применялся никогда: там ключ
+            # содержит `update_id`, уникальный у каждой отправки. Пересланный
+            # второй раз документ заводил второй Raw Object, второй Inbox и
+            # второй одинаковый Knowledge Object.
+            existing = self.storage.find_file_by_content_hash(user_id, digest)
         if existing:
             self._validate_existing_file_source(existing, digest)
             # An exact retry can also repair a missing/corrupt content-addressed

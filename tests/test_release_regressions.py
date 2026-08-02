@@ -363,7 +363,10 @@ async def test_telegram_prepares_media_types(tmp_path: Path, field, descriptor, 
     assert prepared["media_kind"] == kind
     assert prepared["mime_type"] == mime
     assert prepared["filename"].endswith(suffix)
-    assert prepared["source_ref"].startswith("telegram-file:11:")
+    # Без update_id: он уникален у каждой отправки, и один и тот же файл не
+    # совпадал сам с собой — повторная пересылка заводила второй Raw Object.
+    assert prepared["source_ref"].startswith("telegram-file:")
+    assert ":11:" not in prepared["source_ref"]
     assert base64.b64decode(prepared["content_base64"]) == payload
     if descriptor.get("duration"):
         assert prepared["duration"] == descriptor["duration"]
@@ -597,6 +600,10 @@ async def test_failed_file_promotion_does_not_delete_bytes_referenced_by_another
         raise RuntimeError("injected promotion failure")
 
     monkeypatch.setattr(pipeline, "_promote_raw", fail_promotion)
+    # Ранний дедуп по содержимому здесь глушится намеренно: он ловит обычный
+    # повтор, а проверяется ГОНКА — строка с теми же байтами появилась ПОСЛЕ
+    # проверки, и удалить файл, на который она ссылается, нельзя.
+    monkeypatch.setattr(storage, "find_file_by_content_hash", lambda user_id, content_hash: None)
     with pytest.raises(RuntimeError, match="injected promotion failure"):
         await pipeline.ingest_file(
             user_id,
