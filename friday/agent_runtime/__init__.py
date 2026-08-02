@@ -279,7 +279,16 @@ _ASKS_FOR_A_FILE = re.compile(
     r"\bpdf\b|пдф|"
     r"картинк\w*|изображени\w*|\bpng\b|"
     r"файл\w*\s+(?:пришли|отправь|сделай)|(?:пришли|отправь|скинь)\s+файл\w*|"
-    r"сделай\s+(?:мне\s+)?(?:отчёт|отчет|справк\w*|документ)|"
+    # Глагол создания и предмет — с ЛЮБЫМИ словами между ними.
+    #
+    # Замерено на проверке документов 2026-08-03: «Собери справку по поверке и
+    # сделай из неё документ Word» не ловилось вовсе — «сделай» и «документ»
+    # разделены словами «из неё», а `word` без предлога «в» шаблон не знал.
+    # Человек получил «Соберу документ по всем найденным материалам» и ни одного
+    # файла: обещание вместо дела.
+    r"(?:сделай|собери|сформируй|подготовь|оформи|составь)"
+    r"(?:\s+\w+){0,3}\s+(?:отчёт|отчет|справк\w*|документ\w*|таблиц\w*|файл\w*)|"
+    r"\bword\b|\bворд\w*|\bэксель\w*|"
     r"оформи\s+(?:в|как)\b"
     r")",
     re.IGNORECASE,
@@ -2371,12 +2380,21 @@ class AgentRuntime:
         «что писал Иванов» про человека из документов останется обычным поиском
         по архиву, как и было.
         """
+        # След на КАЖДОЙ развилке. Владелец трижды сообщал «не работает», а через
+        # прямой вызов те же фразы отвечались верно — значит разница в пути, и
+        # искать её вслепую по размеру промпта нельзя.
         if not _ASKS_WHAT_A_PERSON_WROTE.search(message):
+            LOGGER.info("person-prefetch: вопрос не про человека — %r", message[:80])
             return False
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
         if "user_activity" not in available:
+            LOGGER.info(
+                "person-prefetch: инструмента нет среди доступных (%d шт.) — %r",
+                len(available),
+                message[:80],
+            )
             return False  # инструмент недоступен этому человеку — не обходим права
         storage = self.storage
         # Слова вопроса, которые могут оказаться именем учётки. Служебные
@@ -2396,6 +2414,11 @@ class AgentRuntime:
                 chosen = found
                 break
         if chosen is None:
+            LOGGER.info(
+                "person-prefetch: имя не опознано среди учёток; проверено слов: %d — %r",
+                len(candidates),
+                message[:80],
+            )
             return False
         try:
             result = await self.kernel.execute(
@@ -2406,7 +2429,11 @@ class AgentRuntime:
             return False
         rendered = result.to_llm_message()
         if not rendered:
+            LOGGER.info("person-prefetch: инструмент вернул пустоту для %r", chosen.display_name)
             return False
+        LOGGER.info(
+            "person-prefetch: сработал для %r, данных %d знаков", chosen.display_name, len(rendered)
+        )
         tools_used.append("user_activity")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "user_activity", "output": str(rendered)})
