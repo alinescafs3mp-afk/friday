@@ -91,8 +91,18 @@ async def test_the_search_runs_before_the_model_gets_a_turn(monkeypatch):
             calls.append((name, arguments))
             return _Result()
 
+    class _NoLLM:
+        """Модель недоступна — а прямая просьба всё равно должна быть исполнена.
+
+        Не выдуманный случай: 1 августа модель отпадала посреди работы. Запрос
+        тогда формулирует не арбитр, а вычёркивание вводных слов, и поиск идёт.
+        """
+
+        enabled = False
+
     runtime = object.__new__(runtime_module.AgentRuntime)
     runtime.kernel = _Kernel()
+    runtime.llm = _NoLLM()
     messages: list[dict] = []
     used: list[str] = []
     evidence: list[dict] = []
@@ -148,8 +158,18 @@ async def test_nothing_happens_without_the_tool(monkeypatch):
         async def execute(self, name, arguments, *, actor):  # pragma: no cover - не должен зваться
             raise AssertionError("инструмент недоступен, а его всё равно позвали")
 
+    class _NoLLM:
+        """Модель недоступна — а прямая просьба всё равно должна быть исполнена.
+
+        Не выдуманный случай: 1 августа модель отпадала посреди работы. Запрос
+        тогда формулирует не арбитр, а вычёркивание вводных слов, и поиск идёт.
+        """
+
+        enabled = False
+
     runtime = object.__new__(runtime_module.AgentRuntime)
     runtime.kernel = _Kernel()
+    runtime.llm = _NoLLM()
     messages: list[dict] = []
 
     await runtime_module.AgentRuntime._prefetch_the_web_if_asked(  # noqa: SLF001
