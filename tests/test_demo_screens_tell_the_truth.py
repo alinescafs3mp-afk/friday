@@ -419,3 +419,80 @@ def test_an_empty_page_is_not_counted_as_a_readable_source():
     marker = source.index("readable_sources = ")
     branch = source[marker : marker + 260]
     assert 'item.get("text")' in branch, "пустая страница считается читаемым источником"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Пересылаю из рабочего чата: Приказ №214. С 1 августа доступ в интернете к порталу ограничить",
+        "В интернете пишут, что портал будет недоступен",
+        "Коллеги, наш прайс уже выложен в сети, ссылку не давайте клиентам",
+        "нашёл в интернете инструкцию, сохрани её текст",
+    ],
+)
+def test_a_forwarded_text_is_not_sent_to_a_public_search_engine(message):
+    """Мутация: искать «в интернете» где угодно в тексте — тест краснеет.
+
+    Найдено ревью СОБСТВЕННЫХ правок этой ночи. Прежняя редакция срабатывала на
+    упоминание, а не на просьбу, и пересланный приказ уходил целиком поисковой
+    строкой в публичный поисковик — при этом в архив он не попадал вовсе, потому
+    что тем же шаблоном объявлялся командой. В аудите оставался только хеш
+    запроса, то есть владелец не увидел бы, что именно ушло.
+    """
+    from friday.agent_runtime import asks_for_the_web
+
+    assert not asks_for_the_web(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "найди в интернете ставку ЦБ",
+        "погугли погоду",
+        "поищи в интеренете про Су-57",
+        "посмотри в сети новости",
+        "в интернете посмотри курс евро",
+        "а найди в интернете расписание",
+    ],
+)
+def test_a_real_request_to_search_still_works(message):
+    from friday.agent_runtime import asks_for_the_web
+
+    assert asks_for_the_web(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "сколько документов подписал Хасанов в июле?",
+        "сколько записей в этом протоколе?",
+        "сколько файлов было во вложении?",
+    ],
+)
+def test_a_question_about_someone_does_not_get_archive_totals(message):
+    """Мутация: убрать требование указания на архив — тест краснеет.
+
+    Найдено ревью собственных правок: «сколько документов подписал Хасанов?»
+    получало числа ВСЕГО архива вместе с указанием «отвечай ТОЛЬКО этими
+    числами». Механизм, поставленный против выдуманных чисел, сам производил
+    неверное — и запрещал считать по найденным записям.
+    """
+    from friday.agent_runtime import _ASKS_ABOUT_THE_ARCHIVE
+
+    assert not _ASKS_ABOUT_THE_ARCHIVE.search(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "сколько всего знаний в базе? посчитай точно",
+        "сколько у меня документов",
+        "сколько документов в архиве",
+        "сколько в базе сущностей",
+        "покажи статистику базы знаний",
+    ],
+)
+def test_a_question_about_the_whole_archive_still_reaches_the_counter(message):
+    from friday.agent_runtime import _ASKS_ABOUT_THE_ARCHIVE
+
+    assert _ASKS_ABOUT_THE_ARCHIVE.search(message)
