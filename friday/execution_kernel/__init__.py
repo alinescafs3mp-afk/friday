@@ -2470,6 +2470,16 @@ class ExecutionKernel:
             "resolved": chosen.to_dict(),
             "content": "full" if include_content else "redacted",
             "summary": storage.user_activity_summary(chosen.user_id, since=since, until=until),
+            # Что человек ПИСАЛ. Без этого инструмент выполнял своё название
+            # наполовину: у того, кто только переписывается, загрузок ноль, и на
+            # «что писал JBL?» приходило «сообщений 42, но записи не загрузились».
+            "messages": storage.user_messages(
+                chosen.user_id,
+                since=since,
+                until=until,
+                limit=max(1, min(int(limit), 40)),
+                include_content=include_content,
+            ),
             "items": storage.user_activity(
                 chosen.user_id,
                 since=since,

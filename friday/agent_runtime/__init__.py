@@ -1798,11 +1798,19 @@ class AgentRuntime:
         await self._prefetch_the_web_if_asked(
             message, actor, tools, messages, tools_used, tool_evidence, web_notice, context
         )
-        await self._prefetch_the_timeline_if_asked(
+        # Про ЧЕЛОВЕКА — раньше, чем про свою ленту.
+        #
+        # Замерено: «чем занимался Yato вчера?» — слово «вчера» поднимало ленту
+        # ВЛАДЕЛЬЦА, она приходила первой, и модель отвечала «вчера ты активно
+        # работал с базой». Вопрос был про другого человека.
+        about_a_person = await self._prefetch_person_activity(
             message, actor, tools, messages, tools_used, tool_evidence
         )
+        if not about_a_person:
+            await self._prefetch_the_timeline_if_asked(
+                message, actor, tools, messages, tools_used, tool_evidence
+            )
         await self._prefetch_archive_numbers(message, actor, tools, messages, tools_used, tool_evidence)
-        await self._prefetch_person_activity(message, actor, tools, messages, tools_used, tool_evidence)
         # Set by a successful `speak` call; last one wins (a turn ships at most one
         # voice message). Kept off `tool_evidence`/`messages` entirely — see
         # `ToolResult.attachment`.
@@ -2333,8 +2341,11 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
-    ) -> None:
+    ) -> bool:
         """«Что писал JBL?» — вопрос о ЧЕЛОВЕКЕ, и отвечать надо инструментом.
+
+        Возвращает True, если вопрос оказался про участника и данные получены:
+        по этому признаку ход не поднимает ЕЩЁ И ленту владельца.
 
         Найдено владельцем 2026-08-03 на живой переписке. `user_activity`
         существует и делает ровно это, но модель его не позвала: вопрос ушёл в
@@ -2350,12 +2361,12 @@ class AgentRuntime:
         по архиву, как и было.
         """
         if not _ASKS_WHAT_A_PERSON_WROTE.search(message):
-            return
+            return False
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
         if "user_activity" not in available:
-            return  # инструмент недоступен этому человеку — не обходим права
+            return False  # инструмент недоступен этому человеку — не обходим права
         storage = self.storage
         # Слова вопроса, которые могут оказаться именем учётки. Служебные
         # («что», «писал») отсеиваются тем же списком, что и в поиске имён.
@@ -2374,17 +2385,17 @@ class AgentRuntime:
                 chosen = found
                 break
         if chosen is None:
-            return
+            return False
         try:
             result = await self.kernel.execute(
                 "user_activity", {"person": chosen.display_name or chosen.user_id}, actor=actor
             )
         except Exception:  # noqa: BLE001 — надзорный вызов не должен ронять ход
             LOGGER.exception("Prefetch user activity failed")
-            return
+            return False
         rendered = result.to_llm_message()
         if not rendered:
-            return
+            return False
         tools_used.append("user_activity")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "user_activity", "output": str(rendered)})
@@ -2398,6 +2409,7 @@ class AgentRuntime:
                 ),
             }
         )
+        return True
 
     async def _prefetch_archive_numbers(
         self,
@@ -2843,6 +2855,12 @@ class AgentRuntime:
         # среда» — и напоминание не поставилось, и дело человека вместе с днём
         # недели оказалось в чужом поисковике.
         if _ASKS_FOR_A_REMINDER.search(message):
+            return
+        # Вопрос о деятельности УЧАСТНИКА наружу тоже не уходит. Замерено:
+        # «Что писал Пегас?» — арбитр счёл это вопросом о внешнем мире, и Пятница
+        # рассказала про туроператора «Пегас Туристик». Имя участника совпало с
+        # брендом, а поисковику ушло имя человека из этой системы.
+        if not asked_outright and _ASKS_WHAT_A_PERSON_WROTE.search(message):
             return
         if not asked_outright and not _might_be_a_question(message):
             return

@@ -142,3 +142,52 @@ def test_the_prefetch_is_wired_into_the_loop() -> None:
     """Проверяется подключённое: вызов стоит в боевом цикле, а не рядом."""
     source = inspect.getsource(AgentRuntime._agentic_loop)
     assert "_prefetch_person_activity(" in source
+
+
+def test_the_answer_carries_what_the_person_wrote() -> None:
+    """Инструмент обязан нести СООБЩЕНИЯ, а не только загруженные файлы.
+
+    Замерено на живом вопросе: «что писал JBL?» вернуло «сообщений 42 штуки, но
+    сами записи не загрузились» — потому что надзор смотрел только
+    `raw_objects`, а у человека, который просто переписывается, их ноль. Своё
+    название инструмент выполнял наполовину.
+    """
+    import inspect
+
+    from friday.execution_kernel import ExecutionKernel
+
+    source = inspect.getsource(ExecutionKernel._user_activity)
+    assert '"messages": storage.user_messages(' in source, "реплики человека снова не попадают в ответ"
+    assert "include_content=include_content" in source, "глубина доступа перестала соблюдаться"
+
+
+def test_a_participant_name_never_goes_to_a_search_engine() -> None:
+    """Мутация: убрать защиту — «Что писал Пегас?» снова уйдёт наружу.
+
+    Замерено: имя участника совпало с брендом, и Пятница рассказала про
+    туроператора «Пегас Туристик», отправив имя человека из этой системы в чужой
+    поисковик.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)
+    assert "_ASKS_WHAT_A_PERSON_WROTE.search(message)" in source, "имя участника снова уходит в поиск"
+
+
+def test_a_person_question_wins_over_the_owners_own_timeline() -> None:
+    """«Чем занимался Yato вчера?» — про Yato, а не про меня.
+
+    Замерено: слово «вчера» поднимало ленту ВЛАДЕЛЬЦА, она приходила первой, и
+    ответ получался про его собственную активность.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._agentic_loop)
+    person_at = source.index("_prefetch_person_activity(")
+    timeline_at = source.index("_prefetch_the_timeline_if_asked(")
+    assert person_at < timeline_at, "лента владельца снова отвечает раньше вопроса о человеке"
+    assert "if not about_a_person:" in source, "лента поднимается даже когда вопрос был про человека"

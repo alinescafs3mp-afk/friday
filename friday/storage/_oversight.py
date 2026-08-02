@@ -179,6 +179,52 @@ class OversightMixin(StorageShared):
             items.append(item)
         return items
 
+    def user_messages(
+        self,
+        user_id: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 40,
+        include_content: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Что человек ПИСАЛ — его реплики, новые сверху.
+
+        Найдено на живом вопросе владельца 2026-08-03: «что писал JBL?» —
+        инструмент надзора отвечал «сообщений 42 штуки, но сами записи не
+        загрузились». Он смотрел только `raw_objects`, то есть ЗАГРУЖЕННЫЕ
+        материалы, а у человека, который просто переписывается, их ноль. Своё
+        название («что писал и загружал») инструмент выполнял наполовину.
+
+        `include_content=False` оставляет только время и длину: у надзора две
+        разные глубины, и та, что без содержания, должна оставаться доступной.
+        """
+        clauses = ["m.user_id=?", "m.role='user'"]
+        params: list[Any] = [user_id]
+        if since:
+            clauses.append("m.created_at >= ?")
+            params.append(since)
+        if until:
+            clauses.append("m.created_at <= ?")
+            params.append(until)
+        params.append(max(1, min(int(limit), 200)))
+        rows = self.execute(
+            f"""SELECT m.created_at AS at, m.content, m.conversation_id
+                FROM messages m
+                WHERE {' AND '.join(clauses)}
+                ORDER BY m.created_at DESC LIMIT ?""",  # nosec B608
+            tuple(params),
+        ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            content = str(record.pop("content", "") or "")
+            record["chars"] = len(content)
+            if include_content:
+                record["text"] = _preview(content)
+            items.append(record)
+        return items
+
     def user_activity_summary(
         self,
         user_id: str,
