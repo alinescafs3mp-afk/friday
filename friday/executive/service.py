@@ -23,9 +23,10 @@ from friday.agent_runtime.tool_protocol import (
     normalize_native_tool_calls,
 )
 from friday.config import FridaySettings
-from friday.execution_kernel import ExecutionKernel
+from friday.execution_kernel import POSTCONDITIONS, ExecutionKernel
 from friday.executive.planner import MissionPlanner, PlannedTask
 from friday.ingestion import IdempotencyConflictError, IngestionPipeline
+from friday.ingestion._base import _json_dict
 from friday.permissions import ActorContext, AuthorizationService
 from friday.storage import FridayStorage
 from friday.storage.models import (
@@ -294,6 +295,9 @@ class ExecutiveService:
         )
         for mission in active:
             self._reclaim_stale_tasks(mission)
+            # Сверка идёт ПОСЛЕ пометки: шаг, только что признанный неизвестным,
+            # проверяется в том же тике, а не через пятнадцать минут.
+            self._reconcile_uncertain(mission)
         ran = 0
         for mission in active:
             if ran >= _MAX_TASKS_PER_TICK:
@@ -304,6 +308,56 @@ class ExecutiveService:
             except Exception:
                 LOGGER.exception("Mission tick failed for %s", mission.get("id"))
         return {"ran": ran, "active": len(active)}
+
+    def _reconcile_uncertain(self, mission: dict[str, Any]) -> int:
+        """Выяснить наблюдением, случился ли побочный эффект прерванного шага.
+
+        Спека v3 §5: «Uncertain side effects require reconciliation, not
+        automatic replay». Сверка — это не повтор и не догадка: у части
+        инструментов есть проверка ПОСТУСЛОВИЯ, которая читает факт из
+        хранилища (`POSTCONDITIONS` в ядре). Если постусловие выполнено, эффект
+        случился — шаг закрывается как сделанный. Если не выполнено, эффекта не
+        было — шаг можно переигрывать безопасно.
+
+        Шаг, для инструмента которого проверки нет, остаётся `uncertain`: молча
+        решить за человека, чем кончилось необратимое действие, нельзя.
+        """
+        reconciled = 0
+        for task in self.storage.get_mission_tasks(mission["id"], mission["user_id"]):
+            if str(task.get("status") or "") != TaskStatus.UNCERTAIN.value:
+                continue
+            checkpoint = _json_dict(task.get("checkpoint_json"))
+            tool = str(checkpoint.get("tool") or "")
+            arguments = checkpoint.get("arguments")
+            verifier = POSTCONDITIONS.get(tool)
+            if verifier is None or not isinstance(arguments, dict):
+                continue
+            try:
+                happened, detail = verifier(self.storage, mission["user_id"], arguments)
+            except Exception:  # noqa: BLE001 — сверка не должна ронять тик
+                LOGGER.exception("Reconciliation failed for mission task %s", task["id"])
+                continue
+            if happened:
+                LOGGER.info("Reconciled mission task %s: the effect did happen", task["id"])
+                self.storage.update_mission_task_fields(
+                    task["id"],
+                    mission["user_id"],
+                    status=TaskStatus.DONE.value,
+                    error="",
+                    result=f"сверено с состоянием: действие выполнено ({detail})"[:2000],
+                    completed_at=utc_now(),
+                )
+            else:
+                LOGGER.info("Reconciled mission task %s: the effect did not happen", task["id"])
+                self.storage.update_mission_task_fields(
+                    task["id"],
+                    mission["user_id"],
+                    status=TaskStatus.PENDING.value,
+                    error=f"сверено с состоянием: действие не выполнено ({detail}); шаг можно повторить"[:2000],
+                    started_at="",
+                )
+            reconciled += 1
+        return reconciled
 
     def _offer_compensation(self, mission: dict[str, Any], task: dict[str, Any]) -> None:
         """Предложить человеку откатить то, что могло случиться.
@@ -673,7 +727,7 @@ class ExecutiveService:
         user_message = f"Цель миссии: {goal}\n\nШаг для выполнения: {instruction}"
         if upstream:
             user_message += f"\n\nРезультаты предыдущих шагов:\n{upstream}"
-        return await self._run_tool_loop(user_message, actor)
+        return await self._run_tool_loop(user_message, actor, mission=mission, task=task)
 
     def _offline_result(self, goal: str, task: dict[str, Any], instruction: str, upstream: str) -> str:
         label = str(task.get("title") or instruction)[:200]
@@ -684,7 +738,14 @@ class ExecutiveService:
         parts.append("(Локальная модель недоступна — заготовка для ручной доработки на review.)")
         return "\n\n".join(parts)
 
-    async def _run_tool_loop(self, user_message: str, actor: ActorContext) -> tuple[str, list[str]]:
+    async def _run_tool_loop(
+        self,
+        user_message: str,
+        actor: ActorContext,
+        *,
+        mission: dict[str, Any] | None = None,
+        task: dict[str, Any] | None = None,
+    ) -> tuple[str, list[str]]:
         tools = [
             spec
             for spec in self.kernel.get_tool_definitions(actor)
@@ -743,6 +804,21 @@ class ExecutiveService:
                     )
                     total_calls += 1
                     continue
+                # Чекпойнт пишется ДО вызова: если процесс умрёт внутри него,
+                # только по этой записи потом и можно будет выяснить, что именно
+                # делалось, — и свериться с состоянием вместо слепого повтора.
+                # Пишется лишь для инструментов, у которых есть проверка
+                # постусловия: для остальных сверять всё равно нечем.
+                if call.name in POSTCONDITIONS and task is not None and mission is not None:
+                    self.storage.update_mission_task_fields(
+                        str(task["id"]),
+                        str(mission["user_id"]),
+                        side_effect=1,
+                        checkpoint_json=json.dumps(
+                            {"tool": call.name, "arguments": call.arguments},
+                            ensure_ascii=False,
+                        ),
+                    )
                 tool_result = await self.kernel.execute(call.name, call.arguments, actor=actor)
                 tools_used.append(call.name)
                 total_calls += 1

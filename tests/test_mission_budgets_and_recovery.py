@@ -344,3 +344,78 @@ def test_a_step_without_a_written_compensation_offers_nothing(storage, settings)
     ExecutiveService._reclaim_stale_tasks(service, {"id": mission_id, "user_id": "alice"})  # noqa: SLF001
 
     assert storage.list_action_approvals("alice", status="pending") == []
+
+
+def test_an_uncertain_step_is_reconciled_by_looking_at_the_world(storage, settings):
+    """Мутация: убрать `_reconcile_uncertain` из тика — тест краснеет.
+
+    Спека v3 §5: неизвестный исход побочного эффекта требует СВЕРКИ, а не
+    повтора. Сверка не гадает: у части инструментов есть проверка постусловия,
+    читающая факт из хранилища. Эффект случился — шаг закрывается сделанным;
+    не случился — возвращается в очередь, где повтор уже безопасен.
+    """
+    from friday.executive.service import ExecutiveService
+
+    mission_id = _mission(storage)
+    happened = _task(
+        storage,
+        mission_id,
+        seq=1,
+        status="uncertain",
+        side_effect=1,
+        checkpoint_json='{"tool": "test_effect", "arguments": {"id": "yes"}}',
+    )
+    missed = _task(
+        storage,
+        mission_id,
+        seq=2,
+        status="uncertain",
+        side_effect=1,
+        checkpoint_json='{"tool": "test_effect", "arguments": {"id": "no"}}',
+    )
+    unknown = _task(
+        storage,
+        mission_id,
+        seq=3,
+        status="uncertain",
+        side_effect=1,
+        checkpoint_json='{"tool": "no_such_check", "arguments": {}}',
+    )
+
+    from friday.execution_kernel import POSTCONDITIONS
+
+    POSTCONDITIONS["test_effect"] = lambda st, uid, args: (
+        (True, "запись на месте") if args.get("id") == "yes" else (False, "записи нет")
+    )
+    try:
+        service = object.__new__(ExecutiveService)
+        service.storage = storage
+        count = ExecutiveService._reconcile_uncertain(  # noqa: SLF001
+            service, {"id": mission_id, "user_id": "alice"}
+        )
+    finally:
+        POSTCONDITIONS.pop("test_effect", None)
+
+    states = {
+        row["id"]: row["status"]
+        for row in storage.execute("SELECT id, status FROM mission_tasks WHERE mission_id=?", (mission_id,))
+    }
+    assert count == 2
+    assert states[happened] == "done", "подтверждённый эффект не закрыт"
+    assert states[missed] == "pending", "несостоявшийся эффект не возвращён в очередь"
+    assert states[unknown] == "uncertain", (
+        "шаг без проверки постусловия решён за человека — а сверять его нечем"
+    )
+
+
+def test_reconciliation_runs_in_the_same_tick_as_the_marking():
+    """Шаг, только что признанный неизвестным, проверяется сразу, а не через 15 минут."""
+    import inspect
+
+    from friday.executive.service import ExecutiveService
+
+    source = inspect.getsource(ExecutiveService.tick)
+    assert "_reconcile_uncertain(" in source, "сверка не вызывается из тика"
+    assert source.index("_reclaim_stale_tasks") < source.index("_reconcile_uncertain"), (
+        "сверка идёт до пометки — ей нечего будет сверять"
+    )
