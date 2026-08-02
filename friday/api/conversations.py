@@ -37,7 +37,7 @@ def _resolve_conversation_ref(request: Request, actor: Any, conversation_id: str
     channel_chat_id = getattr(request.state, "bridge_chat_id", None)
     if actor.source == "telegram-bridge" and channel_chat_id:
         session = request.app.state.storage.get_channel_session(
-            actor.user_id,
+            actor.own_id,
             "telegram",
             str(channel_chat_id),
         )
@@ -54,7 +54,7 @@ async def reset_channel_conversation(request: Request) -> dict[str, Any]:
     channel_id = str(body.get("channel_id") or getattr(request.state, "bridge_chat_id", ""))
     if not channel_id:
         raise HTTPException(status_code=400, detail="Нужен channel_id")
-    cleared = request.app.state.storage.clear_channel_conversation(actor.user_id, channel, channel_id)
+    cleared = request.app.state.storage.clear_channel_conversation(actor.own_id, channel, channel_id)
     return {"status": "reset", "cleared": cleared}
 
 
@@ -80,10 +80,10 @@ async def channel_answer_diagnostics(
     resolved_id = str(channel_id or getattr(request.state, "bridge_chat_id", ""))
     if not resolved_id:
         raise HTTPException(status_code=400, detail="Нужен channel_id")
-    conversation_id = storage.get_channel_conversation(actor.user_id, resolved_channel, resolved_id)
+    conversation_id = storage.get_channel_conversation(actor.own_id, resolved_channel, resolved_id)
     if not conversation_id:
         raise HTTPException(status_code=404, detail="В этом канале ещё нет диалога")
-    messages = storage.get_conversation_messages(conversation_id, user_id=actor.user_id, limit=30)
+    messages = storage.get_conversation_messages(conversation_id, user_id=actor.own_id, limit=30)
     latest = next(
         (item for item in reversed(messages) if str(item.get("role")) == "assistant"),
         None,
@@ -117,22 +117,22 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
         mode = normalize_conversation_mode(str(body.get("mode") or "dialogue"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    session = request.app.state.storage.get_channel_session(actor.user_id, channel, channel_id)
+    session = request.app.state.storage.get_channel_session(actor.own_id, channel, channel_id)
     if session:
         updated = request.app.state.storage.set_channel_mode(
-            actor.user_id,
+            actor.own_id,
             channel,
             channel_id,
             mode,
         )
         return {"mode": mode, "session": updated, "conversation_created": False}
     conversation = request.app.state.storage.create_conversation(
-        actor.user_id,
+        actor.own_id,
         title=f"{channel} {mode}",
         mode=mode,
     )
     request.app.state.storage.set_channel_conversation(
-        actor.user_id,
+        actor.own_id,
         channel,
         channel_id,
         str(conversation["id"]),
@@ -140,7 +140,7 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
     )
     return {
         "mode": mode,
-        "session": request.app.state.storage.get_channel_session(actor.user_id, channel, channel_id),
+        "session": request.app.state.storage.get_channel_session(actor.own_id, channel, channel_id),
         "conversation_created": True,
     }
 
@@ -152,7 +152,7 @@ async def conversations(
 ) -> dict[str, Any]:
     actor = _require(request, "conversations.read")
     items = request.app.state.storage.list_conversations(
-        actor.user_id,
+        actor.own_id,
         include_archived=include_archived,
     )
     return {"items": items, "count": len(items)}
@@ -166,11 +166,11 @@ async def conversation_messages(
 ) -> dict[str, Any]:
     actor = _require(request, "conversations.read")
     resolved = _resolve_conversation_ref(request, actor, conversation_id)
-    if not request.app.state.storage.get_conversation(resolved, actor.user_id):
+    if not request.app.state.storage.get_conversation(resolved, actor.own_id):
         raise HTTPException(status_code=404, detail="Диалог не найден")
     items = request.app.state.storage.get_conversation_messages(
         resolved,
-        user_id=actor.user_id,
+        user_id=actor.own_id,
         limit=limit,
     )
     return {"items": items, "count": len(items)}
@@ -226,13 +226,13 @@ async def export_conversation(
     """
     actor = _require(request, "conversations.read")
     resolved = _resolve_conversation_ref(request, actor, conversation_id)
-    conversation = request.app.state.storage.get_conversation(resolved, actor.user_id)
+    conversation = request.app.state.storage.get_conversation(resolved, actor.own_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Диалог не найден")
     cap = max(1, min(int(limit), EXPORT_MESSAGE_LIMIT))
     items = request.app.state.storage.get_conversation_messages(
         resolved,
-        user_id=actor.user_id,
+        user_id=actor.own_id,
         limit=cap,
     )
     # If we filled the window, earlier messages may exist — never silent-truncate.
@@ -259,7 +259,7 @@ async def archive_conversation(conversation_id: str, request: Request) -> dict[s
     resolved = _resolve_conversation_ref(request, actor, conversation_id)
     body = await _request_json(request)
     archived = _parse_json_bool(body.get("archived"), field="archived", default=True)
-    updated = request.app.state.storage.set_conversation_archived(resolved, actor.user_id, archived)
+    updated = request.app.state.storage.set_conversation_archived(resolved, actor.own_id, archived)
     if not updated:
         raise HTTPException(status_code=404, detail="Диалог не найден")
     return {"conversation": updated}
@@ -274,7 +274,7 @@ async def rename_conversation(conversation_id: str, request: Request) -> dict[st
     title = " ".join(str(body.get("title") or "").split()).strip()
     if not title:
         raise HTTPException(status_code=400, detail="Нужен title")
-    updated = request.app.state.storage.set_conversation_title(resolved, actor.user_id, title)
+    updated = request.app.state.storage.set_conversation_title(resolved, actor.own_id, title)
     if not updated:
         raise HTTPException(status_code=404, detail="Диалог не найден")
     return {"conversation": updated}
@@ -292,7 +292,7 @@ async def delete_conversation(conversation_id: str, request: Request) -> dict[st
     """
     actor = _require(request, "conversations.manage")
     resolved = _resolve_conversation_ref(request, actor, conversation_id)
-    report = request.app.state.storage.delete_conversation(resolved, actor.user_id)
+    report = request.app.state.storage.delete_conversation(resolved, actor.own_id)
     if not report.get("existed"):
         raise HTTPException(status_code=404, detail="Диалог не найден")
     return {

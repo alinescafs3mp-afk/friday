@@ -372,6 +372,7 @@ def _notify_owners_of_self_registration(
     user_id: str,
     display_name: str,
     username: str,
+    preset_key: str = "newcomer",
 ) -> None:
     """Tell every configured owner chat that a stranger just self-registered.
 
@@ -393,7 +394,15 @@ def _notify_owners_of_self_registration(
         who = f"@{handle}"
     else:
         who = user_id
-    body = f"Новый пользователь самозарегистрировался: {who}. Аккаунт {user_id}, preset newcomer."
+    body = f"Новый пользователь самозарегистрировался: {who}. Аккаунт {user_id}, preset {preset_key}."
+    if preset_key == "owner":
+        # Набор прав владельца — это весь архив и административные действия.
+        # Человек, впущенный автоматически, получил их по настройке, и владелец
+        # должен увидеть это отдельной строкой, а не вычитать из слова «owner».
+        body += (
+            " ⚠️ Это ПОЛНЫЕ права: доступ ко всем документам всех пользователей "
+            "и к административным действиям. Так настроено FRIDAY_NEW_ACCOUNT_PRESET."
+        )
     # user_id column is FK to users(id). Owner chats from settings may never
     # have a matching telegram-derived row, but LEGACY_OWNER_USER_ID is always
     # provisioned at app boot. Dedup includes the owner chat so every owner
@@ -652,7 +661,18 @@ async def _authenticate(request: Request) -> ActorContext:
         # that budget anonymously. `newcomer` is the deliberately narrower preset
         # decided for this feature: chat, own knowledge, files, web search; no
         # missions, no code execution. See `ensure_newcomer_preset` below.
-        if in_private_chat and chat_is_allowlisted:
+        #
+        # Всё это перекрывается настройкой `FRIDAY_NEW_ACCOUNT_PRESET`, если она
+        # задана: владелец 2026-08-02 попросил, чтобы каждый написавший впервые
+        # заводился с правами администратора и люди видели документы и записи
+        # друг друга. Решение владельца, и ручка ровно под него — вместе с ценой,
+        # расписанной у настройки в `config`. Несуществующий пресет игнорируется:
+        # опечатка в переменной окружения не должна ни закрывать вход, ни
+        # раздавать права молча.
+        forced_preset = str(getattr(settings, "new_account_preset", "") or "").strip()
+        if forced_preset and state.auth_service.preset_exists(forced_preset):
+            preset_for_new_account = forced_preset
+        elif in_private_chat and chat_is_allowlisted:
             preset_for_new_account = "user"
         elif in_private_chat:
             preset_for_new_account = _ensure_newcomer_preset(state.auth_service, state.storage)
@@ -660,6 +680,12 @@ async def _authenticate(request: Request) -> ActorContext:
             preset_for_new_account = "user"
         else:
             preset_for_new_account = "guest"
+        if forced_preset and not state.auth_service.preset_exists(forced_preset):
+            LOGGER.error(
+                "FRIDAY_NEW_ACCOUNT_PRESET=%r — такого пресета нет; учётка заведена как %r",
+                forced_preset,
+                preset_for_new_account,
+            )
         # `chat_id` is not bookkeeping: it is where every proactive organ delivers.
         # Recording the chat the user last wrote in meant one message sent in an
         # allowlisted GROUP redirected the weekly digest, reminders and "on this day"
@@ -703,13 +729,19 @@ async def _authenticate(request: Request) -> ActorContext:
             # link, and the account received the deliberately narrow newcomer
             # preset (private chat admitted solely by open registration). A
             # returning newcomer keeps existing set and never re-notifies.
-            if existing is None and preset_for_new_account == "newcomer":
+            # Уведомление уходит о КАЖДОЙ новой самозаведённой учётке, а не
+            # только о `newcomer`. Прежнее условие было верно, пока автоматически
+            # выдавался единственный узкий пресет; с `FRIDAY_NEW_ACCOUNT_PRESET`
+            # человек с улицы может получить и полные права — и именно об этом
+            # владельцу знать важнее всего, а он бы не узнал ничего.
+            if existing is None and not chat_is_allowlisted:
                 _notify_owners_of_self_registration(
                     state.storage,
                     settings,
                     user_id=user_id,
                     display_name=display_name,
                     username=str(telegram_user.get("username") or ""),
+                    preset_key=preset_for_new_account,
                 )
         user = state.storage.get_user(user_id) or existing or {}
         if user.get("status") != "active":
@@ -839,7 +871,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 preset_key="owner",
             )
             storage.update_user(LEGACY_OWNER_USER_ID, preset_key="owner", status="active")
-            auth_service = AuthorizationService(storage)
+            # Общий архив — решение владельца (см. `shared_archive` в config).
+            # Арендатором становится учётка владельца: материал, который уже
+            # лежит в базе, тогда не нужно никуда переносить, и он сразу виден
+            # всем — а перенос полутора тысяч объектов между арендаторами был бы
+            # необратимой операцией над чужими данными.
+            auth_service = AuthorizationService(
+                storage,
+                shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
+            )
             llm = LLMRouter(settings)
             embeddings = EmbeddingBackend(settings)
             # Переранжировщик подключается, только если настроен адрес И задана

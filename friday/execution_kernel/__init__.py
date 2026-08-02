@@ -1171,7 +1171,13 @@ class ExecutionKernel:
         self.storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
-                user_id=actor.user_id,
+                # В общем архиве `user_id` у всех один — это арендатор, а не
+                # человек. Кто ДЕЙСТВОВАЛ, отвечает `own_id`, и без него след
+                # превратился бы в «кто-то из нас», то есть перестал быть следом.
+                # Именно `own_id`, а не `identity_id`: во втором лежит способ
+                # входа (идентификатор токена), и один человек с двумя токенами
+                # выглядел бы в журнале двумя разными.
+                user_id=actor.own_id,
                 action="tool.invoke",
                 target_type="tool",
                 target_id=tool_name,
@@ -1179,6 +1185,7 @@ class ExecutionKernel:
                     "success": success,
                     "reason": reason,
                     "source": actor.source,
+                    **({"tenant": actor.user_id} if actor.shared_tenant else {}),
                     **(details or {}),
                 },
             )

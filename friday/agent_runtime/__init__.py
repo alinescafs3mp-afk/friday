@@ -825,8 +825,15 @@ class AgentRuntime:
         clean_message = (message or "").strip()
         if not clean_message:
             raise ValueError("message is required")
-        if actor.user_id != user_id and not actor.is_owner:
+        # Две разные вещи, которые при обычной настройке совпадают: ЧЬЯ это
+        # переписка и В КАКОМ архиве искать. В общем архиве арендатор у всех
+        # один — иначе люди не видели бы документы друг друга, — а переписка
+        # остаётся личной, и различает её только `own_id`.
+        person_id = actor.own_id if actor.shared_tenant else user_id
+        tenant_id = actor.user_id
+        if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
             raise PermissionError("actor cannot chat as another user")
+        user_id = person_id
 
         requested_mode = normalize_conversation_mode(mode) if mode is not None else None
         conversation = self.storage.get_conversation(conversation_id, user_id) if conversation_id else None
@@ -882,7 +889,9 @@ class AgentRuntime:
             metadata=user_metadata,
         )
         context = await self._prepare_context(
-            user_id,
+            # Арендатор, а не человек: искать надо в том архиве, который человеку
+            # открыт, — в общем режиме это общий корпус.
+            tenant_id,
             clean_message,
             conversation_id,
             prior_history=prior_history,
@@ -978,7 +987,7 @@ class AgentRuntime:
         # Surface the [K#] → Knowledge Object mapping so the user can see which of
         # their records an answer rests on, and honestly flag a personal-knowledge
         # answer that retrieved sources but attributed none of them.
-        citations = self._build_citation_legend(attributed_knowledge_ids, context, user_id)
+        citations = self._build_citation_legend(attributed_knowledge_ids, context, tenant_id)
         answer_grounded: bool | None
         if attributed_knowledge_ids:
             answer_grounded = True
@@ -1031,7 +1040,7 @@ class AgentRuntime:
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
-                user_id,
+                tenant_id,
                 attributed_knowledge_ids,
                 used_in_answer=True,
             )

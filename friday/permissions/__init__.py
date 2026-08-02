@@ -42,10 +42,38 @@ class ActorContext:
     identity_id: str | None = None
     session_id: str | None = None
     policy_epoch: int = 1
+    #: Работает ли этот человек в ОБЩЕМ архиве (`FRIDAY_SHARED_ARCHIVE`).
+    #: Тогда `user_id` — общий арендатор, а человека называет `person_id`.
+    shared_tenant: bool = False
+    #: Учётка человека. В общем архиве `user_id` у всех один, и только это поле
+    #: отвечает на вопрос «кто именно». Не `identity_id`: там лежит способ входа
+    #: — идентификатор API-токена или связанной телеграм-личности, — и переписка
+    #: человека разъезжалась бы по токенам, которыми он входил.
+    person_id: str = ""
 
     @property
     def is_owner(self) -> bool:
         return self.preset_key == "owner"
+
+    @property
+    def own_id(self) -> str:
+        """Идентификатор ЧЕЛОВЕКА, а не арендатора, в котором он работает.
+
+        При обычной настройке это одно и то же. В общем архиве `user_id` у всех
+        один — иначе они не видели бы материал друг друга, — и различает людей
+        только это поле. По нему остаются личными переписка и авторство: общими
+        просьба делала документы и записи, а не чужие разговоры.
+
+        Признак берётся отдельным полем, а не выводится из «identity_id не равен
+        user_id»: связанная личность бывает и при обычной настройке (владелец,
+        вошедший через бота), и вывод разносил бы его переписку по двум разным
+        идентификаторам — поймано двадцатью пятью упавшими тестами. И человек
+        здесь `person_id`, а не `identity_id`: во втором лежит СПОСОБ входа
+        (идентификатор API-токена), и переписка разъезжалась бы по токенам.
+        """
+        if self.shared_tenant and self.person_id:
+            return self.person_id
+        return self.user_id
 
 
 _ACTOR: ContextVar[ActorContext | None] = ContextVar("jericho_actor", default=None)
@@ -256,8 +284,17 @@ class AuthorizationDecision:
 class AuthorizationService:
     """Resolve built-in/custom presets plus explicit allow/deny overrides."""
 
-    def __init__(self, storage: FridayStorage | None = None) -> None:
+    def __init__(self, storage: FridayStorage | None = None, *, shared_tenant: str = "") -> None:
         self.storage = storage
+        # Общий архив: все работают в ОДНОМ арендаторе, поэтому любой находит,
+        # правит и подтверждает материал любого. Подмена делается здесь, а не в
+        # двухстах сорока трёх местах, где спрашивают `actor.user_id`: иначе одно
+        # забытое место означало бы, что часть системы видит общий корпус, а
+        # часть — свой, и расхождение вылезло бы молча.
+        #
+        # Личность не теряется: настоящий идентификатор человека едет в
+        # `identity_id`, и по нему пишется след.
+        self._shared_tenant = str(shared_tenant or "").strip()
         self._capabilities: dict[str, CapabilityDefinition] = {}
         for capability in CORE_CAPABILITIES:
             self.register_capability(capability)
@@ -417,9 +454,21 @@ class AuthorizationService:
         self.storage.set_permission_override(user_id, security_id, None)
 
     def actor_for_user(self, user_id: str, *, source: str, identity_id: str | None = None) -> ActorContext:
+        preset = self.get_user_preset(user_id)
+        if self._shared_tenant:
+            # Права остаются личными — они у человека свои; общим становится
+            # только хранилище, в котором он работает.
+            return ActorContext(
+                user_id=self._shared_tenant,
+                preset_key=preset,
+                source=source,
+                identity_id=identity_id,
+                shared_tenant=True,
+                person_id=user_id,
+            )
         return ActorContext(
             user_id=user_id,
-            preset_key=self.get_user_preset(user_id),
+            preset_key=preset,
             source=source,
             identity_id=identity_id,
         )

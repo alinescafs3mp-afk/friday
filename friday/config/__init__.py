@@ -504,6 +504,36 @@ class FridaySettings:
     # `telegram_group_members_full_access` governs their member preset as before.
     # An existing account's preset is never rewritten (`ensure_user` guarantee).
     telegram_open_registration: bool
+    #: Какой набор прав получает учётка, заведённая автоматически при первом
+    #: сообщении. Пусто — прежнее поведение (узкий пресет `newcomer`).
+    #:
+    #: Владелец 2026-08-02 попросил обратного: «все, кто первый раз написали,
+    #: при создании учётки — с правами админа», чтобы люди видели документы и
+    #: записи друг друга. Это ручка ровно для этого решения, и она же —
+    #: единственная строка для отката.
+    #:
+    #: Взвесить стоит прямо здесь: вместе с открытой регистрацией
+    #: (`FRIDAY_TELEGRAM_OPEN_REGISTRATION=1`) admin-пресет означает, что ЛЮБОЙ
+    #: человек, написавший боту в Telegram, получает полный доступ к архиву —
+    #: чужим документам, ФИО, суммам — и к административным действиям, включая
+    #: чистку базы и выполнение кода. Список разрешённых чатов при выключенной
+    #: открытой регистрации оставляет то же удобство без этой цены.
+    new_account_preset: str
+    #: Общий архив: знания, файлы, граф и «Входящие» — одни на всех.
+    #:
+    #: Владелец 2026-08-02 попросил, чтобы люди «видели документы и записи друг
+    #: друга и могли с ними взаимодействовать». Одних админских прав для этого
+    #: мало: они открывают админские МАРШРУТЫ, а обычный разговор по-прежнему
+    #: ищет только в своём арендаторе — замерено, вопрос про чужую смету дал ноль
+    #: попаданий и ушёл в интернет.
+    #:
+    #: Здесь снимается сама изоляция: все работают в одном арендаторе, поэтому
+    #: любой находит, правит, подтверждает и удаляет материал любого. Авторство
+    #: не теряется — кто добавил и кто действовал, пишется отдельно.
+    #:
+    #: Личная переписка общей НЕ становится: список разговоров остаётся своим у
+    #: каждого. Общими становятся документы и знания — то, о чём просьба.
+    shared_archive: bool
 
     autonomy_enabled: bool
     operator_full_autonomy: bool
@@ -859,6 +889,8 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         telegram_group_members_full_access=_bool_env("FRIDAY_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS", False),
         telegram_signature_max_age_sec=_int_env("FRIDAY_TELEGRAM_SIGNATURE_MAX_AGE_SEC", 90, minimum=10),
         telegram_open_registration=_bool_env("FRIDAY_TELEGRAM_OPEN_REGISTRATION", False),
+        new_account_preset=env("FRIDAY_NEW_ACCOUNT_PRESET", "").strip(),
+        shared_archive=_bool_env("FRIDAY_SHARED_ARCHIVE", False),
         autonomy_enabled=_bool_env("FRIDAY_AUTONOMY_ENABLED", True),
         operator_full_autonomy=_bool_env("FRIDAY_OPERATOR_FULL_AUTONOMY", False),
         cognition_enabled=_bool_env("FRIDAY_COGNITION_ENABLED", True),
