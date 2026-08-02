@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
+from typing import Any
 
 from friday.diagnostics import collect_diagnostics
 from friday.organs import (
@@ -73,6 +74,26 @@ def _format_alert(action: dict) -> str:
     if _PATH_PLACEHOLDER in detail or _PATH_PLACEHOLDER in command:
         lines.append("Полные пути — на самой машине: `jericho doctor`.")
     return "\n".join(lines)
+
+
+def _is_service_recipient(settings: Any, chat_id: str) -> bool:
+    """Кому уходят СЛУЖЕБНЫЕ сообщения — диагностика хоста и состояние системы.
+
+    Заказ владельца 2026-08-02: «все служебные сообщения уходят только мне в
+    телеграм, другим участникам их слать не надо».
+
+    До этого адресатов выбирало право `admin.diagnostics`. Границей оно быть
+    перестало: владелец же попросил заводить каждого написавшего с полным
+    набором прав, и рассылка молча расширилась бы на всех — вместе с состоянием
+    воркеров, резервных копий и отчётом о гигиене секретов ЕГО машины.
+
+    Пустой список owner-чатов оставляет прежнее правило: молчать совсем хуже,
+    чем сказать тому, кто и так всё видит через админку.
+    """
+    owners = [str(item) for item in (getattr(settings, "telegram_owner_chat_ids", None) or [])]
+    if not owners:
+        return True
+    return str(chat_id) in owners
 
 
 def _may_see_diagnostics(ctx: ServiceContext, user_id: str) -> bool:
@@ -136,10 +157,21 @@ async def scan_health(ctx: ServiceContext) -> None:
         # `admin.diagnostics`.
         if not _may_see_diagnostics(ctx, user_id):
             continue
-        audience += 1
         chat_id = resolve_chat_id(ctx.storage, user_id)
         if not chat_id:
             continue
+        # Служебное — только владельцу, в его чат. Права здесь перестали быть
+        # границей: владелец попросил заводить каждого написавшего с полным
+        # набором прав, и `admin.diagnostics` теперь есть у всех — то есть
+        # состояние воркеров, резервных копий и гигиены секретов чужой машины
+        # рассылалось бы каждому, кто однажды написал боту.
+        #
+        # Список owner-чатов задан — он и есть адресат. Не задан — остаётся
+        # прежнее правило по способности: молчать совсем хуже, чем сказать
+        # тому, кто и так всё видит.
+        if not _is_service_recipient(settings, chat_id):
+            continue
+        audience += 1
         # Deny-by-default, re-checked here (the bridge re-checks again at send).
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue

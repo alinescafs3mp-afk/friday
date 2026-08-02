@@ -1787,6 +1787,17 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     }
                     if media_kind:
                         file_metadata["media_kind"] = media_kind
+                    # Язык человека — из его же учётки. На короткой записи
+                    # автоопределение ошибается: «проверка связи» длиной 1.4 с
+                    # распозналось как португальское «Pra ver com as vezes.»,
+                    # хотя в профиле стоял `language_code: ru`.
+                    speaker = state.storage.get_user(actor.own_id) or {}
+                    speaker_meta = _json_load(speaker.get("metadata_json"), {})
+                    language_code = str(
+                        (speaker_meta or {}).get("language_code") or ""
+                    ).strip()
+                    if language_code:
+                        file_metadata["language_code"] = language_code
                     if isinstance(document.get("duration"), int):
                         file_metadata["duration_sec"] = document["duration"]
                     if forward_meta:

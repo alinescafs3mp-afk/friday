@@ -384,3 +384,27 @@ def test_a_repeated_voice_note_keeps_its_transcript(settings, storage):
     )
     # Служебная подпись файла транскриптом не считается.
     assert 'not spoken.startswith("[")' in source
+
+
+def test_the_language_is_pinned_not_guessed():
+    """Мутация: убрать язык из профиля — тест краснеет.
+
+    Живой случай: голосовое «проверка связи» длиной 1.4 с распозналось как
+    португальское «Pra ver com as vezes.» — на короткой записи автоопределение
+    ошибается, а в профиле человека стоял `language_code: ru`, то есть ответ был
+    известен заранее. Владелец подтвердил: других языков здесь не будет.
+    """
+    import inspect
+
+    from friday import server
+    from friday.ingestion._files import FilesMixin
+
+    source = inspect.getsource(FilesMixin._transcribe_audio)  # noqa: SLF001
+    assert 'self.settings.whisper_language' in source
+    assert '(metadata or {}).get("language_code")' in source, (
+        "язык человека из профиля не используется"
+    )
+    assert "language=language or None" in source
+
+    # И профиль до приёма доезжает: без этого поле в метаданных всегда пусто.
+    assert 'file_metadata["language_code"] = language_code' in inspect.getsource(server)

@@ -260,3 +260,53 @@ async def test_the_scan_does_not_freeze_the_event_loop(storage, monkeypatch):
         await beat
 
     assert worst < 0.25, f"the event loop stalled for {worst:.2f}s during a 0.5s scan"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_reach_only_the_owner_chats(storage):
+    """Мутация: убрать `_is_service_recipient` — тест краснеет.
+
+    Заказ владельца 2 августа: «все служебные сообщения уходят только мне в
+    телеграм, другим участникам их слать не надо».
+
+    До этого адресатов выбирало право `admin.diagnostics`. Границей оно быть
+    перестало: владелец же попросил заводить каждого написавшего с ПОЛНЫМ
+    набором прав (`FRIDAY_NEW_ACCOUNT_PRESET=owner`), и рассылка молча
+    расширилась бы на всех — вместе с состоянием воркеров, резервных копий и
+    отчётом о гигиене секретов его машины.
+    """
+    settings = replace(
+        _sentinel_settings(),
+        telegram_allowed_chat_ids=[5001, 7002],
+        telegram_owner_chat_ids=[5001],
+    )
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    # Тот самый случай: посторонний с полными правами, заведённый автоматически.
+    _seed_telegram_user(storage, "7002", preset_key="owner")
+    _seed_degraded_worker(storage)
+
+    await scan_health(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert pending, "владелец не получил диагностику"
+    recipients = {str(item["chat_id"]) for item in pending}
+    assert recipients == {"5001"}, f"служебное ушло посторонним: {sorted(recipients)}"
+
+
+@pytest.mark.asyncio
+async def test_without_owner_chats_the_capability_still_decides(storage):
+    """Контроль: не задан список — прежнее правило.
+
+    Молчать совсем хуже, чем сказать тому, кто и так всё видит через админку.
+    """
+    settings = replace(
+        _sentinel_settings(),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[],
+    )
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    _seed_degraded_worker(storage)
+
+    await scan_health(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+
+    assert storage.list_pending_notifications(limit=100), "диагностика пропала совсем"

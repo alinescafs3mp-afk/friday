@@ -299,12 +299,20 @@ class FilesMixin(PipelineShared):
                     max_sec,
                 )
                 return None
+        # Язык: настройка, затем язык из профиля человека, и лишь потом
+        # автоопределение. Замерено на живом случае: голосовое «проверка связи»
+        # длиной 1.4 с распозналось как португальское «Pra ver com as vezes.» —
+        # на короткой фразе автоопределение ошибается, а в профиле у человека
+        # стоял `language_code: ru`, то есть ответ был известен заранее.
+        language = str(self.settings.whisper_language or "").strip()
+        if not language:
+            language = str((metadata or {}).get("language_code") or "").strip()
         try:
             transcript = await asyncio.to_thread(
                 transcribe_bytes,
                 content,
                 model=self.settings.whisper_model,
-                language=self.settings.whisper_language or None,
+                language=language or None,
                 device=self.settings.whisper_device,
                 compute_type=self.settings.whisper_compute_type,
                 download_root=self.settings.whisper_download_root or None,
