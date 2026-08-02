@@ -122,6 +122,17 @@ class AllProvidersRefusedError(RuntimeError):
 #: 401/403 — неверный или истёкший ключ, 429 — исчерпанный лимит.
 _REFUSAL_STATUS = frozenset({202, 401, 403, 429})
 
+#: Человек прямо просит источники не из русского сегмента. Замерено на живом
+#: вопросе: «какие новости не из ру сегмента есть за сегодня и вчера?» приносило
+#: lenta.ru и rbc.ru — ровно то, о чём просили НЕ давать.
+_ASKS_FOR_FOREIGN_SOURCES = re.compile(
+    r"не\s+из\s+ру\w*|не\s+рос\w+|не\s+рунет\w*|вне\s+рунет\w*|"
+    r"зарубежн\w+|иностранн\w+|западн\w+\s+(?:сми|пресс\w*|источник\w*)|"
+    r"мировы\w+\s+(?:сми|пресс\w*|новост\w*)|на\s+английск\w+|"
+    r"english\s+sources?|foreign\s+(?:press|media|sources?)",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class SearchResult:
@@ -637,6 +648,30 @@ class WebSurfer:
             raise ProviderRefusedError("brave-html answered without result markup")
         return results
 
+    def _yandex_segment(self, query: str) -> str:
+        """Какой сегмент спрашивать: русский или международный.
+
+        Жёсткий `SEARCH_TYPE_RU` был не про язык индекса — русский сегмент
+        находит и raft.github.io, и autohome.com.cn, — а про региональное
+        ранжирование. Но оно решает: замерено на живом вопросе владельца «какие
+        новости не из ру сегмента есть за сегодня и вчера?» — выдача пришла из
+        lenta.ru и rbc.ru, то есть ровно то, о чём просили НЕ давать.
+
+        Правило простое и проверяемое: просят зарубежное или пишут не
+        кириллицей — международный сегмент. Настройка `yandex_search_type`
+        по-прежнему главнее: если владелец задал сегмент явно, спорить не с чем.
+        """
+        configured = str(self.settings.yandex_search_type or "").strip()
+        if configured:
+            return configured
+        if _ASKS_FOR_FOREIGN_SOURCES.search(query):
+            return "SEARCH_TYPE_COM"
+        letters = [character for character in query if character.isalpha()]
+        if letters and not any("а" <= character.casefold() <= "я" or character == "ё" for character in letters):
+            # Ни одной кириллической буквы — запрос набран на другом языке.
+            return "SEARCH_TYPE_COM"
+        return "SEARCH_TYPE_RU"
+
     async def _search_yandex(self, query: str, limit: int) -> list[SearchResult]:
         """Яндекс Search API v2 — синхронный поиск, ответ приходит XML-ом в base64.
 
@@ -648,7 +683,7 @@ class WebSurfer:
             "https://searchapi.api.cloud.yandex.net/v2/web/search",
             json={
                 "query": {
-                    "searchType": self.settings.yandex_search_type or "SEARCH_TYPE_RU",
+                    "searchType": self._yandex_segment(query),
                     "queryText": query,
                 },
                 "groupSpec": {

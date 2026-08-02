@@ -287,3 +287,54 @@ async def test_the_encyclopedia_introduces_itself_honestly(settings):
     await surfer.close()
     assert agents and "Friday" in agents[0]
     assert "Mozilla" not in agents[0], "подделка под браузер против правил Wikimedia"
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("новости за сегодня", "SEARCH_TYPE_RU"),
+        ("курс доллара", "SEARCH_TYPE_RU"),
+        ("какие новости не из ру сегмента", "SEARCH_TYPE_COM"),
+        ("зарубежные СМИ о выборах", "SEARCH_TYPE_COM"),
+        ("что пишут иностранные источники", "SEARCH_TYPE_COM"),
+        ("Raft consensus algorithm paper", "SEARCH_TYPE_COM"),
+        ("新能源汽车 销量 2026", "SEARCH_TYPE_COM"),
+    ],
+)
+def test_the_segment_follows_the_question_not_a_constant(settings, query, expected):
+    """Мутация: вернуть жёсткий `SEARCH_TYPE_RU` — тест краснеет.
+
+    Замерено на живом вопросе владельца «какие новости не из ру сегмента есть за
+    сегодня и вчера?»: выдача пришла из lenta.ru и rbc.ru — ровно то, о чём
+    просили НЕ давать. Сегмент — про региональное ранжирование, и оно решает.
+    """
+    import dataclasses
+
+    surfer = WebSurfer(dataclasses.replace(settings, yandex_search_type=""))
+    assert surfer._yandex_segment(query) == expected  # noqa: SLF001
+
+
+def test_an_explicit_setting_still_wins(settings):
+    """Владелец задал сегмент явно — спорить не с чем."""
+    import dataclasses
+
+    surfer = WebSurfer(dataclasses.replace(settings, yandex_search_type="SEARCH_TYPE_TR"))
+    assert surfer._yandex_segment("какие новости не из ру сегмента") == "SEARCH_TYPE_TR"  # noqa: SLF001
+
+
+def test_the_arbiter_is_told_to_translate_a_foreign_request():
+    """Мутация: убрать указание о языке из промпта — тест краснеет.
+
+    Одного сегмента мало: русская формулировка приводит на русские сайты, чем бы
+    ни был задан регион. Замерено — «зарубежные СМИ о ситуации» дало inosmi.ru и
+    russian.rt.com, а после перевода запроса той же выдачей пришли theguardian,
+    apnews и sky.news.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._web_query_by_arbiter)  # noqa: SLF001
+    assert "ПО-АНГЛИЙСКИ" in source
+    assert "не из рунета" in source
+    assert "на языке страны" in source, "про китайский и японский сегменты не сказано"
