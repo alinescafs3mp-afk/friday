@@ -58,6 +58,19 @@ _FETCH_TOTAL_BUDGET = 60.0
 # completed pages because one peer was still streaming.
 _RESEARCH_TOTAL_BUDGET = 27.0
 _RESEARCH_FETCH_BUDGET = 12.0
+
+
+def _host_of(url: str) -> str:
+    """Домен ссылки — чтобы не ломиться повторно туда, откуда уже отказали.
+
+    `www.` отбрасывается: `dns-shop.ru` и `www.dns-shop.ru` — один и тот же
+    магазин, и считать их разными сайтами значит повторить отказ ещё раз.
+    """
+    try:
+        host = urllib.parse.urlparse(str(url or "")).hostname or ""
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
 # CPU wall-clock for pypdf after the body is already in memory. Declared with the
 # PDF allowlist (G22 / PROPOSALS №3): measured 9/10 public PDFs extracted clean
 # text in <0.5 s; 8 s leaves headroom for a multi-megabyte report without letting
@@ -1093,7 +1106,25 @@ class WebSurfer:
         spare = results[len(selected) :]
         remaining = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
         if readable_sources == 0 and spare and remaining > 2.0:
-            extra = spare[:source_limit]
+            # Вторая волна идёт на ДРУГИЕ сайты, а не на тот же самый.
+            #
+            # Замерено на живом вопросе владельца «сколько стоит самая дешёвая
+            # 5090 в ДНС»: магазин закрыт от роботов и отвечает 401 на КАЖДОЙ
+            # своей странице. Запрос содержал название магазина, поэтому вся
+            # выдача — с одного домена, и запасные ссылки повторяли отказ
+            # пять раз подряд. Человек получил «точную цену получить не удалось»
+            # при том, что цена есть на десятке других сайтов.
+            #
+            # Домен, уже ответивший отказом, отодвигается в конец очереди, а не
+            # выбрасывается: если других нет, попытаться всё равно стоит.
+            refused = {
+                _host_of(str(item.get("url") or ""))
+                for item in sources
+                if item.get("error") and _host_of(str(item.get("url") or ""))
+            }
+            elsewhere = [item for item in spare if _host_of(item.url) not in refused]
+            same_place = [item for item in spare if _host_of(item.url) in refused]
+            extra = (elsewhere + same_place)[:source_limit]
             requested_sources += len(extra)
             extra_tasks = [
                 asyncio.create_task(self.fetch(item.url, max_length=20_000)) for item in extra
@@ -1126,7 +1157,32 @@ class WebSurfer:
             readable_sources = sum(
                 1 for item in sources if not item["error"] and str(item.get("text") or "").strip()
             )
-        if sources:
+        if sources and readable_sources == 0:
+            # Все страницы закрылись — сказать об этом ПРЯМО, а не отдать модели
+            # пустоту под видом собранных источников.
+            #
+            # Живой вопрос владельца: «сколько стоит самая дешёвая 5090 в ДНС».
+            # Магазин отвечает 401 на каждой странице, и вся выдача по такому
+            # запросу — с него одного, так что перебирать было нечего. Человек
+            # получил «точную цену получить не удалось» и не понял, почему.
+            # Теперь модель знает причину и может сказать её словами, а заодно
+            # предложить посмотреть в другом месте.
+            refused_hosts = sorted(
+                {
+                    _host_of(str(item.get("url") or ""))
+                    for item in sources
+                    if item.get("error") and _host_of(str(item.get("url") or ""))
+                }
+            )
+            where = ", ".join(refused_hosts[:3]) or "источники"
+            summary = (
+                f"Ни одну страницу прочитать не удалось: {where} закрывает содержимое от "
+                "автоматического чтения. В выдаче видны только заголовки и краткие описания — "
+                "цифры и подробности с самих страниц недоступны. Скажи это человеку прямо, "
+                "перескажи то, что видно в описаниях, и предложи посмотреть на другом сайте "
+                "или открыть ссылку самому."
+            )
+        elif sources:
             summary = f"Collected {readable_sources} readable public sources."
         else:
             summary = "Search results were found, but no source could be fetched safely."

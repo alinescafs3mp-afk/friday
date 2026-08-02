@@ -541,12 +541,38 @@ class ToolSpec:
     risk: str
     handler: Handler | None = None
 
-    def to_openai(self) -> dict[str, Any]:
+    def to_openai(self, *, brief: bool = False) -> dict[str, Any]:
+        """Описание для модели. `brief` — короткая форма, одна фраза.
+
+        Окно модели 32 768 токенов, а полные описания всех инструментов — 4 650
+        токенов в КАЖДОМ вызове, и вызовов на один ход несколько. При этом
+        подробности нужны не всем: в разговоре о погоде незачем объяснять, как
+        разбирать очередь слияний сущностей.
+
+        Инструмент остаётся ДОСТУПНЫМ в любом случае — сокращается только
+        описание. Это важно: набор, урезанный по догадке о теме, отнимал бы
+        способности («напомни завтра» посреди разговора о курсе валют), а
+        короткая строка лишь делает вызов менее вероятным, но не невозможным.
+        """
+        description = self.description
+        if brief:
+            # Первая фраза несёт назначение; остальное — оговорки и примеры,
+            # которые нужны, когда инструмент реально в деле.
+            head = description.split(". ", 1)[0].strip()
+            description = (head + ".") if head and not head.endswith(".") else (head or description)
+            # Девяносто знаков — примерно строка. Хватает назвать назначение
+            # («Поставить напоминание», «Поиск по своему архиву»), и этого
+            # достаточно, чтобы модель узнала инструмент, если он вдруг нужен;
+            # за подробностями она его просто вызовет и увидит отказ с
+            # объяснением. Замерено: полная форма 4 650 токенов, короткая для
+            # неуместных — около 2 900.
+            if len(description) > 90:
+                description = description[:87].rstrip(" ,;:—-") + "…"
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
+                "description": description,
                 "parameters": self.parameters,
             },
         }
@@ -900,8 +926,44 @@ class ExecutionKernel:
     def get_tool_names(self, actor: ActorContext | None = None) -> list[str]:
         return [tool.name for tool in self._visible_tools(actor)]
 
-    def get_tool_definitions(self, actor: ActorContext | None = None) -> list[dict[str, Any]]:
-        return [tool.to_openai() for tool in self._visible_tools(actor)]
+    #: Какие инструменты уместны при каком виде вопроса. Остальные остаются
+    #: доступны, но описаны одной строкой — см. `ToolSpec.to_openai(brief=True)`.
+    #: Списки намеренно щедрые: цена лишнего подробного описания — сотня токенов,
+    #: цена недостающего — несделанное дело.
+    _RELEVANT_TOOLS = {
+        "интернет": {"web_search", "web_fetch", "web_research", "speak", "make_file", "remind"},
+        "знание": {"speak", "make_file", "remind", "memory_search"},
+        "архив": {
+            "memory_search",
+            "message_search",
+            "what_happened",
+            "upcoming",
+            "list_tags",
+            "kg_stats",
+            "entity_lookup",
+            "user_activity",
+            "user_knowledge_search",
+            "inbox_list",
+            "make_file",
+            "speak",
+            "remind",
+        },
+        "материал": {"memory_save", "entity_create", "entity_link", "inbox_list", "make_file"},
+    }
+
+    def get_tool_definitions(
+        self, actor: ActorContext | None = None, *, topic: str = ""
+    ) -> list[dict[str, Any]]:
+        """Описания инструментов; `topic` — вид вопроса от арбитра намерения.
+
+        Без `topic` (или при неизвестном виде) все описания идут полностью — так
+        было всегда, и это безопасное умолчание.
+        """
+        relevant = self._RELEVANT_TOOLS.get(str(topic or "").strip().casefold())
+        return [
+            tool.to_openai(brief=relevant is not None and tool.name not in relevant)
+            for tool in self._visible_tools(actor)
+        ]
 
     def _visible_tools(self, actor: ActorContext | None) -> list[ToolSpec]:
         if actor is None:

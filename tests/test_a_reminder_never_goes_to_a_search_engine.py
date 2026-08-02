@@ -21,7 +21,7 @@ import inspect
 
 import pytest
 
-from friday.agent_runtime import AgentContext, AgentRuntime, _ASKS_FOR_A_REMINDER
+from friday.agent_runtime import _ASKS_FOR_A_REMINDER, AgentContext, AgentRuntime
 
 
 @pytest.mark.parametrize(

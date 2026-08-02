@@ -38,6 +38,10 @@ _MAX_TOOL_ROUNDS = 3
 # so a tool-grounded answer is judged against what it actually used — not only the
 # user's personal notes (which it may not rest on at all).
 _MAX_TOOL_EVIDENCE = 6
+#: Сколько знаков остаётся от УЖЕ ОТРАБОТАВШЕГО результата инструмента, когда в
+#: ленте появляется свежий. Начало несёт суть («найдено 9 документов», «курс
+#: 79,46 ₽»), и его достаточно, чтобы модель помнила, что уже делала.
+_SPENT_TOOL_RESULT_CHARS = 900
 #: Сколько знаков КАЖДОГО результата инструмента видит судья обоснованности.
 #: Было 500 — на выдаче веб-поиска в несколько тысяч знаков это вырезка, по
 #: которой ни один названный в ответе факт не подтверждается. Шесть записей по
@@ -508,6 +512,41 @@ _ASKS_FOR_A_REMINDER = re.compile(
     r")(?=$|\W)",
     re.IGNORECASE,
 )
+
+
+#: Сколько знаков разговора уходит в контекст. Окно модели — 32 768 токенов, и в
+#: тяжёлом ходе (описания инструментов ~4650, результат инструмента до 4000,
+#: выдача поиска до 4000, найденные документы) история легко становится тем, из-за
+#: чего запрос не помещается.
+_HISTORY_CHAR_BUDGET = 9_000
+#: Ходов больше этого не берём даже короткими: разговор недельной давности редко
+#: помогает ответить на сегодняшний вопрос, а место занимает.
+_HISTORY_MAX_TURNS = 16
+
+
+def _history_within_budget(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Свежие ходы разговора, сколько влезает по ЗНАКАМ, а не по счёту.
+
+    Прежняя редакция брала последние десять сообщений независимо от их размера.
+    Десять коротких реплик — это шестьсот знаков, а десять ответов с разбором
+    документов — двадцать тысяч, то есть треть окна модели на одну только
+    историю. Считать надо то, что дорого, а дорога длина.
+
+    Порядок сохраняется: разговор, прочитанный задом наперёд, хуже обрезанного.
+    """
+    selected: list[dict[str, Any]] = []
+    spent = 0
+    for item in reversed(history or []):
+        if item.get("role") not in {"user", "assistant"}:
+            continue
+        size = len(str(item.get("content") or ""))
+        # Первый (то есть самый свежий) ход берётся всегда: без него теряется
+        # то, на что человек прямо ссылается словом «это».
+        if selected and (spent + size > _HISTORY_CHAR_BUDGET or len(selected) >= _HISTORY_MAX_TURNS):
+            break
+        selected.append(item)
+        spent += size
+    return list(reversed(selected))
 
 
 def _might_be_a_question(message: str) -> bool:
@@ -1133,8 +1172,13 @@ class AgentRuntime:
         # коротки и обращены к собеседнику), и напоминание молча не поставится.
         # Список же содержит только «привет», «спасибо», «ок» — по ним действий
         # не просят.
+        # Вид вопроса уже определён арбитром (параллельно поиску) — по нему
+        # подробные описания получают уместные инструменты, остальные остаются
+        # доступны, но описаны одной строкой. Полный набор описаний стоит 4 650
+        # токенов из окна в 32 768, и уходит он в КАЖДЫЙ вызов модели.
+        topic = str((context.outward_verdict or ("", None))[0] or "")
         visible_tools = (
-            self.kernel.get_tool_definitions(actor)
+            self.kernel.get_tool_definitions(actor, topic=topic)
             if enable_tools and not _is_small_talk(clean_message)
             else []
         )
@@ -1873,6 +1917,27 @@ class AgentRuntime:
                 # may rest on these, not on personal notes.
                 if tool_result.success and rendered and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
                     tool_evidence.append({"tool": call.name, "output": str(rendered)})
+                # ПРЕЖНИЕ результаты в ленте ужимаются: полным остаётся только
+                # свежий.
+                #
+                # Окно модели 32 768 токенов, а один результат доходит до 4 000.
+                # За ход в режиме диалога вызовов до четырёх, в исследовании до
+                # двенадцати — и каждый оставался в ленте целиком, хотя отвечает
+                # модель по последнему. Замерено: четыре полных результата плюс
+                # описания инструментов и история подходят к пределу вплотную,
+                # двенадцать переполняют его гарантированно.
+                #
+                # Ужимается ХВОСТ, а не голова: начало результата несёт суть
+                # («найдено 9», «курс 79,46»), конец — подробности.
+                for older in messages:
+                    if older.get("role") != "tool":
+                        continue
+                    body = str(older.get("content") or "")
+                    if len(body) > _SPENT_TOOL_RESULT_CHARS:
+                        older["content"] = (
+                            body[:_SPENT_TOOL_RESULT_CHARS]
+                            + "\n… (остальное убрано, чтобы поместился разговор)"
+                        )
                 messages.append(
                     {
                         "role": "tool",
@@ -3130,7 +3195,7 @@ class AgentRuntime:
             )
 
         current_labels = {kid: label for label, kid in context.knowledge_citations.items()}
-        for history_item in context.conversation_history[-10:]:
+        for history_item in _history_within_budget(context.conversation_history):
             role = history_item.get("role")
             if role not in {"user", "assistant"}:
                 continue

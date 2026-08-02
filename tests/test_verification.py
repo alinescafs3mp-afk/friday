@@ -342,7 +342,11 @@ class _FakeKernel:
     def __init__(self, result: ToolResult):
         self._result = result
 
-    def get_tool_definitions(self, actor):
+    def get_tool_definitions(self, actor, *, topic: str = ""):
+        # `topic` — вид вопроса от арбитра: по нему боевое ядро решает, каким
+        # инструментам дать подробное описание, а каким хватит строки. Заглушке
+        # он безразличен, но подпись обязана совпадать с настоящей.
+        del topic
         del actor
         return [
             {

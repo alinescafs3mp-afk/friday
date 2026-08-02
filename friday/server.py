@@ -1337,7 +1337,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 status_code=400,
                 detail="Нет активного разговора для повтора",
             )
-        if not state.storage.get_conversation(conversation_id, actor.user_id):
+        # Разговор личный: в общем архиве `actor.user_id` у всех один, а
+        # переписка сохраняется под самим человеком.
+        if not state.storage.get_conversation(conversation_id, actor.own_id):
             raise HTTPException(
                 status_code=400,
                 detail="Разговор не найден",
@@ -1467,8 +1469,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             end=(today + timedelta(days=lead_days)).isoformat(),
             limit=limit,
         )
+        # События лежат под арендатором (в общем архиве — под общим), но
+        # напоминание принадлежит тому, кто его поставил. Тот же признак, по
+        # которому рассылает орган: без него в «что мне предстоит» попадали бы
+        # чужие просьбы.
+        events = [
+            event
+            for event in events
+            if not str(event.get("source") or "").startswith("reminder:")
+            or str(event.get("source") or "")[len("reminder:") :] == actor.own_id
+        ]
         keys = [f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}" for event in events]
-        states = storage.reminder_states(actor.user_id, keys)
+        # «Снято» — решение ЧЕЛОВЕКА о своём напоминании, а не свойство архива.
+        states = storage.reminder_states(actor.own_id, keys)
         items = []
         for event, key in zip(events, keys, strict=True):
             occurred_at = str(event.get("occurred_at") or "")
@@ -1982,7 +1995,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         message_id = str(body.get("message_id") or "").strip()
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
-        message_row = request.app.state.storage.get_message(message_id, actor.user_id)
+        # Сообщение — часть личной переписки, ищется по человеку.
+        message_row = request.app.state.storage.get_message(message_id, actor.own_id)
         if not message_row or message_row.get("role") != "assistant":
             raise HTTPException(status_code=404, detail="Assistant message not found")
         metadata = _json_load(message_row.get("metadata_json"), {})
@@ -2048,7 +2062,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="target_id is required")
         try:
             item = await request.app.state.agent.record_feedback(
-                actor.user_id,
+                # Оценка ставится СВОЕМУ сообщению, а переписка личная: в общем
+                # архиве (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и
+                # ответ, сохранённый под самим человеком, по нему не находился.
+                # Живая жалоба 2026-08-02: новый участник жал 👍/👎 и получал
+                # «Действие недоступно» — за этим стоял 404 «Assistant answer not
+                # found». Та же болезнь уже ловилась в поиске по переписке, в
+                # напоминаниях и в заявках на подтверждение.
+                actor.own_id,
                 str(body.get("target_type") or "answer"),
                 target_id,
                 feedback_type,
