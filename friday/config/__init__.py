@@ -1070,10 +1070,15 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         # today, and an error here would refuse to start it. But the fact stands —
         # every request from outside carries the owner token and the archive's
         # content in cleartext, and one passive interception is full access.
+        # Текст попадает В ПАНЕЛЬ владельца как есть (диагностика оборачивает его
+        # в русский заголовок «Проверьте конфигурацию» и печатает `detail` без
+        # перевода), поэтому он написан по-русски: предупреждение, которое человек
+        # не читает, предупреждением не является.
         warnings.append(
-            "the API listens beyond loopback without TLS: the owner token and all "
-            "knowledge travel in cleartext — set FRIDAY_SSL_CERTFILE/FRIDAY_SSL_KEYFILE "
-            "(a self-signed pair is enough) or front it with a TLS proxy"
+            "API слушает не только localhost, а TLS не настроен: токен владельца и "
+            "всё содержимое базы идут по сети открытым текстом. Задайте "
+            "FRIDAY_SSL_CERTFILE и FRIDAY_SSL_KEYFILE (хватит самоподписанной пары) "
+            "или поставьте перед ним TLS-прокси"
         )
     if settings.rerank_top > 0 and not (settings.rerank_base_url.strip() and settings.rerank_model.strip()):
         # Same contradiction class as embeddings-without-model: `RerankBackend.enabled`

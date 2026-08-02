@@ -1287,6 +1287,8 @@ def test_a_bare_http_bind_beyond_loopback_is_a_warning_not_an_error(settings):
 
     exposed = dataclasses.replace(settings, api_host="0.0.0.0", api_token="T" * 40)
     problems = validate_settings(exposed)
-    warning = next((item for item in problems if "cleartext" in item), None)
+    # Текст предупреждения переведён на русский: он показывается владельцу в
+    # панели как есть, без слоя перевода.
+    warning = next((item for item in problems if "открытым текстом" in item), None)
     assert warning is not None, "голый HTTP наружу остался незамеченным"
     assert warning.startswith("warning:"), "это предупреждение обязано не блокировать старт"
