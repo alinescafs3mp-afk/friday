@@ -341,3 +341,46 @@ def test_a_long_voice_note_stays_a_document_upload(settings, monkeypatch):
         messages = app.state.storage.get_conversation_messages(conversation_id, user_id=LEGACY_OWNER_USER_ID)
         user_turns = [m for m in messages if m.get("role") == "user"]
         assert user_turns and user_turns[0]["content"].startswith("Загружен документ")
+
+
+def test_a_voice_question_is_answered_with_voice():
+    """Мутация: убрать `answer_with_voice` из вызова — тест краснеет.
+
+    Человек записывает голосовое, когда ему неудобно печатать; отвечать ему
+    стеной текста — предлагать читать там, где он выбрал слушать. Текст приходит
+    рядом, как и раньше.
+    """
+    import inspect
+
+    from friday import server
+
+    source = inspect.getsource(server)
+    assert "answer_with_voice=spoken_question" in source, (
+        "голосовой вопрос не помечен как просьба ответить голосом"
+    )
+    # Флаг объявлен до разбора вложения: без вложения ветка не выполняется, и
+    # обычный текстовый ход падал бы на обращении к переменной.
+    assert source.index("spoken_question = False") < source.index("answer_with_voice=spoken_question")
+
+
+def test_a_repeated_voice_note_keeps_its_transcript(settings, storage):
+    """Мутация: убрать транскрипт из `_replay_file_source` — тест краснеет.
+
+    Замерено на живой переписке (пользователь Пегас, 2 августа): голосовое
+    распозналось верно — «Привет, пятница!» — и легло в архив, а на второй и
+    третий присыл того же файла срабатывал дедуп, и вызывающий получал словарь
+    БЕЗ транскрипта. Ход превращался в «Загружен документ:
+    telegram-voice-63.ogg», и Пятница трижды отвечала «я не могу услышать его
+    напрямую» — при том что услышала с первого раза.
+    """
+    import inspect
+
+    from friday.ingestion._files import FilesMixin
+
+    source = inspect.getsource(FilesMixin._replay_file_source)  # noqa: SLF001
+    assert '"transcript_text"' in source, "повтор теряет распознанный голос"
+    assert 'raw_metadata.get("transcription")' in source, (
+        "транскрипт берётся не из провенанса — значит не оттуда, где он лежит"
+    )
+    # Служебная подпись файла транскриптом не считается.
+    assert 'not spoken.startswith("[")' in source

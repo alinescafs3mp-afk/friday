@@ -58,7 +58,7 @@ class FilesMixin(PipelineShared):
         # pending inbox item without a KO and must replay, not error.
         if action == "promote" and not existing_ko and not existing_inbox:
             raise IdempotencyInProgressError("source_ref is already being promoted by another worker")
-        return {
+        replay = {
             "idempotent_replay": True,
             "promoted": bool(existing_ko),
             "queued_for_review": bool(
@@ -68,6 +68,19 @@ class FilesMixin(PipelineShared):
             "inbox_id": existing_inbox.get("id") if existing_inbox else None,
             "knowledge_object": existing_ko,
         }
+        # Повтор обязан вести себя как первый раз. Замерено на живой переписке
+        # (пользователь Пегас, 2 августа): голосовое распозналось верно —
+        # «Привет, пятница!» — и легло в архив, а на второй и третий присыл того
+        # же файла срабатывал дедуп, и вызывающий получал словарь БЕЗ
+        # транскрипта. Ход превращался в «Загружен документ:
+        # telegram-voice-63.ogg», и Пятница трижды отвечала «я не могу услышать
+        # его напрямую» — при том что услышала с первого раза и текст лежал в
+        # базе.
+        transcription = _json_dict(raw_metadata.get("transcription"))
+        spoken = str(existing_raw.get("raw_content") or "").strip()
+        if transcription and spoken and not spoken.startswith("["):
+            replay["transcript_text"] = spoken
+        return replay
 
     async def _extract_visual_document(
         self,

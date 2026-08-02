@@ -821,6 +821,7 @@ class AgentRuntime:
         ingestion_result: dict[str, Any] | None = None,
         synthetic_document_notice: bool = False,
         mode: str | None = None,
+        answer_with_voice: bool = False,
     ) -> dict[str, Any]:
         clean_message = (message or "").strip()
         if not clean_message:
@@ -1072,7 +1073,13 @@ class AgentRuntime:
                 warning=grounding_warning,
                 caution=verification_caution,
                 actor=actor,
-                asked_for_voice=bool(_ASKS_FOR_VOICE.search(clean_message)),
+                # Спросили голосом — отвечаем голосом. Человек записывает
+                # голосовое, когда ему неудобно печатать; отвечать ему стеной
+                # текста — предлагать читать там, где он выбрал слушать. Текст
+                # приходит рядом, как и раньше, так что ничего не теряется.
+                asked_for_voice=(
+                    answer_with_voice or bool(_ASKS_FOR_VOICE.search(clean_message))
+                ),
             ),
             "files": response.get("file_clips") or [],
             "context": {

@@ -1652,6 +1652,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # «Текст сочинил backend» и «файл уже принят отдельно» — разные факты; см.
         # разбор ниже, где они расходятся у голосового вопроса.
         synthetic_document_notice = False
+        # Спросили ли голосом. Объявляется здесь, а не внутри разбора вложения:
+        # без вложения ветка не выполняется вовсе, и обращение к переменной ниже
+        # роняло бы обычный текстовый ход.
+        spoken_question = False
         file_already_ingested = False
         attachments_value = body.get("attachments")
         attachments: list[dict[str, Any]] = (
@@ -1923,6 +1927,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 ingestion_result=ingestion_result,
                 synthetic_document_notice=synthetic_document_notice,
                 mode=requested_mode,
+                answer_with_voice=spoken_question,
             )
             if actor.source == "telegram-bridge" and channel_chat_id:
                 state.storage.set_channel_conversation(
