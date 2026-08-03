@@ -953,6 +953,93 @@ def _backfill_entities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backfill_relations(args: argparse.Namespace) -> int:
+    """Провести извлечение СВЯЗЕЙ по уже загруженному архиву.
+
+    Та же беда, что у сущностей: правило действует только при приёме документа, а
+    корпус загружен раньше. В графе владельца было 4610 сущностей и НОЛЬ связей —
+    не потому, что механизм сломан, а потому, что его никто не звал.
+
+    Замерено на копии базы 2026-08-03 (проход по всем 1533 документам):
+
+        без родственных слов                      0 кандидатов
+        со словами, без проверок             509 кандидатов, мусор: «Изобильный
+                                             -> Москва | Брат» — два города
+        + обе стороны люди                   243 кандидата, половина сцепляет
+                                             людей из РАЗНЫХ анкет заголовком поля
+        + слово вплотную к имени              98 кандидатов, из них 4 от «внук» —
+                                             все из одного списка позывных
+        + «внук» убран из словаря             94 кандидата на 56 документах,
+                                             около 85% верных на глаз
+
+    Результат — ОЧЕРЕДЬ НА ПОДТВЕРЖДЕНИЕ, а не готовые связи: каждый кандидат
+    ждёт решения человека. Поэтому по умолчанию — показ, запись включает `--apply`.
+    """
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    graph = KnowledgeGraph(storage)
+    apply_changes = bool(getattr(args, "apply", False))
+    scanned = found = touched = 0
+    #: Одна и та же пара, названная в трёх документах, — три СРАБАТЫВАНИЯ и одна
+    #: связь: хранилище схлопывает их по (источник, цель, тип). Считать надо оба
+    #: числа. Замерено: 94 срабатывания дали 64 различных пары, и печатать первое
+    #: как «кандидатов в связи» значило бы выдать работу прохода за содержимое
+    #: очереди — тот же класс, что «длина страницы — не факт о корпусе».
+    pairs: set[str] = set()
+    cursor = 0
+    try:
+        while True:
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
+            if not batch:
+                break
+            for row in batch:
+                cursor = int(row["rowid"])
+                scanned += 1
+                if not apply_changes:
+                    # Показ считает документы, а не кандидатов: сам разбор ПИШЕТ
+                    # в базу, и «сухой» его вариант был бы вторым кодом, который
+                    # мерит уже не то, что применится.
+                    continue
+                try:
+                    made = graph.suggest_relations_for_knowledge(str(row["user_id"]), str(row["id"]))
+                except Exception as error:  # noqa: BLE001 — один документ не должен рвать проход
+                    print(f"  {row['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+                    continue
+                if made:
+                    found += len(made)
+                    pairs.update(str(item.get("id") or "") for item in made if item.get("id"))
+                    touched += 1
+            if args.limit and scanned >= args.limit:
+                break
+        if apply_changes:
+            storage.record_event(
+                "graph.relations_backfilled",
+                {
+                    "scanned": scanned,
+                    "matches": found,
+                    "candidates": len(pairs),
+                    "documents": touched,
+                },
+            )
+    finally:
+        storage.close()
+    print(f"Просмотрено объектов: {scanned}.")
+    if apply_changes:
+        print(
+            f"Срабатываний: {found}; различных пар в очереди: {len(pairs)}; "
+            f"документов со связями: {touched}."
+        )
+        print("Это КАНДИДАТЫ — каждый ждёт подтверждения человеком в панели.")
+    else:
+        print("Это ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _purge(args: argparse.Namespace) -> int:
     """Irreversibly hard-delete soft-deleted knowledge while the backend is stopped."""
 
@@ -1350,6 +1437,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the entities and links (without it the pass only counts)",
     )
     entities.set_defaults(handler=_backfill_entities)
+
+    relations = sub.add_parser(
+        "backfill-relations",
+        help="Extract declared relations over the archive ingested before the rule existed",
+    )
+    relations.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    relations.add_argument("--batch", type=int, default=200, help="Objects per pass (default: 200)")
+    relations.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
+    relations.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write the relation candidates (without it the pass only counts objects)",
+    )
+    relations.set_defaults(handler=_backfill_relations)
 
     mint = sub.add_parser("mint-token", help="Issue a scoped API token for an account/preset")
     mint.add_argument("--user", required=True, help="Account id the token authenticates as")
