@@ -1082,6 +1082,10 @@ class AgentContext:
     #: раньше, чем правило «свой архив вперёд чужого интернета»: наличие
     #: совпадений — не доказательство, что вопрос был про архив.
     outward_verdict: tuple[str, str | None] | None = None
+    #: Просили собрать ПРИСЛАННЫЕ файлы за какие-то дни. Ставится, когда сборка
+    #: началась, — независимо от того, нашлось ли что паковать. Сочинять вместо
+    #: архива документ нельзя: человек просил присланное.
+    asked_for_an_archive: bool = False
     retrieval_confidence: float = 0.0
     graph_context: dict[str, Any] = field(default_factory=dict)
     proactive_suggestions: list[str] = field(default_factory=list)
@@ -1323,6 +1327,7 @@ class AgentRuntime:
         if (
             not synthetic_document_notice
             and asked_for_a_file
+            and not context.asked_for_an_archive
             and not response.get("file_clips")
         ):
             made = await self._file_for_a_request_that_wanted_one(
@@ -2370,6 +2375,12 @@ class AgentRuntime:
         days = [part.strip() for part in str(payload).split(",") if part.strip()]
         if not days:
             return False
+        # С этого места просьба считается просьбой об АРХИВЕ, чем бы сборка ни
+        # кончилась. Замерено на живом экземпляре: «собери документы за 13 число»
+        # — файлов за тот день нет, архив не собрался, и вместо него человеку
+        # уехал сочинённый docx с именем «Собери документы за 13 число.docx».
+        # Просили присланное, а получили выдумку на пустом месте.
+        context.asked_for_an_archive = True
         try:
             result = await self.kernel.execute("collect_files", {"days": days}, actor=actor)
         except Exception:  # noqa: BLE001 — сборка архива не должна ронять ответ
@@ -2382,13 +2393,17 @@ class AgentRuntime:
             if reason:
                 # Неудача тоже уходит модели: иначе она пообещает архив, которого
                 # не будет. «За эти дни файлов не приходило» — законный ответ.
+                #
+                # Формулировка — ФАКТ, без повелительного наклонения. Замерено на
+                # живом экземпляре 2026-08-03: прежняя редакция заканчивалась
+                # словами «Скажи это человеку прямо и не обещай файл», и модель
+                # переслала человеку всю строку целиком, вместе с указанием.
+                # Служебная реплика обязана оставаться осмысленной, даже если её
+                # перескажут дословно.
                 messages.append(
                     {
                         "role": "system",
-                        "content": (
-                            f"Архив собрать не удалось: {reason}. "
-                            "Скажи это человеку прямо и не обещай файл."
-                        ),
+                        "content": f"Архив собрать не удалось: {reason}.",
                     }
                 )
             return False
@@ -2402,15 +2417,16 @@ class AgentRuntime:
         # Даты называются ЯВНО и в том виде, в каком они разобраны, — иначе модель
         # пересказывает число из реплики человека («28 августа») вместо того, что
         # собрано на самом деле (28 июля).
+        # Тоже фактами: строку могут переслать человеку дословно, и она должна
+        # читаться как нормальный ответ, а не как инструкция самой себе.
         said = (
-            f"Архив уже собран и отправлен человеку: файл «{filename}», "
-            f"внутри {collected} файлов за {', '.join(str(day) for day in (data.get('days') or days))}. "
-            "Скажи об этом коротко, назови ИМЕННО эти даты и не обещай собрать что-то ещё."
+            f"Архив уже собран и отправлен: файл «{filename}», "
+            f"внутри {collected} файлов за {', '.join(str(day) for day in (data.get('days') or days))}."
         )
         if data.get("not_all"):
-            said += f" Вошло не всё: {data['not_all']} — скажи и это."
+            said += f" Вошло не всё: {data['not_all']}."
         if data.get("unclear_days"):
-            said += f" Не понял дни: {', '.join(str(day) for day in data['unclear_days'])} — переспроси о них."
+            said += f" Не понял, какие дни имелись в виду: {', '.join(str(day) for day in data['unclear_days'])}."
         messages.append({"role": "system", "content": said})
         return True
 

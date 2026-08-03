@@ -486,8 +486,49 @@ async def test_a_failed_assembly_is_not_promised_as_a_file() -> None:
 
     assert done is False
     assert clips == []
-    assert "не удалось" in str(messages[0]["content"]).lower()
-    assert "не приходило" in str(messages[0]["content"])
+    said = str(messages[0]["content"])
+    assert "не удалось" in said.lower()
+    assert "не приходило" in said
+    # Служебная реплика обязана читаться как нормальный ответ, даже если её
+    # перескажут дословно. Замерено на живом экземпляре 2026-08-03: прежняя
+    # редакция кончалась словами «Скажи это человеку прямо и не обещай файл», и
+    # Пятница переслала владельцу всю строку целиком, вместе с указанием.
+    assert "скажи" not in said.lower(), f"указание самой себе уедет человеку: {said}"
+    assert "не обещай" not in said.lower(), said
+    # И просьба остаётся просьбой об АРХИВЕ: сочинять вместо него документ нельзя.
+    assert context.asked_for_an_archive is True
+
+
+@pytest.mark.anyio
+async def test_a_failed_assembly_does_not_turn_into_an_invented_document() -> None:
+    """«Собери документы за 13 число» — файлов нет, и docx вместо них не нужен.
+
+    Замерено на живом экземпляре 2026-08-03: архив не собрался, а человеку уехал
+    сочинённый «Собери документы за 13 число.docx». Просили присланное, получили
+    выдумку на пустом месте.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime.chat)
+    at = source.index("_file_for_a_request_that_wanted_one(")
+    guard = source[max(0, at - 400) : at]
+    assert "not context.asked_for_an_archive" in guard, "выдумка снова заменяет архив"
+
+
+def test_the_successful_notice_is_safe_to_repeat_verbatim() -> None:
+    """Тот же класс, что и у неудачи: пересказ служебной строки не должен вредить."""
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._prefetch_the_archive_if_asked)
+    at = source.index("said = (")
+    body = source[at : source.index("messages.append", at)]
+    code = "\n".join(line for line in body.splitlines() if not line.strip().startswith("#"))
+    for imperative in ("Скажи", "скажи и это", "не обещай", "переспроси"):
+        assert imperative not in code, f"указание самой себе уедет человеку: {imperative}"
 
 
 @pytest.mark.parametrize(
