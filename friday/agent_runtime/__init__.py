@@ -745,7 +745,7 @@ def _relabel_history_citations(
 _INVENTED_CITATION_RE = re.compile(r"\[\s*K[_\-\s]*(?![0-9])[^\]\n]{0,24}\]", re.IGNORECASE)
 
 
-def _strip_invented_citations(content: str) -> str:
+def _strip_invented_citations(content: str, available: Any = None) -> str:
     """Убрать ссылки, которые модель придумала: открыть их всё равно нельзя.
 
     Замерено на недельном прогоне 2026-08-02: отвечая по веб-выдаче, модель
@@ -753,12 +753,31 @@ def _strip_invented_citations(content: str) -> str:
     указывающую. Человек видел в тексте служебный мусор, а «ссылка», которую
     невозможно открыть, ещё и врёт про обоснованность ответа.
 
-    Настоящие метки не трогаются: они номерные и разбираются отдельно.
+    НОМЕРНЫЕ метки тоже бывают выдуманными, и это найдено на живом диалоге с
+    новым человеком 2026-08-03: в ответе стояли `[K1]`, `[K2]`, `[K3]` при НУЛЕ
+    найденных документов и нуле поданных источников. Прежняя редакция считала
+    номерную метку настоящей по одному её виду и пропускала все три.
+
+    Это хуже служебного мусора: `[K_source]` человек прочтёт как сбой, а `[K1]`
+    выглядит как ссылка на его собственный документ — то есть ответ из головы
+    подаётся как ответ по архиву.
+
+    `available` — номера поданных источников (ключи `context.knowledge_citations`).
+    Без него номерные метки не трогаются: молча вырезать законные ссылки, не зная
+    списка, хуже, чем оставить лишнюю.
     """
     text = str(content or "")
     if "[K" not in text and "[k" not in text:
         return text
     cleaned = _INVENTED_CITATION_RE.sub("", text)
+    if available is not None:
+        known = {str(label).strip().lstrip("Kk") for label in available}
+        known = {label for label in known if label.isdigit()}
+
+        def _drop_unknown(match: re.Match[str]) -> str:
+            return match.group(0) if match.group(1) in known else ""
+
+        cleaned = re.sub(r"\[\s*[Kk]\s*(\d+)\s*\]", _drop_unknown, cleaned)
     # Пробел перед знаком препинания, оставшийся от вырезанной метки.
     cleaned = re.sub(r"[ \t]+([,.;:!?])", r"\1", cleaned)
     return re.sub(r"[ \t]{2,}", " ", cleaned)
@@ -1361,7 +1380,10 @@ class AgentRuntime:
         # Выдуманные ссылки убираются ПОСЛЕ проверки и ремонта, но ДО разбора
         # настоящих: судья должен видеть ответ таким, каким его написала модель,
         # а человек — без меток, которые никуда не ведут.
-        content = _strip_invented_citations(content)
+        # Список поданных источников передаётся сюда: без него номерная метка
+        # неотличима от настоящей, и `[K1]` при нуле документов доезжала до
+        # человека как ссылка на его собственный архив.
+        content = _strip_invented_citations(content, (context.knowledge_citations or {}).keys())
 
         cited_knowledge_ids = self._extract_cited_knowledge_ids(content, context)
         tool_knowledge_ids = [

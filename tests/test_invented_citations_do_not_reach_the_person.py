@@ -59,6 +59,9 @@ def test_text_without_markers_is_returned_as_is() -> None:
 def test_the_cleanup_is_wired_into_the_turn() -> None:
     """Проверяется подключённое: чистка стоит в боевом ходе, а не рядом."""
     source = inspect.getsource(AgentRuntime.chat)
-    assert "_strip_invented_citations(content)" in source, "чистка не подключена к ответу"
+    # Именно факт вызова, а не его точная форма: список поданных источников
+    # добавился вторым аргументом 2026-08-03, и тест, закреплявший число
+    # аргументов, покраснел на правке, ничего при этом не защищая.
+    assert "_strip_invented_citations(content" in source, "чистка не подключена к ответу"
     # Порядок важен: судья видит ответ как есть, человек — уже без мусора.
-    assert source.index("_verify_response") < source.index("_strip_invented_citations(content)")
+    assert source.index("_verify_response") < source.index("_strip_invented_citations(content")
