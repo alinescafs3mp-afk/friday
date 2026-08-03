@@ -386,20 +386,108 @@ async def test_the_archive_is_built_without_waiting_for_the_model(verdict, expec
 
             class _Result:
                 success = True
-                data = {"filename": "Документы.zip", "files_in_archive": 2}
+                data = {
+                    "filename": "Документы.zip",
+                    "files_in_archive": 2,
+                    "days": ["2026-07-26", "2026-07-28"],
+                }
                 attachment = {"filename": "Документы.zip", "content_base64": "UEs="}
+
+                def to_llm_message(self) -> str:
+                    return "Архив: 2 файла."
 
             return _Result()
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=verdict)
-    bound = AgentRuntime._archive_for_a_request_that_wanted_one.__get__(runtime, AgentRuntime)
+    messages: list[dict] = []
+    tools_used: list[str] = []
+    evidence: list[dict] = []
+    clips: list[dict] = []
+    bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
 
-    clip = await bound(context, None)
+    done = await bound(context, None, messages, tools_used, evidence, clips)
 
+    assert done is True
     assert calls == [("collect_files", {"days": expected})], calls
-    assert clip and clip["filename"] == "Документы.zip"
+    assert clips and clips[0]["filename"] == "Документы.zip"
+    assert tools_used == ["collect_files"], "сборка не попала в основания хода"
+    assert evidence and evidence[0]["tool"] == "collect_files"
+
+
+@pytest.mark.anyio
+async def test_the_model_is_told_which_dates_were_actually_packed() -> None:
+    """Замерено на живом экземпляре 2026-08-03: слово разошлось с делом.
+
+    На «собери документы за 26 и 28 число» Пятница написала «соберу документы за
+    26 и 28 АВГУСТА», а приложен был архив за 26 и 28 июля — собранный верно,
+    августовских чисел ещё не наступало. Модель пересказывала число из реплики
+    человека, потому что о результате сборки не знала: та шла ПОСЛЕ ответа.
+    """
+    from friday.agent_runtime import AgentContext, AgentRuntime
+
+    class _Kernel:
+        async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+            class _Result:
+                success = True
+                data = {
+                    "filename": "Документы за 2026-07-26 2026-07-28.zip",
+                    "files_in_archive": 66,
+                    "days": ["2026-07-26", "2026-07-28"],
+                    "not_all": "за эти дни файлов 1605, в архив вошли первые 300",
+                }
+                attachment = {"filename": "Документы.zip", "content_base64": "UEs="}
+
+                def to_llm_message(self) -> str:
+                    return "Архив: 66 файлов."
+
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "26,28"))
+    messages: list[dict] = []
+    bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
+
+    await bound(context, None, messages, [], [], [])
+
+    said = str(messages[0]["content"])
+    assert "2026-07-26" in said and "2026-07-28" in said, said
+    assert "66" in said, "модель не знает, сколько файлов собрано"
+    assert "1605" in said, "человеку не скажут, что вошло не всё"
+
+
+@pytest.mark.anyio
+async def test_a_failed_assembly_is_not_promised_as_a_file() -> None:
+    """Иначе Пятница пообещает архив, которого нет: «сейчас соберу» и тишина."""
+    from friday.agent_runtime import AgentContext, AgentRuntime
+
+    class _Kernel:
+        async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+            class _Result:
+                success = True
+                data = {"collected": False, "reason": "за эти дни файлов не приходило"}
+                attachment = None
+
+                def to_llm_message(self) -> str:
+                    return "Нечего собирать."
+
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "13"))
+    messages: list[dict] = []
+    clips: list[dict] = []
+    bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
+
+    done = await bound(context, None, messages, [], [], clips)
+
+    assert done is False
+    assert clips == []
+    assert "не удалось" in str(messages[0]["content"]).lower()
+    assert "не приходило" in str(messages[0]["content"])
 
 
 @pytest.mark.parametrize(
@@ -425,23 +513,26 @@ async def test_without_days_nothing_is_packed(verdict) -> None:
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=verdict)
-    bound = AgentRuntime._archive_for_a_request_that_wanted_one.__get__(runtime, AgentRuntime)
+    bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
 
-    assert await bound(context, None) is None
+    assert await bound(context, None, [], [], [], []) is False
     assert calls == []
 
 
-def test_the_assembly_is_wired_into_the_answer() -> None:
-    """Проверяется подключённое: сборка стоит в боевом пути, а не рядом."""
+def test_the_assembly_runs_before_the_model_speaks() -> None:
+    """Проверяется подключённое: сборка стоит в цикле, ДО хода модели.
+
+    Стояла после ответа — и модель называла даты из реплики человека вместо
+    собранных. Порядок здесь и есть исправление.
+    """
     import inspect
 
     from friday.agent_runtime import AgentRuntime
 
-    source = inspect.getsource(AgentRuntime.chat)
-    assert "_archive_for_a_request_that_wanted_one(" in source, "сборку никто не зовёт"
-    archive_at = source.index("_archive_for_a_request_that_wanted_one(")
-    make_at = source.index("_file_for_a_request_that_wanted_one(")
-    assert archive_at < make_at, "«сочини документ» перехватывает «отдай присланное»"
+    loop = inspect.getsource(AgentRuntime._agentic_loop)
+    assert "_prefetch_the_archive_if_asked(" in loop, "сборку никто не зовёт"
+    chat = inspect.getsource(AgentRuntime.chat)
+    assert "_prefetch_the_archive_if_asked(" not in chat, "сборка снова после ответа"
 
 
 @pytest.mark.anyio

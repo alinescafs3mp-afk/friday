@@ -1316,18 +1316,10 @@ class AgentRuntime:
         asked_for_a_file = bool(_ASKS_FOR_A_FILE.search(clean_message)) or str(
             (context.outward_verdict or ("", None))[0] or ""
         ).startswith("файл")
-        # Просьба «собери ПРИСЛАННОЕ за такие-то дни» — не то же, что «сочини
-        # документ»: там пакуются файлы, которые уже есть. Различает их поле
-        # «дни» в вердикте, и запускается сборка ДО того, как решать про `make_file`.
-        #
-        # Выполняется здесь, а не оставляется модели, по измеренной причине:
-        # `make_file` она звала в 1 случае из 12, и два подхода уговорить её
-        # промптом дали те же 1/12. Вызов инструмента остаётся её решением всюду,
-        # кроме случаев, где человек попросил однозначно.
-        if not synthetic_document_notice and not response.get("file_clips"):
-            packed = await self._archive_for_a_request_that_wanted_one(context, actor)
-            if packed:
-                response = {**response, "file_clips": [packed]}
+        # Сборка присланных файлов («собери за 10, 13 и 25 число») здесь НЕ
+        # запускается: она стоит раньше, в агентском цикле, чтобы модель говорила
+        # о собранном, а не гадала. Сюда доходит только «сочини документ», и оно
+        # намеренно позже — файл собирается по уже проверенному тексту.
         if (
             not synthetic_document_notice
             and asked_for_a_file
@@ -1943,6 +1935,20 @@ class AgentRuntime:
         voice_clip: dict[str, Any] | None = None
         #: Собранные файлы: их может быть несколько за ход («сделай и word, и pdf»).
         file_clips: list[dict[str, Any]] = []
+        # Архив собирается ДО хода модели, а не после ответа.
+        #
+        # Замерено на живом экземпляре 2026-08-03: сборка стояла после ответа, и
+        # модель о ней не знала. На «собери документы за 26 и 28 число» она
+        # написала «соберу документы за 26 и 28 АВГУСТА», а приложен был архив за
+        # 26 и 28 июля — собранный верно (августовских чисел ещё не было). Слово
+        # и дело разошлись, и прав оказался файл, а не текст.
+        #
+        # Вторым следствием того же порядка было предупреждение «ответ не
+        # опирается ни на одну запись вашей базы»: сборка не попадала в
+        # основания хода, и выглядело это как ответ из ниоткуда.
+        await self._prefetch_the_archive_if_asked(
+            context, actor, messages, tools_used, tool_evidence, file_clips
+        )
         total_calls = 0
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
             context.interaction_mode,
@@ -2334,11 +2340,15 @@ class AgentRuntime:
         cleaned = " ".join(cleaned.replace(",", " ").split()).strip(" ,.:;—-")
         return cleaned or " ".join(message.split())
 
-    async def _archive_for_a_request_that_wanted_one(
+    async def _prefetch_the_archive_if_asked(
         self,
         context: AgentContext,
         actor: ActorContext,
-    ) -> dict[str, Any] | None:
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_evidence: list[dict[str, str]],
+        file_clips: list[dict[str, Any]],
+    ) -> bool:
         """Просили собрать присланные файлы за какие-то дни — собираем.
 
         Владелец 2026-08-03: «Пятница же не умеет архивы собирать? Надо, чтобы
@@ -2348,30 +2358,61 @@ class AgentRuntime:
         Отдельного шаблона здесь нет намеренно — та же просьба владельца в тот же
         день: «не затыкай всё эвристиками и шаблонами, старайся работать именно
         с пониманием».
+
+        Выполняется ДО хода модели и кладёт результат ей в контекст. Так она
+        говорит о том, что собрано на самом деле: замерено, что при сборке после
+        ответа она написала «соберу документы за 26 и 28 августа», а приложен был
+        (верно собранный) архив за июль.
         """
         kind, payload = context.outward_verdict or ("", None)
         if not str(kind or "").startswith("файл") or not payload:
-            return None
+            return False
         days = [part.strip() for part in str(payload).split(",") if part.strip()]
         if not days:
-            return None
+            return False
         try:
             result = await self.kernel.execute("collect_files", {"days": days}, actor=actor)
         except Exception:  # noqa: BLE001 — сборка архива не должна ронять ответ
             LOGGER.exception("Archive assembly failed")
-            return None
+            return False
+        data = result.data or {}
         if not result.success or not result.attachment:
-            LOGGER.info(
-                "archive-prefetch: не собралось — %s",
-                str((result.data or {}).get("reason") or result.error or "")[:120],
-            )
-            return None
-        LOGGER.info(
-            "archive-prefetch: собран %r, файлов %s",
-            str((result.data or {}).get("filename") or ""),
-            (result.data or {}).get("files_in_archive"),
+            reason = str(data.get("reason") or result.error or "")
+            LOGGER.info("archive-prefetch: не собралось — %s", reason[:120])
+            if reason:
+                # Неудача тоже уходит модели: иначе она пообещает архив, которого
+                # не будет. «За эти дни файлов не приходило» — законный ответ.
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Архив собрать не удалось: {reason}. "
+                            "Скажи это человеку прямо и не обещай файл."
+                        ),
+                    }
+                )
+            return False
+        collected = data.get("files_in_archive")
+        filename = str(data.get("filename") or "")
+        LOGGER.info("archive-prefetch: собран %r, файлов %s", filename, collected)
+        tools_used.append("collect_files")
+        if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
+            tool_evidence.append({"tool": "collect_files", "output": result.to_llm_message()})
+        file_clips.append(dict(result.attachment))
+        # Даты называются ЯВНО и в том виде, в каком они разобраны, — иначе модель
+        # пересказывает число из реплики человека («28 августа») вместо того, что
+        # собрано на самом деле (28 июля).
+        said = (
+            f"Архив уже собран и отправлен человеку: файл «{filename}», "
+            f"внутри {collected} файлов за {', '.join(str(day) for day in (data.get('days') or days))}. "
+            "Скажи об этом коротко, назови ИМЕННО эти даты и не обещай собрать что-то ещё."
         )
-        return dict(result.attachment)
+        if data.get("not_all"):
+            said += f" Вошло не всё: {data['not_all']} — скажи и это."
+        if data.get("unclear_days"):
+            said += f" Не понял дни: {', '.join(str(day) for day in data['unclear_days'])} — переспроси о них."
+        messages.append({"role": "system", "content": said})
+        return True
 
     async def _file_for_a_request_that_wanted_one(
         self,
