@@ -188,6 +188,41 @@ class AccountsMixin(StorageShared):
             )
         return self.get_user(user_id)
 
+    def remember_correction(
+        self,
+        user_id: str,
+        correction: str,
+        *,
+        replaces: str = "",
+        forget: str = "",
+        limit: int = 12,
+        chars: int = 240,
+    ) -> list[str]:
+        """Запомнить ПОПРАВКУ человека к сказанному Пятницей.
+
+        Отдельный список, а не общий с указаниями о поведении, и это не косметика.
+        «Не ставь смайлики» — про то, КАК отвечать; «День морской пехоты 27 ноября,
+        а не 27 июля» — про то, ЧТО правда. Смешать их значило бы подать модели
+        факт как распоряжение о стиле и наоборот; в промпте они и объясняются
+        по-разному.
+
+        Найдено в живой переписке 2026-08-03: человек поправил дату
+        профессионального праздника, и от этого не изменилось ничего — ни правила,
+        ни записи в графе. В следующий раз система сказала бы то же самое. Та же
+        дыра, что была с указаниями о поведении, только в другом слое.
+
+        Хранится там же и так же — в метаданных человека, одной транзакцией, — и
+        едет в контекст КАЖДОГО хода. Иначе поправка действовала бы ровно один
+        ход, тот самый, в котором её произнесли.
+
+        Поправка чуть длиннее правила (240 против 200): в ней два утверждения —
+        что неверно и что верно, — а правило одно.
+        """
+        return self._remember_personal_line(
+            user_id, "corrections", correction, replaces=replaces, forget=forget,
+            limit=limit, chars=chars,
+        )
+
     def remember_standing_rule(
         self,
         user_id: str,
@@ -216,7 +251,31 @@ class AccountsMixin(StorageShared):
         Возвращается получившийся список — вызывающему он нужен целиком, чтобы
         положить в контекст ЭТОГО же хода, а не следующего.
         """
-        rule = " ".join(str(rule or "").split())[:chars]
+        return self._remember_personal_line(
+            user_id, "standing_rules", rule, replaces=replaces, forget=forget,
+            limit=limit, chars=chars,
+        )
+
+    def _remember_personal_line(
+        self,
+        user_id: str,
+        field: str,
+        line: str,
+        *,
+        replaces: str = "",
+        forget: str = "",
+        limit: int = 12,
+        chars: int = 200,
+    ) -> list[str]:
+        """Общее тело для личных списков человека: указаний и поправок.
+
+        Списки разные по смыслу и одинаковые по механике: хранятся в метаданных,
+        едут в контекст каждым ходом, вытесняют самое старое при переполнении и
+        пишутся одной транзакцией. Держать две копии этого кода значило бы
+        починить гонку в одном месте и забыть в другом — на этом проекте так уже
+        расходились шаблоны времени.
+        """
+        line = " ".join(str(line or "").split())[:chars]
         replaces = " ".join(str(replaces or "").split())[:chars]
         forget = " ".join(str(forget or "").split())[:chars]
         with self.transaction() as conn:
@@ -226,7 +285,7 @@ class AccountsMixin(StorageShared):
             metadata = _json_load(row["metadata_json"], {})
             if not isinstance(metadata, dict):
                 metadata = {}
-            raw = metadata.get("standing_rules")
+            raw = metadata.get(field)
             rules: list[str] = []
             for item in raw if isinstance(raw, list) else []:
                 text = item if isinstance(item, str) else str((item or {}).get("text") or "")
@@ -236,15 +295,15 @@ class AccountsMixin(StorageShared):
             for gone in (replaces, forget):
                 if gone and gone in rules:
                     rules.remove(gone)
-            if rule:
-                # Новое правило встаёт первым: при переполнении списка вытесняется
-                # самое старое, а не только что сказанное.
-                rules = [rule] + [existing for existing in rules if existing != rule]
+            if line:
+                # Новое встаёт первым: при переполнении вытесняется самое старое, а
+                # не только что сказанное.
+                rules = [line] + [existing for existing in rules if existing != line]
             rules = rules[:limit]
             if rules:
-                metadata["standing_rules"] = rules
+                metadata[field] = rules
             else:
-                metadata.pop("standing_rules", None)
+                metadata.pop(field, None)
             conn.execute(
                 "UPDATE users SET metadata_json=?, updated_at=? WHERE id=?",
                 (json.dumps(metadata, ensure_ascii=False, sort_keys=True), utc_now(), user_id),

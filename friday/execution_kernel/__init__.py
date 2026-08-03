@@ -3585,6 +3585,9 @@ def _pack_archive(
     """
     del name
     buffer = io.BytesIO()
+    # Корень раскрывается ОДИН раз: `resolve()` ходит в файловую систему, а
+    # сравнение делается на каждый файл из трёхсот.
+    base_root = root.resolve()
     left_out: list[str] = []
     used: set[str] = set()
     size = 0
@@ -3594,16 +3597,32 @@ def _pack_archive(
             source = (root / stored).resolve()
             # Путь пришёл из базы, но проверяется всё равно: запись могла быть
             # сделана иначе, а `..` в ней увёл бы чтение за пределы хранилища.
-            if not str(source).startswith(str(root.resolve())) or not source.is_file():
+            #
+            # `is_relative_to`, а не сравнение начала строки. Разбор Сола
+            # 2026-08-03 и проверка: при хранилище `/data/files` путь
+            # `/data/files_backup/secret.pdf` проходит `startswith` — соседний
+            # каталог, чьё имя начинается так же, границей не отделён вовсе.
+            if not source.is_relative_to(base_root) or not source.is_file():
                 left_out.append(f"{row.get('filename') or row.get('title') or stored} — файла нет")
+                continue
+            # Размер спрашивается У ФАЙЛОВОЙ СИСТЕМЫ, а не после чтения.
+            #
+            # Прежде файл читался целиком и лишь потом сверялся с потолком: файл
+            # на несколько гигабайт сначала оказывался в памяти и только затем
+            # объявлялся не поместившимся. Потолок стоял, но защищал он архив, а
+            # не машину.
+            try:
+                on_disk = source.stat().st_size
+            except OSError as error:
+                left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
+                continue
+            if size + on_disk > _MAX_ARCHIVE_BYTES:
+                left_out.append(f"{row.get('filename') or stored} — не поместился по размеру")
                 continue
             try:
                 payload = source.read_bytes()
             except OSError as error:
                 left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
-                continue
-            if size + len(payload) > _MAX_ARCHIVE_BYTES:
-                left_out.append(f"{row.get('filename') or stored} — не поместился по размеру")
                 continue
             base = str(row.get("filename") or row.get("title") or source.name).strip() or source.name
             base = base.replace("/", "_").replace("\\", "_").lstrip(".") or source.name

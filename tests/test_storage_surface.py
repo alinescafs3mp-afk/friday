@@ -137,7 +137,12 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: транзакцией, в отличие от `/api/me/instructions`: там правит человек руками и
 #: изредка, здесь пишет сам ход разговора, и два хода подряд при том же приёме
 #: потеряли бы одну из правок вместе со ВСЕМИ остальными ключами метаданных.
-EXPECTED_MEMBER_COUNT = 310
+#: +2 к 310: `remember_correction` и общее для него с правилами тело
+#: `_remember_personal_line`. Поправка человека («День морской пехоты 27 ноября, а
+#: не 27 июля») — не указание о СТИЛЕ, а сведение о том, ЧТО правда, и списки
+#: разные. Механика у них одна, поэтому тело вынесено: держать две копии значило
+#: бы починить гонку в одном месте и забыть в другом.
+EXPECTED_MEMBER_COUNT = 312
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
