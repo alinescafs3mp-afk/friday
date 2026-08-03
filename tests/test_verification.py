@@ -204,8 +204,16 @@ async def test_unrunnable_verifier_fails_closed_to_unknown(settings, storage):
 
 @pytest.mark.asyncio
 async def test_passing_verdict_leaves_no_warning(settings, storage):
+    """Ответ СО ССЫЛКОЙ: судье было с чем сверять, и «прошло» относится к делу.
+
+    Ссылка `[K1]` добавлена 2026-08-03. До этого ответ не ссылался ни на что, и
+    тест закреплял ровно ту неправду, ради которой правка и делалась: «проверено»
+    ставилось под ответом, который судья сверял с документами, НЕ использованными
+    моделью. На живой базе таких оказалось 66 из 479. Суть проверки — «прошедший
+    вердикт не добавляет предупреждения» — осталась прежней.
+    """
     llm = _ScriptedLLM(
-        answer="У Atlas выделенный кластер PostgreSQL 16.",
+        answer="У Atlas выделенный кластер PostgreSQL 16 [K1].",
         verdict='```json\n{"ok": true, "score": 0.95, "issues": []}\n```',
     )
     result = await _run_chat(settings, storage, llm)
@@ -213,6 +221,25 @@ async def test_passing_verdict_leaves_no_warning(settings, storage):
     assert result["verification_status"] == "passed"
     assert result["verified"] is True
     assert result["verification_caution"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_passing_verdict_on_an_uncited_answer_is_not_called_verified(settings, storage):
+    """Тот же ход без ссылки: сверять было не с чем, и «проверено» — неправда.
+
+    Судья при нуле ссылок берёт запасной путь — верхние найденные документы. Он
+    оценивает ответ против того, чего модель не использовала, противоречий не
+    находит и честно ставит «прошло». Вывод должен быть скромнее.
+    """
+    llm = _ScriptedLLM(
+        answer="У Atlas выделенный кластер PostgreSQL 16.",
+        verdict='```json\n{"ok": true, "score": 0.95, "issues": []}\n```',
+    )
+    result = await _run_chat(settings, storage, llm)
+
+    assert result["verification_status"] == "skipped"
+    assert result["verified"] is False
+    assert result["verification_caution"] == "", "лишнего предупреждения человеку не добавилось"
 
 
 @pytest.mark.asyncio
