@@ -431,8 +431,12 @@ async def test_the_model_is_told_which_dates_were_actually_packed() -> None:
         async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
             class _Result:
                 success = True
+                # Имя файла НАМЕРЕННО без дат. Прежде оно звалось «Документы за
+                # 2026-07-26 2026-07-28.zip», и проверка проходила даже когда
+                # разобранные дни выбрасывались вовсе: даты попадали в текст через
+                # имя. Показала мутация — тест не различал два источника.
                 data = {
-                    "filename": "Документы за 2026-07-26 2026-07-28.zip",
+                    "filename": "Документы.zip",
                     "files_in_archive": 66,
                     "days": ["2026-07-26", "2026-07-28"],
                     "not_all": "за эти дни файлов 1605, в архив вошли первые 300",
@@ -452,10 +456,16 @@ async def test_the_model_is_told_which_dates_were_actually_packed() -> None:
 
     await bound(context, None, messages, [], [], [])
 
-    said = str(messages[0]["content"])
+    # Читается то, что получает ЧЕЛОВЕК. Прежде это была служебная строка для
+    # модели в расчёте на удачный пересказ; теперь факт о собранном говорит
+    # структура, и проверять надо её текст.
+    said = context.structural_answer
     assert "2026-07-26" in said and "2026-07-28" in said, said
-    assert "66" in said, "модель не знает, сколько файлов собрано"
-    assert "1605" in said, "человеку не скажут, что вошло не всё"
+    assert "66" in said, "человек не узнал, сколько файлов собрано"
+    assert "1605" in said, "человеку не сказали, что вошло не всё"
+    # Модели остаётся знать, что дело сделано, — иначе она предложит сделать его.
+    told = str(messages[0]["content"])
+    assert "уже собран" in told, told
 
 
 @pytest.mark.anyio
@@ -571,18 +581,53 @@ def test_what_did_not_fit_is_counted_by_the_code_not_the_model() -> None:
     assert "не вошло {missed}" in source
 
 
-def test_the_successful_notice_is_safe_to_repeat_verbatim() -> None:
-    """Тот же класс, что и у неудачи: пересказ служебной строки не должен вредить."""
-    import inspect
+@pytest.mark.anyio
+async def test_the_successful_notice_reads_as_an_answer() -> None:
+    """Текст о собранном уходит человеку НАПРЯМУЮ и должен читаться как ответ.
 
-    from friday.agent_runtime import AgentRuntime
+    Прежняя редакция проверяла ТЕКСТ ИСХОДНИКА между двумя строками — приём,
+    который на этом проекте уже краснел от переписанного комментария и молчал бы
+    при переименовании переменной. Здесь проверяется произведённый текст: он и
+    есть то, что увидит человек.
 
-    source = inspect.getsource(AgentRuntime._prefetch_the_archive_if_asked)
-    at = source.index("said = (")
-    body = source[at : source.index("messages.append", at)]
-    code = "\n".join(line for line in body.splitlines() if not line.strip().startswith("#"))
-    for imperative in ("Скажи", "скажи и это", "не обещай", "переспроси"):
-        assert imperative not in code, f"указание самой себе уедет человеку: {imperative}"
+    Требования те же, что у отказа в правах, и по той же причине. Никаких
+    указаний самой себе — раньше служебная строка кончалась словами «Скажи это
+    человеку прямо и не обещай файл», и она уехала человеку целиком. Никакого
+    будущего времени — «Собираю архив… сейчас выгружу» при уже приложенном файле
+    заставляет ждать пришедшего.
+    """
+    from friday.agent_runtime import AgentContext, AgentRuntime
+
+    class _Kernel:
+        async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+            class _Result:
+                success = True
+                data = {
+                    "filename": "Документы.zip",
+                    "files_in_archive": 4,
+                    "days": ["2026-07-26"],
+                }
+                attachment = {"filename": "Документы.zip", "content_base64": "UEs="}
+
+                def to_llm_message(self) -> str:
+                    return "Архив: 4 файла."
+
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "26"))
+    bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
+
+    await bound(context, None, [], [], [], [])
+
+    said = context.structural_answer
+    assert said, "о собранном архиве человеку не сказали ничего"
+    lowered = said.casefold()
+    for imperative in ("скажи", "не обещай", "переспроси", "ответь"):
+        assert imperative not in lowered, f"указание самой себе уедет человеку: {imperative}"
+    for promise in ("соберу", "сейчас ", "выгружу", "займёт"):
+        assert promise not in lowered, f"обещание вместо факта: {promise}"
 
 
 @pytest.mark.parametrize(

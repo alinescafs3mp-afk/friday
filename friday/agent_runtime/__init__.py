@@ -657,6 +657,22 @@ _ABOUT_MY_OWN_STUFF = re.compile(
 )
 
 
+def _is_household_turn(context: Any) -> bool:
+    """Разговорная реплика: «как дела», «устал сегодня», «о чём поговорим».
+
+    Два признака вместо одного, и оба нужны. Закрытый список (`small_talk`) ловит
+    «привет» и «спасибо», но молчит на «да вот думаю, о чём с тобой поговорить»;
+    вердикт «быт» ловит понимание, но на самой короткой реплике арбитр видов не
+    зовётся вовсе, и вердикта нет. Асимметрия уже стоила одного дефекта: реплика
+    из списка не получала инструментов, а распознанная пониманием получала весь
+    набор.
+    """
+    if getattr(context, "small_talk", False):
+        return True
+    kind = str((getattr(context, "outward_verdict", None) or ("", None))[0] or "")
+    return kind.startswith("быт")
+
+
 def _archive_is_weak(hits: list[dict[str, Any]]) -> bool:
     """Отвечает ли архив уверенно — или просто что-то нашёл.
 
@@ -1067,7 +1083,11 @@ _CLAIMS_THE_ARCHIVE = re.compile(
 
 
 def _grounding_warning(
-    content: str, answer_grounded: bool | None, *, about_his_own_papers: bool = False
+    content: str,
+    answer_grounded: bool | None,
+    *,
+    about_his_own_papers: bool = False,
+    personal_data_reached_the_turn: bool = False,
 ) -> str:
     """Предупреждение, которое обязано стоять ПЕРЕД ответом, а не после него.
 
@@ -1116,7 +1136,14 @@ def _grounding_warning(
     # архива не пришло ничего, значит фраза ложна.
     #
     # Стоит после ветки про пересказ: у той свой, более точный текст.
-    if _CLAIMS_THE_ARCHIVE.search(body):
+    # Обвинение ставится только там, где личных данных не было ВОВСЕ.
+    #
+    # Найдено владельцем в живой переписке 2026-08-04. Фраза «это тоже проект из
+    # твоей базы» была ПРАВДОЙ: проект приехал полем `user_model`, мимо поиска, —
+    # а человек прочёл «сказано, что ответ взят из вашего архива, — это не так».
+    # Отсутствие меток `[K#]` доказывает только то, что не сработала ОДНА дорога
+    # из трёх; ложной ссылку делает пустота на всех.
+    if _CLAIMS_THE_ARCHIVE.search(body) and not personal_data_reached_the_turn:
         return (
             "⚠️ Ниже сказано, что ответ взят из вашего архива, — это не так: под эти "
             "утверждения не найдено ни одной вашей записи. Проверьте факты."
@@ -1322,10 +1349,24 @@ class AgentContext:
     #: не давать модели говорить об этом вовсе.
     structural_answer: str = ""
     #: Чего система НЕ решила: остаток реплики, на который отвечает модель.
-    #: Пустая строка — отвечать не на что, ход модели не нужен вовсе. Разбор в
-    #: `_standing_rule_by_arbiter`; неизвестность там оборачивается полной
-    #: репликой, а не пустой, — потерять вопрос дороже, чем сказать лишнее.
+    #: Пустая строка ЗНАЧИМА только вместе с `remainder_known`.
     open_remainder: str = ""
+    #: Уехала ли модели выведенная модель пользователя (люди, проекты, интересы).
+    #: Нужна не логике, а честности предупреждений: данные из архива приезжают
+    #: ТРЕМЯ дорогами, а метки `[K#]` покрывают одну.
+    user_model_offered: bool = False
+    #: Разобрал ли кто-нибудь реплику на «решённое» и «остаток».
+    #:
+    #: Различие куплено мутацией. Сборка архива знает, что сделала, но остатка не
+    #: считает — дни ей даёт общий арбитр видов, у которого такого поля нет. Пока
+    #: она объявляла ход своим целиком, реплика «собери документы за 26 число и
+    #: напомни про отчёт в пятницу» теряла напоминание МОЛЧА: следующий
+    #: предварительный вызов получал пустую строку и не срабатывал.
+    #:
+    #: Поэтому «остатка нет» и «остаток не считали» — разные состояния, и ход у
+    #: модели отнимается только в первом. Несделанное дело человек обнаруживает,
+    #: когда уже поздно; лишняя фраза модели поверх верного факта видна сразу.
+    remainder_known: bool = False
     #: Поправки человека к сказанному Пятницей. Отдельно от правил намеренно:
     #: правило про то, КАК отвечать, поправка — про то, ЧТО правда, и в промпте
     #: они объясняются по-разному. Едут в контекст КАЖДЫМ ходом по той же
@@ -1560,10 +1601,14 @@ class AgentRuntime:
         # целиком, потерял бы вопрос про отчёт МОЛЧА. Модель отвечает на остаток
         # и не видит той половины, которую уже решили: переспорить нельзя то,
         # чего тебе не показали.
+        # Снимок ДО цикла: здесь он про разбор реплики (правило, поправка,
+        # отказ). Предварительные вызовы внутри цикла добавят к утверждению своё
+        # — состоявшийся побочный эффект, — поэтому окончательный текст читается
+        # ПОСЛЕ цикла, а не отсюда.
         settled = context.structural_answer
-        asked_of_model = context.open_remainder if settled else clean_message
+        asked_of_model = context.open_remainder if context.remainder_known else clean_message
         response: dict[str, Any]
-        if settled and not asked_of_model.strip():
+        if settled and context.remainder_known and not asked_of_model.strip():
             response = {"content": "", "tools_used": []}
         elif self.llm.enabled and visible_tools:
             response = await self._agentic_loop(context, asked_of_model, actor, visible_tools, attachments)
@@ -1576,11 +1621,18 @@ class AgentRuntime:
         if response.get("llm_failed") and self.llm.enabled:
             self._tell_the_owner_the_model_is_silent(user_id)
         content = (response.get("content") or "").strip()
-        if settled:
+        # То, что сказала МОДЕЛЬ, — отдельно от того, что сказала система.
+        # Судить можно только первое: см. условие проверки ниже.
+        model_said = content
+        # Читается ПОСЛЕ цикла: к утверждению могли добавиться факты о том, что
+        # цикл успел СДЕЛАТЬ, — поставленное напоминание, собранный архив.
+        # Снимок `settled` для этого не годится, он снят до них.
+        spoken = context.structural_answer
+        if spoken:
             # Утверждение стоит ПЕРВЫМ и дословно. Порядок здесь не про красоту:
             # человек читает сверху вниз и первую строку прочтёт наверняка, а
             # хвост длинного ответа — как получится.
-            content = f"{settled}\n\n{content}".strip() if content else settled
+            content = f"{spoken}\n\n{content}".strip() if content else spoken
         content = content or "Не удалось сформировать ответ."
         # `synthetic_document_notice` означает, что текст сочинил backend вместо
         # человека («Загружен документ: отчёт.docx»), и просьбой о файле он не
@@ -1598,7 +1650,9 @@ class AgentRuntime:
             # characters against a 300-character threshold, so a hung endpoint cost a
             # second full retry budget — 726 seconds on top of 726, one message
             # holding a foreground slot for 24 minutes.
-            and len(content) >= self.settings.verify_min_answer_chars
+            # Порог считается по словам МОДЕЛИ: структурный факт длину набирает,
+            # а судить в нём нечего.
+            and len(model_said) >= self.settings.verify_min_answer_chars
             # Проверять есть смысл только там, где есть С ЧЕМ сверять.
             #
             # Судья складывает данные из личных записей и результатов
@@ -1615,17 +1669,39 @@ class AgentRuntime:
             # расхождение с документом.
             and (context.knowledge_hits or response.get("tool_evidence"))
             and not context.small_talk
+            # Судить нечего, если модель не говорила.
+            #
+            # Найдено разбором СВОЕЙ ЖЕ правки, гейт этого не показал бы. Ответ,
+            # собранный структурой целиком («Напоминание поставлено: „отчёт“,
+            # срок — в пятницу»), — не утверждение о мире, а отчёт системы о
+            # собственном действии. Судья же сверяет утверждения с записями и на
+            # таком тексте обязан сказать «не подтверждается вашими данными».
+            #
+            # Это ровно тот класс, что уже лечили строкой выше: предупреждение не
+            # по делу обесценивает те, что по делу. Здесь оно было бы хуже
+            # обычного — под фактом, который система знает ТОЧНО, потому что сама
+            # его и совершила.
+            and bool(model_said)
         ):
             verification = await self._verify_response(
-                clean_message, content, context, tool_evidence=response.get("tool_evidence")
+                # Судится ТО, ЧТО СКАЗАЛА МОДЕЛЬ, а не склейка со структурным
+                # фактом: иначе судья бракует ответ из-за строки, которую модель
+                # не писала и исправить не может.
+                clean_message,
+                model_said,
+                context,
+                tool_evidence=response.get("tool_evidence"),
             )
         verification_status = str(verification.get("status") or VERDICT_SKIPPED)
         if verification_status == VERDICT_FAILED:
-            repaired = await self._repair_once(clean_message, content, context, verification)
+            # Чинится тоже ТОЛЬКО сказанное моделью. Структурный факт правке не
+            # подлежит: система его не предполагает, а знает.
+            repaired = await self._repair_once(clean_message, model_said, context, verification)
             if repaired:
-                content = repaired
+                model_said = repaired
+                content = f"{spoken}\n\n{repaired}".strip() if spoken else repaired
                 verification = await self._verify_response(
-                    clean_message, content, context, tool_evidence=response.get("tool_evidence")
+                    clean_message, model_said, context, tool_evidence=response.get("tool_evidence")
                 )
                 verification_status = str(verification.get("status") or VERDICT_SKIPPED)
         # «Проверено» под ответом, который ни на что не опирался, — неправда.
@@ -1777,7 +1853,26 @@ class AgentRuntime:
             and not _archive_is_weak(context.knowledge_hits)
         )
         grounding_warning = _grounding_warning(
-            content, answer_grounded, about_his_own_papers=about_his_own_papers
+            content,
+            answer_grounded,
+            about_his_own_papers=about_his_own_papers,
+            # Приезжали ли личные данные хоть какой-нибудь дорогой.
+            #
+            # Найдено владельцем в живой переписке 2026-08-04. Ответ сказал «это
+            # тоже проект из твоей базы», ссылок `[K#]` в нём не было — и человек
+            # получил «⚠️ сказано, что ответ взят из вашего архива, — это не так».
+            # Проект БЫЛ из его базы: имена и проекты приехали полем `user_model`,
+            # мимо поиска. Система обвинила себя в выдумке, которой не совершала.
+            #
+            # Ложная ссылка на архив — тяжёлое обвинение, и ставить его по
+            # отсутствию `[K#]` нельзя: `[K#]` покрывает ОДНУ дорогу из трёх.
+            # Обвинение остаётся ровно там, где личных данных не было вовсе.
+            personal_data_reached_the_turn=bool(
+                context.knowledge_hits
+                or context.graph_context.get("entities")
+                or answered_from_storage
+                or context.user_model_offered
+            ),
         )
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
@@ -2389,6 +2484,10 @@ class AgentRuntime:
         attachments: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
         messages = self._build_initial_messages(context, message, attachments, tool_enabled=True)
+        # Сколько сообщений было ДО предварительных вызовов. Всё, что они
+        # добавят, лежит дальше этой границы — и переживёт пересборку списка,
+        # если реплику придётся заменить остатком (см. ниже).
+        before_prefetch = len(messages)
         tools_used: list[str] = []
         tool_knowledge_ids: list[str] = []
         tool_evidence: list[dict[str, str]] = []
@@ -2432,9 +2531,37 @@ class AgentRuntime:
         # Напоминания — последнее однозначное действие, которое оставалось на
         # усмотрение модели. Стоит после сборки архива: обе просьбы независимы, а
         # порядок важен только тем, что напоминание дешевле и не должно ждать.
+        #
+        # Разбирает ИСХОДНУЮ реплику, а не остаток, и это проверено мутацией.
+        # Единственный вызов, который отработал раньше, — сборка архива, а она
+        # остатка не считает: подставить сюда её пустую строку значило бы
+        # потерять «…и напомни про отчёт в пятницу» молча.
         await self._prefetch_a_reminder_if_asked(
             message, context, actor, tools, messages, tools_used, tool_evidence
         )
+        # Предварительный вызов что-то СДЕЛАЛ и уже сказал об этом человеку.
+        if context.structural_answer:
+            rest = context.open_remainder.strip()
+            if context.remainder_known and not rest:
+                # Отвечать больше не на что. Ход модели здесь не просто лишний
+                # расход: это единственная дверь, через которую в ответ попадает
+                # обещание сделать уже сделанное.
+                return {
+                    "content": "",
+                    "tools_used": tools_used,
+                    "web_query_notice": " ".join(web_notice),
+                    "knowledge_object_ids": tool_knowledge_ids,
+                    "tool_evidence": tool_evidence,
+                    "voice_clip": voice_clip,
+                    "file_clips": file_clips,
+                }
+            # Реплика заменяется остатком ЦЕЛИКОМ, а не только в последнем
+            # сообщении: та же просьба едет вторым путём — полем `search_query` в
+            # конверте контекста. Правка, стоящая на одном из путей, мертва;
+            # найдено замером на правилах, здесь предупреждено сразу.
+            added = messages[before_prefetch:]
+            messages = self._build_initial_messages(context, rest, attachments, tool_enabled=True)
+            messages.extend(added)
         total_calls = 0
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
             context.interaction_mode,
@@ -3006,6 +3133,7 @@ class AgentRuntime:
             # Поэтому ход отдаётся модели ТОЛЬКО при явном непустом остатке.
             # Неизвестность значит «отвечать больше не на что».
             context.open_remainder = remainder or ""
+            context.remainder_known = True
             return
         if action == "забыть":
             context.standing_rules = self.storage.remember_standing_rule(
@@ -3018,6 +3146,7 @@ class AgentRuntime:
             context.rule_forgotten = previous_rule
             context.structural_answer = _settled_answer(forgotten=previous_rule)
             context.open_remainder = rest
+            context.remainder_known = True
             LOGGER.info("standing-rule: снято, осталось %d", len(context.standing_rules))
             return
         context.standing_rules = self.storage.remember_standing_rule(
@@ -3030,6 +3159,7 @@ class AgentRuntime:
         context.rule_learned = rule
         context.structural_answer = _settled_answer(learned=rule)
         context.open_remainder = rest
+        context.remainder_known = True
         LOGGER.info("standing-rule: запомнено, всего %d", len(context.standing_rules))
 
     def _corrections(self, user_id: str) -> list[str]:
@@ -3103,6 +3233,7 @@ class AgentRuntime:
             # правил другим словом («поправляю: тебе можно показывать чужие
             # документы») отвечается структурой и не возвращается модели.
             context.open_remainder = remainder or ""
+            context.remainder_known = True
             return
         if action == "забыть":
             context.corrections = self.storage.remember_correction(
@@ -3113,6 +3244,7 @@ class AgentRuntime:
             # должен видеть, ЧТО именно перестало действовать.
             context.structural_answer = _settled_answer(forgotten=previous)
             context.open_remainder = rest
+            context.remainder_known = True
             LOGGER.info("correction: снято, осталось %d", len(context.corrections))
             return
         context.corrections = self.storage.remember_correction(
@@ -3122,6 +3254,7 @@ class AgentRuntime:
         context.correction_learned = correction
         context.structural_answer = _settled_answer(corrected=correction)
         context.open_remainder = rest
+        context.remainder_known = True
         LOGGER.info("correction: запомнено, всего %d", len(context.corrections))
 
     def _conflict_map(self, user_id: str, retrieved_ids: set[str]) -> dict[str, dict[str, str]]:
@@ -3221,7 +3354,7 @@ class AgentRuntime:
                         "content": (
                             "Реши, просят ли ПОСТАВИТЬ НАПОМИНАНИЕ, и верни ОДНУ строку JSON: "
                             '{"напоминание": "да|нет", "что": "о чём напомнить", '
-                            '"когда": "срок словами человека"}.\n'
+                            '"когда": "срок словами человека", "остаток": "о чём ещё спросили"}.\n'
                             "да — просят напомнить, разбудить, предупредить, не дать забыть: "
                             "«напомни завтра в 10 про совещание», «не дай забыть про отчёт в "
                             "пятницу», «поставь напоминание на понедельник».\n"
@@ -3231,6 +3364,10 @@ class AgentRuntime:
                             "«что» — суть дела без слова «напомни»: «совещание», «отчёт».\n"
                             "«когда» — срок ТАК, КАК СКАЗАЛ ЧЕЛОВЕК: «завтра в 10 утра», "
                             "«в пятницу», «через неделю». Ничего не пересчитывай в даты.\n"
+                            "«остаток» — то, о чём человек спросил ПОМИМО просьбы напомнить, "
+                            "его словами. «напомни про отчёт в пятницу, и как там проект» → "
+                            "остаток «как там проект». Если больше ничего не сказано — пустая "
+                            "строка. Поле обязательное: пиши его всегда.\n"
                             f"{self._today_line().strip()}\n"
                             "Только JSON, без пояснений."
                         ),
@@ -3252,6 +3389,12 @@ class AgentRuntime:
             return False
         what = " ".join(str(parsed.get("что") or "").split())[:300]
         when = " ".join(str(parsed.get("когда") or "").split())[:120]
+        # Остаток реплики: то, на что модель ещё будет отвечать. Здесь запасной
+        # вариант ОБЫЧНЫЙ, а не перевёрнутый, как у отказа в правах: дело уже
+        # сделано, и лишняя фраза модели поверх факта безобидна — а потерянный
+        # рядом заданный вопрос нет.
+        rest_of_it = parsed.get("остаток")
+        rest = " ".join(str(rest_of_it).split())[:600] if isinstance(rest_of_it, str) else message
         if not what or not when:
             # Без обеих половин напоминание бессмысленно: «напомнить неизвестно о
             # чём» и «напомнить когда-нибудь» одинаково бесполезны. Пусть решает
@@ -3277,13 +3420,38 @@ class AgentRuntime:
             for tool in tools
             if str((tool.get("function") or {}).get("name") or "") != "remind"
         ]
-        # Фактами и в прошедшем времени: строку могут переслать человеку дословно.
+        # О СДЕЛАННОМ ГОВОРИТ СТРУКТУРА, а не модель.
+        #
+        # Прежде здесь стояла служебная строка, написанная «фактами в прошедшем
+        # времени», чтобы её можно было переслать человеку дословно. Она и
+        # признавала половинчатость: говорить всё равно будет модель, а мы лишь
+        # надеемся, что перескажет удачно. Замерено 2026-08-04 враждебной
+        # заглушкой на боевой сборке: напоминание уже стоит, а человек получает
+        # «Хорошо, сейчас поставлю тебе напоминание про отчёт на пятницу».
+        #
+        # Цена ошибки та же, что у отказа в правах: человек читает обещание,
+        # ждёт — и либо удивляется напоминанию, которого не ждал, либо ставит
+        # второе.
+        #
+        # Служебная строка остаётся для случая, когда ход у модели ВСЁ ЖЕ будет
+        # (человек спросил рядом о чём-то ещё): там ей надо знать, что дело уже
+        # сделано, иначе она предложит сделать его.
+        context.structural_answer = "\n\n".join(
+            part
+            for part in (
+                context.structural_answer,
+                f"Напоминание поставлено: «{what}», срок — {when}. Придёт в чат само.",
+            )
+            if part
+        )
+        context.open_remainder = rest
+        context.remainder_known = True
         messages.append(
             {
                 "role": "system",
                 "content": (
-                    f"Напоминание уже поставлено: «{what}» на срок «{when}». "
-                    "Оно придёт человеку в чат само. Работа сделана, ставить ещё раз не нужно."
+                    f"Напоминание уже поставлено: «{what}» на срок «{when}». Человеку об этом "
+                    "уже сказано отдельной строкой — повторять и обещать не нужно."
                 ),
             }
         )
@@ -3380,16 +3548,50 @@ class AgentRuntime:
         # Замерено на живом экземпляре 2026-08-03: файл был приложен к ответу, а
         # Пятница писала «Собираю архив… Сейчас выгружу файлы. Это займёт немного
         # времени» — обещание вместо факта. Человек ждёт того, что уже пришло.
-        said = (
-            f"Архив уже собран, файл «{filename}» уже приложен к этому ответу и уже у человека: "
-            f"внутри {collected} файлов за {', '.join(str(day) for day in (data.get('days') or days))}. "
-            "Работа закончена, собирать больше нечего."
+        # О СОБРАННОМ ГОВОРИТ СТРУКТУРА, а не модель, — как и о напоминании.
+        #
+        # Замерено на живом экземпляре 2026-08-03: файл был приложен к ответу, а
+        # Пятница писала «Собираю архив… Сейчас выгружу файлы. Это займёт немного
+        # времени». Обещание вместо факта, и человек ждёт того, что уже пришло.
+        # Прежнее лечение — служебная строка «фактами и в прошедшем времени», в
+        # расчёте на удачный пересказ, — half-measure того же рода, что и у
+        # напоминаний.
+        #
+        # Остаток здесь НЕ СЧИТАЕТСЯ, и `remainder_known` остаётся ложным. Дни
+        # приходят от общего арбитра видов, у которого поля «остаток» нет, а
+        # притвориться, что реплика исчерпана, оказалось прямо вредно: первая
+        # редакция ставила `open_remainder = ""`, и «собери документы за 26 число
+        # и напомни про отчёт в пятницу» ТЕРЯЛО напоминание — следующий
+        # предварительный вызов получал пустую строку. Показала мутация.
+        #
+        # Поэтому здесь закрыта только половина класса: факт о собранном архиве
+        # человек получает от структуры и потерять его нельзя, но ход у модели не
+        # отнимается — она может добавить к верному факту лишнюю фразу. Вторая
+        # половина требует поля «остаток» у общего арбитра видов, а это самый
+        # нагруженный классификатор системы, и трогать его надо отдельным замером.
+        days_said = ", ".join(str(day) for day in (data.get("days") or days))
+        fact = (
+            f"Архив собран: файл «{filename}» приложен к этому ответу, "
+            f"внутри {collected} файлов за {days_said}."
         )
         if data.get("not_all"):
-            said += f" Вошло не всё: {data['not_all']}."
+            fact += f" Вошло не всё: {data['not_all']}."
         if data.get("unclear_days"):
-            said += f" Не понял, какие дни имелись в виду: {', '.join(str(day) for day in data['unclear_days'])}."
-        messages.append({"role": "system", "content": said})
+            unclear = ", ".join(str(day) for day in data["unclear_days"])
+            fact += f" Не разобрала, какие дни имелись в виду: {unclear}."
+        context.structural_answer = "\n\n".join(
+            part for part in (context.structural_answer, fact) if part
+        )
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"Архив уже собран и приложен к ответу: «{filename}», {collected} файлов за "
+                    f"{days_said}. Человеку об этом уже сказано отдельной строкой — повторять и "
+                    "обещать не нужно."
+                ),
+            }
+        )
         return True
 
     async def _file_for_a_request_that_wanted_one(
@@ -4684,9 +4886,27 @@ class AgentRuntime:
         }
         # The derived user model rides in the same untrusted data envelope as
         # retrieved knowledge: background for personal answers, never policy.
+        #
+        # НА РАЗГОВОРНОЙ РЕПЛИКЕ ЕГО НЕТ, и это найдено владельцем в живой
+        # переписке 2026-08-04. На «да вот думаю, о чём с тобой поговорить)
+        # подкинешь идеи?» человек получил список: три сотрудника ПОЛНЫМИ ФИО и
+        # три проекта из его базы. Никто о них не спрашивал.
+        #
+        # Дорога оказалась ТРЕТЬЕЙ, мимо всех уже поставленных ворот. В том ходу
+        # `knowledge_hits` = 0, `entity_hits` = 0, уверенность поиска 0.0 — все
+        # десять кандидатов отброшены переранжировщиком, — и `tools_used` пуст:
+        # модель не звала ничего. Архивные ворота отработали, отнятие
+        # инструментов у вида «быт» отработало, а `people[:3]` и `projects[:3]`
+        # приехали сами, потому что это поле не закрывал никто.
+        #
+        # На болтовне оно и не нужно: модель пользователя существует, чтобы
+        # понимать, о КОМ идёт речь, — а в «как дела» речь ни о ком.
         user_model = self._user_model_payload(context.user_id)
-        if user_model:
+        if user_model and not _is_household_turn(context):
             context_payload["user_model"] = user_model
+            # Помечается ФАКТ выдачи, а не наличие модели: обвинение в ложной
+            # ссылке снимается только тогда, когда данные реально доехали.
+            context.user_model_offered = True
         custom_instructions = self._custom_instructions(context.user_id)
         if custom_instructions:
             context_payload["custom_instructions"] = custom_instructions
