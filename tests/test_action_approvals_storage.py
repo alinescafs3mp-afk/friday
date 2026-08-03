@@ -104,11 +104,16 @@ def test_key_order_does_not_change_the_binding(storage):
     assert claimed is not None
 
 
-def test_a_changed_policy_invalidates_the_decision(storage):
-    record = _approval(storage, policy_epoch="epoch-1")
-    storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice")
-    assert storage.claim_action_approval(record["id"], "alice", policy_epoch="epoch-2") is None
-    assert storage.claim_action_approval(record["id"], "alice", policy_epoch="epoch-1") is not None
+# Проверка «смена политики отменяет решение» УДАЛЕНА вместе с самим механизмом
+# 2026-08-03. Она доказывала помощника, а не систему: сравнивала переданные руками
+# `epoch-1` и `epoch-2`, тогда как боевой контур всегда передавал единицу —
+# `ActorContext.policy_epoch = 1` был единственным источником значения и никем не
+# увеличивался: ни выдачей права, ни отзывом, ни сменой пресета.
+#
+# Настоящая защита существует и живёт выше по стеку: `execute_approved` вызывает
+# `authorization.require()` НЕПОСРЕДСТВЕННО перед побочным эффектом, поэтому право,
+# снятое между решением человека и исполнением, действие останавливает. Она и
+# проверяется теперь — `tests/test_a_declared_risk_is_an_executable_promise.py`.
 
 
 def test_an_expired_request_cannot_be_decided_or_claimed(storage):

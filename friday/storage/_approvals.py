@@ -88,10 +88,16 @@ class ApprovalsMixin(StorageShared):
         requested_by: str = "",
         conversation_id: str | None = None,
         mission_id: str | None = None,
-        policy_epoch: str = "",
         ttl_sec: int = DEFAULT_APPROVAL_TTL_SEC,
     ) -> dict[str, Any]:
-        """Завести заявку на подтверждение. Действие ещё НЕ выполнено."""
+        """Завести заявку на подтверждение. Действие ещё НЕ выполнено.
+
+        `policy_epoch` больше не принимается и не пишется: единственным его
+        источником была константа `ActorContext.policy_epoch = 1`, никем не
+        увеличиваемая. Столбец в таблице оставлен со своим умолчанием — сносить
+        его отдельной миграцией дороже, чем он мешает, — но никакой защитой он не
+        притворяется и в решениях не участвует. См. `claim_action_approval`.
+        """
         if risk not in {"mutate", "high"}:
             raise ValueError("risk must be mutate or high")
         clean_tool = str(tool or "").strip()
@@ -111,7 +117,6 @@ class ApprovalsMixin(StorageShared):
             "requested_by": str(requested_by or "").strip(),
             "conversation_id": conversation_id or None,
             "mission_id": mission_id or None,
-            "policy_epoch": str(policy_epoch or ""),
             "expires_at": _plus_seconds(ttl_sec),
             "created_at": now,
             "updated_at": now,
@@ -119,10 +124,10 @@ class ApprovalsMixin(StorageShared):
         with self.transaction() as conn:
             conn.execute(
                 """INSERT INTO action_approvals(id, user_id, tool, risk, payload_json, payload_hash,
-                   summary, status, requested_by, conversation_id, mission_id, policy_epoch,
+                   summary, status, requested_by, conversation_id, mission_id,
                    expires_at, created_at, updated_at)
                    VALUES(:id, :user_id, :tool, :risk, :payload_json, :payload_hash, :summary,
-                   :status, :requested_by, :conversation_id, :mission_id, :policy_epoch,
+                   :status, :requested_by, :conversation_id, :mission_id,
                    :expires_at, :created_at, :updated_at)""",
                 record,
             )
@@ -281,25 +286,33 @@ class ApprovalsMixin(StorageShared):
         user_id: str,
         *,
         payload: dict[str, Any] | None = None,
-        policy_epoch: str | None = None,
     ) -> dict[str, Any] | None:
         """Забрать подтверждение под исполнение — ровно один раз.
 
         Возвращает запись, если заявление удалось, и None во всех остальных
-        случаях: не подтверждено, уже заявлено, просрочено, изменились аргументы
-        или сменилась политика прав. Вызывающий обязан считать None отказом и НЕ
-        выполнять действие.
+        случаях: не подтверждено, уже заявлено, просрочено или изменились
+        аргументы. Вызывающий обязан считать None отказом и НЕ выполнять действие.
 
-        Проверка хэша здесь, а не только при создании, — это и есть повторная
-        авторизация непосредственно перед побочным эффектом: между решением
-        человека и исполнением аргументы могли подменить.
+        Проверка хэша здесь, а не только при создании: между решением человека и
+        исполнением аргументы могли подменить.
+
+        Сверки `policy_epoch` здесь БОЛЬШЕ НЕТ, и это удаление, а не упущение.
+        Разбор Codex (§15) и прямая проверка: единственным источником значения был
+        `ActorContext.policy_epoch = 1`, никем не увеличиваемый — ни выдачей
+        права, ни отзывом, ни сменой пресета или состояния. Сравнивалась единица с
+        единицей, а комментарий называл это защитой от смены политики. Механизм,
+        которого нет, опаснее отсутствующего: на него ссылаются, и следующий
+        человек считает, что защита есть.
+
+        Настоящая повторная авторизация никуда не делась и живёт выше по стеку:
+        `execute_approved` вызывает `authorization.require()` НЕПОСРЕДСТВЕННО
+        перед побочным эффектом, поэтому снятое между решением и исполнением право
+        действие останавливает.
         """
         record = self._approval_row(approval_id, user_id)
         if not record:
             return None
         if payload is not None and payload_digest(payload) != record.get("payload_hash"):
-            return None
-        if policy_epoch is not None and str(policy_epoch) != str(record.get("policy_epoch") or ""):
             return None
         now = utc_now()
         with self.transaction() as conn:

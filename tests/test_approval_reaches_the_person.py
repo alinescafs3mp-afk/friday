@@ -126,7 +126,6 @@ def test_the_route_executes_on_approval_and_only_once(api):
         tool="entity_merge_decide",
         payload={"candidate_id": candidate_id, "decision": "accept"},
         summary="Слить «Иванов И.И.» и «Иванов Иван»",
-        policy_epoch="1",
     )
 
     listed = client.get("/api/me/approvals", headers=headers).json()
@@ -158,7 +157,6 @@ def test_a_rejection_does_not_execute(api):
         tool="entity_merge_decide",
         payload={"candidate_id": candidate_id, "decision": "accept"},
         summary="Слить два узла",
-        policy_epoch="1",
     )
     response = client.post(
         f"/api/approvals/{approval['id']}/decide", json={"decision": "reject"}, headers=headers
@@ -180,7 +178,6 @@ def test_an_approval_that_cannot_execute_says_so(api):
         tool="entity_merge_decide",
         payload={"candidate_id": "res_does_not_exist", "decision": "accept"},
         summary="Слить несуществующее",
-        policy_epoch="1",
     )
     del storage_approval
     response = client.post(
@@ -201,7 +198,6 @@ def test_another_tenant_cannot_decide_your_action(api):
         tool="entity_merge_decide",
         payload={"candidate_id": "res_1", "decision": "accept"},
         summary="Слить два узла",
-        policy_epoch="1",
     )
     storage.ensure_user("mallory", preset_key="user")
     import hashlib
@@ -229,14 +225,12 @@ def test_the_chat_command_lists_what_waits_and_names_unknown_outcomes(api):
         tool="entity_merge_decide",
         payload={"candidate_id": "res_1", "decision": "accept"},
         summary="Слить два узла",
-        policy_epoch="1",
     )
     stale = storage.create_action_approval(
         user_id,
         tool="code_run",
         payload={"code": "print(1)"},
         summary="Выполнить код",
-        policy_epoch="1",
     )
     storage.decide_action_approval(stale["id"], user_id, decision="approve", decided_by=user_id)
     storage.claim_action_approval(stale["id"], user_id)
@@ -264,7 +258,6 @@ def test_the_bridge_receives_what_it_needs_to_draw_the_buttons(api):
         tool="entity_merge_decide",
         payload={"candidate_id": "res_1", "decision": "accept"},
         summary="Слить два узла",
-        policy_epoch="1",
     )
     storage.update_user(user_id, metadata_json=json.dumps({"chat_id": "42"}))
     storage.enqueue_notification(
@@ -300,7 +293,6 @@ def test_a_bystander_pressing_the_button_changes_nothing(api):
         tool="entity_merge_decide",
         payload={"candidate_id": candidate_id, "decision": "accept"},
         summary="Слить два узла",
-        policy_epoch="1",
     )
 
     import hashlib

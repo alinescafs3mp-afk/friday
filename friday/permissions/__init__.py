@@ -41,7 +41,6 @@ class ActorContext:
     source: str
     identity_id: str | None = None
     session_id: str | None = None
-    policy_epoch: int = 1
     #: Работает ли этот человек в ОБЩЕМ архиве (`FRIDAY_SHARED_ARCHIVE`).
     #: Тогда `user_id` — общий арендатор, а человека называет `person_id`.
     shared_tenant: bool = False
@@ -273,7 +272,6 @@ class AuthorizationDecision:
     security_id: str
     user_id: str
     reason_code: str
-    policy_epoch: int
     preset_key: str | None = None
 
     @property
@@ -504,7 +502,6 @@ class AuthorizationService:
                 security_id,
                 actor.user_id,
                 "unknown_capability",
-                actor.policy_epoch,
                 actor.preset_key,
             )
 
@@ -516,7 +513,6 @@ class AuthorizationService:
                 security_id,
                 actor.user_id,
                 "explicit_deny",
-                actor.policy_epoch,
                 actor.preset_key,
             )
         if overrides.get(security_id) == "allow":
@@ -526,7 +522,6 @@ class AuthorizationService:
                 security_id,
                 actor.user_id,
                 "explicit_allow",
-                actor.policy_epoch,
                 actor.preset_key,
             )
         if security_id in self._preset_grants(actor.preset_key):
@@ -536,7 +531,6 @@ class AuthorizationService:
                 security_id,
                 actor.user_id,
                 "preset_grant",
-                actor.policy_epoch,
                 actor.preset_key,
             )
         return AuthorizationDecision(
@@ -545,7 +539,6 @@ class AuthorizationService:
             security_id,
             actor.user_id,
             "default_deny",
-            actor.policy_epoch,
             actor.preset_key,
         )
 

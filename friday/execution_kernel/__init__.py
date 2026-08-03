@@ -1008,11 +1008,54 @@ class ExecutionKernel:
         """
         self.executive = executive
         self._tools["mission_propose"].handler = self._mission_propose
+        # Расхождение деклараций риска с гейтом — ошибка СБОРКИ, а не поведения.
+        #
+        # Проверять её здесь, а не при первом опасном вызове: инструмент,
+        # объявивший себя опасным и не попавший под гейт, обходит человека молча,
+        # и узнать об этом можно только постфактум — по сделанному.
+        self.assert_risk_declarations_agree()
 
     def register(self, tool: ToolSpec) -> None:
         if tool.name in self._tools:
             raise ValueError(f"Tool already registered: {tool.name}")
         self._tools[tool.name] = tool
+
+    def assert_risk_declarations_agree(self) -> None:
+        """Словарь предикатов обязан ТОЧНО совпадать с объявленными классами риска.
+
+        Комментарий у `ToolSpec.risk` обещает, что обязательное поле не даёт
+        новому опасному инструменту пройти fail-open. Обещание было пустым:
+        решение читало только `HIGH_RISK_TOOLS` по имени, а поле в нём не
+        участвовало. Множества совпадали случайно, и это совпадение и было всей
+        защитой.
+
+        Здесь оно перестаёт быть случайным. Расхождение видно НА СТАРТЕ, а не при
+        первом опасном вызове, и обе стороны названы отдельно:
+
+            объявлен `high`, предиката нет — забыт предикат;
+            предикат есть, а инструмент опасным себя не считает — забыта
+            декларация, и гейт сработает там, где его не ждали.
+
+        Словарь при этом остаётся и остаётся нужным: риск живёт в АРГУМЕНТАХ, а
+        не в инструменте — `entity_merge_decide` с `decision=reject` безопасен, с
+        `accept` нет. Он перестаёт быть источником политики и становится её
+        реализацией.
+        """
+        declared = {name for name, tool in self._tools.items() if tool.risk == "high"}
+        with_predicate = set(HIGH_RISK_TOOLS)
+        missing_predicate = sorted(declared - with_predicate)
+        missing_declaration = sorted(name for name in with_predicate - declared if name in self._tools)
+        problems = []
+        if missing_predicate:
+            problems.append(
+                "объявлены high, но предиката нет: " + ", ".join(missing_predicate)
+            )
+        if missing_declaration:
+            problems.append(
+                "предикат есть, а класс риска не high: " + ", ".join(missing_declaration)
+            )
+        if problems:
+            raise ValueError("Декларации риска разошлись с гейтом — " + "; ".join(problems))
 
     def get_tool(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)
@@ -1178,7 +1221,20 @@ class ExecutionKernel:
             await self._audit(actor, name, False, "disabled", details=details)
             return ToolResult(name, False, error="Code execution is disabled by configuration")
 
+        # Решение читает ДЕКЛАРАЦИЮ инструмента, а не только словарь имён.
+        #
+        # Объявлен `high`, а предиката нет — закрываемся: спрашиваем человека.
+        # Обратный порядок («нет в словаре — значит можно») и есть тот самый
+        # fail-open, от которого обязательное поле якобы защищает. Инвариант
+        # `assert_risk_declarations_agree` не даёт такому инструменту дожить до
+        # запуска, но исполнение всё равно обязано быть безопасным само по себе:
+        # инвариант проверяется на старте, а регистрация бывает и динамической.
         needs_person = HIGH_RISK_TOOLS.get(name)
+        if tool.risk == "high" and needs_person is None:
+            LOGGER.warning(
+                "tool %s объявлен high, но предиката риска нет — требуем человека", name
+            )
+            return await self._request_approval(actor, name, arguments or {}, details)
         if needs_person and needs_person(arguments or {}):
             return await self._request_approval(actor, name, arguments or {}, details)
 
@@ -1236,7 +1292,6 @@ class ExecutionKernel:
                 # разъезжалась бы по токенам, которыми человек входил. По этому же
                 # полю теперь держится личная граница списка и решения.
                 requested_by=actor.own_id,
-                policy_epoch=str(actor.policy_epoch),
             )
         except Exception as exc:  # noqa: BLE001 - отказ в заявке не должен выполнять действие
             LOGGER.exception("Could not create an approval request for %s", name)
@@ -1386,7 +1441,6 @@ class ExecutionKernel:
             approval_id,
             actor.user_id,
             payload=arguments,
-            policy_epoch=str(actor.policy_epoch),
         )
         if not claimed:
             await self._audit(actor, name, False, "approval_not_claimable", details={"approval": approval_id})
