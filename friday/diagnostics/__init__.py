@@ -8,6 +8,7 @@ import math
 import os
 import socket
 import sqlite3
+import time
 import urllib.request
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -105,6 +106,55 @@ def _llm_endpoint_status(
     )
     status["served_models"] = served[:20]
     status["model_served"] = (model in served) if served else None
+    return status
+
+
+def _llm_generates(
+    base_url: str, model: str, *, api_key: str = "", timeout: float = 25.0
+) -> dict[str, Any]:
+    """Отвечает ли модель НА САМОМ ДЕЛЕ — не «открыт ли порт» и не «есть ли в списке».
+
+    Найдено на живом отказе 2026-08-03, и это единственная проверка, которая его
+    поймала бы. Сервер модели принимал соединения и отдавал `/models` за 0.019 с —
+    то есть и `_port_reachable`, и `_llm_endpoint_status` считали его здоровым, —
+    а генерация висела и обрывалась пустым ответом. Так продолжалось двадцать
+    минут; живой человек за это время получил восемь испорченных ответов подряд, и
+    никто об этом не узнал, потому что сторож смотрел не туда.
+
+    Проба намеренно копеечная: один токен, температура ноль. Дороже неё стоит
+    молчание — за него платит человек по ту сторону чата.
+
+    Потолок ожидания больше, чем у соседних проверок (25 с против 2 с): здоровый,
+    но занятый сервер отвечает не мгновенно, и объявлять его мёртвым за две
+    секунды значило бы будить владельца по каждому всплеску нагрузки. Зато
+    ЗАВИСШАЯ генерация не отвечает вовсе, и её ловит любой конечный потолок.
+    """
+    status: dict[str, Any] = {"generates": None, "seconds": None}
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": "ок"}],
+            "max_tokens": 1,
+            "temperature": 0,
+        }
+    ).encode()
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions", data=payload, headers=headers
+    )
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - configured local URL
+            response.read()
+    except Exception as exc:  # noqa: BLE001 — любой отказ означает «не отвечает»
+        status["generates"] = False
+        status["seconds"] = round(time.monotonic() - started, 2)
+        status["error"] = f"{type(exc).__name__}: {exc}"[:200]
+        return status
+    status["generates"] = True
+    status["seconds"] = round(time.monotonic() - started, 2)
     return status
 
 
@@ -1068,6 +1118,27 @@ def collect_diagnostics(
                 f"vLLM отвечает, но не отдаёт модель '{settings.llm_model}'. "
                 f"Проверьте FRIDAY_LLM_MODEL и имя модели vLLM. Обслуживаются: {served}.",
             )
+        else:
+            # Порт открыт и модель в списке — но это ещё не «работает».
+            #
+            # Живой отказ 2026-08-03: обе проверки выше были зелёными (список
+            # отдавался за 0.019 с), а генерация висела и обрывалась пустым
+            # ответом. Двадцать минут, восемь испорченных ответов живому человеку,
+            # и ни одного сигнала владельцу — сторож смотрел не туда.
+            generation = _llm_generates(
+                settings.llm_base_url, settings.llm_model, api_key=settings.llm_api_key
+            )
+            llm["generation"] = generation
+            if generation.get("generates") is False:
+                result["ok"] = False
+                add_action(
+                    "llm_not_generating",
+                    "error",
+                    "Модель принимает соединения, но не отвечает",
+                    f"Порт {settings.llm_base_url} открыт и модель '{settings.llm_model}' в списке, "
+                    f"но запрос на генерацию не вернул ответа за {generation.get('seconds')} с. "
+                    "Людям в это время уходят испорченные ответы. Нужен перезапуск сервера модели.",
+                )
     # Покрытие корпуса векторами. Число собиралось и НИ С ЧЕМ не сравнивалось: лежало
     # в свёрнутом JSON-дампе рядом с числом объектов, и сопоставить их было некому.
     # А расходятся они буднично — после смены модели, после правки разбиения на
