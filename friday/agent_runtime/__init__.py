@@ -2028,7 +2028,7 @@ class AgentRuntime:
         )
         if not about_a_person:
             await self._prefetch_the_timeline_if_asked(
-                message, actor, tools, messages, tools_used, tool_evidence
+                message, actor, tools, messages, tools_used, tool_evidence, context
             )
         await self._prefetch_archive_numbers(message, actor, tools, messages, tools_used, tool_evidence)
         # Set by a successful `speak` call; last one wins (a turn ships at most one
@@ -3039,6 +3039,7 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
+        context: AgentContext | None = None,
     ) -> None:
         """Спросили «что было тогда-то» — берём ленту, не спрашивая модель.
 
@@ -3048,6 +3049,20 @@ class AgentRuntime:
         рассказала про 29 июля **2024** года по документу, где эта дата
         упомянута, — при полутора тысячах событий 29 июля 2026-го в архиве.
         """
+        # Основной вердикт СИЛЬНЕЕ шаблона времени.
+        #
+        # Найдено замером 2026-08-03: «устал сегодня» устойчиво поднимало ленту
+        # событий — три раза из трёх. Слово «сегодня» даёт время, дальше
+        # спрашивается отдельный маленький арбитр «это вопрос о ленте?», и он
+        # отвечает «да», хотя основной арбитр уже сказал «быт».
+        #
+        # Это и есть корень непредсказуемости, на который жаловался владелец:
+        # решения об источнике принимаются НЕЗАВИСИМО друг от друга, и каждое
+        # само по себе разумно. Здесь они связаны: если про источник уже решено,
+        # что это быт, поручение или внешний мир, лента не поднимается.
+        kind = str((getattr(context, "outward_verdict", None) or ("", None))[0] or "")
+        if kind.startswith(("быт", "действие", "интернет")):
+            return
         period = period_from_question(message)
         moment = period[0] if period else moment_from_question(message)
         if not moment:
