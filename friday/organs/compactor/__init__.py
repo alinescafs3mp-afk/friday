@@ -183,6 +183,42 @@ def counters_of_a_day(rows: Sequence[dict[str, Any]]) -> dict[str, int]:
     return counters
 
 
+#: Со скольких суток подряд повторение считается ПОВЕДЕНИЕМ, а не случаем.
+#:
+#: Два дня — совпадение: сутки бывают неудачные. Три — уже привычка системы, и
+#: именно это человек хочет видеть, не листая сводки по одной.
+_PATTERN_DAYS = 3
+
+
+def patterns_across_days(recent: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Что повторяется день за днём — из СВОИХ ЖЕ сводок, а не из переписки.
+
+    Считается по цепочке подряд идущих суток, а не по «сколько раз за неделю»:
+    три случая, разбросанные по месяцу, — это три случая, а три дня подряд — это
+    поведение. Разница видна человеку и меняет, что он станет чинить.
+
+    Сводки приходят от новых к старым (так их отдаёт хранилище), и порядок здесь
+    важен: цепочка считается от самого свежего дня назад.
+    """
+    if len(recent) < _PATTERN_DAYS:
+        return []
+    by_day = [
+        {str(item.get("code") or "") for item in (day.get("incidents") or [])} for day in recent
+    ]
+    found: list[dict[str, Any]] = []
+    # Цепочка может тянуться только от САМОГО СВЕЖЕГО дня: код, пропавший вчера,
+    # сегодня уже не поведение, чем бы он ни был позавчера.
+    for code in sorted(by_day[0]):
+        days = 0
+        for codes in by_day:
+            if code not in codes:
+                break
+            days += 1
+        if days >= _PATTERN_DAYS:
+            found.append({"code": code, "days": days})
+    return sorted(found, key=lambda item: (-item["days"], item["code"]))
+
+
 def compact_a_day(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, int], list[dict[str, Any]]]:
     """Сутки → счётчики и инциденты. Чистая функция, базы не касается.
 
@@ -240,6 +276,10 @@ class CompactorOrgan(Organ):
             for item in items:
                 for incident in item.get("incidents") or []:
                     incident["text"] = incident_text(str(incident.get("code") or ""))
+                # Цепочкам формулировка нужна та же и по той же причине: в базе
+                # лежит код, текст живёт в коде программы.
+                for pattern in item.get("patterns") or []:
+                    pattern["text"] = incident_text(str(pattern.get("code") or ""))
             return {
                 "items": items,
                 # Отдельным COUNT, а не длиной страницы: длина выдаёт размер
@@ -276,7 +316,15 @@ class CompactorOrgan(Organ):
                     source_turns=len(rows),
                     counters=counters,
                     incidents=incidents,
-                    patterns=[],
+                    # Повторяющееся считается ПОСЛЕ записи сегодняшних суток:
+                    # цепочка тянется от самого свежего дня, и без него она
+                    # оборвалась бы на вчерашнем.
+                    patterns=patterns_across_days(
+                        [
+                            {"incidents": incidents},
+                            *storage.list_day_compacts(principal, limit=_PATTERN_DAYS + 2),
+                        ][: _PATTERN_DAYS + 2]
+                    ),
                 )
             except Exception:  # noqa: BLE001 — оборванная сводка не роняет запрос
                 LOGGER.exception("compactor: сутки %s не свелись", day)
@@ -285,6 +333,8 @@ class CompactorOrgan(Organ):
             made = storage.get_day_compact(principal, day) or {}
             for incident in made.get("incidents") or []:
                 incident["text"] = incident_text(str(incident.get("code") or ""))
+            for pattern in made.get("patterns") or []:
+                pattern["text"] = incident_text(str(pattern.get("code") or ""))
             return made
 
         return router
@@ -335,7 +385,15 @@ async def compact_pending_days(ctx: ServiceContext) -> dict[str, Any]:
                     source_turns=len(rows),
                     counters=counters,
                     incidents=incidents,
-                    patterns=[],
+                    # Повторяющееся считается ПОСЛЕ записи сегодняшних суток:
+                    # цепочка тянется от самого свежего дня, и без него она
+                    # оборвалась бы на вчерашнем.
+                    patterns=patterns_across_days(
+                        [
+                            {"incidents": incidents},
+                            *storage.list_day_compacts(principal, limit=_PATTERN_DAYS + 2),
+                        ][: _PATTERN_DAYS + 2]
+                    ),
                 )
                 made += 1
             except Exception:  # noqa: BLE001 — оборванная сводка не роняет орган

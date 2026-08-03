@@ -943,8 +943,14 @@ function compactBody(item){
   const incidents=(item.incidents||[]).map(i=>
     `<div class="toolbar"><span class="badge ${COMPACT_SEVERITY[i.severity]||'warn'}">${esc(i.severity)}</span>`
     +`<span>${esc(i.text||i.code)}</span><span class="grow"></span><span class="mono">×${Number(i.count||1)}</span></div>`).join('');
+  // Цепочки идут ПЕРЕД происшествиями: повторяющееся третьи сутки подряд —
+  // поведение системы, а не случай, и чинить надо в первую очередь его.
+  const patterns=(item.patterns||[]).map(p=>
+    `<div class="toolbar"><span class="badge warn">${Number(p.days||0)} дня подряд</span>`
+    +`<span>${esc(p.text||p.code)}</span></div>`).join('');
   return `<h2>${esc(item.local_date)}</h2>`
     +`<div class="grid stats">${numbers.map(([l,v])=>`<div class="card stat"><div class="value">${Number(v||0)}</div><div class="label">${l}</div></div>`).join('')}</div>`
+    +(patterns?`<h2 class="mt16">Повторяется</h2>${patterns}`:'')
     +`<h2 class="mt16">Происшествия</h2>${incidents||empty('За эти сутки ничего не отмечено')}`
     +`<div class="muted mt10">Собрано по ${Number(item.source_turns||0)} ходам. В сводке нет текста переписки: только коды и числа.</div>`;
 }

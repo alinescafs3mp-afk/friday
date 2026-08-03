@@ -121,6 +121,35 @@ def test_a_malformed_date_is_refused_not_guessed(client, owner_token) -> None:
     assert answer.status_code == 400, answer.text
 
 
+def test_someone_elses_compact_is_only_for_the_owner(client) -> None:
+    """Сводка обезличена, но она про ЧЕЛОВЕКА.
+
+    Сколько раз он поправлял систему, сколько раз ему отказывали в правах — это
+    его дело, а не соседа по общему архиву. Проверка появилась после мутации:
+    запрет стоял в коде, а тест на него я не написала, и снятие запрета
+    ПЕРЕЖИЛО прогон.
+    """
+    app = client.app
+    storage = app.state.storage
+    storage.ensure_user("colleague", source="test", display_name="colleague", preset_key="user")
+    storage.update_user("colleague", preset_key="user")
+    storage.create_api_token(
+        "colleague",
+        hashlib.sha256(b"jrc_colleague_secret").hexdigest(),
+        label="test",
+        created_by="test",
+    )
+    theirs = {"Authorization": "Bearer jrc_colleague_secret"}
+
+    peeking = client.get("/api/compacts?user_id=owner", headers=theirs)
+
+    assert peeking.status_code == 403, peeking.text
+    # Обратная сторона: свою собственную сводку человек видит без всяких прав.
+    mine = client.get("/api/compacts", headers=theirs)
+    assert mine.status_code == 200, mine.text
+    assert mine.json()["principal"] == "colleague"
+
+
 def test_the_list_carries_the_human_wording(client, owner_token) -> None:
     """Формулировка приезжает с сервера, а не хранится в базе.
 

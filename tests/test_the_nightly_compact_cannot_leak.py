@@ -22,9 +22,11 @@ import pytest
 
 from friday.organs.compactor import (
     _ALLOWED_FIELDS,
+    _marks,
     compact_a_day,
     incident_text,
     incidents_of_a_turn,
+    patterns_across_days,
 )
 
 # Ход, в котором есть всё, чего в сводке быть не должно: фамилия, звание,
@@ -90,20 +92,30 @@ def test_the_compact_holds_only_codes_and_numbers() -> None:
 
 
 def test_the_field_list_is_an_allow_list() -> None:
-    """Новое поле в метаданных не попадает в сводку САМО.
+    """Новое поле в метаданных не доходит до детекторов САМО.
 
-    Запретительный список означал бы обратное — а рядом в тех же метаданных
-    лежат сырая реплика человека и имена его документов. Ворота на одной дороге
-    не охраняют ничего: замерено дважды за одни сутки.
+    Проверяется НАПРЯМУЮ, на `_marks`, и это исправление после мутации. Первая
+    редакция проверяла список через выход компакта — а он состоит из кодов и
+    чисел, поэтому мутация «сделать список запретительным» его не меняла вовсе и
+    ПЕРЕЖИЛА проверку.
+
+    Вывод, который стоит держать в голове: разрешительный список здесь не
+    несущий, а страховочный. Несёт гарантию форма выхода (коды и числа); список
+    защищает будущее изменение, когда в сводку захотят положить что-то ещё. Но
+    непроверяемый страховочный механизм гниёт, поэтому проверяется он сам.
     """
     for forbidden in ("search_query", "retrieval_trace", "knowledge_citations",
                       "knowledge_object_ids"):
         assert forbidden not in _ALLOWED_FIELDS, f"{forbidden} читается компактором"
 
-    # И обратная сторона: выдуманное поле, которого никто не предусмотрел.
-    turn = {**A_SENSITIVE_TURN, "новое_поле_с_фамилией": "Нестеренко"}
-    _, incidents = compact_a_day([turn])
-    assert "Нестеренко" not in json.dumps(incidents, ensure_ascii=False)
+    passed = _marks({**A_SENSITIVE_TURN, "новое_поле_с_фамилией": "Нестеренко"})
+
+    assert "новое_поле_с_фамилией" not in passed, "новое поле дошло до детекторов само"
+    assert "search_query" not in passed, "сырая реплика человека дошла до детекторов"
+    assert "retrieval_trace" not in passed, "имена документов дошли до детекторов"
+    assert set(passed) <= _ALLOWED_FIELDS, sorted(set(passed) - _ALLOWED_FIELDS)
+    # И обратная сторона: разрешённое пропускается, иначе детекторы ослепнут.
+    assert "grounding_warning" in passed and "structural" in passed
 
 
 def test_the_measured_defects_are_seen() -> None:
@@ -151,6 +163,52 @@ def test_counters_separate_the_structure_from_the_model() -> None:
     assert counters["structural_answers"] == 1
     assert counters["model_answers"] == 2
     assert counters["total_turns"] == 3
+
+
+def _day(*codes: str) -> dict:
+    return {"incidents": [{"code": code, "severity": "high", "count": 1} for code in codes]}
+
+
+def test_three_days_in_a_row_are_a_pattern() -> None:
+    """Три дня подряд — уже поведение системы, а не неудачные сутки.
+
+    Ради этого сводки и складываются: один случай человек заметит глазами,
+    привычку — только рядом лежащими сводками.
+    """
+    found = patterns_across_days([_day("model_silent"), _day("model_silent"), _day("model_silent")])
+
+    assert found == [{"code": "model_silent", "days": 3}]
+
+
+def test_scattered_cases_are_not_a_pattern() -> None:
+    """Обратная сторона: три случая за месяц — это три случая.
+
+    Разница видна человеку и меняет, что он станет чинить. Считать «сколько раз
+    за неделю» вместо цепочки значило бы стирать её.
+    """
+    found = patterns_across_days(
+        [_day("model_silent"), _day(), _day("model_silent"), _day(), _day("model_silent")]
+    )
+
+    assert found == []
+
+
+def test_a_streak_that_ended_yesterday_is_not_a_pattern() -> None:
+    """Код, пропавший вчера, сегодня уже не поведение.
+
+    Цепочка тянется от САМОГО СВЕЖЕГО дня. Иначе давняя починенная беда
+    показывалась бы человеку как привычка ещё неделю после починки.
+    """
+    found = patterns_across_days(
+        [_day("verification_failed"), _day("model_silent"), _day("model_silent"), _day("model_silent")]
+    )
+
+    assert found == []
+
+
+def test_a_short_history_claims_nothing() -> None:
+    """Двух сводок мало, чтобы говорить о повторении, — и молчать тут честно."""
+    assert patterns_across_days([_day("model_silent"), _day("model_silent")]) == []
 
 
 @pytest.mark.parametrize(
