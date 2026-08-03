@@ -1234,10 +1234,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     @application.get("/api/me", tags=["identity"])
     async def me(request: Request) -> dict[str, Any]:
         actor = request.state.actor
-        user = request.app.state.storage.get_user(actor.user_id)
+        # Учётка ЧЕЛОВЕКА, а не архива: в общем режиме `actor.user_id` у всех
+        # один, и «кто я» возвращалось бы одинаковым для всех участников.
+        user = request.app.state.storage.get_user(actor.own_id)
         return {
             "actor": {
-                "user_id": actor.user_id,
+                "user_id": actor.own_id,
                 "preset_key": actor.preset_key,
                 "source": actor.source,
             },
@@ -1268,7 +1270,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         body = await _request_json(request)
         text = " ".join(str(body.get("instructions") or "").split())[:MAX_CUSTOM_INSTRUCTIONS_CHARS]
         state = request.app.state
-        user = state.storage.get_user(actor.user_id) or {}
+        # Пожелание о стиле ЛИЧНОЕ. По арендатору оно становилось общим — та же
+        # дыра, что была у указаний о поведении: «пиши формально» одного
+        # участника применялось бы ко всем.
+        user = state.storage.get_user(actor.own_id) or {}
         try:
             metadata = json.loads(str(user.get("metadata_json") or "{}"))
         except (json.JSONDecodeError, TypeError):
@@ -1279,7 +1284,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             metadata["custom_instructions"] = text
         else:
             metadata.pop("custom_instructions", None)
-        state.storage.update_user(actor.user_id, metadata_json=metadata)
+        state.storage.update_user(actor.own_id, metadata_json=metadata)
         return {"custom_instructions": text}
 
     # Поиск по своей переписке (не knowledge_objects). Self-service контур как
@@ -1294,7 +1299,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         actor = _require(request, "chat.use")
         state = request.app.state
         rows = state.storage.search_messages(
-            actor.user_id,
+            # Переписка хранится под ЧЕЛОВЕКОМ; по арендатору поиск не находил
+            # ничего вовсе — своя же переписка была не видна.
+            actor.own_id,
             q,
             limit=limit,
             conversation_id=conversation_id,
@@ -1357,7 +1364,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # не «первое в окне», иначе два user подряд без ответа дали бы старый вопрос.
         recent = state.storage.get_conversation_messages(
             conversation_id,
-            user_id=actor.user_id,
+            # По ЧЕЛОВЕКУ, как и проверка разговора двумя строками выше. Разбор
+            # Codex §12.3: принадлежность разговора сверялась по `own_id`, а
+            # сообщения внутри него читались по арендатору — в общем архиве это
+            # разные строки, и собственный разговор находился, а собственный
+            # вопрос в нём — нет.
+            user_id=actor.own_id,
             limit=4,
         )
         last_user: dict[str, Any] | None = None
@@ -1382,7 +1394,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # а повторный /regenerate после успешного (новый user-ряд с новым id) — нет.
         request_key = f"regenerate:{conversation_id}:{last_user.get('id') or ''}"
         claim = state.storage.idempotency_claim(
-            actor.user_id,
+            # Тот же довод, что и в чате: ключ принадлежит человеку. Здесь он
+            # вдобавок содержит идентификатор разговора, но разговор в общем
+            # архиве тоже личный, и заявлять его под арендатором значит смешивать
+            # людей на ровном месте.
+            actor.own_id,
             request_key,
             lease_seconds=90,
         )
@@ -1441,12 +1457,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     result["conversation_id"],
                     mode=str(result.get("context", {}).get("interaction_mode") or "dialogue"),
                 )
-            if not state.storage.idempotency_complete(actor.user_id, request_key, lease_token, result):
+            if not state.storage.idempotency_complete(actor.own_id, request_key, lease_token, result):
                 raise RuntimeError("Lost regenerate idempotency lease before response commit")
             return result
         except BaseException:
             if lease_token:
-                state.storage.idempotency_release(actor.user_id, request_key, lease_token)
+                state.storage.idempotency_release(actor.own_id, request_key, lease_token)
             raise
 
     # G19: предстоящие напоминания (entity_time → outbound_notifications kind=reminder).
@@ -1526,7 +1542,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         notification_id = str(notification_id or "").strip()
         if not notification_id:
             raise HTTPException(status_code=404, detail="Напоминание не найдено")
-        ok = storage.dismiss_notification(actor.user_id, notification_id)
+        # Уведомления ставятся человеку и снимаются им же.
+        ok = storage.dismiss_notification(actor.own_id, notification_id)
         if not ok:
             settings = request.app.state.settings
             today = local_now(settings).date()
@@ -1757,7 +1774,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 document_digest=document_digest,
             )
             claim = state.storage.idempotency_claim(
-                actor.user_id,
+                # Ключ принадлежит ЧЕЛОВЕКУ, а не архиву. Разбор Codex §12.3: для
+                # API `source_ref` задаёт клиент, и два участника общего архива с
+                # одинаковым ключом попадали в один namespace — второй получал
+                # чужой ответ вместе с чужим `conversation_id`. Документы у них
+                # общие намеренно, разговоры личные, и кэш не имеет права
+                # превращать одно в другое.
+                actor.own_id,
                 source_ref,
                 request_hash=request_hash,
                 lease_seconds=120,
@@ -1781,7 +1804,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             async def renew_lease() -> None:
                 while True:
                     await asyncio.sleep(30)
-                    if not state.storage.idempotency_renew(actor.user_id, source_ref, lease_token):
+                    if not state.storage.idempotency_renew(actor.own_id, source_ref, lease_token):
                         return
 
             heartbeat = asyncio.create_task(renew_lease(), name="jericho-idempotency-heartbeat")
@@ -1993,13 +2016,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             if file_ingestion:
                 result["file_ingestion"] = file_ingestion
             if source_ref and not state.storage.idempotency_complete(
-                actor.user_id, source_ref, lease_token, result
+                actor.own_id, source_ref, lease_token, result
             ):
                 raise RuntimeError("Lost idempotency lease before response commit")
             return result
         except BaseException:
             if source_ref and lease_token:
-                state.storage.idempotency_release(actor.user_id, source_ref, lease_token)
+                state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
             raise
         finally:
             if heartbeat is not None:
