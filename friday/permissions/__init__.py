@@ -454,8 +454,14 @@ class AuthorizationService:
     def actor_for_user(self, user_id: str, *, source: str, identity_id: str | None = None) -> ActorContext:
         preset = self.get_user_preset(user_id)
         if self._shared_tenant:
-            # Права остаются личными — они у человека свои; общим становится
-            # только хранилище, в котором он работает.
+            # Права остаются личными — и пресет, и ПЕРЕОПРЕДЕЛЕНИЯ. Общим
+            # становится только хранилище, в котором человек работает.
+            #
+            # Уточнено 2026-08-04: прежняя редакция обещала то же самое, а
+            # выполняла наполовину — пресет брался личный, а явные allow/deny
+            # читались в `authorize()` по арендатору и не находились. Обещание,
+            # которое код не держит, опаснее отсутствия обещания: на него
+            # ссылаются и считают, что защита есть.
             return ActorContext(
                 user_id=self._shared_tenant,
                 preset_key=preset,
@@ -494,24 +500,40 @@ class AuthorizationService:
 
     def authorize(self, actor: ActorContext, security_id: str) -> AuthorizationDecision:
         decision_id = uuid.uuid4().hex[:16]
+        # Права принадлежат ЧЕЛОВЕКУ, а не архиву, в котором он работает.
+        #
+        # Разбор Codex §12.1, воспроизведено: `actor_for_user` берёт личный пресет
+        # и кладёт в `actor.user_id` общего арендатора — так и задумано, искать
+        # надо в открытом человеку архиве. А переопределения читались по этому же
+        # `user_id`, то есть по арендатору: явный запрет, выданный человеку, не
+        # находился (общая строка пуста), и решение возвращалось разрешающим от
+        # пресета.
+        #
+        # Опасен именно ЗАПРЕТ. Забытый allow значит «не получил лишнего» —
+        # неудобно; забытый deny значит «сохранил то, что у него отобрали», и
+        # узнать об этом можно только по сделанному.
+        #
+        # В след тоже пишется человек: запись «отказано арендатору» в общем архиве
+        # бесполезна — арендатор один, людей несколько.
+        principal = actor.own_id
         capability = self._capabilities.get(security_id)
         if not capability:
             return AuthorizationDecision(
                 decision_id,
                 "deny",
                 security_id,
-                actor.user_id,
+                principal,
                 "unknown_capability",
                 actor.preset_key,
             )
 
-        overrides = self.storage.get_permission_overrides(actor.user_id) if self.storage else {}
+        overrides = self.storage.get_permission_overrides(principal) if self.storage else {}
         if overrides.get(security_id) == "deny":
             return AuthorizationDecision(
                 decision_id,
                 "deny",
                 security_id,
-                actor.user_id,
+                principal,
                 "explicit_deny",
                 actor.preset_key,
             )
@@ -520,7 +542,7 @@ class AuthorizationService:
                 decision_id,
                 "allow",
                 security_id,
-                actor.user_id,
+                principal,
                 "explicit_allow",
                 actor.preset_key,
             )
@@ -529,7 +551,7 @@ class AuthorizationService:
                 decision_id,
                 "allow",
                 security_id,
-                actor.user_id,
+                principal,
                 "preset_grant",
                 actor.preset_key,
             )
@@ -537,7 +559,7 @@ class AuthorizationService:
             decision_id,
             "deny",
             security_id,
-            actor.user_id,
+            principal,
             "default_deny",
             actor.preset_key,
         )
