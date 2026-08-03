@@ -1443,6 +1443,26 @@ class ExecutionKernel:
                 if isinstance(max_sources, int):
                     details["max_sources"] = max_sources
             return details
+        if tool_name == "collect_files":
+            # Найдено ревью собственных правок 2026-08-03. Инструмент отдаёт
+            # ИСХОДНЫЕ файлы, а в общем архиве это файлы всех участников — то
+            # есть один запрос уносит чужие личные дела целиком. В журнале при
+            # этом оставалось только имя инструмента, и на вопрос «что человек
+            # выгрузил вчера» ответить было нечем.
+            #
+            # Соседний `user_activity` такой след оставляет и прямо обещает это
+            # в своём описании; здесь обещания не было, а последствия крупнее.
+            #
+            # Дни — не содержимое, а рамка запроса: их можно писать целиком, в
+            # отличие от текста вопроса (см. оговорку выше про «пароль от
+            # роутера»).
+            days = args.get("days")
+            if not isinstance(days, list):
+                return {}
+            return {
+                "days": [str(day)[:12] for day in days[:12]],
+                "day_count": len(days),
+            }
         if tool_name == "web_fetch":
             url = args.get("url")
             if not isinstance(url, str):
