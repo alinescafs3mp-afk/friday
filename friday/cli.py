@@ -1040,6 +1040,126 @@ def _backfill_relations(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_exact_duplicates(args: argparse.Namespace) -> int:
+    """Снять с очереди те конфликты, где решать нечего: текст совпал побайтово.
+
+    Замерено на живом архиве 2026-08-03. В очереди «почти-дубликат» лежали 200
+    пар, и разбор их состава показал:
+
+        точные копии (текст совпал) ........  56
+        версии (имя то же, текст другой) ...  54
+        «разные» (имя и текст другие) ......  90   медиана похожести 0.99
+
+    Все 200 пришли ОДНИМ импортом папки 29 июля, и ни одна из точных копий не
+    ловилась дедупликацией по хешу файла: тот же документ, пересохранённый из
+    Word, даёт другие байты. Двести решений система создала себе сама.
+
+    Здесь закрываются ТОЛЬКО точные копии — там, где нормализованный текст
+    совпадает знак в знак. Победителем остаётся более ранняя запись: повтор
+    воспроизводит первое решение, а не последнее. Порог похожести не участвует
+    вовсе — `friday/dedup.py` замерил, что «дубликат» и «следующая заметка в
+    серии» перекрываются и порогом не разделяются, поэтому всё, что не совпало
+    точно, остаётся человеку.
+
+    По умолчанию — ПОКАЗ. Запись включает `--apply`.
+    """
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.ingestion._base import _extracted_text_digest
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    apply_changes = bool(getattr(args, "apply", False))
+    exact = versions = different = 0
+    closed = 0
+    try:
+        rows = storage.execute(
+            """SELECT h.id, h.user_id, h.knowledge_a_id a, h.knowledge_b_id b,
+                      ka.title ta, kb.title tb, ka.content ca, kb.content cb,
+                      ka.created_at da, kb.created_at db
+               FROM knowledge_conflicts h
+               JOIN knowledge_objects ka ON ka.id=h.knowledge_a_id
+               JOIN knowledge_objects kb ON kb.id=h.knowledge_b_id
+               WHERE h.status='suggested' AND h.conflict_type='near_duplicate'"""
+        ).fetchall()
+        for row in rows:
+            item = dict(row)
+            if _extracted_text_digest(item["ca"]) != _extracted_text_digest(item["cb"]):
+                if str(item["ta"]).strip() == str(item["tb"]).strip():
+                    versions += 1
+                else:
+                    different += 1
+                continue
+            exact += 1
+            if not apply_changes:
+                continue
+            # Более ранняя ЖИВАЯ запись — победитель. Проигравшая становится
+            # `deprecated` штатным путём разрешения конфликта, а не удаляется:
+            # у неё остаётся собственный провенанс, и откат возможен.
+            #
+            # Живая — потому что копии образуют КЛАСТЕРЫ. Найдено на живом
+            # архиве: пять копий одного документа дают десять пар, и запись,
+            # проигравшая в первой паре, во второй оказывается «более ранней».
+            # Разрешение такой пары справедливо отвергается хранилищем («winner
+            # is already deprecated»), и проход падал на 55-й паре из 56.
+            owner = str(item["user_id"])
+            sides = sorted(
+                ((str(item["da"]), str(item["a"])), (str(item["db"]), str(item["b"]))),
+            )
+            alive = [
+                ko_id
+                for _when, ko_id in sides
+                if str((storage.get_knowledge_object(ko_id, owner) or {}).get("lifecycle_stage") or "")
+                != "deprecated"
+            ]
+            if not alive:
+                # Обе стороны уже погашены другими парами кластера — решать
+                # нечего, но и висеть в очереди пара не должна.
+                #
+                # Найдено на живом архиве, уже ПОСЛЕ первой правки: пропуск через
+                # `continue` оставлял такую пару в статусе `suggested` навсегда.
+                # Проход печатал «точных копий: 1» и закрывал ноль — вечный
+                # хвост, который человек всё равно не смог бы разобрать: обе
+                # записи погашены, выбирать не из чего.
+                if storage.review_knowledge_conflict(
+                    owner,
+                    str(item["id"]),
+                    "dismissed",
+                    reviewed_by="exact_duplicate_pass",
+                    resolution_note="обе записи уже погашены как копии в этом же кластере",
+                ):
+                    closed += 1
+                continue
+            try:
+                if storage.resolve_conflict(
+                    owner,
+                    str(item["id"]),
+                    alive[0],
+                    reviewed_by="exact_duplicate_pass",
+                    resolution_note="точная копия: извлечённый текст совпал знак в знак",
+                ):
+                    closed += 1
+            except Exception as error:  # noqa: BLE001 — одна пара не должна рвать проход
+                print(f"  {item['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+        if apply_changes and closed:
+            storage.record_event(
+                "knowledge.exact_duplicates_resolved",
+                {"closed": closed, "exact": exact, "versions": versions, "different": different},
+            )
+    finally:
+        storage.close()
+    print(f"Конфликтов «почти-дубликат» в очереди: {len(rows)}.")
+    print(f"  точные копии (решать нечего): {exact}")
+    print(f"  версии одного имени:          {versions}   <- остаются человеку")
+    print(f"  прочие:                       {different}   <- остаются человеку")
+    if apply_changes:
+        print(f"\nЗакрыто как точные копии: {closed}. Проигравшая запись помечена устаревшей, не удалена.")
+    else:
+        print("\nЭто ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _purge(args: argparse.Namespace) -> int:
     """Irreversibly hard-delete soft-deleted knowledge while the backend is stopped."""
 
@@ -1451,6 +1571,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the relation candidates (without it the pass only counts objects)",
     )
     relations.set_defaults(handler=_backfill_relations)
+
+    duplicates = sub.add_parser(
+        "resolve-exact-duplicates",
+        help="Close near-duplicate conflicts whose extracted text matches exactly",
+    )
+    duplicates.add_argument(
+        "--apply",
+        action="store_true",
+        help="Close them (without it the pass only counts and shows the split)",
+    )
+    duplicates.set_defaults(handler=_resolve_exact_duplicates)
 
     mint = sub.add_parser("mint-token", help="Issue a scoped API token for an account/preset")
     mint.add_argument("--user", required=True, help="Account id the token authenticates as")

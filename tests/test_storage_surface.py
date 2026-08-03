@@ -126,7 +126,11 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: неизвестного исхода наблюдением (спека v3 §5). Заявка, чьё исполнение
 #: оборвалось, уходила в `uncertain` и висела там навсегда: сверка для шагов
 #: миссии существовала, а для заявок — нет.
-EXPECTED_MEMBER_COUNT = 307
+#: +1 к 307: `find_file_by_extracted_text` — тот же ДОКУМЕНТ, пришедший другим
+#: файлом. Дедупликация сравнивала байты, а Word при пересохранении их меняет:
+#: 56 пар из 200 в очереди разбора имели побайтово одинаковый текст и ни одна не
+#: совпадала по хешу файла.
+EXPECTED_MEMBER_COUNT = 308
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

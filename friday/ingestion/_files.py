@@ -23,6 +23,7 @@ from friday.ingestion._base import (
     _clamp,
     _coerce_score,
     _estimate_file_importance,
+    _extracted_text_digest,
     _json_dict,
     _json_list,
     _parse_model_response,
@@ -433,6 +434,29 @@ class FilesMixin(PipelineShared):
             )
             if transcription and transcription.get("text"):
                 text_content = str(transcription["text"])[: self.settings.max_extracted_text_chars]
+        # Тот же ДОКУМЕНТ, пришедший другим файлом, — это повтор, а не новая
+        # запись. Проверка стоит здесь, а не рядом с проверкой по байтам выше:
+        # текст известен только после извлечения, и раньше сравнивать нечего.
+        #
+        # Замерено на живом архиве 2026-08-03: из 200 конфликтов «почти-дубликат»,
+        # ждавших разбора человеком, 56 пар имели побайтово одинаковый извлечённый
+        # текст, и НИ ОДНА не совпадала по хешу файла. Все 56 пришли одним
+        # импортом папки 29 июля — то есть двести решений система создала себе
+        # сама, и в этих парах решать было нечего.
+        #
+        # Пустой текст сюда не попадает: у картинки и у нечитаемого файла он
+        # пустой у всех сразу, и такая склейка объявила бы одним документом всё,
+        # что не разобралось.
+        text_digest = _extracted_text_digest(text_content)
+        if text_digest:
+            same_document = self.storage.find_file_by_extracted_text(user_id, text_digest)
+            if same_document:
+                LOGGER.info(
+                    "Тот же текст уже принят под другим файлом (%s); повторяю прежний исход",
+                    str(same_document.get("source_ref") or "")[:80],
+                )
+                self._store_file(user_id, file_content, digest, filename)
+                return self._replay_file_source(user_id, same_document)
         media_label = media_kind or "File"
         raw_content = (
             text_content or f"[{media_label}: {filename}; type={mime_type}; size={len(file_content)}]"
@@ -584,6 +608,10 @@ class FilesMixin(PipelineShared):
             # Читатель принимает обе формы, поэтому уже записанные строки не ломаются.
             "stored_path": _storage_relative(self.settings.files_dir, target_path),
             "extraction_success": extraction_succeeded,
+            # Отпечаток ИЗВЛЕЧЁННОГО текста рядом с отпечатком файла. Байты и
+            # содержимое — разные вещи: тот же документ, пересохранённый из Word
+            # или положенный в две папки, даёт другой `sha256` при том же тексте.
+            "text_sha256": _extracted_text_digest(text_content),
             "text_extraction_success": bool(extraction.success),
             "extraction_error": extraction.error if not extraction.success else "",
             "vision_used": bool(vision),

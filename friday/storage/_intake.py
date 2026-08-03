@@ -77,6 +77,36 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def find_file_by_extracted_text(self, user_id: str, text_hash: str) -> dict[str, Any] | None:
+        """Тот же ДОКУМЕНТ, пришедший другим файлом.
+
+        `find_file_by_content_hash` сравнивает байты, а один и тот же документ,
+        пересохранённый из Word или положенный в две папки, даёт другие байты при
+        том же содержимом. Замерено на живом архиве 2026-08-03: из 200 конфликтов
+        «почти-дубликат», ждавших разбора, **56 пар имели побайтово одинаковый
+        извлечённый текст, и ни одна из них не совпадала по хешу файла**. Все 56
+        пришли одним импортом папки 29 июля.
+
+        То есть очередь на двести решений система создала себе сама, и решать в
+        этих парах было нечего: это один документ в нескольких экземплярах.
+
+        Сравнивается НОРМАЛИЗОВАННЫЙ текст (пробелы схлопнуты): разница в
+        переносах строк между экспортом из Word и из PDF — не разница в
+        документе. Регистр НЕ сбрасывается: «Приказ №214» и «ПРИКАЗ №214» это
+        разные написания, и решать за человека, что они одно и то же, здесь
+        нельзя — для таких пар и существует очередь разбора.
+        """
+        text_hash = str(text_hash or "").strip()
+        if not text_hash:
+            return None
+        row = self.execute(
+            "SELECT * FROM raw_objects WHERE user_id=? AND content_type='file' "
+            "AND json_extract(metadata_json,'$.text_sha256')=? AND deleted_at IS NULL "
+            "ORDER BY received_at ASC, id ASC LIMIT 1",
+            (user_id, text_hash),
+        ).fetchone()
+        return dict(row) if row else None
+
     def store_raw_object(self, obj: RawObject) -> RawObject:
         self.ensure_user(obj.user_id)
         if not obj.content_hash:
