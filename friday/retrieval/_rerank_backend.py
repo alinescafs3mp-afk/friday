@@ -57,7 +57,9 @@ Cross-encoder делает ровно эту работу одним прохо�
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import time
 from typing import Any
 
@@ -151,6 +153,16 @@ class RerankBackend:
         # который уже не справляется. Проще, потому что переранжирование необязательно:
         # пока пауза держится, поиск просто идёт прежним порядком.
         self._cooldown_until = 0.0
+        # Сколько документов служба принимает за раз. Неизвестно, пока она сама не
+        # скажет: у разных сборок предел разный, и зашивать его числом значило бы
+        # угадывать.
+        #
+        # Замерено на живом экземпляре 2026-08-03: `rerank_top=40`, служба отвечает
+        # «At most 32 documents are accepted», и КАЖДЫЙ поиск платил лишним
+        # обращением — сначала заведомо провальным на 40, потом двумя по 20.
+        # Отказ приходил, запоминать его было некуда, и стена стояла на том же
+        # месте при следующем вопросе.
+        self._max_documents: int | None = None
 
     @property
     def enabled(self) -> bool:
@@ -181,6 +193,54 @@ class RerankBackend:
             return None
         return first + second
 
+    async def _in_batches(
+        self, query: str, documents: list[str], size: int, deadline: float
+    ) -> list[float] | None:
+        """Оценить партиями объявленного размера и склеить встык.
+
+        Склейка верна по той же причине, что и в `_halve`: cross-encoder
+        оценивает пары независимо, партии — соседние срезы входа, и каждая
+        возвращает свои скоры в своём порядке.
+
+        Отличие от `_halve` в том, что размер здесь ИЗВЕСТЕН, а не подбирается
+        делением: 40 документов при пределе 32 — это 32 + 8, а не 20 + 20, и без
+        первого заведомо провального обращения.
+
+        Партии идут ОДНОВРЕМЕННО. Замерено вычитанием на живом архиве 2026-08-03:
+        переранжировщик стоит 1.77 с из 2.25 с поиска — 79%, — и почти всё это
+        ожидание ответа по сети. Последовательные партии складывали два таких
+        ожидания подряд. Оценки от порядка обращений не зависят: cross-encoder
+        считает пары независимо, и `gather` сохраняет порядок задач, а значит и
+        порядок скоров.
+        """
+        chunks = [documents[start : start + size] for start in range(0, len(documents), size)]
+        parts = await asyncio.gather(
+            *(self.scores(query, chunk, _deadline=deadline, _nested=True) for chunk in chunks)
+        )
+        if any(part is None for part in parts):
+            return None
+        out: list[float] = []
+        for part in parts:
+            out.extend(part or [])
+        return out
+
+    @staticmethod
+    def _declared_limit(detail: str) -> int | None:
+        """Предел, названный самой службой: «At most 32 documents are accepted».
+
+        Читается из текста отказа, а не задаётся настройкой: настройку пришлось
+        бы держать в согласии с чужой сборкой вручную, и разъехались бы они
+        молча — ровно в тот момент, когда служба обновится.
+        """
+        match = re.search(r"at most\s+(\d+)\s+document", detail, re.IGNORECASE)
+        if not match:
+            return None
+        try:
+            limit = int(match.group(1))
+        except ValueError:
+            return None
+        return limit if 1 <= limit <= 4096 else None
+
     async def scores(
         self,
         query: str,
@@ -208,6 +268,10 @@ class RerankBackend:
         if remaining <= 0:
             return None
         trimmed = [text[:DOCUMENT_CHARS] for text in documents]
+        # Предел, о котором служба уже сказала, соблюдается СРАЗУ: бить в ту же
+        # стену на каждом поиске — чистая потеря обращения.
+        if self._max_documents and len(trimmed) > self._max_documents:
+            return await self._in_batches(query, trimmed, self._max_documents, _deadline)
         if len(trimmed) > 1 and _estimated_tokens(query, trimmed) > _REQUEST_MAX_TOKENS:
             return await self._halve(query, trimmed, _deadline)
         payload = {"model": self._model, "query": query, "documents": trimmed}
@@ -223,11 +287,19 @@ class RerankBackend:
                     LOGGER.warning("rerank backend overloaded (%d); pausing", response.status_code)
                     return None
                 if response.status_code == 413 and len(trimmed) > 1:
+                    detail = " ".join(response.text.split())[:200]
                     LOGGER.warning(
                         "rerank request too large for %d documents (service said: %s); splitting",
                         len(trimmed),
-                        " ".join(response.text.split())[:200],
+                        detail,
                     )
+                    # Предел запоминается, если служба его назвала: следующий поиск
+                    # пойдёт сразу партиями и лишнего обращения не сделает.
+                    limit = self._declared_limit(detail)
+                    if limit and limit < len(trimmed):
+                        self._max_documents = limit
+                        LOGGER.info("rerank: служба принимает не больше %d документов за раз", limit)
+                        return await self._in_batches(query, trimmed, limit, _deadline)
                     return await self._halve(query, trimmed, _deadline)
                 if response.status_code == 400 and len(trimmed) > 1:
                     # vLLM-совместимые сервисы отвечают на переполнение контекста не

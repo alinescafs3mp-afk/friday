@@ -1412,6 +1412,12 @@ class HybridSearcher:
         self._field_vector_cache: OrderedDict[tuple[str, str, str], tuple[dict[str, float], ...]] = (
             OrderedDict()
         )
+        # Ключ — САМИ имена сущностей, не документ: связи меняются, не трогая
+        # строку документа, и ключ по (id, version) устарел бы молча. По именам
+        # устаревать нечему. Без блокировки — как и `_field_vector_cache`: оба
+        # живут в `_field_scores`, а тот вызывается из `search` напрямую, в
+        # главном потоке, в отличие от `_lexical_rank`.
+        self._entity_vector_cache: OrderedDict[tuple[str, ...], dict[str, float]] = OrderedDict()
         # `_lexical_rank` is offloaded to a worker thread (see its call sites in
         # `search`) so one tenant's cold-cache scoring pass — measured at 2.4s over
         # 400 candidates — cannot freeze the single shared event loop for every
@@ -2493,6 +2499,34 @@ class HybridSearcher:
             self._field_vector_cache.popitem(last=False)
         return vectors
 
+    def _entity_names_vector(self, entity_names: list[str]) -> dict[str, float]:
+        """Вектор имён сущностей — по САМИМ ИМЕНАМ, а не по документу.
+
+        Кэшировать его вместе с полями документа было нельзя: имена приходят из
+        таблицы связей, которая меняется, не трогая строку документа. Но ключом
+        могут быть сами имена — тогда устареть нечему.
+
+        Замерено на живом архиве 2026-08-03: `lexical_vector` — самое дорогое
+        место поиска (3186 вызовов, 2.42 с из ~10 с на четырёх запросах), и
+        2206 из этих вызовов приходились сюда: вектор строился заново для
+        каждого кандидата. При этом на 1533 документа набор имён принимает всего
+        509 разных значений, а 514 документов (33%) не имеют сущностей вовсе —
+        для них строился вектор из пустой строки. «в/ч 30926» повторяется 132
+        раза, «НАИМЕНОВАНИЕ» — 94.
+        """
+        if not entity_names:
+            return {}
+        key = tuple(entity_names)
+        cached = self._entity_vector_cache.get(key)
+        if cached is not None:
+            self._entity_vector_cache.move_to_end(key)
+            return cached
+        vector = lexical_vector(" ".join(entity_names))
+        self._entity_vector_cache[key] = vector
+        while len(self._entity_vector_cache) > _VECTOR_CACHE_MAX:
+            self._entity_vector_cache.popitem(last=False)
+        return vector
+
     def _lexical_rank(
         self,
         candidates: list[dict[str, Any]],
@@ -2777,7 +2811,6 @@ class HybridSearcher:
         vector = lexical_vector(query) if query_vector is None else query_vector
         query_folded = query.casefold()
         title_vector, summary_vector, tags_vector = self._cached_field_vectors(item)
-        entities = " ".join(entity_names)
         exact_phrase = (
             1.0 if len(query_folded) >= 3 and query_folded in self._search_text(item).casefold() else 0.0
         )
@@ -2785,7 +2818,7 @@ class HybridSearcher:
             "title": sparse_cosine(vector, title_vector),
             "summary": sparse_cosine(vector, summary_vector),
             "tags": sparse_cosine(vector, tags_vector),
-            "entities": sparse_cosine(vector, lexical_vector(entities)),
+            "entities": sparse_cosine(vector, self._entity_names_vector(entity_names)),
             "exact_phrase": exact_phrase,
         }
 
