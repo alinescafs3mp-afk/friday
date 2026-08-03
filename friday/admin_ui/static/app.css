@@ -31,3 +31,5 @@
 .bubble-body{white-space:pre-wrap;word-break:break-word}
 .reply-box{margin-top:10px;display:flex;gap:8px;align-items:flex-end}
 .reply-box textarea{flex:1;resize:vertical}
+/* Строка списка ночных сводок: во всю ширину колонки, содержимое читается рядом. */
+.btn.wide{width:100%;text-align:left;display:flex;gap:8px;align-items:center;margin-bottom:6px}

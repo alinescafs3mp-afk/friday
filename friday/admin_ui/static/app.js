@@ -1,6 +1,6 @@
 'use strict';
-const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],usersTotal:0,presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',conflictStatus:'suggested',relationStatus:'suggested',knowledgeSince:'',knowledgeUntil:'',timelineSince:'',timelineUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,resolutionsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0,chatFeed:[],chatPerson:null,chatMessages:[]};
-const views=[['dashboard','Обзор','◈'],['chats','Переписка','✉'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['timeline','Хроника','◴'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['diagnostics','Диагностика','⚙']];
+const state={token:sessionStorage.getItem('jericho_api_token')||'',view:'dashboard',users:[],usersTotal:0,presets:[],capabilities:[],knowledge:[],knowledgeTag:'',knowledgeQuery:'',conflictStatus:'suggested',relationStatus:'suggested',knowledgeSince:'',knowledgeUntil:'',timelineSince:'',timelineUntil:'',inbox:[],inboxGroups:[],inboxAxis:'extension',entities:[],containers:[],resolutions:[],relationCandidates:[],conflicts:[],lifecycle:[],cleanup:[],audit:[],inspectedKnowledge:null,userId:'',activity:[],activitySummary:null,activitySince:'',activityUntil:'',activityOffset:0,activityFound:null,conversationsOffset:0,auditOffset:0,auditAnchor:null,inboxOffset:0,knowledgeOffset:0,entitiesOffset:0,relationsOffset:0,conflictsOffset:0,resolutionsOffset:0,filesOffset:0,cleanupOffset:0,lifecycleOffset:0,chatFeed:[],chatPerson:null,chatMessages:[],compacts:[],compactsTotal:0,openCompact:null};
+const views=[['dashboard','Обзор','◈'],['chats','Переписка','✉'],['inbox','Inbox','▣'],['knowledge','Знания','◇'],['timeline','Хроника','◴'],['graph','Граф','⌘'],['quality','Качество','◎'],['cleanup','Ревизия','⌫'],['users','Пользователи','♙'],['activity','Активность','◷'],['conversations','Диалоги','◌'],['files','Файлы','▤'],['backups','Резервирование','⬡'],['audit','Аудит','≋'],['compacts','Сводки','▦'],['diagnostics','Диагностика','⚙']];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const q=v=>encodeURIComponent(v??'').replace(/'/g,'%27').replace(/%20/g,'+');
 const fmtDate=v=>v?new Date(v).toLocaleString('ru-RU'):'—';
@@ -919,6 +919,60 @@ function endpointCell(probe,enabled){
   if(probe.model_served===false)return `<span class="badge bad">не отдаёт «${esc(probe.model_expected||'')}»</span>`;
   return `<span class="badge ok">отвечает</span> <span class="muted">${esc(probe.model_expected||'')}</span>`;
 }
+// Ночные сводки: слева нумерованный список прогонов, справа содержимое выбранного.
+//
+// Показывается ровно то, что лежит в базе: коды инцидентов и счётчики. Текста из
+// переписки там нет по построению схемы, поэтому и «показать полностью» здесь
+// нечего — читать нечего, кроме того, что видно сразу.
+const COMPACT_SEVERITY={high:'bad',medium:'warn',low:'ok'};
+function compactRow(item,number){
+  const chosen=state.openCompact&&state.openCompact.id===item.id;
+  const when=(item.finished_at||item.started_at||'').replace('T',' ').slice(0,16);
+  const flags=(item.incidents||[]).length;
+  return `<button class="btn wide ${chosen?'primary':''}" ${call('openCompact',item.id)}>`
+    +`<span class="mono">${number}. ${esc(item.local_date)}</span> <span class="muted">${esc(when)}</span>`
+    +`${flags?` <span class="badge bad">${flags}</span>`:' <span class="badge ok">чисто</span>'}`
+    +`${item.status!=='done'?` <span class="badge warn">${esc(item.status)}</span>`:''}</button>`;
+}
+function compactBody(item){
+  if(!item)return empty('Выберите прогон слева');
+  const c=item.counters||{};
+  const numbers=[['Ходов всего',c.total_turns],['Ответила структура',c.structural_answers],
+    ['Ответила модель',c.model_answers],['Принято поправок',c.corrections_accepted],
+    ['Отказов в правах',c.refusals],['Не выполнено поручений',c.ignored_orders]];
+  const incidents=(item.incidents||[]).map(i=>
+    `<div class="toolbar"><span class="badge ${COMPACT_SEVERITY[i.severity]||'warn'}">${esc(i.severity)}</span>`
+    +`<span>${esc(i.text||i.code)}</span><span class="grow"></span><span class="mono">×${Number(i.count||1)}</span></div>`).join('');
+  return `<h2>${esc(item.local_date)}</h2>`
+    +`<div class="grid stats">${numbers.map(([l,v])=>`<div class="card stat"><div class="value">${Number(v||0)}</div><div class="label">${l}</div></div>`).join('')}</div>`
+    +`<h2 class="mt16">Происшествия</h2>${incidents||empty('За эти сутки ничего не отмечено')}`
+    +`<div class="muted mt10">Собрано по ${Number(item.source_turns||0)} ходам. В сводке нет текста переписки: только коды и числа.</div>`;
+}
+renderers.compacts=async gen=>{
+  const who=state.userId?`&user_id=${encodeURIComponent(state.userId)}`:'';
+  const data=await api(`/api/compacts?limit=90${who}`);
+  state.compacts=data.items||[];state.compactsTotal=Number(data.total||0);
+  if(state.openCompact)state.openCompact=state.compacts.find(i=>i.id===state.openCompact.id)||null;
+  const list=state.compacts.map((item,index)=>compactRow(item,index+1)).join('');
+  const today=new Date().toISOString().slice(0,10);
+  setApp(gen,`<div class="grid two"><section class="card">`
+    +`<div class="toolbar"><h2>Прогоны</h2><span class="grow"></span><span class="muted">${state.compactsTotal}</span></div>`
+    +`<div class="form"><label>Собрать за дату<input id="compactDate" type="date" max="${today}" value="${today}"></label>`
+    +`<button class="btn primary" ${call('runCompact')}>Собрать</button></div>`
+    +`<div class="mt10">${list||empty('Прогонов ещё не было')}</div></section>`
+    +`<section class="card">${compactBody(state.openCompact)}</section></div>`);
+};
+actions.openCompact=async id=>{state.openCompact=state.compacts.find(i=>i.id===id)||null;await refresh()};
+actions.runCompact=async()=>{
+  const day=document.getElementById('compactDate')?.value||'';
+  if(!day){toast('Выберите дату',true);return}
+  try{
+    const made=await api('/api/compacts/run',{method:'POST',body:JSON.stringify({date:day,user_id:state.userId||''})});
+    state.openCompact=made;
+    toast(`Сводка за ${day} собрана`);
+  }catch(e){toast(e.message,true)}
+  await refresh();
+};
 renderers.diagnostics=async gen=>{
   // `check_llm=true` обязателен, и без него экран врал: он печатал «LLM: включён» из
   // ФАЙЛА КОНФИГУРАЦИИ, то есть показывал ровно то же самое при выключенной машине с
@@ -933,6 +987,9 @@ function handleSaveHash(){const m=/[#&]save=([^&]*)/.exec(location.hash||'');if(
 // доходит до диспетчера и молча теряется — поймано браузерным прогоном,
 // строка ленты не открывала переписку и ошибок в консоли не было.
 Object.assign(actions,{navigate,refresh,toggleMenu,openTokenDialog,saveToken,clearToken,closeModal,download,openChat,sendReply});
+// `openCompact` и `runCompact` объявлены как `actions.*` выше и в этой строке не
+// нужны. Строка существует для функций верхнего уровня: без неё кнопка рисуется,
+// клик доходит до диспетчера и молча теряется.
 // Кнопки «назад»/«вперёд» браузера тоже переключают вкладку.
 window.addEventListener('hashchange',()=>{const view=startingView();if(view!==state.view)navigate(view,{push:false})});
 bootstrap();setInterval(health,30000);

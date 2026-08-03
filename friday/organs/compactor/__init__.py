@@ -26,11 +26,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Sequence
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from friday.organs import Organ, OrganWorker, ServiceContext, local_now
 from friday.permissions import CapabilityDefinition
@@ -227,10 +228,14 @@ class CompactorOrgan(Organ):
         router = APIRouter()
 
         @router.get("/api/compacts")
-        async def read_compacts(request: Request, limit: int = Query(30, ge=1, le=90)) -> Any:
+        async def read_compacts(
+            request: Request,
+            limit: int = Query(30, ge=1, le=90),
+            user_id: str = Query("", description="Чью сводку смотреть (только владелец)"),
+        ) -> Any:
             storage = request.app.state.storage
             actor = request.state.actor
-            principal = actor.own_id if actor.shared_tenant else actor.user_id
+            principal = _whose_compacts(actor, user_id)
             items = storage.list_day_compacts(principal, limit=limit)
             for item in items:
                 for incident in item.get("incidents") or []:
@@ -240,9 +245,69 @@ class CompactorOrgan(Organ):
                 # Отдельным COUNT, а не длиной страницы: длина выдаёт размер
                 # своего запроса за свойство данных.
                 "total": storage.count_day_compacts(principal),
+                "principal": principal,
             }
 
+        @router.post("/api/compacts/run")
+        async def run_compact(request: Request) -> Any:
+            """Собрать сводку за названные сутки прямо сейчас.
+
+            Нужна не только для удобства: без неё первая сводка за прошедший день
+            собиралась бы разовым скриптом, то есть путём, который никто больше
+            не пройдёт и не проверит. Кнопка идёт той же дорогой, что и ночной
+            обход, и потому проверяется теми же тестами.
+
+            Повторный вызов за те же сутки дубля не делает: идемпотентность стоит
+            в схеме (`UNIQUE(principal, local_date)`), а не в этой обработке.
+            """
+            payload = await request.json()
+            day = str((payload or {}).get("date") or "").strip()
+            if not _LOOKS_LIKE_A_DAY.fullmatch(day):
+                raise HTTPException(status_code=400, detail="Нужна дата вида ГГГГ-ММ-ДД")
+            storage = request.app.state.storage
+            actor = request.state.actor
+            principal = _whose_compacts(actor, str((payload or {}).get("user_id") or ""))
+            compact_id = storage.begin_day_compact(principal, day)
+            try:
+                rows = _metadata_of_a_day(storage, principal, day, request.app.state.settings)
+                counters, incidents = compact_a_day(rows)
+                storage.finish_day_compact(
+                    compact_id,
+                    source_turns=len(rows),
+                    counters=counters,
+                    incidents=incidents,
+                    patterns=[],
+                )
+            except Exception:  # noqa: BLE001 — оборванная сводка не роняет запрос
+                LOGGER.exception("compactor: сутки %s не свелись", day)
+                storage.abandon_day_compact(compact_id)
+                raise HTTPException(status_code=500, detail="Сводка не собралась") from None
+            made = storage.get_day_compact(principal, day) or {}
+            for incident in made.get("incidents") or []:
+                incident["text"] = incident_text(str(incident.get("code") or ""))
+            return made
+
         return router
+
+
+#: Дата суток в том виде, в каком её называет человек и хранит таблица.
+_LOOKS_LIKE_A_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _whose_compacts(actor: Any, asked_for: str) -> str:
+    """Чью сводку показывать. По умолчанию — свою.
+
+    Чужую отдаём только владельцу. Сводка обезличена, но она всё же говорит, как
+    человек пользовался системой: сколько раз поправлял, сколько раз ему
+    отказывали. Это его дело, а не соседа по общему архиву.
+    """
+    mine = actor.own_id if getattr(actor, "shared_tenant", False) else actor.user_id
+    wanted = (asked_for or "").strip()
+    if not wanted or wanted == mine:
+        return str(mine)
+    if not getattr(actor, "is_owner", False):
+        raise HTTPException(status_code=403, detail="Чужие сводки доступны только владельцу")
+    return wanted
 
 
 async def compact_pending_days(ctx: ServiceContext) -> dict[str, Any]:
@@ -263,7 +328,7 @@ async def compact_pending_days(ctx: ServiceContext) -> dict[str, Any]:
         for day in storage.days_needing_a_compact(principal, wanted):
             compact_id = storage.begin_day_compact(principal, day)
             try:
-                rows = _metadata_of_a_day(storage, principal, day, ctx)
+                rows = _metadata_of_a_day(storage, principal, day, ctx.settings)
                 counters, incidents = compact_a_day(rows)
                 storage.finish_day_compact(
                     compact_id,
@@ -285,7 +350,7 @@ def _people_with_conversations(storage: Any) -> list[str]:
 
 
 def _metadata_of_a_day(
-    storage: Any, principal: str, day: str, ctx: ServiceContext
+    storage: Any, principal: str, day: str, settings: Any
 ) -> list[dict[str, Any]]:
     """Метаданные ответов за местные сутки.
 
@@ -293,8 +358,8 @@ def _metadata_of_a_day(
     сообщений компактору не нужны и не читаются — тогда утечке неоткуда взяться,
     и проверять её нечем.
     """
-    offset = timedelta(minutes=int(getattr(ctx.settings, "utc_offset_minutes", 0) or 0))
-    start = local_now(ctx.settings).replace(
+    offset = timedelta(minutes=int(getattr(settings, "utc_offset_minutes", 0) or 0))
+    start = local_now(settings).replace(
         year=int(day[:4]), month=int(day[5:7]), day=int(day[8:10]),
         hour=0, minute=0, second=0, microsecond=0,
     )
