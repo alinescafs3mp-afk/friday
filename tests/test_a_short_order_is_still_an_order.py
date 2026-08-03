@@ -49,9 +49,13 @@ def test_an_order_clears_the_follow_up_question() -> None:
     tail = source[at:]
     assert "context.terse_request = False" in tail, "переспрос больше не снимается"
     at_clear = tail.index("context.terse_request = False")
-    guard = tail[max(0, at_clear - 400) : at_clear]
-    assert '"действие"' in guard, "поручение не считается поводом снять переспрос"
-    assert '"файл"' in guard and '"человек"' in guard
+    guard = tail[max(0, at_clear - 600) : at_clear]
+    # Правило с тех пор расширено: переспрос снимается для ЛЮБОГО понятого вида,
+    # а не только для трёх перечисленных. Владелец 2026-08-03: «некоторые будут
+    # её использовать как тупой поисковик» — «курс доллара» и «цена 5090» тоже
+    # получали встречный вопрос. Поручение по-прежнему покрыто: «действие» — это
+    # понятый вид, а не «другое».
+    assert 'startswith("друг")' in guard, "переспрос снова шире, чем «не понял»"
 
 
 def test_the_clearing_happens_after_the_verdict_not_before() -> None:
