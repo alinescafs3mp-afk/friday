@@ -122,7 +122,11 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: пришедшие в названные дни, и их полное число. Материал для сборки архива:
 #: «собери документы за 10, 13 и 25 число». Список и счёт разведены намеренно —
 #: длина страницы не должна выдавать себя за размер дня.
-EXPECTED_MEMBER_COUNT = 305
+#: +2 к 305: `settle_uncertain_approval` и `list_uncertain_approvals` — сверка
+#: неизвестного исхода наблюдением (спека v3 §5). Заявка, чьё исполнение
+#: оборвалось, уходила в `uncertain` и висела там навсегда: сверка для шагов
+#: миссии существовала, а для заявок — нет.
+EXPECTED_MEMBER_COUNT = 307
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

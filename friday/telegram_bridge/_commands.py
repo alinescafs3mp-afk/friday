@@ -107,6 +107,48 @@ def _month_bounds(year: int, month: int) -> tuple[str, str, str]:
 
 class CommandsMixin(BridgeShared):
     @staticmethod
+    def _uncertain_guidance(payload: dict[str, Any]) -> str:
+        """Что осталось неизвестным и что с этим делать — словами, а не числом.
+
+        Спека v3 §5 требует не только различать неизвестный исход, но и давать по
+        нему указание («retry or reconciliation guidance»), а §«Users can see…» —
+        показывать, «что осталось неизвестным и как это исправить».
+
+        Прежняя редакция говорила «есть действия с НЕИЗВЕСТНЫМ исходом: 3»: число
+        без имён не позволяет ни проверить, ни решить. Здесь называется САМО
+        действие, потому что проверять человек будет именно его.
+
+        Часть таких заявок система закрывает сама, наблюдением за состоянием
+        (`_reconcile_uncertain_approvals`). Сюда доходит остаток — то, для чего
+        проверки постусловия нет, и решить за человека, чем кончилось необратимое
+        действие, нельзя.
+        """
+        raw = payload.get("items")
+        items: list[Any] = raw if isinstance(raw, list) else []
+        total = int(payload.get("total") or len(items))
+        if not total:
+            return ""
+        lines = [
+            "",
+            f"⚠️ Действий с НЕИЗВЕСТНЫМ исходом: {total}.",
+            "Их исполнение оборвалось на середине: эффект мог случиться, а мог и нет.",
+        ]
+        for item in items[:5]:
+            if not isinstance(item, dict):
+                continue
+            what = str(item.get("summary") or item.get("tool") or "").strip()
+            why = str(item.get("error") or "").strip()
+            if what:
+                lines.append(f"• {what[:160]}" + (f" — {why[:80]}" if why else ""))
+        if total > 5:
+            lines.append(f"…и ещё {total - 5}.")
+        lines.append(
+            "Проверьте по этим действиям сами, что получилось. Повторять их "
+            "автоматически нельзя: повтор дал бы второй побочный эффект по одному решению."
+        )
+        return "\n".join(lines)
+
+    @staticmethod
     def _read_command_layout(text: str) -> str:
         """Recognise a command typed without switching the keyboard layout.
 
@@ -463,26 +505,21 @@ class CommandsMixin(BridgeShared):
                 str(chat_id),
             )
             items = data.get("items") if isinstance(data.get("items"), list) else []
+            # Неизвестные исходы спрашиваются ВСЕГДА, а не только когда очередь
+            # пуста. Прежняя редакция показывала их лишь в ветке «ничего не ждёт
+            # решения», и одна ожидающая заявка полностью скрывала то, про что
+            # система сама не знает, чем кончилось. Спека v3: человек видит, «что
+            # осталось неизвестным и как это исправить».
+            unknown = await self._backend_json(
+                backend,
+                "GET",
+                "/api/me/approvals?status=uncertain",
+                {"telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            tail = self._uncertain_guidance(unknown)
             if not items:
-                # Второй вопрос важнее первого: «нечего подтверждать» и «есть
-                # действия с неизвестным исходом» — разные состояния, и второе
-                # молчать не должно.
-                unknown = await self._backend_json(
-                    backend,
-                    "GET",
-                    "/api/me/approvals?status=uncertain",
-                    {"telegram_user": user},
-                    external_user_id,
-                    str(chat_id),
-                )
-                pending_unknown = int(unknown.get("total") or 0)
-                tail = (
-                    f"\n\nНо есть действия с НЕИЗВЕСТНЫМ исходом: {pending_unknown}. "
-                    "Их исполнение оборвалось, и повторять их автоматически нельзя — "
-                    "проверьте результат вручную."
-                    if pending_unknown
-                    else ""
-                )
                 await self._send_message(
                     telegram, chat_id, "Ничего не ждёт вашего решения." + tail
                 )
@@ -507,7 +544,7 @@ class CommandsMixin(BridgeShared):
             await self._send_message(
                 telegram,
                 chat_id,
-                "\n".join(lines),
+                "\n".join(lines) + tail,
                 reply_markup={"inline_keyboard": rows} if rows else None,
             )
             return

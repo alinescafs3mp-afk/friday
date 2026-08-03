@@ -297,6 +297,50 @@ class ApprovalsMixin(StorageShared):
             return None
         return self._approval_row(approval_id, user_id)
 
+    def settle_uncertain_approval(
+        self, approval_id: str, user_id: str, *, happened: bool, detail: str
+    ) -> dict[str, Any] | None:
+        """Закрыть неизвестный исход тем, что УВИДЕЛИ в состоянии.
+
+        Спека v3 §5: «Uncertain side effects require reconciliation, not automatic
+        replay». Повтора здесь нет и быть не может — есть наблюдение: постусловие
+        инструмента читает факт из хранилища и отвечает, случилось действие или
+        нет. Заявка после этого перестаёт висеть неизвестностью.
+
+        `failed`, а не `pending`: заявка одноразовая и её решение уже потрачено.
+        Узнать, что эффекта не было, — не то же самое, что получить право
+        повторить: новое действие требует нового решения человека.
+
+        Переход разрешён ТОЛЬКО из `uncertain`. Иначе сверка, запоздавшая на такт,
+        переписала бы исход, который уже установлен точнее её.
+        """
+        now = utc_now()
+        note = f"сверено наблюдением: {detail}"[:2000]
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE action_approvals
+                   SET status=?, error=?, updated_at=?
+                   WHERE id=? AND user_id=? AND status='uncertain'""",
+                ("done" if happened else "failed", note, now, approval_id, user_id),
+            )
+        if cursor.rowcount != 1:
+            return None
+        return self._approval_row(approval_id, user_id)
+
+    def list_uncertain_approvals(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Неизвестные исходы ВСЕХ арендаторов — материал для сверки.
+
+        Без арендатора в запросе: сверку ведёт фоновый работник, у которого своего
+        человека нет, а ходить по арендаторам по одному он не может — их список и
+        есть то, что он бы выяснял. Тот же приём, что у `reconcile_stale_claims`.
+        """
+        rows = self.execute(
+            """SELECT * FROM action_approvals WHERE status='uncertain'
+               ORDER BY updated_at ASC LIMIT ?""",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def expire_action_approvals(self) -> int:
         """Просроченные заявки и решения — в `expired`. Идёт по расписанию."""
         now = utc_now()

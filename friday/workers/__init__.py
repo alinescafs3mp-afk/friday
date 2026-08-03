@@ -1578,12 +1578,68 @@ class WorkersManager:
         """
         expired = await run_blocking(self.storage.expire_action_approvals)
         unknown = await run_blocking(self.storage.reconcile_stale_claims)
-        if expired or unknown:
+        settled = await run_blocking(self._reconcile_uncertain_approvals)
+        if expired or unknown or settled:
             LOGGER.info(
-                "Approval hygiene: %d expired, %d marked uncertain",
+                "Approval hygiene: %d expired, %d marked uncertain, %d settled by observation",
                 expired,
                 unknown,
+                settled,
             )
+
+    def _reconcile_uncertain_approvals(self) -> int:
+        """Выяснить наблюдением, случилось ли то, чей исход остался неизвестным.
+
+        Спека v3 §5: «Uncertain side effects require reconciliation, not automatic
+        replay». Сверка для ШАГОВ МИССИИ была написана раньше
+        (`ExecutiveService._reconcile_uncertain`), а заявки на подтверждение
+        оставались висеть неизвестностью навсегда: `mark_action_approval_uncertain`
+        честно писала «ждут сверки человеком», и на этом всё заканчивалось.
+
+        Разница между этими двумя путями — только в том, откуда берутся аргументы:
+        у шага миссии из чекпойнта, у заявки из `payload_json`. Проверка одна и та
+        же — `POSTCONDITIONS`, читающие факт из хранилища.
+
+        Повтора здесь нет: наблюдение устанавливает исход, а не производит его.
+        Заявка, чей эффект не случился, становится `failed`, а не `pending`, —
+        решение человека уже потрачено, и новое действие потребует нового.
+
+        Заявка, для инструмента которой проверки нет, остаётся `uncertain`: решить
+        за человека, чем кончилось необратимое действие, нельзя.
+        """
+        from friday.execution_kernel import POSTCONDITIONS
+
+        settled = 0
+        for approval in self.storage.list_uncertain_approvals(limit=50):
+            tool = str(approval.get("tool") or "")
+            verifier = POSTCONDITIONS.get(tool)
+            if verifier is None:
+                continue
+            payload = approval.get("payload")
+            if not isinstance(payload, dict):
+                raw = approval.get("payload_json")
+                try:
+                    payload = json.loads(raw) if isinstance(raw, str) else {}
+                except (TypeError, ValueError):
+                    continue
+            if not isinstance(payload, dict) or not payload:
+                continue
+            owner = str(approval.get("user_id") or "")
+            try:
+                happened, detail = verifier(self.storage, owner, payload)
+            except Exception:  # noqa: BLE001 — сверка не должна ронять гигиену
+                LOGGER.exception("Approval reconciliation failed for %s", approval.get("id"))
+                continue
+            if self.storage.settle_uncertain_approval(
+                str(approval.get("id") or ""), owner, happened=happened, detail=detail
+            ):
+                settled += 1
+                LOGGER.info(
+                    "Approval %s reconciled by observation: the effect %s happen",
+                    approval.get("id"),
+                    "did" if happened else "did NOT",
+                )
+        return settled
 
     async def _database_optimize(self) -> None:
         await run_blocking(self.storage.optimize)
