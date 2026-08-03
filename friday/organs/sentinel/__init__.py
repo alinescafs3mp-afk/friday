@@ -40,6 +40,18 @@ LOGGER = logging.getLogger(__name__)
 # guidance (e.g. database not initialised yet), not an operational fault.
 _ALERT_SEVERITIES = {"error", "warning"}
 
+#: Поломки, о которых говорят НЕМЕДЛЕННО, невзирая на тихие часы.
+#:
+#: Решение владельца 2026-08-03: «отказ ВСЕЙ системы будит всегда». Довод —
+#: пока модель не отвечает, каждый пишущий получает испорченные ответы, а не
+#: молчание; в живом отказе этих суток человек за двадцать минут получил восемь
+#: таких и перестал писать вовсе.
+#:
+#: Список намеренно короткий и содержит только «система не работает». Состояние
+#: воркеров, резервные копии, гигиена секретов, нехватка места — важное, но не
+#: то, ради чего будят: оно дождётся утра и ничего за ночь не испортит.
+_WAKES_THE_OWNER = {"llm_not_generating", "start_llm_runtime"}
+
 # Reading host diagnostics over HTTP needs this capability; a push carries the
 # same material, so it answers to the same gate. Otherwise the outbound channel
 # is a way *around* the permission model instead of a use of it.
@@ -106,10 +118,19 @@ async def scan_health(ctx: ServiceContext) -> None:
     if not settings.sentinel_enabled:
         return
     now = local_now(settings)
-    # Quiet hours gate the push; a fault simply waits until the window ends and
-    # the next tick re-detects it (dedup is per calendar day, so nothing is lost).
-    if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):
-        return
+    # Тихие часы придерживают сообщение; неисправность дождётся конца окна, и
+    # следующий обход обнаружит её заново (дедуп посуточный, ничего не теряется).
+    #
+    # КРОМЕ поломки всей системы. Решение владельца 2026-08-03, прямым ответом:
+    # «отказ ВСЕЙ системы будит всегда». Довод — пока модель мертва, каждый
+    # пишущий получает испорченные ответы; в живом отказе этих суток человек за
+    # двадцать минут получил восемь таких и перестал писать. Ждать до восьми утра
+    # означало бы восемь часов того же самого.
+    #
+    # Ночью проходят только эти коды, всё остальное по-прежнему ждёт утра:
+    # состояние воркеров, резервные копии, гигиена секретов — не поломка, а
+    # сведения, которые спокойно дождутся.
+    quiet = in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end)
     allowed = settings.telegram_effective_allowed_chat_ids
     if not allowed:
         # No delivery target configured — do not even run diagnostics.
@@ -135,6 +156,10 @@ async def scan_health(ctx: ServiceContext) -> None:
     alerts = [
         action for action in report.get("actions", []) if str(action.get("severity")) in _ALERT_SEVERITIES
     ]
+    if quiet:
+        alerts = [action for action in alerts if str(action.get("code")) in _WAKES_THE_OWNER]
+        if alerts:
+            LOGGER.warning("sentinel: тихие часы, но система не работает — говорим сейчас")
     if not alerts:
         return
 

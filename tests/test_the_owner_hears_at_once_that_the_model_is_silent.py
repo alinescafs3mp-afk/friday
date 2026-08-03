@@ -133,11 +133,20 @@ def test_the_turn_survives_a_broken_notification(settings, storage) -> None:
     assert str(reply.get("message") or reply.get("content") or "").strip()
 
 
-def test_quiet_hours_are_respected(settings, storage) -> None:
-    """Будить человека ночью — его решение, не моё.
+def test_a_dead_system_wakes_the_owner_even_at_night(settings, storage) -> None:
+    """Решение владельца 2026-08-03, прямым ответом: «отказ ВСЕЙ системы будит всегда».
 
-    Ночной отказ доживёт до утреннего обхода сторожа. Верно ли это для поломки
-    ВСЕЙ системы — вопрос владельцу, а не моё самоуправство.
+    Довод его же: пока модель мертва, каждый пишущий получает не молчание, а
+    испорченные ответы. В живом отказе этих суток человек за двадцать минут
+    получил восемь таких и перестал писать вовсе. Ждать до восьми утра означало
+    бы восемь часов того же самого.
+
+    Первая редакция этой правки тихие часы соблюдала — и это было МОЁ решение
+    вместо его. Спросила прямо, получила прямой ответ.
+
+    Тихие часы остаются в силе для всего остального: сводок, хроники,
+    напоминаний, состояния воркеров и резервных копий. Они дождутся утра и
+    ничего за ночь не испортят.
     """
     user_id, settings = _owner(storage, settings)
     settings = replace(settings, quiet_hours_start=0, quiet_hours_end=23)
@@ -146,7 +155,26 @@ def test_quiet_hours_are_respected(settings, storage) -> None:
 
     agent._tell_the_owner_the_model_is_silent(user_id)
 
-    assert _queued(storage, user_id) == [], "написали в тихие часы"
+    queued = _queued(storage, user_id)
+    assert queued, "система мертва ночью, и человек об этом не узнал"
+    assert queued[0]["kind"] == "model_silent"
+
+
+def test_the_night_alert_is_still_one_message(settings, storage) -> None:
+    """Разбудить один раз — решение владельца. Разбудить восемь — нет.
+
+    Ночью цена шквала выше: дедуп по пятнадцатиминутному ведру здесь не
+    украшение, а условие, при котором решение «будить всегда» вообще разумно.
+    """
+    user_id, settings = _owner(storage, settings)
+    settings = replace(settings, quiet_hours_start=0, quiet_hours_end=23)
+    agent = AgentRuntime(settings, storage)
+    agent.llm = _SilentModel()
+
+    for _ in range(8):
+        agent._tell_the_owner_the_model_is_silent(user_id)
+
+    assert len(_queued(storage, user_id)) == 1, "ночной шквал уведомлений"
 
 
 def test_a_stranger_is_not_told_about_the_host(settings, storage) -> None:

@@ -4728,20 +4728,22 @@ class AgentRuntime:
         важнее уведомления о ходе.
         """
         try:
-            from friday.organs import (
-                in_quiet_hours,
-                is_service_recipient,
-                local_now,
-                may_push_to,
-                resolve_chat_id,
-            )
+            from friday.organs import is_service_recipient, may_push_to, resolve_chat_id
             from friday.storage._base import utc_now
 
             settings = self.settings
-            now = local_now(settings)
-            if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):
-                LOGGER.warning("модель молчит, но сейчас тихие часы — владельцу не пишем")
-                return
+            # Тихие часы ЗДЕСЬ не действуют — решение владельца 2026-08-03,
+            # прямым ответом на прямой вопрос: «отказ ВСЕЙ системы будит всегда».
+            #
+            # Довод его же: пока модель мертва, каждый пишущий получает
+            # испорченные ответы. Сегодня это был живой человек, который за
+            # двадцать минут получил восемь таких ответов и перестал писать.
+            # Ждать до восьми утра означало бы восемь часов того же самого.
+            #
+            # Тихие часы остаются в силе для всего остального: сводок, хроники,
+            # напоминаний и прочих находок сторожа — это не поломка, а сообщения,
+            # которые спокойно ждут утра. Дедуп по пятнадцатиминутному ведру не
+            # даёт этому превратиться в ночной шквал: одно сообщение, не восемь.
             stamp = utc_now()[:15]  # до десятков минут: YYYY-MM-DDTHH:M
             body = (
                 "⚠️ Модель не отвечает на запросы прямо сейчас.\n\n"

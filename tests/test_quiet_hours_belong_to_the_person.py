@@ -150,3 +150,35 @@ def test_every_proactive_organ_uses_the_local_clock():
         assert "datetime.now(UTC)" not in source, (
             f"{module.__name__}: остался UTC-час — тихие часы разъедутся между органами"
         )
+
+
+def test_a_dead_system_is_the_one_thing_that_wakes_the_owner():
+    """Решение владельца 2026-08-03: «отказ ВСЕЙ системы будит всегда».
+
+    Тихие часы остаются правилом; исключение ровно одно и названо поимённо. Довод
+    владельца: пока модель не отвечает, каждый пишущий получает не молчание, а
+    испорченные ответы — в живом отказе этих суток человек за двадцать минут
+    получил восемь таких и перестал писать.
+
+    Список исключений обязан оставаться КОРОТКИМ. Состояние воркеров, резервные
+    копии, гигиена секретов, нехватка места — важное, но не то, ради чего будят:
+    оно дождётся утра и за ночь ничего не испортит. Каждый лишний код здесь —
+    ещё одна причина, по которой человек начнёт глушить уведомления целиком.
+    """
+    from friday.organs.sentinel import _WAKES_THE_OWNER
+
+    assert "llm_not_generating" in _WAKES_THE_OWNER, "молчащая модель снова ждёт до утра"
+    assert len(_WAKES_THE_OWNER) <= 3, f"список ночных тревог разросся: {_WAKES_THE_OWNER}"
+    for quiet_matter in ("backup_missing", "worker_crash_loop", "disk_space_low", "secret_in_file"):
+        assert quiet_matter not in _WAKES_THE_OWNER, f"{quiet_matter} будит ночью без нужды"
+
+
+def test_the_sentinel_looks_often_enough_to_catch_a_short_outage():
+    """Живой отказ длился 20 минут — часовой обход мог не застать его вовсе.
+
+    Владелец выбрал 10–15 минут. Проба стоит один токен; шесть таких в час — цена,
+    несопоставимая с тем, что человек в это время получает испорченные ответы.
+    """
+    from friday.config import load_settings
+
+    assert load_settings().sentinel_interval_sec <= 900

@@ -926,7 +926,12 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         chronicle_enabled=_bool_env("FRIDAY_CHRONICLE_ENABLED", True),
         chronicle_interval_sec=_int_env("FRIDAY_CHRONICLE_INTERVAL_SEC", 86400, minimum=300),
         sentinel_enabled=_bool_env("FRIDAY_SENTINEL_ENABLED", True),
-        sentinel_interval_sec=_int_env("FRIDAY_SENTINEL_INTERVAL_SEC", 3600, minimum=60),
+        # Пятнадцать минут вместо часа — решение владельца 2026-08-03, после
+        # живого отказа: он длился двадцать минут, то есть часовой обход мог не
+        # застать его вовсе. Проба стоит один токен, и шесть таких в час — цена,
+        # несопоставимая с тем, что человек в это время получает испорченные
+        # ответы и уходит.
+        sentinel_interval_sec=_int_env("FRIDAY_SENTINEL_INTERVAL_SEC", 900, minimum=60),
         sentinel_check_llm=_bool_env("FRIDAY_SENTINEL_CHECK_LLM", True),
         profile_in_context=_bool_env("FRIDAY_PROFILE_IN_CONTEXT", True),
         quiet_hours_start=_int_env("FRIDAY_QUIET_HOURS_START", 22, minimum=0),
