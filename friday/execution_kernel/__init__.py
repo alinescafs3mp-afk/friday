@@ -1044,6 +1044,19 @@ class ExecutionKernel:
             "remind",
         },
         "материал": {"memory_save", "entity_create", "entity_link", "inbox_list", "make_file"},
+        # Поручение: человек просит СДЕЛАТЬ. Подробные описания получают те
+        # инструменты, что меняют мир, — замерено, что именно они простаивают:
+        # шесть из десяти мутирующих не срабатывали ни разу за всё время.
+        "действие": {
+            "remind",
+            "memory_save",
+            "entity_create",
+            "entity_link",
+            "speak",
+            "make_file",
+            "collect_files",
+            "mission_propose",
+        },
         # Просьба о файле — это и «сочини документ» (make_file), и «собери
         # присланное» (collect_files). Какой из двух, решает модель по формулировке.
         "файл": {"make_file", "collect_files", "memory_search", "what_happened", "speak"},
