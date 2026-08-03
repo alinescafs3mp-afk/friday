@@ -143,6 +143,31 @@ def test_my_own_stuff_survives_an_outward_verdict(settings, storage) -> None:
     assert context.knowledge_hits, "свои материалы выброшены по ошибке арбитра"
 
 
+def test_the_arbiter_is_told_about_the_status_question_form() -> None:
+    """«Что там по поверке приборов» — вопрос о СВОЁМ деле, а не о мире.
+
+    Проверяется содержимое промпта, и это тот случай, когда осмотр исходника
+    уместен: промпт и ЕСТЬ изделие, поведение модели проверяется живым прогоном.
+
+    Замерено 2026-08-03 до правки: эта форма уходила в интернет два раза из трёх,
+    «как там с поверкой» — три из трёх. Притяжательного в такой фразе нет вовсе,
+    и арбитр читал её как вопрос о мире. Правка перевела 5 архивных форм из 5 в
+    «архив», не тронув 6 сетевых из 6.
+
+    Соседняя пара форм обязана остаться снаружи, поэтому в промпте она названа
+    прямо: без этого правило перетянуло бы «что нового в мире» в архив.
+    """
+    import inspect
+
+    from friday.agent_runtime import AgentRuntime
+
+    source = inspect.getsource(AgentRuntime._web_query_by_arbiter)
+    assert "что там по…" in source, "форма вопроса о своём деле пропала из промпта"
+    assert "как там с…" in source
+    assert "состоянии своего дела" in source, "не объяснено, ПОЧЕМУ это архив"
+    assert "что нового в мире" in source, "не отделено от вопроса о внешнем мире"
+
+
 @pytest.mark.parametrize("verdict", [OUTWARD, KNOWLEDGE])
 def test_the_weak_match_rule_still_applies_underneath(settings, storage, verdict: str) -> None:
     """Прежнее правило никуда не делось: слабое совпадение отбрасывается и так."""

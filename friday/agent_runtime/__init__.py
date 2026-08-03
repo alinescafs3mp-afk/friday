@@ -1420,6 +1420,11 @@ class AgentRuntime:
         else:
             response = await self._generate_response(context, clean_message, attachments)
 
+        # Ход провалился из-за молчащей модели — владелец узнаёт об этом СЕЙЧАС.
+        # Сторож опрашивает раз в час и сегодняшний двадцатиминутный отказ мог не
+        # застать вовсе; система же знает о провале в ту же секунду.
+        if response.get("llm_failed") and self.llm.enabled:
+            self._tell_the_owner_the_model_is_silent(user_id)
         content = (response.get("content") or "").strip() or "Не удалось сформировать ответ."
         # `synthetic_document_notice` означает, что текст сочинил backend вместо
         # человека («Загружен документ: отчёт.docx»), и просьбой о файле он не
@@ -4569,6 +4574,80 @@ class AgentRuntime:
             f"В базе {context.kb_size} объектов, но надёжного совпадения нет.{suffix} "
             "Попробуйте уточнить формулировку. Модель сейчас недоступна."
         )
+
+    def _tell_the_owner_the_model_is_silent(self, user_id: str) -> None:
+        """Сказать владельцу СРАЗУ, что модель молчит, — а не через час.
+
+        Живой отказ 2026-08-03: сервер модели перестал отвечать на генерацию в
+        15:45, человек писал ещё двадцать минут и получил восемь испорченных
+        ответов подряд, потом написал «Плохо» и перестал писать. Владелец узнал
+        об этом от меня, а не от системы.
+
+        Сторож существовал и работал штатно. Он опрашивает раз в час — то есть
+        мог не застать двадцатиминутный отказ вовсе, — и до сегодняшней правки
+        проверял только порт, который в этом отказе был открыт.
+
+        Здесь опроса нет: система УЖЕ знает, что ход провалился, в ту же секунду.
+        Опрашивать состояние, о котором тебе только что сообщили, — лишняя работа
+        и лишняя задержка.
+
+        Дедуп по пятнадцатиминутному ведру. Отказ модели задевает КАЖДЫЙ ход, и
+        без ведра шквал ответов превратился бы в шквал уведомлений: сегодня это
+        было бы восемь сообщений за двадцать минут вместо двух. Ведро по времени,
+        а не счётчик подряд идущих: два человека, пишущие одновременно, — это два
+        разных потока отказов об одной и той же поломке.
+
+        Тихие часы соблюдаются, как и у всех проактивных органов: будить человека
+        ночью — его решение, не моё. Ночной отказ поэтому доживёт до утреннего
+        обхода сторожа; вопрос, верно ли это для поломки ВСЕЙ системы, вынесен
+        владельцу отдельно.
+
+        Сбой на любом шаге означает «не сказали» и ничего больше: ход человека
+        важнее уведомления о ходе.
+        """
+        try:
+            from friday.organs import (
+                in_quiet_hours,
+                is_service_recipient,
+                local_now,
+                may_push_to,
+                resolve_chat_id,
+            )
+            from friday.storage._base import utc_now
+
+            settings = self.settings
+            now = local_now(settings)
+            if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):
+                LOGGER.warning("модель молчит, но сейчас тихие часы — владельцу не пишем")
+                return
+            stamp = utc_now()[:15]  # до десятков минут: YYYY-MM-DDTHH:M
+            body = (
+                "⚠️ Модель не отвечает на запросы прямо сейчас.\n\n"
+                "Соединение с сервером устанавливается, но генерация не возвращает "
+                "ответа. Людям в это время уходят испорченные ответы вместо обычных. "
+                "Нужен перезапуск сервера модели."
+            )
+            sent = 0
+            for candidate in self.storage.list_user_ids(active_only=True):
+                chat_id = resolve_chat_id(self.storage, candidate)
+                if not chat_id or not is_service_recipient(settings, chat_id):
+                    continue
+                if not may_push_to(settings, self.storage, candidate, chat_id):
+                    continue
+                if self.storage.enqueue_notification(
+                    candidate,
+                    chat_id,
+                    body,
+                    kind="model_silent",
+                    dedup_key=f"model_silent:{stamp}",
+                ):
+                    sent += 1
+            if sent:
+                LOGGER.warning("модель молчит — владельцу отправлено предупреждение (ход %s)", user_id)
+            else:
+                LOGGER.warning("модель молчит, но сказать об этом некому: нет служебного адресата")
+        except Exception:  # noqa: BLE001 — уведомление не имеет права ронять ход
+            LOGGER.warning("Не удалось предупредить владельца о молчании модели", exc_info=True)
 
     async def _answer_without_tools(
         self,
