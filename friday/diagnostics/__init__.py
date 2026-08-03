@@ -109,6 +109,36 @@ def _llm_endpoint_status(
     return status
 
 
+def served_model_name(base_url: str, *, api_key: str = "", timeout: float = 3.0) -> str:
+    """Как НА САМОМ ДЕЛЕ называется модель, которую обслуживает эндпойнт.
+
+    Нужно там, где имя показывают человеку. В настройках владельца `llm_model`
+    равно «dispatcher» — это псевдоним маршрутизатора, и на вопрос «какая ты
+    модель?» он не отвечает ничего. Настоящее имя лежит в поле `root`: путь к
+    весам вида «/models/qwen3.6-35b-a3b-uncensored-nvfp4».
+
+    Пустая строка значит «не узнали», и это законный исход: показывать нечего —
+    скажем то, что есть в настройках. Выдумывать нельзя ровно потому, что этот
+    вызов и появился из-за выдумки.
+    """
+    try:
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urllib.request.Request(f"{base_url.rstrip('/')}/models", headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - configured local URL
+            payload = json.loads(response.read())
+    except Exception:  # noqa: BLE001 — незнание имени не должно ронять вызов
+        return ""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list) or not data:
+        return ""
+    first = data[0] if isinstance(data[0], dict) else {}
+    root = str(first.get("root") or "").strip()
+    # `root` — путь к весам; человеку нужно имя, а не каталог.
+    return root.rsplit("/", 1)[-1] if root else str(first.get("id") or "").strip()
+
+
 def _llm_generates(
     base_url: str, model: str, *, api_key: str = "", timeout: float = 25.0
 ) -> dict[str, Any]:
