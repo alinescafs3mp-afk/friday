@@ -70,6 +70,14 @@ def _redact_user_metadata(user: dict[str, Any]) -> dict[str, Any]:
     if instructions:
         # Факт, что инструкции заданы, для надзора осмысленный; их текст — нет.
         safe["has_custom_instructions"] = True
+    # То же и для указаний, сказанных в разговоре: сколько их — видно, что именно
+    # сказано — нет. Человек говорит Пятнице, как к нему обращаться и о чём не
+    # напоминать; это ровно тот же личный текст, что и `custom_instructions`, и
+    # начальнику с одним лишь надзором он не предназначен. Ключ в белый список
+    # `_METADATA_KEYS_FOR_OVERSIGHT` не добавлен намеренно.
+    rules = metadata.get("standing_rules")
+    if isinstance(rules, list) and rules:
+        safe["standing_rules_count"] = len(rules)
     return {"metadata_json": json.dumps(safe, ensure_ascii=False), "metadata_redacted": True}
 
 

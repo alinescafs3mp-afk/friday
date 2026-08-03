@@ -27,11 +27,64 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 
 import pytest
 
 from friday.agent_runtime import _ARCHIVE_IS_SURE, AgentRuntime, _archive_is_weak
+
+
+class _Searcher:
+    """Поиск, который всегда что-то находит — как на настоящем корпусе."""
+
+    def __init__(self, score: float) -> None:
+        self.score = score
+        self.calls = 0
+
+    async def search(self, user_id, query, **kwargs):  # noqa: ANN001, ARG002
+        self.calls += 1
+        return {
+            "results": [
+                {
+                    "id": "ko_1",
+                    "title": "Служебный документ",
+                    "content": "порядок и сроки",
+                    "_score": self.score,
+                    "_rerank_score": self.score,
+                }
+            ],
+            "entity_matches": [],
+            "strategy": "hybrid",
+            "trace": [],
+        }
+
+
+class _LLM:
+    def __init__(self, verdict: str) -> None:
+        self.enabled = True
+        self.verdict = verdict
+
+    async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
+        return {"content": self.verdict}
+
+
+HOUSEHOLD = '{"вид": "быт", "запрос": "", "кто": "", "дни": []}'
+ARCHIVE = '{"вид": "архив", "запрос": "", "кто": "", "дни": []}'
+ABOUT_A_PERSON = '{"вид": "человек", "запрос": "", "кто": "Пегас", "дни": []}'
+A_FILE = '{"вид": "файл", "запрос": "", "кто": "", "дни": []}'
+
+
+def _prepared(settings, storage, message: str, verdict: str, *, score: float):
+    """Настоящая сборка контекста с поддельными поиском и моделью."""
+    storage.ensure_user("alice")
+    agent = AgentRuntime(settings, storage)
+    agent.llm = _LLM(verdict)
+    searcher = _Searcher(score)
+    context = asyncio.run(
+        agent._prepare_context("alice", message, "conv", prior_history=[], searcher=searcher)
+    )
+    return context, searcher
 
 
 def test_the_arbiter_knows_what_household_talk_is() -> None:
@@ -42,37 +95,61 @@ def test_the_arbiter_knows_what_household_talk_is() -> None:
     assert "не нужны ни документы, ни поиск" in source, "не сказано, что делать с бытом"
 
 
-def test_household_drops_documents_regardless_of_score() -> None:
+def test_household_drops_documents_regardless_of_score(settings, storage) -> None:
     """Мутация: убрать `household` из условия — «чай или кофе» снова из архива.
 
     Порог тут бессилен: замерено 0.743 у бытовой фразы против такой же
-    уверенности у настоящего архивного вопроса.
+    уверенности у настоящего архивного вопроса. Счёт 0.85 в проверке намеренно
+    ВЫШЕ замеренной границы 0.5 — иначе документы отбросило бы прежнее правило и
+    тест прошёл бы, ничего не проверив.
+
+    Переписан с осмотра исходника на поведение 2026-08-03: прежняя редакция
+    искала подстроку в окне на 900 знаков и покраснела от добавленного
+    КОММЕНТАРИЯ, сдвинувшего код за границу окна. Проверка, которую ломает
+    комментарий и переживает подмена смысла, — не проверка.
     """
-    source = inspect.getsource(AgentRuntime._prepare_context)
-    at = source.index("household = ")
-    guard = source[at : at + 900]
-    assert "household or _archive_is_weak" in guard, "быт снова решается порогом"
-    assert "context.knowledge_hits = []" in guard
+    context, searcher = _prepared(settings, storage, "чай или кофе", HOUSEHOLD, score=0.85)
+
+    assert searcher.calls == 1, "поиск не отработал — проверять нечего"
+    assert context.knowledge_hits == [], "бытовая реплика снова тянет документы"
+    assert context.answer_mode != "personal_knowledge"
 
 
-def test_a_direct_archive_question_keeps_its_documents() -> None:
+def test_a_direct_archive_question_keeps_its_documents(settings, storage) -> None:
     """Обратная сторона: «покажи штатное расписание» обязано отвечать по архиву.
 
     Правка, которая глушит архив целиком, формально решает задачу и ломает
     систему.
     """
-    source = inspect.getsource(AgentRuntime._prepare_context)
-    at = source.index("about_own_archive = ")
-    guard = source[at : at + 400]
-    for kind in ("архив", "человек", "файл"):
-        assert f'"{kind}"' in guard, f"вид «{kind}» перестал защищать документы"
+    for verdict in (ARCHIVE, A_FILE):
+        context, _ = _prepared(settings, storage, "покажи штатное расписание", verdict, score=0.6)
+        assert context.knowledge_hits, f"вид {verdict[:24]}… перестал защищать документы"
 
 
-def test_a_personal_cue_still_wins() -> None:
-    """«В моей базе», «у меня» — человек прямо сказал, что спрашивает о своём."""
-    source = inspect.getsource(AgentRuntime._prepare_context)
-    at = source.index("household = ")
-    assert "not personal_cue" in source[at : at + 700]
+def test_a_question_about_a_person_clears_documents_on_purpose(settings, storage) -> None:
+    """Вид «человек» — единственный из «своих», который архив ОБНУЛЯЕТ, и намеренно.
+
+    На «что писал Пегас» отвечает инструмент надзора. Рядом с его ответом
+    подсказка «похожее в архиве есть, но не по делу» уезжала в контекст, и модель
+    пересказывала подсказку вместо данных — владелец видел это на живой переписке.
+
+    Записано отдельным тестом, потому что при написании соседней проверки я сама
+    решила, что «человек» документы сохраняет. Тест это опроверг.
+    """
+    context, _ = _prepared(settings, storage, "что писал Пегас", ABOUT_A_PERSON, score=0.9)
+
+    assert context.knowledge_hits == []
+
+
+def test_a_personal_cue_still_wins(settings, storage) -> None:
+    """«В моей базе», «у меня» — человек прямо сказал, что спрашивает о своём.
+
+    Слабое совпадение (0.1) выбрано намеренно: без указания на своё документы
+    отбросил бы порог, поэтому проверка ловит именно спасающее действие подсказки.
+    """
+    context, _ = _prepared(settings, storage, "что у меня по поверке", HOUSEHOLD, score=0.1)
+
+    assert context.knowledge_hits, "прямое указание на свои материалы перестало спасать документы"
 
 
 def test_the_measured_threshold_is_still_the_one_used() -> None:
