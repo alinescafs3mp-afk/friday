@@ -418,7 +418,8 @@ class TransportMixin(BridgeShared):
             # идти за ним в другую команду, и половина смысла проактивности теряется.
             markup = None
             dedup_key = str(item.get("dedup_key") or "")
-            if str(item.get("kind") or "") == "approval" and dedup_key.startswith("approval:"):
+            kind = str(item.get("kind") or "")
+            if kind == "approval" and dedup_key.startswith("approval:"):
                 approval_id = dedup_key.split(":", 1)[1]
                 if CALLBACK_TARGET_RE.fullmatch(approval_id):
                     markup = {
@@ -426,6 +427,24 @@ class TransportMixin(BridgeShared):
                             [
                                 {"text": "✓ Подтвердить", "callback_data": f"apr:yes:{approval_id}"},
                                 {"text": "✕ Отклонить", "callback_data": f"apr:no:{approval_id}"},
+                            ]
+                        ]
+                    }
+            elif kind == "mission" and dedup_key.startswith("mission:"):
+                # По той же причине, что и у заявки: миссия, ждущая запуска,
+                # приходила бы текстом «откройте /missions» — то есть просьбой
+                # сходить за решением в другую команду.
+                #
+                # Кнопки те же, что в списке миссий, и обработчик у них общий:
+                # заводить второй путь к тому же действию значит однажды их
+                # рассинхронизировать.
+                mission_id = dedup_key.split(":", 1)[1]
+                if CALLBACK_TARGET_RE.fullmatch(mission_id):
+                    markup = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "▶ Запустить", "callback_data": f"mission:start:{mission_id}"},
+                                {"text": "✕ Остановить", "callback_data": f"mission:stop:{mission_id}"},
                             ]
                         ]
                     }

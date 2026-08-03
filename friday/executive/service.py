@@ -194,7 +194,62 @@ class ExecutiveService:
             mission_id,
             after={"origin": origin_enum.value, "status": status.value, "tasks": len(tasks)},
         )
+        self._notify_if_waiting(user_id, mission_id, title, status, len(tasks), created_by)
         return self.get_mission_view(mission_id, user_id) or (persisted or {})
+
+    def _notify_if_waiting(
+        self,
+        user_id: str,
+        mission_id: str,
+        title: str,
+        status: MissionStatus,
+        task_count: int,
+        created_by: str,
+    ) -> None:
+        """Миссия, ждущая решения, идёт к человеку сама.
+
+        Найдено 2026-08-03: в базе владельца висела миссия в статусе `proposed`,
+        созданная 26 июля, — НЕДЕЛЮ. Узнать о ней можно было только набрав
+        `/missions`, то есть спросив о том, о чём не знаешь.
+
+        Ровно та же половинчатость, которую уже лечили у заявок на подтверждение
+        (`_notify_pending_approval`): механизм есть, действие ждёт, а человек не
+        оповещён. Доставка идёт тем же путём и через тот же предохранитель — в
+        личный чат, потому что миссия называет, что предлагается сделать с
+        личными данными.
+
+        Уведомляются только те состояния, где ход за ЧЕЛОВЕКОМ: `proposed` (ждёт
+        запуска) и `blocked` (автономия выключена). Про `ready` и `running`
+        сообщать незачем — там система работает сама, и сообщение было бы шумом.
+        """
+        if status not in {MissionStatus.PROPOSED, MissionStatus.BLOCKED}:
+            return
+        # Чат — у ЧЕЛОВЕКА, а не у арендатора: в общем архиве `user_id` у всех
+        # один, и предложение уходило бы владельцу архива вместо того, кто его
+        # затронул. Тот же разбор, что у заявок.
+        person = str(created_by or "").strip() or user_id
+        try:
+            from friday.organs import may_push_to, resolve_chat_id
+
+            chat_id = resolve_chat_id(self.storage, person)
+            if not chat_id:
+                return
+            if not may_push_to(self.settings, self.storage, person, chat_id):
+                return
+            waiting = (
+                "ждёт запуска"
+                if status is MissionStatus.PROPOSED
+                else "не может начаться: автономия выключена"
+            )
+            self.storage.enqueue_notification(
+                person,
+                chat_id,
+                f"Миссия {waiting}: {title}\n\nШагов: {task_count}. Открыть: /missions",
+                kind="mission",
+                dedup_key=f"mission:{mission_id}",
+            )
+        except Exception:  # noqa: BLE001 — недоставленное уведомление не отменяет миссию
+            LOGGER.warning("Could not queue a mission notification", exc_info=True)
 
     def _initial_status(self, origin: MissionOrigin) -> MissionStatus:
         if not self.settings.autonomy_enabled:
