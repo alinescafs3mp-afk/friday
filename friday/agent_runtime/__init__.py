@@ -1952,7 +1952,7 @@ class AgentRuntime:
         # опирается ни на одну запись вашей базы»: сборка не попадала в
         # основания хода, и выглядело это как ответ из ниоткуда.
         await self._prefetch_the_archive_if_asked(
-            context, actor, messages, tools_used, tool_evidence, file_clips
+            context, actor, messages, tools_used, tool_evidence, file_clips, tools
         )
         total_calls = 0
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
@@ -2353,6 +2353,7 @@ class AgentRuntime:
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
         file_clips: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Просили собрать присланные файлы за какие-то дни — собираем.
 
@@ -2414,6 +2415,18 @@ class AgentRuntime:
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "collect_files", "output": result.to_llm_message()})
         file_clips.append(dict(result.attachment))
+        # Инструмент УБИРАЕТСЯ из набора на этот ход.
+        #
+        # Замерено на живом экземпляре 2026-08-03: архив собрался предварительно,
+        # а модель позвала `collect_files` ещё раз — и человек получил ДВА
+        # одинаковых файла. Сказать ей «уже собрано» мало: решение звать
+        # инструмент остаётся её, и половину раз она его принимает по-своему.
+        if tools is not None:
+            tools[:] = [
+                tool
+                for tool in tools
+                if str((tool.get("function") or {}).get("name") or "") != "collect_files"
+            ]
         # Даты называются ЯВНО и в том виде, в каком они разобраны, — иначе модель
         # пересказывает число из реплики человека («28 августа») вместо того, что
         # собрано на самом деле (28 июля).

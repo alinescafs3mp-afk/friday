@@ -517,6 +517,60 @@ async def test_a_failed_assembly_does_not_turn_into_an_invented_document() -> No
     assert "not context.asked_for_an_archive" in guard, "выдумка снова заменяет архив"
 
 
+@pytest.mark.anyio
+async def test_the_same_archive_does_not_arrive_twice() -> None:
+    """Замерено на живом экземпляре 2026-08-03: человек получил ДВА одинаковых архива.
+
+    Собрала предварительная сборка, а потом модель позвала `collect_files` сама.
+    Сказать ей «уже собрано» мало — решение звать инструмент остаётся её.
+    """
+    from friday.agent_runtime import AgentContext, AgentRuntime
+
+    class _Kernel:
+        async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+            class _Result:
+                success = True
+                data = {"filename": "Д.zip", "files_in_archive": 3, "days": ["2026-07-26"]}
+                attachment = {"filename": "Д.zip", "content_base64": "UEs="}
+
+                def to_llm_message(self) -> str:
+                    return "Архив: 3 файла."
+
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "26"))
+    tools = [
+        {"function": {"name": "collect_files"}},
+        {"function": {"name": "make_file"}},
+    ]
+    bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
+
+    await bound(context, None, [], [], [], [], tools)
+
+    names = [str((tool.get("function") or {}).get("name")) for tool in tools]
+    assert "collect_files" not in names, "модель может собрать второй такой же архив"
+    assert "make_file" in names, "остальные инструменты трогать не за чем"
+
+
+def test_what_did_not_fit_is_counted_by_the_code_not_the_model() -> None:
+    """Замерено: модель сложила числа по-своему и сказала неправду.
+
+    Инструмент отдавал «файлов 1671, вошли первые 160» и отдельно 140
+    пропущенных имён; в ответе человеку получилось «остальные 140 не
+    поместились», хотя не вошло 1511. Там, где ошибка в сложении меняет смысл,
+    считать должен код.
+    """
+    import inspect
+
+    from friday.execution_kernel import ExecutionKernel
+
+    source = inspect.getsource(ExecutionKernel._collect_files)
+    assert "missed = total - packed_count" in source, "разность снова считает модель"
+    assert "не вошло {missed}" in source
+
+
 def test_the_successful_notice_is_safe_to_repeat_verbatim() -> None:
     """Тот же класс, что и у неудачи: пересказ служебной строки не должен вредить."""
     import inspect

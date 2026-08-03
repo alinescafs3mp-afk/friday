@@ -2415,10 +2415,23 @@ class ExecutionKernel:
             # которым он и пришёл.
             result["left_out"] = skipped[:20]
             result["left_out_count"] = len(skipped)
-        if total > len(page):
-            result["not_all"] = (
-                f"за эти дни файлов {total}, в архив вошли первые {len(page) - len(skipped)}"
-            )
+        packed_count = len(page) - len(skipped)
+        if total > packed_count:
+            # Готовая фраза, а не слагаемые. Замерено на живом экземпляре
+            # 2026-08-03: инструмент отдавал «файлов 1671, вошли первые 160» и
+            # отдельно 140 пропущенных имён — модель сложила это по-своему и
+            # сказала человеку «остальные 140 не поместились», хотя не вошло
+            # 1511. Складывать числа она не обязана, и там, где ошибка меняет
+            # смысл, считать должен код.
+            missed = total - packed_count
+            detail = f"за эти дни файлов {total}, в архив вошло {packed_count}, не вошло {missed}"
+            if skipped:
+                detail += (
+                    f" (из них {len(skipped)} не поместились по объёму или потерялись, "
+                    f"остальные не рассматривались: за один раз берётся не больше "
+                    f"{_MAX_ARCHIVE_FILES} файлов)"
+                )
+            result["not_all"] = detail
         return result
 
     async def _resolve_duplicates(self, *, actor: ActorContext) -> dict[str, Any]:
