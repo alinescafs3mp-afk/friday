@@ -1241,6 +1241,23 @@ class ExecutionKernel:
         timeout = 30
         if self.settings:
             timeout = max(1, self.settings.code_execution_timeout_sec if name == "code_run" else 30)
+        # Инструмент, МЕНЯЮЩИЙ данные, получает запись о начале ДО вызова.
+        #
+        # Разбор Codex §14, воспроизведено: аудит писался только после возврата
+        # обработчика, поэтому обрыв через `BaseException` — отмена задачи,
+        # остановка процесса — оставлял эффект в базе и НОЛЬ записей о вызове. Со
+        # стороны это выглядит как «инструмент не звали».
+        #
+        # Оборванная пара «начал / нет конца» сама является доказательством
+        # незавершённости, и в этом весь смысл: восстановить её постфактум нельзя,
+        # а увидеть — можно.
+        #
+        # Наблюдающие инструменты не трогаются: у чтения нет эффекта, о котором
+        # можно не знать, а лишняя пара записей на каждый поиск засоряет журнал,
+        # в котором ищут настоящие действия.
+        changes_data = tool.risk in {"mutate", "high"}
+        if changes_data:
+            await self._audit(actor, name, True, "started", details=details)
         try:
             async with asyncio.timeout(timeout):
                 data = await tool.handler(actor=actor, **(arguments or {}))
@@ -1254,9 +1271,32 @@ class ExecutionKernel:
                 attachment = data.pop("_attachment")
             return ToolResult(name, True, data=data, attachment=attachment)
         except TimeoutError:
+            # Таймаут наступает ПОСЛЕ начала работы, а значит эффект мог случиться.
+            #
+            # Прежний текст «Tool execution timed out» читается человеком и моделью
+            # как «ничего не вышло», и следующий шаг — повторить. Эффект при этом
+            # уже есть, и повтор делает его вторым. Особенно у отменённого
+            # `asyncio.to_thread`: ожидание прервано, а поток может продолжать
+            # писать в базу.
+            #
+            # Наблюдающему инструменту таймаут ничем не грозит: читать нечего
+            # дважды, и там остаётся прежний честный отказ.
+            if changes_data:
+                await self._audit(actor, name, False, "uncertain", details=details)
+                return ToolResult(
+                    name,
+                    False,
+                    error=(
+                        "Инструмент не ответил вовремя, и НЕИЗВЕСТНО, успел ли он "
+                        "выполнить действие. Проверьте результат, прежде чем повторять."
+                    ),
+                )
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
         except (TypeError, ValueError) as exc:
+            # Разбор аргументов случается ДО эффекта: это обычный отказ, и
+            # объявлять его неизвестным нельзя. Если неизвестно всё, слово теряет
+            # смысл и человек перестаёт его читать.
             await self._audit(actor, name, False, "invalid_arguments", details=details)
             return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
         except Exception as exc:
