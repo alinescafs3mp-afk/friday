@@ -1271,6 +1271,10 @@ class AgentContext:
     #: Предыдущая реплика человека — для арбитров, которым короткое продолжение
     #: без неё читается как чужое.
     previous_user_turn: str = ""
+    #: Последний ответ Пятницы — то, что поправляют. Без него поправка
+    #: формулируется обрывком: «дату 27 ноября» вместо «День морской пехоты —
+    #: 27 ноября». Предмет разговора живёт в ЕЁ реплике, а не в его.
+    previous_answer: str = ""
     #: ЧЕЛОВЕК, а не арендатор. `user_id` здесь намеренно общий: искать надо в том
     #: архиве, который человеку открыт, и в общем режиме это общий корпус. Но
     #: указания о поведении и поправки — личные, и хранить их по `user_id` значило
@@ -1929,6 +1933,17 @@ class AgentRuntime:
             # Тот же кусок предыстории нужен арбитру указаний: «а можно наоборот?»
             # без предыдущей реплики не читается вовсе.
             context.previous_user_turn = previous
+            # А поправке нужен ПОСЛЕДНИЙ ОТВЕТ ПЯТНИЦЫ — то, что исправляют.
+            #
+            # Живой прогон 2026-08-03: на «нет, не 27 июля, а 27 ноября» в память
+            # легло «дату 27 ноября» — обрывок, не читаемый сам по себе. Промпт
+            # прямо требует самодостаточной формулировки, но выполнить это было
+            # НЕЧЕМ: арбитр видел только реплики человека, а исправляли ответ
+            # Пятницы, где и стоял предмет разговора.
+            for item in reversed(context.conversation_history or []):
+                if str(item.get("role") or "") == "assistant":
+                    context.previous_answer = str(item.get("content") or "")[:400]
+                    break
             arbiter = asyncio.create_task(
                 self._web_query_by_arbiter(message, previous_turn=previous)
             )
@@ -2729,7 +2744,12 @@ class AgentRuntime:
         return rules[:_STANDING_RULE_LIMIT]
 
     async def _standing_rule_by_arbiter(
-        self, message: str, existing: list[str], *, previous_turn: str = ""
+        self,
+        message: str,
+        existing: list[str],
+        *,
+        previous_turn: str = "",
+        corrected_answer: str = "",
     ) -> tuple[str, str, str]:
         """Что именно человек велел: запомнить, заменить прежнее или отменить.
 
@@ -2778,6 +2798,23 @@ class AgentRuntime:
                     *(
                         [{"role": "system", "content": f"Предыдущий ход разговора: {previous_turn[:400]}"}]
                         if previous_turn.strip()
+                        else []
+                    ),
+                    # Ответ, который поправляют. Без него формулировка выходит
+                    # обрывком — «дату 27 ноября» вместо «День морской пехоты —
+                    # 27 ноября», — потому что предмет разговора живёт здесь, а
+                    # не в реплике человека. Замерено живым прогоном 2026-08-03.
+                    *(
+                        [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Твой ответ, который сейчас исправляют: "
+                                    f"{corrected_answer[:400]}"
+                                ),
+                            }
+                        ]
+                        if corrected_answer.strip()
                         else []
                     ),
                     {"role": "user", "content": message[:600]},
@@ -2925,7 +2962,10 @@ class AgentRuntime:
             return
         existing = self._corrections(context.person_id or context.user_id)
         action, correction, previous = await self._standing_rule_by_arbiter(
-            message, existing, previous_turn=context.previous_user_turn
+            message,
+            existing,
+            previous_turn=context.previous_user_turn,
+            corrected_answer=context.previous_answer,
         )
         if not action:
             LOGGER.info("correction: поправка не подтвердилась, предложено было %r", proposed)
@@ -3608,7 +3648,14 @@ class AgentRuntime:
         # само по себе разумно. Здесь они связаны: если про источник уже решено,
         # что это быт, поручение или внешний мир, лента не поднимается.
         kind = str((getattr(context, "outward_verdict", None) or ("", None))[0] or "")
-        if kind.startswith(("быт", "действие", "интернет")):
+        # «Правило» и «поправка» добавлены 2026-08-03 после живого прогона: на
+        # «нет, не 27 июля, а 27 ноября» человек получил не «поняла, исправила», а
+        # отчёт по архиву — «27 ноября 2025 года появилось одно событие: документ
+        # VPN-конфигурации». Дата в поправке подняла ленту событий.
+        #
+        # Тот же класс, что уже чинился для быта и поручений, и я его тогда не
+        # дообошла: список видов пополнялся, а исключение — нет.
+        if kind.startswith(("быт", "действие", "интернет", "правило", "поправка")):
             return
         period = period_from_question(message)
         moment = period[0] if period else moment_from_question(message)
