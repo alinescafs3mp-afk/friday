@@ -819,6 +819,15 @@ async def _authenticate(request: Request) -> ActorContext:
 async def _enforce_rate_limit(request: Request, actor: ActorContext) -> None:
     settings: FridaySettings = request.app.state.settings
     limiter: SlidingWindowLimiter = request.app.state.rate_limiter
+    # Личный бюджет считается по ЧЕЛОВЕКУ, а не по архиву.
+    #
+    # Разбор Codex §12.4, воспроизведено: ключи строились по `actor.user_id`, а в
+    # общем архиве это арендатор, один на всех. Один шумный участник выбирал
+    # бюджет остальных, включая владельца, и те получали 429 за чужую активность.
+    #
+    # Отказ здесь дороже, чем кажется: человеку приходит «слишком часто пишете»,
+    # хотя часто писал не он, и понять это по ответу невозможно.
+    principal = actor.own_id
     if actor.source == "telegram-bridge":
         if not await limiter.allow(
             "telegram:global",
@@ -830,7 +839,7 @@ async def _enforce_rate_limit(request: Request, actor: ActorContext) -> None:
                 headers={"Retry-After": "60"},
             )
         if not await limiter.allow(
-            f"telegram:user:{actor.user_id}",
+            f"telegram:user:{principal}",
             settings.telegram_user_rate_limit_per_minute,
         ):
             raise HTTPException(
@@ -839,7 +848,7 @@ async def _enforce_rate_limit(request: Request, actor: ActorContext) -> None:
                 headers={"Retry-After": "60"},
             )
     elif not await limiter.allow(
-        f"api:user:{actor.user_id}",
+        f"api:user:{principal}",
         settings.api_user_rate_limit_per_minute,
     ):
         raise HTTPException(
