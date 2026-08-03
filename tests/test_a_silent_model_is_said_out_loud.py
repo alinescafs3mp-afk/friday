@@ -126,11 +126,74 @@ def test_the_disabled_model_is_not_called_a_failure() -> None:
 
 
 def test_found_material_is_still_offered_with_the_reason_on_top() -> None:
-    """Отказ не отменяет пользы: что нашлось — показать, но причину сказать первой."""
-    hits = [{"title": "Поверка", "summary": "порядок и сроки"}]
+    """Отказ не отменяет пользы: что нашлось — показать, но причину сказать первой.
+
+    Уточнено 2026-08-03 по живому отказу: показывается не «что нашлось вообще», а
+    что нашлось УВЕРЕННО по вопросу, который сам указывает на свои материалы.
+    Ядро проверки осталось прежним — польза не отменяется и причина стоит первой.
+    """
+    hits = [{"title": "Поверка", "summary": "порядок и сроки", "_rerank_score": 0.81}]
     text = AgentRuntime._offline_response(
         _context(kb_size=5, knowledge_hits=hits, answer_mode="personal_knowledge"),
         unreachable=True,
+        message="что там по поверке в моей базе",
     )
     assert text.splitlines()[0].casefold().startswith("⚠️ не могу связаться")
     assert "Поверка" in text
+
+
+def test_an_outage_does_not_dump_the_archive_at_a_stray_remark() -> None:
+    """Найдено на живом отказе 2026-08-03.
+
+    За двадцать минут человек получил восемь отказов подряд, пять из них — с
+    выдержками из документов на 700–1200 знаков, включая таблицы. Одно из его
+    сообщений было длиной в ЧЕТЫРЕ знака.
+
+    Причина не в пороге совпадения, а в том, что при отказе модели не остаётся
+    ничего, что понимает вопрос: намерение распознаёт арбитр, а он работает через
+    ту же модель. Поиск при этом отрабатывает всегда, и у короткой реплики счёт
+    совпадения ВЫШЕ, чем у настоящего вопроса. Чем меньше человек написал, тем
+    увереннее ему показывали чужой документ.
+    """
+    hits = [{"title": "Ведомость", "summary": "таблица со сроками", "_rerank_score": 0.83}]
+    text = AgentRuntime._offline_response(
+        _context(kb_size=1533, knowledge_hits=hits, answer_mode="personal_knowledge"),
+        unreachable=True,
+        message="Э-э",
+    )
+
+    assert "Ведомость" not in text, "документ ушёл человеку в ответ на междометие"
+    assert "таблица со сроками" not in text
+    assert "не отвеча" in text.splitlines()[0].casefold()
+
+
+def test_the_promise_in_the_header_matches_what_follows() -> None:
+    """«Пробую обойтись тем, что есть в архиве» — обещание, а не украшение.
+
+    Если архив не показывается, эта фраза обещает человеку то, чего дальше нет:
+    он дочитывает до конца в поисках обещанного. Служебная строка обязана читаться
+    как правда — класс, чинившийся на этом проекте дважды.
+    """
+    silent = AgentRuntime._offline_response(
+        _context(kb_size=1533, knowledge_hits=[]), unreachable=True, message="привет"
+    )
+    assert "в архиве" not in silent.splitlines()[0].casefold()
+
+    hits = [{"title": "Поверка", "summary": "сроки", "_rerank_score": 0.7}]
+    shown = AgentRuntime._offline_response(
+        _context(kb_size=5, knowledge_hits=hits, answer_mode="personal_knowledge"),
+        unreachable=True,
+        message="что у меня по поверке",
+    )
+    assert "в архиве" in shown.splitlines()[0].casefold()
+
+
+def test_a_weak_match_stays_hidden_even_on_a_proper_question() -> None:
+    """Два признака нужны ОБА: замеренный порог 0.5 не отменяется словом «мои»."""
+    hits = [{"title": "Ведомость", "summary": "таблица", "_rerank_score": 0.2}]
+    text = AgentRuntime._offline_response(
+        _context(kb_size=1533, knowledge_hits=hits, answer_mode="personal_knowledge"),
+        unreachable=True,
+        message="что там по моим приборам",
+    )
+    assert "Ведомость" not in text

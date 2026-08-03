@@ -188,6 +188,69 @@ class AccountsMixin(StorageShared):
             )
         return self.get_user(user_id)
 
+    def remember_standing_rule(
+        self,
+        user_id: str,
+        rule: str,
+        *,
+        replaces: str = "",
+        forget: str = "",
+        limit: int = 12,
+        chars: int = 200,
+    ) -> list[str]:
+        """Запомнить указание человека о том, как Пятнице себя вести. Или снять его.
+
+        Чтение и запись — в ОДНОЙ транзакции, в отличие от `/api/me/instructions`,
+        который читает метаданные, меняет их в памяти и кладёт обратно. Там это
+        безопасно: настройку правит человек руками, изредка. Здесь пишет сам ход
+        разговора, и два хода подряд (или ход и одновременная правка из админки)
+        при том же приёме потеряли бы одну из правок целиком — вместе со ВСЕМИ
+        остальными ключами метаданных, а не только со списком правил.
+
+        `replaces`/`forget` — текст правила, которое новое указание заменяет или
+        отменяет. Сравнение по точному тексту не годится: человек говорит «не
+        надо больше про смайлики», а лежит «не ставить смайлики в ответах». Кто
+        именно заменяется, решает арбитр выше по стеку — он видит и старые
+        формулировки, и новую; сюда приходит уже выбранная строка.
+
+        Возвращается получившийся список — вызывающему он нужен целиком, чтобы
+        положить в контекст ЭТОГО же хода, а не следующего.
+        """
+        rule = " ".join(str(rule or "").split())[:chars]
+        replaces = " ".join(str(replaces or "").split())[:chars]
+        forget = " ".join(str(forget or "").split())[:chars]
+        with self.transaction() as conn:
+            row = conn.execute("SELECT metadata_json FROM users WHERE id=?", (user_id,)).fetchone()
+            if row is None:
+                return []
+            metadata = _json_load(row["metadata_json"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            raw = metadata.get("standing_rules")
+            rules: list[str] = []
+            for item in raw if isinstance(raw, list) else []:
+                text = item if isinstance(item, str) else str((item or {}).get("text") or "")
+                text = " ".join(str(text).split())[:chars]
+                if text and text not in rules:
+                    rules.append(text)
+            for gone in (replaces, forget):
+                if gone and gone in rules:
+                    rules.remove(gone)
+            if rule:
+                # Новое правило встаёт первым: при переполнении списка вытесняется
+                # самое старое, а не только что сказанное.
+                rules = [rule] + [existing for existing in rules if existing != rule]
+            rules = rules[:limit]
+            if rules:
+                metadata["standing_rules"] = rules
+            else:
+                metadata.pop("standing_rules", None)
+            conn.execute(
+                "UPDATE users SET metadata_json=?, updated_at=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False, sort_keys=True), utc_now(), user_id),
+            )
+        return rules
+
     def create_api_token(
         self,
         user_id: str,

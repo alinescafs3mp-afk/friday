@@ -132,7 +132,12 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: совпадала по хешу файла.
 #: +1 к 308: `chat_feed_cursor` — отпечаток ленты переписки. Панель спрашивает
 #: его раз в несколько секунд вместо самой ленты: 2 мс против 34 мс.
-EXPECTED_MEMBER_COUNT = 309
+#: +1 к 309: `remember_standing_rule` — указание человека о том, как Пятнице себя
+#: вести, сказанное в разговоре. Чтение и запись метаданных идут одной
+#: транзакцией, в отличие от `/api/me/instructions`: там правит человек руками и
+#: изредка, здесь пишет сам ход разговора, и два хода подряд при том же приёме
+#: потеряли бы одну из правок вместе со ВСЕМИ остальными ключами метаданных.
+EXPECTED_MEMBER_COUNT = 310
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
