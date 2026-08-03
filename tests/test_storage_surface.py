@@ -142,7 +142,13 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: не 27 июля») — не указание о СТИЛЕ, а сведение о том, ЧТО правда, и списки
 #: разные. Механика у них одна, поэтому тело вынесено: держать две копии значило
 #: бы починить гонку в одном месте и забыть в другом.
-EXPECTED_MEMBER_COUNT = 312
+#: +8 к 312: слой ночных сводок (`begin_day_compact`, `finish_day_compact`,
+#: `abandon_day_compact`, `get_day_compact`, `list_day_compacts`,
+#: `count_day_compacts`, `days_needing_a_compact` и разбор строки `_compact_row`).
+#: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
+#: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
+#: списке не появилось — очищать нечего.
+EXPECTED_MEMBER_COUNT = 320
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",

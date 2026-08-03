@@ -25,6 +25,7 @@ from friday.storage._base import (
     normalize_entity_name,
     validate_user_id,
 )
+from friday.storage._compacts import CompactsMixin
 from friday.storage._conversations import ConversationsMixin
 from friday.storage._core import CoreMixin, iso_date
 from friday.storage._feedback import FeedbackMixin
@@ -57,6 +58,7 @@ __all__ = [
 class FridayStorage(
     AccountsMixin,
     ApprovalsMixin,
+    CompactsMixin,
     ConversationsMixin,
     CoreMixin,
     FeedbackMixin,

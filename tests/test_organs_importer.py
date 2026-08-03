@@ -175,6 +175,9 @@ def test_registry_has_all_organs(settings):
         "importer",
         "monitors",
         "sentinel",
+        # Ночная сводка о поведении системы за сутки. Заказ владельца
+        # 2026-08-04; обезличивание делает структура, модель корпуса не видит.
+        "compactor",
     }
 
 

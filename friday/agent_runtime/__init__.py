@@ -1429,6 +1429,10 @@ class AgentContext:
     #: Чего система НЕ решила: остаток реплики, на который отвечает модель.
     #: Пустая строка ЗНАЧИМА только вместе с `remainder_known`.
     open_remainder: str = ""
+    #: Ответ объявил себя чужим продуктом и был заменён правдой. Признак хода, а
+    #: не логики: он нужен ночному компактору, чтобы такой ход было видно в
+    #: сводке за сутки без чтения переписки.
+    self_description_replaced: bool = False
     #: Уехала ли модели выведенная модель пользователя (люди, проекты, интересы).
     #: Нужна не логике, а честности предупреждений: данные из архива приезжают
     #: ТРЕМЯ дорогами, а метки `[K#]` покрывают одну.
@@ -1718,6 +1722,7 @@ class AgentRuntime:
             LOGGER.warning("self-description: ответ назвал себя чужим продуктом, заменён")
             content = _self_description(self.settings, served_name=self._served_model_name())
             response["content"] = content
+            context.self_description_replaced = True
         model_said = content
         # Читается ПОСЛЕ цикла: к утверждению могли добавиться факты о том, что
         # цикл успел СДЕЛАТЬ, — поставленное напоминание, собранный архив.
@@ -2004,6 +2009,30 @@ class AgentRuntime:
                 "answer_grounded": answer_grounded,
                 "grounding_warning": grounding_warning,
                 "work_product": context.interaction_mode in {"knowledge_work", "research"},
+                # Структурные признаки хода — для ночного компактора.
+                #
+                # ТОЛЬКО булевы значения и вид вердикта из закрытого списка. Ни
+                # одной строки, выведенной из переписки: компакт собирается из
+                # этого блока, и утечке должно быть физически неоткуда взяться.
+                # Рядом в этих же метаданных лежат `search_query` (сырая реплика
+                # человека) и `retrieval_trace` (имена его документов) — потому
+                # список полей компактора и разрешительный, а не запретительный.
+                #
+                # Пишутся ЗДЕСЬ, а не выводятся потом из текста: половина этих
+                # признаков (было ли утверждение структурным, знали ли остаток) в
+                # готовом ответе уже неразличима.
+                "structural": {
+                    "verdict_kind": str((context.outward_verdict or ("", None))[0] or ""),
+                    "answer_present": bool(spoken),
+                    "model_spoke": bool(model_said),
+                    "remainder_known": context.remainder_known,
+                    "rule_learned": bool(context.rule_learned),
+                    "rule_forgotten": bool(context.rule_forgotten),
+                    "rule_refused": context.rule_refused,
+                    "correction_learned": bool(context.correction_learned),
+                    "self_description_replaced": context.self_description_replaced,
+                    "llm_failed": bool(response.get("llm_failed")),
+                },
             },
         )
         if attributed_knowledge_ids:

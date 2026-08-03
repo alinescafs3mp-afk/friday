@@ -749,6 +749,47 @@ CREATE INDEX IF NOT EXISTS idx_approvals_user_status
 CREATE INDEX IF NOT EXISTS idx_approvals_pending_expiry
     ON action_approvals(status, expires_at);
 
+-- Ночная сводка о ПОВЕДЕНИИ системы за сутки. Заказ владельца 2026-08-04,
+-- проект — `artifacts/compactor_design.md`.
+--
+-- В таблице НЕТ НИ ОДНОЙ СТРОКИ, ВЫВЕДЕННОЙ ИЗ ПЕРЕПИСКИ, и это свойство схемы,
+-- а не фильтра. Инцидент хранится перечислимым кодом, человеческая формулировка
+-- рендерится при чтении из таблицы шаблонов в коде. Тогда утечке некуда попасть,
+-- и «не просочилось ли имя» перестаёт быть надеждой на обезличивание.
+--
+-- Обоснование: обезличивание НЕ поручено модели. За двое суток пять раз
+-- замерено, что промптовые ограничения не работают как механизм, а корпус
+-- содержит фамилии, звания и названия подразделений.
+--
+-- `principal` — ЧЕЛОВЕК, не арендатор: в общем архиве корпус общий, а переписка
+-- личная, и сводка о ней тоже. Тот же класс, что закрывался в правилах,
+-- поправках и заявках на подтверждение.
+--
+-- UNIQUE(principal, local_date) — идемпотентность ПО ПОСТРОЕНИЮ: повторный
+-- прогон за те же сутки делает UPSERT, и дубль создать просто нечем.
+--
+-- `status` — тот же приём, что у оборванных мутаторов: запись «начал» ставится
+-- ДО работы, поэтому пара «начал / нет конца» сама доказывает незавершённость, и
+-- следующий прогон видит, какой день переделать.
+CREATE TABLE IF NOT EXISTS day_compacts (
+    id TEXT PRIMARY KEY,
+    principal TEXT NOT NULL REFERENCES users(id),
+    local_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'started'
+        CHECK(status IN ('started', 'done', 'uncertain')),
+    source_turns INTEGER NOT NULL DEFAULT 0,
+    counters_json TEXT NOT NULL DEFAULT '{}',
+    incidents_json TEXT NOT NULL DEFAULT '[]',
+    patterns_json TEXT NOT NULL DEFAULT '[]',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    deleted_at TEXT,
+    UNIQUE(principal, local_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_day_compacts_person
+    ON day_compacts(principal, local_date DESC);
+
 -- Retrieval eval gold set: a query paired with the Knowledge Objects that a
 -- good search must surface. Measured periodically to catch quality regressions.
 CREATE TABLE IF NOT EXISTS eval_cases (

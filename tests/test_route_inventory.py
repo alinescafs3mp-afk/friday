@@ -57,7 +57,10 @@ from friday.server import create_app
 #: +1 к 178: `GET /api/admin/chats/cursor` — дешёвая метка «лента переписки
 #: изменилась». Панель обновляет её сама, как мессенджер, и опрашивать ради
 #: этого саму ленту было бы платой ни за что: замерено 2.1 мс против 34.4 мс.
-EXPECTED_OPERATIONS = 179
+#: +1 к 179: `GET /api/compacts` — ночная сводка о поведении системы за сутки
+#: (заказ владельца 2026-08-04). Отдаёт коды инцидентов и счётчики; ни одной
+#: строки, выведенной из переписки, там нет по построению схемы.
+EXPECTED_OPERATIONS = 180
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

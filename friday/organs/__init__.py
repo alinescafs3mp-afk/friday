@@ -272,6 +272,7 @@ def in_quiet_hours(hour: int, start: int, end: int) -> bool:
 def build_registry(settings: FridaySettings) -> OrganRegistry:
     """Instantiate the built-in organs. New organs are added to this list."""
     from friday.organs.chronicle import ChronicleOrgan
+    from friday.organs.compactor import CompactorOrgan
     from friday.organs.importer import ImporterOrgan
     from friday.organs.monitors import MonitorsOrgan
     from friday.organs.profile import ProfileOrgan
@@ -287,6 +288,7 @@ def build_registry(settings: FridaySettings) -> OrganRegistry:
         ImporterOrgan(),
         MonitorsOrgan(),
         SentinelOrgan(),
+        CompactorOrgan(),
     ]
     return OrganRegistry(organs)
 
@@ -314,4 +316,5 @@ BUILTIN_ORGAN_NAMES: tuple[str, ...] = (
     "importer",
     "monitors",
     "sentinel",
+    "compactor",
 )
