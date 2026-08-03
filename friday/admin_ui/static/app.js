@@ -49,7 +49,7 @@ actions.lifecyclePage=direction=>pageStep('lifecycleOffset',direction);
 // Вкладка живёт в адресе. Обновление страницы возвращало на «Обзор», и человек,
 // работавший в переписке или в графе, каждый раз начинал заново; адрес заодно
 // становится ссылкой, которой можно поделиться и вернуться.
-function navigate(view,{push=true}={}){state.view=view;resetPages();renderNav();document.getElementById('pageTitle').textContent=views.find(v=>v[0]===view)?.[1]||view;document.getElementById('sidebar').classList.remove('open');if(push)rememberView(view);refresh()}
+function navigate(view,{push=true}={}){state.view=view;resetPages();if(view==='chats')startLiveChats();else stopLiveChats();renderNav();document.getElementById('pageTitle').textContent=views.find(v=>v[0]===view)?.[1]||view;document.getElementById('sidebar').classList.remove('open');if(push)rememberView(view);refresh()}
 function rememberView(view){try{sessionStorage.setItem('jericho_admin_view',view)}catch(e){}const hash='#'+view;if(location.hash!==hash)history.replaceState(null,'',location.pathname+location.search+hash)}
 // Что открыть при загрузке: сначала адрес (им делятся и его правят руками),
 // потом последняя вкладка этой сессии, и лишь затем «Обзор».
@@ -115,6 +115,65 @@ renderers.chats = async gen => {
 async function openChat(userId) {
   state.chatPerson = userId;
   await refresh();
+}
+
+// Живая переписка: вкладка обновляется сама, как обычный мессенджер.
+//
+// Заказ владельца: «хотелось бы, чтобы было как настоящий телеграм» — раньше
+// новое сообщение появлялось только после F5.
+//
+// Опрашивается ДЕШЁВАЯ метка (`/chats/cursor` — два агрегата), а не сама лента:
+// та собирается оконной функцией по всем сообщениям плюс четырьмя подзапросами,
+// и дёргать её каждые несколько секунд значило бы держать базу занятой впустую.
+// Полная перерисовка — только когда метка изменилась.
+const LIVE_PERIOD_MS = 4000;
+let liveTimer = null;
+let liveCursor = '';
+
+function stopLiveChats() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+}
+
+function startLiveChats() {
+  stopLiveChats();
+  liveTimer = setInterval(async () => {
+    // Ушли с вкладки или закрыли окно — не тратим ни запрос, ни батарею.
+    if (state.view !== 'chats' || document.hidden || !state.token) return;
+    try {
+      const mark = await api('/api/admin/chats/cursor');
+      const stamp = `${mark.total}:${mark.last_at}`;
+      if (stamp === liveCursor) return;
+      liveCursor = stamp;
+      await refreshChatsQuietly();
+    } catch (error) {
+      // Молча: обрыв сети на фоновом опросе не повод пугать человека тостом
+      // каждые четыре секунды. Следующий тик попробует снова.
+    }
+  }, LIVE_PERIOD_MS);
+}
+
+// Перерисовка БЕЗ «Загрузка…», с сохранением того, что человек делает прямо
+// сейчас: набранного ответа и места, до которого он дочитал.
+async function refreshChatsQuietly() {
+  const draft = document.getElementById('replyText')?.value || '';
+  const thread = document.querySelector('#chatThread .thread');
+  // «Прилипание» к низу, как в мессенджере: если человек читает старое, лента
+  // не должна выдёргивать его вниз при каждом новом сообщении.
+  const wasAtBottom = thread
+    ? thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80
+    : true;
+  const keptTop = thread ? thread.scrollTop : 0;
+  const gen = ++renderGen;
+  try {
+    await renderers.chats(gen);
+  } catch (error) {
+    return;
+  }
+  if (gen !== renderGen) return;
+  const field = document.getElementById('replyText');
+  if (field && draft) field.value = draft;
+  const fresh = document.querySelector('#chatThread .thread');
+  if (fresh) fresh.scrollTop = wasAtBottom ? fresh.scrollHeight : keptTop;
 }
 
 // Переписка человека: все его разговоры одной лентой, старые сверху — так же,
@@ -868,7 +927,7 @@ renderers.diagnostics=async gen=>{
   // были физически недостижимы из админки.
   const [d,s]=await Promise.all([api('/api/admin/diagnostics?check_llm=true'),api('/api/admin/settings')]);const db=d.database||{},backup=d.backups||{},workers=d.workers||{},lease=d.backend_lease||{},bq=d.bridge_queue||{};const actionCards=(d.actions||[]).map(a=>`<div class="card ${a.severity==='error'?'error':''}"><div class="toolbar"><span class="badge ${a.severity==='error'?'bad':a.severity==='warning'?'warn':'ok'}">${esc(a.severity)}</span><b>${esc(a.title)}</b></div><div>${esc(a.detail)}</div>${a.command?`<div class="pre mt10">${esc(a.command)}</div>`:''}</div>`).join('');setApp(gen,`<div class="grid stats"><div class="card stat"><div class="value">${esc(d.state||'unknown')}</div><div class="label">Общее состояние</div></div><div class="card stat"><div class="value">${esc(db.schema_version??'—')}</div><div class="label">Схема SQLite</div></div><div class="card stat"><div class="value">${backup.verified?'verified':esc(backup.state||'none')}</div><div class="label">Последняя копия</div></div><div class="card stat"><div class="value">${workers.healthy?'healthy':'attention'}</div><div class="label">Workers</div></div></div><div class="grid two"><section class="card"><h2>Операционное состояние</h2><div class="kv"><div>SQLite</div><div><span class="badge ${db.ok?'ok':'bad'}">${esc(db.state||db.integrity_check)}</span></div><div>Backend lease</div><div>${esc(lease.state||'unknown')} ${lease.pid?`· PID ${esc(lease.pid)}`:''}</div><div>Worker-задач</div><div>${Number(workers.task_count||0)}; failures ${(workers.degraded_tasks||[]).length}; stale ${(workers.stale_tasks||[]).length}</div><div>Очередь моста</div><div>${bq.state==='present'?`${Number(bq.pending||0)} pending · <span class="badge ${Number(bq.dead_letter||0)?'bad':'ok'}">${Number(bq.dead_letter||0)} dead-letter</span>`:'—'}</div><div>LLM</div><div>${endpointCell(d.llm_endpoint,d.features?.llm_enabled)}</div><div>Эмбеддинги</div><div>${endpointCell(d.embeddings_endpoint,d.features?.embeddings_enabled)}</div><div>Переранжировщик</div><div>${endpointCell(d.rerank_endpoint,d.rerank_endpoint!==undefined)}</div><div>Покрытие индексом</div><div>${coverageCell(d.embeddings_index)}</div><div>Свободно на диске</div><div>${diskCell(d.runtime?.disk)}</div></div></section><section class="card"><h2>Рекомендуемые действия</h2>${actionCards||empty('Действий не требуется')}</section></div><div class="grid two mt16"><section class="card"><details><summary>Полная диагностика</summary><div class="pre">${esc(JSON.stringify(d,null,2))}</div></details></section><section class="card"><details><summary>Активная конфигурация</summary><div class="pre">${esc(JSON.stringify(s,null,2))}</div></details></section></div>`)};
 async function health(){try{const d=await fetch('/api/health').then(r=>r.json());const dot=document.getElementById('healthDot');dot.classList.remove('health-bad');dot.classList.add('health-ok');document.getElementById('healthText').textContent=`${d.status} · ${d.version}`;}catch{const dot=document.getElementById('healthDot');dot.classList.remove('health-ok');dot.classList.add('health-bad');document.getElementById('healthText').textContent='сервер недоступен'}}
-async function bootstrap(){state.view=startingView();document.getElementById('pageTitle').textContent=views.find(v=>v[0]===state.view)?.[1]||state.view;renderNav();await health();if(!state.token){openTokenDialog();return}await loadUsers();await refresh();handleSaveHash()}
+async function bootstrap(){state.view=startingView();document.getElementById('pageTitle').textContent=views.find(v=>v[0]===state.view)?.[1]||state.view;renderNav();await health();if(!state.token){openTokenDialog();return}await loadUsers();await refresh();if(state.view==='chats')startLiveChats();handleSaveHash()}
 function handleSaveHash(){const m=/[#&]save=([^&]*)/.exec(location.hash||'');if(!m||!m[1])return;let url='';try{url=decodeURIComponent(m[1])}catch(e){return}history.replaceState(null,'',location.pathname+location.search);if(/^https?:\/\//i.test(url))actions.ingestUrlDialog(url)}
 // Обработчики регистрируются ЯВНО: без этой строки кнопка рисуется, клик
 // доходит до диспетчера и молча теряется — поймано браузерным прогоном,

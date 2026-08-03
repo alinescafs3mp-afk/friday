@@ -54,11 +54,14 @@ from friday.server import create_app
 #: +1 к прежним 177: добавлен `POST /api/admin/users/{user_id}/supervisor` —
 #: назначение руководителя, от которого зависит, чью деятельность человек вправе
 #: смотреть (см. `friday/oversight_scope.py`).
-EXPECTED_OPERATIONS = 178
+#: +1 к 178: `GET /api/admin/chats/cursor` — дешёвая метка «лента переписки
+#: изменилась». Панель обновляет её сама, как мессенджер, и опрашивать ради
+#: этого саму ленту было бы платой ни за что: замерено 2.1 мс против 34.4 мс.
+EXPECTED_OPERATIONS = 179
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 90,
+    "/api/admin": 91,
     "/api/kg": 21,
     "/api/missions": 4,
 }
