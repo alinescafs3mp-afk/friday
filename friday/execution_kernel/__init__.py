@@ -1231,7 +1231,11 @@ class ExecutionKernel:
                 payload=arguments,
                 summary=self._approval_summary(storage, actor.user_id, name, arguments),
                 risk="high",
-                requested_by=actor.identity_id or actor.user_id,
+                # Кто ПРОСИЛ — человек, а не способ входа. В  лежит
+                # идентификатор токена или связанной телеграм-личности, и заявка
+                # разъезжалась бы по токенам, которыми человек входил. По этому же
+                # полю теперь держится личная граница списка и решения.
+                requested_by=actor.own_id,
                 policy_epoch=str(actor.policy_epoch),
             )
         except Exception as exc:  # noqa: BLE001 - отказ в заявке не должен выполнять действие

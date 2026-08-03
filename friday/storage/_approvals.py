@@ -63,6 +63,19 @@ def _plus_seconds(seconds: int) -> str:
     return (datetime.fromisoformat(utc_now()) + timedelta(seconds=max(1, int(seconds)))).isoformat()
 
 
+#: Заявки, у которых нет автора-человека: их заводит сама система.
+#:
+#: Откат оборвавшегося шага миссии просит не человек, а исполнительный орган.
+#: Спрятать такую заявку от всех было бы хуже той дыры, ради которой вводилась
+#: личная граница: решение по ней просто некому было бы принять. Поэтому именная
+#: заявка личная, а безымянная служебная остаётся общей для арендатора — ровно
+#: как было до правки.
+#:
+#: Пустая строка тоже здесь: так выглядят записи, заведённые до появления
+#: личной границы, и внутренние пути, которые человека не знают.
+SYSTEM_REQUESTERS = ("", "executive")
+
+
 class ApprovalsMixin(StorageShared):
     def create_action_approval(
         self,
@@ -115,11 +128,38 @@ class ApprovalsMixin(StorageShared):
             )
         return self._approval_row(str(record["id"]), user_id) or record
 
-    def get_action_approval(self, approval_id: str, user_id: str | None = None) -> dict[str, Any] | None:
-        return self._approval_row(approval_id, user_id)
+    def get_action_approval(
+        self, approval_id: str, user_id: str | None = None, *, person_id: str = ""
+    ) -> dict[str, Any] | None:
+        return self._approval_row(approval_id, user_id, person_id=person_id)
 
-    def _approval_row(self, approval_id: str, user_id: str | None) -> dict[str, Any] | None:
-        if user_id:
+    def _approval_row(
+        self, approval_id: str, user_id: str | None, *, person_id: str = ""
+    ) -> dict[str, Any] | None:
+        """Заявка арендатора, а при `person_id` — только заявка ЭТОГО человека.
+
+        В общем архиве `user_id` один на всех, и одного его мало: заявка это
+        просьба конкретного человека разрешить действие ОТ ЕГО ИМЕНИ. Проверено
+        на живом коде до правки — участник видел чужую заявку с описанием
+        действия и мог её подтвердить; при наличии у него нужного права действие
+        исполнилось бы под ним.
+
+        Человек называется `requested_by`, куда теперь кладётся `own_id`. Раньше
+        там лежал `identity_id` — СПОСОБ входа, идентификатор токена или связанной
+        телеграм-личности, — и заявка разъезжалась бы по токенам, которыми
+        человек входил.
+
+        Пустой `person_id` оставлен намеренно: внутренние пути (исполнение,
+        истечение срока, служебные проверки) работают по арендатору и человека не
+        знают. Личную границу держат вызывающие снаружи — маршруты и мост.
+        """
+        if user_id and person_id:
+            row = self.execute(
+                "SELECT * FROM action_approvals WHERE id=? AND user_id=? "
+                f"AND requested_by IN (?, {', '.join('?' * len(SYSTEM_REQUESTERS))})",  # nosec B608
+                (approval_id, user_id, person_id, *SYSTEM_REQUESTERS),
+            ).fetchone()
+        elif user_id:
             row = self.execute(
                 "SELECT * FROM action_approvals WHERE id=? AND user_id=?", (approval_id, user_id)
             ).fetchone()
@@ -144,34 +184,49 @@ class ApprovalsMixin(StorageShared):
         user_id: str,
         *,
         status: str | None = None,
+        person_id: str = "",
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """Заявки арендатора, а при `person_id` — только заявки этого человека."""
         bounded = max(1, min(int(limit), 200))
+        where = ["user_id=?"]
+        params: list[Any] = [user_id]
+        if person_id:
+            where.append(f"requested_by IN (?, {', '.join('?' * len(SYSTEM_REQUESTERS))})")
+            params.extend([person_id, *SYSTEM_REQUESTERS])
         if status:
-            rows = self.execute(
-                """SELECT * FROM action_approvals WHERE user_id=? AND status=?
-                   ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?""",
-                (user_id, status, bounded, max(0, int(offset))),
-            ).fetchall()
-        else:
-            rows = self.execute(
-                """SELECT * FROM action_approvals WHERE user_id=?
-                   ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?""",
-                (user_id, bounded, max(0, int(offset))),
-            ).fetchall()
-        return [self._approval_row(dict(row)["id"], user_id) or dict(row) for row in rows]
+            where.append("status=?")
+            params.append(status)
+        params.extend([bounded, max(0, int(offset))])
+        rows = self.execute(
+            # Условия собираются только из констант выше; значения — параметрами.
+            f"SELECT * FROM action_approvals WHERE {' AND '.join(where)} "  # nosec B608
+            "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            tuple(params),
+        ).fetchall()
+        return [
+            self._approval_row(dict(row)["id"], user_id, person_id=person_id) or dict(row)
+            for row in rows
+        ]
 
-    def count_action_approvals(self, user_id: str, *, status: str | None = None) -> int:
+    def count_action_approvals(
+        self, user_id: str, *, status: str | None = None, person_id: str = ""
+    ) -> int:
+        """Число рядом со списком обязано считать ровно то, что список показывает."""
+        where = ["user_id=?"]
+        params: list[Any] = [user_id]
+        if person_id:
+            where.append(f"requested_by IN (?, {', '.join('?' * len(SYSTEM_REQUESTERS))})")
+            params.extend([person_id, *SYSTEM_REQUESTERS])
         if status:
-            row = self.execute(
-                "SELECT COUNT(*) AS count FROM action_approvals WHERE user_id=? AND status=?",
-                (user_id, status),
-            ).fetchone()
-        else:
-            row = self.execute(
-                "SELECT COUNT(*) AS count FROM action_approvals WHERE user_id=?", (user_id,)
-            ).fetchone()
+            where.append("status=?")
+            params.append(status)
+        row = self.execute(
+            # Условия собираются только из констант выше; значения — параметрами.
+            f"SELECT COUNT(*) AS count FROM action_approvals WHERE {' AND '.join(where)}",  # nosec B608
+            tuple(params),
+        ).fetchone()
         return int(row["count"] if row else 0)
 
     def decide_action_approval(
@@ -181,6 +236,7 @@ class ApprovalsMixin(StorageShared):
         *,
         decision: str,
         decided_by: str,
+        person_id: str = "",
     ) -> dict[str, Any] | None:
         """Решение человека. Только из `pending` и только один раз.
 
@@ -192,11 +248,17 @@ class ApprovalsMixin(StorageShared):
         if choice not in {"approve", "reject"}:
             raise ValueError("decision must be approve or reject")
         now = utc_now()
+        # Решает ТОЛЬКО тот, кто просил. Условие стоит в самом UPDATE, рядом с
+        # `status='pending'`, и по той же причине: «прочитать, потом записать»
+        # пропустило бы гонку двух нажатий. В общем архиве `user_id` один на всех,
+        # и без этого условия участник подтверждал чужое действие — проверено на
+        # живом коде до правки.
         with self.transaction() as conn:
             cursor = conn.execute(
                 """UPDATE action_approvals
                    SET status=?, decided_by=?, decided_at=?, updated_at=?
-                   WHERE id=? AND user_id=? AND status='pending' AND expires_at > ?""",
+                   WHERE id=? AND user_id=? AND (?='' OR requested_by IN (?, '', 'executive'))
+                     AND status='pending' AND expires_at > ?""",
                 (
                     "approved" if choice == "approve" else "rejected",
                     str(decided_by or ""),
@@ -204,12 +266,14 @@ class ApprovalsMixin(StorageShared):
                     now,
                     approval_id,
                     user_id,
+                    str(person_id or ""),
+                    str(person_id or ""),
                     now,
                 ),
             )
         if cursor.rowcount != 1:
             return None
-        return self._approval_row(approval_id, user_id)
+        return self._approval_row(approval_id, user_id, person_id=person_id)
 
     def claim_action_approval(
         self,

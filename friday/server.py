@@ -1606,11 +1606,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         rows = await run_blocking(
             request.app.state.storage.list_action_approvals,
             actor.user_id,
+            # Заявка — просьба КОНКРЕТНОГО человека. В общем архиве `user_id`
+            # один на всех, и без этого участник видел чужую заявку и мог её
+            # подтвердить (проверено на живом коде).
+            person_id=actor.own_id,
             status=status,
             limit=int(request.query_params.get("limit") or 20),
         )
         total = await run_blocking(
-            request.app.state.storage.count_action_approvals, actor.user_id, status=status
+            request.app.state.storage.count_action_approvals,
+            actor.user_id,
+            status=status,
+            person_id=actor.own_id,
         )
         return {"count": len(rows), "total": total, "status": status, "items": rows}
 
@@ -1633,7 +1640,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             str(approval_id or ""),
             actor.user_id,
             decision=decision,
-            decided_by=actor.user_id,
+            # Автор решения — ЧЕЛОВЕК, а не арендатор. В общем архиве `user_id`
+            # один на всех, и авторство решения терялось целиком.
+            decided_by=actor.own_id,
+            person_id=actor.own_id,
         )
         if not decided:
             # Одинаковый ответ на «нет такой», «чужая» и «уже решена»: существование
@@ -1646,7 +1656,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         result = await request.app.state.kernel.execute_approved(str(approval_id), actor=actor)
         return {
             "approval": await run_blocking(
-                request.app.state.storage.get_action_approval, str(approval_id), actor.user_id
+                request.app.state.storage.get_action_approval,
+                str(approval_id),
+                actor.user_id,
+                person_id=actor.own_id,
             ),
             "executed": bool(result.success),
             "error": result.error,
