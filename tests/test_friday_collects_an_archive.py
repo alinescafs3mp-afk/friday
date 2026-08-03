@@ -34,6 +34,17 @@ def anyio_backend():
     return "asyncio"
 
 
+class _NoLLM:
+    """Выключенная модель: разбор остатка её спрашивает и обязан пережить отказ.
+
+    Эти проверки — про саму сборку, а не про разбор реплики. Выключенная модель
+    здесь честнее подставной: она проверяет заодно, что сборка работает и когда
+    спросить не у кого.
+    """
+
+    enabled = False
+
+
 def _kernel(settings, storage) -> ExecutionKernel:
     from friday.ingestion import IngestionPipeline
 
@@ -400,6 +411,9 @@ async def test_the_archive_is_built_without_waiting_for_the_model(verdict, expec
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
+    # Разбор остатка зовёт модель. Прибор без неё падал бы `AttributeError`,
+    # то есть проверял бы не то, что работает у человека.
+    runtime.llm = _NoLLM()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=verdict)
     messages: list[dict] = []
     tools_used: list[str] = []
@@ -450,6 +464,9 @@ async def test_the_model_is_told_which_dates_were_actually_packed() -> None:
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
+    # Разбор остатка зовёт модель. Прибор без неё падал бы `AttributeError`,
+    # то есть проверял бы не то, что работает у человека.
+    runtime.llm = _NoLLM()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "26,28"))
     messages: list[dict] = []
     bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
@@ -487,6 +504,9 @@ async def test_a_failed_assembly_is_not_promised_as_a_file() -> None:
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
+    # Разбор остатка зовёт модель. Прибор без неё падал бы `AttributeError`,
+    # то есть проверял бы не то, что работает у человека.
+    runtime.llm = _NoLLM()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "13"))
     messages: list[dict] = []
     clips: list[dict] = []
@@ -550,6 +570,9 @@ async def test_the_same_archive_does_not_arrive_twice() -> None:
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
+    # Разбор остатка зовёт модель. Прибор без неё падал бы `AttributeError`,
+    # то есть проверял бы не то, что работает у человека.
+    runtime.llm = _NoLLM()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "26"))
     tools = [
         {"function": {"name": "collect_files"}},
@@ -616,6 +639,9 @@ async def test_the_successful_notice_reads_as_an_answer() -> None:
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
+    # Разбор остатка зовёт модель. Прибор без неё падал бы `AttributeError`,
+    # то есть проверял бы не то, что работает у человека.
+    runtime.llm = _NoLLM()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=("файл", "26"))
     bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
 
@@ -652,6 +678,9 @@ async def test_without_days_nothing_is_packed(verdict) -> None:
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
+    # Разбор остатка зовёт модель. Прибор без неё падал бы `AttributeError`,
+    # то есть проверял бы не то, что работает у человека.
+    runtime.llm = _NoLLM()
     context = AgentContext(conversation_id="c", user_id="u", outward_verdict=verdict)
     bound = AgentRuntime._prefetch_the_archive_if_asked.__get__(runtime, AgentRuntime)
 
