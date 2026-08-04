@@ -125,6 +125,9 @@ def _seed_owner_objects(storage, owner_id: str) -> dict[str, str]:
         "case_id": "eval_missing",
         "token_id": "tok_missing",
         "filename": "missing.json",
+        # Внешний источник: запрет действия против владельца обязан сработать
+        # раньше, чем выяснится, что источника с таким именем нет.
+        "name": "missing-source",
         "source": "telegram",
         "external_id": "missing",
         "security_id": "chat.ask",

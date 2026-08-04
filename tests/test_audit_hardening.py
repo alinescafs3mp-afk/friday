@@ -167,7 +167,7 @@ def test_cross_tenant_reads_are_audited_own_reads_are_not(settings):
         assert "admin.inbox.read" in _actions(storage)
 
 
-def test_every_admin_read_of_another_account_is_audited(settings):
+def test_every_admin_read_of_another_account_is_audited(settings, monkeypatch, tmp_path):
     """Inventory-shaped on purpose: a list of call sites drifts, an enumeration does not.
 
     `_audit_cross_tenant_read` existed and was wired into knowledge, graph, inbox,
@@ -213,6 +213,18 @@ def test_every_admin_read_of_another_account_is_audited(settings):
         storage = app.state.storage
         storage.ensure_user("victim", preset_key="user")
         placeholders = _seed_addressable_objects(storage, "victim")
+        # Внешний источник чужого человека: чтобы дорога к его схеме отвечала
+        # 200, нужна и запись об источнике, и настоящая база под переменной.
+        external = tmp_path / "victim.sqlite3"
+        probe = sqlite3.connect(external)
+        probe.execute("CREATE TABLE staff (id INTEGER PRIMARY KEY)")
+        probe.commit()
+        probe.close()
+        monkeypatch.setenv("VICTIM_PROBE_DSN", str(external))
+        storage.register_data_source(
+            "victim", name="probe", kind="sqlite", dsn_env="VICTIM_PROBE_DSN", created_by="victim"
+        )
+        placeholders["name"] = "probe"
         owner = {"Authorization": f"Bearer {settings.api_token}"}
 
         checked: list[str] = []

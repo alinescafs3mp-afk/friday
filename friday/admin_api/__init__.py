@@ -19,6 +19,7 @@ from fastapi import APIRouter
 from friday.admin_api import (
     _conflicts,
     _conversations,
+    _data_sources,
     _evaluation,
     _files,
     _graph,
@@ -45,3 +46,4 @@ router.include_router(_conversations.router)
 router.include_router(_files.router)
 router.include_router(_evaluation.router)
 router.include_router(_maintenance.router)
+router.include_router(_data_sources.router)

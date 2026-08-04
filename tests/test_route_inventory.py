@@ -63,11 +63,11 @@ from friday.server import create_app
 #: не для удобства: без него первая сводка за прошедший день собиралась бы
 #: разовым скриптом, то есть путём, который никто не пройдёт и не проверит.
 #: Отдаются коды инцидентов и счётчики; строк из переписки там нет по построению.
-EXPECTED_OPERATIONS = 182
+EXPECTED_OPERATIONS = 186
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 92,
+    "/api/admin": 95,
     "/api/kg": 21,
     "/api/missions": 4,
 }

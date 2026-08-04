@@ -13,6 +13,7 @@ from datetime import date
 from friday.storage._base import (
     CORE_INDEX_SCHEMA,
     CORE_TABLE_SCHEMA,
+    DATA_SOURCES_SCHEMA,
     FTS_SCHEMA,
     FTS_VOCAB_SCHEMA,
     LOGGER,
@@ -429,6 +430,36 @@ class CoreMixin(StorageShared):
         conn.execute(f"INSERT INTO mission_tasks({shared}) SELECT {shared} FROM mission_tasks_pre24")  # nosec B608
         conn.execute("DROP TABLE mission_tasks_pre24")
 
+    @staticmethod
+    def _rescope_data_sources_to_tenant(conn: sqlite3.Connection, table_names: set[str]) -> None:
+        """Сделать ключом источника ПАРУ «владелец + имя» (схема 29).
+
+        В схеме 28 первичным ключом было одно имя. Читается источник всегда
+        парой `name + user_id`, а писался по имени — поэтому второй человек,
+        объявив источник с уже занятым именем, делал UPDATE ЧУЖОЙ строки:
+        владелец в ней оставался прежний, а `dsn_env` становился новый. Чужой
+        источник начинал читать базу соседа, и заметно это стало бы нескоро.
+
+        Таблица пересоздаётся со строками: объявленные источники — рабочие
+        записи. Идёт только если ключ действительно старый.
+        """
+
+        if "data_sources" not in table_names:
+            return
+        # У составного ключа `pk` — это НОМЕР столбца в ключе, а не «да/нет»,
+        # поэтому порядок берётся из него, а не из порядка объявления столбцов.
+        parts = sorted(
+            (item[5], item[1]) for item in conn.execute("PRAGMA table_info(data_sources)") if item[5]
+        )
+        if [name for _, name in parts] == ["user_id", "name"]:
+            return
+        columns = [item[1] for item in conn.execute("PRAGMA table_info(data_sources)")]
+        shared = ", ".join(columns)
+        conn.execute("ALTER TABLE data_sources RENAME TO data_sources_pre29")
+        conn.execute(DATA_SOURCES_SCHEMA.strip().rstrip(";"))
+        conn.execute(f"INSERT INTO data_sources({shared}) SELECT {shared} FROM data_sources_pre29")  # nosec B608
+        conn.execute("DROP TABLE data_sources_pre29")
+
     def _retire_outdated_indexes(self, conn: sqlite3.Connection) -> None:
         """Снести индексы, чьё ОПРЕДЕЛЕНИЕ изменилось.
 
@@ -580,6 +611,7 @@ class CoreMixin(StorageShared):
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
         self._widen_mission_task_states(conn, table_names)
+        self._rescope_data_sources_to_tenant(conn, table_names)
 
         now = utc_now()
 

@@ -524,7 +524,7 @@ class RuntimeMixin(StorageShared):
                 """INSERT INTO data_sources(name, user_id, kind, dsn_env, description,
                    created_at, created_by)
                    VALUES(?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(name) DO UPDATE SET kind=excluded.kind,
+                   ON CONFLICT(user_id, name) DO UPDATE SET kind=excluded.kind,
                    dsn_env=excluded.dsn_env, description=excluded.description""",
                 (name, user_id, kind, dsn_env, description, utc_now(), created_by),
             )
@@ -540,16 +540,12 @@ class RuntimeMixin(StorageShared):
         return dict(row) if row else None
 
     def list_data_sources(self, user_id: str) -> list[dict[str, Any]]:
-        rows = self.execute(
-            "SELECT * FROM data_sources WHERE user_id=? ORDER BY name", (user_id,)
-        ).fetchall()
+        rows = self.execute("SELECT * FROM data_sources WHERE user_id=? ORDER BY name", (user_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def forget_data_source(self, user_id: str, name: str) -> bool:
         with self.transaction() as conn:
-            cursor = conn.execute(
-                "DELETE FROM data_sources WHERE name=? AND user_id=?", (name, user_id)
-            )
+            cursor = conn.execute("DELETE FROM data_sources WHERE name=? AND user_id=?", (name, user_id))
         return cursor.rowcount > 0
 
     def touch_data_source(self, user_id: str, name: str) -> None:
@@ -652,8 +648,7 @@ class RuntimeMixin(StorageShared):
         # Потолок считается НА ЧЕЛОВЕКА, а не на архив: в общем архиве иначе
         # один участник исчерпывал бы лимит для всех остальных.
         active = self.execute(
-            "SELECT COUNT(*) AS count FROM monitors "
-            "WHERE user_id=? AND active=1 AND created_by=?",
+            "SELECT COUNT(*) AS count FROM monitors WHERE user_id=? AND active=1 AND created_by=?",
             (user_id, str(created_by or "")),
         ).fetchone()
         if int((active["count"] if active else 0) or 0) >= self.MAX_ACTIVE_MONITORS:

@@ -64,7 +64,30 @@ LOGGER = logging.getLogger("friday.storage")
 # числа. Проверено на живой базе 2026-08-04 — со старым номером столбец не
 # появился, а код его уже читал, и маршрут слежений отдавал 500. Тесты этого не
 # видели: там база создаётся с нуля по актуальному CREATE TABLE.
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
+
+#: Определение таблицы внешних источников отдельной константой: миграция схемы 29
+#: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно
+#: это определение. Копия внутри `CORE_SCHEMA` обязана совпадать — за этим следит
+#: `tests/test_one_table_one_definition.py`.
+DATA_SOURCES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS data_sources (
+    name TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    dsn_env TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    last_used_at TEXT,
+    -- Ключ — ПАРА, а не имя. Имя было первичным ключом в схеме 28, и это
+    -- пробивало границу арендаторов: читается источник всегда парой
+    -- `name + user_id`, а писался по имени, поэтому объявление «hr» вторым
+    -- человеком делало UPDATE чужой строки, оставляя в ней прежнего владельца.
+    -- Чужой источник начинал смотреть в переменную окружения соседа.
+    PRIMARY KEY(user_id, name)
+);
+"""
 
 #: Определение таблицы шагов миссии отдельной константой: миграция схемы 24
 #: пересоздаёт её, чтобы расширить список состояний, и должна брать ровно это
@@ -738,14 +761,20 @@ CREATE INDEX IF NOT EXISTS idx_monitors_user ON monitors(user_id, active);
 -- аккаунта отдаётся человеку целиком — пароль от чужой боевой базы уехал бы и
 -- туда, и туда, и обнаружилось бы это не скоро.
 CREATE TABLE IF NOT EXISTS data_sources (
-    name TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
     user_id TEXT NOT NULL REFERENCES users(id),
     kind TEXT NOT NULL,
     dsn_env TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     created_by TEXT NOT NULL DEFAULT '',
-    last_used_at TEXT
+    last_used_at TEXT,
+    -- Ключ — ПАРА, а не имя. Имя было первичным ключом в схеме 28, и это
+    -- пробивало границу арендаторов: читается источник всегда парой
+    -- `name + user_id`, а писался по имени, поэтому объявление «hr» вторым
+    -- человеком делало UPDATE чужой строки, оставляя в ней прежнего владельца.
+    -- Чужой источник начинал смотреть в переменную окружения соседа.
+    PRIMARY KEY(user_id, name)
 );
 
 -- Спека v3 §5: подтверждение опасного действия — durable, привязано к ТОЧНОМУ
@@ -1404,6 +1433,7 @@ __all__ = [
     "CORE_SCHEMA",
     "CORE_TABLE_SCHEMA",
     "Callable",
+    "DATA_SOURCES_SCHEMA",
     "EVAL_MINED_CASE_CAP",
     "RUNTIME_EVENT_CAP",
     "Entity",
