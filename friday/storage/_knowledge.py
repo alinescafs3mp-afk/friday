@@ -555,6 +555,22 @@ class KnowledgeMixin(StorageShared):
         ).fetchall()
         return {str(row["entity_id"]) for row in rows}
 
+    def entity_links_touched_by_a_person(self, entity_id: str, user_id: str) -> bool:
+        """Смотрел ли человек хоть одну привязку этого узла.
+
+        Тот же вопрос, что у `decided_entity_links`, но с другой стороны — не «какие
+        сущности решены у этого документа», а «трогали ли этот узел вообще». Нужен
+        чистке графа: снести узел, про который человек уже высказался, значит стереть
+        его решение молча.
+        """
+        row = self.execute(
+            "SELECT 1 FROM knowledge_entity_links "
+            "WHERE user_id=? AND entity_id=? "
+            "AND (reviewed_by IS NOT NULL OR status='rejected') LIMIT 1",
+            (user_id, entity_id),
+        ).fetchone()
+        return row is not None
+
     def set_document_date(self, ko_id: str, user_id: str, document_date: str) -> bool:
         """Записать собственную дату документа в метаданные, не создавая версию.
 

@@ -953,6 +953,131 @@ def _backfill_entities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prune_entities(args: argparse.Namespace) -> int:
+    """Убрать узлы, которых ТЕКУЩИЕ правила больше не порождают.
+
+    Починка правила извлечения действует только вперёд. Узел, заведённый прежней
+    редакцией, остаётся в графе навсегда и — что хуже — продолжает собирать
+    привязки: сопоставление упоминаний работает от СУЩЕСТВУЮЩИХ имён, и одна
+    ошибка разрастается. Узел «Викторович» (отчество, принятое за имя сервера)
+    завёлся по одному документу и набрал 314 привязок в документах про разных
+    людей — концентратор из ничего.
+
+    Проход не судит имя и не знает никаких списков мусора. Он спрашивает ровно
+    одно: породили бы сегодняшние правила это имя хоть на одном документе архива?
+    Если нет — узла быть не должно.
+
+    Четыре запрета, и каждый оплачен ошибкой — три из них МОЕЙ, найденной первым же
+    прогоном этого прохода по живому графу:
+
+    * Рождён ли узел правилом, спрашивается у САМОГО МЕТОДА, а не у имени прохода.
+      Первая редакция держала список «ingestion, backfill_entities» — и не знала, что
+      4349 узлов-людей заведены проходом под прежним именем `backfill_person_entities`.
+      Вся людская половина графа молча считалась чужой, а проход при этом отчитывался
+      как отработавший. Имена проходов меняются, набор методов извлечения — это
+      объявленный инвентарь (`DECLARED` + `EVIDENCE_ONLY`), и спрашивать надо его.
+    * Сверка идёт с ТЕМ ЖЕ правилом, которое узел завело. Первая редакция сравнивала
+      имя со всеми правилами разом, и «Курган Курганская» уцелел: слабое правило «два
+      слова с заглавной» выдаёт ту же строку кандидатом в люди. Мусорное место
+      пряталось за догадкой о человеке.
+    * Узел остаётся и в том случае, если его имя сегодня объявляет ЛЮБОЕ сильное
+      правило: метод узла мог смениться на более уверенный, и это не повод сносить.
+    * Ни одной привязки, которую человек посмотрел или отклонил: решение человека
+      в этой системе — вершина, и разовый проход с ним не спорит.
+
+    По умолчанию ПОКАЗ. Запись включает `--apply`, и она мягкая: `deleted_at`
+    ставится новой версией, обратный ход — `undelete_entity`.
+    """
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.ingestion import _extract_entities
+    from friday.ingestion._base import DECLARED_ENTITY_METHODS, EVIDENCE_ONLY_ENTITY_METHODS
+    from friday.storage import init_storage
+    from friday.storage._base import normalize_entity_name
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    apply_changes = bool(getattr(args, "apply", False))
+    born_of_a_rule = DECLARED_ENTITY_METHODS | EVIDENCE_ONLY_ENTITY_METHODS
+
+    scanned = 0
+    produced: set[tuple[str, str, str]] = set()
+    declared: set[tuple[str, str]] = set()
+    owners: set[str] = set()
+    doomed: list[dict[str, Any]] = []
+    kept_reviewed = kept_foreign = 0
+    try:
+        cursor = 0
+        while True:
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
+            if not batch:
+                break
+            for row in batch:
+                cursor = int(row["rowid"])
+                scanned += 1
+                owner = str(row["user_id"])
+                owners.add(owner)
+                text = f"{row['title'] or ''}\n{row['content'] or ''}"
+                for item in _extract_entities(text):
+                    name = normalize_entity_name(str(item.get("name") or ""))
+                    method = str(item.get("method") or "")
+                    produced.add((owner, method, name))
+                    if method in DECLARED_ENTITY_METHODS:
+                        declared.add((owner, name))
+            if args.limit and scanned >= args.limit:
+                break
+
+        if args.limit and scanned >= args.limit:
+            # Половина корпуса — половина порождённых имён, и всё остальное
+            # объявляется мусором. Такой прогон годится только посмотреть.
+            print(
+                f"--limit {args.limit} оборвал просмотр на {scanned} объектах: "
+                f"неполный корпус даёт неполный список порождённых имён, и удалять по нему нельзя.",
+                file=sys.stderr,
+            )
+            return 2
+
+        for owner in sorted(owners if not args.user else {str(args.user)}):
+            for entity in storage.iter_entities(owner):
+                metadata = entity.get("metadata_json")
+                meta = json.loads(metadata) if isinstance(metadata, str) and metadata else (metadata or {})
+                method = str(meta.get("extraction_method") or "")
+                if method not in born_of_a_rule:
+                    kept_foreign += 1
+                    continue
+                normalized = str(entity.get("normalized_name") or normalize_entity_name(str(entity["name"])))
+                if (owner, method, normalized) in produced or (owner, normalized) in declared:
+                    continue
+                if storage.entity_links_touched_by_a_person(str(entity["id"]), owner):
+                    kept_reviewed += 1
+                    continue
+                doomed.append(entity)
+
+        for entity in doomed:
+            print(
+                f"  [{entity['entity_type']}] {entity['name']}  "
+                f"(правило: {(json.loads(entity['metadata_json']) if isinstance(entity.get('metadata_json'), str) and entity.get('metadata_json') else {}).get('extraction_method', '?')})"
+            )
+            if apply_changes:
+                storage.soft_delete_entity(str(entity["id"]), str(entity["user_id"]))
+        if apply_changes and doomed:
+            storage.record_event(
+                "graph.entities_pruned",
+                {"scanned": scanned, "removed": len(doomed), "names": [str(e["name"]) for e in doomed][:200]},
+            )
+    finally:
+        storage.close()
+
+    print(
+        f"Просмотрено объектов: {scanned}; пар правило-имя у сегодняшних правил: {len(produced)}, "
+        f"из них объявленных: {len(declared)}. Узлов под снос: {len(doomed)}; "
+        f"оставлено не рождённых правилом: {kept_foreign}; оставлено решённых человеком: {kept_reviewed}."
+    )
+    if not apply_changes:
+        print("Это ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _backfill_relations(args: argparse.Namespace) -> int:
     """Провести извлечение СВЯЗЕЙ по уже загруженному архиву.
 
@@ -1659,6 +1784,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the entities and links (without it the pass only counts)",
     )
     entities.set_defaults(handler=_backfill_entities)
+
+    prune = sub.add_parser(
+        "prune-entities",
+        help="Remove nodes today's extraction rules no longer produce anywhere in the archive",
+    )
+    prune.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    prune.add_argument("--batch", type=int, default=200, help="Objects per pass (default: 200)")
+    prune.add_argument("--limit", type=int, default=0, help="Stop after N objects (show only)")
+    prune.add_argument(
+        "--apply",
+        action="store_true",
+        help="Soft-delete the nodes (without it the pass only lists them)",
+    )
+    prune.set_defaults(handler=_prune_entities)
 
     relations = sub.add_parser(
         "backfill-relations",

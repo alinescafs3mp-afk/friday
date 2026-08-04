@@ -254,6 +254,7 @@ jericho search-source ФРАЗА [--limit N] [--json]
 jericho reindex-embeddings [--user U] --yes
 jericho backfill-document-dates [--user U] [--batch N] [--limit N]
 jericho backfill-entities --method M [--user U] [--batch N] [--limit N] [--apply]
+jericho prune-entities [--user U] [--batch N] [--limit N] [--apply]
 jericho backfill-relations [--user U] [--batch N] [--limit N] [--apply]
 jericho extract-structure-relations [--user U] [--batch N] [--limit N] [--apply]
 jericho resolve-exact-duplicates [--apply]
