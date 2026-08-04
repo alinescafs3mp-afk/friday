@@ -136,7 +136,9 @@ def _audit(
     state.storage.log_audit(
         AuditEntry(
             id=new_id("audit"),
-            user_id=actor.user_id,
+            # Кто ДЕЙСТВОВАЛ, а не в чьём архиве. Для админских дорог это тем
+            # важнее: здесь чистят базу и читают чужое.
+            user_id=actor.own_id,
             action=action,
             target_type=target_type,
             target_id=target_id,
@@ -164,10 +166,24 @@ def _audit_cross_tenant_read(request: Request, action: str, target_user: str | N
     foreign account, so it is always recorded — the routes that accept an optional
     ``user_id`` were the ones most worth logging and the easiest to overlook.
     """
+    actor = request.state.actor
     if target_user is None:
         _audit(request, action, "user", "*", after={**detail, "scope": "all_tenants"})
         return
-    if target_user != request.state.actor.user_id:
+    # В ОБЩЕМ архиве `user_id` у всех один — это арендатор, — и сравнение по нему
+    # давало «читает своё» всегда. Воспроизведено: `_target_user(None)` возвращает
+    # арендатора, он равен `actor.user_id`, и запись не появлялась НИКОГДА. То есть
+    # ровно там, где людей стало много, надзор за чтением выключался целиком.
+    #
+    # Отсюда две ветки вместо одной. Материал в общем архиве открыт всем по прямой
+    # просьбе владельца, и «Боб прочитал документ Алисы» — не нарушение; но это и
+    # не «Боб прочитал своё», а именно чтение общего корпуса админской дорогой, и
+    # называется оно своим именем. Молча приравнивать его к своему нельзя: тогда
+    # единственный след чтения чужого исчезает.
+    if getattr(actor, "shared_tenant", False) and target_user == actor.user_id:
+        _audit(request, action, "user", "*", after={**detail, "scope": "shared_archive"})
+        return
+    if target_user != actor.own_id:
         _audit(request, action, "user", target_user, after=detail or None)
 
 

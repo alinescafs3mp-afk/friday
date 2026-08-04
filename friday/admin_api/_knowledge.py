@@ -302,7 +302,7 @@ async def reenrich_knowledge(knowledge_id: str, request: Request) -> dict[str, A
             user_id,
             knowledge_id,
             apply=_parse_bool(body.get("apply", False), field="apply"),
-            reviewed_by=request.state.actor.user_id,
+            reviewed_by=request.state.actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -339,7 +339,7 @@ async def create_knowledge_entity_link(knowledge_id: str, request: Request) -> d
             confidence=_parse_unit_float(body.get("confidence", 1.0), field="confidence"),
             evidence=body.get("evidence") if isinstance(body.get("evidence"), dict) else {},
             status=status,
-            reviewed_by=request.state.actor.user_id,
+            reviewed_by=request.state.actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -589,7 +589,7 @@ async def decide_entity_suggestion_group(request: Request) -> dict[str, Any]:
             confidence=1.0 if decision == "accept" else 0.0,
             evidence={"method": "human_review_bulk", "accepted_by": actor.user_id},
             status="accepted" if decision == "accept" else "rejected",
-            reviewed_by=actor.user_id,
+            reviewed_by=actor.own_id,
         )
         decided += 1
     _audit(
@@ -723,7 +723,7 @@ async def accept_entity_suggestion(knowledge_id: str, request: Request) -> dict[
         confidence=1.0,
         evidence={"method": "human_review", "accepted_by": actor.user_id},
         status="accepted",
-        reviewed_by=actor.user_id,
+        reviewed_by=actor.own_id,
     )
     _audit(
         request,
@@ -758,7 +758,7 @@ async def review_knowledge_entity_link(link_id: str, request: Request) -> dict[s
             link_id,
             user_id,
             status,
-            reviewed_by=request.state.actor.user_id,
+            reviewed_by=request.state.actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

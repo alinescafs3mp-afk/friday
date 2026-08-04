@@ -534,7 +534,9 @@ def _audit_boundary_refusal(
         request.app.state.storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
-                user_id=getattr(actor, "user_id", None) or "anonymous",
+                # `own_id`, а не `user_id`: в общем архиве второй — арендатор, и
+                # неудачные входы всех людей слились бы в одну строку.
+                user_id=getattr(actor, "own_id", None) or "anonymous",
                 action=action,
                 target_type="auth",
                 target_id=reason,

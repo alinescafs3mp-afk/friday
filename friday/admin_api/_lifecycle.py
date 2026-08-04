@@ -108,7 +108,7 @@ async def apply_legacy_cleanup(request: Request) -> dict[str, Any]:
                 user_id,
                 knowledge_id,
                 action=action,
-                reviewed_by=request.state.actor.user_id,
+                reviewed_by=request.state.actor.own_id,
                 reason=reason,
             )
         except ValueError as exc:

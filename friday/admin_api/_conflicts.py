@@ -91,7 +91,7 @@ async def bulk_review_conflicts(request: Request) -> dict[str, Any]:
                 user_id,
                 conflict_id,
                 status,
-                reviewed_by=request.state.actor.user_id,
+                reviewed_by=request.state.actor.own_id,
                 resolution_note=resolution_note,
             )
         except ValueError as exc:
@@ -129,7 +129,7 @@ async def review_conflict(conflict_id: str, request: Request) -> dict[str, Any]:
             user_id,
             conflict_id,
             status,
-            reviewed_by=request.state.actor.user_id,
+            reviewed_by=request.state.actor.own_id,
             resolution_note=str(body.get("resolution_note") or "")[:1000],
         )
     except ValueError as exc:
@@ -154,7 +154,7 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
             user_id,
             conflict_id,
             winner_id,
-            reviewed_by=request.state.actor.user_id,
+            reviewed_by=request.state.actor.own_id,
             resolution_note=str(body.get("resolution_note") or "")[:1000],
         )
     except ValueError as exc:
@@ -285,7 +285,7 @@ async def accept_resolution(candidate_id: str, request: Request) -> dict[str, An
             candidate_id,
             user_id,
             target_entity_id=body.get("target_entity_id"),
-            resolved_by=request.state.actor.user_id,
+            resolved_by=request.state.actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -302,7 +302,7 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
     ok = _services(request).kg.resolver.reject_resolution(
         candidate_id,
         user_id,
-        resolved_by=request.state.actor.user_id,
+        resolved_by=request.state.actor.own_id,
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Кандидат на объединение не найден")

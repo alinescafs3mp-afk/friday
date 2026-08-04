@@ -855,9 +855,19 @@ class GraphMixin(StorageShared):
     # `user_id` on both endpoints drops a candidate whose entity belongs to another
     # account or no longer exists. A count that omits them counts rows the page
     # never shows.
+    # Концы связи обязаны быть ЖИВЫ. Проверка стояла при создании кандидата, но
+    # между созданием и решением человека проходит время — за него сущность
+    # успевают удалить или слить. Воспроизведено: конец удалён, кандидат принят,
+    # ребро в никуда создано, а решение терминально и не откатывается.
+    #
+    # Условие живости стоит в JOIN, а не в WHERE, потому что этот же фрагмент
+    # используют и счётчик, и выборка: разъехавшись, они дали бы «17 предложений»
+    # над списком из пятнадцати.
     _RELATION_CANDIDATE_FROM = """FROM relation_candidates c
                 JOIN entities s ON s.id=c.source_entity_id AND s.user_id=c.user_id
-                JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id"""
+                    AND s.deleted_at IS NULL
+                JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id
+                    AND t.deleted_at IS NULL"""
 
     @staticmethod
     def _relation_candidate_filter(user_id: str, status: str | None) -> tuple[list[str], list[Any]]:
@@ -947,6 +957,26 @@ class GraphMixin(StorageShared):
                         f"Relation candidate is already {current_status}; reviewed decisions are terminal"
                     )
             else:
+                if status == "accepted":
+                    # Живость концов проверяется ЗДЕСЬ, а не только при создании
+                    # кандидата: между предложением и решением человека проходит
+                    # время, и за него сущность успевают удалить или слить.
+                    #
+                    # Отказ, а не молчаливый пропуск: решение терминально, и, приняв
+                    # такую пару, человек получил бы ребро в никуда без возможности
+                    # передумать. Кандидат при этом остаётся нерешённым — но из
+                    # очереди он уже исчез (см. `_RELATION_CANDIDATE_FROM`), так что
+                    # мозолить глаза не будет.
+                    for column, side in (("source_entity_id", "начало"), ("target_entity_id", "конец")):
+                        alive = conn.execute(
+                            "SELECT 1 FROM entities WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                            (str(row[column]), user_id),
+                        ).fetchone()
+                        if not alive:
+                            raise ValueError(
+                                f"Принять связь нельзя: её {side} больше не существует "
+                                "(сущность удалена или слита)"
+                            )
                 now = utc_now()
                 conn.execute(
                     """UPDATE relation_candidates SET status=?, reviewed_at=?, reviewed_by=?

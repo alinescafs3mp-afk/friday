@@ -53,7 +53,7 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         entity_id=body.get("entity_id"),
         tags=body.get("tags") if isinstance(body.get("tags"), list) else None,
         notes=str(body.get("notes") or ""),
-        reviewed_by=actor.user_id,
+        reviewed_by=actor.own_id,
     )
     if not item:
         raise HTTPException(status_code=404, detail="Элемент входящих не найден")

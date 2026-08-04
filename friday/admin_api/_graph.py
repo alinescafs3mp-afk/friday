@@ -201,7 +201,7 @@ async def bulk_review_relation_candidates(request: Request) -> dict[str, Any]:
                 user_id,
                 candidate_id,
                 status,
-                reviewed_by=request.state.actor.user_id,
+                reviewed_by=request.state.actor.own_id,
             )
         except ValueError as exc:
             skipped.append({"id": candidate_id, "reason": str(exc)})
@@ -238,7 +238,7 @@ async def review_relation_candidate(candidate_id: str, request: Request) -> dict
             user_id,
             candidate_id,
             status,
-            reviewed_by=request.state.actor.user_id,
+            reviewed_by=request.state.actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -37,6 +37,11 @@ API_BASE = "https://api.telegram.org"
 # downloads take the min of the two.
 BOT_API_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 POLL_TIMEOUT = 30
+#: Виды обновлений, на которые подписан мост. Список ОДИН, потому что подписка и
+#: разбор жили в разных местах и разошлись: опрос просил три вида, а чат обновления
+#: искался только в `message`, и нажатая кнопка теряла адресата — человек нажимал
+#: «Подтвердить», попытки исчерпывались, и он не узнавал об этом ничего.
+ALLOWED_UPDATE_KINDS = ("message", "edited_message", "callback_query")
 BACKOFF_MAX = 60.0
 MAX_ATTEMPTS = 288
 BATCH_SIZE = 20

@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import suppress
 
 from friday.telegram_bridge._base import (
+    ALLOWED_UPDATE_KINDS,
     API_BASE,
     BACKOFF_MAX,
     BATCH_SIZE,
@@ -521,7 +522,7 @@ class TransportMixin(BridgeShared):
                 "timeout": POLL_TIMEOUT,
                 # edited_message принимается, чтобы честно ответить «правки не
                 # подхватываю» — иначе чат и база молча расходятся навсегда.
-                "allowed_updates": ["message", "edited_message", "callback_query"],
+                "allowed_updates": list(ALLOWED_UPDATE_KINDS),
             },
         )
         response.raise_for_status()
@@ -592,14 +593,42 @@ class TransportMixin(BridgeShared):
 
     @staticmethod
     def _update_chat_id(update: dict[str, Any]) -> int | None:
-        message = update.get("message") if isinstance(update, dict) else None
-        chat = message.get("chat") if isinstance(message, dict) else None
-        if not isinstance(chat, dict):
+        """Чат обновления — ЛЮБОГО из трёх видов, которые мы запрашиваем.
+
+        Читалось только `update["message"]["chat"]`, а мост подписан на три вида
+        (`allowed_updates` в опросе): `message`, `edited_message`, `callback_query`.
+        У нажатой кнопки чат лежит на этаж глубже — в `callback_query.message`, —
+        и функция возвращала `None`. Воспроизведено: тот же чат находится у текста
+        и не находится у кнопки.
+
+        Единственный потребитель — уведомление о неудаче, поэтому цена ровно такая:
+        человек нажал «Подтвердить», попытки исчерпались, и он не узнал НИЧЕГО.
+        Молчание после нажатия читается как «сделано», и это худшее из возможных
+        толкований: пропавший вопрос человек хотя бы задаст ещё раз, а пропавшее
+        подтверждение он считает исполненным.
+
+        Виды перечислены здесь все, а не только тот, на котором нашлась поломка:
+        мост подписывается на список видов в одном месте, а разбирал их в другом,
+        и расхождение этих двух мест — и есть класс ошибки. Новый вид в подписке
+        снова окажется невидимым, но ниже стоит тест, который сверяет оба списка.
+        """
+        if not isinstance(update, dict):
             return None
-        try:
-            return int(chat.get("id", 0)) or None
-        except (TypeError, ValueError):
-            return None
+        carriers = [update.get("message"), update.get("edited_message")]
+        callback = update.get("callback_query")
+        if isinstance(callback, dict):
+            carriers.append(callback.get("message"))
+        for carrier in carriers:
+            chat = carrier.get("chat") if isinstance(carrier, dict) else None
+            if not isinstance(chat, dict):
+                continue
+            try:
+                found = int(chat.get("id", 0)) or None
+            except (TypeError, ValueError):
+                continue
+            if found is not None:
+                return found
+        return None
 
     def _may_message_chat(self, chat_id: int) -> bool:
         """Кому боту вообще позволено писать: статический список ИЛИ чат, который
@@ -626,11 +655,25 @@ class TransportMixin(BridgeShared):
         chat_id = self._update_chat_id(update)
         if chat_id is None or not self._may_message_chat(chat_id):
             return
-        text = (
-            "⚠️ Не удалось обработать это сообщение — оно отклонено."
-            if permanent
-            else "⚠️ Не удалось обработать это сообщение, я отложил его. Попробуйте позже или переформулируйте."
-        )
+        # Нажатие кнопки — не «сообщение», и говорить о нём как о сообщении значит
+        # оставить человека в неведении о судьбе именно РЕШЕНИЯ. «Кнопка не
+        # сработала, решение не принято» отвечает на тот вопрос, который у него
+        # есть: подтвердилось ли действие.
+        pressed = isinstance(update, dict) and isinstance(update.get("callback_query"), dict)
+        if pressed:
+            text = (
+                "⚠️ Кнопка не сработала — решение НЕ принято. Откройте заявку и нажмите ещё раз."
+                if permanent
+                else "⚠️ Кнопка не сработала, решение пока НЕ принято. Я повторю попытку; "
+                "если ответа не будет, нажмите ещё раз."
+            )
+        else:
+            text = (
+                "⚠️ Не удалось обработать это сообщение — оно отклонено."
+                if permanent
+                else "⚠️ Не удалось обработать это сообщение, я отложил его. "
+                "Попробуйте позже или переформулируйте."
+            )
         try:
             await self._send_message(telegram, chat_id, text)
         except Exception:

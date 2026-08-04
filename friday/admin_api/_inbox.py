@@ -126,7 +126,7 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         entity_id=body.get("entity_id"),
         tags=body.get("tags") if isinstance(body.get("tags"), list) else None,
         notes=str(body.get("notes") or ""),
-        reviewed_by=request.state.actor.user_id,
+        reviewed_by=request.state.actor.own_id,
         promote=_parse_bool(body["promote"], field="promote") if "promote" in body else None,
         title=str(body["title"]) if body.get("title") is not None else None,
         summary=str(body["summary"]) if body.get("summary") is not None else None,
@@ -198,7 +198,7 @@ async def bulk_classify_inbox(request: Request) -> dict[str, Any]:
                 user_id,
                 inbox_id,
                 status,
-                reviewed_by=request.state.actor.user_id,
+                reviewed_by=request.state.actor.own_id,
                 promote=promote,
                 notes=str(body.get("notes") or "bulk Inbox review")[:1000],
             )

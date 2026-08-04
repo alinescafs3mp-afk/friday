@@ -100,7 +100,9 @@ def _audit(
     request.app.state.storage.log_audit(
         AuditEntry(
             id=new_id("audit"),
-            user_id=request.state.actor.user_id,
+            # Кто ДЕЙСТВОВАЛ, а не в чьём архиве: в общем архиве `user_id` у всех
+            # один, и запись об удалении знания отвечала бы «кто-то из нас».
+            user_id=request.state.actor.own_id,
             action=action,
             target_type=target_type,
             target_id=target_id,

@@ -258,7 +258,7 @@ async def restore_entity_version(entity_id: str, request: Request) -> dict[str, 
             actor.user_id,
             entity_id,
             version,
-            reviewed_by=actor.user_id,
+            reviewed_by=actor.own_id,
         )
     except LookupError as exc:
         # Текст исключения — английский и служебный («Version 7 not found for
@@ -321,7 +321,7 @@ async def link_knowledge(request: Request) -> dict[str, Any]:
             ),
             evidence=body.get("evidence") if isinstance(body.get("evidence"), dict) else {},
             status=str(body.get("status") or "accepted"),
-            reviewed_by=actor.user_id,
+            reviewed_by=actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -391,7 +391,7 @@ async def accept_resolution(candidate_id: str, request: Request) -> dict[str, An
             candidate_id,
             actor.user_id,
             target_entity_id=body.get("target_entity_id"),
-            resolved_by=actor.user_id,
+            resolved_by=actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -406,7 +406,7 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
         request.app.state.kg.resolver.reject_resolution(
             candidate_id,
             actor.user_id,
-            resolved_by=actor.user_id,
+            resolved_by=actor.own_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -516,7 +516,7 @@ async def decide_own_conflict(conflict_id: str, request: Request) -> dict[str, A
                 actor.user_id,
                 conflict_id,
                 "dismissed",
-                reviewed_by=actor.user_id,
+                reviewed_by=actor.own_id,
                 resolution_note="chat: dismissed",
             )
             _audit(request, "knowledge_conflict.dismissed", "knowledge_conflict", conflict_id, after=result)
@@ -529,7 +529,7 @@ async def decide_own_conflict(conflict_id: str, request: Request) -> dict[str, A
             actor.user_id,
             conflict_id,
             winner_id,
-            reviewed_by=actor.user_id,
+            reviewed_by=actor.own_id,
             resolution_note=f"chat: {decision}",
         )
     except ValueError as exc:

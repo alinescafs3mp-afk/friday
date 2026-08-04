@@ -2989,7 +2989,7 @@ class ExecutionKernel:
             storage.log_audit(
                 AuditEntry(
                     id=new_id("audit"),
-                    user_id=actor.user_id,
+                    user_id=actor.own_id,
                     action="tool.user_activity.unresolved",
                     target_type="user",
                     target_id="*",
@@ -3035,7 +3035,7 @@ class ExecutionKernel:
         storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
-                user_id=actor.user_id,
+                user_id=actor.own_id,
                 action="tool.user_activity",
                 target_type="user",
                 target_id=chosen.user_id,
@@ -3138,7 +3138,7 @@ class ExecutionKernel:
             storage.log_audit(
                 AuditEntry(
                     id=new_id("audit"),
-                    user_id=actor.user_id,
+                    user_id=actor.own_id,
                     action="tool.user_knowledge_search.unresolved",
                     target_type="user",
                     target_id="*",
@@ -3200,7 +3200,7 @@ class ExecutionKernel:
         storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
-                user_id=actor.user_id,
+                user_id=actor.own_id,
                 action="tool.user_knowledge_search",
                 target_type="user",
                 target_id=chosen.user_id,

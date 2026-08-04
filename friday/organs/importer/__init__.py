@@ -416,7 +416,7 @@ def _router() -> APIRouter:
         state.storage.log_audit(
             AuditEntry(
                 id=new_id("audit"),
-                user_id=actor.user_id,
+                user_id=actor.own_id,
                 action="knowledge.import",
                 target_type="import",
                 target_id=str(file.filename or kind_label),
