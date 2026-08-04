@@ -207,7 +207,7 @@ def test_duplicate_of_an_out_of_window_object_is_detected(settings, storage):
     # Mutually dissimilar filler: identical vectors here would be genuine duplicates
     # of each other, and a full-corpus scan would rightly report them too.
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])):
-        noise = _store(storage, "alice", f"Позвонить врачу {index}.", f"Врач {index}")
+        noise = _store(storage, "alice", f"Позвонить врачу {index}.", f"Врач {chr(65 + index)}")
         _index(storage, "alice", noise, vector, "test-embed")
     fresh = _store(storage, "alice", "Купить молоко, хлеб.", "Новый список")
     _index(storage, "alice", fresh, [0.98, 0.2, 0.0], "test-embed")
@@ -252,7 +252,7 @@ def test_second_run_with_no_changes_compares_nothing(settings, storage):
     storage.ensure_user("alice")
     for index, vector in enumerate(([1.0, 0.0, 0.0], [0.98, 0.2, 0.0], [0.0, 0.0, 1.0])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T{index}"), vector, "test-embed"
+            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"), vector, "test-embed"
         )
 
     first = _run(storage, cfg)
@@ -312,7 +312,7 @@ def test_backfill_walks_the_whole_corpus_across_ticks(settings, storage):
     _index(storage, "alice", old_b, [0.98, 0.2, 0.0], "test-embed")
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Прочее {index}", f"P{index}"), vector, "test-embed"
+            storage, "alice", _store(storage, "alice", f"Прочее {index}", f"P-{chr(65 + index)}"), vector, "test-embed"
         )
 
     seen_modes = set()
@@ -375,7 +375,7 @@ def test_scan_state_survives_a_shrinking_corpus(settings, storage):
     storage.ensure_user("alice")
     ids = []
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.98, 0.2, 0.0])):
-        ko = _store(storage, "alice", f"Текст {index}", f"T{index}")
+        ko = _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}")
         _index(storage, "alice", ko, vector, "test-embed")
         ids.append(ko)
     _run(storage, cfg)
@@ -397,7 +397,7 @@ def test_deadline_stops_without_losing_progress(settings, storage):
     storage.ensure_user("alice")
     for index, vector in enumerate(([1.0, 0.0, 0.0], [0.98, 0.2, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T{index}"), vector, "test-embed"
+            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"), vector, "test-embed"
         )
 
     starved = _run(storage, cfg, max_seconds=0.0)
@@ -511,7 +511,7 @@ def test_vector_pages_walk_the_corpus_without_gaps_or_repeats(settings, storage)
     storage.ensure_user("alice")
     expected = set()
     for index in range(7):
-        ko = _store(storage, "alice", f"Текст {index}", f"T{index}")
+        ko = _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}")
         _index(storage, "alice", ko, [float(index), 1.0, 0.0], "test-embed")
         expected.add(ko)
     # Every row shares one timestamp: ordering must still be total, via the id.
@@ -546,7 +546,7 @@ def test_vector_pages_exclude_soft_deleted_and_respect_the_second_bound(settings
 def test_count_user_vectors_before_a_cursor(settings, storage):
     storage.ensure_user("alice")
     for index in range(4):
-        _index(storage, "alice", _store(storage, "alice", f"T{index}", f"T{index}"), [1.0, 0.0], "test-embed")
+        _index(storage, "alice", _store(storage, "alice", f"T-{chr(65 + index)}", f"T-{chr(65 + index)}"), [1.0, 0.0], "test-embed")
     storage.execute("UPDATE knowledge_embeddings SET updated_at='1500-01-01T00:00:00+00:00'")
     rows = storage.list_user_vectors_page("alice", "test-embed")
     middle = (rows[2][1], rows[2][0])
@@ -588,7 +588,7 @@ def test_a_tile_costlier_than_the_budget_still_makes_progress(settings, storage,
     storage.ensure_user("alice")
     vectors = ([1.0, 0.0, 0.0], [0.98, 0.2, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])
     for index, vector in enumerate(vectors):
-        _index(storage, "alice", _store(storage, "alice", f"T{index}", f"T{index}"), vector, "test-embed")
+        _index(storage, "alice", _store(storage, "alice", f"T-{chr(65 + index)}", f"T-{chr(65 + index)}"), vector, "test-embed")
 
     seen = []
     for _ in range(6):
@@ -623,7 +623,7 @@ def test_end_of_history_comes_from_an_empty_page_not_a_short_one(settings, stora
     _index(storage, "alice", old_a, [1.0, 0.0, 0.0], "test-embed")
     _index(storage, "alice", old_b, [0.98, 0.2, 0.0], "test-embed")
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])):
-        _index(storage, "alice", _store(storage, "alice", f"P{index}", f"P{index}"), vector, "test-embed")
+        _index(storage, "alice", _store(storage, "alice", f"P-{chr(65 + index)}", f"P-{chr(65 + index)}"), vector, "test-embed")
 
     for _ in range(6):
         result = _run(storage, cfg)
@@ -648,11 +648,14 @@ def test_pair_accumulator_is_bounded_on_a_duplicate_cluster(settings, storage, m
     monkeypatch.setattr(dedup_module, "_MAX_PAIRS_PER_RUN", 3)
     cfg = replace(_dedup_settings(settings), dedup_scan_batch=64)
     storage.ensure_user("alice")
-    for index in range(8):  # 8 identical records -> 28 pairs, only 3 may be kept
+    # Записи ОДИНАКОВЫ и по тексту, и по имени — как и говорит комментарий ниже.
+    # Прежде они различались номером («Копия 0», «K0»), и по правилу соседей
+    # серии это уже не копии, а разные документы одной формы.
+    for _index_of_copy in range(8):  # 8 identical records -> 28 pairs, only 3 may be kept
         _index(
             storage,
             "alice",
-            _store(storage, "alice", f"Копия {index}", f"K{index}"),
+            _store(storage, "alice", "Купить молоко и хлеб.", "Копия"),
             [1.0, 0.0],
             "test-embed",
         )
@@ -717,7 +720,7 @@ def test_a_row_appearing_below_the_watermark_reopens_the_backfill(settings, stor
     cfg = _dedup_settings(settings)
     storage.ensure_user("alice")
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
-        _index(storage, "alice", _store(storage, "alice", f"P{index}", f"P{index}"), vector, "test-embed")
+        _index(storage, "alice", _store(storage, "alice", f"P-{chr(65 + index)}", f"P-{chr(65 + index)}"), vector, "test-embed")
     for _ in range(4):
         result = _run(storage, cfg)
         if result["pending"] == 0 and result["objects_compared"] == 0:
@@ -788,7 +791,7 @@ def test_an_ordinary_new_object_does_not_reopen_history(settings, storage):
     storage.ensure_user("alice")
     for index, vector in enumerate(([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T{index}"), vector, "test-embed"
+            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"), vector, "test-embed"
         )
     first = _run(storage, cfg)
     assert first["objects_compared"] == 3

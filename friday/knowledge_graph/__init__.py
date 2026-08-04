@@ -1805,10 +1805,20 @@ class KnowledgeGraph:
             resolution_note=resolution_note,
         )
 
-    def get_entity_relations(self, entity_id: str, user_id: str) -> list[dict[str, Any]]:
+    def get_entity_relations(
+        self, entity_id: str, user_id: str, *, as_of: str = ""
+    ) -> list[dict[str, Any]]:
+        """Связи узла; `as_of` — какими они были на ту дату.
+
+        Обёртка обязана пропускать дату дальше: без этого «как было тогда»
+        работало бы через обход графа и не работало через прямой вызов, а
+        разница между двумя дорогами к одному факту — это ровно тот случай,
+        когда ворота стоят на одной из них.
+        """
+
         if not self.storage.get_entity(entity_id, user_id):
             return []
-        return self.storage.get_entity_relations(entity_id, user_id)
+        return self.storage.get_entity_relations(entity_id, user_id, as_of=as_of)
 
     def count_pending_relations(self, entity_id: str, user_id: str) -> int:
         if not self.storage.get_entity(entity_id, user_id):

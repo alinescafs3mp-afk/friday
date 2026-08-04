@@ -24,6 +24,7 @@ import heapq
 import json
 import logging
 import math
+import re
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
@@ -73,6 +74,64 @@ _SCAN_STATE_VERSION = 1
 # Statuses a human has settled: re-proposing these would be nagging, not detection.
 # 'confirmed' is deliberately absent — re-touching it only raises confidence.
 _SETTLED = frozenset({"dismissed", "resolved"})
+
+
+#: Числа в имени файла: «13 день» против «12 день», «за 22_12_25 4» против «2».
+_TITLE_NUMBERS = re.compile(r"\d+")
+#: Пометки копии — они различием НЕ считаются: «_ копия», «- copy», «(1)».
+_COPY_MARK = re.compile(r"\s*[-_(]?\s*(?:копия|copy)\s*\)?|\s*\(\d+\)", re.IGNORECASE)
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _series_numbers(title: str) -> tuple[str, ...]:
+    return tuple(_TITLE_NUMBERS.findall(_COPY_MARK.sub("", title or "")))
+
+
+def series_neighbour_reason(storage: Any, user_id: str, id_a: str, id_b: str) -> str:
+    """Почему эта пара — соседи по серии, а не копия. Пусто — возражений нет.
+
+    Порог тут бессилен, и это записано в шапке модуля ещё при его написании:
+    «серия текстуально почти идентична по построению». Замер на живом архиве
+    подтвердил в худшем виде — в очереди висели 144 пары со сходством 0.99–1.00,
+    и среди них «13 день.docx» ⟷ «12 день.docx» (разные дни одного курса),
+    «ЖП.pdf» ⟷ «ЖП1.pdf» (журнал за 25 и за 24 августа), «строевка 05.03» ⟷
+    «строевка 07.03». Слить их значило бы стереть данные.
+
+    Различающий признак есть, и он не в тексте: у соседей по серии различается
+    СОБСТВЕННАЯ дата документа или числа в имени. Замер: правило отсеивает 69
+    пар из 144.
+
+    Порядок важен. Проверка идёт ПОСЛЕ точного совпадения текста, и контроль это
+    требует: все 55 пар, закрытых проходом точных копий, имеют текст знак в
+    знак, и среди них есть «12 день» ⟷ «13 день» — один и тот же файл, дважды
+    сохранённый под разными именами. Правило, поставленное раньше, забраковало
+    бы 18 верных решений; поставленное позже — не трогает ни одного.
+    """
+
+    left = storage.get_knowledge_object(id_a, user_id)
+    right = storage.get_knowledge_object(id_b, user_id)
+    if not left or not right:
+        return ""
+    if _WHITESPACE.sub(" ", str(left.get("content") or "")).strip() == _WHITESPACE.sub(
+        " ", str(right.get("content") or "")
+    ).strip():
+        # Текст совпал знак в знак — это копия, как бы ни назывались файлы.
+        return ""
+    left_meta = left.get("metadata_json")
+    right_meta = right.get("metadata_json")
+    if isinstance(left_meta, str):
+        left_meta = json.loads(left_meta or "{}")
+    if isinstance(right_meta, str):
+        right_meta = json.loads(right_meta or "{}")
+    left_date = str((left_meta or {}).get("document_date") or "")
+    right_date = str((right_meta or {}).get("document_date") or "")
+    if left_date and right_date and left_date != right_date:
+        return f"у документов разные собственные даты: {left_date} и {right_date}"
+    left_numbers = _series_numbers(str(left.get("title") or ""))
+    right_numbers = _series_numbers(str(right.get("title") or ""))
+    if left_numbers != right_numbers:
+        return f"в именах разные числа: {left_numbers or '—'} и {right_numbers or '—'}"
+    return ""
 
 
 def _unit(vector: list[float]) -> list[float] | None:
@@ -558,7 +617,14 @@ def detect_near_duplicates(
     if collector.dropped:
         complete = False
     stored = 0
+    series = 0
     for id_a, id_b, score in ordered:
+        veto = series_neighbour_reason(storage, user_id, id_a, id_b)
+        if veto:
+            # Соседний документ серии — не копия. Это не отсев по порогу, а
+            # ответ на вопрос, который порог задать не может; см. функцию.
+            series += 1
+            continue
         try:
             storage.store_knowledge_conflict(
                 user_id,
@@ -621,6 +687,10 @@ def detect_near_duplicates(
         )
     return {
         "detected": stored,
+        # Названо числом, а не молчанием: отсев соседей по серии — самое частое,
+        # что делает этот проход на корпусе бланковых документов (69 из 144 на
+        # архиве владельца), и молчаливый отсев не отличить от «ничего не нашли».
+        "series_neighbours_skipped": series,
         # Above-threshold pairs seen this run. A pair whose two sides fall in different
         # tiles is seen once per tile: this is a diagnostic counter, not an invariant.
         "candidate_pairs": collector.total,

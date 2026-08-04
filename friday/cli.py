@@ -1535,6 +1535,75 @@ def _retag_documents(args: argparse.Namespace) -> int:
     return 0
 
 
+def _dismiss_series_conflicts(args: argparse.Namespace) -> int:
+    """Снять с очереди пары, которые сегодняшнее правило и не завело бы.
+
+    Детектор почти-дубликатов ловил бланк, а не копию: на архиве владельца в
+    очереди висели 144 пары со сходством 0.99–1.00, и среди них «13 день.docx»
+    ⟷ «12 день.docx» (разные дни курса), «ЖП.pdf» ⟷ «ЖП1.pdf» (журнал за два
+    разных дня), «строевка 05.03» ⟷ «строевка 07.03». Слить их значило бы
+    стереть данные.
+
+    Правило починено вперёд (`series_neighbour_reason`), но узлы прежней
+    редакции остаются: очередь их не потеряет сама. Здесь они закрываются
+    статусом `dismissed` с причиной — не «удалено», а «рассмотрено и отклонено»,
+    и причина видна человеку.
+
+    Замер перед проходом: 69 пар из 144. Контроль: на 55 парах, уже закрытых
+    человеком, правило не возражает ни разу.
+    """
+
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.dedup import series_neighbour_reason
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    apply_changes = bool(getattr(args, "apply", False))
+    if apply_changes:
+        warn_if_service_holds_the_database(storage, action="закрывать конфликты")
+
+    seen = dismissed = 0
+    reasons: dict[str, int] = {}
+    try:
+        conflicts = storage.list_knowledge_conflicts(args.user, status="suggested", limit=5000)
+        for conflict in conflicts:
+            seen += 1
+            reason = series_neighbour_reason(
+                storage,
+                args.user,
+                str(conflict["knowledge_a_id"]),
+                str(conflict["knowledge_b_id"]),
+            )
+            if not reason:
+                continue
+            dismissed += 1
+            head = reason.split(":")[0]
+            reasons[head] = reasons.get(head, 0) + 1
+            if apply_changes:
+                storage.review_knowledge_conflict(
+                    args.user,
+                    str(conflict["id"]),
+                    "dismissed",
+                    reviewed_by="series_rule",
+                    resolution_note=f"Не копия, а соседний документ серии: {reason}",
+                )
+        if apply_changes:
+            storage.record_event("knowledge.series_conflicts_dismissed", {"seen": seen, "dismissed": dismissed})
+    finally:
+        storage.close()
+
+    print(f"Конфликтов в очереди: {seen}.")
+    print(f"Соседи по серии (не копии): {dismissed}.")
+    for head, count in sorted(reasons.items(), key=lambda item: -item[1]):
+        print(f"    {head}: {count}")
+    print(f"Остаётся человеку: {seen - dismissed}.")
+    if not apply_changes:
+        print("Это ПОКАЗ, очередь не тронута. Чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _backfill_relation_dates(args: argparse.Namespace) -> int:
     """Проставить уже принятым связям дату документа, который их объявил.
 
@@ -2307,6 +2376,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retag.add_argument("--report", help="Write every decision as JSON lines to this file")
     retag.set_defaults(handler=_retag_documents)
+
+    series = sub.add_parser(
+        "dismiss-series-conflicts",
+        help="Close near-duplicate conflicts that are neighbours in a series, not copies",
+    )
+    series.add_argument("--user", required=True, help="Tenant whose queue is reviewed")
+    series.add_argument(
+        "--apply",
+        action="store_true",
+        help="Close them (without it the pass only counts them)",
+    )
+    series.set_defaults(handler=_dismiss_series_conflicts)
 
     relation_dates = sub.add_parser(
         "backfill-relation-dates",
