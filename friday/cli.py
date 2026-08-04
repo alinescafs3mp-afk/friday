@@ -1275,6 +1275,145 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
     return 0
 
 
+def _retag_documents(args: argparse.Namespace) -> int:
+    """Проставить архиву ВИД документа и снять теги прежней редакции правил.
+
+    Правило чинится вперёд, а узлы прежней редакции остаются: теги `document` и
+    `application` код не порождает с 2026-07-29 (последний объект с ними создан
+    в тот день), но на живом архиве они сидят на 1524 объектах из 1536 — 99.2%,
+    то есть 19.2% всего тегового объёма занято двумя тегами, не сужающими ничего.
+
+    Показ по умолчанию. Замер перед применением — на архиве владельца вид
+    объявляют о себе 88.2% документов; остальным вид не приписывается, потому
+    что тег «рапорт» на списке личного состава хуже отсутствия тега: по нему
+    будут отбирать.
+    """
+
+    import asyncio
+
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.ingestion._document_kind import KIND_TAG_PREFIX, detect_document_kind, kind_tag
+    from friday.storage import init_storage
+
+    #: Теги прежней редакции: вид НОСИТЕЛЯ (`document`) и первая часть mime-типа
+    #: (`application`), приписывавшиеся каждому файлу без анализа содержимого.
+    _STALE_TAGS = frozenset({"document", "application"})
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    apply_changes = bool(getattr(args, "apply", False))
+    use_arbiter = bool(getattr(args, "arbiter", False))
+    llm = None
+    if use_arbiter:
+        from friday.agent_runtime.llm import LLMRouter
+
+        llm = LLMRouter(settings)
+        if not llm.enabled:
+            print("Модель выключена: арбитр вида недоступен.", file=sys.stderr)
+            storage.close()
+            return 2
+    report_path = getattr(args, "report", None)
+    report_file = open(report_path, "w", encoding="utf-8") if report_path else None  # noqa: SIM115
+
+    seen = kinds_set = stale_removed = changed = asked = 0
+    by_kind: dict[str, int] = {}
+    proposals: dict[str, int] = {}
+
+    async def run() -> None:
+        nonlocal seen, kinds_set, stale_removed, changed, asked
+        cursor = 0
+        while True:
+            batch = storage.knowledge_bodies_after(
+                after_rowid=cursor, user_id=args.user, limit=args.batch
+            )
+            if not batch:
+                break
+            for row in batch:
+                cursor = int(row["rowid"])
+                seen += 1
+                current = storage.get_knowledge_object(str(row["id"]), str(row["user_id"]))
+                if not current:
+                    continue
+                tags = list(json.loads(current.get("tags_json") or "[]"))
+                content = str(current.get("content") or "")
+                title = str(current.get("title") or "")
+                kind, evidence = detect_document_kind(content, title=title)
+                if not kind and llm is not None:
+                    from friday.ingestion._document_kind import ask_document_kind
+
+                    asked += 1
+                    try:
+                        kind, evidence = await ask_document_kind(content, llm=llm)
+                    except Exception as error:  # noqa: BLE001 — один документ не рвёт проход
+                        print(f"  {row['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+                        kind, evidence = "", ""
+                    if not kind and evidence.startswith("другое: "):
+                        proposals[evidence[8:]] = proposals.get(evidence[8:], 0) + 1
+                kept = [tag for tag in tags if tag not in _STALE_TAGS and not tag.startswith(KIND_TAG_PREFIX)]
+                stale_removed += len(tags) - len(kept)
+                if kind:
+                    kept.append(kind_tag(kind))
+                    kinds_set += 1
+                    by_kind[kind] = by_kind.get(kind, 0) + 1
+                new_tags = sorted(set(kept))
+                if report_file is not None:
+                    report_file.write(
+                        json.dumps(
+                            {
+                                "id": row["id"],
+                                "title": title[:120],
+                                "kind": kind,
+                                "evidence": evidence,
+                                "removed": sorted(set(tags) - set(new_tags)),
+                                "added": sorted(set(new_tags) - set(tags)),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                if new_tags == sorted(set(tags)):
+                    continue
+                changed += 1
+                if apply_changes:
+                    storage.update_knowledge_fields(
+                        str(row["id"]), str(row["user_id"]), tags_json=new_tags
+                    )
+            if args.limit and seen >= args.limit:
+                break
+
+    try:
+        asyncio.run(run())
+        if apply_changes:
+            storage.record_event(
+                "knowledge.retagged",
+                {"seen": seen, "kinds": kinds_set, "changed": changed},
+            )
+    finally:
+        if report_file is not None:
+            report_file.close()
+        storage.close()
+
+    print(f"Просмотрено объектов: {seen}.")
+    print(f"Вид объявлен у: {kinds_set} ({kinds_set / max(seen, 1) * 100:.1f}%)")
+    for kind, count in sorted(by_kind.items(), key=lambda item: -item[1]):
+        print(f"    {kind:26s} {count:5d}")
+    print(f"Снято тегов прежней редакции: {stale_removed}.")
+    if asked:
+        print(f"Спрошено у арбитра: {asked}.")
+    if proposals:
+        # Новый вид заводится решением человека, а не молча в проходе: фасет из
+        # сотни одноразовых значений перестаёт отбирать что-либо.
+        print("Арбитр предложил виды, которых нет в списке (решать человеку):")
+        for name, count in sorted(proposals.items(), key=lambda item: -item[1])[:12]:
+            print(f"    {name:40s} {count:4d}")
+    if apply_changes:
+        print(f"Изменено объектов: {changed}.")
+    else:
+        print(f"Изменилось бы объектов: {changed}. Это ПОКАЗ; чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _review_relation_candidates(args: argparse.Namespace) -> int:
     """Сверить очередь предложенных связей с документами, которые их объявляют.
 
@@ -1343,6 +1482,7 @@ def _review_relation_candidates(args: argparse.Namespace) -> int:
                 llm=llm,
                 limit=int(getattr(args, "limit", 0) or 0),
                 apply=apply_changes,
+                votes=int(getattr(args, "votes", 2) or 2),
                 on_verdict=note,
             )
         )
@@ -1940,6 +2080,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     structure.set_defaults(handler=_extract_structure_relations)
 
+    retag = sub.add_parser(
+        "retag-documents",
+        help="Tag every document with the KIND it declares about itself, and drop tags of the previous rule",
+    )
+    retag.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    retag.add_argument("--batch", type=int, default=100, help="Objects per pass (default: 100)")
+    retag.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
+    retag.add_argument(
+        "--arbiter",
+        action="store_true",
+        help="Ask the model about documents whose kind is not declared by a known word",
+    )
+    retag.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write the tags (without it the pass only shows what would change)",
+    )
+    retag.add_argument("--report", help="Write every decision as JSON lines to this file")
+    retag.set_defaults(handler=_retag_documents)
+
     review = sub.add_parser(
         "review-relation-candidates",
         help="Check each suggested relation against the document that supposedly declares it",
@@ -1950,6 +2110,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply",
         action="store_true",
         help="Write the verdicts (without it the pass only shows them)",
+    )
+    review.add_argument(
+        "--votes",
+        type=int,
+        default=2,
+        help="Ask the arbiter this many times; a decision needs them to agree (default: 2)",
     )
     review.add_argument(
         "--report",

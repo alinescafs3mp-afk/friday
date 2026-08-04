@@ -45,6 +45,7 @@ from friday.ingestion._base import (
     replace,
     utc_now,
 )
+from friday.ingestion._document_kind import detect_document_kind, kind_tag
 
 if TYPE_CHECKING:
     from friday.agent_runtime.llm import LLMRouter
@@ -507,6 +508,7 @@ class AdviceMixin(PipelineShared):
         assessment: PromotionAssessment,
         *,
         user_id: str,
+        title: str = "",
     ) -> KnowledgeEnrichment:
         kind = assessment.knowledge_kind or _detect_knowledge_kind(content)
         entities = self._entity_suggestions(user_id, content)
@@ -514,6 +516,15 @@ class AdviceMixin(PipelineShared):
         tags.extend(_extract_keywords(content, max_keywords=8))
         if kind != "note":
             tags.append(kind)
+        # Вид документа — то, чем документ объявляет себя сам, и единственный
+        # тег этого набора, по которому осмысленно ОТБИРАТЬ. Замер на архиве
+        # владельца: `knowledge_kind` у 1532 объектов из 1536 равен `document`
+        # (это вид носителя, а не документа), а частотные ключевые слова дают
+        # 786 объектов из 1536 с набором тегов, совпадающим с набором другого
+        # объекта — 47 карточек РАЗНЫХ людей размечены одинаково.
+        document_kind, _evidence = detect_document_kind(content, title=title)
+        if document_kind:
+            tags.append(kind_tag(document_kind))
         # Entity names improve navigation, but keep the tag space compact and conservative.
         for entity in entities[:5]:
             if float(entity.get("confidence", 0.0)) >= 0.88:

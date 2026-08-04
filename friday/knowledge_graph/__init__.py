@@ -1594,6 +1594,7 @@ class KnowledgeGraph:
         limit: int = 0,
         apply: bool = False,
         reviewed_by: str = "arbiter",
+        votes: int = 2,
         on_verdict: Any = None,
     ) -> dict[str, Any]:
         """Сверить очередь предложенных связей с документами-основаниями.
@@ -1613,6 +1614,7 @@ class KnowledgeGraph:
             limit=limit,
             apply=apply,
             reviewed_by=reviewed_by,
+            votes=votes,
             on_verdict=on_verdict,
         )
 

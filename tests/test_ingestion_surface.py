@@ -105,7 +105,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_apply_feedback_calibration": "(self, user_id: 'str', assessment: 'PromotionAssessment') -> 'PromotionAssessment'",
     "_commit_staged_file": "(self, target: 'Path', staged: 'Path | None', digest: 'str') -> 'Path'",
     "_create_promoted_ko": "(self, inbox_id: 'str', user_id: 'str', item: 'dict[str, Any]', reviewer: 'str', *, title: 'str | None', summary: 'str | None', knowledge_kind: 'str | None', importance: 'float | None', metadata: 'dict[str, Any] | None', tags: 'list[str] | None') -> 'str | None'",
-    "_enrich": "(self, content: 'str', assessment: 'PromotionAssessment', *, user_id: 'str') -> 'KnowledgeEnrichment'",
+    # `title` добавлен сознательно: у части документов вид объявлен только именем
+    # файла («План-конспект ПК.doc» — в теле слова нет вовсе), и без заголовка
+    # обогащение этот вид теряет.
+    "_enrich": "(self, content: 'str', assessment: 'PromotionAssessment', *, user_id: 'str', title: 'str' = '') -> 'KnowledgeEnrichment'",
     "_entity_suggestions": "(self, user_id: 'str', content: 'str') -> 'list[dict[str, Any]]'",
     "_extract_visual_document": "(self, file_content: 'bytes', *, filename: 'str', mime_type: 'str') -> 'dict[str, Any] | None'",
     "_file_sha256": "(path: 'Path') -> 'str'",

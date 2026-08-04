@@ -263,3 +263,109 @@ async def test_an_impossible_relation_is_not_worth_asking_about(storage):
     assert result["reject"] == 1
     assert model.calls == []
     assert result["verdicts"][0]["checked_by"] == "structure"
+
+
+@pytest.mark.asyncio
+async def test_the_judge_is_told_that_a_letterhead_city_is_not_a_persons_place(storage):
+    """Город в шапке приказа — место ЧАСТИ, издавшей приказ, а не место человека.
+
+    Замерено на живой очереди: из 45 подтверждённых `located_at` часть судья
+    обосновывал словами «г. Севастополь указано как место составления приказа» —
+    и всё равно подтверждал. Различение это не выводится из выдержки: оно
+    выводится из того, чем город в документе является.
+    """
+
+    _candidate_id, _people = _queue(storage, excerpt="Водитель | рядовой | Котельников Олег Сергеевич")
+    graph = KnowledgeGraph(storage)
+    model = _Model({"verdict": "не уверен", "about": "", "reason": "."})
+
+    await graph.review_relation_candidates("alice", llm=model, apply=False)
+
+    system = str(model.calls[0][0]["content"])
+    assert "место, где документ составлен" in system
+    assert "Адрес места жительства" in system
+
+
+@pytest.mark.asyncio
+async def test_an_arbiter_that_disagrees_with_itself_decides_nothing(storage):
+    """Два прогона по одной очереди из 522 кандидатов разошлись на 97 вердиктах.
+
+    Согласие 81.4% при temperature=0. Решение терминально — отвергнутого не
+    вернуть, — поэтому кандидат, по которому арбитр не повторил сам себя,
+    остаётся человеку, а не решается броском монеты.
+    """
+
+    candidate_id, _people = _queue(storage, excerpt="Водитель | рядовой | Котельников Олег Сергеевич")
+    graph = KnowledgeGraph(storage)
+    model = _Model(
+        {"verdict": "подтверждаю", "about": "", "reason": "первый раз так"},
+        {"verdict": "отвергаю", "about": "", "reason": "второй раз иначе"},
+    )
+
+    result = await graph.review_relation_candidates("alice", llm=model, apply=True, votes=2)
+
+    assert result["unsure"] == 1
+    assert _status(storage, candidate_id) == "suggested"
+    assert "разошёлся сам с собой" in result["verdicts"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_two_agreeing_votes_decide(storage):
+    candidate_id, _people = _queue(storage, excerpt="Водитель | рядовой | Котельников Олег Сергеевич")
+    graph = KnowledgeGraph(storage)
+    model = _Model({"verdict": "отвергаю", "about": "", "reason": "строка про самого Котельникова"})
+
+    result = await graph.review_relation_candidates("alice", llm=model, apply=True, votes=2)
+
+    assert result["reject"] == 1
+    assert len(model.calls) == 2
+    assert _status(storage, candidate_id) == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_a_structural_rejection_is_not_asked_twice(storage):
+    """Структурный отказ не зависит от модели — второй вызов был бы тратой."""
+
+    graph = KnowledgeGraph(storage)
+    people = {
+        name: str(graph.create_entity("alice", name, EntityType.PERSON)["id"])
+        for name in ("Марухненко Иван Михайлович", "Котельников Олег Сергеевич")
+    }
+    raw = RawObject(new_id("raw"), "alice", "test", new_id("ref"), _ROSTER, "text")
+    storage.store_raw_object(raw)
+    document = KnowledgeObject(new_id("ko"), "alice", raw.id, content=_ROSTER, title="Расчёт")
+    storage.store_knowledge_object(document)
+    for entity_id in people.values():
+        graph.link_knowledge_to_entity(document.id, entity_id, "alice")
+    storage.store_relation_candidate(
+        "alice",
+        people["Марухненко Иван Михайлович"],
+        people["Котельников Олег Сергеевич"],
+        "member_of",
+        confidence=0.9,
+        evidence={"knowledge_object_id": document.id, "excerpt": "Водитель | рядовой | Котельников Олег Сергеевич"},
+    )
+    model = _Model({"verdict": "подтверждаю", "about": "", "reason": "не должно быть спрошено"})
+
+    result = await graph.review_relation_candidates("alice", llm=model, apply=True, votes=3)
+
+    assert result["reject"] == 1
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_disagreement_stops_the_voting(storage):
+    """Разошлись — вопрос уже решён, и третий голос ничего не добавит."""
+
+    _candidate_id, _people = _queue(storage, excerpt="Водитель | рядовой | Котельников Олег Сергеевич")
+    graph = KnowledgeGraph(storage)
+    model = _Model(
+        {"verdict": "подтверждаю", "about": "", "reason": "раз"},
+        {"verdict": "отвергаю", "about": "", "reason": "два"},
+        {"verdict": "отвергаю", "about": "", "reason": "три"},
+    )
+
+    result = await graph.review_relation_candidates("alice", llm=model, apply=True, votes=3)
+
+    assert result["unsure"] == 1
+    assert len(model.calls) == 2

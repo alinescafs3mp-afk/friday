@@ -94,6 +94,12 @@ def _judge_prompt(
                 "Соседство двух имён — не связь. Заголовок графы бланка («22. Родители "
                 "(ФИО, дата рождения, где проживает…)») не подтверждает ничего: он "
                 "стоит между любыми двумя именами анкеты.\n\n"
+                "Город в ШАПКЕ документа — место, где документ составлен, а не место "
+                "человека, о котором документ написан. «г. Севастополь» над текстом "
+                "приказа говорит, где стоит часть, издавшая приказ; о том, где живёт "
+                "зачисленный этим приказом человек, он не говорит ничего. Место человека "
+                "объявляет графа его собственной строки («Адрес места жительства», "
+                "«проживает»), а не бланк.\n\n"
                 "«не уверен» — законный ответ, и он лучше догадки: такую связь "
                 "посмотрит человек.\n\n"
                 "Верни ОДИН JSON-объект без Markdown и пояснений, строго по схеме: "
@@ -237,13 +243,24 @@ async def review_relation_candidates(
     limit: int = 0,
     apply: bool = False,
     reviewed_by: str = "arbiter",
+    votes: int = 2,
     on_verdict: Any = None,
 ) -> dict[str, Any]:
     """Пройти очередь предложенных связей и вынести по каждой вердикт.
 
     ``apply=False`` — показ: вердикты считаются и возвращаются, статусы не
-    трогаются. Показ здесь настоящий, а не на словах: без записи повторный
-    прогон даёт те же числа, и сверять их можно с чем угодно.
+    трогаются.
+
+    ``votes`` — сколько раз спросить арбитра об одном кандидате. Решение
+    принимается только при ЕДИНОГЛАСИИ; разошёлся сам с собой — значит вопрос
+    трудный, и кандидат остаётся человеку.
+
+    Один голос доверия не заслуживает, и это замерено: два полных прогона по
+    одной и той же очереди из 522 кандидатов при temperature=0 разошлись на 97
+    вердиктах (согласие 81.4%) — 41 отказ стал воздержанием, 15 подтверждений
+    стали воздержанием, 7 подтверждений — отказом. Решение по кандидату
+    терминально: отвергнутого не вернуть, и цена случайного расхождения тут
+    выше цены второго вызова модели.
 
     Воздержание (``unsure``) статус НЕ меняет — кандидат остаётся человеку.
     """
@@ -264,15 +281,36 @@ async def review_relation_candidates(
     )
     for candidate in candidates:
         result["seen"] += 1
-        try:
-            judged = await judge_relation_candidate(storage, user_id, candidate, llm=llm)
-        except Exception as error:  # noqa: BLE001 — один кандидат не рвёт проход
-            # Молчащая модель даёт «просмотрено 597, отвергнуто 0» — то же, что
-            # безупречная очередь. Проход обязан называть это числом.
-            result["model_errors"] += 1
-            if on_verdict is not None:
-                on_verdict(candidate, {"verdict": UNSURE, "reason": f"{type(error).__name__}: {error}"})
+        rounds: list[dict[str, Any]] = []
+        failed = False
+        for _attempt in range(max(1, int(votes))):
+            try:
+                judged = await judge_relation_candidate(storage, user_id, candidate, llm=llm)
+            except Exception as error:  # noqa: BLE001 — один кандидат не рвёт проход
+                # Молчащая модель даёт «просмотрено 597, отвергнуто 0» — то же, что
+                # безупречная очередь. Проход обязан называть это числом.
+                result["model_errors"] += 1
+                if on_verdict is not None:
+                    on_verdict(candidate, {"verdict": UNSURE, "reason": f"{type(error).__name__}: {error}"})
+                failed = True
+                break
+            rounds.append(judged)
+            if str(judged.get("checked_by")) == "structure":
+                # Структурный отказ не зависит от модели: спрашивать второй раз
+                # нечего, ответ будет тот же самый.
+                break
+            if str(judged.get("verdict")) != str(rounds[0].get("verdict")):
+                break
+        if failed:
             continue
+        judged = dict(rounds[0])
+        if len({str(item.get("verdict")) for item in rounds}) > 1:
+            # Арбитр разошёлся сам с собой — вопрос трудный, и решать его
+            # молча нельзя.
+            judged["verdict"] = UNSURE
+            judged["reason"] = "Арбитр разошёлся сам с собой: " + " / ".join(
+                f"{item.get('verdict')}" for item in rounds
+            )
         verdict = str(judged.get("verdict"))
         result[verdict] = int(result.get(verdict, 0)) + 1
         record = {

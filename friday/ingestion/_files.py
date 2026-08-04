@@ -504,7 +504,10 @@ class FilesMixin(PipelineShared):
                 ),
             )
         )
-        enrichment = self._enrich(text_content or filename, assessment, user_id=user_id)
+        # Имя файла идёт в обогащение как ЗАГОЛОВОК: у части документов вид
+        # объявлен только им («План-конспект ПК.doc» — в теле слова нет вовсе,
+        # на живом архиве такими оказались 50 объектов из 1536).
+        enrichment = self._enrich(text_content or filename, assessment, user_id=user_id, title=filename)
         # Дата документа едет В ОБОГАЩЕНИИ, а не только в метаданных raw: объект
         # знаний собирается из `enrichment.metadata`, и метаданные raw в него не
         # копируются — по-другому дата не пережила бы продвижение и фильтровать
