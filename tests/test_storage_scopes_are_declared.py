@@ -84,7 +84,7 @@ PERSON_SCOPED = {
 #: вопрос «арендатор или человек?». Если ответ «человек», имя идёт в
 #: `PERSON_SCOPED` выше; если «арендатор» — просто число растёт, и это тоже
 #: решение, принятое явно.
-EXPECTED_USER_ID_METHODS = 224
+EXPECTED_USER_ID_METHODS = 225
 
 
 def _methods_taking_user_id() -> set[str]:

@@ -60,7 +60,13 @@ def _previous_window(since: str, until: str | None) -> tuple[str, str]:
 
 class OversightMixin(StorageShared):
     def _arrival_window(
-        self, user_id: str, since: str | None, until: str | None, *, alias: str = ""
+        self,
+        user_id: str,
+        since: str | None,
+        until: str | None,
+        *,
+        alias: str = "",
+        uploaded_by: str | None = None,
     ) -> tuple[str, list[Any]]:
         """The window every oversight read shares, built once.
 
@@ -80,7 +86,36 @@ class OversightMixin(StorageShared):
         if until:
             clauses.append(f"{prefix}received_at <= ?")
             params.append(until)
+        # КТО принёс материал. В общем архиве `user_id` один на всех, и без этого
+        # условия надзор «что Иван присылал» отвечал по всему архиву либо, если
+        # спрашивать по человеку, не находил ничего никогда.
+        #
+        # Признак пишется с 2026-08-04. У материалов, принятых раньше, его нет —
+        # и приписать их кому-либо нельзя: автор неизвестен, а догадка здесь
+        # означала бы приписать человеку чужие документы. Такие строки в ответ по
+        # автору не попадают и считаются отдельно, честной строкой «без автора».
+        if uploaded_by is not None:
+            clauses.append(f"json_extract({prefix}metadata_json,'$.uploaded_by') = ?")
+            params.append(str(uploaded_by or ""))
         return " AND ".join(clauses), params
+
+    def arrivals_without_an_author(
+        self, user_id: str, since: str | None = None, until: str | None = None
+    ) -> int:
+        """Сколько материалов в окне пришло БЕЗ признака автора.
+
+        Существует затем, чтобы «у Ивана ноль загрузок» нельзя было прочесть как
+        «Иван ничего не присылал», когда рядом лежат три тысячи документов
+        неизвестного происхождения. Пустота и неизвестность — разные ответы, и
+        человек, принимающий решение о сотруднике, обязан видеть разницу.
+        """
+        where, params = self._arrival_window(user_id, since, until)
+        row = self.execute(
+            f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where} "  # nosec B608
+            "AND COALESCE(json_extract(metadata_json,'$.uploaded_by'),'') = ''",
+            tuple(params),
+        ).fetchone()
+        return int((row["n"] if row else 0) or 0)
 
     def _windowed_count(
         self, table: str, user_id: str, since: str | None, until: str | None, extra: str = ""

@@ -34,7 +34,7 @@ async def upload_file(
         filename=file.filename or "upload.bin",
         mime_type=file.content_type or "application/octet-stream",
         source_ref=source_ref,
-        metadata={"uploaded_via": "api"},
+        metadata={"uploaded_via": "api", "uploaded_by": actor.own_id},
     )
     _audit(
         request,

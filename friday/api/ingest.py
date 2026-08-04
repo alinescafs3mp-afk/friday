@@ -30,7 +30,11 @@ async def ingest(request: Request) -> dict[str, Any]:
         source="api",
         source_ref=str(body.get("source_ref") or ""),
         force_knowledge=force_knowledge,
-        metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+        # Кто принёс материал: единый ключ на всех дорогах приёма.
+        metadata={
+            **(dict(given) if isinstance(given := body.get("metadata"), dict) else {}),
+            "uploaded_by": actor.own_id,
+        },
     )
 
 

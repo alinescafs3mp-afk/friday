@@ -1895,6 +1895,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         file_metadata["duration_sec"] = document["duration"]
                     if forward_meta:
                         file_metadata["forward"] = forward_meta
+                    # КТО принёс материал. Без этого поля надзор «что Иван присылал»
+                    # неразрешим: в общем архиве все документы лежат под одним
+                    # арендатором. Замерено 2026-08-04 — 3295 документов из 3296 не
+                    # несут ни одного признака автора.
+                    file_metadata["uploaded_by"] = actor.own_id
                     file_ingestion = await state.ingestion.ingest_file(
                         actor.user_id,
                         None,
@@ -2012,6 +2017,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         source_ref=source_ref,
                         force_knowledge=force_knowledge,
                         metadata={
+                            # Кто прислал текст — тем же ключом, что и у файлов.
+                            "uploaded_by": actor.own_id,
                             "channel": actor.source,
                             "chat_id": channel_chat_id,
                             "telegram_message_id": body.get("telegram_message_id"),
