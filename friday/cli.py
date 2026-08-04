@@ -810,6 +810,49 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
     return 0
 
 
+def warn_if_service_holds_the_database(storage: Any, *, action: str) -> bool:
+    """Сказать вслух, что базу прямо сейчас держит живая служба.
+
+    Два процесса, одновременно пишущие в одну базу SQLite, — это не теория.
+    Живой экземпляр упал 2026-08-05 в 00:22:29: сигнал 7 (SIGBUS), стек целиком
+    внутри libsqlite3, адрес обращения `0x79f73fdcd000` — внутри отображения
+    `79f73fdc9000-79f73fdd1000 rw-s … jericho.sqlite3-shm`. То есть файл общей
+    памяти WAL стал короче собственного отображения. В ту же минуту по той же
+    базе шёл проход `retag-documents --apply` ВТОРЫМ процессом.
+
+    База уцелела (`integrity_check` = ok), служба поднялась сама через 19 секунд,
+    но запросы человека в эти секунды оборвались, а мост потерял бэкенд с
+    `httpx.ReadError`.
+
+    Прагмой это не лечится: `PRAGMA persist_wal` в SQLite нет вовсе, а неизвестные
+    прагмы молча игнорируются — проверено исполнением, файлы `-wal`/`-shm` после
+    закрытия удаляются как ни в чём не бывало.
+
+    Поэтому здесь не запрет, а честное предупреждение: запрет остановил бы работу
+    там, где риск — секунды недоступности, а не потеря данных. Решает человек,
+    но решает ЗНАЯ.
+    """
+
+    age = storage.live_service_heartbeat_age()
+    if age is None:
+        return False
+    print(
+        f"⚠️  Базу держит живая служба (отметилась {age:.0f} с назад), а этот проход "
+        f"будет {action}.",
+        file=sys.stderr,
+    )
+    print(
+        "    Два процесса, пишущие в одну базу SQLite, уже роняли живой экземпляр "
+        "по SIGBUS 2026-08-05 в 00:22 (данные уцелели, простой 19 с).",
+        file=sys.stderr,
+    )
+    print(
+        "    Надёжнее: `systemctl --user stop friday-backend`, проход, потом start.",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _backfill_entities(args: argparse.Namespace) -> int:
     """Провести ОБЪЯВЛЯЮЩЕЕ правило извлечения по УЖЕ загруженному архиву.
 
@@ -1304,6 +1347,8 @@ def _retag_documents(args: argparse.Namespace) -> int:
     ensure_runtime_dirs(settings)
     storage = init_storage(settings)
     apply_changes = bool(getattr(args, "apply", False))
+    if apply_changes:
+        warn_if_service_holds_the_database(storage, action="переписывать теги")
     use_arbiter = bool(getattr(args, "arbiter", False))
     llm = None
     if use_arbiter:
@@ -1522,6 +1567,8 @@ def _review_relation_candidates(args: argparse.Namespace) -> int:
         storage.close()
         return 2
     apply_changes = bool(getattr(args, "apply", False))
+    if apply_changes:
+        warn_if_service_holds_the_database(storage, action="решать судьбу кандидатов")
     report_path = getattr(args, "report", None)
     report_file = open(report_path, "w", encoding="utf-8") if report_path else None  # noqa: SIM115
 
