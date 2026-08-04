@@ -33,10 +33,10 @@
 from __future__ import annotations
 
 import json
-import re
 from collections import Counter, defaultdict
 from typing import Any
 
+from friday.ingestion._base import tag_tokens
 from friday.storage import FridayStorage
 
 #: Ключ, под которым список живёт в служебном словаре.
@@ -55,11 +55,15 @@ _MIN_CONTEXT_DOCUMENTS = 10
 #: повторится случайно, а вреда от такого тега нет — он и так редкий.
 _MIN_WORD_DOCUMENTS = 5
 
-_WORD = re.compile(r"[А-ЯЁа-яёA-Za-z-]{2,}")
-
-
 def _words(text: str) -> list[str]:
-    return [match.group(0).casefold() for match in _WORD.finditer(text or "")]
+    """Те же слова, что видит отбор тегов, — иначе ворота стоят на другой дороге.
+
+    Поймано на живом архиве: список бланка резал текст своей регуляркой, без
+    точки внутри слова, и «ф.и.о» в него не попадало никогда. Отбор тегов точку
+    считал частью слова — и тег «ф.и.о» пережил чистку на 120 объектах.
+    """
+
+    return [token.casefold().strip("._-+") for token in tag_tokens(text)]
 
 
 def learn_boilerplate(texts: list[str]) -> dict[str, Any]:

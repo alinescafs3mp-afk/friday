@@ -502,6 +502,38 @@ class RuntimeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def live_service_heartbeat_age(self, *, fresh_within: float = 180.0) -> float | None:
+        """Сколько секунд назад живая служба последний раз отметилась, или None.
+
+        Нужно проходам CLI, которые ПИШУТ в базу. Два процесса, одновременно
+        пишущие в одну базу SQLite, — это не теория: живой экземпляр упал
+        2026-08-05 в 00:22:29 с сигналом 7 (SIGBUS) внутри libsqlite3, обращаясь
+        по адресу внутри отображения `jericho.sqlite3-shm`, пока по той же базе
+        шёл проход `retag-documents --apply` вторым процессом. База уцелела,
+        служба поднялась сама через 19 секунд, но запросы человека в эти секунды
+        оборвались.
+
+        Отметку ведут воркеры (`workers:health:*`), и она не про здоровье
+        конкретного воркера, а про то, что процесс службы ЖИВ и держит базу.
+        `PRAGMA persist_wal` тут не помогает: такой прагмы в SQLite нет вовсе,
+        неизвестные прагмы молча игнорируются — проверено исполнением.
+        """
+
+        rows = self.kv_list_prefix("workers:health:")
+        if not rows:
+            return None
+        newest = max(str(row.get("updated_at") or "") for row in rows)
+        if not newest:
+            return None
+        try:
+            stamp = datetime.fromisoformat(newest.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - stamp).total_seconds()
+        return age if age <= fresh_within else None
+
     def claim_bridge_nonce(self, nonce: str) -> bool:
         """Atomically record a single-use bridge nonce; return False on replay.
 

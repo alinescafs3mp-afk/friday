@@ -98,3 +98,20 @@ def test_a_broken_list_does_not_break_the_pass(storage):
 
     storage.kv_set(BOILERPLATE_KEY, "не json вовсе")
     assert stored_boilerplate(storage) == frozenset()
+
+
+def test_the_label_list_sees_the_same_words_the_tags_do():
+    """Ворота обязаны стоять на той же дороге, по которой едут теги.
+
+    Поймано на живом архиве: список бланка резал текст своей регуляркой, где
+    точка не часть слова, и «ф.и.о» в него не попадало НИКОГДА. Отбор тегов
+    точку частью слова считал — и тег «ф.и.о» пережил чистку на 120 объектах.
+    """
+
+    from friday.ingestion._base import _extract_keywords
+    from friday.ingestion._boilerplate import _words
+
+    text = "Ф.И.О сотрудника: Иванов. Ф.И.О заполняется полностью."
+    assert "ф.и.о" in _words(text)
+    assert "ф.и.о" in _extract_keywords(text)
+    assert "ф.и.о" not in _extract_keywords(text, blocked=frozenset({"ф.и.о"}))
