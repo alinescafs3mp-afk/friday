@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
+from friday.failures import safe_failure_text
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
 from friday.permissions import (
@@ -1687,7 +1688,7 @@ class ExecutionKernel:
                 approval_id,
                 actor.user_id,
                 success=False,
-                error=f"{type(exc).__name__}: {exc}",
+                error=safe_failure_text(exc),
             )
             await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
@@ -1846,7 +1847,7 @@ class ExecutionKernel:
             )
         )
 
-    def _capability_requires_person(self, security_id: str) -> bool:
+    def _capability_requires_person(self, security_id: str) -> bool:  # noqa: D401
         """Спрашивает у авторизации, помечена ли способность как «не молча»."""
 
         authorization = getattr(self, "authorization", None)
