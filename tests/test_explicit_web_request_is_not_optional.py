@@ -125,8 +125,12 @@ async def test_the_search_runs_before_the_model_gets_a_turn(monkeypatch):
     assert calls and calls[0][0] == "web_research", "поиск не выполнен при прямой просьбе"
     assert calls[0][1]["query"] == "какая сейчас ключевая ставка ЦБ"
     assert used == ["web_research"]
-    assert messages and "14,00%" in messages[0]["content"], "выдача не дошла до модели"
-    assert "не подменяй" in messages[0]["content"] or "не выдумывай" in messages[0]["content"]
+    # Выдача и указания приходят РАЗНЫМИ сообщениями: содержимое чужого сайта не
+    # должно лежать в системной роли, где модель ждёт инструкций (2026-08-04).
+    # Здесь проверяется, что оба доехали, — а не в каком порядке они сложены.
+    whole = " ".join(str(item.get("content") or "") for item in messages)
+    assert messages and "14,00%" in whole, "выдача не дошла до модели"
+    assert "не подменяй" in whole or "не выдумывай" in whole
 
 
 def test_the_prefetch_is_wired_into_the_loop():
