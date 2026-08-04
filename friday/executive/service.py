@@ -252,12 +252,17 @@ class ExecutiveService:
         # Чат — у ЧЕЛОВЕКА, а не у арендатора: в общем архиве `user_id` у всех
         # один, и предложение уходило бы владельцу архива вместо того, кто его
         # затронул. Тот же разбор, что у заявок.
-        person = str(created_by or "").strip() or user_id
+        person = self._person_behind(created_by, user_id)
         try:
             from friday.organs import may_push_to, resolve_chat_id
 
             chat_id = resolve_chat_id(self.storage, person)
             if not chat_id:
+                LOGGER.info(
+                    "mission-notify: у %r нет чата — миссия %s останется незамеченной",
+                    person,
+                    mission_id,
+                )
                 return
             if not may_push_to(self.settings, self.storage, person, chat_id):
                 return
@@ -275,6 +280,43 @@ class ExecutiveService:
             )
         except Exception:  # noqa: BLE001 — недоставленное уведомление не отменяет миссию
             LOGGER.warning("Could not queue a mission notification", exc_info=True)
+
+    def _person_behind(self, created_by: str, user_id: str) -> str:
+        """Кому писать о ждущей миссии. `created_by` — не всегда человек.
+
+        ЗАМЕРЕНО 2026-08-04, пять дорог, постусловие — строка в очереди
+        уведомлений:
+
+            инструмент  `agent:<own_id>`          НЕ ДОШЛО
+            HTTP        `api`                     НЕ ДОШЛО
+            мост        `telegram-bridge`         НЕ ДОШЛО
+            человек     `<own_id>`                дошло
+            воркер      `worker:mission_proposer` НЕ ДОШЛО
+
+        То есть механизм «миссия сама идёт к человеку» работал ровно там, где
+        автор случайно совпал с идентификатором учётной записи, — и не работал на
+        главном пути, когда миссию предложила модель. В живой базе владельца это
+        видно прямо: миссия в статусе `proposed` от 26 июля и НОЛЬ уведомлений о
+        миссиях за всё время.
+
+        Разбирается происхождение строки, а не подставляется `user_id` вслепую:
+        `agent:` несёт человека в хвосте, `worker:` человека не несёт вовсе, а
+        имена каналов (`api`, `telegram-bridge`) — это не люди. Во всех случаях,
+        где человека определить нечем, письмо идёт арендатору: у личной установки
+        это и есть владелец, а в общем архиве — тот, кто archive держит. Молчать
+        вместо этого хуже: миссия ждёт решения, которое некому принять.
+        """
+        raw = str(created_by or "").strip()
+        if raw.startswith("agent:"):
+            raw = raw.split(":", 1)[1].strip()
+        elif raw.startswith("worker:"):
+            raw = ""
+        if not raw:
+            return user_id
+        # Имя канала человеком не является. Проверяется по учёткам, а не списком
+        # известных каналов: список пришлось бы дописывать при каждой новой
+        # поверхности, и о промахе никто бы не узнал.
+        return raw if self.storage.get_user(raw) else user_id
 
     def _initial_status(self, origin: MissionOrigin) -> MissionStatus:
         if not self.settings.autonomy_enabled:

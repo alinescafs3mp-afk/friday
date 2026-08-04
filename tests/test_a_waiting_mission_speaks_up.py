@@ -22,13 +22,26 @@ from friday.storage.models import MissionStatus
 
 
 class _Storage:
-    def __init__(self) -> None:
+    def __init__(self, people: set[str] | None = None) -> None:
         self.queued: list[dict] = []
+        self.people = people if people is not None else {"person-1", "tenant-1"}
 
     def enqueue_notification(self, user_id, chat_id, text, *, kind="", dedup_key=""):  # noqa: ANN001
         self.queued.append(
             {"user_id": user_id, "chat_id": chat_id, "text": text, "kind": kind, "dedup": dedup_key}
         )
+
+    def get_user(self, user_id):  # noqa: ANN001
+        """Опознание автора: имя канала («api», «telegram-bridge») учёткой не является.
+
+        Появилось здесь 2026-08-04 вместе с разбором `created_by`. До него этот
+        файл проверял ветвление и текст, но НЕ доставку: `resolve_chat_id`
+        подменяется ниже и возвращает чат для кого угодно, — то есть прибор мокал
+        ровно то место, где и был дефект. Настоящая доставка по всем пяти дорогам
+        проверяется отдельно, на живом хранилище:
+        `tests/test_a_waiting_mission_reaches_a_person.py`.
+        """
+        return {"id": user_id} if user_id in self.people else None
 
 
 def _service(monkeypatch, *, chat_id: int | None = 42, allowed: bool = True) -> ExecutiveService:
@@ -92,7 +105,9 @@ def test_the_notice_goes_to_the_person_not_the_tenant(monkeypatch) -> None:
     monkeypatch.setattr(organs, "resolve_chat_id", lambda storage, person: seen.append(person) or 42)
     monkeypatch.setattr(organs, "may_push_to", lambda settings, storage, person, chat: True)
     service = ExecutiveService.__new__(ExecutiveService)
-    service.storage = _Storage()
+    # Человек ДОЛЖЕН существовать: с 2026-08-04 автор опознаётся по учётным
+    # записям, иначе именем канала («api», «telegram-bridge») оказался бы человек.
+    service.storage = _Storage({"person-42", "tenant-1"})
     service.settings = object()
 
     _notify(service, MissionStatus.PROPOSED, created_by="person-42")

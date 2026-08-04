@@ -50,7 +50,11 @@ async def create_mission(request: Request) -> dict[str, Any]:
     if len(goal) > _MAX_GOAL_CHARS:
         raise HTTPException(status_code=413, detail="goal is too long")
     executive = request.app.state.executive
-    mission = await executive.create_mission(actor.user_id, goal, created_by=actor.source)
+    # Автор — ЧЕЛОВЕК, а не канал. Здесь стоял `actor.source`, то есть «api» или
+    # «telegram-bridge» (у моста это константа). По этому же полю ищется чат для
+    # уведомления и ключуется дедуп миссий: с именем канала уведомление не
+    # доходило никому, а в общем архиве просьбы разных людей склеивались бы в одну.
+    mission = await executive.create_mission(actor.user_id, goal, created_by=actor.own_id)
     return {"mission": mission}
 
 
