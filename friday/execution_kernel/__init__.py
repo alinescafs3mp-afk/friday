@@ -38,7 +38,15 @@ from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import best_snippet
 from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
-from friday.storage.models import AuditEntry, EntityType, InboxStatus, RelationType, new_id
+from friday.storage.models import (
+    AuditEntry,
+    EntityType,
+    InboxStatus,
+    RelationType,
+    TaskStatus,
+    new_id,
+    utc_now,
+)
 from friday.tts import TTSUnavailable, synthesize_speech
 from friday.web_surfer import AllProvidersRefusedError
 from friday.workers._blocking import run_blocking
@@ -529,9 +537,34 @@ def _conflict_postcondition(storage, user_id: str, arguments: dict[str, Any]) ->
 # Инструмента здесь может не быть: у `code_run` постусловия не существует — его
 # результат и есть вывод программы, проверять в базе нечего, и выдумывать проверку
 # ради симметрии значило бы проверять пустоту.
+def _compensation_postcondition(storage, user_id: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+    """Шаг, который человек закрыл, действительно перестал быть неизвестным.
+
+    Проверять здесь есть что, и это не формальность: успешный возврат обработчика
+    означает лишь «UPDATE выполнился», а нужен ответ на другой вопрос — остался ли
+    шаг висеть. Именно вечно висящий `uncertain` и был исходным дефектом, поэтому
+    сверка идёт по статусу, а не по факту записи.
+    """
+    task_id = str(arguments.get("task_id") or "")
+    mission_id = str(arguments.get("mission_id") or "")
+    tasks = storage.get_mission_tasks(mission_id, user_id)
+    task = next((item for item in tasks if str(item.get("id")) == task_id), None)
+    if task is None:
+        return False, "шаг миссии исчез"
+    status = str(task.get("status") or "")
+    if status != "compensated":
+        return False, f"шаг остался в состоянии {status!r}"
+    return True, ""
+
+
+# Что должно стать правдой ПОСЛЕ действия, проверенное чтением хранилища заново.
+# Инструмента здесь может не быть: у `code_run` постусловия не существует — его
+# результат и есть вывод программы, проверять в базе нечего, и выдумывать проверку
+# ради симметрии значило бы проверять пустоту.
 POSTCONDITIONS: dict[str, Callable[[Any, str, dict[str, Any]], tuple[bool, str]]] = {
     "entity_merge_decide": _merge_postcondition,
     "conflict_decide": _conflict_postcondition,
+    "mission_compensation": _compensation_postcondition,
 }
 
 
@@ -986,6 +1019,12 @@ class ExecutionKernel:
         # инструмент памяти работал на префиксном FTS: без эмбеддингов, без морфологии.
         self.searcher = searcher
         handlers: dict[str, Handler] = {
+            # Компенсация зависит только от хранилища, поэтому привязывается здесь,
+            # а не в `bind_executive`: заявка на откат приходит человеку и без
+            # исполнительной службы (её создаёт разбор оборвавшихся шагов), и
+            # инструмент, привязанный к службе, отвечал бы «Инструмент недоступен»
+            # ровно тем сборкам, где служба не поднята.
+            "mission_compensation": self._mission_compensation,
             "memory_search": self._memory_search,
             "message_search": self._message_search,
             "memory_save": self._memory_save,
