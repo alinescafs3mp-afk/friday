@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 325
+EXPECTED_MEMBER_COUNT = 327
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -157,7 +157,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "backfill_entity_mentions": "(self, user_id: 'str', *, max_documents: 'int' = 200) -> 'dict[str, Any]'",
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
-    "group_pending_inbox": "(self, user_id: 'str', *, by: 'str' = 'extension', limit_ids: 'int' = 200, max_groups: 'int' = 100) -> 'list[dict[str, Any]]'",
+    "group_pending_inbox": "(self, user_id: 'str', *, by: 'str' = 'extension', limit_ids: 'int' = 200, max_groups: 'int' = 100) -> 'dict[str, Any]'",
     "count_events": "(self) -> 'int'",
     "list_events": "(self, *, event_type: 'str | None' = None, since: 'str | None' = None, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "record_event": "(self, event_type: 'str', payload: 'dict[str, Any] | None' = None) -> 'str'",
@@ -190,6 +190,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_knowledge_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_chat_feed": "(self) -> 'int'",
     "count_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False) -> 'int'",
+    "count_events_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, mine: 'str' = '') -> 'int'",
+    "count_entities_by_type": "(self, user_id: 'str', *, include_merged: 'bool' = False) -> 'dict[str, int]'",
     "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_objects": "(self, user_id: 'str') -> 'int'",

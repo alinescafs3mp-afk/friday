@@ -409,8 +409,16 @@ class IntakeMixin(StorageShared):
         by: str = "extension",
         limit_ids: int = 200,
         max_groups: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Cut the pending queue into groups, and hand back their members.
+
+        Возвращает не голый список, а список ВМЕСТЕ с двумя итогами: сколько
+        групп получилось всего и сколько материалов в очереди. Обрез сотней
+        существует (тысяча групп на экране бесполезна), но он был МОЛЧАЛИВЫМ:
+        группы со сто первой исчезали, а заголовок «Группы непроверенного (N)»
+        считал N по показанным — то есть уменьшался вместе с обрезом и выглядел
+        полным. Человек, разбирающий импорт, видел меньше очереди, чем в ней
+        есть, и не имел ни одного признака, что смотрит не всё.
 
         Read-only on purpose. The ids come back with each group so the caller feeds
         them to the existing bulk endpoint, which already refuses to canonize anything.
@@ -470,7 +478,12 @@ class IntakeMixin(StorageShared):
             group["quality_max"] = round(scores[-1], 3)
 
         ordered = sorted(groups.values(), key=lambda item: (-item["total"], item["key"]))
-        return ordered[: max(1, int(max_groups))]
+        shown = ordered[: max(1, int(max_groups))]
+        return {
+            "groups": shown,
+            "groups_total": len(ordered),
+            "items_total": len(rows),
+        }
 
     @classmethod
     def quality_band(cls, score: float | None) -> str:

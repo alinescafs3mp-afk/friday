@@ -67,7 +67,7 @@ def imported(storage):
 
 
 def test_quality_is_a_grouping_axis_because_it_is_the_one_that_separates(imported):
-    groups = imported.group_pending_inbox("owner", by="quality")
+    groups = imported.group_pending_inbox("owner", by="quality")["groups"]
     by_key = {group["key"]: group["total"] for group in groups}
 
     assert by_key == {"0.00–0.25 нечитаемое": 43, "0.75–1.00 содержательное": 4}, (
@@ -77,7 +77,7 @@ def test_quality_is_a_grouping_axis_because_it_is_the_one_that_separates(importe
 
 def test_the_advice_column_alone_would_have_said_nothing(imported):
     """Проверяется именно бесполезность прежнего сигнала — иначе непонятно, зачем правка."""
-    groups = imported.group_pending_inbox("owner", by="extension")
+    groups = imported.group_pending_inbox("owner", by="extension")["groups"]
     advice = {key for group in groups for key in group["actions"]}
     assert advice == {"promote"}, (
         "совет перестал быть одинаковым — тогда этот тест надо переписать, а не удалять"
@@ -87,7 +87,7 @@ def test_the_advice_column_alone_would_have_said_nothing(imported):
 def test_every_group_carries_its_quality_whatever_the_axis(imported):
     """Вопрос «смотреть или сносить» задаётся при любом разрезе, не только по качеству."""
     for axis in ("extension", "directory", "source"):
-        groups = imported.group_pending_inbox("owner", by=axis)
+        groups = imported.group_pending_inbox("owner", by=axis)["groups"]
         assert groups, f"ось {axis} не дала групп"
         for group in groups:
             for field in ("quality_min", "quality_median", "quality_max"):
@@ -97,7 +97,7 @@ def test_every_group_carries_its_quality_whatever_the_axis(imported):
 
 def test_the_junk_group_is_actionable_in_one_decision(imported):
     """Смысл разреза: 43 бесполезных файла отклоняются одним действием, а не 43."""
-    groups = imported.group_pending_inbox("owner", by="quality")
+    groups = imported.group_pending_inbox("owner", by="quality")["groups"]
     junk = next(group for group in groups if group["key"].startswith("0.00"))
 
     assert junk["total"] == 43
@@ -108,7 +108,7 @@ def test_the_junk_group_is_actionable_in_one_decision(imported):
 
 def test_a_group_larger_than_the_id_budget_says_so(imported):
     """Иначе «отклонить группу» тихо тронет часть, а человек будет думать, что всю."""
-    groups = imported.group_pending_inbox("owner", by="quality", limit_ids=10)
+    groups = imported.group_pending_inbox("owner", by="quality", limit_ids=10)["groups"]
     junk = next(group for group in groups if group["key"].startswith("0.00"))
 
     assert junk["total"] == 43
@@ -125,7 +125,7 @@ def test_an_unscored_item_sinks_to_the_junk_band(storage):
     """
     storage.ensure_user("owner")
     _pending(storage, "owner", "битый.bin", "application/octet-stream", 0.0)
-    groups = storage.group_pending_inbox("owner", by="quality")
+    groups = storage.group_pending_inbox("owner", by="quality")["groups"]
 
     assert groups[0]["key"] == "0.00–0.25 нечитаемое"
     assert groups[0]["quality_median"] == 0.0

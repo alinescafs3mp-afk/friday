@@ -81,6 +81,31 @@ async def test_the_trail_says_the_failure_came_after_the_start(kernel, storage):
 
 
 @pytest.mark.asyncio
+async def test_a_wrong_field_name_is_not_called_started_work(kernel, storage):
+    """Ошибка в ИМЕНИ поля случается до первой строки обработчика.
+
+    Найдено собственным тестом сразу после правки выше: она объявляла «работа
+    НАЧАЛАСЬ» на любом `TypeError` у мутирующего инструмента, а модель ошибается
+    именем поля регулярно. Предупреждение, приходящее не по делу, обесценивает
+    те, что по делу, — а здесь ещё и подталкивает искать несделанное действие.
+
+    Различает не тип исключения, а то, дошло ли дело до вызова: аргументы теперь
+    сверяются с сигнатурой ДО записи «начал».
+
+    Мутация: убрать сверку сигнатуры — тест краснеет.
+    """
+    result = await kernel.execute(
+        "remind", {"текст": "позвонить", "when": "2027-03-01"}, actor=_actor()
+    )
+
+    assert result.success is False
+    assert "НАЧАВ" not in result.error, f"неверное поле названо начатой работой: {result.error!r}"
+    assert "Invalid tool arguments" in result.error
+    trail = " ".join(str(row) for row in storage.list_audit_log(limit=10))
+    assert "started" not in trail, "запись о начале появилась там, где вызова не было"
+
+
+@pytest.mark.asyncio
 async def test_an_observing_tool_keeps_the_short_refusal(kernel):
     """Ошибка в другую сторону: у чтения эффекта нет, и пугать им нечем.
 
@@ -124,7 +149,7 @@ async def test_a_reminder_is_written_whole_or_not_at_all(kernel, storage, monkey
     monkeypatch.setattr(graph, "set_event_time", _fails)
 
     result = await kernel.execute(
-        "remind", {"text": "позвонить в банк", "when": "2027-03-01"}, actor=_actor()
+        "remind", {"what": "позвонить в банк", "when": "2027-03-01"}, actor=_actor()
     )
 
     assert result.success is False

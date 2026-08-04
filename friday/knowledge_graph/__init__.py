@@ -1811,10 +1811,6 @@ class KnowledgeGraph:
         )
 
     def get_stats(self, user_id: str) -> dict[str, Any]:
-        entities = self.storage.list_entities(user_id, limit=5000)
-        by_type: dict[str, int] = defaultdict(int)
-        for entity in entities:
-            by_type[entity.get("entity_type", EntityType.OTHER.value)] += 1
         relation_row = self.storage.execute(
             "SELECT COUNT(*) AS count FROM relations WHERE user_id=? AND deleted_at IS NULL",
             (user_id,),
@@ -1838,7 +1834,10 @@ class KnowledgeGraph:
             "entity_count": self.storage.count_entities(user_id),
             "relation_count": int(relation_row["count"] if relation_row else 0),
             "knowledge_object_count": self.storage.count_knowledge_objects(user_id),
-            "entities_by_type": dict(by_type),
+            # Тем же агрегатом, что и `entity_count` выше, и по тем же условиям:
+            # разбивка считалась питоном по странице в 5000 строк и на большем
+            # корпусе застывала, стоя рядом с честным «всего».
+            "entities_by_type": self.storage.count_entities_by_type(user_id),
             "pending_resolutions": self.storage.count_resolution_candidates(
                 user_id, ResolutionStatus.SUGGESTED
             ),

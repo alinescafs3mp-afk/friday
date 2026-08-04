@@ -67,7 +67,7 @@ def seeded(storage):
 
 
 def test_grouping_by_extension_collapses_the_queue(seeded):
-    groups = seeded.group_pending_inbox("alice", by="extension")
+    groups = seeded.group_pending_inbox("alice", by="extension")["groups"]
 
     by_key = {group["key"]: group for group in groups}
     assert by_key[".py"]["total"] == 5
@@ -81,7 +81,7 @@ def test_grouping_by_extension_collapses_the_queue(seeded):
 
 
 def test_grouping_by_directory_uses_the_immediate_parent(seeded):
-    groups = {group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="directory")}
+    groups = {group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="directory")["groups"]}
 
     assert groups["/home/u/Проекты/код"] == 5
     assert groups["/home/u/Документы"] == 2
@@ -90,7 +90,7 @@ def test_grouping_by_directory_uses_the_immediate_parent(seeded):
 
 
 def test_grouping_by_source_separates_import_from_chat(seeded):
-    groups = {group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="source")}
+    groups = {group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="source")["groups"]}
     assert groups == {"upload": 7, "telegram": 1}
 
 
@@ -99,7 +99,7 @@ def test_a_group_carries_its_members_and_says_when_it_is_truncated(storage):
     for index in range(250):
         _pending(storage, source="upload", path=f"/home/u/Загрузки/f{index}.bin")
 
-    group = storage.group_pending_inbox("alice", by="extension", limit_ids=200)[0]
+    group = storage.group_pending_inbox("alice", by="extension", limit_ids=200)["groups"][0]
 
     assert group["total"] == 250
     assert len(group["inbox_ids"]) == 200
@@ -108,17 +108,17 @@ def test_a_group_carries_its_members_and_says_when_it_is_truncated(storage):
 
 def test_only_pending_items_are_grouped(seeded):
     """Reviewed material is not review work."""
-    before = sum(group["total"] for group in seeded.group_pending_inbox("alice", by="extension"))
+    before = sum(group["total"] for group in seeded.group_pending_inbox("alice", by="extension")["groups"])
     seeded.execute("UPDATE inbox SET status='ignored' WHERE id IN (SELECT id FROM inbox LIMIT 3)")
     seeded.conn.commit()
 
-    after = sum(group["total"] for group in seeded.group_pending_inbox("alice", by="extension"))
+    after = sum(group["total"] for group in seeded.group_pending_inbox("alice", by="extension")["groups"])
     assert after == before - 3
 
 
 def test_an_unknown_axis_is_refused(seeded):
     with pytest.raises(ValueError, match="Unknown grouping axis"):
-        seeded.group_pending_inbox("alice", by="promotion_score")
+        seeded.group_pending_inbox("alice", by="promotion_score")["groups"]
 
 
 # --- the endpoint and what it may do --------------------------------------
@@ -181,7 +181,7 @@ def test_a_group_can_be_dismissed_but_not_promoted(settings, seeded):
         assert len(dismissing.json()["changed"]) == 5
 
     assert seeded.list_knowledge_objects("alice") == []
-    remaining = {group["key"] for group in seeded.group_pending_inbox("alice", by="extension")}
+    remaining = {group["key"] for group in seeded.group_pending_inbox("alice", by="extension")["groups"]}
     assert ".py" not in remaining
 
 
@@ -209,4 +209,4 @@ def test_grouping_survives_a_purge(settings, storage):
     purge_knowledge(storage, settings, None, knowledge_id, "alice")
 
     assert storage.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert storage.group_pending_inbox("alice", by="extension") == []
+    assert storage.group_pending_inbox("alice", by="extension")["groups"] == []

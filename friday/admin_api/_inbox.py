@@ -52,15 +52,23 @@ async def group_inbox(
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.inbox.read", target)
     try:
-        groups = _services(request).storage.group_pending_inbox(target, by=by)
+        grouping = _services(request).storage.group_pending_inbox(target, by=by)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    groups = grouping["groups"]
+    # `grouped` — сколько материалов в ПОКАЗАННЫХ группах, `pending_total` —
+    # сколько их в очереди. Раньше было только первое, под именем, которое
+    # страница подписывала как «Группы непроверенного (N)»: при обрезе сотней
+    # число молча уменьшалось вместе с ним.
     return {
         "user_id": target,
         "axis": by,
         "axes": list(_services(request).storage.INBOX_GROUP_AXES),
         "groups": groups,
         "grouped": sum(group["total"] for group in groups),
+        "groups_shown": len(groups),
+        "groups_total": grouping["groups_total"],
+        "pending_total": grouping["items_total"],
     }
 
 

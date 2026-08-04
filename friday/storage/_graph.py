@@ -325,6 +325,25 @@ class GraphMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
+    def count_entities_by_type(self, user_id: str, *, include_merged: bool = False) -> dict[str, int]:
+        """Сколько сущностей каждого вида — агрегатом, а не подсчётом страницы.
+
+        «Здоровье графа» считало это питоном по выборке с потолком 5000: на
+        большем корпусе разбивка застывала и продолжала выглядеть точной, а
+        `entity_count` рядом с ней считался честным агрегатом — два числа в одной
+        панели расходились молча.
+
+        Условия те же, что у `count_entities`, из одного помощника: иначе «всего»
+        и сумма по видам разойдутся при первой же правке фильтра.
+        """
+        where, params = self._entity_filter(user_id, None, include_merged=include_merged)
+        rows = self.execute(
+            f"SELECT entity_type, COUNT(*) AS count FROM entities WHERE {where} "  # nosec B608
+            "GROUP BY entity_type",
+            tuple(params),
+        ).fetchall()
+        return {str(row["entity_type"] or ""): int(row["count"] or 0) for row in rows}
+
     def list_entities(
         self,
         user_id: str,
@@ -646,6 +665,50 @@ class GraphMixin(StorageShared):
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def count_events_in_range(
+        self,
+        user_id: str,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        mine: str = "",
+    ) -> int:
+        """Сколько событий попадает в окно — независимо от размера страницы.
+
+        `len(items)` при выборке с потолком отвечает «сколько я попросил». В
+        планах человека это особенно дорого: «на неделю запланировано 100» при
+        потолке ровно 100 читается как факт о его календаре.
+
+        `mine` — учётка человека; при ней считаются его напоминания плюс события
+        без автора (они из документов и общие). Условия повторяют
+        `list_events_in_range`, включая отбор чужих напоминаний, который тот
+        делает уже в питоне: два числа обязаны отвечать на один вопрос.
+        """
+        clauses = [
+            "e.user_id=?",
+            "e.entity_type='event'",
+            "e.canonical=1",
+            "e.deleted_at IS NULL",
+        ]
+        params: list[Any] = [user_id]
+        if start:
+            clauses.append("t.occurred_at >= ?")
+            params.append(start)
+        if end:
+            clauses.append("t.occurred_at <= ?")
+            params.append(end)
+        if mine:
+            clauses.append(
+                "(COALESCE(t.source,'') NOT LIKE 'reminder:%' OR COALESCE(t.source,'') = ?)"
+            )
+            params.append(f"reminder:{mine}")
+        row = self.execute(
+            "SELECT COUNT(*) AS count FROM entity_time t JOIN entities e ON e.id=t.entity_id "
+            f"WHERE {' AND '.join(clauses)}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
 
     def create_relation(self, relation: Relation) -> Relation:
         if relation.source_entity_id == relation.target_entity_id:

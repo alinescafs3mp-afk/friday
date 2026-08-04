@@ -25,22 +25,34 @@ async def overview(request: Request) -> dict[str, Any]:
     _require(request, "admin.diagnostics")
     storage = _services(request).storage
     counts: dict[str, int] = {}
-    for table in (
-        "users",
-        "raw_objects",
-        "knowledge_objects",
-        "inbox",
-        "entities",
-        "relations",
-        "conversations",
-        "messages",
-        "feedback",
-        "feedback_state",
-        "relation_candidates",
-        "knowledge_conflicts",
+    # Плитки считают ЖИВОЕ, а не строки в таблице.
+    #
+    # Удаление здесь мягкое: строка остаётся с проставленным `deleted_at`, и
+    # голый COUNT показывал её вместе с остальными. Замерено на живой базе:
+    # плитка «Знаний 1562» стояла рядом со страницей знаний, где их 1536, — и
+    # объяснить разницу человеку было нечем, кроме «где-то что-то не сходится».
+    # Доверие к обзору при этом теряется целиком: если врёт одно число, читать
+    # остальные незачем.
+    #
+    # Предикат назван у каждой таблицы отдельно, а не выведен по имени столбца:
+    # `deleted_at` есть ровно у четырёх из двенадцати (проверено PRAGMA на живой
+    # базе), и молчаливое «добавим, если есть» скрыло бы появление пятой.
+    for table, alive_only in (
+        ("users", ""),
+        ("raw_objects", " WHERE deleted_at IS NULL"),
+        ("knowledge_objects", " WHERE deleted_at IS NULL"),
+        ("inbox", ""),
+        ("entities", " WHERE deleted_at IS NULL"),
+        ("relations", " WHERE deleted_at IS NULL"),
+        ("conversations", ""),
+        ("messages", ""),
+        ("feedback", ""),
+        ("feedback_state", ""),
+        ("relation_candidates", ""),
+        ("knowledge_conflicts", ""),
     ):
-        # ``table`` comes only from the fixed diagnostic allowlist above.
-        row = storage.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()  # nosec B608
+        # ``table`` and ``alive_only`` come only from the fixed allowlist above.
+        row = storage.execute(f"SELECT COUNT(*) AS count FROM {table}{alive_only}").fetchone()  # nosec B608
         counts[table] = int(row["count"] if row else 0)
     pending = storage.execute("SELECT COUNT(*) AS count FROM inbox WHERE status='pending'").fetchone()
     # Onboarding hints surface only while there is nothing to review yet, so an

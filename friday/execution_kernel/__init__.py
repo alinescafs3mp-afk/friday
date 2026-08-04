@@ -6,6 +6,7 @@ import asyncio
 import base64
 import calendar
 import hashlib
+import inspect
 import io
 import json
 import logging
@@ -1336,6 +1337,22 @@ class ExecutionKernel:
         # можно не знать, а лишняя пара записей на каждый поиск засоряет журнал,
         # в котором ищут настоящие действия.
         changes_data = tool.risk in {"mutate", "high"}
+        # Аргументы сверяются с сигнатурой ДО записи «начал».
+        #
+        # Иначе «инструмент вызван с чужим именем поля» неотличимо от «инструмент
+        # упал на середине»: и то и другое приходит сюда как `TypeError`, только
+        # первое случается ДО первой строки обработчика, а второе — после того,
+        # как он мог что-то записать. Разница видна не по типу исключения, а по
+        # тому, дошло ли дело до вызова, и здесь она устанавливается точно.
+        #
+        # Модель ошибается именем поля регулярно, и говорить ей на это «работа
+        # НАЧАЛАСЬ, проверьте, не выполнено ли действие» — значит приучить её (и
+        # человека) не верить предупреждению, которое в остальных случаях верно.
+        try:
+            inspect.signature(tool.handler).bind(actor=actor, **(arguments or {}))
+        except TypeError as exc:
+            await self._audit(actor, name, False, "invalid_arguments", details=details)
+            return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
         if changes_data:
             await self._audit(actor, name, True, "started", details=details)
         try:
@@ -2040,11 +2057,24 @@ class ExecutionKernel:
                     "mine": source.startswith("reminder:"),
                 }
             )
+        # `total` — сколько запланировано ВСЕГО в этом окне, `shown` — сколько
+        # попало в ответ. Раньше здесь стояла длина собственной выборки (потолок
+        # 100, показ 40), то есть размер запроса выдавался за содержимое
+        # календаря: «на неделю запланировано 100» при потолке ровно 100.
+        total = await run_blocking(
+            storage.count_events_in_range,
+            actor.user_id,
+            start=today.isoformat(),
+            end=(today + timedelta(days=horizon)).isoformat(),
+            mine=actor.own_id,
+        )
+        shown = items[:40]
         return {
             "days": horizon,
-            "total": len(items),
-            "items": items[:40],
-            "note": "" if items else f"На ближайшие {horizon} дн. ничего не запланировано.",
+            "total": total,
+            "shown": len(shown),
+            "items": shown,
+            "note": "" if total else f"На ближайшие {horizon} дн. ничего не запланировано.",
         }
 
     async def _what_happened(

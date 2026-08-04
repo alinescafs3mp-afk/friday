@@ -254,7 +254,13 @@ renderers.inbox=async gen=>{
       const qual=`<span class="badge ${qcls}">качество ${qm.toFixed(2)}</span> <span class="muted">${Number(g.quality_min||0).toFixed(2)}–${Number(g.quality_max||0).toFixed(2)}</span>`;
       const note=g.truncated?`<span class="muted">действие охватит ${g.inbox_ids.length} из ${g.total}</span>`:'';
       return `<tr><td><b>${esc(g.key)}</b> ${note}</td><td>${g.total}</td><td>${qual}</td><td>${acts}</td><td><button class="btn small" ${call('dismissGroup',g.key,'archived')}>В архив</button> <button class="btn small danger" ${call('dismissGroup',g.key,'ignored')}>Игнорировать</button></td></tr>`});
-    groupsBlock=state.inboxGroups.length?`<section class="card"><div class="toolbar"><h2 class="grow">Группы непроверенного (${gd.grouped})</h2>${axisTabs}</div><div class="notice">Групповое действие только отклоняет. Продвижение в знания — поштучно, через «Разобрать», где виден исходный текст.</div>${table(['Группа','Материалов','Качество разбора','Что предлагает классификатор',''],rows)}</section>`:'';
+    // Заголовок называет ВСЮ очередь, а не показанную часть, и говорит прямо,
+    // если групп больше, чем поместилось. Прежнее число считалось по показанным
+    // группам и при обрезе уменьшалось вместе с ними — то есть выглядело полным.
+    const gTotal=Number(gd.groups_total||0), gShown=Number(gd.groups_shown||state.inboxGroups.length);
+    const pendTotal=Number(gd.pending_total||gd.grouped||0);
+    const cut=gTotal>gShown?`<div class="notice warn">Показано ${gShown} групп из ${gTotal}: остальные не поместились и в групповое действие не попадут.</div>`:'';
+    groupsBlock=state.inboxGroups.length?`<section class="card"><div class="toolbar"><h2 class="grow">Группы непроверенного (${pendTotal})</h2>${axisTabs}</div>${cut}<div class="notice">Групповое действие только отклоняет. Продвижение в знания — поштучно, через «Разобрать», где виден исходный текст.</div>${table(['Группа','Материалов','Качество разбора','Что предлагает классификатор',''],rows)}</section>`:'';
   }catch(e){groupsBlock=`<div class="notice">Группировка недоступна: ${esc(e.message)}</div>`}
   const rows=state.inbox.map(i=>{
     const suggestion=i.suggestions||parse(i.suggestions_json,{});
