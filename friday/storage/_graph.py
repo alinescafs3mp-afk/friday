@@ -1118,6 +1118,22 @@ class GraphMixin(StorageShared):
         if user_id is not None:
             query += " AND user_id=?"
             params += (user_id,)
+        # Состоявшееся слияние не переписывается отказом.
+        #
+        # Замерено 2026-08-04: у пары в состоянии `merged` вызов с `rejected`
+        # менял состояние на «не дубликат», при том что сущности в графе уже
+        # слиты. Дальше пара не всплывёт нигде — она решена, — а записанное
+        # решение противоречит тому, что произошло на самом деле.
+        #
+        # Хуже всего дорога: `entity_merge_decide(decision='reject')` НЕ требует
+        # подтверждения человеком, в отличие от accept, — то есть переписать
+        # состоявшееся слияние могла сама модель.
+        #
+        # Возврат в очередь (`suggested`) разрешён: это откат слияния, у него своя
+        # дорога и свой смысл — пара снова ждёт решения. Разрешён и обратный ход
+        # «отказал, потом передумал и слил»: там человек действует осознанно.
+        if status is ResolutionStatus.REJECTED:
+            query += " AND status <> 'merged'"
         with self.transaction() as conn:
             cursor = conn.execute(query, params)
         return cursor.rowcount > 0
@@ -1310,12 +1326,43 @@ class GraphMixin(StorageShared):
                      AND (entity_a_id=? OR entity_b_id=?)""",
                 (now, merged_by or user_id, user_id, source_id, source_id),
             )
+            # Время события переезжает на цель вместе со всем остальным.
+            #
+            # Замерено 2026-08-04: слияние переносило алиасы, ссылки на документы,
+            # связи и кандидатуры — и не трогало `entity_time`. Строка оставалась
+            # на слитой сущности, которую читатель ленты уже не видит, и у события
+            # просто пропадала дата: «Совещание 12 августа», слитое с дубликатом,
+            # переставало напоминать о себе вовсе.
+            #
+            # Время цели при этом НЕ затирается: если у неё своя дата, она
+            # правильнее — это тот узел, который человек оставил. Перенос идёт
+            # только в пустое место.
+            time_moved = [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM entity_time WHERE user_id=? AND entity_id=?",
+                    (user_id, source_id),
+                ).fetchall()
+            ]
+            if time_moved:
+                conn.execute(
+                    """INSERT OR IGNORE INTO entity_time(
+                           user_id, entity_id, occurred_at, occurred_end, precision, source, updated_at)
+                       SELECT user_id, ?, occurred_at, occurred_end, precision, source, ?
+                         FROM entity_time WHERE user_id=? AND entity_id=?""",
+                    (target_id, now, user_id, source_id),
+                )
+                conn.execute(
+                    "DELETE FROM entity_time WHERE user_id=? AND entity_id=?",
+                    (user_id, source_id),
+                )
             transfer = {
                 "links_moved": links_moved,
                 "links_suppressed": links_suppressed,
                 "primary_moved": primary_moved,
                 "relations": relations_transfer,
                 "closed_candidates": closed_candidates,
+                "time_moved": time_moved,
             }
             merge_id = new_id("merge")
             conn.execute(
