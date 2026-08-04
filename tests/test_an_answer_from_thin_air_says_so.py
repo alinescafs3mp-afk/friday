@@ -176,9 +176,24 @@ def test_the_guard_is_wired_into_a_real_turn(settings, storage) -> None:
     )
 
 
-def test_a_worldly_question_stays_clean_on_a_real_turn(settings, storage) -> None:
-    """Обратная сторона на том же пути: про внешний мир оговорки быть не должно."""
-    assert _warning_of_a_real_turn(settings, storage, "интернет") == ""
+def test_a_worldly_question_also_says_it_never_looked(settings, storage) -> None:
+    """Про внешний мир оговорка ТОЖЕ нужна — но своя, а не про архив.
+
+    Прежняя редакция требовала здесь пустоты, и это было верно, пока речь шла о
+    пометке «ответ не опирается на вашу базу»: под вопросом о курсе доллара она
+    не по делу, и владелец дважды просил её убрать.
+
+    Живая переписка владельца 2026-08-04 показала вторую половину: «где в Донецке
+    есть RPI5?» → «давай» → ответ с магазином, статусом «в наличии» и ценой в
+    гривнах, при `tools_used=[]` и `verification=skipped`. Наличие и цена — не
+    мнение: их либо смотрят, либо выдумывают. Поэтому у вопроса о мире теперь
+    свой текст — про то, что в интернет не ходили, — и он появляется ровно тогда,
+    когда не пришло ничего ни одной дорогой.
+    """
+    warning = _warning_of_a_real_turn(settings, storage, "интернет")
+
+    assert "в интернет" in warning.casefold(), f"выдумка о внешнем мире прошла молча: {warning!r}"
+    assert "вашей записи" not in warning, "вернулась пометка про архив, которую владелец просил убрать"
 
 
 def test_data_by_another_road_silences_the_guard(settings, storage, monkeypatch) -> None:

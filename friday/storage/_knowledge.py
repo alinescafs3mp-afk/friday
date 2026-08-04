@@ -521,7 +521,17 @@ class KnowledgeMixin(StorageShared):
             params.append(user_id)
         params.append(max(1, min(int(limit), 1000)))
         rows = self.execute(
+            # `summary` и `knowledge_kind` добавлены сюда потому, что их УЖЕ
+            # искал потребитель: `_matches` в органе мониторов складывает
+            # haystack из пяти полей, а выборка отдавала три — два молча были
+            # пустыми, и монитор со словом, стоящим только в кратком содержании,
+            # не срабатывал ни разу. Совпадение там требует ВСЕ слова запроса,
+            # так что одно недостающее поле гасит правило целиком.
+            #
+            # Оба поля короткие, тело документа рядом на порядки больше — цена
+            # страницы не меняется.
             "SELECT rowid AS rowid, id AS id, user_id AS user_id, title AS title, "
+            "summary AS summary, knowledge_kind AS knowledge_kind, "
             "tags_json AS tags_json, content AS content "
             f"FROM knowledge_objects WHERE {' AND '.join(clauses)} "  # nosec B608 - фиксированные условия
             "ORDER BY rowid LIMIT ?",

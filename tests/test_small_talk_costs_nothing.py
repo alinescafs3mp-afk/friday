@@ -22,9 +22,22 @@ import pytest
 from friday.agent_runtime import AgentRuntime, _is_small_talk
 
 
-@pytest.mark.parametrize("greeting", ["привет", "Доброе утро", "спасибо", "Спасибо!", "ок", "ясно"])
+@pytest.mark.parametrize("greeting", ["привет", "Доброе утро", "спасибо", "Спасибо!", "пока"])
 def test_a_greeting_is_recognised_by_the_closed_list(greeting: str) -> None:
+    """Приветствие и благодарность продолжать нечего — дешёвый путь им положен."""
     assert _is_small_talk(greeting)
+
+
+@pytest.mark.parametrize("consent", ["ок", "ясно", "ага", "хорошо", "принято"])
+def test_a_consent_is_not_decided_by_the_closed_list(consent: str) -> None:
+    """Слово согласия решает арбитр, а не шаблон.
+
+    Замерено 2026-08-04: «ок» после «Могу поискать на OLX — сделать?» означает
+    «делай», а список объявлял его болтовнёй без единого обращения к модели — и
+    гасил весь блок понимания вместе с инструментами. Цена дешёвого пути здесь
+    оказалась выше выигрыша.
+    """
+    assert not _is_small_talk(consent), f"«{consent}» снова решается списком"
 
 
 @pytest.mark.parametrize(

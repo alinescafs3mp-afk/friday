@@ -514,6 +514,17 @@ class Mission:
     error: str = ""
     task_count: int = 0
     done_count: int = 0
+    #: Пределы, за которыми миссию останавливают. Ноль — «без ограничения».
+    #:
+    #: Столбцы существовали в схеме, `_budget_verdict` их читал, расход
+    #: (`add_mission_spend`) исправно рос — а полей в модели не было, значит при
+    #: создании всегда оставались нули, и проверка пропускала любую миссию.
+    #: Механизм остановки был написан целиком и не работал ни разу: половина
+    #: цепочки без второй половины.
+    budget_seconds: int = 0
+    budget_tool_calls: int = 0
+    budget_retries: int = 0
+    deadline_at: str | None = None
     metadata_json: dict[str, Any] = field(default_factory=dict)
     version: int = 1
     created_at: str = field(default_factory=utc_now)
@@ -531,6 +542,10 @@ class Mission:
             "origin": enum_value(self.origin),
             "plan_summary": self.plan_summary,
             "created_by": self.created_by,
+            "budget_seconds": int(self.budget_seconds),
+            "budget_tool_calls": int(self.budget_tool_calls),
+            "budget_retries": int(self.budget_retries),
+            "deadline_at": self.deadline_at,
             "error": self.error,
             "task_count": int(self.task_count),
             "done_count": int(self.done_count),

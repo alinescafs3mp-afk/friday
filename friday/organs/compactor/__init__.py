@@ -314,6 +314,19 @@ class CompactorOrgan(Organ):
     def router(self) -> APIRouter | None:
         router = APIRouter()
 
+        def _require(request: Request, capability: str) -> Any:
+            """Право, ОБЪЯВЛЕННОЕ этим органом, обязано кем-то проверяться.
+
+            `compact.read` было заведено, зарегистрировано и роздано пресетам
+            admin/moderator/user — и не спрашивалось ни на одной дороге. То есть
+            гость, которому его намеренно не дали, читал сводки наравне со
+            всеми: объявление без проверки — это обещание без механизма, и оно
+            хуже отсутствия обещания, потому что на него ссылаются.
+            """
+            actor = request.state.actor
+            request.app.state.auth_service.require(actor, capability)
+            return actor
+
         @router.get("/api/compacts")
         async def read_compacts(
             request: Request,
@@ -321,7 +334,7 @@ class CompactorOrgan(Organ):
             user_id: str = Query("", description="Чью сводку смотреть (только владелец)"),
         ) -> Any:
             storage = request.app.state.storage
-            actor = request.state.actor
+            actor = _require(request, "compact.read")
             principal = _whose_compacts(actor, user_id)
             items = storage.list_day_compacts(principal, limit=limit)
             for item in items:
@@ -356,7 +369,7 @@ class CompactorOrgan(Organ):
             if not _LOOKS_LIKE_A_DAY.fullmatch(day):
                 raise HTTPException(status_code=400, detail="Нужна дата вида ГГГГ-ММ-ДД")
             storage = request.app.state.storage
-            actor = request.state.actor
+            actor = _require(request, "compact.read")
             principal = _whose_compacts(actor, str((payload or {}).get("user_id") or ""))
             compact_id = storage.begin_day_compact(principal, day)
             try:

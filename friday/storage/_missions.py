@@ -27,9 +27,11 @@ class MissionsMixin(StorageShared):
             conn.execute(
                 """INSERT INTO missions(id, user_id, goal, title, status, origin, plan_summary,
                    created_by, error, task_count, done_count, metadata_json, version,
+                   budget_seconds, budget_tool_calls, budget_retries, deadline_at,
                    created_at, updated_at, started_at, completed_at)
                    VALUES(:id, :user_id, :goal, :title, :status, :origin, :plan_summary,
                    :created_by, :error, :task_count, :done_count, :metadata_json, :version,
+                   :budget_seconds, :budget_tool_calls, :budget_retries, :deadline_at,
                    :created_at, :updated_at, :started_at, :completed_at)""",
                 mission.to_row(),
             )
@@ -83,9 +85,11 @@ class MissionsMixin(StorageShared):
                 conn.execute(
                     """INSERT INTO missions(id, user_id, goal, title, status, origin, plan_summary,
                        created_by, error, task_count, done_count, metadata_json, version,
+                       budget_seconds, budget_tool_calls, budget_retries, deadline_at,
                        created_at, updated_at, started_at, completed_at)
                        VALUES(:id, :user_id, :goal, :title, :status, :origin, :plan_summary,
                        :created_by, :error, :task_count, :done_count, :metadata_json, :version,
+                       :budget_seconds, :budget_tool_calls, :budget_retries, :deadline_at,
                        :created_at, :updated_at, :started_at, :completed_at)""",
                     mission.to_row(),
                 )

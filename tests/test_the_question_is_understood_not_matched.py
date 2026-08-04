@@ -231,7 +231,17 @@ def test_a_failed_search_is_not_passed_off_as_results():
     content = messages[0]["content"]
     assert "не удался" in content
     assert "Отвечай по этой выдаче" not in content, "текст ошибки выдан за выдачу поиска"
-    assert "не выдумывай" in content
+    # Проверяется СМЫСЛ, а не формулировка. Прежняя редакция требовала слова «не
+    # выдумывай» — то есть прибивала к тесту приказ, положенный в поток
+    # сообщений. Приказы модель пересказывает человеку дословно, и это отдельный
+    # класс дефекта; сказано должно быть то же самое, но фактом: сведений из
+    # интернета в этом ходе нет, и всё похожее на найденное найденным не
+    # является.
+    assert "нет" in content and "найденным не является" in content, (
+        f"модели не сказано, что сведений из интернета нет: {content!r}"
+    )
+    for order in ("скажи человеку", "не выдумывай", "предложи"):
+        assert order not in content.casefold(), f"служебная строка написана как приказ: {content!r}"
 
     source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
     assert "if not result.success:" in source

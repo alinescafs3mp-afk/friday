@@ -64,7 +64,7 @@ LOGGER = logging.getLogger("friday.storage")
 # числа. Проверено на живой базе 2026-08-04 — со старым номером столбец не
 # появился, а код его уже читал, и маршрут слежений отдавал 500. Тесты этого не
 # видели: там база создаётся с нуля по актуальному CREATE TABLE.
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 #: Определение таблицы шагов миссии отдельной константой: миграция схемы 24
 #: пересоздаёт её, чтобы расширить список состояний, и должна брать ровно это
@@ -928,8 +928,19 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_user_model_updated
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_entity_time_user ON entity_time(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_outbound_status ON outbound_notifications(status, created_at);
+-- Дедуп по АДРЕСАТУ, а не по учётке: получает сообщение чат, а не строка в базе.
+--
+-- Найдено владельцем в живом Telegram 2026-08-04 («оповещение, правда два
+-- подряд») и подтверждено по базе: у сторожа задвоены ВСЕ записи. Причина —
+-- у владельца две учётки (`964e5f17…` через API и `telegram:telegram:467035772`
+-- через бота), а чат один и тот же, 467035772. Ключ уникальности стоял по
+-- `user_id`, поэтому обе строки проходили и в один чат приходило два одинаковых
+-- сообщения.
+--
+-- Цена ошибки здесь выше обычной: этим каналом система сообщает о лежащей модели
+-- и об утёкшем секрете, и удвоение превращает такое сообщение в шум.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_outbound_dedup
-    ON outbound_notifications(user_id, dedup_key) WHERE dedup_key <> '';
+    ON outbound_notifications(chat_id, dedup_key) WHERE dedup_key <> '';
 """
 CORE_INDEX_MARKER = "CREATE INDEX IF NOT EXISTS idx_users_source_external"
 CORE_TABLE_SCHEMA, CORE_INDEX_SCHEMA_TAIL = CORE_SCHEMA.split(CORE_INDEX_MARKER, 1)

@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 327
+EXPECTED_MEMBER_COUNT = 328
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -166,6 +166,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_is_sqlite_busy": "(exc: 'sqlite3.OperationalError') -> 'bool'",
     "_ko_snapshot": "(obj: 'KnowledgeObject | dict[str, Any]') -> 'dict[str, Any]'",
     "_migrate_legacy_schema": "(self, conn: 'sqlite3.Connection') -> 'None'",
+    "_retire_outdated_indexes": "(self, conn: 'sqlite3.Connection') -> 'None'",
     "_migrate_schema": "(self, conn: 'sqlite3.Connection') -> 'None'",
     "_open": "(self) -> 'sqlite3.Connection'",
     "_open_once": "(self) -> 'sqlite3.Connection'",

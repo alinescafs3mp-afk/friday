@@ -223,6 +223,22 @@ class ExecutiveService:
         status = self._initial_status(origin_enum)
         mission_id = new_id("msn")
         title = goal.splitlines()[0][:120] if goal else "Миссия"
+        # Пределы задаются ЗДЕСЬ, при заведении, и записываются в саму миссию.
+        #
+        # Проверка `_budget_verdict` существовала с самого начала и читала эти
+        # столбцы, расход исправно рос — а задавать бюджет было некому, и в
+        # каждой миссии стояли нули, которые эта проверка трактует как «без
+        # ограничения». То есть остановка по бюджету не сработала ни разу.
+        #
+        # Значение из настроек, а не из просьбы человека: предел существует
+        # против зациклившейся работы, и миссия, назначающая себе бюджет сама,
+        # защищает ровно от того, от чего не надо.
+        deadline_hours = int(self.settings.mission_deadline_hours or 0)
+        deadline_at = (
+            (datetime.now(UTC) + timedelta(hours=deadline_hours)).isoformat(timespec="seconds")
+            if deadline_hours > 0
+            else None
+        )
         mission = Mission(
             id=mission_id,
             user_id=user_id,
@@ -231,6 +247,10 @@ class ExecutiveService:
             status=status,
             origin=origin_enum,
             created_by=created_by or origin_enum.value,
+            budget_seconds=int(self.settings.mission_budget_seconds or 0),
+            budget_tool_calls=int(self.settings.mission_budget_tool_calls or 0),
+            budget_retries=int(self.settings.mission_budget_retries or 0),
+            deadline_at=deadline_at,
         )
         # Такая же живая миссия того же автора — не повод заводить вторую.
         #

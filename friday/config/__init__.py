@@ -544,6 +544,16 @@ class FridaySettings:
     executive_max_tasks_per_mission: int
     executive_task_tool_budget: int
     executive_tick_interval_sec: int
+    #: Пределы ОДНОЙ миссии: сколько ей отпущено работы и до какого срока.
+    #: Ноль в любом из них означает «без ограничения» — так что умолчания здесь
+    #: и есть тот механизм, которого не хватало: столбцы, расход и проверка были
+    #: на месте, а задавать бюджет было некому, и остановка не срабатывала ни
+    #: разу. Числа щедрые намеренно: они отсекают зациклившуюся миссию, а не
+    #: просто долгую.
+    mission_budget_seconds: int
+    mission_budget_tool_calls: int
+    mission_budget_retries: int
+    mission_deadline_hours: int
     workers_enabled: bool
 
     reminders_enabled: bool
@@ -663,6 +673,10 @@ class FridaySettings:
                 "max_tasks_per_mission": self.executive_max_tasks_per_mission,
                 "task_tool_budget": self.executive_task_tool_budget,
                 "tick_interval_sec": self.executive_tick_interval_sec,
+                "mission_budget_seconds": self.mission_budget_seconds,
+                "mission_budget_tool_calls": self.mission_budget_tool_calls,
+                "mission_budget_retries": self.mission_budget_retries,
+                "mission_deadline_hours": self.mission_deadline_hours,
             },
             "organs": {
                 "reminders_enabled": self.reminders_enabled,
@@ -914,6 +928,13 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         executive_max_tasks_per_mission=_int_env("FRIDAY_EXECUTIVE_MAX_TASKS_PER_MISSION", 12, minimum=1),
         executive_task_tool_budget=_int_env("FRIDAY_EXECUTIVE_TASK_TOOL_BUDGET", 6, minimum=1),
         executive_tick_interval_sec=_int_env("FRIDAY_EXECUTIVE_TICK_INTERVAL_SEC", 15, minimum=5),
+        # Два часа чистой работы, три сотни вызовов, тридцать повторов, двое
+        # суток срока. Для сравнения: полный план — 12 шагов по 6 вызовов, то
+        # есть 72; исчерпать три сотни может только миссия, ходящая по кругу.
+        mission_budget_seconds=_int_env("FRIDAY_MISSION_BUDGET_SECONDS", 7200, minimum=0),
+        mission_budget_tool_calls=_int_env("FRIDAY_MISSION_BUDGET_TOOL_CALLS", 300, minimum=0),
+        mission_budget_retries=_int_env("FRIDAY_MISSION_BUDGET_RETRIES", 30, minimum=0),
+        mission_deadline_hours=_int_env("FRIDAY_MISSION_DEADLINE_HOURS", 48, minimum=0),
         workers_enabled=_bool_env("FRIDAY_WORKERS_ENABLED", True),
         reminders_enabled=_bool_env("FRIDAY_REMINDERS_ENABLED", True),
         reminders_lead_days=_int_env("FRIDAY_REMINDERS_LEAD_DAYS", 1, minimum=0),

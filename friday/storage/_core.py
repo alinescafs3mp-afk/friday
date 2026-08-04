@@ -300,6 +300,7 @@ class CoreMixin(StorageShared):
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
+                self._retire_outdated_indexes(conn)
             self._execute_statements(conn, CORE_INDEX_SCHEMA)
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('schema_version', ?, ?)",
@@ -427,6 +428,33 @@ class CoreMixin(StorageShared):
         conn.execute(MISSION_TASKS_SCHEMA.strip().rstrip(";"))
         conn.execute(f"INSERT INTO mission_tasks({shared}) SELECT {shared} FROM mission_tasks_pre24")  # nosec B608
         conn.execute("DROP TABLE mission_tasks_pre24")
+
+    def _retire_outdated_indexes(self, conn: sqlite3.Connection) -> None:
+        """Снести индексы, чьё ОПРЕДЕЛЕНИЕ изменилось.
+
+        `CREATE ... IF NOT EXISTS` смотрит только на имя: индекс с прежним
+        набором столбцов остаётся жить, и правка молча не доезжает до базы, где
+        она нужнее всего — на живой. Ровно тот же класс, что «новый столбец без
+        нового номера схемы»: тесты создают базу с нуля и разницы не видят.
+
+        Проверяется САМО определение из `sqlite_master`, а не номер версии:
+        совпало с новым — трогать нечего, разошлось — пересоздаём.
+        """
+        wanted = {
+            # Схема 26: дедуп оповещений считается по адресату (chat_id), потому
+            # что у одного человека бывает несколько учёток и один чат.
+            "uq_outbound_dedup": "chat_id, dedup_key",
+        }
+        for name, columns in wanted.items():
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)
+            ).fetchone()
+            if row is None or not row[0]:
+                continue
+            if columns.replace(" ", "") in str(row[0]).replace(" ", ""):
+                continue
+            LOGGER.info("schema: пересоздаю индекс %s — определение изменилось", name)
+            conn.execute(f"DROP INDEX IF EXISTS {name}")  # nosec B608 - имя из словаря выше
 
     def _migrate_legacy_schema(self, conn: sqlite3.Connection) -> None:
         """Upgrade pre-release databases without discarding personal data.
