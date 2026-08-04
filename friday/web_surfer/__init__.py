@@ -1010,7 +1010,11 @@ class WebSurfer:
         except AllProvidersRefusedError as exc:
             # «Ничего не найдено» здесь было бы утверждением о мире, которого
             # никто не проверял: искать не удалось вовсе.
-            LOGGER.warning("Research search refused for %r: %s", query[:80], exc)
+            # Без текста запроса: `docs/SECURITY.md` обещает, что здесь в журнал
+            # идут только имя хоста и класс исключения. Поисковая строка — это
+            # персональные данные, а журнал не чистится ни удалением знания, ни
+            # `purge`.
+            LOGGER.warning("Research search refused (%d chars): %s", len(query), type(exc).__name__)
             return {
                 "query": query,
                 "sources": [],
