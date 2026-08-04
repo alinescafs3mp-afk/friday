@@ -374,3 +374,83 @@ async def test_a_document_with_one_entity_is_not_sent_to_the_model(storage):
     result = await graph.suggest_relations_from_structure("alice", document.id, llm=model)
     assert result["candidates"] == []
     assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_relation_needs_ends_its_type_allows(storage):
+    """Понимание решает, объявлена ли связь; структура — какая связь возможна.
+
+    Замерено на живой очереди 2026-08-04: 42 кандидата «человек СОСТОИТ в
+    человеке», рождённых строками ведомости. Арбитр их не отсеивает и отсеять не
+    может — он читает текст, а не устройство графа: сверка живой моделью
+    подтвердила и «Павликов — ЧАСТЬ в/ч 30926» (это `member_of`), и «Нестеренко
+    занят Графиком», где «График» — слово из шапки бланка.
+    """
+
+    document, _people = _linked_report(storage)
+    graph = KnowledgeGraph(storage)
+    probe = _Model({"relations": []})
+    await graph.suggest_relations_from_structure("alice", document.id, llm=probe)
+    subject = _index_of(probe.calls[0], "Кублик Александр Юрьевич")
+    brother = _index_of(probe.calls[0], "Макаров Кирилл Евгеньевич")
+    unit = _index_of(probe.calls[0], "в/ч 30926")
+
+    # Выдержка безупречна и цель в ней названа — брак только в видах концов.
+    model = _Model(
+        {
+            "relations": [
+                {
+                    "source": subject,
+                    "target": brother,
+                    "type": "member_of",
+                    "quote": "Брат: Макаров Кирилл Евгеньевич",
+                    "confidence": 0.9,
+                },
+                {
+                    "source": subject,
+                    "target": unit,
+                    "type": "part_of",
+                    "quote": "Командиру в/ч 30926",
+                    "confidence": 0.9,
+                },
+            ]
+        }
+    )
+    result = await graph.suggest_relations_from_structure("alice", document.id, llm=model)
+
+    assert result["candidates"] == []
+    assert result["rejected"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_person_still_serves_in_a_unit(storage):
+    """Контроль к предыдущему: правило не должно резать законную связь.
+
+    На живом графе оно и не режет — замерено на 51 действующей связи (отсеклось
+    ноль) и на 64 принятых кандидатах (отсёкся один, и он был неверен:
+    «человек состоит в ГОРОДЕ»).
+    """
+
+    document, _people = _linked_report(storage)
+    graph = KnowledgeGraph(storage)
+    probe = _Model({"relations": []})
+    await graph.suggest_relations_from_structure("alice", document.id, llm=probe)
+    subject = _index_of(probe.calls[0], "Кублик Александр Юрьевич")
+    unit = _index_of(probe.calls[0], "в/ч 30926")
+
+    model = _Model(
+        {
+            "relations": [
+                {
+                    "source": subject,
+                    "target": unit,
+                    "type": "member_of",
+                    "quote": "Командиру в/ч 30926",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    result = await graph.suggest_relations_from_structure("alice", document.id, llm=model)
+
+    assert [item["relation_type"] for item in result["candidates"]] == ["member_of"]

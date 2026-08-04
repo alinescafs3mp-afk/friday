@@ -1167,8 +1167,7 @@ def _backfill_relations(args: argparse.Namespace) -> int:
     print(f"Просмотрено объектов: {scanned}.")
     if apply_changes:
         print(
-            f"Срабатываний: {found}; различных пар в очереди: {len(pairs)}; "
-            f"документов со связями: {touched}."
+            f"Срабатываний: {found}; различных пар в очереди: {len(pairs)}; документов со связями: {touched}."
         )
         print("Это КАНДИДАТЫ — каждый ждёт подтверждения человеком в панели.")
     else:
@@ -1214,9 +1213,7 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
         scanned = proposed = kept = skipped_windows = model_errors = 0
         cursor = 0
         while True:
-            batch = storage.knowledge_bodies_after(
-                after_rowid=cursor, user_id=args.user, limit=args.batch
-            )
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
             if not batch:
                 break
             for row in batch:
@@ -1275,6 +1272,111 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
         print("Это КАНДИДАТЫ — каждый ждёт подтверждения человеком в панели.")
     else:
         print("Это ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
+    return 0
+
+
+def _review_relation_candidates(args: argparse.Namespace) -> int:
+    """Сверить очередь предложенных связей с документами, которые их объявляют.
+
+    Обратный проход к `extract-structure-relations`. Тот предлагает, этот
+    спрашивает у документа: объявляет ли он ЭТУ связь между ЭТИМИ двумя.
+
+    Зачем отдельный проход, а не строгие правила при извлечении: правило,
+    отсекающее строку ведомости, замерено и забраковано на контроле — оно же
+    убивает настоящую родню из анкеты (14 из 64 уже принятых связей, в том числе
+    «Мама Джумаева Уланбике Эсманбетовна»). Форма документа не читается признаком
+    одной строки, и различить их может только тот, кто видит документ целиком.
+
+    Воздержание арбитра статус НЕ меняет: такой кандидат остаётся человеку.
+    """
+
+    import asyncio
+
+    from friday.agent_runtime.llm import LLMRouter
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    graph = KnowledgeGraph(storage)
+    llm = LLMRouter(settings)
+    if not llm.enabled:
+        print("Модель выключена: прочитать документ без неё нечем.", file=sys.stderr)
+        storage.close()
+        return 2
+    apply_changes = bool(getattr(args, "apply", False))
+    report_path = getattr(args, "report", None)
+    report_file = open(report_path, "w", encoding="utf-8") if report_path else None  # noqa: SIM115
+
+    def note(candidate: dict[str, Any], judged: dict[str, Any]) -> None:
+        if report_file is None:
+            return
+        evidence = candidate.get("evidence_json") or "{}"
+        if isinstance(evidence, str):
+            try:
+                evidence = json.loads(evidence)
+            except ValueError:
+                evidence = {}
+        report_file.write(
+            json.dumps(
+                {
+                    "candidate_id": candidate.get("id"),
+                    "relation_type": candidate.get("relation_type"),
+                    "source_name": candidate.get("source_name"),
+                    "target_name": candidate.get("target_name"),
+                    "excerpt": evidence.get("excerpt"),
+                    "knowledge_object_id": evidence.get("knowledge_object_id"),
+                    **judged,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        report_file.flush()
+
+    try:
+        result = asyncio.run(
+            graph.review_relation_candidates(
+                args.user,
+                llm=llm,
+                limit=int(getattr(args, "limit", 0) or 0),
+                apply=apply_changes,
+                on_verdict=note,
+            )
+        )
+        if apply_changes:
+            storage.record_event("graph.relation_candidates_reviewed", dict(result, verdicts=None))
+    finally:
+        if report_file is not None:
+            report_file.close()
+        storage.close()
+
+    seen = int(result.get("seen") or 0)
+    print(f"Просмотрено кандидатов: {seen}.")
+    print(f"  подтверждено: {result.get('confirm')}")
+    print(f"  отвергнуто:   {result.get('reject')}")
+    print(f"  воздержался:  {result.get('unsure')} — остаются человеку")
+    if apply_changes:
+        print(f"Записано решений: {result.get('applied')}.")
+    else:
+        print("Это ПОКАЗ, статусы не тронуты. Чтобы применить, повторите с --apply.")
+    errors = int(result.get("model_errors") or 0)
+    if errors:
+        # Молчащая модель даёт «просмотрено 597, отвергнуто 0» — то же, что
+        # безупречная очередь. Разница видна только числом.
+        print(
+            f"ОШИБОК ВЫЗОВА МОДЕЛИ: {errors} — столько кандидатов осталось несверенными.",
+            file=sys.stderr,
+        )
+        if errors == seen:
+            print(
+                f"Ни один кандидат не сверен. Проверьте адрес модели: {llm.base_url} "
+                "(файл окружения — FRIDAY_ENV_FILE).",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 
@@ -1837,6 +1939,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the relation candidates (without it the pass only shows them)",
     )
     structure.set_defaults(handler=_extract_structure_relations)
+
+    review = sub.add_parser(
+        "review-relation-candidates",
+        help="Check each suggested relation against the document that supposedly declares it",
+    )
+    review.add_argument("--user", required=True, help="Tenant whose queue is reviewed")
+    review.add_argument("--limit", type=int, default=0, help="Stop after N candidates (default: all)")
+    review.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write the verdicts (without it the pass only shows them)",
+    )
+    review.add_argument(
+        "--report",
+        help="Write every verdict as JSON lines to this file (for reading them yourself)",
+    )
+    review.set_defaults(handler=_review_relation_candidates)
 
     duplicates = sub.add_parser(
         "resolve-exact-duplicates",

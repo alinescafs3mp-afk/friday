@@ -91,6 +91,56 @@ _ALLOWED_RELATIONS: dict[str, str] = {
     RelationType.PART_OF.value: "источник входит в состав цели (подразделение → часть)",
 }
 
+#: Какие виды концов допускает каждый тип связи.
+#:
+#: Понимание решает, ОБЪЯВЛЕНА ли связь; структура решает, какая связь вообще
+#: может существовать. Без второй половины арбитр, прочитавший документ верно,
+#: всё равно кладёт в граф бессмыслицу: замерено на живой очереди 2026-08-04 —
+#: 42 кандидата «человек состоит в человеке», 8 «человек состоит в понятии»,
+#: 3 «человек состоит в городе», 1 «человек — часть части» (это `member_of`,
+#: а не `part_of`). Сам арбитр их не ловит: сверка 60 кандидатов живой моделью
+#: подтвердила и «Павликов — ЧАСТЬ в/ч 30926», и «Нестеренко занят Графиком»,
+#: где «График» — не проект, а слово из шапки бланка.
+#:
+#: Пусто = вид конца не ограничен. `family_of` уже проверялся отдельно и здесь
+#: получает то же ограничение общим правилом.
+_PERSON = frozenset({"person"})
+_ORG = frozenset({"organization"})
+_PLACE = frozenset({"location"})
+_RELATION_ENDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    # Служат в организации, а не в человеке и не в городе.
+    RelationType.MEMBER_OF.value: (_PERSON | _ORG, _ORG),
+    # Командуют людьми и подразделениями.
+    RelationType.MANAGES.value: (_PERSON | _ORG, _PERSON | _ORG),
+    # Заняты работой, а не человеком и не местом.
+    RelationType.WORKS_ON.value: (_PERSON | _ORG, frozenset({"project", "concept", "event", "other"})),
+    # Находятся в МЕСТЕ. «Служит в в/ч» — это member_of, и подменять одно другим
+    # значит терять и то и другое.
+    RelationType.LOCATED_AT.value: (frozenset(), _PLACE),
+    RelationType.FAMILY_OF.value: (_PERSON, _PERSON),
+    # Часть входит в часть, район — в область; человек в часть НЕ «входит».
+    RelationType.PART_OF.value: (_ORG | _PLACE, _ORG | _PLACE),
+}
+
+
+def ends_fit_relation(relation_type: str, source_type: str, target_type: str) -> bool:
+    """Допускает ли этот тип связи такие виды концов."""
+
+    allowed = _RELATION_ENDS.get(relation_type)
+    if allowed is None:
+        return True
+    source_allowed, target_allowed = allowed
+    if source_allowed and source_type not in source_allowed:
+        return False
+    if target_allowed and target_type not in target_allowed:
+        return False
+    if relation_type == RelationType.PART_OF.value:
+        # Часть входит в часть, а район — в область. Смешение видов («часть
+        # входит в город») — не иерархия, а соседство в тексте.
+        return source_type == target_type
+    return True
+
+
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -168,8 +218,7 @@ def _mentioned_in(window: str, links: list[dict[str, Any]]) -> list[dict[str, An
 
 def _prompt(window: str, entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
     listing = "\n".join(
-        f"{index}. {str(item.get('entity_name') or '')} "
-        f"[{str(item.get('entity_type') or 'other')}]"
+        f"{index}. {str(item.get('entity_name') or '')} [{str(item.get('entity_type') or 'other')}]"
         for index, item in enumerate(entities, start=1)
     )
     kinds = "\n".join(f"- {name}: {meaning}" for name, meaning in _ALLOWED_RELATIONS.items())
@@ -286,13 +335,17 @@ def _accept(
         # что выдержка вообще про эту сторону. Источник не требуется: субъект
         # анкеты назван в шапке, а не в строке поля.
         return None
-    if relation_type == RelationType.FAMILY_OF.value and not (
-        str(source.get("entity_type") or "") == "person"
-        and str(target.get("entity_type") or "") == "person"
+    if not ends_fit_relation(
+        relation_type,
+        str(source.get("entity_type") or ""),
+        str(target.get("entity_type") or ""),
     ):
-        # Родня бывает только у людей: то же ограничение, что у фразового
-        # извлекателя, и по той же измеренной причине — без него в родство
-        # попадали города из заголовка поля анкеты.
+        # Родня бывает только у людей — то же ограничение, что у фразового
+        # извлекателя, и по той же измеренной причине: без него в родство
+        # попадали города из заголовка поля анкеты. Здесь оно общее для всех
+        # типов, потому что ошибка оказалась общей: «человек состоит в
+        # человеке» — 42 кандидата живой очереди, «человек — часть части» —
+        # ещё один, и оба вида арбитр подтверждает, читая документ ВЕРНО.
         return None
     try:
         confidence = float(item.get("confidence", 0.6))

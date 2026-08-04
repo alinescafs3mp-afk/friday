@@ -817,9 +817,7 @@ class KnowledgeGraph:
                         best = candidate
             if best is None:
                 position = inflected.get(str(entity["id"]))
-                if position and not any(
-                    position[0] < end and position[1] > start for start, end in occupied
-                ):
+                if position and not any(position[0] < end and position[1] > start for start, end in occupied):
                     best = {
                         "entity_id": entity["id"],
                         "name": entity["name"],
@@ -1586,6 +1584,36 @@ class KnowledgeGraph:
             llm=llm,
             max_tokens=max_tokens,
             store=store,
+        )
+
+    async def review_relation_candidates(
+        self,
+        user_id: str,
+        *,
+        llm: Any,
+        limit: int = 0,
+        apply: bool = False,
+        reviewed_by: str = "arbiter",
+        on_verdict: Any = None,
+    ) -> dict[str, Any]:
+        """Сверить очередь предложенных связей с документами-основаниями.
+
+        Обратная сторона `suggest_relations_from_structure`: тот предлагает,
+        этот спрашивает у документа, объявляет ли он предложенное. Умеет только
+        подтвердить, отвергнуть или воздержаться — воздержание оставляет
+        кандидата человеку. См. `friday/knowledge_graph/_review.py`.
+        """
+
+        from friday.knowledge_graph._review import review_relation_candidates
+
+        return await review_relation_candidates(
+            self.storage,
+            user_id,
+            llm=llm,
+            limit=limit,
+            apply=apply,
+            reviewed_by=reviewed_by,
+            on_verdict=on_verdict,
         )
 
     def invalidate_relation(
