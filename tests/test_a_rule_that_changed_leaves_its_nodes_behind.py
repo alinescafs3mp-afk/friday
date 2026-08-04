@@ -180,6 +180,25 @@ def test_a_weak_guess_does_not_save_a_node_a_strong_rule_abandoned(settings, sto
     assert "Курган Курганская" not in _alive(storage, "alice")
 
 
+def test_the_same_words_in_another_order_are_a_merge_not_a_junk_node(settings, storage):
+    """Разный порядок слов — вопрос о слиянии, а не о мусоре.
+
+    В служебных бумагах фамилию пишут и первой, и последней. Узел «Руслан Рашитович
+    Хасанов» завёлся из «Имя Отчество Фамилия», а сегодня тот же человек в архиве
+    объявлен как «ХАСАНОВ Руслан Рашитович» — другая строка, тот же человек. Один
+    такой нашёлся среди 188 отобранных на живом графе, и он бы исчез вместе со
+    всеми своими привязками.
+
+    Мутация, которую тест обязан ловить: убрать сверку по мешку слов.
+    """
+    storage.ensure_user("alice")
+    ko_id = _store(storage, "alice", "Списком идёт ХАСАНОВ Руслан Рашитович, санитар-стрелок.")
+    _stale_node(storage, "alice", ko_id, "Руслан Рашитович Хасанов")
+
+    assert _run() == 0
+    assert "Руслан Рашитович Хасанов" in _alive(storage, "alice")
+
+
 def test_a_name_another_strong_rule_still_declares_is_kept(settings, storage):
     """Метод узла мог смениться на более уверенный — это не повод сносить."""
     storage.ensure_user("alice")

@@ -982,6 +982,11 @@ def _prune_entities(args: argparse.Namespace) -> int:
       пряталось за догадкой о человеке.
     * Узел остаётся и в том случае, если его имя сегодня объявляет ЛЮБОЕ сильное
       правило: метод узла мог смениться на более уверенный, и это не повод сносить.
+    * Узел остаётся, если сегодняшние правила объявляют ТЕ ЖЕ СЛОВА в другом порядке.
+      «Руслан Рашитович Хасанов» и «ХАСАНОВ Руслан Рашитович» — один человек, и
+      разный порядок слов означает вопрос о СЛИЯНИИ, а не о мусоре; у слияния свой
+      разбор и своя очередь. Один такой на 188 отобранных — и он бы исчез вместе
+      со всеми своими привязками.
     * Ни одной привязки, которую человек посмотрел или отклонил: решение человека
       в этой системе — вершина, и разовый проход с ним не спорит.
 
@@ -1003,9 +1008,10 @@ def _prune_entities(args: argparse.Namespace) -> int:
     scanned = 0
     produced: set[tuple[str, str, str]] = set()
     declared: set[tuple[str, str]] = set()
+    declared_bags: set[tuple[str, frozenset[str]]] = set()
     owners: set[str] = set()
     doomed: list[dict[str, Any]] = []
-    kept_reviewed = kept_foreign = 0
+    kept_reviewed = kept_foreign = kept_permuted = 0
     try:
         cursor = 0
         while True:
@@ -1024,6 +1030,7 @@ def _prune_entities(args: argparse.Namespace) -> int:
                     produced.add((owner, method, name))
                     if method in DECLARED_ENTITY_METHODS:
                         declared.add((owner, name))
+                        declared_bags.add((owner, frozenset(name.split())))
             if args.limit and scanned >= args.limit:
                 break
 
@@ -1048,6 +1055,9 @@ def _prune_entities(args: argparse.Namespace) -> int:
                 normalized = str(entity.get("normalized_name") or normalize_entity_name(str(entity["name"])))
                 if (owner, method, normalized) in produced or (owner, normalized) in declared:
                     continue
+                if (owner, frozenset(normalized.split())) in declared_bags:
+                    kept_permuted += 1
+                    continue
                 if storage.entity_links_touched_by_a_person(str(entity["id"]), owner):
                     kept_reviewed += 1
                     continue
@@ -1071,7 +1081,8 @@ def _prune_entities(args: argparse.Namespace) -> int:
     print(
         f"Просмотрено объектов: {scanned}; пар правило-имя у сегодняшних правил: {len(produced)}, "
         f"из них объявленных: {len(declared)}. Узлов под снос: {len(doomed)}; "
-        f"оставлено не рождённых правилом: {kept_foreign}; оставлено решённых человеком: {kept_reviewed}."
+        f"оставлено не рождённых правилом: {kept_foreign}; оставлено решённых человеком: {kept_reviewed}; "
+        f"оставлено перестановок живого имени: {kept_permuted}."
     )
     if not apply_changes:
         print("Это ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
