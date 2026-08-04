@@ -1350,12 +1350,28 @@ def _retag_documents(args: argparse.Namespace) -> int:
                         kind, evidence = "", ""
                     if not kind and evidence.startswith("другое: "):
                         proposals[evidence[8:]] = proposals.get(evidence[8:], 0) + 1
-                kept = [tag for tag in tags if tag not in _STALE_TAGS and not tag.startswith(KIND_TAG_PREFIX)]
-                stale_removed += len(tags) - len(kept)
+                # Прежний вид снимается только тогда, когда есть чем заменить.
+                # Иначе повторный проход БЕЗ `--arbiter` стирал бы виды, которые
+                # арбитр проставил в прошлый раз: быстрый путь их не находит по
+                # построению — за тем арбитра и звали. Проход, умеющий только
+                # разрушать чужую работу, хуже, чем не запущенный.
+                kept = [
+                    tag
+                    for tag in tags
+                    if tag not in _STALE_TAGS and (not tag.startswith(KIND_TAG_PREFIX) or not kind)
+                ]
+                stale_removed += len([tag for tag in tags if tag in _STALE_TAGS])
                 if kind:
                     kept.append(kind_tag(kind))
                     kinds_set += 1
                     by_kind[kind] = by_kind.get(kind, 0) + 1
+                elif any(tag.startswith(KIND_TAG_PREFIX) for tag in tags):
+                    # Вид уже стоял и остаётся: его поставили прошлым проходом.
+                    kinds_set += 1
+                    previous = next(tag for tag in tags if tag.startswith(KIND_TAG_PREFIX))
+                    by_kind[previous[len(KIND_TAG_PREFIX) :]] = (
+                        by_kind.get(previous[len(KIND_TAG_PREFIX) :], 0) + 1
+                    )
                 new_tags = sorted(set(kept))
                 if report_file is not None:
                     report_file.write(
