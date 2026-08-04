@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 328
+EXPECTED_MEMBER_COUNT = 329
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -320,6 +320,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "merge_entities": "(self, user_id: 'str', source_id: 'str', target_id: 'str', *, merged_by: 'str | None' = None) -> 'dict[str, Any]'",
     "unmerge_entities": "(self, user_id: 'str', merge_id: 'str', *, undone_by: 'str | None' = None) -> 'dict[str, Any]'",
     "optimize": "(self) -> 'None'",
+    "people_whose_name_starts_with": "(self, user_id: 'str', stems: 'Sequence[str]', *, limit: 'int' = 5) -> 'list[str]'",
     "prune_bridge_nonces": "(self, *, max_age_sec: 'int') -> 'int'",
     "prune_eval_cases": "(self, user_id: 'str', *, cap: 'int' = 200) -> 'dict[str, int]'",
     "prune_backups": "(self, *, keep: 'int') -> 'dict[str, Any]'",

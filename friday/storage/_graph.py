@@ -422,6 +422,38 @@ class GraphMixin(StorageShared):
                 results.append(item)
         return results
 
+    def people_whose_name_starts_with(
+        self, user_id: str, stems: Sequence[str], *, limit: int = 5
+    ) -> list[str]:
+        """Имена людей графа, начинающиеся с любой из этих основ.
+
+        Существует ради одного вопроса, у которого цена ошибки высокая: не уходит
+        ли в чужой поисковик фамилия сотрудника. Прежняя проверка звала
+        `search_entities` и находила ТОЛЬКО точную форму — замерено на стенде:
+        «Хасанов» находился, «Хасанова», «Хасанову», «Хасановым», «Маратовича»
+        не находились ни одна. А спрашивают как раз «что известно про Хасанова».
+
+        Поэтому сравнивается ОСНОВА: у русских фамилий меняется окончание, а
+        начало стоит на месте. `LIKE 'основа%'` по индексу
+        `(user_id, entity_type, normalized_name)` — префиксный поиск, который
+        этот индекс и обслуживает.
+
+        Ошибка в сторону «нашли лишнее» здесь дешевле: человек увидит отказ сразу
+        и переспросит, а ушедшую фамилию не вернуть — в журнале остаётся хеш.
+        """
+        wanted = [normalize_entity_name(str(item or "")) for item in stems]
+        clean = [item for item in dict.fromkeys(wanted) if len(item) >= 4]
+        if not clean:
+            return []
+        conditions = " OR ".join("normalized_name LIKE ?" for _ in clean)
+        rows = self.execute(
+            "SELECT name FROM entities WHERE user_id=? AND entity_type='person' "
+            f"AND deleted_at IS NULL AND canonical=1 AND ({conditions}) "  # nosec B608
+            "LIMIT ?",
+            (user_id, *[f"{item}%" for item in clean], max(1, min(int(limit), 50))),
+        ).fetchall()
+        return [str(row["name"] or "") for row in rows]
+
     def find_entities_by_normalized_names(
         self,
         user_id: str,

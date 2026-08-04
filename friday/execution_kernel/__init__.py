@@ -1012,6 +1012,32 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
 # знаков на этом архиве) хватало, чтобы переполнить бюджет целиком.
 _TOOL_EXCERPT_CHARS = 600
 
+#: Сколько знаков запроса уходит НАРУЖУ, в чужой поисковик.
+#:
+#: Замерено на стенде: прямой вызов инструмента отправлял реплику целиком — 371
+#: знак разговорного текста про закупку оборудования, вместе с обстоятельствами,
+#: которые к поиску отношения не имеют. Поисковику больше двух сотен знаков и не
+#: нужно, а цена утечки растёт с каждым: в журнале остаётся только хеш, и что
+#: именно ушло, владелец потом не узнает.
+_MAX_OUTBOUND_QUERY_CHARS = 200
+
+#: Слова, которые именем человека не бывают. Без них поиск по графу срабатывал бы
+#: на «что» и «известно» в каждом втором вопросе. Список тот же по смыслу, что у
+#: одноимённой проверки в `agent_runtime`, и живёт здесь отдельно намеренно: ядро
+#: не должно зависеть от слоя, который его вызывает.
+_NOT_A_NAME_OUTBOUND = frozenset(
+    {
+        "что", "кто", "где", "когда", "сколько", "какой", "какая", "какие", "какое",
+        "почему", "зачем", "чем", "куда", "откуда", "известно", "расскажи", "покажи",
+        "напомни", "найди", "поищи", "посмотри", "скажи", "можешь", "нужно", "хочу",
+        "пожалуйста", "сегодня", "вчера", "завтра", "сейчас", "потом", "тогда",
+        "документ", "документы", "документов", "файл", "файлы", "база", "базе",
+        "архив", "архиве", "интернет", "интернете", "поиск", "погода", "курс",
+        "новости", "цена", "стоит", "такое", "такой", "этот", "эта", "тебе", "меня",
+        "него", "неё", "нас", "вас", "them", "what", "who", "when", "where",
+    }
+)
+
 
 class ExecutionKernel:
     """One immutable registry; user identity is supplied per invocation."""
@@ -2365,8 +2391,11 @@ class ExecutionKernel:
         )
 
     async def _web_search(self, *, actor: ActorContext, query: str, max_results: int = 5) -> dict[str, Any]:
-        del actor
         _, _, web, _ = self._require_services()
+        refusal = await self._what_must_not_leave(query, actor)
+        if refusal:
+            return refusal
+        query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         try:
             results = await web.search(query, max_results=max(1, min(int(max_results), 10)))
         except AllProvidersRefusedError as exc:
@@ -2408,9 +2437,64 @@ class ExecutionKernel:
 
     async def _web_research(self, *, actor: ActorContext, query: str, max_sources: int = 3) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
+        refusal = await self._what_must_not_leave(query, actor)
+        if refusal:
+            return refusal
+        query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         report = await web.research(query, max_sources=max(1, min(int(max_sources), 8)))
         captured = await self._capture_web_sources(actor, query, report)
         return {**report, "captured": captured} if captured else report
+
+    async def _what_must_not_leave(self, query: str, actor: ActorContext) -> dict[str, Any] | None:
+        """Не уходит ли наружу имя человека из архива. `None` — можно искать.
+
+        Ворота стояли на ОДНОЙ дороге — предвыборке в `agent_runtime`, — а модель
+        зовёт `web_search` и `web_research` напрямую. Замерено на стенде: запрос
+        «что известно про Хасанова Рустама Маратовича?» уходил в поисковик
+        целиком, вместе с фамилией. Проверка при этом существовала и работала —
+        просто мимо неё вела вторая дорога.
+
+        Здесь она стоит в самом инструменте, то есть в единственном месте, через
+        которое наружу идёт всё. Ворота на одной дороге не охраняют ничего.
+
+        Решает СТРУКТУРА, а не модель: слово из запроса совпало с именем человека
+        в этом графе — значит вопрос про своего, и наружу ему не надо. Цена
+        ошибки несимметрична: лишний отказ человек увидит сразу и переспросит, а
+        ушедшую фамилию не вернуть — в журнале останется только хеш запроса.
+        """
+        storage, _, _, _ = self._require_services()
+        if not hasattr(storage, "people_whose_name_starts_with"):
+            return None
+        words = [
+            word.strip(".,!?…«»\"'()[]:;")
+            for word in str(query or "").split()
+            if len(word.strip(".,!?…«»\"'()[]:;")) >= 4
+        ]
+        # Сравнивается ОСНОВА, а не слово целиком: у русских фамилий меняется
+        # окончание. Замерено — прежняя проверка через `search_entities` находила
+        # «Хасанов» и не находила «Хасанова», «Хасанову», «Хасановым»; спрашивают
+        # же обычно в косвенном падеже. Ворота узнавали одну форму из шести.
+        stems = [item[:5] for item in words if item.casefold() not in _NOT_A_NAME_OUTBOUND][:6]
+        if not stems:
+            return None
+        try:
+            found = await run_blocking(
+                storage.people_whose_name_starts_with, actor.user_id, stems
+            )
+        except Exception:  # noqa: BLE001 — проверка не должна ронять ход
+            LOGGER.warning("Could not check the graph before a web search", exc_info=True)
+            return None
+        if found:
+            return {
+                "query": "",
+                "results": [],
+                "refused": True,
+                "reason": (
+                    "В запросе имя человека из архива — наружу такой запрос не "
+                    "уходит. Ответ по нему ищется в своих материалах."
+                ),
+            }
+        return None
 
     async def _capture_web_sources(
         self, actor: ActorContext, query: str, report: dict[str, Any]
