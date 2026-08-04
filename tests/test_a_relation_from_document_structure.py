@@ -242,6 +242,128 @@ async def test_a_truncated_pass_says_how_much_it_did_not_read(storage):
 
 
 @pytest.mark.asyncio
+async def test_a_blank_field_heading_does_not_justify_a_relation(storage):
+    """Заголовок поля анкеты стоит между любыми двумя именами и ничего не значит.
+
+    «22. Родители (ФИО, дата рождения, где проживает…)» — это подпись графы
+    бланка. Она честно встречается в тексте, поэтому буквальную сверку выдержки
+    проходит безупречно, а подтверждает ровно ничего. На живом архиве такими
+    заголовками были обоснованы одиннадцать из первых 64 принятых связей.
+    """
+
+    graph = KnowledgeGraph(storage)
+    text = (
+        "1. Фамилия, имя, отчество | Храмов Иван Александрович\n"
+        "22. Родители (ФИО, дата рождения, где проживает, где работает, телефон)\n"
+        "Чурилов Александр Вячеславович 12.03.1970\n"
+    )
+    subject = str(graph.create_entity("alice", "Храмов Иван Александрович", EntityType.PERSON)["id"])
+    other = str(graph.create_entity("alice", "Чурилов Александр Вячеславович", EntityType.PERSON)["id"])
+    document = _document(storage, "alice", text)
+    graph.link_knowledge_to_entity(document.id, subject, "alice")
+    graph.link_knowledge_to_entity(document.id, other, "alice")
+
+    probe = _Model({"relations": []})
+    await graph.suggest_relations_from_structure("alice", document.id, llm=probe)
+    first = _index_of(probe.calls[0], "Храмов Иван Александрович")
+    second = _index_of(probe.calls[0], "Чурилов Александр Вячеславович")
+
+    model = _Model(
+        {
+            "relations": [
+                {
+                    "source": first,
+                    "target": second,
+                    "type": "family_of",
+                    "quote": "22. Родители (ФИО, дата рождения, где проживает, где работает, телефон)",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    result = await graph.suggest_relations_from_structure("alice", document.id, llm=model)
+    assert result["candidates"] == []
+    assert result["rejected"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_quote_about_a_third_person_does_not_justify_the_pair(storage):
+    # «Комогоров Дмитрий → Комогорова Екатерина» при выдержке «Отец Комогоров
+    # Виктор Леонидович»: выдержка настоящая, но она про третьего человека.
+    graph = KnowledgeGraph(storage)
+    text = (
+        "1. Фамилия, имя, отчество | Комогоров Дмитрий Викторович\n"
+        "Мать Комогорова Екатерина Михайловна\n"
+        "Отец Комогоров Виктор Леонидович\n"
+    )
+    subject = str(graph.create_entity("alice", "Комогоров Дмитрий Викторович", EntityType.PERSON)["id"])
+    mother = str(graph.create_entity("alice", "Комогорова Екатерина Михайловна", EntityType.PERSON)["id"])
+    father = str(graph.create_entity("alice", "Комогоров Виктор Леонидович", EntityType.PERSON)["id"])
+    document = _document(storage, "alice", text)
+    for entity_id in (subject, mother, father):
+        graph.link_knowledge_to_entity(document.id, entity_id, "alice")
+
+    probe = _Model({"relations": []})
+    await graph.suggest_relations_from_structure("alice", document.id, llm=probe)
+    son = _index_of(probe.calls[0], "Комогоров Дмитрий Викторович")
+    wrong_target = _index_of(probe.calls[0], "Комогорова Екатерина Михайловна")
+
+    model = _Model(
+        {
+            "relations": [
+                {
+                    "source": son,
+                    "target": wrong_target,
+                    "type": "family_of",
+                    "quote": "Отец Комогоров Виктор Леонидович",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    result = await graph.suggest_relations_from_structure("alice", document.id, llm=model)
+    assert result["candidates"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_dry_pass_writes_nothing(storage):
+    """Разбор, объявленный сухим, обязан быть сухим.
+
+    Иначе последующая сверка находит СВОИ же предложения и принимает их как
+    независимое подтверждение. Поймано на живом архиве: сверка показала
+    «принять 22», а записала 64.
+    """
+
+    document, _people = _linked_report(storage)
+    graph = KnowledgeGraph(storage)
+    probe = _Model({"relations": []})
+    await graph.suggest_relations_from_structure("alice", document.id, llm=probe)
+    subject = _index_of(probe.calls[0], "Кублик Александр Юрьевич")
+    brother = _index_of(probe.calls[0], "Макаров Кирилл Евгеньевич")
+
+    model = _Model(
+        {
+            "relations": [
+                {
+                    "source": subject,
+                    "target": brother,
+                    "type": "family_of",
+                    "quote": "Брат: Макаров Кирилл Евгеньевич",
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    )
+    result = await graph.suggest_relations_from_structure(
+        "alice", document.id, llm=model, store=False
+    )
+
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0]["status"] == "not_stored"
+    assert storage.count_relation_candidates("alice", status="suggested") == 0
+
+
+@pytest.mark.asyncio
 async def test_a_document_with_one_entity_is_not_sent_to_the_model(storage):
     graph = KnowledgeGraph(storage)
     only = str(graph.create_entity("alice", "Кублик Александр Юрьевич", EntityType.PERSON)["id"])

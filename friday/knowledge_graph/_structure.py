@@ -106,6 +106,17 @@ def _flat(text: str) -> str:
     return _WHITESPACE.sub(" ", text.replace("\xa0", " ")).strip().casefold()
 
 
+def _names(quote: str, name: str) -> bool:
+    """Названа ли сущность в этой выдержке — буквально или в косвенном падеже."""
+
+    clean = " ".join(str(name or "").split()).strip()
+    if not clean:
+        return False
+    if _flat(clean) in _flat(quote):
+        return True
+    return bool(inflected_mentions(quote, [(clean, "x")]))
+
+
 def _windows(text: str) -> list[tuple[int, str]]:
     """Нарезать текст на перекрывающиеся окна, вернуть (смещение, текст)."""
 
@@ -256,6 +267,25 @@ def _accept(
         # объявляет связи, которых в документе нет, а отличить их не по чему:
         # обе стороны существуют, тип разрешён, и кандидат выглядит настоящим.
         return None
+    target_name = str(target.get("entity_name") or "").strip()
+    if not _names(quote, target_name):
+        # Выдержка обязана НАЗЫВАТЬ того, о ком связь. Без этого проходит
+        # ЗАГОЛОВОК ПОЛЯ бланка — «22. Родители (ФИО, дата рождения, где
+        # проживает…)», «Совершеннолетние дети (ФИО…)», «Друзья близкие (ФИО…)»,
+        # — который стоит между любыми двумя именами анкеты и потому «сверяется
+        # с текстом» безупречно, ничего при этом не подтверждая.
+        #
+        # Найдено на разборе первых 64 принятых связей живого архива: из них
+        # заголовком поля обоснованы одиннадцать, и там же обнаружились цитаты,
+        # называющие ТРЕТЬЕГО человека («Комогоров Дмитрий → Комогорова
+        # Екатерина» при выдержке «Отец Комогоров Виктор Леонидович») и прямо
+        # опровергающие связь («Воинская часть: | Не указано»).
+        #
+        # Фразовый извлекатель эту же ловушку отсекает требованием близости
+        # родственного слова к имени; здесь она закрывается общее — проверкой,
+        # что выдержка вообще про эту сторону. Источник не требуется: субъект
+        # анкеты назван в шапке, а не в строке поля.
+        return None
     if relation_type == RelationType.FAMILY_OF.value and not (
         str(source.get("entity_type") or "") == "person"
         and str(target.get("entity_type") or "") == "person"
@@ -290,12 +320,19 @@ async def suggest_relations_from_structure(
     *,
     llm: LLMRouter,
     max_tokens: int = 1200,
+    store: bool = True,
 ) -> dict[str, Any]:
     """Предложить связи, объявленные формой документа. Ничего не применяет.
 
     Возвращает словарь, а не список: сколько окон разобрано и сколько НЕ
     поместилось — свойство разбора, которое потребитель обязан увидеть.
     Молча обрезанный разбор читается как «в документе больше ничего нет».
+
+    ``store=False`` — показать, не записывая. Нужен настоящий, а не на словах:
+    разбор, объявленный «сухим», но кладущий кандидатов в ту же очередь, делает
+    последующую сверку самоподтверждающейся — прогон находит СВОИ предложения и
+    принимает их как независимое подтверждение. Поймано на живом архиве: сверка
+    показала «принять 22», а записала 64.
     """
 
     empty: dict[str, Any] = {
@@ -368,6 +405,27 @@ async def suggest_relations_from_structure(
             if key in seen:
                 continue
             seen.add(key)
+            if not store:
+                stored.append(
+                    {
+                        "source_entity_id": relation["source_entity_id"],
+                        "target_entity_id": relation["target_entity_id"],
+                        "relation_type": relation["relation_type"],
+                        "confidence": relation["confidence"],
+                        "status": "not_stored",
+                        "evidence_json": json.dumps(
+                            {
+                                "knowledge_object_id": knowledge_object_id,
+                                "source_name": relation["source_name"],
+                                "target_name": relation["target_name"],
+                                "excerpt": relation["quote"],
+                                "method": "document_structure_arbiter",
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                )
+                continue
             try:
                 candidate = storage.store_relation_candidate(
                     user_id,

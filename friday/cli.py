@@ -1040,6 +1040,90 @@ def _backfill_relations(args: argparse.Namespace) -> int:
     return 0
 
 
+def _extract_structure_relations(args: argparse.Namespace) -> int:
+    """Связи, объявленные ФОРМОЙ документа, — арбитром по всему архиву.
+
+    Второй проход рядом с `backfill-relations`, а не замена ему. Фразовый ищет
+    объявляющее слово между двумя именами и связывает эти два имени; форма
+    служебного документа объявляет отношения СУБЪЕКТА — того, чья это анкета,
+    чей это пункт списка, кто подписал рапорт. Замерено на архиве владельца: в
+    рапорте из восьми фразовых пар верны три, и те случайно.
+
+    Требуется модель: форм в архиве больше десятка (анкет 167, рапортов 5,
+    прочего 1360 — ведомости, списки, книги, планы, выписки, листы Excel), и
+    каждая новая форма при шаблонном разборе снова даёт ноль.
+
+    Результат — ОЧЕРЕДЬ НА ПОДТВЕРЖДЕНИЕ. По умолчанию показ, запись включает
+    `--apply`; показ здесь настоящий — арбитр вызывается с `store=False`.
+    """
+    import asyncio
+
+    from friday.agent_runtime.llm import LLMRouter
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    graph = KnowledgeGraph(storage)
+    llm = LLMRouter(settings)
+    if not llm.enabled:
+        print("Модель выключена: разбор формы документа без неё невозможен.", file=sys.stderr)
+        storage.close()
+        return 2
+    apply_changes = bool(getattr(args, "apply", False))
+
+    async def run() -> tuple[int, int, int, int]:
+        scanned = proposed = kept = skipped_windows = 0
+        cursor = 0
+        while True:
+            batch = storage.knowledge_bodies_after(
+                after_rowid=cursor, user_id=args.user, limit=args.batch
+            )
+            if not batch:
+                break
+            for row in batch:
+                cursor = int(row["rowid"])
+                scanned += 1
+                try:
+                    result = await graph.suggest_relations_from_structure(
+                        str(row["user_id"]),
+                        str(row["id"]),
+                        llm=llm,
+                        store=apply_changes,
+                    )
+                except Exception as error:  # noqa: BLE001 — один документ не рвёт проход
+                    print(f"  {row['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+                    continue
+                proposed += int(result.get("proposed") or 0)
+                kept += len(result.get("candidates") or [])
+                skipped_windows += int(result.get("windows_skipped") or 0)
+            if args.limit and scanned >= args.limit:
+                break
+        return scanned, proposed, kept, skipped_windows
+
+    try:
+        scanned, proposed, kept, skipped_windows = asyncio.run(run())
+        if apply_changes:
+            storage.record_event(
+                "graph.structure_relations_extracted",
+                {"scanned": scanned, "proposed": proposed, "kept": kept},
+            )
+    finally:
+        storage.close()
+    print(f"Просмотрено объектов: {scanned}.")
+    print(f"Арбитр предложил: {proposed}; прошло проверки: {kept}.")
+    if skipped_windows:
+        # Названо вслух: молча недочитанный документ выглядит как разобранный.
+        print(f"НЕ прочитано окон (документы длиннее потолка): {skipped_windows}.")
+    if apply_changes:
+        print("Это КАНДИДАТЫ — каждый ждёт подтверждения человеком в панели.")
+    else:
+        print("Это ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _resolve_exact_duplicates(args: argparse.Namespace) -> int:
     """Снять с очереди те конфликты, где решать нечего: текст совпал побайтово.
 
@@ -1571,6 +1655,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the relation candidates (without it the pass only counts objects)",
     )
     relations.set_defaults(handler=_backfill_relations)
+
+    structure = sub.add_parser(
+        "extract-structure-relations",
+        help="Extract relations declared by document FORM (questionnaire field, roster row, report addressee)",
+    )
+    structure.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    structure.add_argument("--batch", type=int, default=50, help="Objects per pass (default: 50)")
+    structure.add_argument("--limit", type=int, default=0, help="Stop after N objects (default: no limit)")
+    structure.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write the relation candidates (without it the pass only shows them)",
+    )
+    structure.set_defaults(handler=_extract_structure_relations)
 
     duplicates = sub.add_parser(
         "resolve-exact-duplicates",

@@ -1566,6 +1566,7 @@ class KnowledgeGraph:
         *,
         llm: Any,
         max_tokens: int = 1200,
+        store: bool = True,
     ) -> dict[str, Any]:
         """Связи, объявленные ФОРМОЙ документа, — арбитром, а не фразой.
 
@@ -1584,6 +1585,7 @@ class KnowledgeGraph:
             knowledge_object_id,
             llm=llm,
             max_tokens=max_tokens,
+            store=store,
         )
 
     def review_relation_candidate(
