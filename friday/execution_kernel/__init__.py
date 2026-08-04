@@ -3156,10 +3156,28 @@ class ExecutionKernel:
                 },
             )
         )
+        # ГДЕ лежит материал и ЧЕЙ он — разные вопросы, и здесь они разведены.
+        #
+        # В общем архиве `raw_objects.user_id` — арендатор, один на всех, а
+        # человека называет только пометка `uploaded_by`. Прежний вызов передавал
+        # сюда человека как арендатора: строк с таким `user_id` в базе нет вовсе,
+        # то есть надзор по загрузкам отвечал пустотой ВСЕГДА — и пустота
+        # читалась как «он ничего не присылал».
+        #
+        # Различает ОБЩИЙ ли архив, а не «совпали ли идентификаторы». Первая
+        # редакция сравнивала арендатора с человеком — и в обычной установке, где
+        # у каждого своя учётка, включала фильтр по автору там, где материал
+        # лежит под собственным `user_id` и пометки может не иметь вовсе.
+        # Поймано собственным набором: восемь упавших тестов.
+        shared = bool(getattr(actor, "shared_tenant", False))
+        tenant = actor.user_id if shared else chosen.user_id
+        by_author = chosen.user_id if shared else ""
         answer: dict[str, Any] = {
             "resolved": chosen.to_dict(),
             "content": "full" if include_content else "redacted",
-            "summary": storage.user_activity_summary(chosen.user_id, since=since, until=until),
+            "summary": storage.user_activity_summary(
+                tenant, since=since, until=until, uploaded_by=by_author
+            ),
             # Что человек ПИСАЛ. Без этого инструмент выполнял своё название
             # наполовину: у того, кто только переписывается, загрузок ноль, и на
             # «что писал JBL?» приходило «сообщений 42, но записи не загрузились».
@@ -3171,11 +3189,12 @@ class ExecutionKernel:
                 include_content=include_content,
             ),
             "items": storage.user_activity(
-                chosen.user_id,
+                tenant,
                 since=since,
                 until=until,
                 limit=max(1, min(int(limit), 200)),
                 include_content=include_content,
+                uploaded_by=by_author,
             ),
             # Сколько документов за то же окно вообще НЕ имеют отметки автора.
             #
@@ -3195,12 +3214,13 @@ class ExecutionKernel:
         if analysis:
             try:
                 answer["analysis"] = storage.user_activity_analysis(
-                    chosen.user_id,
+                    tenant,
                     since=since,
                     until=until,
                     analyses=list(analysis),
                     top=max(1, min(int(top), 50)),
                     include_content=include_content,
+                    uploaded_by=by_author,
                 )
             except ValueError as exc:
                 # The schema constrains the enum, so this is reachable only if the

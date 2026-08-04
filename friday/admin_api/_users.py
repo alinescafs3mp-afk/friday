@@ -199,28 +199,42 @@ async def user_activity(
         content="full" if include_content else "redacted",
         analysis=analysis or None,
     )
+    # ГДЕ лежит материал и ЧЕЙ он — разные вопросы, как и у одноимённого
+    # инструмента. В общем архиве материал лежит под арендатором, а человека
+    # называет пометка `uploaded_by`; спрашивать по учётке человека значит
+    # спрашивать по строкам, которых в базе нет вовсе.
+    #
+    # Вне общего архива арендатор и человек совпадают, и `tenant` равен `user_id`
+    # — поведение прежнее.
+    shared = bool(getattr(actor, "shared_tenant", False))
+    tenant = getattr(actor, "user_id", user_id) if shared else user_id
+    by_author = user_id if shared else ""
     payload: dict[str, Any] = {
         "user_id": user_id,
         "content": "full" if include_content else "redacted",
-        "summary": storage.user_activity_summary(user_id, since=since, until=until),
+        "summary": storage.user_activity_summary(
+            tenant, since=since, until=until, uploaded_by=by_author
+        ),
         "items": storage.user_activity(
-            user_id,
+            tenant,
             since=since,
             until=until,
             limit=limit,
             offset=offset,
             include_content=include_content,
+            uploaded_by=by_author,
         ),
     }
     if analysis:
         try:
             payload["analysis"] = storage.user_activity_analysis(
-                user_id,
+                tenant,
                 since=since,
                 until=until,
                 analyses=analysis,
                 top=top,
                 include_content=include_content,
+                uploaded_by=by_author,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

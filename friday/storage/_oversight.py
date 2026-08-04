@@ -152,8 +152,22 @@ class OversightMixin(StorageShared):
         limit: int = 200,
         offset: int = 0,
         include_content: bool = True,
+        uploaded_by: str = "",
     ) -> list[dict[str, Any]]:
         """One account's arrivals, newest first, with what became of each.
+
+        `uploaded_by` — КТО принёс материал. В общем архиве `user_id` у всех один,
+        и без этого признака надзор «что Иван присылал» отвечал по всему архиву:
+        параметр существовал в `_arrival_window` с самого начала, а передать его
+        было некому — ни одна из трёх дорог надзора этого не делала.
+
+        Пустая строка означает прежнее поведение (весь арендатор) и нужна там,
+        где человек и есть арендатор, — в обычной, не общей установке.
+
+        У материалов, принятых до 2026-08-04, признака нет, и они в ответ по
+        автору не попадают. Это не потеря: их считает `arrivals_without_an_author`
+        и говорит человеку отдельной строкой, иначе «у Ивана ноль» читалось бы как
+        «Иван ничего не присылал».
 
         `include_content=False` is the metadata-only view: when, how, how much, what
         type and what became of it — with nothing a person wrote in it. What that
@@ -162,7 +176,9 @@ class OversightMixin(StorageShared):
         («заявление на увольнение.docx»), and `source_ref` carries the import path for
         a file. `content_chars` and `size_bytes` stay: a size is not a content.
         """
-        where, params = self._arrival_window(user_id, since, until, alias="r")
+        where, params = self._arrival_window(
+            user_id, since, until, alias="r", uploaded_by=uploaded_by or None
+        )
         params.extend([max(1, min(limit, 1000)), max(0, offset)])
         # ``where`` holds fixed predicates only; every value is bound.
         query = f"""SELECT r.id AS raw_object_id, r.source, r.source_ref, r.content_type,
@@ -266,6 +282,7 @@ class OversightMixin(StorageShared):
         *,
         since: str | None = None,
         until: str | None = None,
+        uploaded_by: str = "",
     ) -> dict[str, Any]:
         """Counts and spans for one account, without carrying any of the content.
 
@@ -274,7 +291,9 @@ class OversightMixin(StorageShared):
         totals sitting next to a windowed `arrivals`, so picking «7 дней» moved one
         card and left three showing the account's whole history in the same type.
         """
-        where, params = self._arrival_window(user_id, since, until)
+        where, params = self._arrival_window(
+            user_id, since, until, uploaded_by=uploaded_by or None
+        )
 
         # ``where`` holds fixed predicates only; every value is bound.
         totals = self.execute(
@@ -390,6 +409,7 @@ class OversightMixin(StorageShared):
         analyses: tuple[str, ...] | list[str] | None = None,
         top: int = 10,
         include_content: bool = True,
+        uploaded_by: str = "",
     ) -> dict[str, Any]:
         """Не «что он сделал», а «что из этого следует» — по запрошенному разрезу.
 
@@ -413,7 +433,9 @@ class OversightMixin(StorageShared):
         if unknown:
             raise ValueError(f"Unknown analysis: {sorted(unknown)}. Valid: {list(ANALYSES)}")
 
-        where, params = self._arrival_window(user_id, since, until, alias="r")
+        where, params = self._arrival_window(
+            user_id, since, until, alias="r", uploaded_by=uploaded_by or None
+        )
         result: dict[str, Any] = {
             "user_id": user_id,
             "since": since,
