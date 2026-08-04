@@ -1087,6 +1087,7 @@ class ExecutionKernel:
             "web_fetch": self._web_fetch,
             "web_research": self._web_research,
             "entity_lookup": self._entity_lookup,
+            "relation_end": self._relation_end,
             "entity_create": self._entity_create,
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
@@ -1211,6 +1212,7 @@ class ExecutionKernel:
             "memory_save",
             "entity_create",
             "entity_link",
+            "relation_end",
             "speak",
             "make_file",
             "collect_files",
@@ -2569,7 +2571,15 @@ class ExecutionKernel:
             )
         return captured
 
-    async def _entity_lookup(self, *, actor: ActorContext, name: str) -> dict[str, Any]:
+    async def _entity_lookup(self, *, actor: ActorContext, name: str, as_of: str = "") -> dict[str, Any]:
+        """Карточка объекта; `as_of` отвечает на вопрос «а как было тогда».
+
+        Без этого параметра вопрос «кто командовал батальоном в 2024» отвечался
+        сегодняшней картиной: связи, отменённые с тех пор, из неё уже вычеркнуты,
+        а связи, подтверждённые позже, в неё уже попали. Ответ выглядел уверенно
+        и относился не к тому году.
+        """
+
         _, kg, _, _ = self._require_services()
         # Через поток, как и HTTP-двойник этой же карточки: профиль на широкой
         # сущности — несколько SQL по 22 тысячам связей. Маршрут перевели на
@@ -2579,7 +2589,31 @@ class ExecutionKernel:
         if not entity:
             return {"found": False, "entity": None}
         profile = await run_blocking(kg.entity_profile, entity["id"], actor.user_id)
-        return {"found": True, "entity": entity, **profile}
+        if not str(as_of or "").strip():
+            return {"found": True, "entity": entity, **profile}
+        # Картина на дату собирается ОТДЕЛЬНЫМ обходом, а не фильтром поверх
+        # профиля: профиль уже отбросил отменённые связи, и восстановить их из
+        # него нечем.
+        past = await run_blocking(
+            kg.get_entity_graph, actor.user_id, str(entity["id"]), 1, as_of=str(as_of).strip()
+        )
+        by_id = {str(node.get("id")): node for node in (past.get("nodes") or [])}
+        return {
+            "found": True,
+            "entity": entity,
+            **profile,
+            "as_of": str(as_of).strip(),
+            "relations_as_of": [
+                {
+                    "type": edge.get("relation_type"),
+                    "source": (by_id.get(str(edge.get("source_entity_id"))) or {}).get("name"),
+                    "target": (by_id.get(str(edge.get("target_entity_id"))) or {}).get("name"),
+                    "valid_from": edge.get("valid_from") or "",
+                    "valid_to": edge.get("valid_to") or "",
+                }
+                for edge in (past.get("edges") or [])
+            ],
+        }
 
     async def _entity_create(
         self,
@@ -2633,6 +2667,55 @@ class ExecutionKernel:
                 ],
             },
         )
+
+    async def _relation_end(
+        self,
+        *,
+        actor: ActorContext,
+        source: str,
+        target: str,
+        valid_to: str = "",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Связь КОНЧИЛАСЬ — это не то же самое, что её не было.
+
+        До этого инструмента отмена жила только админским маршрутом: ни кнопки,
+        ни команды, ни способа у модели. То есть человек мог сказать «он давно
+        перевёлся», а система умела только согласиться на словах — в графе
+        связь оставалась действующей и продолжала отвечать на вопросы о
+        сегодняшнем дне.
+
+        Мягкое удаление тут не годится: оно говорит «этого не было» и стирает
+        прошлое. Рапорт 2024 года остаётся фактом о 2024-м после перевода.
+        """
+
+        _, kg, _, _ = self._require_services()
+        first = await run_blocking(kg.find_entity, actor.user_id, source)
+        second = await run_blocking(kg.find_entity, actor.user_id, target)
+        if not first or not second:
+            missing = source if not first else target
+            return {"ended": False, "reason": f"Объект «{missing}» в графе не найден"}
+        edges = await run_blocking(kg.get_entity_relations, str(first["id"]), actor.user_id)
+        wanted = {str(second["id"])}
+        matches = [
+            edge
+            for edge in edges
+            if str(edge.get("source_entity_id")) in wanted or str(edge.get("target_entity_id")) in wanted
+        ]
+        if not matches:
+            return {"ended": False, "reason": "Действующей связи между ними нет"}
+        ended = []
+        for edge in matches:
+            result = await run_blocking(
+                kg.invalidate_relation,
+                actor.user_id,
+                str(edge["id"]),
+                valid_to=str(valid_to or "").strip(),
+                reason=str(reason or "").strip()[:300],
+            )
+            if result:
+                ended.append({"type": edge.get("relation_type"), "valid_to": result.get("valid_to") or ""})
+        return {"ended": bool(ended), "relations": ended, "source": first["name"], "target": second["name"]}
 
     async def _entity_link(
         self,
@@ -3666,11 +3749,36 @@ class ExecutionKernel:
             "Карточка сущности (человек, проект, часть, организация): связанные "
             "документы, теги по этим документам, диапазон дат документов, "
             "подтверждённые связи и число связей, ожидающих проверки человеком. "
-            "Используй для «расскажи про проект X», «что известно об Y».",
+            "Используй для «расскажи про проект X», «что известно об Y». Если "
+            "спрашивают о ПРОШЛОМ («кто командовал в 2024», «где он служил "
+            "тогда»), передай дату в `as_of` — вернётся картина на тот день, а "
+            "не сегодняшняя.",
             "kg.read",
-            {"name": {"type": "string"}},
+            {
+                "name": {"type": "string"},
+                "as_of": {
+                    "type": "string",
+                    "description": "Дата ГГГГ-ММ-ДД: показать связи, верные на неё",
+                },
+            },
             ["name"],
             risk="observe",
+        )
+        spec(
+            "relation_end",
+            "Связь КОНЧИЛАСЬ: человек говорит «он перевёлся», «она там больше не "
+            "работает», «этого больше нет». Отмечает связь оконченной, но НЕ стирает "
+            "её: прошлое остаётся правдой о прошлом, и вопрос «как было тогда» на неё "
+            "по-прежнему отвечается. Дату конца, если названа, передай в `valid_to`.",
+            "kg.write",
+            {
+                "source": {"type": "string", "description": "Имя объекта, от которого связь"},
+                "target": {"type": "string", "description": "Имя объекта, к которому связь"},
+                "valid_to": {"type": "string", "description": "Дата конца ГГГГ-ММ-ДД, если названа"},
+                "reason": {"type": "string", "description": "Чем это сказано, дословно"},
+            },
+            ["source", "target"],
+            risk="mutate",
         )
         spec(
             "entity_create",

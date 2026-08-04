@@ -958,7 +958,19 @@ class GraphMixin(StorageShared):
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 
-    def get_entity_graph(self, user_id: str, entity_id: str, depth: int = 2) -> dict[str, Any]:
+    def get_entity_graph(
+        self, user_id: str, entity_id: str, depth: int = 2, *, as_of: str = ""
+    ) -> dict[str, Any]:
+        """Окрестность узла. `as_of` — «как это выглядело на ту дату».
+
+        Без этого параметра bi-temporal половина схемы 27 остаётся внутренним
+        свойством хранилища: поля есть, а спросить «кто командовал в 2024» не
+        может ни человек, ни агент — обход всегда идёт по сегодняшней картине.
+
+        Отменённая связь при заданной дате возвращается в картину, если на ту
+        дату она была верна: в этом и смысл отличия «кончилось» от «не было».
+        """
+
         root = self.get_entity(entity_id, user_id)
         if not root or root.get("deleted_at"):
             return {"nodes": [], "edges": [], "root": entity_id}
@@ -970,7 +982,7 @@ class GraphMixin(StorageShared):
         for _ in range(max_depth):
             next_frontier: set[str] = set()
             for current in frontier:
-                for relation in self.get_entity_relations(current, user_id):
+                for relation in self.get_entity_relations(current, user_id, as_of=as_of):
                     edges[relation["id"]] = relation
                     for candidate in (relation["source_entity_id"], relation["target_entity_id"]):
                         if candidate in seen:
@@ -989,7 +1001,9 @@ class GraphMixin(StorageShared):
         # его радиус: два экрана об одной сущности говорили разное.
         counts = self._knowledge_counts_for(user_id, list(nodes))
         enriched = [{**node, "knowledge_count": counts.get(str(node.get("id")), 0)} for node in nodes.values()]
-        return {"root": entity_id, "nodes": enriched, "edges": list(edges.values())}
+        # Дата названа В ОТВЕТЕ: картина «на 2024» и картина «сегодня» выглядят
+        # одинаково, и потребитель обязан видеть, какую из двух он получил.
+        return {"root": entity_id, "nodes": enriched, "edges": list(edges.values()), "as_of": as_of}
 
     def _knowledge_counts_for(self, user_id: str, entity_ids: list[str]) -> dict[str, int]:
         """Сколько документов связано с каждой из названных сущностей."""
@@ -1221,6 +1235,30 @@ class GraphMixin(StorageShared):
                     (status, now, reviewed_by, candidate_id, user_id),
                 )
                 if status == "accepted":
+                    evidence = _json_load(row["evidence_json"], {})
+                    # С какой даты связь ПОДТВЕРЖДЕНА: собственная дата документа,
+                    # который её объявил. Не «началось тогда», а «на эту дату уже
+                    # было правдой» — рапорт от 15.03.2024 не утверждает, что
+                    # раньше человек в части не служил.
+                    #
+                    # Без этого вся временная половина схемы 27 остаётся
+                    # украшением: замерено на живом графе — 192 связи, и у ВСЕХ
+                    # 192 `valid_from` пуст, то есть вопрос «как было в 2024»
+                    # отвечать нечем.
+                    #
+                    # Дата загрузки сюда не годится: архив загружен разом, и
+                    # `created_at` полутора тысяч документов говорит о дне
+                    # импорта, а не о том, когда это было правдой.
+                    valid_from = ""
+                    knowledge_id = str(evidence.get("knowledge_object_id") or "")
+                    if knowledge_id:
+                        source_row = conn.execute(
+                            "SELECT json_extract(metadata_json,'$.document_date') AS on_paper "
+                            "FROM knowledge_objects WHERE id=? AND user_id=?",
+                            (knowledge_id, user_id),
+                        ).fetchone()
+                        if source_row is not None:
+                            valid_from = str(source_row["on_paper"] or "")
                     relation = Relation(
                         id=new_id("rel"),
                         user_id=user_id,
@@ -1228,6 +1266,7 @@ class GraphMixin(StorageShared):
                         target_entity_id=str(row["target_entity_id"]),
                         relation_type=str(row["relation_type"]),
                         weight=max(0.1, min(1.0, float(row["confidence"] or 0.5))),
+                        valid_from=valid_from,
                         metadata_json={
                             "origin": "review",
                             "source": "reviewed_relation_candidate",
@@ -1236,16 +1275,18 @@ class GraphMixin(StorageShared):
                             # weight is clamped for ranking; the extractor's raw
                             # confidence stays available as edge provenance.
                             "confidence": float(row["confidence"] or 0.5),
-                            "evidence": _json_load(row["evidence_json"], {}),
+                            "evidence": evidence,
                         },
                     )
                     # Accepting an already represented relation remains idempotent.
                     with suppress(sqlite3.IntegrityError):
                         conn.execute(
                             """INSERT INTO relations(id, user_id, source_entity_id, target_entity_id,
-                               relation_type, weight, metadata_json, created_at, deleted_at)
+                               relation_type, weight, metadata_json, created_at, deleted_at,
+                               valid_from, valid_to, invalidated_at, superseded_by)
                                VALUES(:id, :user_id, :source_entity_id, :target_entity_id,
-                               :relation_type, :weight, :metadata_json, :created_at, :deleted_at)""",
+                               :relation_type, :weight, :metadata_json, :created_at, :deleted_at,
+                               :valid_from, :valid_to, :invalidated_at, :superseded_by)""",
                             relation.to_row(),
                         )
         return self.get_relation_candidate(user_id, candidate_id)

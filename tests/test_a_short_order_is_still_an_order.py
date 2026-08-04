@@ -115,6 +115,7 @@ def test_every_named_tool_exists() -> None:
         "memory_save",
         "entity_create",
         "entity_link",
+        "relation_end",
         "speak",
         "make_file",
         "collect_files",

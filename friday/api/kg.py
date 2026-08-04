@@ -334,9 +334,16 @@ async def entity_graph(
     entity_id: str,
     request: Request,
     depth: int = Query(2, ge=0, le=5),
+    as_of: str = Query("", description="Картина на дату ГГГГ-ММ-ДД: что было верно тогда"),
 ) -> dict[str, Any]:
+    """Окрестность узла; `as_of` показывает картину на названную дату.
+
+    Отменённая связь при заданной дате возвращается: «кончилось» — это не
+    «не было», и различить их можно только спросив про конкретный день.
+    """
+
     actor = _require(request, "kg.read")
-    graph = request.app.state.kg.get_entity_graph(actor.user_id, entity_id, depth)
+    graph = request.app.state.kg.get_entity_graph(actor.user_id, entity_id, depth, as_of=as_of)
     if not graph.get("nodes"):
         raise HTTPException(status_code=404, detail="Сущность не найдена")
     return graph

@@ -1325,6 +1325,7 @@ class KnowledgeGraph:
         weight: float = 1.0,
         metadata: dict[str, Any] | None = None,
         origin: str = "manual",
+        valid_from: str = "",
     ) -> Relation:
         # Every edge carries a mandatory origin stamp; the parameter wins over
         # caller-supplied metadata so an API body cannot spoof provenance.
@@ -1336,8 +1337,44 @@ class KnowledgeGraph:
             relation_type=relation_type,
             weight=weight,
             metadata_json={**(metadata or {}), "origin": str(origin)[:40]},
+            valid_from=valid_from,
         )
         return self.storage.create_relation(relation)
+
+    def relation_valid_from(self, user_id: str, knowledge_object_id: str) -> str:
+        """С какой даты связь ПОДТВЕРЖДЕНА документом, который её объявил.
+
+        Это не «началось тогда», а «на эту дату уже было правдой». Разница
+        существенная и названа здесь вслух, потому что от неё зависит смысл
+        вопроса «как было в 2024»: рапорт от 15.03.2024 о том, что Иванов служит
+        в в/ч 30926, не утверждает, что раньше он там не служил, — он утверждает,
+        что на 15 марта служил.
+
+        Поэтому `as_of` читается как «что мы знали на эту дату», и связь с более
+        поздним документом в такой ответ не попадает — честно, потому что на ту
+        дату подтверждения не было.
+
+        Берётся СОБСТВЕННАЯ дата документа (`metadata_json.document_date`,
+        извлечённая из бумаги), а не дата загрузки: архив загружен разом, и
+        `created_at` у полутора тысяч документов почти одинаков — он говорит о
+        дне импорта, а не о том, когда это было правдой. На живом архиве своя
+        дата известна у 1349 документов из 1536.
+        """
+
+        if not knowledge_object_id:
+            return ""
+        knowledge = self.storage.get_knowledge_object(knowledge_object_id, user_id)
+        if not knowledge:
+            return ""
+        metadata = knowledge.get("metadata_json")
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata or "{}")
+            except (ValueError, TypeError):
+                metadata = {}
+        if not isinstance(metadata, dict):
+            return ""
+        return str(metadata.get("document_date") or "")
 
     # ------------------------------------------------------------------
     # Containers: user-curated project/collection entities organizing
@@ -1778,8 +1815,10 @@ class KnowledgeGraph:
             return 0
         return self.storage.count_relation_candidates_for_entity(user_id, entity_id)
 
-    def get_entity_graph(self, user_id: str, entity_id: str, depth: int = 2) -> dict[str, Any]:
-        return self.storage.get_entity_graph(user_id, entity_id, depth)
+    def get_entity_graph(
+        self, user_id: str, entity_id: str, depth: int = 2, *, as_of: str = ""
+    ) -> dict[str, Any]:
+        return self.storage.get_entity_graph(user_id, entity_id, depth, as_of=as_of)
 
     def link_knowledge_to_entity(
         self,
