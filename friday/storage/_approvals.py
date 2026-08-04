@@ -122,16 +122,55 @@ class ApprovalsMixin(StorageShared):
             "updated_at": now,
         }
         with self.transaction() as conn:
-            conn.execute(
-                """INSERT INTO action_approvals(id, user_id, tool, risk, payload_json, payload_hash,
+            # Та же просьба, уже висящая без ответа, не спрашивается второй раз.
+            #
+            # Человек отвечает на первый вопрос и видит второй; естественное
+            # прочтение — «система не услышала», и он отвечает снова. Дальше
+            # хуже: одна заявка исполняется, вторая доживает до истечения срока
+            # в списке ожидающих, и список перестаёт значить «ждёт решения».
+            #
+            # Поиск стоит ВНУТРИ той же транзакции, что и вставка: «прочитать,
+            # проверить, записать» двумя запросами — это гонка, и две
+            # одновременные просьбы разошлись бы ровно между шагами. Тот же
+            # довод, по которому решение человека сделано атомарным UPDATE.
+            #
+            # Три границы, каждая со своей причиной:
+            #   * только `pending` — решённая заявка это история, и повторить
+            #     просьбу после отказа человек вправе;
+            #   * только тот же `payload_hash` — слияние A+B и A+C суть разные
+            #     действия, показать одно и сделать другое недопустимо;
+            #   * только тот же человек — в общем архиве двое могут просить одно
+            #     и то же, и ответ одного не является ответом другого.
+            #
+            # `requested_by` в ключе — это и есть ЧЕЛОВЕК: в общем архиве
+            # `user_id` один на всех, и заявку конкретного человека `_approval_row`
+            # отбирает именно по этому столбцу (`requested_by IN (person_id, …)`).
+            # Без него просьба одного участника глушила бы просьбу другого.
+            waiting = conn.execute(
+                """SELECT id FROM action_approvals
+                    WHERE user_id=? AND tool=? AND payload_hash=? AND requested_by=?
+                      AND status='pending' AND expires_at > ?
+                    ORDER BY rowid DESC LIMIT 1""",
+                (user_id, clean_tool, record["payload_hash"], record["requested_by"], now),
+            ).fetchone()
+            if waiting:
+                # Идентификатор запоминается, а строка читается ПОСЛЕ выхода из
+                # транзакции — как и на обычном пути ниже. Чтение через
+                # `self.execute` внутри открытой транзакции берёт соединение
+                # заново, и мешать эти два уровня незачем.
+                found = str(waiting["id"])
+            else:
+                found = ""
+                conn.execute(
+                    """INSERT INTO action_approvals(id, user_id, tool, risk, payload_json, payload_hash,
                    summary, status, requested_by, conversation_id, mission_id,
                    expires_at, created_at, updated_at)
                    VALUES(:id, :user_id, :tool, :risk, :payload_json, :payload_hash, :summary,
                    :status, :requested_by, :conversation_id, :mission_id,
                    :expires_at, :created_at, :updated_at)""",
-                record,
-            )
-        return self._approval_row(str(record["id"]), user_id) or record
+                    record,
+                )
+        return self._approval_row(found or str(record["id"]), user_id) or record
 
     def get_action_approval(
         self, approval_id: str, user_id: str | None = None, *, person_id: str = ""
