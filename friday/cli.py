@@ -1535,6 +1535,81 @@ def _retag_documents(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backfill_relation_dates(args: argparse.Namespace) -> int:
+    """Проставить уже принятым связям дату документа, который их объявил.
+
+    Правило «связь несёт дату своей бумаги» действует только вперёд, а связи,
+    принятые раньше, остаются без начала — и вопрос «как было тогда» на них
+    отвечается сегодняшней картиной. Замерено на живом графе перед этим
+    проходом: 192 связи, у ВСЕХ 192 `valid_from` пуст.
+
+    Дата берётся из документа-основания (`metadata_json.evidence
+    .knowledge_object_id` → `document_date` этого документа), а не из дня
+    принятия: архив загружен разом, и день принятия говорит о работе очереди, а
+    не о том, когда это было правдой.
+
+    Пустая дата остаётся пустой. «Неизвестно» — это не «с начала времён», и
+    обход по дате такие связи не отбрасывает.
+    """
+
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    apply_changes = bool(getattr(args, "apply", False))
+    if apply_changes:
+        warn_if_service_holds_the_database(storage, action="проставлять даты связям")
+
+    seen = dated = no_source = no_date = 0
+    try:
+        rows = storage.execute(
+            "SELECT id, user_id, metadata_json FROM relations "
+            "WHERE deleted_at IS NULL AND (valid_from IS NULL OR valid_from='')"
+            + (" AND user_id=?" if args.user else ""),
+            (args.user,) if args.user else (),
+        ).fetchall()
+        for row in rows:
+            seen += 1
+            metadata = json.loads(str(row["metadata_json"] or "{}") or "{}")
+            evidence = metadata.get("evidence")
+            knowledge_id = str((evidence or {}).get("knowledge_object_id") or "") if isinstance(evidence, dict) else ""
+            if not knowledge_id:
+                no_source += 1
+                continue
+            knowledge = storage.get_knowledge_object(knowledge_id, str(row["user_id"]))
+            if not knowledge:
+                no_source += 1
+                continue
+            document_meta = knowledge.get("metadata_json")
+            if isinstance(document_meta, str):
+                document_meta = json.loads(document_meta or "{}")
+            on_paper = str((document_meta or {}).get("document_date") or "")
+            if not on_paper:
+                no_date += 1
+                continue
+            dated += 1
+            if apply_changes:
+                storage.execute(
+                    "UPDATE relations SET valid_from=? WHERE id=? AND user_id=?",
+                    (on_paper, str(row["id"]), str(row["user_id"])),
+                )
+        if apply_changes:
+            storage.commit()
+            storage.record_event("graph.relation_dates_backfilled", {"seen": seen, "dated": dated})
+    finally:
+        storage.close()
+
+    print(f"Связей без начала: {seen}.")
+    print(f"  дата документа найдена: {dated}")
+    print(f"  документ-основание не назван или удалён: {no_source}")
+    print(f"  у документа нет своей даты: {no_date}")
+    if not apply_changes:
+        print("Это ПОКАЗ, база не тронута. Чтобы применить, повторите с --apply.")
+    return 0
+
+
 def _review_relation_candidates(args: argparse.Namespace) -> int:
     """Сверить очередь предложенных связей с документами, которые их объявляют.
 
@@ -2232,6 +2307,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retag.add_argument("--report", help="Write every decision as JSON lines to this file")
     retag.set_defaults(handler=_retag_documents)
+
+    relation_dates = sub.add_parser(
+        "backfill-relation-dates",
+        help="Give already accepted relations the date of the document that declared them",
+    )
+    relation_dates.add_argument("--user", help="Restrict to one tenant (default: every tenant)")
+    relation_dates.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write the dates (without it the pass only counts them)",
+    )
+    relation_dates.set_defaults(handler=_backfill_relation_dates)
 
     review = sub.add_parser(
         "review-relation-candidates",

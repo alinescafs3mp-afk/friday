@@ -169,3 +169,28 @@ async def test_ending_a_relation_that_does_not_exist_says_so(kernel_and_actor):
 
     assert result["ended"] is False
     assert "нет" in result["reason"].lower()
+
+
+def test_the_backfill_gives_old_relations_the_date_of_their_paper(storage, settings, monkeypatch):
+    """Правило действует вперёд — принятые раньше связи остаются без начала.
+
+    Замер на живом графе перед проходом: 192 связи, у ВСЕХ 192 начало пустое.
+    Проход нашёл дату для 191; у одной документ своей даты не имеет, и она
+    осталась пустой — «неизвестно» это не «с начала времён».
+    """
+
+    import argparse
+
+    from friday.cli import _backfill_relation_dates
+
+    person, _unit, edge = _accepted_relation(storage, document_date="2024-03-15")
+    storage.execute("UPDATE relations SET valid_from='' WHERE id=?", (str(edge["id"]),))
+    storage.commit()
+    monkeypatch.setattr("friday.config.load_settings", lambda: settings)
+    monkeypatch.setattr("friday.storage.init_storage", lambda _settings: storage)
+    monkeypatch.setattr(storage, "close", lambda *args, **kwargs: None)
+
+    assert _backfill_relation_dates(argparse.Namespace(user="alice", apply=True)) == 0
+
+    refreshed = storage.get_entity_relations(str(person["id"]), "alice")
+    assert refreshed[0]["valid_from"] == "2024-03-15"
