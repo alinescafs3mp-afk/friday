@@ -27,6 +27,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from friday.agent_runtime import _grounding_warning
 
 FABRICATED = (
@@ -77,6 +79,71 @@ def test_a_short_answer_is_not_flagged():
     assert (
         _grounding_warning("Не знаю.", None, asked_about_the_world=True, nothing_arrived=True) == ""
     )
+
+
+@pytest.mark.asyncio
+async def test_a_tool_that_ran_and_failed_counts_as_nothing_arrived(settings, storage):
+    """Дыра между двумя механизмами: инструмент вызван и упал.
+
+    `tools_used` непуст — значит «что-то делали», и предупреждение молчало.
+    `tool_evidence` пуст — значит сверять нечего, и судью не звали. Ответ при
+    этом строится ровно ни на чём, и ни один из двух механизмов его не видит.
+
+    Проверяется НАСТОЯЩИЙ ход целиком: тест по тексту исходника на этом проекте
+    краснел от собственных комментариев трижды.
+
+    Мутация: вернуть `response.get("tools_used")` в `nothing_arrived` — тест
+    краснеет, и выдумка про магазины снова уходит без оговорки.
+    """
+    import asyncio
+
+    from friday.agent_runtime import AgentRuntime
+    from friday.execution_kernel import ToolResult
+    from friday.permissions import ActorContext
+
+    class _AsksTheWebThenInvents:
+        """Первый ход — вызов веб-поиска, второй — ответ по памяти."""
+
+        enabled = True
+        total_budget_sec = 120.0
+
+        def __init__(self) -> None:
+            self.rounds = 0
+
+        async def chat(self, messages, **kwargs):  # noqa: ANN003, ARG002
+            asked = " ".join(str(item.get("content") or "") for item in messages)
+            if "РАЗГОВОР или ЗАПРОС" in asked:
+                return {"content": "ЗАПРОС"}
+            if '"вид": "интернет' in asked:
+                return {
+                    "content": '{"вид": "интернет", "запрос": "RPI5 Донецк наличие", '
+                    '"кто": "", "дни": [], "правило": ""}'
+                }
+            self.rounds += 1
+            return {"content": FABRICATED, "tool_calls": None, "_queue_wait_sec": 0.0}
+
+    class _FailingKernel:
+        """Веб-инструмент есть и вызывается — и каждый раз возвращает отказ."""
+
+        def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
+            return [{"type": "function", "function": {"name": "web_research", "description": "искать"}}]
+
+        async def execute(self, name, arguments=None, *, actor=None):  # noqa: ANN001, ARG002
+            return ToolResult(name, False, error="no provider answered")
+
+    storage.ensure_user("alice", preset_key="owner")
+    agent = AgentRuntime(settings, storage, llm=_AsksTheWebThenInvents(), kernel=_FailingKernel())
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    answer = await asyncio.to_thread(
+        lambda: asyncio.run(
+            agent.chat("alice", "где в Донецке есть RPI5 в наличии?", actor=actor)
+        )
+    )
+
+    warning = str(answer.get("grounding_warning") or "")
+    assert warning, "инструмент вызван, ничего не принёс — а выдумка ушла молча"
+    assert "в интернет" in warning.casefold()
 
 
 def test_a_question_about_his_own_archive_keeps_its_own_wording():

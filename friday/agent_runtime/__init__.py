@@ -2183,16 +2183,23 @@ class AgentRuntime:
             asked_about_the_world=str((context.outward_verdict or ("", None))[0] or "").startswith(
                 "интернет"
             ),
-            # Не приехало ничего НИ ОДНОЙ дорогой, и ни один инструмент не звался.
-            # Перечисляются все дороги, а не одна: ворота на одной дороге не
-            # охраняют ничего — на этом проекте замерено дважды за одни сутки.
+            # Не приехало ничего НИ ОДНОЙ дорогой. Перечисляются все, а не одна:
+            # ворота на одной дороге не охраняют ничего — замерено дважды за сутки.
+            #
+            # Считается «ЧТО ПРИНЕСЛИ», а не «звались ли»: `tool_evidence`
+            # наполняется только УСПЕШНЫМИ результатами, `tools_used` — всеми
+            # попытками. Между ними лежала дыра, в которую попадал самый частый
+            # случай: инструмент вызван и упал. Тогда `tools_used` непуст —
+            # предупреждения нет; `tool_evidence` пуст — судью не зовут (ему
+            # нечего сверять). Ни одного механизма, при том что ответ строится
+            # ровно ни на чём. Указано скептиком на разборе 2026-08-04.
             nothing_arrived=not (
                 context.knowledge_hits
                 or context.entity_hits
                 or context.graph_context.get("entities")
                 or answered_from_storage
                 or context.user_model_offered
-                or response.get("tools_used")
+                or response.get("tool_evidence")
             ),
         )
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
