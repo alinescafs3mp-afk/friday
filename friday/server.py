@@ -1595,7 +1595,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         новая способность здесь означала бы, что за человека решает кто-то ещё.
         """
         actor = _require(request, "chat.use")
-        rows = await run_blocking(request.app.state.storage.list_monitors, actor.user_id)
+        # Свои — значит ЭТОГО ЧЕЛОВЕКА. В общем архиве `user_id` один на всех, и
+        # без второй границы список показывал чужие темы: текст запроса — личный
+        # интерес («увольнение такого-то»), и снять чужое слежение можно было по
+        # идентификатору из этого же списка. Найдено ревью 2026-08-04.
+        rows = await run_blocking(
+            request.app.state.storage.list_monitors, actor.user_id, created_by=actor.own_id
+        )
         return {"count": len(rows), "items": rows}
 
     @application.post("/api/me/monitors", tags=["chat"])
@@ -1609,6 +1615,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 actor.user_id,
                 str(body.get("query") or ""),
                 chat_id=chat_id,
+                created_by=actor.own_id,
             )
         except ValueError as exc:
             # Два разных отказа, и человеку они читаются по-разному: слишком
@@ -1626,7 +1633,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     async def stop_my_monitor(request: Request, monitor_id: str) -> dict[str, Any]:
         actor = _require(request, "chat.use")
         stopped = await run_blocking(
-            request.app.state.storage.stop_monitor, str(monitor_id or ""), actor.user_id
+            request.app.state.storage.stop_monitor,
+            str(monitor_id or ""),
+            actor.user_id,
+            created_by=actor.own_id,
         )
         if not stopped:
             # 404, а не 403: чужой и уже снятый выглядят одинаково — существование

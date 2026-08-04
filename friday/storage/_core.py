@@ -496,6 +496,11 @@ class CoreMixin(StorageShared):
                 "lease_token": "TEXT NOT NULL DEFAULT ''",
                 "updated_at": "TEXT NOT NULL DEFAULT ''",
             },
+            # Автор слежения. Пустая строка у старых строк означает «автор
+            # неизвестен»: до этой правки его негде было взять. Такие слежения
+            # видит только владелец архива — отдавать их участникам по догадке
+            # значило бы ровно ту утечку, ради которой столбец и заводится.
+            "monitors": {"created_by": "TEXT NOT NULL DEFAULT ''"},
             "conversations": {"mode": "TEXT NOT NULL DEFAULT 'dialogue'"},
             "channel_sessions": {"mode": "TEXT NOT NULL DEFAULT 'dialogue'"},
             # NULL expires_at = a non-expiring token (all legacy tokens stay valid).

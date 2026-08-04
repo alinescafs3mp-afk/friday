@@ -539,7 +539,9 @@ class RuntimeMixin(StorageShared):
     # намеренно: монитор — это внимание системы, а не хранилище закладок.
     MAX_ACTIVE_MONITORS = 20
 
-    def create_monitor(self, user_id: str, query: str, *, chat_id: str = "") -> dict[str, Any]:
+    def create_monitor(
+        self, user_id: str, query: str, *, chat_id: str = "", created_by: str = ""
+    ) -> dict[str, Any]:
         """Завести монитор.
 
         Граница «что уже видели» ставится по КУРСОРУ (`rowid` последнего знания на
@@ -556,8 +558,12 @@ class RuntimeMixin(StorageShared):
         # Потолок на человека. Без него один аккаунт (а открытая регистрация
         # включена) заводит сотни слежений: список показывает двести новейших,
         # остальные нельзя ни увидеть, ни снять — а обход платит за каждое.
+        # Потолок считается НА ЧЕЛОВЕКА, а не на архив: в общем архиве иначе
+        # один участник исчерпывал бы лимит для всех остальных.
         active = self.execute(
-            "SELECT COUNT(*) AS count FROM monitors WHERE user_id=? AND active=1", (user_id,)
+            "SELECT COUNT(*) AS count FROM monitors "
+            "WHERE user_id=? AND active=1 AND created_by=?",
+            (user_id, str(created_by or "")),
         ).fetchone()
         if int((active["count"] if active else 0) or 0) >= self.MAX_ACTIVE_MONITORS:
             raise ValueError("Слишком много слежений; снимите лишние")
@@ -569,22 +575,51 @@ class RuntimeMixin(StorageShared):
                 (user_id,),
             ).fetchone()
             conn.execute(
-                """INSERT INTO monitors(id, user_id, query, chat_id, active,
+                """INSERT INTO monitors(id, user_id, created_by, query, chat_id, active,
                    last_seen_rowid, last_seen_at, last_checked_at, matches_reported, created_at)
-                   VALUES(?, ?, ?, ?, 1, ?, ?, NULL, 0, ?)""",
-                (monitor_id, user_id, clean, str(chat_id or ""), int(row["cursor"] or 0), now, now),
+                   VALUES(?, ?, ?, ?, ?, 1, ?, ?, NULL, 0, ?)""",
+                (
+                    monitor_id,
+                    user_id,
+                    str(created_by or ""),
+                    clean,
+                    str(chat_id or ""),
+                    int(row["cursor"] or 0),
+                    now,
+                    now,
+                ),
             )
-        return self.get_monitor(monitor_id, user_id) or {}
+        return self.get_monitor(monitor_id, user_id, created_by=created_by) or {}
 
-    def get_monitor(self, monitor_id: str, user_id: str) -> dict[str, Any] | None:
-        row = self.execute(
-            "SELECT * FROM monitors WHERE id=? AND user_id=?", (monitor_id, user_id)
-        ).fetchone()
+    def get_monitor(
+        self, monitor_id: str, user_id: str, *, created_by: str | None = None
+    ) -> dict[str, Any] | None:
+        query = "SELECT * FROM monitors WHERE id=? AND user_id=?"
+        params: list[Any] = [monitor_id, user_id]
+        if created_by is not None:
+            query += " AND created_by=?"
+            params.append(str(created_by or ""))
+        row = self.execute(query, tuple(params)).fetchone()
         return dict(row) if row else None
 
-    def list_monitors(self, user_id: str, *, active_only: bool = True) -> list[dict[str, Any]]:
+    def list_monitors(
+        self, user_id: str, *, active_only: bool = True, created_by: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Слежения арендатора, а при `created_by` — только ЭТОГО человека.
+
+        В общем архиве `user_id` один на всех, и без второй границы «свои
+        слежения» означало «все слежения»: участник читал чужие темы, а текст
+        запроса — это личный интерес («увольнение такого-то»). Найдено ревью
+        2026-08-04.
+
+        `None` означает «без разбора автора» и оставлен для владельца и фонового
+        обхода: первому надзор положен, второму нужны все.
+        """
         query = "SELECT * FROM monitors WHERE user_id=?"
         params: list[Any] = [user_id]
+        if created_by is not None:
+            query += " AND created_by=?"
+            params.append(str(created_by or ""))
         if active_only:
             query += " AND active=1"
         rows = self.execute(query + " ORDER BY created_at DESC LIMIT 200", tuple(params)).fetchall()
@@ -603,12 +638,20 @@ class RuntimeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def stop_monitor(self, monitor_id: str, user_id: str) -> bool:
+    def stop_monitor(self, monitor_id: str, user_id: str, *, created_by: str | None = None) -> bool:
+        """Снять слежение. При `created_by` — только своё.
+
+        Без этой границы участник снимал чужое слежение по идентификатору из
+        общего списка, и владелец переставал получать то, за чем следил, без
+        всякого следа.
+        """
+        query = "UPDATE monitors SET active=0 WHERE id=? AND user_id=? AND active=1"
+        params: list[Any] = [monitor_id, user_id]
+        if created_by is not None:
+            query += " AND created_by=?"
+            params.append(str(created_by or ""))
         with self.transaction() as conn:
-            cursor = conn.execute(
-                "UPDATE monitors SET active=0 WHERE id=? AND user_id=? AND active=1",
-                (monitor_id, user_id),
-            )
+            cursor = conn.execute(query, tuple(params))
         return cursor.rowcount == 1
 
     def latest_monitor_notification(self, user_id: str, monitor_id: str) -> dict[str, Any] | None:

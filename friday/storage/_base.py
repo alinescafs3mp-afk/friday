@@ -690,6 +690,11 @@ CREATE TABLE IF NOT EXISTS outbound_notifications (
 CREATE TABLE IF NOT EXISTS monitors (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
+    -- ЧЕЛОВЕК, а не арендатор. В общем архиве `user_id` один на всех, и без этого
+    -- столбца «свои слежения» означали «все слежения»: участник читал в /watching
+    -- чужие темы (текст запроса — личный интерес) и мог их снять.
+    -- Найдено ревью 2026-08-04.
+    created_by TEXT NOT NULL DEFAULT '',
     query TEXT NOT NULL,
     chat_id TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
