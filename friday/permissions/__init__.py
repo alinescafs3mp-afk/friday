@@ -264,6 +264,12 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
     ),
 )
 
+#: Имена, принадлежащие ядру. Считается ОДИН раз из самого списка, а не пишется
+#: вторым списком рядом: два перечня одного и того же расходятся молча, и здесь
+#: расхождение означало бы дыру, а не опечатку — новое системное право оказалось бы
+#: перекрываемым снаружи ровно потому, что его забыли внести во второй список.
+_CORE_CAPABILITY_IDS: frozenset[str] = frozenset(item.security_id for item in CORE_CAPABILITIES)
+
 
 @dataclass(frozen=True)
 class AuthorizationDecision:
@@ -298,7 +304,50 @@ class AuthorizationService:
             self.register_capability(capability)
 
     def register_capability(self, capability: CapabilityDefinition) -> None:
+        """Объявить способность. Занятое имя не переопределяется — падаем на старте.
+
+        Раньше здесь была обычная запись в словарь по ключу, и этого хватало, чтобы
+        орган ОДНОЙ строкой переписал системное право. Воспроизведено на стенде:
+        `CapabilityDefinition("kg.merge", "мой безобидный обход", "kg", 0, ("guest",
+        "user"))` — и `_builtin_grants("guest")` начинает возвращать `kg.merge`, то
+        есть гость получает слияние сущностей. Ни исключения, ни строки в журнале:
+        со стороны это выглядит как «так и было задумано».
+
+        Дыра тут не в органах — свои пять ведут себя честно, — а в том, что честность
+        держалась на соглашении. Органы собираются `build_registry` из каталога, и
+        один чужой файл рядом с ними не отличим от своего.
+
+        Вторая половина той же дыры — умолчание `source="core"`: объявитель, забывший
+        поле, представляется ядром, и по журналу потом не отличить системное право от
+        принесённого. Поэтому имя из ядрового пространства (`CORE_CAPABILITIES`) не
+        может быть объявлено с чужим `source`, а чужое имя — с `source="core"`.
+
+        Повтор ОДНОГО И ТОГО ЖЕ определения проходит: сборка приложения не одна
+        (сервер, CLI, тесты), и требовать от них ровно одного вызова — значит менять
+        безопасность на хрупкость. Отличается хоть одно поле — это уже подмена.
+        """
         capability.validate()
+        existing = self._capabilities.get(capability.security_id)
+        if existing is not None and existing != capability:
+            raise ValueError(
+                f"{capability.security_id}: способность с таким именем уже объявлена "
+                f"({existing.source}, пресеты {list(existing.default_presets)}), а новое "
+                f"объявление другое ({capability.source}, пресеты "
+                f"{list(capability.default_presets)}). Переопределять чужие права нельзя: "
+                "выберите своё имя."
+            )
+        core_name = capability.security_id in _CORE_CAPABILITY_IDS
+        if core_name and capability.source != "core":
+            raise ValueError(
+                f"{capability.security_id}: это системная способность, её нельзя объявить "
+                f"из {capability.source!r}."
+            )
+        if not core_name and capability.source == "core":
+            raise ValueError(
+                f"{capability.security_id}: объявлена как системная (`source=\"core\"`), но "
+                "в ядровом списке её нет. Укажите, откуда она пришла — иначе в журнале "
+                "принесённое право не отличить от системного."
+            )
         self._capabilities[capability.security_id] = capability
 
     def get_capability(self, security_id: str) -> CapabilityDefinition | None:

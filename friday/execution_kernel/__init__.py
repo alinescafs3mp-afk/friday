@@ -543,6 +543,10 @@ HIGH_RISK_TOOLS: dict[str, Callable[[dict[str, Any]], bool]] = {
     "entity_merge_decide": _merge_needs_a_person,
     "conflict_decide": _conflict_needs_a_person,
     "code_run": lambda _arguments: True,
+    # Компенсация закрывает шаг, у которого исход НЕИЗВЕСТЕН, и решить это может
+    # только человек: он один способен посмотреть на мир и сказать, случился ли
+    # побочный эффект. Аргументы тут ни при чём — опасен сам вопрос.
+    "mission_compensation": lambda _arguments: True,
 }
 
 
@@ -1730,6 +1734,70 @@ class ExecutionKernel:
             # человеку о создании новой — то есть дедупликация починит дубли и
             # заведёт на их месте ложное подтверждение.
             "existing": bool(mission.get("existing")),
+        }
+
+    async def _mission_compensation(
+        self,
+        *,
+        actor: ActorContext,
+        mission_id: str,
+        task_id: str,
+        compensation: str = "",
+        checkpoint: str = "",  # noqa: ARG002 — едет в заявке для человека, не для нас
+    ) -> dict[str, Any]:
+        """Закрыть шаг, с побочным эффектом которого человек разобрался сам.
+
+        Заявка на компенсацию создавалась с `tool="mission_compensation"`, а такого
+        инструмента в ядре не было. Человек, нажимавший «Подтвердить», получал
+        «Инструмент недоступен» — отказ, который ничего не объясняет и ничего не
+        меняет: заявка оставалась одобренной и неиспользованной, шаг миссии — вечно
+        `uncertain`, а статус `compensated` не проставлял никто и никогда (объявлен в
+        модели, разрешён схемой, ноль записей в коде).
+
+        Откат СИСТЕМА не исполняет и здесь: текст компенсации написан для человека и
+        в общем случае невыполним автоматически, а автоматический откат того, чего,
+        может быть, и не было, — такой же необратимый шаг, как повтор. Поэтому
+        подтверждение означает ровно одно: «я посмотрел и разобрался». Ровно это и
+        сказано человеку в тексте заявки — иначе он нажимал бы кнопку, ожидая, что
+        откатит Пятница.
+
+        Возражение «тогда это вообще не инструмент, а отметка» справедливо по форме и
+        неверно по сути: заявка — единственный канал, которым система спрашивает
+        человека, и у ответа должен быть исполнитель. Без него цикл не замыкается.
+        """
+        storage, _, _, _ = self._require_services()
+        mission = await run_blocking(
+            storage.get_mission,
+            mission_id,
+            actor.user_id,
+            # Владелец разбирает любую миссию, остальные — только свои. Чужая
+            # отвечает тем же, чем несуществующая.
+            created_by=None if actor.is_owner else f"agent:{actor.own_id}",
+        )
+        if not mission:
+            raise ValueError("Миссия не найдена")
+        tasks = await run_blocking(storage.get_mission_tasks, mission_id, actor.user_id)
+        task = next((item for item in tasks if str(item.get("id")) == task_id), None)
+        if task is None:
+            raise ValueError("Шаг миссии не найден")
+        note = (compensation or str(task.get("compensation") or "")).strip()
+        updated = await run_blocking(
+            storage.update_mission_task_fields,
+            task_id,
+            actor.user_id,
+            status=TaskStatus.COMPENSATED.value,
+            error="",
+            result=("человек разобрался с побочным эффектом: " + (note or "без описания"))[:2000],
+            completed_at=utc_now(),
+        )
+        if not updated:
+            raise ValueError("Шаг миссии не обновился")
+        return {
+            "mission_id": mission_id,
+            "task_id": task_id,
+            "status": TaskStatus.COMPENSATED.value,
+            # Отвечаем словами, а не «ok»: этот текст читает человек в подтверждении.
+            "message": "Шаг закрыт как разобранный. Пятница откат не выполняла.",
         }
 
     def _zone(self) -> Any:
@@ -3655,6 +3723,21 @@ class ExecutionKernel:
             {"goal": {"type": "string"}},
             ["goal"],
             risk="mutate",
+        )
+        spec(
+            "mission_compensation",
+            "Закрыть оборвавшийся шаг миссии после того, как человек разобрался с "
+            "побочным эффектом сам. Не вызывается моделью напрямую: сюда приходят "
+            "только по подтверждённой заявке.",
+            "missions.control",
+            {
+                "mission_id": {"type": "string"},
+                "task_id": {"type": "string"},
+                "compensation": {"type": "string"},
+                "checkpoint": {"type": "string"},
+            },
+            ["mission_id", "task_id"],
+            risk="high",
         )
 
 
