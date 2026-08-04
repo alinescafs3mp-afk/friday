@@ -529,15 +529,39 @@ actions.runLifecycle=async()=>navigate('quality');
 // значило бы выдавать наблюдение за утверждение.
 const GRAPH_COLORS={person:'#e06c9f',organization:'#f4a261',project:'#7bc86c',collection:'#7bc86c',
   location:'#61a5c2',event:'#c98bdb',concept:'#8ecae6',other:'#9aa5b1'};
+// Подтверждённые связи РАЗНЫЕ по смыслу, и одинаковый синий их прятал: «служит в
+// части» и «супруга» рисовались одной линией. Цвет несёт вид отношения, подпись
+// появляется по наведению.
+const RELATION_COLORS={family_of:'#e06c9f',member_of:'#4c9aff',manages:'#f4a261',part_of:'#7bc86c',
+  located_at:'#61a5c2',works_on:'#c98bdb',related_to:'#9aa5b1'};
+const RELATION_LABELS={family_of:'родня',member_of:'состоит в',manages:'руководит',part_of:'входит в',
+  located_at:'находится в',works_on:'занят',related_to:'связано',occurred_at:'произошло',
+  created_by:'создано',mentions:'упоминает',references:'ссылается',derived_from:'выведено из',
+  same_as:'то же, что',uses:'использует',depends_on:'зависит от'};
 const GRAPH_W=1200, GRAPH_H=700;
+const GRAPH_TYPES=['person','organization','location','project','collection','event','concept','document','other'];
+// Раскладка живёт в браузере, а не в базе: это свойство ЭТОГО экрана, а не знание
+// об архиве. Ключ включает пользователя и режим — иначе локальный вид одного узла
+// перетаскивал бы узлы глобального.
+function graphLayoutKey(){return `friday:graph:${selectedUser()}:${state.graphView||'global'}:${state.graphFocus||''}`}
+function savedLayout(){try{return JSON.parse(localStorage.getItem(graphLayoutKey())||'{}')||{}}catch(e){return {}}}
+function saveLayout(nodes){try{const map={};nodes.forEach(n=>{map[n.id]=[Math.round(n.x),Math.round(n.y)]});
+  localStorage.setItem(graphLayoutKey(),JSON.stringify(map))}catch(e){}}
 
 function graphLayout(nodes,edges){
   // Стартовое положение по кругу, а не случайное: случайный старт даёт разную
   // картинку при каждом открытии, и человек не узнаёт свой же граф.
   const n=nodes.length;
+  const saved=savedLayout();
   nodes.forEach((node,i)=>{const a=2*Math.PI*i/Math.max(1,n);
     node.x=GRAPH_W/2+Math.cos(a)*Math.min(GRAPH_W,GRAPH_H)*0.36;
     node.y=GRAPH_H/2+Math.sin(a)*Math.min(GRAPH_W,GRAPH_H)*0.36;node.vx=0;node.vy=0});
+  // Расставленное руками важнее расчёта: узел, который человек передвинул,
+  // остаётся на месте и не участвует в укладке — иначе следующее открытие
+  // экрана отменяло бы его работу.
+  let pinned=0;
+  nodes.forEach(node=>{const at=saved[node.id];if(at&&at.length===2){node.x=at[0];node.y=at[1];node.fixed=true;pinned++}});
+  if(pinned===nodes.length&&pinned)return nodes;
   const byId=new Map(nodes.map(x=>[x.id,x]));
   const links=edges.map(e=>({s:byId.get(e.source),t:byId.get(e.target),w:Math.min(4,e.weight||1)})).filter(l=>l.s&&l.t);
   for(let step=0;step<260;step++){
@@ -550,41 +574,121 @@ function graphLayout(nodes,edges){
     for(const l of links){let dx=l.t.x-l.s.x,dy=l.t.y-l.s.y;
       const d=Math.sqrt(dx*dx+dy*dy)||0.01;const pull=(d-110)*0.007*l.w;dx/=d;dy/=d;
       l.s.vx+=dx*pull;l.s.vy+=dy*pull;l.t.vx-=dx*pull;l.t.vy-=dy*pull}
-    for(const node of nodes){node.vx+=(GRAPH_W/2-node.x)*0.0015;node.vy+=(GRAPH_H/2-node.y)*0.0015;
+    for(const node of nodes){if(node.fixed){node.vx=0;node.vy=0;continue}
+      node.vx+=(GRAPH_W/2-node.x)*0.0015;node.vy+=(GRAPH_H/2-node.y)*0.0015;
       node.x+=node.vx*cool;node.y+=node.vy*cool;node.vx*=0.82;node.vy*=0.82;
       node.x=Math.max(40,Math.min(GRAPH_W-40,node.x));node.y=Math.max(30,Math.min(GRAPH_H-30,node.y))}}
   return nodes;
 }
 
-function graphMarkup(data){
+// Фильтры и режим — состояние ЭКРАНА, а не запроса: их читает и загрузка данных,
+// и отрисовка, поэтому умолчания заданы в одном месте.
+function graphState(){
+  if(!state.graphFilters)state.graphFilters={types:[],relations:[],onlyRelations:false,minWeight:1,search:'',hideIsolates:false};
+  if(!state.graphView)state.graphView='global';
+  if(!state.graphDepth)state.graphDepth=2;
+  return state.graphFilters;
+}
+
+function graphControls(data){
+  const f=graphState();
+  const local=state.graphView==='local';
+  const chip=(on,label,action)=>`<button class="btn small${on?' primary':''}" ${action}>${label}</button>`;
+  const types=GRAPH_TYPES.map(t=>chip(f.types.includes(t),esc(t),call('toggleGraphType',t))).join(' ');
+  const kinds=Object.keys(RELATION_COLORS).map(t=>chip(f.relations.includes(t),esc(RELATION_LABELS[t]||t),call('toggleGraphRelation',t))).join(' ');
+  const focus=local&&state.graphFocusName?`<span class="badge">фокус: ${esc(state.graphFocusName)}</span>`:'';
+  const depths=local?[1,2,3,4].map(d=>chip(state.graphDepth===d,String(d),call('setGraphDepth',d))).join(' '):'';
+  return `<div class="toolbar">
+      ${chip(!local,'Весь граф',call('setGraphView','global'))}
+      ${chip(local,'Окрестность узла',call('setGraphView','local'))}
+      ${focus}
+      ${local?`<span class="muted">глубина</span>${depths}`:''}
+      <span class="grow"></span>
+      <input id="graphSearch" class="field graph-search" placeholder="Найти сущность" value="${esc(f.search)}">
+      <button class="btn small" ${call('applyGraphSearch')}>Найти</button>
+      <button class="btn small" ${call('resetGraphLayout')}>Сбросить раскладку</button>
+    </div>
+    <div class="toolbar"><span class="muted">типы сущностей:</span>${types}
+      ${f.types.length?`<button class="btn small" ${call('clearGraphTypes')}>все</button>`:''}</div>
+    <div class="toolbar"><span class="muted">виды связей:</span>${kinds}
+      ${f.relations.length?`<button class="btn small" ${call('clearGraphRelations')}>все</button>`:''}</div>
+    <div class="toolbar">
+      ${chip(f.onlyRelations,'только подтверждённые связи',call('toggleGraphOnlyRelations'))}
+      ${chip(f.hideIsolates,'скрыть одиночек',call('toggleGraphIsolates'))}
+      <span class="muted">общих документов не меньше</span>
+      ${[1,2,3,5,10].map(w=>chip(f.minWeight===w,String(w),call('setGraphMinWeight',w))).join(' ')}
+      <span class="grow"></span>
+      <span class="muted">узлов: ${Number(data.shown||0)} из ${Number(data.total||0)}</span>
+    </div>`;
+}
+
+// Локальный вид отдаёт рёбра строками таблицы связей (`source_entity_id`), а
+// обзорный — уже приведёнными (`source`). Приводим ОДИН раз здесь, иначе каждая
+// последующая правка рисования будет чинить два формата.
+function normalizeGraph(data){
+  const edges=(data.edges||[]).map(e=>({
+    source:e.source||e.source_entity_id, target:e.target||e.target_entity_id,
+    relation_type:e.relation_type, weight:e.weight,
+    kind:e.kind||(e.relation_type?'relation':'cooccurrence')}))
+    .filter(e=>e.source&&e.target);
+  return {nodes:data.nodes||[], edges, shown:data.shown!==undefined?data.shown:(data.nodes||[]).length,
+    total:data.total!==undefined?data.total:(data.nodes||[]).length};
+}
+
+function graphMarkup(raw){
+  const data=normalizeGraph(raw);
+  const f=graphState();
   const nodes=(data.nodes||[]).map(x=>({...x}));
-  if(!nodes.length)return empty('В графе пока нет подтверждённых связей с документами');
-  const edges=(data.edges||[]).filter(e=>e.source&&e.target);
+  if(!nodes.length)return empty(f.search||f.types.length||f.relations.length
+    ? 'Под эти условия не подходит ни одна сущность — ослабьте фильтры'
+    : 'В графе пока нет подтверждённых связей с документами');
+  const edges=data.edges;
   graphLayout(nodes,edges);
   state.graphNodes=nodes;state.graphEdges=edges;
   const byId=new Map(nodes.map(x=>[x.id,x]));
   const maxCount=Math.max(1,...nodes.map(x=>x.knowledge_count||0));
+  const needle=(f.search||'').trim().toLowerCase();
   const lines=edges.map((e,i)=>{const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
-    const rel=e.kind==='relation';const w=rel?2.2:Math.min(3,0.6+(e.weight||1)*0.35);
+    const rel=e.kind==='relation';
+    const kind=String(e.relation_type||'');
+    // Толщина подтверждённой связи следует её весу, а не единице: у слабого
+    // предположения и у прямого объявления в документе разный вес, и рисовать
+    // их одинаково значит терять то, что уже измерено.
+    const w=rel?(1.4+1.8*Math.min(1,Number(e.weight)||1)):Math.min(3,0.6+(e.weight||1)*0.35);
+    const color=rel?(RELATION_COLORS[kind]||'#4c9aff'):'#5a6472';
+    const label=rel?(RELATION_LABELS[kind]||kind||'подтверждённая связь'):('общих документов: '+e.weight);
     return `<line data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"`
       +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
-      +` stroke="${rel?'#4c9aff':'#5a6472'}" stroke-width="${w.toFixed(1)}"${rel?'':' stroke-dasharray="3 4"'}`
-      +` opacity="${rel?0.9:0.45}"><title>${esc(rel?String(e.relation_type||'подтверждённая связь'):'общих документов: '+e.weight)}</title></line>`}).join('');
+      +` stroke="${color}" stroke-width="${w.toFixed(1)}"${rel?'':' stroke-dasharray="3 4"'}`
+      +` opacity="${rel?0.92:0.4}"><title>${esc(s.name)} → ${esc(t.name)}: ${esc(label)}</title></line>`}).join('');
   const circles=nodes.map(node=>{const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
     const kind=GRAPH_COLORS[node.entity_type]?node.entity_type:'other';
+    // Найденное подсвечивается кольцом, а не заменой цвета: цвет уже занят типом
+    // сущности, и подменять его значило бы соврать про тип ради поиска.
+    const hit=needle&&String(node.name||'').toLowerCase().includes(needle);
+    const focused=state.graphView==='local'&&node.id===state.graphFocus;
     return `<g class="gnode" data-node="${esc(node.id)}">`
+      +(hit||focused?`<circle cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(r+5).toFixed(1)}" fill="none" stroke="${focused?'#7bc86c':'#ffd166'}" stroke-width="2.5" opacity="0.9"/>`:'')
       +`<circle cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${r.toFixed(1)}" class="gfill-${kind}" stroke="#0a0f18" stroke-width="1.5">`
       +`<title>${esc(node.name)} — ${esc(node.entity_type)}, документов: ${node.knowledge_count}</title></circle>`
       +`<text x="${node.x.toFixed(1)}" y="${(node.y-r-6).toFixed(1)}" text-anchor="middle" font-size="12" fill="#c9d1d9">${esc(short(node.name,24))}</text></g>`}).join('');
   const legend=Object.entries({person:'человек',organization:'организация',project:'проект',
     location:'место',event:'событие',concept:'понятие',other:'прочее'})
     .map(([k,label])=>`<span class="badge gt-${k}">${label}</span>`).join(' ');
+  // Легенда ВИДОВ СВЯЗИ показывает только встреченные: перечислять все пятнадцать
+  // под картинкой с двумя — обещать связи, которых в архиве нет.
+  const present=[...new Set(edges.filter(e=>e.kind==='relation').map(e=>String(e.relation_type||'')))].filter(Boolean);
+  const relLegend=present.length
+    ? `<div class="graph-legend">${present.map(k=>`<span class="badge rl-${esc(RELATION_COLORS[k]?k:'related_to')}">${esc(RELATION_LABELS[k]||k)}</span>`).join(' ')}<span class="muted">цвет линии — вид связи</span></div>`
+    : '';
   // Обрез называется вслух: картинка, молча показывающая часть графа, хуже отсутствующей.
   const capped=(data.total||0)>(data.shown||0)
     ? `<div class="notice">Показано ${data.shown} сущностей из ${data.total} — самые связанные с документами. Остальные не поместились, а не отсутствуют.</div>`:'';
-  return `${capped}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>
+  const found=needle?nodes.filter(n=>String(n.name||'').toLowerCase().includes(needle)).length:0;
+  const searchNote=needle?`<div class="notice">Найдено на картине: ${found}. Подсвечены жёлтым.</div>`:'';
+  return `${capped}${searchNote}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>${relLegend}
     <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}">${lines}${circles}</svg>
-    <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — переставить, клик — подробности</div></div>`;
+    <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — переставить (запомнится), клик по узлу — карточка и переход к его окрестности</div></div>`;
 }
 
 // Взаимодействие вешается ПОСЛЕ отрисовки: обработчики живут на контейнере, а не на
@@ -623,6 +727,7 @@ function bindGraph(){
     const wasNode=drag&&drag.node;canvas.classList.remove('dragging');drag=null;
     // Клик и перетаскивание различаются по факту движения — иначе любое смещение
     // узла открывало бы карточку, и переставить его было бы нельзя.
+    if(wasNode&&moved)saveLayout(state.graphNodes||[]);
     if(wasNode&&!moved)actions.inspectEntityNode(wasNode)});
   // Наведение подсвечивает соседей: на плотном графе это единственный способ
   // разглядеть, с чем связан конкретный узел.
@@ -647,12 +752,48 @@ actions.inspectEntityNode=async id=>{
     openModal(`Сущность: ${node.name||id}`,
       `<div class="kv"><div>Тип</div><div>${esc(node.entity_type||'—')}</div><div>Документов</div><div>${esc(String(node.knowledge_count??'—'))}</div><div>Идентификатор</div><div class="mono">${esc(id)}</div></div>
        <h3>Соседи по подтверждённым связям (${near.length})</h3>
-       ${near.length?table(['Имя','Тип'],near.map(n=>`<tr><td>${esc(n.name)}</td><td>${esc(n.entity_type)}</td></tr>`)):empty('Подтверждённых связей сущность-сущность нет — они появляются после вашего подтверждения')}`);
+       ${near.length?table(['Имя','Тип'],near.map(n=>`<tr><td>${esc(n.name)}</td><td>${esc(n.entity_type)}</td></tr>`)):empty('Подтверждённых связей сущность-сущность нет — они появляются после вашего подтверждения')}`,
+      // Переход к окрестности — отсюда, а не двойным кликом по узлу: первый клик
+      // уже открывает эту самую карточку, и она перехватывает второй. Проверено
+      // в браузере — двойной клик не срабатывал вовсе.
+      `<button class="btn primary" ${call('focusGraphNode',id,node.name||'')}>Показать окрестность</button><button class="btn" ${call('closeModal')}>Закрыть</button>`);
   }catch(e){toast(e.message,true)}
 };
 
+// Какие данные показывать, решает режим. Локальный вид спрашивает ОКРЕСТНОСТЬ
+// узла с заданной глубиной, обзорный — картину целиком с фильтрами; фильтры
+// уходят в запрос, а не применяются к готовой сотне узлов, иначе «людей: 3»
+// означало бы «трое среди ста самых связанных», а не трое в архиве.
+async function graphData(uid){
+  const f=graphState();
+  if(state.graphView==='local'&&state.graphFocus)
+    return api(`/api/admin/graph/${q(state.graphFocus)}?user_id=${q(uid)}&depth=${Number(state.graphDepth)||2}`);
+  const params=[`user_id=${q(uid)}`,'limit=150'];
+  if(f.types.length)params.push(`entity_types=${q(f.types.join(','))}`);
+  if(f.relations.length)params.push(`relation_types=${q(f.relations.join(','))}`);
+  if(f.onlyRelations)params.push('only_relations=true');
+  if(f.hideIsolates)params.push('hide_isolates=true');
+  if(f.minWeight>1)params.push(`min_weight=${Number(f.minWeight)}`);
+  if(f.search)params.push(`search=${q(f.search)}`);
+  return api(`/api/admin/graph?${params.join('&')}`);
+}
+
+actions.setGraphView=view=>{state.graphView=view;if(view==='global'){state.graphFocus='';state.graphFocusName=''}refresh()};
+actions.setGraphDepth=depth=>{state.graphDepth=Number(depth)||2;refresh()};
+actions.toggleGraphType=type=>{const f=graphState();f.types=f.types.includes(type)?f.types.filter(t=>t!==type):[...f.types,type];refresh()};
+actions.clearGraphTypes=()=>{graphState().types=[];refresh()};
+actions.toggleGraphRelation=kind=>{const f=graphState();f.relations=f.relations.includes(kind)?f.relations.filter(t=>t!==kind):[...f.relations,kind];refresh()};
+actions.clearGraphRelations=()=>{graphState().relations=[];refresh()};
+actions.toggleGraphOnlyRelations=()=>{const f=graphState();f.onlyRelations=!f.onlyRelations;refresh()};
+actions.toggleGraphIsolates=()=>{const f=graphState();f.hideIsolates=!f.hideIsolates;refresh()};
+actions.setGraphMinWeight=weight=>{graphState().minWeight=Number(weight)||1;refresh()};
+actions.applyGraphSearch=()=>{const el=document.getElementById('graphSearch');graphState().search=el?el.value.trim():'';refresh()};
+actions.focusGraphNode=(id,name)=>{closeModal();state.graphView='local';state.graphFocus=id;state.graphFocusName=name||'';refresh()};
+actions.resetGraphLayout=()=>{try{localStorage.removeItem(graphLayoutKey())}catch(e){}toast('Раскладка сброшена');refresh()};
+
 renderers.graph=async gen=>{
   const uid=selectedUser();
+  graphState();
   const [entities,resolutions,suggestionQueue,relations,conflicts,containers,overview]=await Promise.all([
     api(`/api/admin/entities?user_id=${q(uid)}&limit=${PAGE}&offset=${state.entitiesOffset}`),
     api(`/api/admin/resolutions?user_id=${q(uid)}&status=suggested&limit=${PAGE}&offset=${state.resolutionsOffset}`),
@@ -664,7 +805,7 @@ renderers.graph=async gen=>{
     // технически по-прежнему можно.
     api(`/api/admin/conflicts?user_id=${q(uid)}&status=${q(state.conflictStatus||'suggested')}&limit=${PAGE}&offset=${state.conflictsOffset}`),
     api(`/api/admin/containers?user_id=${q(uid)}`),
-    api(`/api/admin/graph?user_id=${q(uid)}&limit=150`).catch(()=>({nodes:[],edges:[],shown:0,total:0}))
+    graphData(uid).catch(()=>({nodes:[],edges:[],shown:0,total:0}))
   ]);
   if(gen!==renderGen)return;
   state.entities=entities.items||[];state.resolutions=resolutions.items||[];state.relationCandidates=relations.items||[];state.conflicts=conflicts.items||[];state.containers=containers.items||[];
@@ -678,7 +819,7 @@ renderers.graph=async gen=>{
   const containerRows=[];
   const addLevel=(parentKey,depth)=>{(byParent[parentKey]||[]).forEach(c=>{containerRows.push(`<div class="toolbar">${'&nbsp;&nbsp;&nbsp;'.repeat(depth)}<span class="badge">${esc(kindLabel[c.entity_type]||c.entity_type)}</span><b>${esc(c.name)}</b><span class="muted">знаний: ${Number(c.knowledge_count||0)}</span><span class="grow"></span><button class="btn small" ${call('showContainerKnowledge',c.id,c.name)}>Знания</button> <button class="btn small" ${call('showGraph',c.id)}>Связи</button></div>`);addLevel(c.id,depth+1)})};
   addLevel('',0);
-  setApp(gen,`<section class="card"><div class="toolbar"><h2 class="grow">Картина графа</h2></div>${graphMarkup(overview)}</section><div class="notice">Граф развивается через предложения: Friday не объединяет сущности, не добавляет спорные связи и не объявляет факты устаревшими без явного решения. Массовые действия возвращают число применённых и пропущенных элементов, поэтому частичный сбой не теряется.</div><section class="card"><div class="toolbar"><h2 class="grow">Проекты и коллекции</h2><button class="btn primary" ${call('createContainerDialog')}>Новый контейнер</button><span class="badge">${containerRows.length}</span></div>${containerRows.join('')||empty('Контейнеров пока нет: создайте проект или коллекцию и привязывайте к ним знания через «Добавить связь».')}</section><section class="card"><div class="toolbar"><h2 class="grow">Документы с неразобранными сущностями</h2><button class="btn" ${call('loadSuggestionGroups')}>Группы</button><span class="badge">${Number(suggestionQueue.total||0)}</span></div>${(suggestionQueue.items||[]).length?`<div class="notice">Оценка сверху: столько предложений извлекатель нашёл при приёме, за вычетом уже решённых связей. Откройте документ и подтвердите то, что действительно является сущностью — граф растёт только так.</div>`+table(['Документ','Осталось',''],(suggestionQueue.items||[]).map(it=>`<tr><td><b>${esc(it.title)}</b><div class="mono">${esc(it.id)}</div></td><td><b>${Number(it.pending||0)}</b></td><td><button class="btn small primary" ${call('inspectKnowledge',it.id)}>Разобрать</button></td></tr>`)):empty('Неразобранных предложений нет')}</section><section class="card"><div class="toolbar"><h2 class="grow">Предлагаемые связи</h2>${['suggested','accepted','rejected'].map(st=>`<button class="btn small${(state.relationStatus||'suggested')===st?' primary':''}" ${call('filterRelationStatus',st)}>${({suggested:'предложены',accepted:'приняты',rejected:'отклонены'})[st]}</button>`).join(' ')}<button class="btn" ${call('selectAllGraph','relation',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','relation',false)}>Снять</button><button class="btn good" ${call('bulkReviewRelations','accepted')}>Принять выбранные</button><button class="btn danger" ${call('bulkReviewRelations','rejected')}>Отклонить выбранные</button><span class="badge">${lrows.length}</span></div>${lrows.length?table(['','Источник','Связь','Цель','Решение'],lrows):empty('Предложений связей нет')}${pager('relationsPage',state.relationsOffset,state.relationCandidates.length,relations.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Противоречия и дубликаты</h2>${['suggested','confirmed','dismissed','resolved'].map(st=>`<button class="btn small${(state.conflictStatus||'suggested')===st?' primary':''}" ${call('filterConflictStatus',st)}>${({suggested:'предложены',confirmed:'подтверждены',dismissed:'отклонены',resolved:'разрешены'})[st]}</button>`).join(' ')}<button class="btn" ${call('detectDuplicates2')}>Найти дубли</button><button class="btn" ${call('selectAllGraph','conflict',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','conflict',false)}>Снять</button><button class="btn good" ${call('bulkReviewConflicts','confirmed')}>Подтвердить выбранные</button><button class="btn danger" ${call('bulkReviewConflicts','dismissed')}>Отклонить выбранные</button><span class="badge">${crows.length}</span></div>${crows.length?table(['','Утверждение A','Тип','Утверждение B','Решение'],crows):empty('Потенциальных противоречий нет')}${pager('conflictsPage',state.conflictsOffset,state.conflicts.length,conflicts.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Entity Resolution</h2><button class="btn primary" ${call('detectDuplicates')}>Пересчитать кандидатов</button><span class="badge">${Number(resolutions.total||0).toLocaleString('ru')}</span></div>${rrows.length?table(['Сущность A','Сущность B','Сигналы','Решение'],rrows):empty('Нерешённых предложений нет')}${pager('resolutionsPage',state.resolutionsOffset,state.resolutions.length,resolutions.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Сущности</h2><button class="btn primary" ${call('createEntityDialog')}>Новая сущность</button><span class="badge">${erows.length}</span></div>${erows.length?table(['Имя','Тип','Псевдонимы','Описание',''],erows):empty('Сущностей пока нет')}${pager('entitiesPage',state.entitiesOffset,state.entities.length,entities.total)}</section>`);
+  setApp(gen,`<section class="card"><div class="toolbar"><h2 class="grow">Картина графа</h2></div>${graphControls(normalizeGraph(overview))}${graphMarkup(overview)}</section><div class="notice">Граф развивается через предложения: Friday не объединяет сущности, не добавляет спорные связи и не объявляет факты устаревшими без явного решения. Массовые действия возвращают число применённых и пропущенных элементов, поэтому частичный сбой не теряется.</div><section class="card"><div class="toolbar"><h2 class="grow">Проекты и коллекции</h2><button class="btn primary" ${call('createContainerDialog')}>Новый контейнер</button><span class="badge">${containerRows.length}</span></div>${containerRows.join('')||empty('Контейнеров пока нет: создайте проект или коллекцию и привязывайте к ним знания через «Добавить связь».')}</section><section class="card"><div class="toolbar"><h2 class="grow">Документы с неразобранными сущностями</h2><button class="btn" ${call('loadSuggestionGroups')}>Группы</button><span class="badge">${Number(suggestionQueue.total||0)}</span></div>${(suggestionQueue.items||[]).length?`<div class="notice">Оценка сверху: столько предложений извлекатель нашёл при приёме, за вычетом уже решённых связей. Откройте документ и подтвердите то, что действительно является сущностью — граф растёт только так.</div>`+table(['Документ','Осталось',''],(suggestionQueue.items||[]).map(it=>`<tr><td><b>${esc(it.title)}</b><div class="mono">${esc(it.id)}</div></td><td><b>${Number(it.pending||0)}</b></td><td><button class="btn small primary" ${call('inspectKnowledge',it.id)}>Разобрать</button></td></tr>`)):empty('Неразобранных предложений нет')}</section><section class="card"><div class="toolbar"><h2 class="grow">Предлагаемые связи</h2>${['suggested','accepted','rejected'].map(st=>`<button class="btn small${(state.relationStatus||'suggested')===st?' primary':''}" ${call('filterRelationStatus',st)}>${({suggested:'предложены',accepted:'приняты',rejected:'отклонены'})[st]}</button>`).join(' ')}<button class="btn" ${call('selectAllGraph','relation',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','relation',false)}>Снять</button><button class="btn good" ${call('bulkReviewRelations','accepted')}>Принять выбранные</button><button class="btn danger" ${call('bulkReviewRelations','rejected')}>Отклонить выбранные</button><span class="badge">${lrows.length}</span></div>${lrows.length?table(['','Источник','Связь','Цель','Решение'],lrows):empty('Предложений связей нет')}${pager('relationsPage',state.relationsOffset,state.relationCandidates.length,relations.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Противоречия и дубликаты</h2>${['suggested','confirmed','dismissed','resolved'].map(st=>`<button class="btn small${(state.conflictStatus||'suggested')===st?' primary':''}" ${call('filterConflictStatus',st)}>${({suggested:'предложены',confirmed:'подтверждены',dismissed:'отклонены',resolved:'разрешены'})[st]}</button>`).join(' ')}<button class="btn" ${call('detectDuplicates2')}>Найти дубли</button><button class="btn" ${call('selectAllGraph','conflict',true)}>Выбрать все</button><button class="btn" ${call('selectAllGraph','conflict',false)}>Снять</button><button class="btn good" ${call('bulkReviewConflicts','confirmed')}>Подтвердить выбранные</button><button class="btn danger" ${call('bulkReviewConflicts','dismissed')}>Отклонить выбранные</button><span class="badge">${crows.length}</span></div>${crows.length?table(['','Утверждение A','Тип','Утверждение B','Решение'],crows):empty('Потенциальных противоречий нет')}${pager('conflictsPage',state.conflictsOffset,state.conflicts.length,conflicts.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Entity Resolution</h2><button class="btn primary" ${call('detectDuplicates')}>Пересчитать кандидатов</button><span class="badge">${Number(resolutions.total||0).toLocaleString('ru')}</span></div>${rrows.length?table(['Сущность A','Сущность B','Сигналы','Решение'],rrows):empty('Нерешённых предложений нет')}${pager('resolutionsPage',state.resolutionsOffset,state.resolutions.length,resolutions.total)}</section><section class="card"><div class="toolbar"><h2 class="grow">Сущности</h2><button class="btn primary" ${call('createEntityDialog')}>Новая сущность</button><span class="badge">${erows.length}</span></div>${erows.length?table(['Имя','Тип','Псевдонимы','Описание',''],erows):empty('Сущностей пока нет')}${pager('entitiesPage',state.entitiesOffset,state.entities.length,entities.total)}</section>`);
   bindGraph();
 };
 // Пакетное подтверждение: 42 кандидата на документ делают поштучный разбор

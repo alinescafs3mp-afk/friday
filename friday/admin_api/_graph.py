@@ -118,18 +118,40 @@ async def delete_entity_admin(entity_id: str, request: Request, user_id: str) ->
 
 @router.get("/graph")
 async def graph_overview(
-    request: Request, user_id: str, limit: int = Query(120, ge=10, le=500)
+    request: Request,
+    user_id: str,
+    limit: int = Query(120, ge=10, le=500),
+    entity_types: str = "",
+    relation_types: str = "",
+    only_relations: bool = False,
+    min_weight: int = Query(1, ge=1, le=50),
+    search: str = "",
+    hide_isolates: bool = False,
 ) -> dict[str, Any]:
     """Связная картина графа целиком — то, что можно нарисовать.
 
     Off the event loop: на большом графе это соединение таблицы связей с самой
     собой, а соседний маршрут подграфа уже стоил пяти минут блокировки, когда
     считался синхронно.
+
+    Фильтры приходят строками через запятую и сужают ОТБОР узлов в запросе, а не
+    рисование: отобрав сто самых связанных сущностей и отсеяв их в браузере, вид
+    показал бы «людей — трое» там, где людей в архиве четыре тысячи.
     """
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.graph.read", user_id, scope="overview")
     return await asyncio.to_thread(
-        functools.partial(_services(request).storage.graph_overview, user_id, limit=limit)
+        functools.partial(
+            _services(request).storage.graph_overview,
+            user_id,
+            limit=limit,
+            entity_types=[item for item in entity_types.split(",") if item.strip()],
+            relation_types=[item for item in relation_types.split(",") if item.strip()],
+            only_relations=only_relations,
+            min_weight=min_weight,
+            search=search,
+            hide_isolates=hide_isolates,
+        )
     )
 
 

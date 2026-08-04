@@ -241,7 +241,18 @@ class GraphMixin(StorageShared):
             params.append(enum_value(entity_type))
         return where, params
 
-    def graph_overview(self, user_id: str, *, limit: int = 120) -> dict[str, Any]:
+    def graph_overview(
+        self,
+        user_id: str,
+        *,
+        limit: int = 120,
+        entity_types: Sequence[str] | None = None,
+        relation_types: Sequence[str] | None = None,
+        only_relations: bool = False,
+        min_weight: int = 1,
+        search: str = "",
+        hide_isolates: bool = False,
+    ) -> dict[str, Any]:
         """Связная картина графа целиком, а не окрестность одного узла.
 
         Рисовать по `relations` бессмысленно: на живой установке их ноль и всегда
@@ -258,18 +269,34 @@ class GraphMixin(StorageShared):
         Узлы отбираются по числу связанных документов и ограничены `limit`; сколько
         осталось за кадром, возвращается отдельно — картинка, молча показывающая
         часть графа, хуже отсутствующей.
+
+        Фильтры сужают ОТБОР УЗЛОВ, а не только рисование: обрезав картинку в
+        браузере, мы показали бы «сто самых связанных сущностей, из которых нужного
+        типа оказалось три», выдавая это за три сущности этого типа. `total` при
+        этом продолжает считать весь граф — это свойство архива, а не запроса.
         """
         bounded = max(1, min(int(limit), 500))
+        conditions = ["e.user_id = ?", "e.deleted_at IS NULL", "e.merged_into_id IS NULL"]
+        parameters: list[Any] = [user_id]
+        wanted_types = [str(item).strip() for item in (entity_types or []) if str(item).strip()]
+        if wanted_types:
+            conditions.append(f"e.entity_type IN ({','.join('?' * len(wanted_types))})")
+            parameters.extend(wanted_types)
+        needle = str(search or "").strip()
+        if needle:
+            conditions.append("e.name LIKE ? ESCAPE '\\'")
+            escaped = needle.replace("%", r"\%").replace("_", r"\_")
+            parameters.append(f"%{escaped}%")
         rows = self.execute(
-            """SELECT e.id, e.name, e.entity_type, COUNT(l.knowledge_object_id) AS knowledge_count
+            f"""SELECT e.id, e.name, e.entity_type, COUNT(l.knowledge_object_id) AS knowledge_count
                FROM entities e
                JOIN knowledge_entity_links l
                  ON l.entity_id = e.id AND l.user_id = e.user_id AND l.status = 'accepted'
-               WHERE e.user_id = ? AND e.deleted_at IS NULL AND e.merged_into_id IS NULL
+               WHERE {" AND ".join(conditions)}
                GROUP BY e.id
                ORDER BY knowledge_count DESC, e.name COLLATE NOCASE, e.id
-               LIMIT ?""",
-            (user_id, bounded),
+               LIMIT ?""",  # nosec B608 — условия собраны из литералов, значения связаны
+            (*parameters, bounded),
         ).fetchall()
         nodes = [dict(row) for row in rows]
         ids = [str(node["id"]) for node in nodes]
@@ -279,30 +306,54 @@ class GraphMixin(StorageShared):
         placeholders = ",".join("?" * len(ids))
         # Совместная встречаемость считается ТОЛЬКО между показанными узлами: ребро в
         # невидимый узел рисовать некуда, а считать его в статистику — врать.
-        cooccurrence = self.execute(
-            f"""SELECT a.entity_id AS source, b.entity_id AS target,
-                       COUNT(DISTINCT a.knowledge_object_id) AS weight
-                FROM knowledge_entity_links a
-                JOIN knowledge_entity_links b
-                  ON b.knowledge_object_id = a.knowledge_object_id
-                 AND b.user_id = a.user_id AND b.entity_id > a.entity_id
-                WHERE a.user_id = ? AND a.status = 'accepted' AND b.status = 'accepted'
-                  AND a.entity_id IN ({placeholders}) AND b.entity_id IN ({placeholders})
-                GROUP BY a.entity_id, b.entity_id
-                ORDER BY weight DESC
-                LIMIT 800""",  # nosec B608
-            (user_id, *ids, *ids),
-        ).fetchall()
+        cooccurrence: list[Any] = []
+        if not only_relations:
+            floor = max(1, int(min_weight))
+            cooccurrence = self.execute(
+                f"""SELECT a.entity_id AS source, b.entity_id AS target,
+                           COUNT(DISTINCT a.knowledge_object_id) AS weight
+                    FROM knowledge_entity_links a
+                    JOIN knowledge_entity_links b
+                      ON b.knowledge_object_id = a.knowledge_object_id
+                     AND b.user_id = a.user_id AND b.entity_id > a.entity_id
+                    WHERE a.user_id = ? AND a.status = 'accepted' AND b.status = 'accepted'
+                      AND a.entity_id IN ({placeholders}) AND b.entity_id IN ({placeholders})
+                    GROUP BY a.entity_id, b.entity_id
+                    HAVING weight >= ?
+                    ORDER BY weight DESC
+                    LIMIT 800""",  # nosec B608
+                (user_id, *ids, *ids, floor),
+            ).fetchall()
+        relation_conditions = [
+            "user_id = ?",
+            f"source_entity_id IN ({placeholders})",
+            f"target_entity_id IN ({placeholders})",
+            "deleted_at IS NULL",
+        ]
+        relation_parameters: list[Any] = [user_id, *ids, *ids]
+        wanted_relations = [str(item).strip() for item in (relation_types or []) if str(item).strip()]
+        if wanted_relations:
+            relation_conditions.append(
+                f"relation_type IN ({','.join('?' * len(wanted_relations))})"
+            )
+            relation_parameters.extend(wanted_relations)
         relations = self.execute(
-            f"""SELECT source_entity_id AS source, target_entity_id AS target, relation_type
+            f"""SELECT source_entity_id AS source, target_entity_id AS target, relation_type, weight
                 FROM relations
-                WHERE user_id = ? AND source_entity_id IN ({placeholders})
-                  AND target_entity_id IN ({placeholders})
+                WHERE {" AND ".join(relation_conditions)}
                 LIMIT 800""",  # nosec B608
-            (user_id, *ids, *ids),
+            tuple(relation_parameters),
         ).fetchall()
         edges = [{**dict(row), "kind": "cooccurrence"} for row in cooccurrence]
-        edges.extend({**dict(row), "kind": "relation", "weight": 1} for row in relations)
+        edges.extend({**dict(row), "kind": "relation"} for row in relations)
+        if hide_isolates:
+            # Узел без единого ребра занимает место и ничего не рассказывает. Убирать
+            # его — решение ЗРИТЕЛЯ, поэтому по умолчанию он на месте, а `shown`
+            # ниже считается после отсева, чтобы подпись не расходилась с картинкой.
+            connected = {str(edge["source"]) for edge in edges} | {
+                str(edge["target"]) for edge in edges
+            }
+            nodes = [node for node in nodes if str(node["id"]) in connected]
         return {
             "nodes": nodes,
             "edges": edges,

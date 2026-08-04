@@ -342,6 +342,7 @@ async def suggest_relations_from_structure(
         "entities_omitted": 0,
         "proposed": 0,
         "rejected": 0,
+        "model_errors": 0,
     }
     knowledge = storage.get_knowledge_object(knowledge_object_id, user_id)
     if not knowledge or knowledge.get("deleted_at"):
@@ -368,7 +369,7 @@ async def suggest_relations_from_structure(
 
     seen: set[tuple[str, str, str]] = set()
     stored: list[dict[str, Any]] = []
-    proposed = rejected = omitted = 0
+    proposed = rejected = omitted = model_errors = 0
     for _offset, window in windows:
         present = _mentioned_in(window, links)
         if len(present) > _MAX_ENTITIES_PER_WINDOW:
@@ -385,6 +386,11 @@ async def suggest_relations_from_structure(
                 tools=[],
             )
         except Exception:  # noqa: BLE001 — недоступная модель не должна рвать разбор
+            # …но и молчать о себе не должна. Недоступный эндпоинт даёт «просмотрено
+            # 1532, предложено 0», и это читается как «в архиве нечего извлекать».
+            # Поймано на первом же проходе по живому архиву: 83 подряд неудачных
+            # вызова, ноль предложений и ни слова о причине.
+            model_errors += 1
             continue
         parsed = _parse(str(response.get("content") or ""))
         relations = parsed.get("relations")
@@ -455,5 +461,6 @@ async def suggest_relations_from_structure(
     )
     result["entities_omitted"] = omitted
     result["proposed"] = proposed
+    result["model_errors"] = model_errors
     result["rejected"] = rejected
     return result

@@ -1074,8 +1074,8 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
         return 2
     apply_changes = bool(getattr(args, "apply", False))
 
-    async def run() -> tuple[int, int, int, int]:
-        scanned = proposed = kept = skipped_windows = 0
+    async def run() -> tuple[int, int, int, int, int]:
+        scanned = proposed = kept = skipped_windows = model_errors = 0
         cursor = 0
         while True:
             batch = storage.knowledge_bodies_after(
@@ -1099,12 +1099,13 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
                 proposed += int(result.get("proposed") or 0)
                 kept += len(result.get("candidates") or [])
                 skipped_windows += int(result.get("windows_skipped") or 0)
+                model_errors += int(result.get("model_errors") or 0)
             if args.limit and scanned >= args.limit:
                 break
-        return scanned, proposed, kept, skipped_windows
+        return scanned, proposed, kept, skipped_windows, model_errors
 
     try:
-        scanned, proposed, kept, skipped_windows = asyncio.run(run())
+        scanned, proposed, kept, skipped_windows, model_errors = asyncio.run(run())
         if apply_changes:
             storage.record_event(
                 "graph.structure_relations_extracted",
@@ -1117,6 +1118,23 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
     if skipped_windows:
         # Названо вслух: молча недочитанный документ выглядит как разобранный.
         print(f"НЕ прочитано окон (документы длиннее потолка): {skipped_windows}.")
+    if model_errors:
+        # Недоступная модель даёт «просмотрено 1532, предложено 0» — то же, что
+        # архив без единой объявленной связи. Поймано на первом проходе: 83
+        # неудачных вызова подряд и ни слова о причине, потому что адрес брался
+        # из умолчания (файл окружения лежит рядом с базой, а не в текущем
+        # каталоге). Проход не считается выполненным, если модель молчала.
+        print(
+            f"ОШИБОК ВЫЗОВА МОДЕЛИ: {model_errors} — столько окон осталось неразобранными.",
+            file=sys.stderr,
+        )
+        if not kept:
+            print(
+                "Ни одно окно не разобрано. Проверьте адрес модели: "
+                f"{llm.base_url} (файл окружения — FRIDAY_ENV_FILE).",
+                file=sys.stderr,
+            )
+            return 1
     if apply_changes:
         print("Это КАНДИДАТЫ — каждый ждёт подтверждения человеком в панели.")
     else:
