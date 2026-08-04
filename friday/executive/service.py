@@ -711,7 +711,21 @@ class ExecutiveService:
         self.storage.update_mission_task_fields(
             task_id, user_id, status=TaskStatus.RUNNING.value, started_at=utc_now()
         )
-        actor = self.auth_service.actor_for_user(user_id, source="executive")
+        # Шаг исполняется под ТЕМ, КТО ЗАВЁЛ МИССИЮ, а не под арендатором.
+        #
+        # Найдено ревью 2026-08-04. В общем архиве `mission["user_id"]` — общий
+        # арендатор с пресетом владельца, и шаг получал ЕГО права: участник,
+        # которому не положен веб-поиск, через миссию его исполнял, а шаг,
+        # читающий личное, читал личное владельца.
+        #
+        # Автор разбирается тем же способом, что и адресат уведомления: `agent:`
+        # несёт человека в хвосте, `worker:` не несёт никого, имя канала человеком
+        # не является. Где человека определить нечем — остаётся арендатор: у
+        # воркерных миссий это и есть верный ответ, они идут от имени архива.
+        actor = self.auth_service.actor_for_user(
+            self._person_behind(str(mission.get("created_by") or ""), user_id),
+            source="executive",
+        )
         upstream = self._upstream_context(task, by_seq)
         # Попытка засчитывается ДО работы: если процесс умрёт в середине шага,
         # счётчик уже увеличен, и после перезапуска бюджет повторов не обнулится.
@@ -836,7 +850,29 @@ class ExecutiveService:
                 suggestion_overrides={"title": title},
             )
         except IdempotencyConflictError:
+            # Конфликт по ключу означает, что шаг УЖЕ отработал: запись с этим же
+            # `source_ref` есть, а содержимое другое — переигрыш после обрыва дал
+            # иной текст. Результат при этом лежит во входящих и человеку доступен.
+            #
+            # Возврат `None` объявлял его отсутствующим: шаг считался не давшим
+            # результата, и миссия уходила в «провалилась» при готовой работе.
+            # Найдено ревью 2026-08-04; сценарий рутинный — перезапуск бэкенда
+            # между двумя коммитами шага.
+            #
+            # Поэтому здесь ищется то, что уже записано, и возвращается ОНО. Если
+            # не нашлось — значит конфликт не про наш ключ, и тогда честнее вернуть
+            # пустоту, чем выдумать идентификатор.
             LOGGER.warning("Mission task inbox candidate conflicted for %s", source_ref)
+            existing = self.storage.find_raw_by_source_ref(
+                mission["user_id"], "knowledge_work", source_ref
+            )
+            if existing:
+                waiting = self.storage.find_inbox_by_raw(str(existing["id"]), mission["user_id"])
+                if waiting:
+                    LOGGER.info(
+                        "Mission task %s already delivered its result to the inbox", source_ref
+                    )
+                    return str(waiting.get("id") or "") or None
             return None
         inbox_id = result.get("inbox_id")
         return str(inbox_id) if inbox_id else None

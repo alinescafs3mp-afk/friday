@@ -143,3 +143,53 @@ def test_the_routes_ask_only_for_mine() -> None:
 
     helper = inspect.getsource(api._only_mine)  # noqa: SLF001
     assert 'getattr(actor, "is_owner", False)' in helper, "владелец потерял надзор"
+
+
+@pytest.mark.asyncio
+async def test_a_step_runs_with_the_authors_rights_not_the_owners(settings, storage) -> None:
+    """Шаг миссии исполняется под ТЕМ, КТО ЕЁ ЗАВЁЛ.
+
+    Найдено ревью 2026-08-04. Актор шага строился по `mission["user_id"]`, а в
+    общем архиве это общий арендатор с пресетом владельца — то есть шаг получал
+    ЕГО права. Участник, которому не положен веб-поиск, через миссию его исполнял;
+    шаг, читающий личное, читал личное владельца.
+
+    Проверяется сам актор, а не побочный эффект: пресет и человек в нём — это и
+    есть то, что решает, какие инструменты шагу доступны.
+    """
+    from friday.executive.service import ExecutiveService
+
+    storage.ensure_user("tenant", preset_key="owner")
+    storage.ensure_user("person-a", preset_key="user")
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    ingestion = IngestionPipeline(settings, storage, graph)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(storage, graph, WebSurfer(settings), ingestion)
+    service = ExecutiveService(settings, storage, auth, kernel, _Planner(), ingestion)
+
+    person = service._person_behind("agent:person-a", "tenant")  # noqa: SLF001
+    actor = auth.actor_for_user(person, source="executive")
+
+    assert person == "person-a", "шаг снова пошёл бы под арендатором"
+    assert actor.preset_key == "user", "шаг получил пресет владельца вместо своего"
+
+
+@pytest.mark.asyncio
+async def test_a_worker_mission_still_runs_as_the_archive(settings, storage) -> None:
+    """Обратная сторона: воркерная миссия идёт от имени архива, и это верно.
+
+    У неё нет человека по построению; отняв у неё права арендатора, мы остановили
+    бы фоновую работу целиком.
+    """
+    from friday.executive.service import ExecutiveService
+
+    storage.ensure_user("tenant", preset_key="owner")
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    ingestion = IngestionPipeline(settings, storage, graph)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(storage, graph, WebSurfer(settings), ingestion)
+    service = ExecutiveService(settings, storage, auth, kernel, _Planner(), ingestion)
+
+    assert service._person_behind("worker:mission_proposer", "tenant") == "tenant"  # noqa: SLF001
