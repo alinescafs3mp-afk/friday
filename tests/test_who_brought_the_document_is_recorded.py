@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from friday.storage.models import RawObject, new_id
 
 
@@ -139,3 +141,44 @@ def test_the_marker_is_json_readable(storage) -> None:
     assert json.loads(
         storage.execute("SELECT metadata_json AS m FROM raw_objects LIMIT 1").fetchone()["m"]
     )["uploaded_by"] == "person-a"
+
+
+@pytest.mark.asyncio
+async def test_the_tool_itself_carries_the_count_to_the_model(settings, storage):
+    """Счётчик безымянных загрузок доезжает до МОДЕЛИ, а не просто существует.
+
+    Найдено мутацией: удаление строки, которая кладёт число в ответ, оставляло все
+    тесты зелёными — один проверял хранилище, другой формулировку, и между ними
+    зияла дыра ровно в том месте, где эти двое соединяются. Это на проекте
+    отдельный класс: «проверять не механизм, а что он подключён».
+    """
+    from friday.execution_kernel import ExecutionKernel
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import AuthorizationService
+    from friday.web_surfer import WebSurfer
+
+    storage.ensure_user("tenant", preset_key="owner")
+    storage.ensure_user("bob", preset_key="user")
+    _arrived(storage, "tenant", uploaded_by=None, at="2026-08-01T10:00:00+00:00")
+    _arrived(storage, "tenant", uploaded_by=None, at="2026-08-01T11:00:00+00:00")
+
+    auth = AuthorizationService(storage, shared_tenant="tenant")
+    graph = KnowledgeGraph(storage)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(storage, graph, WebSurfer(settings), IngestionPipeline(settings, storage, graph))
+    owner = auth.actor_for_user("tenant", source="test")
+
+    result = await kernel.execute("user_activity", {"person": "bob"}, actor=owner)
+    rendered = str(result.data or "") + str(result.to_llm_message() or "")
+    assert "без отметки о том, кто их загрузил" in rendered, (
+        "модель не узнала, что у части загрузок автор неизвестен — и объявит, "
+        f"что человек ничего не присылал: {rendered[:300]}"
+    )
+    # Проверяется ЧИСЛО, а не наличие фразы. Осторожное умолчание (ключа нет —
+    # считаем, что безымянные есть) выдаёт ту же фразу, и первая редакция этого
+    # теста мутацию не поймала: отключённый счётчик выглядел как подключённый.
+    # Двойка приходит только из настоящего запроса к хранилищу.
+    assert "2 материалов без отметки" in rendered, (
+        f"в ответе не настоящее число безымянных загрузок: {rendered[:300]}"
+    )
