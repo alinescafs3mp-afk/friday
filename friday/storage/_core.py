@@ -455,6 +455,28 @@ class CoreMixin(StorageShared):
                 continue
             LOGGER.info("schema: пересоздаю индекс %s — определение изменилось", name)
             conn.execute(f"DROP INDEX IF EXISTS {name}")  # nosec B608 - имя из словаря выше
+        # Уже лежащие дубли — часть той же работы, а не отдельная.
+        #
+        # Снести старый индекс мало: новый УНИКАЛЬНЫЙ не создастся, пока в
+        # таблице есть строки, которые он запрещает. Замерено на живой базе
+        # владельца — приложение не запустилось вовсе:
+        #   sqlite3.IntegrityError: UNIQUE constraint failed:
+        #   outbound_notifications.chat_id, outbound_notifications.dedup_key
+        # То есть правка, придуманная против дублей, споткнулась ровно о те
+        # дубли, ради которых написана.
+        #
+        # Оставляется САМАЯ РАННЯЯ строка каждой пары: она либо уже отправлена
+        # (и человек её видел), либо ждёт очереди первой. Удаляются копии,
+        # которые всё равно не должны были появиться.
+        removed = conn.execute(
+            """DELETE FROM outbound_notifications
+               WHERE dedup_key <> '' AND rowid NOT IN (
+                   SELECT MIN(rowid) FROM outbound_notifications
+                   WHERE dedup_key <> '' GROUP BY chat_id, dedup_key
+               )"""
+        ).rowcount
+        if removed:
+            LOGGER.info("schema: убрано %d повторных оповещений в один чат", removed)
 
     def _migrate_legacy_schema(self, conn: sqlite3.Connection) -> None:
         """Upgrade pre-release databases without discarding personal data.

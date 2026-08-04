@@ -97,12 +97,25 @@ def test_the_index_is_rebuilt_on_an_old_database(settings, tmp_path):
     # прежнюю отметку версии. Так выглядит живая база, которую обновляют: сборка
     # таблиц руками этого не показала бы, потому что миграция и не запустилась бы.
     first = init_storage(settings)
+    first.ensure_user("owner-api")
+    first.ensure_user("owner-telegram")
     with first.transaction() as conn:
         conn.execute("DROP INDEX IF EXISTS uq_outbound_dedup")
         conn.execute(
             "CREATE UNIQUE INDEX uq_outbound_dedup "
             "ON outbound_notifications(user_id, dedup_key) WHERE dedup_key <> ''"
         )
+        # ДУБЛИ, которые эта база уже накопила: две учётки, один чат, один ключ.
+        # Без них тест зелен при неработающей миграции — ровно так и вышло:
+        # правка прошла набор и уронила живой экземпляр, потому что новый
+        # уникальный индекс не создаётся поверх строк, которые он запрещает.
+        for index, person in enumerate(("owner-api", "owner-telegram")):
+            conn.execute(
+                "INSERT INTO outbound_notifications(id, user_id, chat_id, kind, dedup_key, body,"
+                " status, attempts, created_at) VALUES(?,?,?,?,?,?,'sent',0,?)",
+                (f"notif-{index}", person, "467035772", "sentinel", "sentinel:llm:2026-08-04",
+                 "🚨 Модель не отвечает", f"2026-08-04T10:49:3{index}+00:00"),
+            )
         conn.execute("UPDATE schema_meta SET value='25' WHERE key='schema_version'")
     first.close()
 
@@ -113,6 +126,12 @@ def test_the_index_is_rebuilt_on_an_old_database(settings, tmp_path):
         ).fetchone()
         assert definition, "индекс исчез вовсе"
         assert "chat_id" in str(definition[0]), "на старой базе остался индекс по учётке"
+        # Дубль убран, а первая строка — та, что человек уже видел, — осталась.
+        rows = storage.execute(
+            "SELECT id FROM outbound_notifications WHERE dedup_key='sentinel:llm:2026-08-04'"
+        ).fetchall()
+        assert len(rows) == 1, f"дубли пережили миграцию: {[dict(row) for row in rows]}"
+        assert str(rows[0]["id"]) == "notif-0", "оставлена не самая ранняя строка"
     finally:
         storage.close()
 
