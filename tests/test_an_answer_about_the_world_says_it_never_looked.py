@@ -146,6 +146,94 @@ async def test_a_tool_that_ran_and_failed_counts_as_nothing_arrived(settings, st
     assert "в интернет" in warning.casefold()
 
 
+@pytest.mark.asyncio
+async def test_the_user_model_riding_along_does_not_cancel_the_warning(settings, storage):
+    """Сводка о людях и проектах — не ответ на вопрос о мире.
+
+    Признак «ничего не добыли» перечисляет все дороги, которыми могут приехать
+    данные, и в это перечисление попала выведенная модель пользователя. А она
+    уезжает почти на КАЖДОМ ходу, кроме бытовой болтовни, — то есть условие
+    стало невыполнимым, и предупреждения не было НИ РАЗУ, ни в этой ветке, ни в
+    соседней про свой архив.
+
+    Найдено на живой переписке владельца 2026-08-04: «Медведев в какие годы
+    президентом был?» → «2018–2024 годы (он вернулся на пост президента после
+    Владимира Путина, который в этот период был премьер-министром)». Ноль
+    записей, ноль сущностей, ни одного инструмента — и пустое предупреждение.
+
+    Одно поле отвечало на два вопроса с разной ценой ошибки: «доехали ли личные
+    данные» (там модель пользователя уместна — она снимает тяжёлое обвинение в
+    ложной ссылке на архив) и «добыли ли что-нибудь ПО ВОПРОСУ» (а на «в каком
+    году X был президентом» сводка о коллегах не отвечает ничем).
+
+    Мутация: вернуть `context.user_model_offered` в `nothing_arrived` — тест
+    краснеет.
+    """
+    import asyncio
+
+    from friday.agent_runtime import AgentRuntime
+    from friday.permissions import ActorContext
+    from friday.storage.models import Entity, EntityType, new_id
+
+    INVENTED = (
+        "Дмитрий Медведев занимал пост президента России в два срока:\n"
+        "1. 2008–2012 годы (два срока по 4 года).\n"
+        "2. 2018–2024 годы (он вернулся на пост президента после Владимира Путина, "
+        "который в этот период был премьер-министром).\n"
+        "Таким образом, он был президентом в 2008–2012 и 2018–2024 годах."
+    )
+
+    class _AnswersFromMemory:
+        enabled = True
+        total_budget_sec = 120.0
+
+        async def chat(self, messages, **kwargs):  # noqa: ANN003, ARG002
+            asked = " ".join(str(item.get("content") or "") for item in messages)
+            if "РАЗГОВОР или ЗАПРОС" in asked:
+                return {"content": "ЗАПРОС"}
+            if '"вид": "интернет' in asked:
+                return {
+                    "content": '{"вид": "интернет", "запрос": "годы президентства Медведева", '
+                    '"кто": "", "дни": [], "правило": ""}'
+                }
+            return {"content": INVENTED, "tool_calls": None, "_queue_wait_sec": 0.0}
+
+    class _NoTools:
+        def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
+            return []
+
+    from friday.storage.models import KnowledgeObject, RawObject
+
+    storage.ensure_user("alice", preset_key="owner")
+    # Модель пользователя строится по сущностям, У КОТОРЫХ ЕСТЬ ДОКУМЕНТЫ:
+    # `list_entities_by_activity` считает именно их. Одних сущностей мало — с
+    # ними модель пуста, `user_model_offered` не ставится, и тест зеленел бы, не
+    # проверив ничего. Первая версия этого теста ровно так и пережила мутацию.
+    raw = RawObject(new_id("raw"), "alice", "test", new_id("ref"), "Совещание", "text")
+    storage.store_raw_object(raw)
+    document = KnowledgeObject(new_id("ko"), "alice", raw.id, content="Совещание", title="Совещание")
+    storage.store_knowledge_object(document)
+    for name in ("Иванов Иван Иванович", "Петров Пётр Петрович"):
+        entity = Entity(id=new_id("ent"), user_id="alice", name=name, entity_type=EntityType.PERSON)
+        storage.create_entity(entity)
+        storage.link_knowledge_entity("alice", document.id, entity.id, status="accepted")
+
+    agent = AgentRuntime(settings, storage, llm=_AnswersFromMemory(), kernel=_NoTools())
+    # Предпосылка проверяется ЯВНО: без неё тест зелен по неверной причине.
+    assert agent._user_model_payload("alice"), "модель пользователя пуста — условие не воспроизведено"
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    answer = await asyncio.to_thread(
+        lambda: asyncio.run(
+            agent.chat("alice", "Медведев в какие годы президентом был?", actor=actor)
+        )
+    )
+
+    warning = str(answer.get("grounding_warning") or "")
+    assert warning, "выдумка про годы президентства ушла человеку без единой оговорки"
+    assert "в интернет" in warning.casefold()
+
+
 def test_a_question_about_his_own_archive_keeps_its_own_wording():
     """Две ветки не должны слиться: у них разные причины и разные слова."""
     body = "У вас по этому вопросу три документа. Первый от 12 марта, второй от 4 апреля. " * 3
