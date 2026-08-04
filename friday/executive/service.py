@@ -339,8 +339,10 @@ class ExecutiveService:
 
     # ---- Control ----
 
-    async def start_mission(self, mission_id: str, user_id: str) -> dict[str, Any] | None:
-        mission = self.storage.get_mission(mission_id, user_id)
+    async def start_mission(
+        self, mission_id: str, user_id: str, *, created_by: str | None = None
+    ) -> dict[str, Any] | None:
+        mission = self.storage.get_mission(mission_id, user_id, created_by=created_by)
         if mission is None:
             return None
         status = mission["status"]
@@ -355,8 +357,16 @@ class ExecutiveService:
         self._audit(user_id, "mission.start", mission_id)
         return self.get_mission_view(mission_id, user_id)
 
-    async def cancel_mission(self, mission_id: str, user_id: str) -> dict[str, Any] | None:
-        mission = self.storage.get_mission(mission_id, user_id)
+    async def cancel_mission(
+        self, mission_id: str, user_id: str, *, created_by: str | None = None
+    ) -> dict[str, Any] | None:
+        """Остановить миссию. При `created_by` — только свою.
+
+        Без границы участник останавливал чужую работу по идентификатору из
+        общего списка, а в журнале оставался арендатор — то есть выяснить, кто
+        именно это сделал, было нельзя.
+        """
+        mission = self.storage.get_mission(mission_id, user_id, created_by=created_by)
         if mission is None:
             return None
         if mission["status"] in {item.value for item in MISSION_TERMINAL_STATUSES}:
@@ -375,8 +385,10 @@ class ExecutiveService:
 
     # ---- Views ----
 
-    def get_mission_view(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
-        mission = self.storage.get_mission(mission_id, user_id)
+    def get_mission_view(
+        self, mission_id: str, user_id: str | None = None, *, created_by: str | None = None
+    ) -> dict[str, Any] | None:
+        mission = self.storage.get_mission(mission_id, user_id, created_by=created_by)
         if mission is None:
             return None
         tasks = self.storage.get_mission_tasks(mission_id, user_id)
@@ -391,8 +403,11 @@ class ExecutiveService:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        created_by: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.storage.list_missions(user_id, status=status, limit=limit, offset=offset)
+        return self.storage.list_missions(
+            user_id, status=status, limit=limit, offset=offset, created_by=created_by
+        )
 
     @staticmethod
     def _task_view(task: dict[str, Any]) -> dict[str, Any]:

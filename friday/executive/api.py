@@ -58,6 +58,17 @@ async def create_mission(request: Request) -> dict[str, Any]:
     return {"mission": mission}
 
 
+def _only_mine(actor: Any) -> str | None:
+    """Чьи миссии показывать: свои — или все, если спрашивает владелец.
+
+    `None` означает «без разбора автора». Владельцу архива это положено: миссии
+    идут по его корпусу, и надзор — часть его роли. Участник видит и трогает
+    только свои: цель миссии — свободный текст просьбы, и чужая работа не его
+    дело.
+    """
+    return None if getattr(actor, "is_owner", False) else actor.own_id
+
+
 @router.get("")
 async def list_missions(
     request: Request,
@@ -67,7 +78,17 @@ async def list_missions(
 ) -> dict[str, Any]:
     actor = _require(request, "missions.read")
     executive = request.app.state.executive
-    items = executive.list_mission_views(actor.user_id, status=status, limit=limit, offset=offset)
+    # Свои миссии — значит ЭТОГО ЧЕЛОВЕКА. В общем архиве `user_id` один на всех,
+    # и без второй границы список показывал цели ВСЕХ участников: цель — это
+    # свободный текст просьбы, и рядом с каждой чужой стояли кнопки «Запустить» и
+    # «Остановить». Владельцу надзор положен, поэтому у него границы нет.
+    items = executive.list_mission_views(
+        actor.user_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+        created_by=_only_mine(actor),
+    )
     return {"items": items, "count": len(items)}
 
 
@@ -75,7 +96,7 @@ async def list_missions(
 async def get_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.read")
     executive = request.app.state.executive
-    mission = executive.get_mission_view(mission_id, actor.user_id)
+    mission = executive.get_mission_view(mission_id, actor.user_id, created_by=_only_mine(actor))
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}
@@ -85,7 +106,9 @@ async def get_mission(mission_id: str, request: Request) -> dict[str, Any]:
 async def start_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.control")
     executive = request.app.state.executive
-    mission = await executive.start_mission(mission_id, actor.user_id)
+    mission = await executive.start_mission(
+        mission_id, actor.user_id, created_by=_only_mine(actor)
+    )
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}
@@ -95,7 +118,9 @@ async def start_mission(mission_id: str, request: Request) -> dict[str, Any]:
 async def stop_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.control")
     executive = request.app.state.executive
-    mission = await executive.cancel_mission(mission_id, actor.user_id)
+    mission = await executive.cancel_mission(
+        mission_id, actor.user_id, created_by=_only_mine(actor)
+    )
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}

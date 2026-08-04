@@ -132,14 +132,23 @@ class MissionsMixin(StorageShared):
             )
         return self.get_mission(mission_id, user_id)
 
-    def get_mission(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
-        if user_id is None:
-            row = self.execute("SELECT * FROM missions WHERE id=?", (mission_id,)).fetchone()
-        else:
-            row = self.execute(
-                "SELECT * FROM missions WHERE id=? AND user_id=?",
-                (mission_id, user_id),
-            ).fetchone()
+    def get_mission(
+        self, mission_id: str, user_id: str | None = None, *, created_by: str | None = None
+    ) -> dict[str, Any] | None:
+        """Миссия арендатора, а при `created_by` — только своя.
+
+        Чужая при этом отвечает тем же, чем несуществующая: разница ответов сама
+        сообщила бы, что миссия есть и чья она.
+        """
+        query = "SELECT * FROM missions WHERE id=?"
+        params: list[Any] = [mission_id]
+        if user_id is not None:
+            query += " AND user_id=?"
+            params.append(user_id)
+        if created_by is not None:
+            query += " AND created_by=?"
+            params.append(str(created_by or ""))
+        row = self.execute(query, tuple(params)).fetchone()
         return dict(row) if row else None
 
     def list_missions(
@@ -150,12 +159,25 @@ class MissionsMixin(StorageShared):
         statuses: Sequence[str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        created_by: str | None = None,
     ) -> list[dict[str, Any]]:
+        """Миссии арендатора, а при `created_by` — только ЭТОГО человека.
+
+        В общем архиве `user_id` один на всех, и без второй границы список
+        показывал цели ВСЕХ участников: цель миссии — свободный текст просьбы
+        («собрать всё по личному делу такого-то»). Найдено ревью 2026-08-04.
+
+        `None` означает «без разбора автора» и оставлен для владельца, надзора и
+        фонового бегунка: первым это положено, третьему нужны все.
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if user_id is not None:
             clauses.append("user_id=?")
             params.append(user_id)
+        if created_by is not None:
+            clauses.append("created_by=?")
+            params.append(str(created_by or ""))
         if status is not None:
             clauses.append("status=?")
             params.append(enum_value(status))
