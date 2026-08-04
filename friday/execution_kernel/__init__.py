@@ -1347,6 +1347,12 @@ class ExecutionKernel:
         # `assert_risk_declarations_agree` не даёт такому инструменту дожить до
         # запуска, но исполнение всё равно обязано быть безопасным само по себе:
         # инвариант проверяется на старте, а регистрация бывает и динамической.
+        # Способность, помеченная «требует человека», задерживает ЛЮБОЙ свой
+        # инструмент — независимо от класса риска самого инструмента. Это и есть
+        # смысл пометки: право говорит «этому актору можно», а пометка — «но не
+        # молча». Раньше поле не читал никто, и объявление его роняло старт.
+        if self._capability_requires_person(tool.security_id):
+            return await self._request_approval(actor, name, arguments or {}, details)
         needs_person = HIGH_RISK_TOOLS.get(name)
         if tool.risk == "high" and needs_person is None:
             LOGGER.warning(
@@ -1839,6 +1845,13 @@ class ExecutionKernel:
                 },
             )
         )
+
+    def _capability_requires_person(self, security_id: str) -> bool:
+        """Спрашивает у авторизации, помечена ли способность как «не молча»."""
+
+        authorization = getattr(self, "authorization", None)
+        checker = getattr(authorization, "capability_requires_person", None)
+        return bool(checker and checker(security_id))
 
     def _require_services(self) -> tuple[FridayStorage, KnowledgeGraph, WebSurfer, IngestionPipeline]:
         storage = self.storage

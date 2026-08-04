@@ -146,21 +146,17 @@ class CapabilityDefinition:
         invalid = set(self.default_presets) - set(BUILTIN_PRESET_KEYS)
         if invalid:
             raise ValueError(f"Unknown default presets: {sorted(invalid)}")
-        if self.default_requires_hitl:
-            # Поле объявлено, но НИЧЕГО его не читает: авторизация знает только
-            # «можно» и «нельзя», а ядро после проверки права сразу зовёт обработчик.
-            # Найдено Sol и подтверждено грепом по всему дереву — упоминаний ровно
-            # два, объявление и это место.
-            #
-            # Обещание в коде, за которым нет механизма, опаснее отсутствия обещания:
-            # тот, кто пометит способность как требующую человека, будет считать, что
-            # действие задержано, а оно исполнится сразу. Поэтому не молчим, а падаем
-            # на старте. Строка снимается вместе с появлением настоящего шлюза
-            # подтверждения — см. `sol/PROPOSALS.md` №2.
-            raise ValueError(
-                f"{self.security_id}: default_requires_hitl объявлен, но шлюза подтверждения "
-                "в системе нет — пометка не задержит действие. Сначала шлюз, потом пометка."
-            )
+        # `default_requires_hitl` больше не роняет старт, и вот почему.
+        #
+        # Прежде поле было обещанием без механизма: авторизация знает только
+        # «можно» и «нельзя», ядро после проверки права сразу звало обработчик, и
+        # пометка не задерживала ничего. Падение на старте было честнее молчания —
+        # тот, кто пометил бы способность, считал бы действие задержанным.
+        #
+        # Шлюз с тех пор построен: `action_approvals`, заявка человеку с кнопками,
+        # отпечаток аргументов, повторная проверка прав перед эффектом. Ядро
+        # спрашивает человека по этой пометке (`_capability_requires_person`),
+        # поэтому обещание наконец обеспечено, и запрет снят.
 
 
 # The same identifiers are used by HTTP routes and agent tools.
@@ -328,6 +324,18 @@ class AuthorizationService:
         self._capabilities: dict[str, CapabilityDefinition] = {}
         for capability in CORE_CAPABILITIES:
             self.register_capability(capability)
+
+    def capability_requires_person(self, security_id: str) -> bool:
+        """Помечена ли способность как «не молча»: задержать любое её действие.
+
+        Пометка живёт на СПОСОБНОСТИ, а не на инструменте, и это разные вопросы.
+        Класс риска инструмента говорит, что делает вызов; пометка говорит, что
+        владелец не хочет отдавать этот класс действий без своего слова, каким бы
+        безобидным ни выглядел конкретный вызов.
+        """
+
+        definition = self._capabilities.get(str(security_id or "").strip())
+        return bool(definition and definition.default_requires_hitl)
 
     def register_capability(self, capability: CapabilityDefinition) -> None:
         """Объявить способность. Занятое имя не переопределяется — падаем на старте.
