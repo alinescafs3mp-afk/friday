@@ -534,6 +534,26 @@ _ORG_RE = re.compile(
     rf"(?i:\b(?:компания|организация|фирма|company|organization|firm))\s+[\"«]?({_PROPER_TOKEN}(?:\s+{_PROPER_TOKEN}){{0,3}})[\"»]?",
     re.UNICODE,
 )
+# «Организация» по-русски — не только учреждение, но и ДЕЙСТВИЕ, и в служебных
+# документах почти всегда второе: «3. ОРГАНИЗАЦИЯ УПРАВЛЕНИЯ», «5. ОРГАНИЗАЦИЯ
+# ПРОВЕДЕНИЯ СОРЕВНОВАНИЙ», «2. ОРГАНИЗАЦИЯ УСИЛЕНИЯ ОХРАНЫ» — это заголовки
+# разделов, а не названия. Правило принимало их за имена организаций.
+#
+# Замерено на архиве владельца: правило «организация X» завело РОВНО ПЯТЬ имён, и
+# все пять — заголовки разделов. Ни одного верного. «УПРАВЛЕНИЯ» при этом сидело
+# в 160 документах и лезло в каждую картину графа.
+#
+# Различает падеж, а не список слов: за учреждением следует ИМЯ («организация
+# Красный Крест»), за действием — родительный падеж («организация управления»).
+# Проверяется первое слово, потому что именно оно несёт падеж всей группы:
+# «БОЕВОЙ подготовки» отсекается по прилагательному, «ПРОВЕДЕНИЯ соревнований» —
+# по отглагольному существительному.
+#
+# Только для русского объявителя: «компания» и «фирма» действиями не бывают.
+_GENITIVE_AFTER_ORG = re.compile(
+    r"^[А-ЯЁа-яё-]+(?:ния|ния|ения|ования|аний|ений|ого|его|ой|ей|ых|их)$",
+    re.IGNORECASE | re.UNICODE,
+)
 _ORG_SUFFIX_RE = re.compile(
     r"(?<!\w)((?:ООО|АО|ПАО)\s+[\"«]?[А-ЯЁA-Z][^\n,;:]{1,70}[\"»]?|"
     r"[A-Z][A-Za-z0-9&.-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.-]{1,40}){0,3}\s+"
@@ -850,7 +870,14 @@ def _extract_entities(text: str) -> list[dict[str, Any]]:
     for match in _PROJECT_RE.finditer(text):
         add(match.group(1), EntityType.PROJECT, 0.93, "explicit_project_marker")
     for match in _ORG_RE.finditer(text):
-        add(match.group(1), EntityType.ORGANIZATION, 0.93, "explicit_organization_marker")
+        candidate = match.group(1)
+        first = candidate.split()[0] if candidate.split() else ""
+        if match.group(0).lower().lstrip('"«').startswith("организац") and _GENITIVE_AFTER_ORG.match(first):
+            # «организация управления» — действие, а не учреждение. См.
+            # `_GENITIVE_AFTER_ORG`: пять из пяти таких имён в архиве владельца
+            # оказались заголовками разделов.
+            continue
+        add(candidate, EntityType.ORGANIZATION, 0.93, "explicit_organization_marker")
     for match in _ORG_SUFFIX_RE.finditer(text):
         add(match.group(1), EntityType.ORGANIZATION, 0.9, "organization_suffix")
     for match in _EVENT_CALLED_RE.finditer(text):
