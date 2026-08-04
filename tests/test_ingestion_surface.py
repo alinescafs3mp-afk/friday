@@ -108,7 +108,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     # `title` добавлен сознательно: у части документов вид объявлен только именем
     # файла («План-конспект ПК.doc» — в теле слова нет вовсе), и без заголовка
     # обогащение этот вид теряет.
-    "_enrich": "(self, content: 'str', assessment: 'PromotionAssessment', *, user_id: 'str', title: 'str' = '') -> 'KnowledgeEnrichment'",
+    "_enrich": "(self, content: 'str', assessment: 'PromotionAssessment', *, user_id: 'str', title: 'str' = '', extra_blocked: 'frozenset[str]' = frozenset()) -> 'KnowledgeEnrichment'",
     "_entity_suggestions": "(self, user_id: 'str', content: 'str') -> 'list[dict[str, Any]]'",
     "_extract_visual_document": "(self, file_content: 'bytes', *, filename: 'str', mime_type: 'str') -> 'dict[str, Any] | None'",
     "_file_sha256": "(path: 'Path') -> 'str'",

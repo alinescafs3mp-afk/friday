@@ -1292,6 +1292,7 @@ def _retag_documents(args: argparse.Namespace) -> int:
     import asyncio
 
     from friday.config import ensure_runtime_dirs, load_settings
+    from friday.ingestion._boilerplate import learn_boilerplate, store_boilerplate
     from friday.ingestion._document_kind import KIND_TAG_PREFIX, detect_document_kind, kind_tag
     from friday.storage import init_storage
 
@@ -1319,6 +1320,38 @@ def _retag_documents(args: argparse.Namespace) -> int:
     seen = kinds_set = stale_removed = changed = asked = 0
     by_kind: dict[str, int] = {}
     proposals: dict[str, int] = {}
+    learned: dict[str, Any] = {}
+    rebuild = bool(getattr(args, "rebuild_tags", False))
+    pipeline = None
+    if rebuild:
+        from friday.ingestion import IngestionPipeline
+
+        pipeline = IngestionPipeline(settings, storage)
+
+    if bool(getattr(args, "learn_boilerplate", False)):
+        # Считается ДО разметки и по всему корпусу: слово бланка узнаётся только
+        # по тому, что его окружение повторяется в других документах.
+        bodies: list[str] = []
+        cursor = 0
+        while True:
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=200)
+            if not batch:
+                break
+            for row in batch:
+                cursor = int(row["rowid"])
+                current = storage.get_knowledge_object(str(row["id"]), str(row["user_id"]))
+                if current:
+                    bodies.append(str(current.get("content") or ""))
+        learned = learn_boilerplate(bodies)
+        print(
+            f"Слов бланка найдено: {len(learned['words'])} "
+            f"(рассмотрено {learned['considered']} слов на {learned['documents']} документах)."
+        )
+        print("    " + ", ".join(learned["words"][:24]))
+        if apply_changes:
+            store_boilerplate(storage, learned)
+        else:
+            print("    ПОКАЗ: список не сохранён.")
 
     async def run() -> None:
         nonlocal seen, kinds_set, stale_removed, changed, asked
@@ -1335,9 +1368,33 @@ def _retag_documents(args: argparse.Namespace) -> int:
                 current = storage.get_knowledge_object(str(row["id"]), str(row["user_id"]))
                 if not current:
                     continue
-                tags = list(json.loads(current.get("tags_json") or "[]"))
+                original = list(json.loads(current.get("tags_json") or "[]"))
+                tags = list(original)
                 content = str(current.get("content") or "")
                 title = str(current.get("title") or "")
+                if rebuild:
+                    # Теги пересобираются ТОЙ ЖЕ дорогой, что и при приёме
+                    # (`_enrich`), а не второй копией правил рядом. Иначе проход
+                    # и приём разойдутся ровно в тот день, когда правило
+                    # поменяют в одном месте из двух.
+                    #
+                    # Берутся только теги: `reenrich_knowledge` переписал бы ещё
+                    # заголовок и сводку, а у файлового архива заголовок — это
+                    # имя файла, и менять его проход не просили.
+                    assert pipeline is not None
+                    enrichment = pipeline._enrich(
+                        content,
+                        pipeline.assess_text(content),
+                        user_id=str(row["user_id"]),
+                        title=title,
+                        # Только что посчитанный список идёт в обогащение прямо,
+                        # а не через базу: иначе показ врёт. Первый прогон это и
+                        # показал — «абонентский» и «работает» остались в новых
+                        # тегах, потому что показ список не сохраняет, а
+                        # `_enrich` читает сохранённый.
+                        extra_blocked=frozenset(learned.get("words") or ()),
+                    )
+                    tags = list(enrichment.tags)
                 kind, evidence = detect_document_kind(content, title=title)
                 if not kind and llm is not None:
                     from friday.ingestion._document_kind import ask_document_kind
@@ -1360,15 +1417,18 @@ def _retag_documents(args: argparse.Namespace) -> int:
                     for tag in tags
                     if tag not in _STALE_TAGS and (not tag.startswith(KIND_TAG_PREFIX) or not kind)
                 ]
-                stale_removed += len([tag for tag in tags if tag in _STALE_TAGS])
+                stale_removed += len([tag for tag in original if tag in _STALE_TAGS])
                 if kind:
                     kept.append(kind_tag(kind))
                     kinds_set += 1
                     by_kind[kind] = by_kind.get(kind, 0) + 1
-                elif any(tag.startswith(KIND_TAG_PREFIX) for tag in tags):
+                elif any(tag.startswith(KIND_TAG_PREFIX) for tag in original):
                     # Вид уже стоял и остаётся: его поставили прошлым проходом.
+                    # Берётся из ИСХОДНЫХ тегов: пересборка его не порождает —
+                    # быстрый путь этот вид не нашёл, за тем и звали арбитра.
                     kinds_set += 1
-                    previous = next(tag for tag in tags if tag.startswith(KIND_TAG_PREFIX))
+                    kept.append(next(tag for tag in original if tag.startswith(KIND_TAG_PREFIX)))
+                    previous = next(tag for tag in original if tag.startswith(KIND_TAG_PREFIX))
                     by_kind[previous[len(KIND_TAG_PREFIX) :]] = (
                         by_kind.get(previous[len(KIND_TAG_PREFIX) :], 0) + 1
                     )
@@ -1381,14 +1441,14 @@ def _retag_documents(args: argparse.Namespace) -> int:
                                 "title": title[:120],
                                 "kind": kind,
                                 "evidence": evidence,
-                                "removed": sorted(set(tags) - set(new_tags)),
-                                "added": sorted(set(new_tags) - set(tags)),
+                                "removed": sorted(set(original) - set(new_tags)),
+                                "added": sorted(set(new_tags) - set(original)),
                             },
                             ensure_ascii=False,
                         )
                         + "\n"
                     )
-                if new_tags == sorted(set(tags)):
+                if new_tags == sorted(set(original)):
                     continue
                 changed += 1
                 if apply_changes:
@@ -2107,6 +2167,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--arbiter",
         action="store_true",
         help="Ask the model about documents whose kind is not declared by a known word",
+    )
+    retag.add_argument(
+        "--learn-boilerplate",
+        action="store_true",
+        help="Learn this corpus's form-label words first (words that always sit in a repeated context)",
+    )
+    retag.add_argument(
+        "--rebuild-tags",
+        action="store_true",
+        help="Rebuild keyword tags with today's rules, not only the document kind",
     )
     retag.add_argument(
         "--apply",

@@ -45,6 +45,7 @@ from friday.ingestion._base import (
     replace,
     utc_now,
 )
+from friday.ingestion._boilerplate import stored_boilerplate
 from friday.ingestion._document_kind import detect_document_kind, kind_tag
 
 if TYPE_CHECKING:
@@ -509,6 +510,7 @@ class AdviceMixin(PipelineShared):
         *,
         user_id: str,
         title: str = "",
+        extra_blocked: frozenset[str] = frozenset(),
     ) -> KnowledgeEnrichment:
         kind = assessment.knowledge_kind or _detect_knowledge_kind(content)
         entities = self._entity_suggestions(user_id, content)
@@ -523,7 +525,7 @@ class AdviceMixin(PipelineShared):
             if str(entity.get("entity_type") or "") == EntityType.PERSON.value
             for part in str(entity.get("name") or "").casefold().split()
             if len(part) >= 3
-        )
+        ) | (extra_blocked or stored_boilerplate(self.storage))
         tags.extend(
             _extract_keywords(
                 content,
