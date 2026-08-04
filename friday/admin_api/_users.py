@@ -29,8 +29,9 @@ from friday.admin_api._deps import (
     secrets,
     validate_user_id,
 )
-from friday.oversight_scope import supervisor_of
+from friday.oversight_scope import hierarchy_is_configured, may_oversee, supervisor_of
 from friday.people import resolve_person, unambiguous
+from friday.permissions import LEGACY_OWNER_USER_ID
 
 router = APIRouter()
 
@@ -164,8 +165,30 @@ async def user_activity(
     recorded, because otherwise the trail cannot tell «looked at the volume» from
     «read the correspondence».
     """
-    _, granted = _require_any(request, "admin.all_data.read", "admin.activity.read")
+    actor, granted = _require_any(request, "admin.all_data.read", "admin.activity.read")
     include_content = granted == "admin.all_data.read"
+    storage = _services(request).storage
+    # Тот же предел, что у одноимённого инструмента Пятницы (execution_kernel,
+    # `_user_activity`): право надзора говорит «можно смотреть чужое», а не
+    # «можно смотреть ЛЮБОГО». Проверка стояла на двух дорогах агента и не стояла
+    # здесь — а это ровно та же деятельность того же человека, только запрошенная
+    # через админку. Ворота на одной дороге не охраняют ничего.
+    #
+    # Сегодня она никого не задевает: пока никому не назначен руководитель,
+    # `hierarchy_is_configured` ложно, и работает решение владельца «все видят
+    # всех». Смысл её в другом — чтобы в день, когда руководителя назначат, эта
+    # дверь не осталась распахнутой молча.
+    if hierarchy_is_configured(storage) and not may_oversee(
+        storage, actor.own_id, user_id, owner_id=LEGACY_OWNER_USER_ID
+    ):
+        _audit(request, "admin.user.activity.out_of_scope", "user", user_id, after={"granted_by": granted})
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Это не ваш подчинённый. Смотреть деятельность можно у себя и у тех, "
+                "кто вам подчинён; полный доступ есть у владельца архива."
+            ),
+        )
     _audit_cross_tenant_read(
         request,
         "admin.user.activity.read",
@@ -176,7 +199,6 @@ async def user_activity(
         content="full" if include_content else "redacted",
         analysis=analysis or None,
     )
-    storage = _services(request).storage
     payload: dict[str, Any] = {
         "user_id": user_id,
         "content": "full" if include_content else "redacted",

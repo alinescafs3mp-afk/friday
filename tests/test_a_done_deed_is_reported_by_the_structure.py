@@ -379,6 +379,12 @@ def test_an_unparsed_remainder_keeps_the_turn_for_the_model(settings, storage) -
     assert "Архив собран" in said, "факт о собранном архиве пропал"
     assert llm.final_calls == 1, "неразобранный остаток съел вопрос человека"
     assert "по плану" in said
+    # Ход модели сам по себе ничего не доказывает: заглушка отвечает одинаково на
+    # любой вход, и тест был зелёным, когда модели уезжала ПУСТАЯ строка вместо
+    # реплики. Проверяется то, что она получила. Указано внешним разбором (Сол,
+    # 2026-08-04) и подтверждено замером на боевой сборке.
+    assert llm.final_prompts, "модель не звалась — проверять нечего"
+    assert "что там по проекту" in llm.final_prompts[0], "вопрос человека не доехал до модели"
 
 
 def test_the_judge_is_not_asked_about_the_structure(settings, storage) -> None:

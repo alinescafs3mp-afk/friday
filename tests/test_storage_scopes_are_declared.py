@@ -16,8 +16,19 @@
     коде, починено);
     указание «отвечай мне кратко» ложилось в учётку арендатора и стало бы
     правилом для всех (разбор Сола, починено);
-    личные разрешения, лимиты обращений и идемпотентность ответов ДО СИХ ПОР
-    считаются по арендатору (§12.1, 12.3, 12.4 — открыто).
+    личные разрешения, лимиты обращений и идемпотентность ответов считались по
+    арендатору — §12.1 (`AuthorizationService.authorize` берёт `actor.own_id`),
+    §12.4 (ключи лимитов там же по человеку) и §12.3 (`idempotency_claim`);
+    закрыто ночью 2026-08-04, сторожа — `test_personal_permissions_work_in_a_
+    shared_archive`, `test_a_noisy_participant_does_not_starve_the_others`,
+    `test_an_answer_is_not_replayed_to_another_person`.
+
+Прежняя редакция этой шапки говорила «до сих пор открыто» ещё сутки после
+починки, и отдельный тест ТРЕБОВАЛ слова «открыто»: тот, кто написал бы правду,
+получил бы красный набор и, скорее всего, вернул бы ложь, чтобы позеленить.
+Указано внешним разбором (Сол, 2026-08-04) и проверено по коммитам. Тест,
+охраняющий неверное утверждение, хуже отсутствия теста — поэтому он снят, а не
+вывернут наизнанку: прибивать текст к тексту не следовало с самого начала.
 
 Полное лечение — типы вместо строк — документ Codex сам не советует начинать с
 переименования по репозиторию: велик риск красиво назвать ту же путаницу. Здесь
@@ -55,17 +66,6 @@ PERSON_SCOPED = {
     "set_conversation_archived",
     "set_conversation_mode",
     "store_message",
-    # Заявка — просьба КОНКРЕТНОГО человека разрешить действие от его имени.
-    # Была общей: участник видел чужую и мог подтвердить.
-    "_approval_row",
-    "claim_action_approval",
-    "count_action_approvals",
-    "create_action_approval",
-    "decide_action_approval",
-    "finish_action_approval",
-    "get_action_approval",
-    "list_action_approvals",
-    "mark_action_approval_uncertain",
     # Личные настройки и память о человеке.
     "remember_correction",
     "remember_standing_rule",
@@ -76,6 +76,33 @@ PERSON_SCOPED = {
     # Ключи входа принадлежат человеку, а не корпусу.
     "create_api_token",
     "list_api_tokens",
+}
+
+#: Заявки: `user_id` — АРЕНДАТОР, человек называется отдельным параметром.
+#:
+#: Здесь двойной контракт, и прежняя редакция перечня врала о нём. Заявка
+#: действительно личная — но личность несут `requested_by` (при создании) и
+#: `person_id` (при чтении и решении), а `user_id` остаётся общим корпусом:
+#: `create_action_approval(actor.user_id, …, requested_by=actor.own_id)`.
+#:
+#: Цена ошибки в этой метке — не в правильности перечня, а в будущем вызове по
+#: нему: заявка, созданная под `own_id`, ляжет туда, где её никто не ищет.
+#: Человек увидит «нужно ваше решение» в чате, а список окажется пуст и кнопка
+#: ответит «заявка не найдена». Указано внешним разбором (Сол, 2026-08-04).
+#:
+#: У трёх последних личности нет вовсе: их зовут по арендатору из исполнителя,
+#: когда решение уже принято, — и это верно, там нет человека, только заявка.
+APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
+    "_approval_row",
+    "count_action_approvals",
+    "create_action_approval",
+    "decide_action_approval",
+    "get_action_approval",
+    "list_action_approvals",
+    # Без личности вовсе — исполнительная часть уже решённой заявки.
+    "claim_action_approval",
+    "finish_action_approval",
+    "mark_action_approval_uncertain",
 }
 
 #: Сколько всего методов хранилища принимают `user_id`.
@@ -107,9 +134,26 @@ def _methods_taking_user_id() -> set[str]:
 def test_every_personal_method_still_exists() -> None:
     """Перечень описывает настоящую поверхность, а не воспоминание о ней."""
     surface = _methods_taking_user_id()
-    missing = sorted(PERSON_SCOPED - surface)
+    missing = sorted((PERSON_SCOPED | APPROVAL_TENANT_WITH_A_SEPARATE_PERSON) - surface)
 
     assert not missing, f"в перечне личных методов есть несуществующие: {missing}"
+
+
+def test_an_approval_names_its_person_in_a_separate_parameter() -> None:
+    """Метка «арендатор + отдельная личность» — проверяемое утверждение.
+
+    Мутация: убрать `person_id` из `get_action_approval` — тест краснеет. Без
+    этого перечень остался бы просто списком имён, а он должен быть контрактом.
+    """
+    named_person = {"_approval_row", "count_action_approvals", "decide_action_approval",
+                    "get_action_approval", "list_action_approvals"}
+    for name in sorted(named_person):
+        signature = inspect.signature(getattr(FridayStorage, name))
+        assert "person_id" in signature.parameters, f"{name} потерял личность заявителя"
+        assert "user_id" in signature.parameters, f"{name} перестал брать арендатора"
+
+    creation = inspect.signature(FridayStorage.create_action_approval)
+    assert "requested_by" in creation.parameters, "заявка создаётся без автора"
 
 
 def test_a_new_method_forces_a_decision() -> None:
@@ -129,21 +173,13 @@ def test_a_new_method_forces_a_decision() -> None:
 
 
 def test_the_personal_surface_is_not_empty() -> None:
-    """Пустой перечень означал бы, что различение потеряно целиком."""
-    assert len(PERSON_SCOPED) >= 25
+    """Пустой перечень означал бы, что различение потеряно целиком.
 
-
-def test_the_known_holes_are_named_in_the_docstring() -> None:
-    """Открытые дыры перечислены здесь же, чтобы не потеряться между сессиями.
-
-    Личные разрешения, лимиты и идемпотентность до сих пор считаются по
-    арендатору. Пока это не починено, файл обязан об этом говорить.
+    Порог считается по обоим перечням: девять методов заявок переехали из
+    `PERSON_SCOPED` в свой набор не потому, что перестали быть личными, а потому
+    что личность у них называется отдельным параметром.
     """
-    import sys
-
-    doc = sys.modules[__name__].__doc__ or ""
-    assert "12.1" in doc and "12.3" in doc and "12.4" in doc
-    assert "открыто" in doc
+    assert len(PERSON_SCOPED) + len(APPROVAL_TENANT_WITH_A_SEPARATE_PERSON) >= 25
 
 
 def test_it_does_not_pretend_to_prove_call_sites() -> None:

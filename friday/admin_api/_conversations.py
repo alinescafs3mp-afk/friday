@@ -83,7 +83,17 @@ async def chat_feed(request: Request, limit: int = Query(100, ge=1, le=500)) -> 
                 "file_count": int(row.get("file_count") or 0),
             }
         )
-    return {"items": items, "count": len(items)}
+    # `count` — сколько людей в ленте ВСЕГО, `shown` — сколько уместилось на этой
+    # странице. Раньше здесь стояло `len(items)` под именем «count», то есть
+    # размер собственного запроса выдавался за свойство архива.
+    return {
+        "items": items,
+        "count": storage.count_chat_feed(),
+        "shown": len(items),
+        # Файлы, принятые до 2026-08-04, не помечены автором. Без этого числа
+        # «у всех по нулю файлов» читается как «никто ничего не присылал».
+        "files_without_an_author": storage.files_without_an_author(),
+    }
 
 
 @router.post("/chats/{user_id}/reply")

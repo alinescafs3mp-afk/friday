@@ -58,15 +58,69 @@ async def create_mission(request: Request) -> dict[str, Any]:
     return {"mission": mission}
 
 
-def _only_mine(actor: Any) -> str | None:
-    """Чьи миссии показывать: свои — или все, если спрашивает владелец.
+def _visible_to(actor: Any) -> str | None:
+    """Чьи миссии ПОКАЗЫВАТЬ. Всех — таково решение владельца.
 
-    `None` означает «без разбора автора». Владельцу архива это положено: миссии
-    идут по его корпусу, и надзор — часть его роли. Участник видит и трогает
-    только свои: цель миссии — свободный текст просьбы, и чужая работа не его
-    дело.
+    `None` означает «без разбора автора». Владелец 2026-08-04, отвечая на прямой
+    вопрос о границах надзора, решил: «все видят всех». Общий архив на то и
+    общий — люди работают над одним корпусом и должны видеть, что по нему уже
+    идёт, иначе двое запускают одну работу дважды.
+
+    Признак `actor` здесь не участвует намеренно: правило одно для всех, и
+    оставленный без дела параметр честнее скрытой ветки, которая говорила бы,
+    что различие есть.
+    """
+    return None
+
+
+def _controlled_by(actor: Any) -> str | None:
+    """Чьи миссии ТРОГАТЬ: свои — или любые, если это хозяин архива.
+
+    Смотреть и управлять — разные права, и одно решение («все видят всех») их не
+    объединяет: запустить или остановить чужую работу это вмешательство, а не
+    осведомлённость. Пока обе дороги ходили через один помощник, участник вместе
+    со списком получал у каждой чужой строки кнопки «Запустить» и «Остановить».
     """
     return None if getattr(actor, "is_owner", False) else actor.own_id
+
+
+def _authored_by_this_person(mission: dict[str, Any], actor: Any) -> bool:
+    """Он ли завёл эту миссию — в любой из двух записей авторства.
+
+    Автор пишется по-разному в зависимости от того, какой дорогой миссия
+    заведена: через HTTP это `own_id` (api.py, `create_mission`), а через
+    Пятницу — `agent:<own_id>` (execution_kernel, `mission_create`). Сравнение с
+    одним только `own_id` объявляло бы чужой ту миссию, которую человек сам
+    попросил завести в разговоре, — а таких у участников как раз большинство.
+    """
+    own = str(getattr(actor, "own_id", "") or "")
+    author = str(mission.get("created_by") or "")
+    return bool(own) and author in {own, f"agent:{own}"}
+
+
+def _mission_to_control(request: Request, actor: Any, mission_id: str) -> dict[str, Any]:
+    """Миссия, которой этот человек вправе управлять, — или честный отказ.
+
+    Отказы здесь РАЗНЫЕ намеренно. Пока чужие миссии были не видны, «чужая» и
+    «несуществующая» обязаны были отвечать одинаково: иначе разница ответов сама
+    сообщала бы, что миссия есть. После решения владельца «все видят всех»
+    скрывать нечего — чужая строка стоит в списке у всех, — и ответ «не найдена»
+    на видимую строку стал бы просто неправдой. Поэтому 404 отвечает только
+    отсутствие, а на чужую приходит 403 с причиной.
+    """
+    executive = request.app.state.executive
+    mission = executive.get_mission_view(mission_id, actor.user_id)
+    if mission is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    if _controlled_by(actor) is not None and not _authored_by_this_person(mission, actor):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Это чужая миссия. Запустить или остановить её может тот, кто её завёл, "
+                "или владелец архива."
+            ),
+        )
+    return mission
 
 
 @router.get("")
@@ -78,16 +132,15 @@ async def list_missions(
 ) -> dict[str, Any]:
     actor = _require(request, "missions.read")
     executive = request.app.state.executive
-    # Свои миссии — значит ЭТОГО ЧЕЛОВЕКА. В общем архиве `user_id` один на всех,
-    # и без второй границы список показывал цели ВСЕХ участников: цель — это
-    # свободный текст просьбы, и рядом с каждой чужой стояли кнопки «Запустить» и
-    # «Остановить». Владельцу надзор положен, поэтому у него границы нет.
+    # Видно всем — решение владельца. Кнопки «Запустить» и «Остановить» рядом с
+    # чужой строкой при этом не работают: управление разведено с показом, см.
+    # `_controlled_by`.
     items = executive.list_mission_views(
         actor.user_id,
         status=status,
         limit=limit,
         offset=offset,
-        created_by=_only_mine(actor),
+        created_by=_visible_to(actor),
     )
     return {"items": items, "count": len(items)}
 
@@ -96,7 +149,7 @@ async def list_missions(
 async def get_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.read")
     executive = request.app.state.executive
-    mission = executive.get_mission_view(mission_id, actor.user_id, created_by=_only_mine(actor))
+    mission = executive.get_mission_view(mission_id, actor.user_id, created_by=_visible_to(actor))
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}
@@ -105,10 +158,9 @@ async def get_mission(mission_id: str, request: Request) -> dict[str, Any]:
 @router.post("/{mission_id}/start")
 async def start_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.control")
+    _mission_to_control(request, actor, mission_id)
     executive = request.app.state.executive
-    mission = await executive.start_mission(
-        mission_id, actor.user_id, created_by=_only_mine(actor)
-    )
+    mission = await executive.start_mission(mission_id, actor.user_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}
@@ -117,10 +169,9 @@ async def start_mission(mission_id: str, request: Request) -> dict[str, Any]:
 @router.post("/{mission_id}/stop")
 async def stop_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.control")
+    _mission_to_control(request, actor, mission_id)
     executive = request.app.state.executive
-    mission = await executive.cancel_mission(
-        mission_id, actor.user_id, created_by=_only_mine(actor)
-    )
+    mission = await executive.cancel_mission(mission_id, actor.user_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}

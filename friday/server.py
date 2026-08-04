@@ -1860,6 +1860,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             "transient": True,
                             "transient_text": transient_file["text_preview"],
                             "extraction_success": transient_file["extraction_success"],
+                            # Всё, что осмотр УЖЕ выяснил про полноту разбора.
+                            # Признаки вычислялись и отбрасывались здесь же, в
+                            # четырёх ключах из десяти: модель получала огрызок
+                            # документа и не знала, что он огрызок, — и отвечала
+                            # по нему как по целому. Материал при этом не
+                            # сохраняется, значит переспросить по нему потом
+                            # нечего: другого случая сказать правду не будет.
+                            "extraction_error": transient_file["extraction_error"],
+                            "text_truncated": transient_file["text_truncated"],
+                            "parse_deadline_reached": transient_file["parse_deadline_reached"],
+                            "parse_pages_read": transient_file["parse_pages_read"],
+                            "parse_pages_truncated": transient_file["parse_pages_truncated"],
+                            "parse_total_pages": transient_file["parse_total_pages"],
                         }
                     )
                     file_ingestion = {

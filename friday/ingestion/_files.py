@@ -803,6 +803,17 @@ class FilesMixin(PipelineShared):
                             (extraction.metadata or {}).get("parse_deadline_reached")
                         ),
                         "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
+                        # Том толще потолка. Признак ставился в метаданные файла и
+                        # НЕ клался сюда — а читает его именно отсюда единственный
+                        # потребитель (`_file_fate_line` в мосте). Правка от
+                        # 2026-08-04 доехала до базы и не доехала до человека;
+                        # тест был зелёным, потому что звал потребителя с
+                        # рукотворным словарём, то есть подменял ровно то место,
+                        # где обрыв и был.
+                        "parse_pages_truncated": bool(
+                            (extraction.metadata or {}).get("pages_truncated")
+                        ),
+                        "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
                         "vision": {
                             key: value
                             for key, value in (vision or {}).items()
@@ -883,6 +894,11 @@ class FilesMixin(PipelineShared):
             # частичный документ покажется целым.
             "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),
             "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
+            # Третья обрезка, отличная от обеих предыдущих: том толще потолка
+            # разборщика. Здесь она особенно важна — материал не сохраняется, и
+            # переспросить по нему потом будет нечего.
+            "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
+            "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
         }
 
     @staticmethod

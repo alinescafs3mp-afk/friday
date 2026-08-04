@@ -46,6 +46,12 @@ _MAX_TOOL_EVIDENCE = 6
 #: ленте появляется свежий. Начало несёт суть («найдено 9 документов», «курс
 #: 79,46 ₽»), и его достаточно, чтобы модель помнила, что уже делала.
 _SPENT_TOOL_RESULT_CHARS = 900
+#: Сколько знаков отводится на ВСЕ результаты инструментов одного хода модели.
+#: Порядок величины взят от потолка одного результата в ядре
+#: (`_LLM_TOOL_PAYLOAD_MAX_CHARS`, 11 900): один вызов проходит целиком, а
+#: несколько параллельных делят это поровну вместо «первый в огрызок, последний
+#: целиком».
+_ROUND_TOOL_BUDGET_CHARS = 11_900
 #: Сколько знаков КАЖДОГО результата инструмента видит судья обоснованности.
 #: Было 500 — на выдаче веб-поиска в несколько тысяч знаков это вырезка, по
 #: которой ни один названный в ответе факт не подтверждается. Шесть записей по
@@ -865,6 +871,33 @@ _HISTORY_CHAR_BUDGET = 9_000
 #: Ходов больше этого не берём даже короткими: разговор недельной давности редко
 #: помогает ответить на сегодняшний вопрос, а место занимает.
 _HISTORY_MAX_TURNS = 16
+
+
+def _what_is_missing_from_this_attachment(item: dict[str, Any]) -> str:
+    """Чего модель НЕ видит в этом вложении — фактами о прошлом, без просьб.
+
+    Осмотр вложения в режиме «не сохраняй» вычисляет полноту разбора четырьмя
+    признаками и отдавал наружу только текст: модель получала первую страницу
+    четырёхсотстраничного тома и отвечала по ней как по целому документу. Здесь
+    это особенно дорого — материал не сохраняется, и переспросить по нему потом
+    нечего.
+
+    Формулировки в прошедшем времени и без указаний себе: служебная строка,
+    написанная как поручение («скажи человеку прямо»), однажды уехала владельцу
+    целиком — модель не отличает данные от инструкции.
+    """
+    if not item.get("extraction_success", True):
+        error = str(item.get("extraction_error") or "").strip()
+        return f"разобрать не удалось: {error[:200]}" if error else "разобрать не удалось"
+    notes: list[str] = []
+    total_pages = int(item.get("parse_total_pages") or 0)
+    if item.get("parse_pages_truncated") and total_pages:
+        notes.append(f"прочитано {int(item.get('parse_pages_read') or 0)} страниц из {total_pages}")
+    if item.get("parse_deadline_reached"):
+        notes.append("разбор оборвался по времени, текст неполный")
+    if item.get("text_truncated"):
+        notes.append("показано начало текста, остальное не поместилось")
+    return "; ".join(notes)
 
 
 def _history_within_budget(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2901,9 +2934,19 @@ class AgentRuntime:
             tool_evidence,
         )
         # Предварительный вызов что-то СДЕЛАЛ и уже сказал об этом человеку.
-        if context.structural_answer:
+        #
+        # Гейт — `remainder_known`, а не сам факт структурного ответа. Пустая
+        # строка в `open_remainder` значима ТОЛЬКО вместе с этим признаком (см.
+        # объявление поля): без него она означает «остаток не считали», а не
+        # «остатка нет». Пока здесь стоял один `structural_answer`, реплика
+        # заменялась пустотой всякий раз, когда арбитр остатка не ответил, —
+        # и человек, попросивший «собери документы за 26 число, и что там по
+        # проекту», получал документы, а вопрос не доезжал до модели вовсе:
+        # последним сообщением ей уходила пустая строка. Замерено на боевой
+        # сборке: вопрос_в_промпте=False, конверт данных не строился.
+        if context.structural_answer and context.remainder_known:
             rest = context.open_remainder.strip()
-            if context.remainder_known and not rest:
+            if not rest:
                 # Отвечать больше не на что. Ход модели здесь не просто лишний
                 # расход: это единственная дверь, через которую в ответ попадает
                 # обещание сделать уже сделанное.
@@ -3035,6 +3078,11 @@ class AgentRuntime:
 
             remaining = max_tool_calls - total_calls
             selected_calls = calls[:remaining]
+            # Хвост запрошенных вызовов отбрасывался МОЛЧА: модель просила восемь,
+            # исполнялись четыре, и о судьбе остальных она не узнавала ничего.
+            # Дальше она отвечает так, будто спросила ровно то, что получила, —
+            # тот же класс, что и обрезанный результат, только обрезано намерение.
+            dropped_calls = len(calls) - len(selected_calls)
             openai_calls: list[dict[str, Any]] = []
             for index, call in enumerate(selected_calls, start=1):
                 call_id = call.call_id or f"call_{total_calls + index}"
@@ -3044,6 +3092,31 @@ class AgentRuntime:
             # by all corresponding tool results.  Splitting this into one
             # assistant message per call violates the OpenAI conversation
             # protocol and is rejected by stricter vLLM builds.
+            # ПРЕЖНИЕ результаты в ленте ужимаются — один раз за раунд, ЗДЕСЬ.
+            #
+            # Окно модели 32 768 токенов, а один результат доходит до 4 000. За ход
+            # в режиме диалога вызовов до четырёх, в исследовании до двенадцати — и
+            # каждый оставался в ленте целиком, хотя отвечает модель по последним.
+            #
+            # Ужимается ХВОСТ, а не голова: начало результата несёт суть («найдено
+            # 9», «курс 79,46»), конец — подробности.
+            #
+            # Место важнее самого правила. Раньше этот блок стоял ВНУТРИ цикла по
+            # вызовам и срабатывал перед каждым следующим — то есть при двух
+            # параллельных вызовах результат первого ужимался ДО того, как модель
+            # его хоть раз увидела. Замерено на стенде: 948 знаков вместо 8 212,
+            # одна запись из десяти. И повторить вызов было нечем: предел вызовов
+            # к тому моменту уже потрачен. Здесь же, перед новым ходом модели, все
+            # сообщения роли `tool` действительно отработали.
+            for older in messages:
+                if older.get("role") != "tool":
+                    continue
+                body = str(older.get("content") or "")
+                if len(body) > _SPENT_TOOL_RESULT_CHARS:
+                    older["content"] = (
+                        body[:_SPENT_TOOL_RESULT_CHARS]
+                        + "\n… (остальное убрано, чтобы поместился разговор)"
+                    )
             messages.append(
                 {
                     "role": "assistant",
@@ -3051,6 +3124,7 @@ class AgentRuntime:
                     "tool_calls": openai_calls,
                 }
             )
+            round_results: list[tuple[str, str]] = []
             for call, openai_call in zip(selected_calls, openai_calls, strict=True):
                 tool_result = await self.kernel.execute(call.name, call.arguments, actor=actor)
                 tools_used.append(call.name)
@@ -3070,32 +3144,39 @@ class AgentRuntime:
                 # may rest on these, not on personal notes.
                 if tool_result.success and rendered and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
                     tool_evidence.append({"tool": call.name, "output": str(rendered)})
-                # ПРЕЖНИЕ результаты в ленте ужимаются: полным остаётся только
-                # свежий.
-                #
-                # Окно модели 32 768 токенов, а один результат доходит до 4 000.
-                # За ход в режиме диалога вызовов до четырёх, в исследовании до
-                # двенадцати — и каждый оставался в ленте целиком, хотя отвечает
-                # модель по последнему. Замерено: четыре полных результата плюс
-                # описания инструментов и история подходят к пределу вплотную,
-                # двенадцать переполняют его гарантированно.
-                #
-                # Ужимается ХВОСТ, а не голова: начало результата несёт суть
-                # («найдено 9», «курс 79,46»), конец — подробности.
-                for older in messages:
-                    if older.get("role") != "tool":
-                        continue
-                    body = str(older.get("content") or "")
-                    if len(body) > _SPENT_TOOL_RESULT_CHARS:
-                        older["content"] = (
-                            body[:_SPENT_TOOL_RESULT_CHARS]
-                            + "\n… (остальное убрано, чтобы поместился разговор)"
-                        )
+                round_results.append((str(openai_call["id"]), str(rendered)))
+
+            # Результаты ОДНОГО раунда делят бюджет поровну.
+            #
+            # Ужимать их «как прежние» нельзя — модель их ещё не читала. Но и
+            # оставлять все целиком нельзя: в исследовании вызовов до двенадцати,
+            # и двенадцать полных результатов переполняют окно гарантированно.
+            # Поэтому режется КАЖДЫЙ до равной доли, а не первый до огрызка при
+            # целом последнем: у параллельных вызовов нет старшего.
+            spent = sum(len(body) for _, body in round_results)
+            if spent > _ROUND_TOOL_BUDGET_CHARS and round_results:
+                share = max(_SPENT_TOOL_RESULT_CHARS, _ROUND_TOOL_BUDGET_CHARS // len(round_results))
+                round_results = [
+                    (
+                        call_id,
+                        body
+                        if len(body) <= share
+                        else body[:share]
+                        + f"\n… (показана часть результата: вызовов в этом ходе {len(round_results)})",
+                    )
+                    for call_id, body in round_results
+                ]
+            for call_id, body in round_results:
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": body})
+            if dropped_calls > 0:
                 messages.append(
                     {
-                        "role": "tool",
-                        "tool_call_id": openai_call["id"],
-                        "content": rendered,
+                        "role": "system",
+                        "content": (
+                            f"Из запрошенных вызовов ({len(calls)}) выполнено {len(selected_calls)}: "
+                            "предел вызовов инструментов на этот ход исчерпан. "
+                            "Результатов остальных нет."
+                        ),
                     }
                 )
 
@@ -5593,8 +5674,13 @@ class AgentRuntime:
             # решённое доезжало до модели в обход подмены реплики: правка стояла
             # на месте вызова, а текст приходил другой дорогой. Найдено замером,
             # а не чтением, — третий случай этого класса на проекте.
+            # Тот же гейт, что у подмены реплики выше: остаток годится в дело
+            # только когда он ПОСЧИТАН. Иначе сюда уезжала пустая строка, и
+            # вторая половина просьбы пропадала и этой дорогой тоже.
             "search_query": (
-                context.open_remainder if context.structural_answer else context.search_query
+                context.open_remainder
+                if (context.structural_answer and context.remainder_known)
+                else context.search_query
             )[:700],
             "knowledge_objects": [],
             "graph_entities": [],
@@ -5791,13 +5877,31 @@ class AgentRuntime:
             remaining = 24_000
             for item in attachments:
                 excerpt = str(item.get("transient_text") or "")
+                filename = str(item.get("filename") or item.get("name") or "attachment")
+                caveat = _what_is_missing_from_this_attachment(item)
                 if not excerpt or remaining <= 0:
+                    # Вложение без текста МОЛЧА исчезало из разговора: разбор
+                    # упал — и модель отвечала так, будто файла не присылали
+                    # вовсе. Человек при этом видел, что отправил его. Файл не
+                    # сохраняется («не запоминай»), другого случая сказать
+                    # правду не будет.
+                    if not excerpt and caveat:
+                        transient_excerpts.append(
+                            f"<attachment filename={json.dumps(filename, ensure_ascii=False)} "
+                            f"note={json.dumps(caveat, ensure_ascii=False)}>\n"
+                            "(содержимое недоступно)\n</attachment>"
+                        )
+                    elif excerpt:
+                        transient_excerpts.append(
+                            f"<attachment filename={json.dumps(filename, ensure_ascii=False)} "
+                            'note="не поместилось в этот ход">\n(содержимое недоступно)\n</attachment>'
+                        )
                     continue
                 excerpt = excerpt[:remaining]
                 remaining -= len(excerpt)
-                filename = str(item.get("filename") or item.get("name") or "attachment")
+                note = f" note={json.dumps(caveat, ensure_ascii=False)}" if caveat else ""
                 transient_excerpts.append(
-                    f"<attachment filename={json.dumps(filename, ensure_ascii=False)}>\n"
+                    f"<attachment filename={json.dumps(filename, ensure_ascii=False)}{note}>\n"
                     f"{excerpt}\n</attachment>"
                 )
             if transient_excerpts:

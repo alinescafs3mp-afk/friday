@@ -1373,14 +1373,41 @@ class ExecutionKernel:
                 )
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
-        except (TypeError, ValueError) as exc:
-            # Разбор аргументов случается ДО эффекта: это обычный отказ, и
-            # объявлять его неизвестным нельзя. Если неизвестно всё, слово теряет
-            # смысл и человек перестаёт его читать.
-            await self._audit(actor, name, False, "invalid_arguments", details=details)
-            return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
         except Exception as exc:
+            # Тип исключения НЕ доказывает, что эффекта не было.
+            #
+            # Здесь стояло разделение по типу: `TypeError`/`ValueError` считались
+            # разбором аргументов, то есть отказом до эффекта, а прочие — обычным
+            # сбоем. Оба утверждения о причине ложны, когда исключение прилетело
+            # из середины обработчика: тот мог записать данные и упасть следующей
+            # строкой. «Invalid tool arguments» в этом случае ложно вдвойне — оно
+            # называет причиной аргументы. Указано внешним разбором (Сол,
+            # 2026-08-04).
+            #
+            # Различает не тип исключения, а РИСК инструмента. У наблюдающего
+            # эффекта нет вовсе, и там прежний честный отказ остаётся: если
+            # неизвестно всё, слово «неизвестно» теряет смысл и его перестают
+            # читать. У меняющего данные — сказано, что работа НАЧАЛАСЬ, и не
+            # сказано, чем кончилась.
+            #
+            # Слово «НЕИЗВЕСТНО» намеренно оставлено таймауту: там неизвестен сам
+            # исход, здесь известен сбой и неизвестны его последствия.
             LOGGER.exception("Tool %s failed", name)
+            if changes_data:
+                await self._audit(
+                    actor, name, False, f"failed_after_start:{type(exc).__name__}", details=details
+                )
+                return ToolResult(
+                    name,
+                    False,
+                    error=(
+                        f"Инструмент {name} прервался ошибкой ({type(exc).__name__}) уже НАЧАВ "
+                        "работу. Проверьте, не выполнено ли действие, прежде чем повторять."
+                    ),
+                )
+            if isinstance(exc, TypeError | ValueError):
+                await self._audit(actor, name, False, "invalid_arguments", details=details)
+                return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
             await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
 
@@ -1941,20 +1968,29 @@ class ExecutionKernel:
                     "reason": f"названный день уже прошёл: {occurred_at}",
                     "hint": "Напоминание можно поставить только на будущее.",
                 }
-        entity = knowledge_graph.create_entity(actor.user_id, text[:120], EntityType.EVENT)
-        # Автор напоминания — в источнике временной привязки. В общем архиве
-        # (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и без этой
-        # отметки орган рассылки не мог узнать, чья это просьба: замерено — она
-        # уходила ХОЗЯИНУ архива, а тот, кто просил, не получал ничего.
-        # События из документов остаются без отметки: у них автора нет, и
-        # напоминает о них по-прежнему хозяин архива.
-        knowledge_graph.set_event_time(
-            actor.user_id, entity["id"], occurred_at, source=f"reminder:{actor.own_id}"
-        )
+        # Две записи — одно напоминание, значит одна транзакция.
+        #
+        # Врозь они давали настоящее половинчатое состояние: `set_event_time`
+        # умеет бросить `ValueError` на неразобранной дате, и в графе оставалось
+        # СОБЫТИЕ БЕЗ ВРЕМЕНИ — не напомнит никто и никогда, а человеку сказано,
+        # что напоминание поставлено. Единственный боевой мутатор с двумя
+        # записями вне транзакции; остальные девять давно внутри. Найдено
+        # внешним разбором (Сол, 2026-08-04) при разборе «тип исключения не
+        # доказывает, что эффекта не было».
+        with storage.transaction():
+            entity = knowledge_graph.create_entity(actor.user_id, text[:120], EntityType.EVENT)
+            # Автор напоминания — в источнике временной привязки. В общем архиве
+            # (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и без этой
+            # отметки орган рассылки не мог узнать, чья это просьба: замерено — она
+            # уходила ХОЗЯИНУ архива, а тот, кто просил, не получал ничего.
+            # События из документов остаются без отметки: у них автора нет, и
+            # напоминает о них по-прежнему хозяин архива.
+            knowledge_graph.set_event_time(
+                actor.user_id, entity["id"], occurred_at, source=f"reminder:{actor.own_id}"
+            )
         # Час не теряется: он остаётся в названии, потому что напоминания
         # рассылаются по календарным дням — точное время человек прочитает в
         # тексте, а не пропустит из-за того, что система его выбросила.
-        del storage
         return {
             "created": True,
             "what": text[:120],

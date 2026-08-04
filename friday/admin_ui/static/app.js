@@ -103,8 +103,17 @@ renderers.chats = async gen => {
     </button>`;
   });
   const list = rows.length ? rows.join('') : empty('Пятнице пока никто не писал');
+  // «Файлов: 0» у всех означало бы «никто ничего не присылал». На деле автор
+  // записывается только с 2026-08-04, и у принятого раньше его нет — это
+  // говорится прямо, иначе ноль читается как факт о человеке.
+  const orphan = Number(data.files_without_an_author || 0);
+  const note = orphan
+    ? `<p class="muted">Файлов без записанного автора: ${orphan} — приняты до того, как система начала это записывать, и никому не приписаны.</p>`
+    : '';
+  const total = Number(data.count || 0), shown = Number(data.shown || 0);
+  const more = total > shown ? `<p class="muted">Показано ${shown} из ${total}.</p>` : '';
   setApp(gen, `<div class="chat-layout">
-    <section class="card chat-list"><h2>Кто писал Пятнице</h2>${list}</section>
+    <section class="card chat-list"><h2>Кто писал Пятнице</h2>${list}${more}${note}</section>
     <section class="card chat-thread" id="chatThread">${
       active ? '<div class="empty">Загружаю переписку…</div>' : empty('Выберите человека слева')
     }</section>

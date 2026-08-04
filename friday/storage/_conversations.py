@@ -306,6 +306,19 @@ class ConversationsMixin(StorageShared):
 
         Одним запросом: последнее сообщение каждого человека, сколько всего
         сообщений и сколько файлов он прислал.
+
+        «Сколько файлов он прислал» считается по ПОМЕТКЕ АВТОРА, а не по учётке в
+        строке материала. В общем архиве `user_id` у документа — арендатор, один
+        на всех: та же формула приписывала владельцу все загрузки установки
+        (1695 файлов на живой базе), а каждому участнику — ноль. Число было
+        посчитано верно и отвечало на другой вопрос.
+
+        Пометка пишется с 2026-08-04, и у всего, что принято раньше, автора нет.
+        Догадаться о нём нельзя, а приписать кому-нибудь — значит показать
+        человеку чужие документы как его. Поэтому такие строки не попадают
+        никому и считаются отдельно: `files_without_an_author` — единственный
+        честный ответ «не знаю, чьи», без которого «у Ивана 0 файлов» читается
+        как «Иван ничего не присылал».
         """
         rows = self.execute(
             """
@@ -330,17 +343,51 @@ class ConversationsMixin(StorageShared):
                    lm.conversation_id AS last_conversation_id,
                    (SELECT COUNT(*) FROM messages WHERE user_id=u.id) AS message_count,
                    (SELECT COUNT(*) FROM raw_objects
-                     WHERE user_id=u.id AND content_type='file' AND deleted_at IS NULL) AS file_count
+                     WHERE json_extract(metadata_json,'$.uploaded_by') = u.id
+                       AND content_type='file' AND deleted_at IS NULL) AS file_count
             FROM users u
             LEFT JOIN last_message lm ON lm.user_id = u.id AND lm.rn = 1
             WHERE lm.created_at IS NOT NULL
-               OR (SELECT COUNT(*) FROM raw_objects WHERE user_id=u.id) > 0
+               OR (SELECT COUNT(*) FROM raw_objects
+                    WHERE json_extract(metadata_json,'$.uploaded_by') = u.id) > 0
             ORDER BY COALESCE(lm.created_at, u.created_at) DESC
             LIMIT ?
             """,
             (max(1, min(int(limit), 500)),),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def files_without_an_author(self) -> int:
+        """Сколько файлов в архиве не знают, кто их принёс.
+
+        Ровно тот же вопрос, на который отвечает `arrivals_without_an_author` в
+        надзоре, и по той же причине: пока признак автора не писался, приписать
+        эти файлы некому. Число стоит рядом с лентой, чтобы «у всех по нулю»
+        читалось как «раньше не записывали», а не как «никто ничего не присылал».
+        """
+        row = self.execute(
+            "SELECT COUNT(*) AS n FROM raw_objects "
+            "WHERE content_type='file' AND deleted_at IS NULL "
+            "AND COALESCE(json_extract(metadata_json,'$.uploaded_by'),'') = ''"
+        ).fetchone()
+        return int((row["n"] if row else 0) or 0)
+
+    def count_chat_feed(self) -> int:
+        """Сколько всего людей в ленте — независимо от размера страницы.
+
+        `len(items)` при `limit` отвечает «сколько я попросил», а не «сколько
+        есть». Условие повторяет `list_chat_feed` дословно, иначе два числа
+        разойдутся молча.
+        """
+        row = self.execute(
+            """
+            SELECT COUNT(*) AS n FROM users u
+            WHERE (SELECT COUNT(*) FROM messages WHERE user_id=u.id) > 0
+               OR (SELECT COUNT(*) FROM raw_objects
+                    WHERE json_extract(metadata_json,'$.uploaded_by') = u.id) > 0
+            """
+        ).fetchone()
+        return int((row["n"] if row else 0) or 0)
 
     def chat_feed_cursor(self) -> dict[str, Any]:
         """Отпечаток ленты переписки: изменилось ли что-нибудь.

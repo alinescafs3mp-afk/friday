@@ -67,27 +67,57 @@ def test_a_document_within_the_cap_says_nothing():
     assert result.metadata.get("total_pages") == 3
 
 
-def test_the_person_is_told_how_much_was_read():
-    """Признак доезжает до ФРАЗЫ, которую человек читает.
+def _ingested(settings, storage, data: bytes, filename: str) -> dict:
+    """Настоящий приём файла целиком — тот же, каким идёт вложение из Telegram."""
+    import asyncio
 
-    Дважды на этом проекте признак усечения существовал и терялся по дороге —
-    поэтому проверяется потребитель, а не наличие поля.
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    return asyncio.run(
+        pipeline.ingest_file(
+            "alice",
+            None,
+            data,
+            filename=filename,
+            mime_type="application/pdf",
+            source_ref=f"test:{filename}",
+        )
+    )
+
+
+def test_the_person_is_told_how_much_was_read(settings, storage):
+    """Признак доезжает до ФРАЗЫ, которую человек читает, — по настоящей дороге.
+
+    Первая редакция этого теста звала `_file_fate_line` с рукотворным словарём и
+    была зелёной при оборванной дороге: разборщик клал признак в метаданные
+    файла, приём НЕ клал его в `extraction`, а потребитель читал именно оттуда.
+    То есть тест подменял ровно то место, где была ошибка, — отдельный класс,
+    уже стоивший этому проекту четырёх дней зелёного набора при нерабочем коде.
+
+    Поэтому словарь берётся у настоящего `ingest_file`.
+
+    Мутация: убрать `parse_pages_truncated` из словаря `extraction` в
+    `friday/ingestion/_files.py` — тест краснеет.
     """
     from friday.telegram_bridge._callbacks import _file_fate_line
 
-    line = _file_fate_line(
-        {
-            "promoted": True,
-            "extraction": {
-                "parse_pages_truncated": True,
-                "parse_pages_read": 250,
-                "parse_total_pages": 400,
-            },
-        }
-    )
-    assert "400" in line and "250" in line, f"человеку не сказали, сколько потеряно: {line!r}"
+    result = _ingested(settings, storage, _pdf_with(260), "том.pdf")
 
-    quiet = _file_fate_line(
-        {"promoted": True, "extraction": {"parse_pages_read": 3, "parse_total_pages": 3}}
-    )
-    assert "страниц" not in quiet, f"предупреждение не по делу: {quiet!r}"
+    extraction = result.get("extraction") or {}
+    assert extraction.get("parse_pages_truncated"), "признак не доехал от разборщика до приёма"
+    assert int(extraction.get("parse_total_pages") or 0) == 260
+
+    line = _file_fate_line(result)
+    assert "260" in line and "250" in line, f"человеку не сказали, сколько потеряно: {line!r}"
+
+
+def test_a_thin_document_says_nothing_about_pages(settings, storage):
+    """Ошибка в другую сторону: предупреждение не по делу обесценивает те, что по делу."""
+    from friday.telegram_bridge._callbacks import _file_fate_line
+
+    result = _ingested(settings, storage, _pdf_with(3), "тонкий.pdf")
+
+    assert not (result.get("extraction") or {}).get("parse_pages_truncated")
+    assert "страниц," not in _file_fate_line(result)

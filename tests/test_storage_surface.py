@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 323
+EXPECTED_MEMBER_COUNT = 325
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -188,6 +188,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_chunked_knowledge_objects": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_chunk_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
     "count_knowledge_embeddings": "(self, user_id: 'str | None' = None) -> 'int'",
+    "count_chat_feed": "(self) -> 'int'",
     "count_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False) -> 'int'",
     "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
@@ -214,6 +215,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "eval_case_health": "(self, user_id: 'str', *, cases: 'list[dict[str, Any]] | None' = None) -> 'dict[str, Any]'",
     "execute": "(self, sql: 'str', params: 'tuple | dict | None' = None) -> 'sqlite3.Cursor'",
     "export_user": "(self, user_id: 'str') -> 'dict[str, Any]'",
+    "files_without_an_author": "(self) -> 'int'",
     "find_api_token": "(self, token_sha256: 'str') -> 'dict[str, Any] | None'",
     "find_duplicate_candidates": "(self, user_id: 'str', *, min_confidence: 'float' = 0.5) -> 'list[EntityResolutionCandidate]'",
     "find_entities_by_normalized_names": "(self, user_id: 'str', names: 'Sequence[str]', *, include_aliases: 'bool' = True) -> 'list[dict[str, Any]]'",

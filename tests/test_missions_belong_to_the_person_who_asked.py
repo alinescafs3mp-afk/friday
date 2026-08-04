@@ -1,20 +1,32 @@
-"""«Мои миссии» — это мои, а не всех участников общего архива.
+"""Чужую миссию видно всем, а трогать её может только автор.
 
 Найдено ревью уязвимых участков 2026-08-04. Четыре маршрута миссий звали службу с
-`actor.user_id`, а в общем архиве это один арендатор на всех.
+`actor.user_id`, а в общем архиве это один арендатор на всех: участник набирал
+/missions и получал под заголовком «Ваши миссии» цели ВСЕХ участников, и рядом с
+каждой чужой строкой стояли кнопки «Запустить» и «Остановить». Остановка чужой
+работы писалась в журнал под арендатором, то есть выяснить, кто её остановил,
+было нельзя.
 
-Что это значило на живой настройке: участник набирает /missions и получает
-заголовок «Ваши миссии: N», под которым перечислены цели ВСЕХ участников. Цель —
-свободный текст просьбы («собрать всё по личному делу такого-то», «подготовить
-справку по увольнению»), и рядом с каждой чужой строкой стояли кнопки «Запустить»
-и «Остановить». Остановка чужой работы при этом писалась в журнал под арендатором,
-то есть выяснить, кто её остановил, было нельзя.
+Первая правка того же дня закрыла обе половины разом — и показ, и управление.
+Владелец, отвечая на прямой вопрос о границах, решил иначе: **«все видят всех»**.
+Общий архив на то и общий, люди работают над одним корпусом, и не видеть, что по
+нему уже идёт, значит запускать одну работу дважды.
 
-Владельцу границы нет, и это не упущение: миссии идут по его корпусу, надзор —
-часть его роли. Участник видит и трогает только своё.
+Поэтому половины разведены:
 
-Столбец `created_by` для этого уже существовал; с правкой того же дня он несёт
-ЧЕЛОВЕКА на всех дорогах, а не имя канала.
+  показ      — без границы вовсе, решение владельца;
+  управление — автору миссии либо хозяину архива.
+
+Смотреть и вмешиваться — разные права, и одно решение их не объединяет.
+
+Отказ на чужой миссии теперь ЧЕСТНЫЙ. Пока чужие были не видны, «чужая» и
+«несуществующая» обязаны были отвечать одинаково, иначе разница ответов сама
+сообщала бы, что миссия есть. Теперь она стоит в списке у всех, скрывать нечего,
+и «не найдена» на видимую строку было бы просто неправдой.
+
+Автор в строке миссии записан по-разному в зависимости от дороги: через HTTP это
+`own_id`, а через Пятницу — `agent:<own_id>`. Сравнение с одним `own_id`
+объявляло бы чужой ту миссию, которую человек сам попросил завести в разговоре.
 """
 
 from __future__ import annotations
@@ -27,7 +39,7 @@ from friday.execution_kernel import ExecutionKernel
 from friday.executive import ExecutiveService
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
-from friday.permissions import AuthorizationService
+from friday.permissions import ActorContext, AuthorizationService
 from friday.web_surfer import WebSurfer
 
 
@@ -70,9 +82,12 @@ def executive(settings, storage):
     return service
 
 
+# --- служба: граница по автору существует и работает -------------------------
+
+
 @pytest.mark.asyncio
-async def test_a_participant_sees_only_his_own_goals(executive) -> None:
-    """Мутация: убрать границу по автору — снова видны чужие цели."""
+async def test_the_service_can_narrow_to_one_author(executive) -> None:
+    """Мутация: убрать границу по автору — управление перестаёт её иметь."""
     await executive.create_mission("tenant", "личное дело Петрова", created_by="person-a")
     await executive.create_mission("tenant", "справка по увольнению", created_by="person-b")
 
@@ -82,7 +97,7 @@ async def test_a_participant_sees_only_his_own_goals(executive) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_participant_cannot_stop_another_persons_mission(executive) -> None:
+async def test_the_service_refuses_to_stop_a_foreign_mission(executive) -> None:
     """Худший исход: чужая работа остановлена, и в журнале стоит арендатор."""
     theirs = await executive.create_mission("tenant", "чужая цель", created_by="person-b")
 
@@ -94,7 +109,7 @@ async def test_a_participant_cannot_stop_another_persons_mission(executive) -> N
 
 
 @pytest.mark.asyncio
-async def test_a_participant_cannot_start_another_persons_mission(executive) -> None:
+async def test_the_service_refuses_to_start_a_foreign_mission(executive) -> None:
     """Запуск чужой работы — та же граница, и её легко забыть на одной из кнопок."""
     theirs = await executive.create_mission("tenant", "чужая цель", created_by="person-b")
 
@@ -103,46 +118,132 @@ async def test_a_participant_cannot_start_another_persons_mission(executive) -> 
     assert started is None
 
 
+# --- дороги: показ без границы, управление с границей ------------------------
+
+
+def _actor(person: str) -> ActorContext:
+    """Участник общего архива: арендатор общий, человек — он сам."""
+    return ActorContext(
+        user_id="tenant",
+        preset_key="owner",
+        source="telegram-bridge",
+        shared_tenant=True,
+        person_id=person,
+    )
+
+
+def _request(executive, actor: ActorContext):
+    class _Request:
+        def __init__(self) -> None:
+            self.app = type(
+                "App",
+                (),
+                {
+                    "state": type(
+                        "S",
+                        (),
+                        {"executive": executive, "auth_service": executive.auth_service},
+                    )()
+                },
+            )()
+            self.state = type("RS", (), {"actor": actor})()
+
+    return _Request()
+
+
 @pytest.mark.asyncio
-async def test_a_foreign_mission_looks_exactly_like_a_missing_one(executive) -> None:
-    """Разница ответов сама сообщила бы, что миссия есть и чья она."""
-    theirs = await executive.create_mission("tenant", "чужая цель", created_by="person-b")
+async def test_a_participant_sees_every_goal(executive) -> None:
+    """Решение владельца: «все видят всех».
 
-    foreign = executive.get_mission_view(theirs["id"], "tenant", created_by="person-a")
-    missing = executive.get_mission_view("msn_nonexistent", "tenant", created_by="person-a")
-
-    assert foreign is None and missing is None
-
-
-@pytest.mark.asyncio
-async def test_the_owner_still_sees_everything(executive) -> None:
-    """Обратная сторона: надзор владельца остаётся.
-
-    Слишком строгая правка отняла бы у него общий обзор — а миссии идут по его
-    корпусу, и это его роль, а не утечка.
+    Мутация: вернуть границу в `_visible_to` — тест краснеет.
     """
+    from friday.executive.api import list_missions
+
     await executive.create_mission("tenant", "цель одного", created_by="person-a")
     await executive.create_mission("tenant", "цель другого", created_by="person-b")
 
-    assert len(executive.list_mission_views("tenant")) == 2
+    answer = await list_missions(
+        _request(executive, _actor("person-a")), status=None, limit=50, offset=0
+    )
+
+    assert {row["goal"] for row in answer["items"]} == {"цель одного", "цель другого"}
 
 
-def test_the_routes_ask_only_for_mine() -> None:
-    """Проверяется ПОДКЛЮЧЕНИЕ: служба умеет границу, если ей дадут человека.
+@pytest.mark.asyncio
+async def test_a_participant_cannot_stop_what_he_can_see(executive) -> None:
+    """Видно — не значит можно. Мутация: снять проверку в `_mission_to_control`."""
+    from fastapi import HTTPException
 
-    Тесты службы остались бы зелёными при маршрутах, передающих арендатора, —
-    ровно так дефект и жил.
+    from friday.executive.api import stop_mission
+
+    theirs = await executive.create_mission("tenant", "чужая цель", created_by="person-b")
+
+    with pytest.raises(HTTPException) as denied:
+        await stop_mission(theirs["id"], _request(executive, _actor("person-a")))
+
+    assert denied.value.status_code == 403, "чужая миссия остановлена участником"
+    assert "чужая" in str(denied.value.detail).lower()
+    assert executive.get_mission_view(theirs["id"], "tenant")["status"] != "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_mission_and_a_foreign_one_answer_differently(executive) -> None:
+    """Раз чужая видна всем, «не найдена» на неё было бы неправдой."""
+    from fastapi import HTTPException
+
+    from friday.executive.api import start_mission
+
+    theirs = await executive.create_mission("tenant", "чужая цель", created_by="person-b")
+    request = _request(executive, _actor("person-a"))
+
+    with pytest.raises(HTTPException) as foreign:
+        await start_mission(theirs["id"], request)
+    with pytest.raises(HTTPException) as missing:
+        await start_mission("msn_nonexistent", request)
+
+    assert foreign.value.status_code == 403
+    assert missing.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_mission_asked_for_in_conversation_is_still_mine(executive) -> None:
+    """Через Пятницу автор пишется `agent:<own_id>` — это тот же человек.
+
+    Мутация: сравнивать только с `own_id` — участник теряет власть над теми
+    миссиями, которые сам и попросил завести, а их у него большинство.
     """
-    import inspect
+    from friday.executive.api import stop_mission
 
-    from friday.executive import api
+    mine = await executive.create_mission("tenant", "моя цель", created_by="agent:person-a")
 
-    for name in ("list_missions", "get_mission", "start_mission", "stop_mission"):
-        source = inspect.getsource(getattr(api, name))
-        assert "_only_mine(actor)" in source, f"{name} снова идёт без человека"
+    answer = await stop_mission(mine["id"], _request(executive, _actor("person-a")))
 
-    helper = inspect.getsource(api._only_mine)  # noqa: SLF001
-    assert 'getattr(actor, "is_owner", False)' in helper, "владелец потерял надзор"
+    assert answer["mission"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_the_archive_owner_still_controls_everything(executive) -> None:
+    """Обратная сторона: у хозяина архива власть остаётся."""
+    from friday.executive.api import stop_mission
+
+    theirs = await executive.create_mission("tenant", "чужая цель", created_by="person-b")
+
+    # Арендатор в стенде называется "tenant", поэтому хозяином здесь выступает
+    # актор, у которого человек и арендатор совпадают, — то же условие, что и в
+    # `ActorContext.is_owner`.
+    owner = ActorContext(
+        user_id="tenant",
+        preset_key="owner",
+        source="api-token",
+        shared_tenant=True,
+        person_id="tenant",
+    )
+    answer = await stop_mission(theirs["id"], _request(executive, owner))
+
+    assert answer["mission"]["status"] == "cancelled"
+
+
+# --- права шага --------------------------------------------------------------
 
 
 @pytest.mark.asyncio
