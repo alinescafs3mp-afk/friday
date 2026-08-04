@@ -502,6 +502,65 @@ class RuntimeMixin(StorageShared):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def register_data_source(
+        self,
+        user_id: str,
+        *,
+        name: str,
+        kind: str,
+        dsn_env: str,
+        description: str = "",
+        created_by: str = "",
+    ) -> dict[str, Any]:
+        """Объявить внешнюю базу источником. Строки подключения здесь НЕТ.
+
+        Хранится имя переменной окружения: резервные копии этой базы лежат рядом
+        с архивом, а экспорт аккаунта отдаётся человеку целиком — пароль от чужой
+        боевой базы уехал бы и туда, и туда.
+        """
+
+        with self.transaction() as conn:
+            conn.execute(
+                """INSERT INTO data_sources(name, user_id, kind, dsn_env, description,
+                   created_at, created_by)
+                   VALUES(?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET kind=excluded.kind,
+                   dsn_env=excluded.dsn_env, description=excluded.description""",
+                (name, user_id, kind, dsn_env, description, utc_now(), created_by),
+            )
+        stored = self.get_data_source(user_id, name)
+        if stored is None:  # pragma: no cover - только при гонке удаления
+            raise ValueError("Источник исчез сразу после объявления")
+        return stored
+
+    def get_data_source(self, user_id: str, name: str) -> dict[str, Any] | None:
+        row = self.execute(
+            "SELECT * FROM data_sources WHERE name=? AND user_id=?", (name, user_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_data_sources(self, user_id: str) -> list[dict[str, Any]]:
+        rows = self.execute(
+            "SELECT * FROM data_sources WHERE user_id=? ORDER BY name", (user_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def forget_data_source(self, user_id: str, name: str) -> bool:
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM data_sources WHERE name=? AND user_id=?", (name, user_id)
+            )
+        return cursor.rowcount > 0
+
+    def touch_data_source(self, user_id: str, name: str) -> None:
+        """Отметить, что источником пользовались: молчащий источник видно сразу."""
+
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE data_sources SET last_used_at=? WHERE name=? AND user_id=?",
+                (utc_now(), name, user_id),
+            )
+
     def live_service_heartbeat_age(self, *, fresh_within: float = 180.0) -> float | None:
         """Сколько секунд назад живая служба последний раз отметилась, или None.
 

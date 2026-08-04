@@ -1535,6 +1535,117 @@ def _retag_documents(args: argparse.Namespace) -> int:
     return 0
 
 
+def _data_source(args: argparse.Namespace) -> int:
+    """Объявить, показать, проверить или забыть внешнюю базу-источник.
+
+    Заказ владельца 2026-08-05: «научить Пятницу ходить за данными в какую-то
+    СУБД по сети». Это не переезд — свой архив остаётся на месте, а внешняя база
+    становится ещё одним источником, как интернет или присланный файл.
+
+    Строка подключения задаётся ИМЕНЕМ переменной окружения и в базу не
+    попадает: резервные копии лежат рядом с архивом, а экспорт аккаунта
+    отдаётся человеку целиком — пароль от чужой боевой базы уехал бы и туда, и
+    туда, и обнаружилось бы это не скоро.
+    """
+
+    import os
+
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.data_sources import (
+        DataSource,
+        SourceUnavailableError,
+        UnsafeQueryError,
+        describe_source,
+        run_query,
+    )
+    from friday.storage import init_storage
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    storage = init_storage(settings)
+    action = str(getattr(args, "action", "list"))
+    try:
+        if action == "list":
+            sources = storage.list_data_sources(args.user)
+            if not sources:
+                print("Источников не объявлено.")
+                return 0
+            for row in sources:
+                secret = "задана" if os.environ.get(str(row["dsn_env"])) else "НЕ ЗАДАНА"
+                used = row["last_used_at"] or "ни разу"
+                print(f"{row['name']:20s} {row['kind']:9s} {row['dsn_env']:28s} строка: {secret}; спрашивали: {used}")
+                if row["description"]:
+                    print(f"    {row['description']}")
+            return 0
+
+        if action == "add":
+            source = DataSource(
+                name=args.name, kind=args.kind, dsn_env=args.dsn_env, description=args.description or ""
+            )
+            source.validate()
+            storage.register_data_source(
+                args.user,
+                name=source.name,
+                kind=source.kind,
+                dsn_env=source.dsn_env,
+                description=source.description,
+                created_by=args.user,
+            )
+            print(f"Источник «{source.name}» объявлен ({source.kind}).")
+            if not os.environ.get(source.dsn_env):
+                # Не отказ: объявить источник заранее законно. Но молчать нельзя —
+                # иначе первый же запрос упадёт непонятной ошибкой.
+                print(
+                    f"⚠️  Переменная {source.dsn_env} сейчас не задана. Строка подключения "
+                    "должна лежать в ней, а не в базе.",
+                    file=sys.stderr,
+                )
+            return 0
+
+        if action == "forget":
+            print("Забыт." if storage.forget_data_source(args.user, args.name) else "Такого источника нет.")
+            return 0
+
+        found = storage.get_data_source(args.user, args.name)
+        if found is None:
+            print(f"Источник «{args.name}» не объявлен.", file=sys.stderr)
+            return 1
+        source = DataSource(
+            name=str(found["name"]),
+            kind=str(found["kind"]),
+            dsn_env=str(found["dsn_env"]),
+            description=str(found["description"] or ""),
+        )
+        dsn = os.environ.get(source.dsn_env, "")
+        if not dsn:
+            print(
+                f"Переменная {source.dsn_env} не задана — подключаться нечем.", file=sys.stderr
+            )
+            return 2
+        try:
+            if action == "describe":
+                described = describe_source(source, dsn)
+                print(f"Таблиц: {len(described['tables'])}")
+                for table, columns in list(described["tables"].items())[:40]:
+                    names = ", ".join(f"{item['column']} {item['type']}" for item in columns[:12])
+                    print(f"  {table}: {names}{' …' if len(columns) > 12 else ''}")
+                if described["truncated"]:
+                    print("⚠️  Описание схемы обрезано потолком строк — показано не всё.", file=sys.stderr)
+            else:
+                result = run_query(source, dsn, args.query)
+                storage.touch_data_source(args.user, source.name)
+                print(" | ".join(result["columns"]))
+                for line in result["rows"][:50]:
+                    print(" | ".join(str(line.get(column, "")) for column in result["columns"]))
+                print(f"Строк: {len(result['rows'])}{' (обрезано потолком)' if result['truncated'] else ''}")
+        except (UnsafeQueryError, SourceUnavailableError) as error:
+            print(str(error), file=sys.stderr)
+            return 2
+    finally:
+        storage.close()
+    return 0
+
+
 def _dismiss_series_conflicts(args: argparse.Namespace) -> int:
     """Снять с очереди пары, которые сегодняшнее правило и не завело бы.
 
@@ -2376,6 +2487,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retag.add_argument("--report", help="Write every decision as JSON lines to this file")
     retag.set_defaults(handler=_retag_documents)
+
+    source = sub.add_parser(
+        "data-source",
+        help="Declare, inspect or query an external SQL database Friday may read",
+    )
+    source.add_argument("action", choices=("list", "add", "forget", "describe", "query"))
+    source.add_argument("--user", required=True, help="Tenant the source belongs to")
+    source.add_argument("--name", default="", help="Short name of the source")
+    source.add_argument("--kind", default="sqlite", choices=("sqlite", "postgres", "mysql"))
+    source.add_argument(
+        "--dsn-env",
+        default="",
+        dest="dsn_env",
+        help="Environment variable holding the connection string (never stored in the database)",
+    )
+    source.add_argument("--description", default="", help="What lives in this database")
+    source.add_argument("--query", default="", help="A single SELECT to run (query action)")
+    source.set_defaults(handler=_data_source)
 
     series = sub.add_parser(
         "dismiss-series-conflicts",

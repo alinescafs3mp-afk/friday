@@ -1089,6 +1089,9 @@ class ExecutionKernel:
             "web_research": self._web_research,
             "entity_lookup": self._entity_lookup,
             "relation_end": self._relation_end,
+            "data_sources": self._data_sources,
+            "data_schema": self._data_schema,
+            "data_query": self._data_query,
             "entity_create": self._entity_create,
             "entity_link": self._entity_link,
             "kg_stats": self._kg_stats,
@@ -2682,6 +2685,78 @@ class ExecutionKernel:
             },
         )
 
+    def _open_source(self, actor: ActorContext, name: str) -> tuple[Any, str]:
+        """Найти объявленный источник и строку подключения к нему.
+
+        Строка живёт в переменной окружения, а не в базе: резервные копии архива
+        переживают всё, и пароль от чужой боевой системы уехал бы в них.
+        """
+
+        import os
+
+        from friday.data_sources import DataSource
+
+        storage, _, _, _ = self._require_services()
+        row = storage.get_data_source(actor.user_id, str(name or "").strip())
+        if row is None:
+            raise ValueError(f"Источник «{name}» не объявлен")
+        source = DataSource(
+            name=str(row["name"]),
+            kind=str(row["kind"]),
+            dsn_env=str(row["dsn_env"]),
+            description=str(row["description"] or ""),
+        )
+        dsn = os.environ.get(source.dsn_env, "")
+        if not dsn:
+            raise ValueError(
+                f"Источник «{source.name}» объявлен, но переменная {source.dsn_env} не задана — "
+                "подключаться нечем"
+            )
+        return source, dsn
+
+    async def _data_sources(self, *, actor: ActorContext) -> dict[str, Any]:
+        """Какие внешние базы объявлены и о чём они."""
+
+        storage, _, _, _ = self._require_services()
+        rows = await run_blocking(storage.list_data_sources, actor.user_id)
+        return {
+            "sources": [
+                {
+                    "name": str(row["name"]),
+                    "kind": str(row["kind"]),
+                    "description": str(row["description"] or ""),
+                }
+                for row in rows
+            ]
+        }
+
+    async def _data_schema(self, *, actor: ActorContext, source: str) -> dict[str, Any]:
+        """Таблицы и столбцы источника — то, по чему составляется запрос.
+
+        Без этого модель угадывает имена таблиц, а угаданное имя даёт не пустой
+        ответ, а ОШИБКУ, и выглядит она как «источник не работает».
+        """
+
+        from friday.data_sources import describe_source
+
+        declared, dsn = self._open_source(actor, source)
+        return await run_blocking(describe_source, declared, dsn)
+
+    async def _data_query(self, *, actor: ActorContext, source: str, sql: str) -> dict[str, Any]:
+        """Одно чтение во внешней базе. Запрос возвращается вместе с ответом.
+
+        Возвращается намеренно: человек должен видеть, ЧТО именно спросили в
+        чужой системе, а не только полученные числа.
+        """
+
+        from friday.data_sources import run_query
+
+        declared, dsn = self._open_source(actor, source)
+        storage, _, _, _ = self._require_services()
+        result = await run_blocking(run_query, declared, dsn, sql)
+        await run_blocking(storage.touch_data_source, actor.user_id, declared.name)
+        return result
+
     async def _relation_end(
         self,
         *,
@@ -3776,6 +3851,38 @@ class ExecutionKernel:
                 },
             },
             ["name"],
+            risk="observe",
+        )
+        spec(
+            "data_sources",
+            "Какие ВНЕШНИЕ базы подключены и о чём они. Зови первым, если вопрос про "
+            "данные, которых нет в архиве: кадры, склад, заявки, любая рабочая система.",
+            "data.read",
+            {},
+            [],
+            risk="observe",
+        )
+        spec(
+            "data_schema",
+            "Таблицы и столбцы внешней базы. Зови ПЕРЕД `data_query`: без схемы имя "
+            "таблицы приходится угадывать, а угаданное имя даёт не пустой ответ, а ошибку.",
+            "data.read",
+            {"source": {"type": "string", "description": "Имя источника из `data_sources`"}},
+            ["source"],
+            risk="observe",
+        )
+        spec(
+            "data_query",
+            "Одно чтение во внешней базе: ровно один SELECT, без точки с запятой. Запись "
+            "запрещена структурно — не пытайся. Ответ содержит и строки, и сам запрос: "
+            "покажи человеку, ЧТО именно ты спросил в чужой системе. Строк отдаётся не "
+            "больше двухсот, и если обрезано, это сказано в ответе — не выдавай кусок за всё.",
+            "data.read",
+            {
+                "source": {"type": "string", "description": "Имя источника из `data_sources`"},
+                "sql": {"type": "string", "description": "Один SELECT по схеме из `data_schema`"},
+            },
+            ["source", "sql"],
             risk="observe",
         )
         spec(
