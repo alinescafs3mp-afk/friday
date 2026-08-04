@@ -356,11 +356,46 @@ def test_an_instruction_turn_does_not_drag_the_archive_in(settings, storage) -> 
     На корпусе в полторы тысячи объектов поиск находит что-нибудь почти всегда, и
     рядом с «поняла» уехал бы пересказ документа про порядок приветствий. Тот же
     класс, что и с бытовыми репликами.
+
+    Проверяется ПОВЕДЕНИЕ, а не текст исходника. Прежняя редакция искала строку
+    `context.knowledge_hits = []` в окне 400 знаков после проверки вида — и покраснела
+    от комментария, добавленного рядом. Тест, который ломается от объяснения, мешает
+    объяснять; на этом проекте такой случай уже третий.
     """
-    source = inspect.getsource(AgentRuntime._prepare_context)
-    marker = source.find('startswith("правило")')
-    assert marker > 0, "ход с указанием не распознаётся в сборке контекста"
-    assert "context.knowledge_hits = []" in source[marker : marker + 400]
+    import asyncio
+
+    runtime = _runtime(storage, NOTHING)
+    storage.ensure_user("alice")
+
+    async def _kind_is_a_rule(message, previous_turn=""):
+        del message, previous_turn
+        return ("правило", "не здороваться")
+
+    async def _confirms(message, existing, previous_turn=""):
+        del message, existing, previous_turn
+        return ("remember", "не здороваться", "", "")
+
+    runtime._web_query_by_arbiter = _kind_is_a_rule  # noqa: SLF001
+    # Второй арбитр ПОДТВЕРЖДАЕТ указание — только тогда архив и выбрасывается.
+    # Подмена нужна потому, что модель в этом стенде молчит, а неподтверждённое
+    # указание с недавних пор возвращает найденное обратно (см. соседний тест).
+    runtime._standing_rule_by_arbiter = _confirms  # noqa: SLF001
+    runtime.storage.search_knowledge = lambda *a, **k: [  # type: ignore[method-assign]
+        {"id": "kn_1", "title": "Порядок приветствий", "content": "здороваться положено", "score": 0.9}
+    ]
+
+    context = asyncio.run(
+        runtime._prepare_context(  # noqa: SLF001
+            "alice",
+            "не здоровайся со мной",
+            conversation_id="c1",
+            prior_history=[],
+            person_id="alice",
+        )
+    )
+    assert not context.knowledge_hits, (
+        "рядом с «поняла» уехал бы пересказ документа про порядок приветствий"
+    )
 
 
 def test_the_learning_is_wired_into_the_turn() -> None:
@@ -423,3 +458,52 @@ def test_the_list_has_a_ceiling(settings, storage) -> None:
 
     agent = AgentRuntime(settings, storage)
     assert agent._standing_rules("alice") == stored
+
+
+def test_an_unconfirmed_instruction_gives_the_archive_back(settings, storage) -> None:
+    """Если указание не подтвердилось, найденное возвращается.
+
+    Вид определяет ПЕРВЫЙ арбитр, а подтверждает второй — тот, что видит прежние
+    правила и предысторию. Он же исправляет ошибки первого: замерено 2026-08-04, что
+    «Поверка манометра МП-100 выполнена 14 марта 2026, погрешность 0.4%» получает вид
+    «правило». Это факт с датой и числом — ровно тот материал, ради которого архив
+    существует.
+
+    Порядок был обратный: документы выбрасывались по вердикту первого, и второй уже
+    не мог их вернуть. Человек, сообщивший факт, получал ответ без архива и без
+    объяснения, почему.
+
+    Мутация: убрать возврат `found_before_the_rule` — тест краснеет.
+    """
+    import asyncio
+
+    runtime = _runtime(storage, NOTHING)
+    storage.ensure_user("alice")
+
+    async def _kind_is_a_rule(message, previous_turn=""):
+        del message, previous_turn
+        return ("правило", "всегда писать дату рядом с цифрами")
+
+    async def _does_not_confirm(message, existing, previous_turn=""):
+        del message, existing, previous_turn
+        return ("", "", "", "")
+
+    runtime._web_query_by_arbiter = _kind_is_a_rule  # noqa: SLF001
+    runtime._standing_rule_by_arbiter = _does_not_confirm  # noqa: SLF001
+    runtime.storage.search_knowledge = lambda *a, **k: [  # type: ignore[method-assign]
+        {"id": "kn_1", "title": "Поверки за март", "content": "МП-100, 0.4%", "score": 0.9}
+    ]
+
+    context = asyncio.run(
+        runtime._prepare_context(  # noqa: SLF001
+            "alice",
+            "Поверка манометра МП-100 выполнена 14 марта 2026, погрешность 0.4%",
+            conversation_id="c1",
+            prior_history=[],
+            person_id="alice",
+        )
+    )
+    assert context.knowledge_hits, (
+        "указание не подтвердилось, а найденные документы уже выброшены — "
+        "человек, сообщивший факт, получит ответ без архива"
+    )

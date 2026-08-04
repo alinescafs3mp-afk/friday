@@ -464,6 +464,7 @@ class ConversationsMixin(StorageShared):
         self,
         user_id: str,
         *,
+        person_id: str = "",
         since: str,
         until: str,
         limit: int = 60,
@@ -501,7 +502,10 @@ class ConversationsMixin(StorageShared):
                FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id
                WHERE m.user_id=? AND m.created_at >= ? AND m.created_at <= ?
                ORDER BY m.created_at ASC LIMIT ?""",
-            (user_id, since, until, fetch_window),
+            # Переписка — по ЧЕЛОВЕКУ. Знания ниже — по арендатору: они общие по
+            # прямой просьбе владельца. Один параметр на обе границы означал, что
+            # участник видел реплики владельца вместо своих (воспроизведено).
+            (person_id or user_id, since, until, fetch_window),
         ):
             events.append(
                 {
@@ -548,16 +552,32 @@ class ConversationsMixin(StorageShared):
             picked[-1] = events[-1]
         return picked
 
-    def count_what_happened(self, user_id: str, *, since: str, until: str) -> dict[str, int]:
+    def count_what_happened(
+        self, user_id: str, *, person_id: str = "", since: str, until: str
+    ) -> dict[str, int]:
         """Сколько всего событий в промежутке — отдельным счётом, без потолка.
 
         Длина показанной страницы — не факт о промежутке: сказать «за этот час
         было 60 событий», показав ровно свои 60, значит выдать размер запроса за
         свойство архива.
+
+        В общем архиве это ДВЕ РАЗНЫЕ границы, и до правки их обслуживал один
+        параметр. Переписка личная — она лежит под `own_id` человека; документы и
+        знания общие по прямой просьбе владельца — они лежат под арендатором. Один
+        `user_id` на обе означал, что участник, спросивший «что было вчера»,
+        получал реплики ВЛАДЕЛЬЦА дословно, а своих не видел вовсе.
+
+        Воспроизведено на изолированном стенде: участник получил чужую фразу вместе
+        с ролью и заголовком разговора. На живой базе под арендатором лежит 2862
+        сообщения владельца против 92/84/42/14/2 у участников.
+
+        Поэтому `person_id` — отдельный параметр, и подставлять в него арендатора
+        нельзя. Пустой означает «те же границы, что и раньше» — обычная настройка,
+        где человек и арендатор совпадают.
         """
         messages = self.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE user_id=? AND created_at >= ? AND created_at <= ?",
-            (user_id, since, until),
+            (person_id or user_id, since, until),
         ).fetchone()["c"]
         documents = self.execute(
             """SELECT COUNT(*) AS c FROM knowledge_objects

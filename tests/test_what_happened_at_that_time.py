@@ -495,3 +495,83 @@ def test_a_question_about_a_document_is_not_a_timeline_question():
     assert not _ASKS_WHAT_HAPPENED.search("расскажи про приказ от 29 июля")
     assert _ASKS_WHAT_HAPPENED.search("что было 29 июля")
     assert _ASKS_WHAT_HAPPENED.search("что происходило вчера")
+
+
+@pytest.mark.asyncio
+async def test_the_timeline_shows_my_conversation_not_the_owners(settings, storage):
+    """Лента показывает МОЮ переписку и ОБЩИЕ документы — это разные границы.
+
+    Найдено большим ревью 2026-08-04 и воспроизведено: инструмент звал ленту с
+    `actor.user_id`, а в общем архиве это арендатор. Участник, спросивший «что было
+    вчера», получал реплики ВЛАДЕЛЬЦА дословно — с ролью и заголовком разговора, —
+    а своих не видел ни одной. На живой базе под арендатором лежало 2862 сообщения
+    владельца против 92/84/42/14/2 у участников.
+
+    Простой заменой на `own_id` это не чинится, и в этом суть: один параметр
+    обслуживал ДВЕ границы. Переписка личная, документы общие по прямой просьбе
+    владельца — все 1562 знания живой базы лежат под арендатором, и замена увела
+    бы их из ленты целиком. Поэтому параметра теперь два.
+
+    Мутация: вернуть `person_id=actor.user_id` — краснеет утечка; убрать `user_id`
+    из запроса документов — краснеет их пропажа.
+    """
+    from friday.execution_kernel import ExecutionKernel
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
+    from friday.storage.models import KnowledgeObject, RawObject, new_id, utc_now
+    from friday.web_surfer import WebSurfer
+
+    tenant = LEGACY_OWNER_USER_ID
+    storage.ensure_user(tenant, preset_key="owner")
+    storage.ensure_user("bob", preset_key="owner")
+    for who, text in ((tenant, "надо заказать перегородки"), ("bob", "уточню смету у подрядчика")):
+        conversation = storage.create_conversation(who, "рабочий")
+        storage.store_message(conversation["id"], who, "user", text)
+    raw = storage.store_raw_object(
+        RawObject(
+            id=new_id("raw"),
+            user_id=tenant,
+            source="api",
+            source_ref="",
+            raw_content="итого 480 000",
+            content_type="text",
+            metadata_json={},
+            content_hash=new_id("h"),
+            version=1,
+            received_at=utc_now(),
+            created_at=utc_now(),
+        )
+    )
+    storage.store_knowledge_object(
+        KnowledgeObject(
+            id=new_id("kn"),
+            user_id=tenant,
+            raw_object_id=raw.id,
+            title="Смета за июль",
+            content="итого 480 000",
+            summary="сводка расходов",
+            knowledge_kind="note",
+            content_type="text/plain",
+        )
+    )
+
+    auth = AuthorizationService(storage, shared_tenant=tenant)
+    graph = KnowledgeGraph(storage)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(storage, graph, WebSurfer(settings), IngestionPipeline(settings, storage, graph))
+
+    bob = auth.actor_for_user("bob", source="test")
+    assert bob.user_id == tenant and bob.own_id == "bob", "стенд собран не как общий архив"
+
+    result = await kernel.execute("what_happened", {"since": "сегодня"}, actor=bob)
+    assert result.success, f"инструмент отказал: {result.error!r}"
+    seen = str(result.data)
+    assert "перегородки" not in seen, "участник читает переписку владельца"
+    assert "подрядчика" in seen, "участник не видит собственной реплики"
+    assert "Смета за июль" in seen, "общий документ пропал из ленты"
+
+    owner = auth.actor_for_user(tenant, source="test")
+    mine = str((await kernel.execute("what_happened", {"since": "сегодня"}, actor=owner)).data)
+    assert "перегородки" in mine, "владелец потерял собственную переписку"
+    assert "подрядчика" not in mine, "владельцу показали чужую реплику в ленте"

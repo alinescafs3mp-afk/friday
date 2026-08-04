@@ -2051,9 +2051,16 @@ class ExecutionKernel:
         until_utc = datetime.fromisoformat(end_local).replace(tzinfo=zone).astimezone(UTC)
         if until_utc < since_utc:
             since_utc, until_utc = until_utc, since_utc
+        # Переписка — ЛИЧНАЯ, документы — общие, и это две разные границы.
+        # До правки обе шли одним `actor.user_id`: в общем архиве это арендатор, и
+        # любой участник, спросивший «что было вчера», получал реплики ВЛАДЕЛЬЦА
+        # дословно — с ролью и заголовком разговора, — а своих не видел ни одной.
+        # Воспроизведено на изолированном стенде; тот же класс уже чинили в
+        # `_message_search` и `_upcoming`.
         events = await run_blocking(
             storage.what_happened,
             actor.user_id,
+            person_id=actor.own_id,
             since=since_utc.isoformat(),
             until=until_utc.isoformat(),
             limit=max(1, min(int(limit), 200)),
@@ -2061,6 +2068,7 @@ class ExecutionKernel:
         totals = await run_blocking(
             storage.count_what_happened,
             actor.user_id,
+            person_id=actor.own_id,
             since=since_utc.isoformat(),
             until=until_utc.isoformat(),
         )

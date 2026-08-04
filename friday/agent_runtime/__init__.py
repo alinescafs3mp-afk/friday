@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
 import logging
@@ -451,6 +452,28 @@ _QUESTION_LENGTH_LIMIT = 300
 #: и три десятка строк вытеснили бы из контекста найденные документы. Двенадцать
 #: — с запасом: в живой переписке, по которой это делалось, человек за сорок
 #: сообщений сформулировал три.
+
+def _trace(message: str) -> str:
+    """Отпечаток реплики для журнала: соотнести можно, прочитать нельзя.
+
+    Реплики уходили в journald ЦЕЛИКОМ (обрезанными по 60–80 знаков, но целиком по
+    смыслу): «person-prefetch: вопрос не про человека — 'Собери документы за 26
+    число'». Проверено на живом журнале — строки на месте.
+
+    База защищена границами между людьми, журнал не защищён ничем: его читает любой,
+    у кого есть доступ к машине, он попадает в отчёты об ошибках и переживает удаление
+    записи. То есть личная переписка участников лежала там в обход всех ворот, которые
+    для неё построены, — та же дыра, что «ворота на одной дороге».
+
+    Отладке нужно не содержание, а различимость: тот же вопрос или другой, длинный или
+    короткий. Восемь знаков хеша это дают, а восстановить по ним текст нельзя.
+    """
+    text = " ".join(str(message or "").split())
+    if not text:
+        return "пусто"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+    return f"#{digest}/{len(text)}зн"
+
 _STANDING_RULE_LIMIT = 12
 #: Указание — одна фраза, а не изложение. Всё длиннее почти наверняка не правило,
 #: а присланный текст, ошибочно принятый за него.
@@ -2232,7 +2255,7 @@ class AgentRuntime:
                 },
             },
         )
-        LOGGER.info("silence-order: ход остановлен структурой — %r", message[:60])
+        LOGGER.info("silence-order: ход остановлен структурой — %s", _trace(message))
         return {
             "conversation_id": conversation_id,
             "message_id": assistant_message.get("id"),
@@ -2565,8 +2588,21 @@ class AgentRuntime:
             # что-нибудь да находит, и рядом с подтверждением «поняла» уехал бы
             # пересказ документа про порядок приветствий.
             if str((context.outward_verdict or ("", None))[0] or "").startswith("правило"):
+                # Архив выбрасывается ПОСЛЕ перепроверки, а не до неё.
+                #
+                # Указание подтверждает второй арбитр — тот, что видит и прежние
+                # правила, и предысторию. Он же исправляет ошибки первого: замерено
+                # 2026-08-04, что «Поверка манометра МП-100 выполнена 14 марта 2026,
+                # погрешность 0.4%» получает вид «правило» — факт с датой и числом,
+                # то есть ровно тот материал, ради которого архив существует.
+                #
+                # Порядок был обратный: документы выбрасывались по вердикту ПЕРВОГО
+                # арбитра, и второй уже не мог их вернуть. Человек, сообщивший факт,
+                # получал ответ без архива — и без объяснения, почему.
+                found_before_the_rule = list(context.knowledge_hits or [])
                 context.knowledge_hits = []
-                await self._learn_a_standing_rule(message, context)
+                if not await self._learn_a_standing_rule(message, context):
+                    context.knowledge_hits = found_before_the_rule
             # Поправка — не вопрос к архиву: человек сообщает, как правильно, а не
             # спрашивает. Найденные документы выбрасываются по той же причине, что
             # и у правил: рядом с «поняла, исправила» уехал бы пересказ документа.
@@ -2695,10 +2731,10 @@ class AgentRuntime:
             and (household or looks_outward or _archive_is_weak(context.knowledge_hits))
         ):
             LOGGER.info(
-                "archive-gate: %s — %d документов не пойдут в ответ (%r)",
+                "archive-gate: %s — %d документов не пойдут в ответ (%s)",
                 "быт" if household else ("вопрос наружу" if looks_outward else "слабое совпадение"),
                 len(context.knowledge_hits),
-                message[:60],
+                _trace(message),
             )
             context.knowledge_hits = []
             context.retrieval_confidence = 0.0
@@ -3599,7 +3635,7 @@ class AgentRuntime:
         self._served_name_cache = name
         return name
 
-    async def _learn_a_standing_rule(self, message: str, context: AgentContext) -> None:
+    async def _learn_a_standing_rule(self, message: str, context: AgentContext) -> bool:
         """Человек сказал, как себя вести, — запомнить это ДО того, как отвечать.
 
         Найдено владельцем в живой переписке 2026-08-03. Человек трижды объяснил,
@@ -3619,7 +3655,7 @@ class AgentRuntime:
         """
         kind, proposed = context.outward_verdict or ("", None)
         if not str(kind).startswith("правило"):
-            return
+            return False
         existing = self._standing_rules(context.person_id or context.user_id)
         action, rule, previous_rule, remainder = await self._standing_rule_by_arbiter(
             message, existing, previous_turn=context.previous_user_turn
@@ -3632,7 +3668,7 @@ class AgentRuntime:
             # сохранять то, что предложил общий арбитр: он формулировал правило,
             # не зная ни прежних, ни того, отменяют ли его сейчас.
             LOGGER.info("standing-rule: указание не подтвердилось, предложено было %r", proposed)
-            return
+            return False
         if rule and _RULE_GRABS_RIGHTS.search(rule):
             # Структурный потолок. Правило едет в контекст каждым ходом и лежит
             # там рядом с системными указаниями — то есть это ровно тот канал,
@@ -3663,7 +3699,7 @@ class AgentRuntime:
             # Неизвестность значит «отвечать больше не на что».
             context.open_remainder = remainder or ""
             context.remainder_known = True
-            return
+            return True
         if action == "забыть":
             context.standing_rules = self.storage.remember_standing_rule(
                 context.person_id or context.user_id,
@@ -3677,7 +3713,7 @@ class AgentRuntime:
             context.open_remainder = rest
             context.remainder_known = True
             LOGGER.info("standing-rule: снято, осталось %d", len(context.standing_rules))
-            return
+            return True
         context.standing_rules = self.storage.remember_standing_rule(
             context.person_id or context.user_id,
             rule,
@@ -3690,6 +3726,7 @@ class AgentRuntime:
         context.open_remainder = rest
         context.remainder_known = True
         LOGGER.info("standing-rule: запомнено, всего %d", len(context.standing_rules))
+        return True
 
     def _corrections(self, user_id: str) -> list[str]:
         """Поправки человека к сказанному Пятницей.
@@ -3926,7 +3963,7 @@ class AgentRuntime:
         if not isinstance(parsed, dict):
             return False
         if not str(parsed.get("напоминание") or "").strip().casefold().startswith("да"):
-            LOGGER.info("reminder-prefetch: это не просьба напомнить — %r", message[:80])
+            LOGGER.info("reminder-prefetch: это не просьба напомнить — %s", _trace(message))
             return False
         what = " ".join(str(parsed.get("что") or "").split())[:300]
         when = " ".join(str(parsed.get("когда") or "").split())[:120]
@@ -4324,16 +4361,16 @@ class AgentRuntime:
         verdict = (context.outward_verdict or ("", None)) if context is not None else ("", None)
         by_arbiter = str(verdict[0] or "").startswith("человек")
         if not asked_plainly and not by_arbiter:
-            LOGGER.info("person-prefetch: вопрос не про человека — %r", message[:80])
+            LOGGER.info("person-prefetch: вопрос не про человека — %s", _trace(message))
             return False
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
         if "user_activity" not in available:
             LOGGER.info(
-                "person-prefetch: инструмента нет среди доступных (%d шт.) — %r",
+                "person-prefetch: инструмента нет среди доступных (%d шт.) — %s",
                 len(available),
-                message[:80],
+                _trace(message),
             )
             return False  # инструмент недоступен этому человеку — не обходим права
         storage = self.storage
@@ -4359,9 +4396,9 @@ class AgentRuntime:
                 break
         if chosen is None:
             LOGGER.info(
-                "person-prefetch: имя не опознано среди учёток; проверено слов: %d — %r",
+                "person-prefetch: имя не опознано среди учёток; проверено слов: %d — %s",
                 len(candidates),
-                message[:80],
+                _trace(message),
             )
             if named:
                 # Имя НАЗВАНО, но учётки с ним нет: «что писал Иванов» про человека
