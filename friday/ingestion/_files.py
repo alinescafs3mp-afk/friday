@@ -630,6 +630,13 @@ class FilesMixin(PipelineShared):
         if (extraction.metadata or {}).get("parse_deadline_reached"):
             file_metadata["parse_deadline_reached"] = True
             file_metadata["parse_pages_read"] = int((extraction.metadata or {}).get("pages_read") or 0)
+        # Страниц в томе больше, чем разборщик читает. Свойство хранимого объекта по
+        # той же причине, что и обрыв по сроку: «первые 250 страниц» неотличимы от
+        # целого документа для всего, что придёт потом.
+        if (extraction.metadata or {}).get("pages_truncated"):
+            file_metadata["parse_pages_truncated"] = True
+            file_metadata["parse_pages_read"] = int((extraction.metadata or {}).get("pages_read") or 0)
+            file_metadata["parse_total_pages"] = int((extraction.metadata or {}).get("total_pages") or 0)
         if media_kind:
             file_metadata["media_kind"] = media_kind
         raw = RawObject(

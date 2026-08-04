@@ -58,9 +58,23 @@ def _file_fate_line(file_ingestion: Any) -> str:
     partial = bool(extraction.get("parse_deadline_reached"))
     # Текст не поместился в потолок: принято начало, остальное отброшено.
     over_the_cap = bool(extraction.get("text_truncated"))
+    # Страниц больше, чем разборщик читает. Отдельно от «не уместилось по объёму»:
+    # там помогает вопрос о начале документа, а здесь конца тома система не видела
+    # вовсе, и знать об этом человеку важнее.
+    beyond_the_pages = bool(extraction.get("parse_pages_truncated"))
+    read_pages = int(extraction.get("parse_pages_read") or 0)
+    total_pages = int(extraction.get("parse_total_pages") or 0)
+    pages_line = (
+        f" В документе {total_pages} страниц, прочитано {read_pages} — "
+        "по концу спрашивать бесполезно."
+        if beyond_the_pages and total_pages
+        else ""
+    )
     if file_ingestion.get("promoted"):
         line = "✅ Файл стал знанием — можно спрашивать."
-        if over_the_cap:
+        if beyond_the_pages:
+            line += pages_line
+        elif over_the_cap:
             line += (
                 " Документ длиннее, чем помещается целиком, — принято начало;"
                 " по концу файла спрашивать бесполезно."
@@ -72,7 +86,9 @@ def _file_fate_line(file_ingestion: Any) -> str:
         return line
     if file_ingestion.get("queued_for_review") or file_ingestion.get("inbox_id"):
         line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
-        if text_missing:
+        if beyond_the_pages:
+            line += pages_line
+        elif text_missing:
             line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
         elif over_the_cap:
             line += (

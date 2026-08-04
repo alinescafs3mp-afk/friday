@@ -918,6 +918,11 @@ class DocumentExtractor:
         text_chars = 0
         extraction_truncated = False
         deadline_hit = False
+        # Сколько страниц В ДОКУМЕНТЕ, а не сколько мы согласились прочитать.
+        # Потолок в 250 страниц срабатывал молча: 251-я и дальше не попадали ни в
+        # текст, ни в признаки, и человек, приславший том на 400 страниц, узнавал
+        # об этом, только не найдя в нём того, что там есть.
+        total_pages = len(reader.pages)
         for page in itertools.islice(reader.pages, 250):
             if deadline is not None and time.monotonic() >= deadline:
                 deadline_hit = True
@@ -942,7 +947,15 @@ class DocumentExtractor:
             "format": "pdf",
             "pages_read": pages_read,
             "page_limit": 250,
+            "total_pages": total_pages,
         }
+        if total_pages > 250:
+            # Отдельный признак, а не общий `extraction_truncated`: причина обрезки
+            # человеку важна. «Не уместилось по объёму» лечится вопросом о начале
+            # документа, а «страниц больше, чем читаем» означает, что конца тома
+            # система не видела вовсе.
+            metadata["pages_truncated"] = True
+            metadata["extraction_truncated"] = True
         if extraction_truncated:
             metadata["extraction_truncated"] = True
         if deadline_hit:
