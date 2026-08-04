@@ -7,6 +7,9 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
+
 from friday.ingestion._base import (
     Any,
     EntityType,
@@ -19,6 +22,14 @@ from friday.ingestion._base import (
     new_id,
     replace,
 )
+
+#: Сколько времени одинаковое предложение агента считается ПОВТОРОМ.
+#:
+#: Замеренный дефект — два одинаковых вызова в одном ходу, и часа на него с
+#: избытком. Дальше окно вредно: через две недели человек вправе сказать то же
+#: самое снова, и это новая запись, а не дубль. Без окна длину ключа задавал бы
+#: не замысел, а то, насколько запущена очередь разбора.
+AGENT_CANDIDATE_REPEAT_WINDOW_SEC = 3600
 
 
 class CandidatesMixin(PipelineShared):
@@ -81,16 +92,10 @@ class CandidatesMixin(PipelineShared):
                 raise IdempotencyConflictError(
                     "source_ref is already bound to different agent-candidate content"
                 )
-            inbox = self.storage.find_inbox_by_raw(str(existing["id"]), user_id)
-            return {
-                "idempotent_replay": True,
-                "promoted": False,
-                "queued_for_review": bool(inbox),
-                "action": "review",
-                "candidate_type": candidate_type,
-                "raw_object_id": existing["id"],
-                "inbox_id": inbox.get("id") if inbox else None,
-            }
+            return self._replay_of(existing, user_id, candidate_type)
+        twin = self._fresh_twin(user_id, source, candidate_type, digest, metadata)
+        if twin:
+            return self._replay_of(twin, user_id, candidate_type)
 
         baseline = self.assess_text(content, force_knowledge=True)
         assessment = replace(
@@ -182,16 +187,13 @@ class CandidatesMixin(PipelineShared):
                     raise IdempotencyConflictError(
                         "source_ref is already bound to different agent-candidate content"
                     )
-                existing_inbox = self.storage.find_inbox_by_raw(str(existing["id"]), user_id)
-                return {
-                    "idempotent_replay": True,
-                    "promoted": False,
-                    "queued_for_review": bool(existing_inbox),
-                    "action": "review",
-                    "candidate_type": candidate_type,
-                    "raw_object_id": existing["id"],
-                    "inbox_id": existing_inbox.get("id") if existing_inbox else None,
-                }
+                return self._replay_of(existing, user_id, candidate_type)
+            # Тот же поиск повторяется ВНУТРИ транзакции: снаружи он — быстрый
+            # отказ, а гонку закрывает только этот. Два одинаковых вызова из
+            # одного хода приходят почти одновременно.
+            twin = self._fresh_twin(user_id, source, candidate_type, digest, metadata)
+            if twin:
+                return self._replay_of(twin, user_id, candidate_type)
             raw = self.storage.store_raw_object(raw)
             review_item = self._store_review_inbox(raw, assessment, enrichment)
         return {
@@ -204,6 +206,71 @@ class CandidatesMixin(PipelineShared):
             "raw_object_id": raw.id,
             "inbox_id": review_item.id,
             "suggestions": enrichment.to_suggestions(),
+        }
+
+    def _fresh_twin(
+        self,
+        user_id: str,
+        source: str,
+        candidate_type: str,
+        digest: str,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Такое же предложение того же человека, ещё ждущее разбора.
+
+        Нужно потому, что ключ происхождения у инструментов агента свежий на
+        каждый вызов (`toolref_<uuid>`), и поиск по нему не совпадает сам с собой
+        никогда. Та же болезнь, что у пересланных документов, и лечение то же:
+        запасной поиск по естественному ключу — содержимому.
+        """
+        since = (
+            datetime.now(UTC) - timedelta(seconds=AGENT_CANDIDATE_REPEAT_WINDOW_SEC)
+        ).isoformat(timespec="seconds")
+        return self.storage.find_fresh_agent_candidate(
+            user_id,
+            source,
+            candidate_type,
+            digest,
+            requested_by=str((metadata or {}).get("requested_by") or ""),
+            since=since,
+        )
+
+    def _replay_of(
+        self, existing: dict[str, Any], user_id: str, candidate_type: str
+    ) -> dict[str, Any]:
+        """Ответ на повтор. Обязан говорить, что новой карточки НЕ появилось.
+
+        Без `reason` наверх уходит словарь, неотличимый от обычного успеха, и
+        модель отчитывается человеку «сохранила» — то есть дедупликация чинит
+        дубли и заводит ложное подтверждение вместо них. `candidate_type` берётся
+        у НАЙДЕННОЙ строки, а не у вызова: заметка и сущность делят один `source`,
+        и врать про вид найденного нельзя.
+        """
+        inbox = self.storage.find_inbox_by_raw(str(existing["id"]), user_id)
+        # `metadata_json` из строки базы приходит ТЕКСТОМ, а не словарём: хранилище
+        # отдаёт `dict(row)` как есть. Первая редакция звала `.get` прямо на нём,
+        # и повтор падал `AttributeError` — то есть дедупликация работала, а ответ
+        # человеку превращался в ошибку инструмента. Поймано повторным замером,
+        # тестов на эту ветку тогда ещё не было.
+        raw_meta = existing.get("metadata_json")
+        if isinstance(raw_meta, str):
+            try:
+                raw_meta = json.loads(raw_meta or "{}")
+            except (TypeError, ValueError):
+                raw_meta = {}
+        found_type = str((raw_meta or {}).get("candidate_type") or candidate_type)
+        return {
+            "idempotent_replay": True,
+            "promoted": False,
+            "queued_for_review": bool(inbox),
+            "action": "review",
+            "candidate_type": found_type,
+            "reason": (
+                "такое же предложение уже лежит во входящих и ждёт разбора; "
+                "новой записи не создано"
+            ),
+            "raw_object_id": existing["id"],
+            "inbox_id": inbox.get("id") if inbox else None,
         }
 
     async def queue_research_candidate(

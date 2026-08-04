@@ -100,7 +100,7 @@ def test_public_names_stay_importable() -> None:
     )
 
 
-EXPECTED_MEMBER_COUNT = 42
+EXPECTED_MEMBER_COUNT = 44
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_apply_feedback_calibration": "(self, user_id: 'str', assessment: 'PromotionAssessment') -> 'PromotionAssessment'",
     "_commit_staged_file": "(self, target: 'Path', staged: 'Path | None', digest: 'str') -> 'Path'",

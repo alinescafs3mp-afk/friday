@@ -77,6 +77,61 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def find_fresh_agent_candidate(
+        self,
+        user_id: str,
+        source: str,
+        candidate_type: str,
+        content_hash: str,
+        *,
+        requested_by: str = "",
+        since: str = "",
+    ) -> dict[str, Any] | None:
+        """То же предложение агента, ещё ждущее разбора. Брат `find_file_by_content_hash`.
+
+        Та же ошибка, что с пересланными документами, и в том же конвейере:
+        `memory_save` и `entity_create` передавали `source_ref = new_id("toolref")`,
+        то есть СВЕЖИЙ ключ на каждый вызов. Ключ происхождения не совпадал сам с
+        собой никогда, ветка повтора была недостижима, и два одинаковых вызова
+        подряд давали два Raw Object и две одинаковые карточки во входящих.
+        Замерено 2026-08-04: повтор `memory_save` и `entity_create` с теми же
+        аргументами добавлял по строке каждый раз.
+
+        Границы, каждая со своей причиной:
+
+        * `content_hash` — естественный ключ, он уже вычисляется и уже лежит в
+          строке; выдумывать новое поле незачем;
+        * `candidate_type` — заметка и сущность делят один `source='agent_tool'`,
+          и без него предложение сущности глушило бы заметку с тем же текстом;
+        * человек (`requested_by` в метаданных) — в общем архиве `user_id` один на
+          всех, и просьба одного не является просьбой другого;
+        * `since` — окно свежести. Замеренный дефект это повтор в одном ходу;
+          через две недели человек вправе сказать то же самое СНОВА, и это новая
+          запись, а не дубль. Без окна ключ становится вечным, а его длину задавал
+          бы не замысел, а то, насколько человек запустил очередь разбора;
+        * только `pending`. Ответ «это уже лежит во входящих» обязан быть правдой:
+          разобранной карточки там уже нет.
+
+        Продвинутая карточка ключ не держит намеренно. Человек с предложением
+        согласился, повтор — новая просьба; совпадение уже принятого разбирает
+        отдельный механизм ближних дублей.
+        """
+        content_hash = str(content_hash or "").strip()
+        if not content_hash:
+            return None
+        row = self.execute(
+            """SELECT r.* FROM raw_objects r
+               JOIN inbox i ON i.raw_object_id = r.id AND i.user_id = r.user_id
+               WHERE r.user_id=? AND r.source=? AND r.content_hash=?
+                 AND COALESCE(json_extract(r.metadata_json,'$.candidate_type'),'')=?
+                 AND COALESCE(json_extract(r.metadata_json,'$.requested_by'),'')=?
+                 AND r.received_at > ?
+                 AND r.deleted_at IS NULL AND i.status='pending'
+               ORDER BY r.received_at ASC, r.id ASC LIMIT 1""",
+            (user_id, source, content_hash, candidate_type, str(requested_by or ""), since),
+        ).fetchone()
+        return dict(row) if row else None
+
     def find_file_by_extracted_text(self, user_id: str, text_hash: str) -> dict[str, Any] | None:
         """Тот же ДОКУМЕНТ, пришедший другим файлом.
 

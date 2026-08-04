@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 320
+EXPECTED_MEMBER_COUNT = 321
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -220,6 +220,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "iter_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, page_size: 'int' = 1000, include_merged: 'bool' = False) -> 'Iterator[dict[str, Any]]'",
     "find_inbox_by_raw": "(self, raw_object_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "find_raw_by_source_ref": "(self, user_id: 'str', source: 'str', source_ref: 'str') -> 'dict[str, Any] | None'",
+    "find_fresh_agent_candidate": "(self, user_id: 'str', source: 'str', candidate_type: 'str', content_hash: 'str', *, requested_by: 'str' = '', since: 'str' = '') -> 'dict[str, Any] | None'",
     "get_api_token": "(self, token_id: 'str') -> 'dict[str, Any] | None'",
     "get_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'str | None'",
     "get_channel_session": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'dict[str, Any] | None'",

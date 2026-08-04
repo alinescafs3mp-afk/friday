@@ -2279,6 +2279,11 @@ class ExecutionKernel:
             candidate_type="entity",
             metadata={
                 "tool": "entity_create",
+                # Тот же довод, что у `memory_save`: автор предложения — человек, а
+                # не арендатор. Без этого поля повтор одного участника глушился бы
+                # карточкой другого, а поиск повтора по содержимому не находил бы
+                # ничего вовсе — он сверяет именно автора.
+                "requested_by": actor.own_id,
                 "entity_proposal": {
                     "name": clean_name,
                     "entity_type": parsed_type.value,

@@ -808,6 +808,11 @@ CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id);
 CREATE INDEX IF NOT EXISTS idx_raw_objects_user_received ON raw_objects(user_id, received_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_source_ref
     ON raw_objects(user_id, source, source_ref) WHERE source_ref <> '';
+-- Поиск повтора по СОДЕРЖИМОМУ, когда ключ происхождения свежий на каждый вызов
+-- (`find_fresh_agent_candidate`, `find_file_by_content_hash`). Частичный по живым
+-- строкам: удалённые в этом поиске не участвуют никогда.
+CREATE INDEX IF NOT EXISTS idx_raw_content_hash
+    ON raw_objects(user_id, source, content_hash) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_lifecycle
     ON knowledge_objects(user_id, lifecycle_stage, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_quality
