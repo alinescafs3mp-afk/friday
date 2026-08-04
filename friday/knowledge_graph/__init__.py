@@ -10,6 +10,7 @@ from functools import lru_cache
 from typing import Any
 
 from friday.entity_phrases import mention_phrase_candidates
+from friday.mentions import inflected_mentions
 from friday.storage import FridayStorage
 from friday.storage.models import (
     Entity,
@@ -774,6 +775,18 @@ class KnowledgeGraph:
         matches: list[dict[str, Any]] = []
         occupied: list[tuple[int, int]] = []
         lowered = text.casefold()
+        # Косвенный падеж. Инвертированный поиск выше УЖЕ находит такую сущность —
+        # `normalized_name` складывает падежи пословно, поэтому «Кублику Александру
+        # Юрьевичу» и «Кублик Александр Юрьевич» это один узел, — а буквальная
+        # проверка ниже её отбрасывала. Замерено на архиве владельца: в рапорте
+        # «Прошу… Прапорщику Кублику Александру Юрьевичу» не привязывался ни один
+        # из четырёх военнослужащих, ради которых он написан; привязывались только
+        # их родственники, названные в именительном. Оттуда же росли неверные
+        # кандидаты в связи: субъекта документа не было среди его сущностей.
+        inflected = inflected_mentions(
+            text,
+            [(str(entity.get("name") or ""), str(entity["id"])) for entity in entities],
+        )
         for entity in entities:
             best: dict[str, Any] | None = None
             for term, source in _entity_terms(entity):
@@ -802,6 +815,23 @@ class KnowledgeGraph:
                     }
                     if best is None or len(candidate["matched_text"]) > len(best["matched_text"]):
                         best = candidate
+            if best is None:
+                position = inflected.get(str(entity["id"]))
+                if position and not any(
+                    position[0] < end and position[1] > start for start, end in occupied
+                ):
+                    best = {
+                        "entity_id": entity["id"],
+                        "name": entity["name"],
+                        "entity_type": entity["entity_type"],
+                        "matched_text": text[position[0] : position[1]],
+                        "span": [position[0], position[1]],
+                        # Ниже буквального совпадения: падеж сложен свёрткой, а
+                        # свёртка — приближение, пусть и то же самое, которым
+                        # определяется тождество самого узла.
+                        "confidence": 0.97,
+                        "method": "existing_canonical_name_inflected",
+                    }
             if best:
                 matches.append(best)
                 occupied.append(tuple(best["span"]))
@@ -1528,6 +1558,33 @@ class KnowledgeGraph:
                     break
         unique = {str(item.get("id") or ""): item for item in suggestions if item.get("id")}
         return sorted(unique.values(), key=lambda item: float(item.get("confidence", 0.0)), reverse=True)
+
+    async def suggest_relations_from_structure(
+        self,
+        user_id: str,
+        knowledge_object_id: str,
+        *,
+        llm: Any,
+        max_tokens: int = 1200,
+    ) -> dict[str, Any]:
+        """Связи, объявленные ФОРМОЙ документа, — арбитром, а не фразой.
+
+        Второй извлекатель рядом с `suggest_relations_for_knowledge`, а не
+        замена ему: фразовый детерминирован и работает без модели, а этот
+        читает то, чего в фразе нет вовсе, — поле анкеты, строку ведомости,
+        адресата рапорта. Оба кладут кандидатов в одну очередь на review.
+        См. `friday/knowledge_graph/_structure.py`.
+        """
+
+        from friday.knowledge_graph._structure import suggest_relations_from_structure
+
+        return await suggest_relations_from_structure(
+            self.storage,
+            user_id,
+            knowledge_object_id,
+            llm=llm,
+            max_tokens=max_tokens,
+        )
 
     def review_relation_candidate(
         self,

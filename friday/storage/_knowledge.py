@@ -2737,6 +2737,7 @@ class KnowledgeMixin(StorageShared):
         узлов молча терял хвост алфавита — тот же класс, что #50.
         """
         from friday.entity_phrases import mention_phrase_candidates
+        from friday.mentions import inflected_mentions
 
         entity_total = self.count_entities(user_id)
         if entity_total == 0:
@@ -2775,7 +2776,18 @@ class KnowledgeMixin(StorageShared):
                 )
             }
             lowered = content.casefold()
-            for entity in self.find_entities_by_normalized_names(user_id, mention_phrase_candidates(content)):
+            candidates = self.find_entities_by_normalized_names(
+                user_id, mention_phrase_candidates(content)
+            )
+            # Косвенный падеж — рядом с буквальной проверкой, а не вместо неё:
+            # у идентификаторов границы слова строже, а падежей нет. См.
+            # `inflected_mentions` и ту же добавку в `match_existing_entities`:
+            # правило остаётся ОДНИМ на оба пути.
+            inflected = inflected_mentions(
+                content,
+                [(str(entity.get("name") or ""), str(entity["id"])) for entity in candidates],
+            )
+            for entity in candidates:
                 entity_id = str(entity["id"])
                 if entity_id in known:
                     continue
@@ -2790,6 +2802,10 @@ class KnowledgeMixin(StorageShared):
                     if re.search(rf"(?<![\w.]){re.escape(text)}(?![\w.])", content, re.I):
                         matched = True
                         break
+                method = "existing_entity_exact_mention"
+                if not matched and entity_id in inflected:
+                    matched = True
+                    method = "existing_entity_inflected_mention"
                 if not matched:
                     continue
                 self.link_knowledge_entity(
@@ -2798,7 +2814,7 @@ class KnowledgeMixin(StorageShared):
                     entity_id,
                     status="accepted",
                     confidence=0.97,
-                    evidence={"method": "existing_entity_exact_mention", "source": "backfill"},
+                    evidence={"method": method, "source": "backfill"},
                 )
                 known.add(entity_id)
                 linked += 1

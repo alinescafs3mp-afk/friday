@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
+from friday.morphology import stem_to_fixpoint
 from friday.retrieval import _search_form, _snippet_fold
 
 # Потолок на документ. Подсветка — вспомогательный слой: на тексте, где сущность
@@ -173,6 +175,102 @@ def _is_word_char(character: str) -> bool:
     return character.isalnum() or character in "_-"
 
 
+_TOKEN_RE = re.compile(r"(?u)\w+")
+_ALL_CYRILLIC = re.compile(r"^[а-яё]+$")
+
+
+def _fold_word(token: str) -> str:
+    """Свёртка ОДНОГО слова — ровно та, которой нормализовано имя узла графа.
+
+    `normalize_entity_name` складывает падежи пословно (`_fold_russian`), поэтому
+    «Кублику Александру Юрьевичу» и «Кублик Александр Юрьевич» — один и тот же
+    `normalized_name`, то есть один узел. Здесь та же функция применяется к
+    словам ТЕКСТА, чтобы упоминание узла считалось упоминанием того же узла.
+    """
+
+    low = token.casefold().replace("ё", "е")
+    return stem_to_fixpoint(low) if _ALL_CYRILLIC.match(low) else low
+
+
+def _inflected_spans(
+    body: str,
+    tokens: list[tuple[int, int, str]],
+    name: str,
+    entity_id: str,
+    taken: list[bool],
+    found: list[Mention],
+) -> None:
+    """Места, где многословное имя стоит в косвенном падеже.
+
+    Без этого прохода имя из нескольких слов не находится ВООБЩЕ, как только
+    склоняется: `_search_form` — стеммер одного токена, а на строке «Кублик
+    Александр Юрьевич» он не срабатывает, и поиск подстроки ищет именительный
+    падеж в тексте, где стоит дательный. Замерено на архиве владельца: в рапорте
+    «Прошу… Прапорщику Кублику Александру Юрьевичу» не находился ни один из
+    четырёх военнослужащих, ради которых рапорт написан, — привязывались только
+    их родственники, названные в именительном. Отсюда же брались неверные связи:
+    субъекта документа не было среди его сущностей, и родство доставалось
+    соседнему имени.
+
+    Правило узкое намеренно:
+
+    * только имена из ДВУХ и более слов. У однословных свёртка склеивает разных
+      людей — «Андрей» и «Андреев» оба дают «андр», — а многословное совпадение
+      требует совпадения всех слов подряд. Замерено: все 4349 человек в архиве
+      владельца записаны ровно тремя словами, так что ограничение не теряет людей;
+    * только целиком кириллические слова: у идентификаторов и латиницы падежей
+      нет, а стемминг там опасен;
+    * основа каждого слова не короче трёх знаков.
+    """
+
+    parts = name.split()
+    if len(parts) < 2:
+        return
+    if not all(_ALL_CYRILLIC.match(part.casefold().replace("ё", "е")) for part in parts):
+        return
+    words = tuple(_fold_word(part) for part in parts)
+    if any(len(word) < _MIN_STEM for word in words):
+        return
+    span = len(words)
+    for start_index in range(len(tokens) - span + 1):
+        if any(tokens[start_index + offset][2] != words[offset] for offset in range(span)):
+            continue
+        start = tokens[start_index][0]
+        end = tokens[start_index + span - 1][1]
+        if any(taken[start:end]):
+            continue
+        for index in range(start, end):
+            taken[index] = True
+        found.append(Mention(start=start, end=end, name=name, entity_id=entity_id))
+        if len(found) >= _COLLECT_LIMIT:
+            return
+
+
+def inflected_mentions(text: str, entities: list[tuple[str, str]]) -> dict[str, tuple[int, int]]:
+    """Кто из ``entities`` назван в тексте в косвенном падеже. Пары (имя, id).
+
+    Отдельная от `mention_spans` дверь для тех, кому нужен не список мест, а
+    ответ «упомянута ли»: разбор при приёме и обратный проход по архиву.
+    Оба уже проверяют БУКВАЛЬНОЕ вхождение имени и должны продолжать — у
+    идентификаторов вроде `BRK.A` и `PK-04-04` границы слова строже, а падежей
+    нет вовсе. Эта проверка добавляется рядом, а не вместо.
+    """
+
+    body = text or ""
+    if not body or not entities:
+        return {}
+    tokens = [(m.start(), m.end(), _fold_word(m.group(0))) for m in _TOKEN_RE.finditer(body)]
+    if not tokens:
+        return {}
+    taken = [False] * len(body)
+    found: list[Mention] = []
+    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
+        clean = " ".join(str(name or "").split()).strip()
+        if clean:
+            _inflected_spans(body, tokens, clean, entity_id, taken, found)
+    return {item.entity_id: (item.start, item.end) for item in found}
+
+
 def mention_spans(text: str, entities: list[tuple[str, str]]) -> list[Mention]:
     """Непересекающиеся места упоминаний. ``entities`` — пары (имя, id сущности).
 
@@ -185,10 +283,18 @@ def mention_spans(text: str, entities: list[tuple[str, str]]) -> list[Mention]:
     folded = _snippet_fold(body)
     taken = [False] * len(body)
     found: list[Mention] = []
+    # Свёрнутые слова текста считаются ОДИН раз на документ: их перебирает
+    # `_inflected_spans` для каждого имени, а документы бывают в миллион знаков.
+    tokens = [(m.start(), m.end(), _fold_word(m.group(0))) for m in _TOKEN_RE.finditer(body)]
     for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
         clean = " ".join(str(name or "").split()).strip()
         if not clean:
             continue
+        # Косвенный падеж разбирается ПЕРВЫМ: он занимает слово целиком, а
+        # буквальный проход ниже поставил бы разметку на первое слово имени и
+        # оставил остальные снаружи — «Кублику» вместо «Кублику Александру
+        # Юрьевичу». Занятые места уважают оба прохода.
+        _inflected_spans(body, tokens, clean, entity_id, taken, found)
         needle = _search_form(clean)
         if len(needle) < _MIN_STEM:
             continue
