@@ -513,7 +513,30 @@ class AdviceMixin(PipelineShared):
         kind = assessment.knowledge_kind or _detect_knowledge_kind(content)
         entities = self._entity_suggestions(user_id, content)
         tags = _extract_hashtags(content)
-        tags.extend(_extract_keywords(content, max_keywords=8))
+        # Части имён людей, найденных В ЭТОМ ЖЕ документе, тегами не становятся:
+        # «александрович» стоял тегом на 194 объектах живого архива, «сергей» на
+        # 105. Имена знает граф, и повторяющий их тег не добавляет ни одного
+        # нового отбора — только вытесняет с экрана осмысленные.
+        blocked = frozenset(
+            part
+            for entity in entities
+            if str(entity.get("entity_type") or "") == EntityType.PERSON.value
+            for part in str(entity.get("name") or "").casefold().split()
+            if len(part) >= 3
+        )
+        tags.extend(
+            _extract_keywords(
+                content,
+                max_keywords=8,
+                blocked=blocked,
+                # Корпусная частота — из индекса поиска, а не из второй копии
+                # текста: `knowledge_vocab` это представление над FTS.
+                document_frequency=self.storage.term_document_frequency(
+                    [token.casefold() for token in re.findall(r"[А-ЯЁа-яёA-Za-z-]{3,}", content or "")][:200]
+                ),
+                corpus_size=self.storage.count_knowledge_objects(user_id),
+            )
+        )
         if kind != "note":
             tags.append(kind)
         # Вид документа — то, чем документ объявляет себя сам, и единственный

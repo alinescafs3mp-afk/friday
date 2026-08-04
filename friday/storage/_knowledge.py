@@ -1474,6 +1474,36 @@ class KnowledgeMixin(StorageShared):
                 break
         return terms
 
+    def term_document_frequency(self, terms: Sequence[str]) -> dict[str, int]:
+        """Сколько документов корпуса содержат каждое из этих слов.
+
+        Читает `knowledge_vocab` — представление над индексом FTS, а не вторую
+        копию текста, поэтому число всегда свежее и стоит одного индексного
+        запроса. Нужно там, где решается, СУЖАЕТ ли слово выбор: тег,
+        встречающийся почти везде, не отбирает ничего.
+
+        Корпусная, а не арендаторская, по той же причине, что и
+        `vocabulary_terms`: у индекса нет столбца пользователя. Для вопроса «это
+        слово вообще различает документы» разницы нет, а для отбора по тегу
+        считает уже сам отбор.
+        """
+
+        if not self._fts_available or not terms:
+            return {}
+        unique = [term for term in dict.fromkeys(str(item).strip().casefold() for item in terms) if term][:200]
+        if not unique:
+            return {}
+        placeholders = ",".join("?" for _ in unique)
+        try:
+            # Единственная подставляемая часть — ограниченная строка из «?».
+            rows = self.execute(
+                f"SELECT term, doc FROM knowledge_vocab WHERE term IN ({placeholders})",  # nosec B608
+                tuple(unique),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        return {str(row["term"]): int(row["doc"] or 0) for row in rows}
+
     def known_vocabulary(self, terms: Sequence[str]) -> set[str]:
         """Which of ``terms`` are words this corpus actually contains, verbatim.
 
