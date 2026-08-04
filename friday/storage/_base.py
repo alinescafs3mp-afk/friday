@@ -57,7 +57,14 @@ from friday.storage.models import (
 # Named for the package, not this module: `__name__` here is "friday.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("friday.storage")
-SCHEMA_VERSION = 24
+# 25 — столбец `monitors.created_by` (автор слежения).
+#
+# Номер обязан расти вместе с добавлением столбца, и это не формальность:
+# `_migrate_legacy_schema` вызывается ТОЛЬКО когда отметка в базе меньше этого
+# числа. Проверено на живой базе 2026-08-04 — со старым номером столбец не
+# появился, а код его уже читал, и маршрут слежений отдавал 500. Тесты этого не
+# видели: там база создаётся с нуля по актуальному CREATE TABLE.
+SCHEMA_VERSION = 25
 
 #: Определение таблицы шагов миссии отдельной константой: миграция схемы 24
 #: пересоздаёт её, чтобы расширить список состояний, и должна брать ровно это

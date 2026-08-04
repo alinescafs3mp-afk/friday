@@ -302,3 +302,55 @@ def test_legacy_reconstruction_is_skipped_once_the_schema_is_current(settings, t
     finally:
         monkeypatch.undo()
     assert calls == [], "legacy reconstruction ran again on an already-current database"
+
+
+def test_a_new_column_needs_a_new_schema_number(settings, tmp_path):
+    """Столбец, добавленный без роста номера схемы, до живой базы НЕ доедет.
+
+    Случилось 2026-08-04 и стоило пятиминутной поломки живого маршрута. Столбец
+    `monitors.created_by` был добавлен и в `CREATE TABLE`, и в список миграции —
+    а номер схемы остался прежним. `_migrate_legacy_schema` вызывается ТОЛЬКО
+    когда отметка в базе меньше текущего числа, поэтому на существующей базе
+    столбец не появился, код его уже читал, и `/api/me/monitors` отдавал 500.
+
+    Весь набор тестов при этом был зелёным: там база каждый раз создаётся с нуля
+    по актуальному `CREATE TABLE`, где столбец есть. Ровно тот случай, когда
+    проверять надо ПОСТАВЛЯЕМОЕ — обновление существующей базы, а не создание
+    новой.
+
+    Этот тест ставит базу в состояние «схема на единицу младше» и требует, чтобы
+    открытие её обновило: так забытый номер краснеет здесь, а не у человека.
+    """
+    from friday.storage._base import SCHEMA_VERSION
+
+    database = tmp_path / "aged.sqlite3"
+    made = FridayStorage(replace(settings, database_path=database))
+    try:
+        made.ensure_user("owner")
+    finally:
+        made.close()
+
+    # Состаривание: отметка младше, столбец снят — как на базе, собранной прошлой
+    # версией кода.
+    aged = sqlite3.connect(database)
+    try:
+        aged.execute(
+            "UPDATE schema_meta SET value=? WHERE key='schema_version'",
+            (str(SCHEMA_VERSION - 1),),
+        )
+        aged.execute("ALTER TABLE monitors DROP COLUMN created_by")
+        aged.commit()
+    finally:
+        aged.close()
+
+    reopened = FridayStorage(replace(settings, database_path=database))
+    try:
+        columns = {row[1] for row in reopened.execute("PRAGMA table_info(monitors)").fetchall()}
+        version = reopened.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()[0]
+    finally:
+        reopened.close()
+
+    assert "created_by" in columns, "миграция не добралась до существующей базы"
+    assert str(version) == str(SCHEMA_VERSION)
