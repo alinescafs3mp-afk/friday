@@ -245,6 +245,31 @@ def patterns_across_days(recent: Sequence[dict[str, Any]]) -> list[dict[str, Any
     return sorted(found, key=lambda item: (-item["days"], item["code"]))
 
 
+def chain_for(storage: Any, principal: str, day: str, incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Цепочка суток для поиска повторяющегося: сегодня + прошлые дни, БЕЗ двойника.
+
+    Найдено ревью 2026-08-04 и подтверждено замером: раздел «Повторяется» не
+    находил НИЧЕГО НИКОГДА. Сборка суток начинается с `begin_day_compact`, то есть
+    строка ЭТИХ суток уже лежит в базе — незавершённая, с пустым списком
+    происшествий. Список из хранилища отдаёт её первой, и цепочка получала эти
+    сутки дважды: сначала со свежими происшествиями, следом пустыми. Пустая строка
+    рвала цепочку на первом же шаге.
+
+    То есть механизм, сделанный ради мысли «три случая за месяц — это три случая,
+    а три дня подряд — это поведение», выглядел работающим и молчал всегда.
+    Владелец читал пустой раздел как факт «ничего не повторяется».
+
+    Помощник общий на обе дороги — маршрут и ночной обход — намеренно: ошибка была
+    ОДНА И ТА ЖЕ в двух местах, и порознь они разъедутся снова.
+    """
+    previous = [
+        row
+        for row in storage.list_day_compacts(principal, limit=_PATTERN_DAYS + 2)
+        if str(row.get("local_date") or "") != day
+    ]
+    return patterns_across_days([{"incidents": incidents}, *previous][: _PATTERN_DAYS + 2])
+
+
 def compact_a_day(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, int], list[dict[str, Any]]]:
     """Сутки → счётчики и инциденты. Чистая функция, базы не касается.
 
@@ -344,13 +369,9 @@ class CompactorOrgan(Organ):
                     incidents=incidents,
                     # Повторяющееся считается ПОСЛЕ записи сегодняшних суток:
                     # цепочка тянется от самого свежего дня, и без него она
-                    # оборвалась бы на вчерашнем.
-                    patterns=patterns_across_days(
-                        [
-                            {"incidents": incidents},
-                            *storage.list_day_compacts(principal, limit=_PATTERN_DAYS + 2),
-                        ][: _PATTERN_DAYS + 2]
-                    ),
+                    # оборвалась бы на вчерашнем. Двойник этих же суток из базы
+                    # отсеивает `chain_for` — см. разбор в её докстроке.
+                    patterns=chain_for(storage, principal, day, incidents),
                 )
             except Exception:  # noqa: BLE001 — оборванная сводка не роняет запрос
                 LOGGER.exception("compactor: сутки %s не свелись", day)
@@ -413,13 +434,9 @@ async def compact_pending_days(ctx: ServiceContext) -> dict[str, Any]:
                     incidents=incidents,
                     # Повторяющееся считается ПОСЛЕ записи сегодняшних суток:
                     # цепочка тянется от самого свежего дня, и без него она
-                    # оборвалась бы на вчерашнем.
-                    patterns=patterns_across_days(
-                        [
-                            {"incidents": incidents},
-                            *storage.list_day_compacts(principal, limit=_PATTERN_DAYS + 2),
-                        ][: _PATTERN_DAYS + 2]
-                    ),
+                    # оборвалась бы на вчерашнем. Двойник этих же суток из базы
+                    # отсеивает `chain_for` — см. разбор в её докстроке.
+                    patterns=chain_for(storage, principal, day, incidents),
                 )
                 made += 1
             except Exception:  # noqa: BLE001 — оборванная сводка не роняет орган

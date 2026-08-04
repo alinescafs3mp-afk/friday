@@ -1557,8 +1557,27 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 if str(event.get("entity_id") or "") != notification_id:
                     continue
                 key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"
+                # ЧЕЛОВЕК, а не арендатор. Соседние строки этого же обработчика
+                # человека уже знают (`dismiss_notification(actor.own_id, …)` выше,
+                # `reminder_states(actor.own_id, …)` в списке) — признак есть, но до
+                # места решения не доезжал.
+                #
+                # Найдено ревью 2026-08-04. Ветка не запасная, а основная: список
+                # кладёт в идентификатор пункта `entity_id` события, кнопка несёт
+                # его же, а `dismiss_notification` ищет по идентификатору СТРОКИ
+                # ОЧЕРЕДИ и потому всегда отвечает «не нашла».
+                #
+                # Цена ошибки двойная, и обе стороны замерены по коду. Своё
+                # напоминание участника лежит в очереди под его `person_id`: UPDATE
+                # под арендатором его не находит, кладётся посторонняя строка
+                # «снято» под арендатором, а собственная остаётся ждущей — то есть
+                # мост ПОТОМ ДОСТАВИТ напоминание, которое человеку уже объявили
+                # снятым. А событие из общего документа орган ставит хозяину
+                # архива, и та же вставка занимает ключ владельца: частичный
+                # уникальный индекс по (user_id, dedup_key) больше не даст
+                # поставить это напоминание заново, и владелец теряет его молча.
                 ok = storage.silence_reminder(
-                    actor.user_id, key, chat_id=resolve_chat_id(storage, actor.user_id) or ""
+                    actor.own_id, key, chat_id=resolve_chat_id(storage, actor.own_id) or ""
                 )
                 break
         if not ok:

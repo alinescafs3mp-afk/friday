@@ -131,3 +131,54 @@ def test_a_finished_day_is_not_redone(storage) -> None:
     pending = storage.days_needing_a_compact("alice", ["2026-08-01", "2026-08-02"])
 
     assert pending == ["2026-08-01"], pending
+
+
+def test_a_streak_survives_the_started_row_of_today(storage) -> None:
+    """Цепочка «повторяется день за днём» считается на НАСТОЯЩЕМ прогоне.
+
+    НАЙДЕНО РЕВЬЮ 2026-08-04 и подтверждено замером: раздел «Повторяется» не
+    находил ничего НИКОГДА. Сборка суток начинается с `begin_day_compact`, то есть
+    строка этих суток уже лежит в базе — незавершённая, с пустым списком
+    происшествий, — и список из хранилища отдаёт её первой. Цепочка получала одни
+    и те же сутки дважды: сначала со свежими происшествиями, следом пустыми, и
+    пустая строка рвала её на первом же шаге.
+
+    Прежний тест этого не видел, потому что проверял ЧИСТУЮ ФУНКЦИЮ на выдуманных
+    днях. Механизм был верен, подключение — нет; здесь проверяется именно оно.
+    """
+    from friday.organs.compactor import chain_for
+
+    storage.ensure_user("person-a")
+    incidents = [{"code": "answer_ungrounded", "severity": "low", "count": 4}]
+    for day in ("2026-08-01", "2026-08-02"):
+        done = storage.begin_day_compact("person-a", day)
+        storage.finish_day_compact(
+            done, source_turns=5, counters={"total_turns": 5}, incidents=incidents, patterns=[]
+        )
+
+    # Ровно как в бою: строка сегодняшних суток уже заведена и ещё пуста.
+    storage.begin_day_compact("person-a", "2026-08-03")
+    found = chain_for(storage, "person-a", "2026-08-03", incidents)
+
+    assert found == [{"code": "answer_ungrounded", "days": 3}], (
+        "трое суток подряд с одним происшествием не сложились в цепочку"
+    )
+
+
+def test_a_streak_still_needs_three_days(storage) -> None:
+    """Обратная сторона: правка не должна начать видеть поведение там, где его нет.
+
+    Двое суток — совпадение; объявить их привычкой системы значит послать человека
+    чинить случайность.
+    """
+    from friday.organs.compactor import chain_for
+
+    storage.ensure_user("person-a")
+    incidents = [{"code": "verification_failed", "severity": "medium", "count": 2}]
+    done = storage.begin_day_compact("person-a", "2026-08-02")
+    storage.finish_day_compact(
+        done, source_turns=5, counters={"total_turns": 5}, incidents=incidents, patterns=[]
+    )
+    storage.begin_day_compact("person-a", "2026-08-03")
+
+    assert chain_for(storage, "person-a", "2026-08-03", incidents) == []
