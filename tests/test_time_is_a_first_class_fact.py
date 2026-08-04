@@ -25,7 +25,7 @@ from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext, AuthorizationService
-from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, RelationType, new_id
 from friday.web_surfer import WebSurfer
 
 
@@ -194,3 +194,52 @@ def test_the_backfill_gives_old_relations_the_date_of_their_paper(storage, setti
 
     refreshed = storage.get_entity_relations(str(person["id"]), "alice")
     assert refreshed[0]["valid_from"] == "2024-03-15"
+
+
+def test_the_local_view_honours_the_filters(storage):
+    """Окрестность узла обязана слушать те же фильтры, что и общий вид.
+
+    До правки маршрут `/api/admin/graph/{id}` не принимал НИ ОДНОГО фильтра:
+    человек выбирал «только люди», переключался с общей картины на окрестность и
+    молча получал всё. Молча — худшая часть: вид выглядел отфильтрованным.
+    """
+
+    graph = KnowledgeGraph(storage)
+    person = graph.create_entity("alice", "Иванов Иван Иванович", EntityType.PERSON)
+    unit = graph.create_entity("alice", "в/ч 30926", EntityType.ORGANIZATION)
+    city = graph.create_entity("alice", "Севастополь", EntityType.LOCATION)
+    graph.create_relation("alice", str(person["id"]), str(unit["id"]), RelationType.MEMBER_OF)
+    graph.create_relation("alice", str(person["id"]), str(city["id"]), RelationType.LOCATED_AT)
+
+    everything = graph.get_entity_graph("alice", str(person["id"]), 1)
+    only_units = graph.get_entity_graph(
+        "alice", str(person["id"]), 1, entity_types=["organization"]
+    )
+    only_family = graph.get_entity_graph(
+        "alice", str(person["id"]), 1, relation_types=["family_of"]
+    )
+
+    assert len(everything["edges"]) == 2
+    assert [node["name"] for node in only_units["nodes"] if node["id"] != person["id"]] == ["в/ч 30926"]
+    assert len(only_units["edges"]) == 1
+    assert only_family["edges"] == [], "родни нет — и рисовать нечего"
+
+
+def test_a_filtered_out_node_does_not_open_the_next_circle(storage):
+    """Отсев сужает ОБХОД, а не картинку.
+
+    Иначе сосед второго круга приезжал бы через связь, которую только что
+    выключили: узел отсеян, а путь через него остался.
+    """
+
+    graph = KnowledgeGraph(storage)
+    person = graph.create_entity("alice", "Иванов Иван Иванович", EntityType.PERSON)
+    unit = graph.create_entity("alice", "в/ч 30926", EntityType.ORGANIZATION)
+    far = graph.create_entity("alice", "Севастополь", EntityType.LOCATION)
+    graph.create_relation("alice", str(person["id"]), str(unit["id"]), RelationType.MEMBER_OF)
+    graph.create_relation("alice", str(unit["id"]), str(far["id"]), RelationType.LOCATED_AT)
+
+    filtered = graph.get_entity_graph("alice", str(person["id"]), 2, entity_types=["person"])
+
+    assert [node["id"] for node in filtered["nodes"]] == [str(person["id"])]
+    assert filtered["edges"] == []

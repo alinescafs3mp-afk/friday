@@ -959,7 +959,15 @@ class GraphMixin(StorageShared):
         return [dict(row) for row in rows]
 
     def get_entity_graph(
-        self, user_id: str, entity_id: str, depth: int = 2, *, as_of: str = ""
+        self,
+        user_id: str,
+        entity_id: str,
+        depth: int = 2,
+        *,
+        as_of: str = "",
+        entity_types: Sequence[str] = (),
+        relation_types: Sequence[str] = (),
+        min_weight: float = 0.0,
     ) -> dict[str, Any]:
         """Окрестность узла. `as_of` — «как это выглядело на ту дату».
 
@@ -975,6 +983,14 @@ class GraphMixin(StorageShared):
         if not root or root.get("deleted_at"):
             return {"nodes": [], "edges": [], "root": entity_id}
         max_depth = max(0, min(depth, 5))
+        # Фильтры сужают ОБХОД, а не рисование: отсеяв рёбра после обхода, вид
+        # показал бы соседей второго круга, добытых через связь, которую человек
+        # только что выключил. До этой правки локальный вид не получал фильтров
+        # ВООБЩЕ — человек выбирал «только люди», переключался на окрестность
+        # узла и молча получал всё.
+        wanted_entities = {str(item).strip() for item in entity_types if str(item).strip()}
+        wanted_relations = {str(item).strip() for item in relation_types if str(item).strip()}
+        floor = max(0.0, float(min_weight))
         seen = {entity_id}
         frontier = {entity_id}
         nodes: dict[str, dict[str, Any]] = {entity_id: root}
@@ -983,15 +999,31 @@ class GraphMixin(StorageShared):
             next_frontier: set[str] = set()
             for current in frontier:
                 for relation in self.get_entity_relations(current, user_id, as_of=as_of):
-                    edges[relation["id"]] = relation
+                    if wanted_relations and str(relation.get("relation_type") or "") not in wanted_relations:
+                        continue
+                    if floor and float(relation.get("weight") or 0.0) < floor:
+                        continue
+                    neighbours = []
                     for candidate in (relation["source_entity_id"], relation["target_entity_id"]):
                         if candidate in seen:
                             continue
                         entity = self.get_entity(candidate, user_id)
-                        if entity and not entity.get("deleted_at"):
-                            seen.add(candidate)
-                            nodes[candidate] = entity
-                            next_frontier.add(candidate)
+                        if not entity or entity.get("deleted_at"):
+                            continue
+                        if wanted_entities and str(entity.get("entity_type") or "") not in wanted_entities:
+                            # Узел отсеян — значит и ребро к нему рисовать нечем.
+                            continue
+                        neighbours.append((candidate, entity))
+                    both_known = all(
+                        side in seen for side in (relation["source_entity_id"], relation["target_entity_id"])
+                    )
+                    if not neighbours and not both_known:
+                        continue
+                    edges[relation["id"]] = relation
+                    for candidate, entity in neighbours:
+                        seen.add(candidate)
+                        nodes[candidate] = entity
+                        next_frontier.add(candidate)
             frontier = next_frontier
             if not frontier:
                 break

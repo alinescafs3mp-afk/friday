@@ -1826,9 +1826,25 @@ class KnowledgeGraph:
         return self.storage.count_relation_candidates_for_entity(user_id, entity_id)
 
     def get_entity_graph(
-        self, user_id: str, entity_id: str, depth: int = 2, *, as_of: str = ""
+        self,
+        user_id: str,
+        entity_id: str,
+        depth: int = 2,
+        *,
+        as_of: str = "",
+        entity_types: Any = (),
+        relation_types: Any = (),
+        min_weight: float = 0.0,
     ) -> dict[str, Any]:
-        return self.storage.get_entity_graph(user_id, entity_id, depth, as_of=as_of)
+        return self.storage.get_entity_graph(
+            user_id,
+            entity_id,
+            depth,
+            as_of=as_of,
+            entity_types=entity_types,
+            relation_types=relation_types,
+            min_weight=min_weight,
+        )
 
     def link_knowledge_to_entity(
         self,

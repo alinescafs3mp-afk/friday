@@ -157,11 +157,36 @@ async def graph_overview(
 
 @router.get("/graph/{entity_id}")
 async def graph(
-    entity_id: str, request: Request, user_id: str, depth: int = Query(2, ge=0, le=5)
+    entity_id: str,
+    request: Request,
+    user_id: str,
+    depth: int = Query(2, ge=0, le=5),
+    entity_types: str = "",
+    relation_types: str = "",
+    min_weight: float = Query(0.0, ge=0.0, le=1.0),
+    as_of: str = "",
 ) -> dict[str, Any]:
+    """Окрестность узла — с теми же фильтрами, что и общий вид.
+
+    До этого маршрут не принимал НИ ОДНОГО фильтра: человек выбирал «только
+    люди», переключался с общей картины на окрестность узла и молча получал всё.
+    Молча — худшая часть: вид выглядел отфильтрованным.
+
+    `as_of` показывает картину на дату; отменённая с тех пор связь в неё
+    возвращается, потому что тогда она была верна.
+    """
+
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.graph.read", user_id, entity_id=entity_id, depth=depth)
-    return _services(request).kg.get_entity_graph(user_id, entity_id, depth)
+    return _services(request).kg.get_entity_graph(
+        user_id,
+        entity_id,
+        depth,
+        as_of=as_of,
+        entity_types=[item for item in entity_types.split(",") if item.strip()],
+        relation_types=[item for item in relation_types.split(",") if item.strip()],
+        min_weight=min_weight,
+    )
 
 
 @router.get("/relation-candidates")

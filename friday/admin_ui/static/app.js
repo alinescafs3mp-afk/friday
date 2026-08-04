@@ -766,8 +766,16 @@ actions.inspectEntityNode=async id=>{
 // означало бы «трое среди ста самых связанных», а не трое в архиве.
 async function graphData(uid){
   const f=graphState();
-  if(state.graphView==='local'&&state.graphFocus)
-    return api(`/api/admin/graph/${q(state.graphFocus)}?user_id=${q(uid)}&depth=${Number(state.graphDepth)||2}`);
+  if(state.graphView==='local'&&state.graphFocus){
+    // Локальный вид получает ТЕ ЖЕ фильтры, что и общий. Прежде он не получал
+    // ни одного: человек выбирал «только люди», переключался на окрестность
+    // узла и молча получал всё, а вид выглядел отфильтрованным.
+    const local=[`user_id=${q(uid)}`,`depth=${Number(state.graphDepth)||2}`];
+    if(f.types.length)local.push(`entity_types=${q(f.types.join(','))}`);
+    if(f.relations.length)local.push(`relation_types=${q(f.relations.join(','))}`);
+    if(f.minWeight>1)local.push(`min_weight=${Number(f.minWeight)/50}`);
+    return api(`/api/admin/graph/${q(state.graphFocus)}?${local.join('&')}`);
+  }
   const params=[`user_id=${q(uid)}`,'limit=150'];
   if(f.types.length)params.push(`entity_types=${q(f.types.join(','))}`);
   if(f.relations.length)params.push(`relation_types=${q(f.relations.join(','))}`);
