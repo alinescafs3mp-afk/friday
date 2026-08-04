@@ -1588,6 +1588,30 @@ class KnowledgeGraph:
             store=store,
         )
 
+    def invalidate_relation(
+        self,
+        user_id: str,
+        relation_id: str,
+        *,
+        valid_to: str = "",
+        superseded_by: str = "",
+        reason: str = "",
+    ) -> dict[str, Any] | None:
+        """Связь перестала быть верной — это не то же самое, что её не было.
+
+        Мягкое удаление говорит «этого не было», отмена — «это было и кончилось».
+        Второе первым не выразить, а именно оно нужно архиву: рапорт 2024 года о
+        службе в в/ч 30926 остаётся фактом о 2024-м после перевода человека.
+        """
+
+        return self.storage.invalidate_relation(
+            user_id,
+            relation_id,
+            valid_to=valid_to,
+            superseded_by=superseded_by,
+            reason=reason,
+        )
+
     def review_relation_candidate(
         self,
         user_id: str,

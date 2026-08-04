@@ -248,6 +248,36 @@ async def bulk_review_relation_candidates(request: Request) -> dict[str, Any]:
     }
 
 
+@router.post("/relations/{relation_id}/invalidate")
+async def invalidate_relation(relation_id: str, request: Request) -> dict[str, Any]:
+    """Связь перестала быть верной — но она БЫЛА, и это остаётся в архиве.
+
+    Отдельно от мягкого удаления: то говорит «этого не было», это — «было и
+    кончилось». Дата окончания приходит от человека (`valid_to`), а дата записи
+    ставится сама: без второй нельзя восстановить, что система считала верным
+    неделю назад, и почему тогда ответила именно так.
+    """
+
+    _require(request, "admin.all_data.manage")
+    body = await _request_json(request)
+    user_id = str(body.get("user_id") or "")
+    _protect_owner_target(request, user_id)
+    try:
+        result = _services(request).kg.invalidate_relation(
+            user_id,
+            relation_id,
+            valid_to=str(body.get("valid_to") or ""),
+            superseded_by=str(body.get("superseded_by") or ""),
+            reason=str(body.get("reason") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Связь не найдена")
+    _audit(request, "admin.relation.invalidate", "relation", relation_id, after=result)
+    return {"item": result}
+
+
 @router.post("/relation-candidates/{candidate_id}/review")
 async def review_relation_candidate(candidate_id: str, request: Request) -> dict[str, Any]:
     _require(request, "admin.all_data.manage")

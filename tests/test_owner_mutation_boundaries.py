@@ -117,6 +117,9 @@ def _seed_owner_objects(storage, owner_id: str) -> dict[str, str]:
         "link_id": "kel_missing",
         "conflict_id": "kc_missing",
         "candidate_id": "rc_missing",
+        # Отмена связи проверяется тем же обходом: маршрут мутирующий, и запрет
+        # действий против владельца обязан сработать до того, как связь найдётся.
+        "relation_id": "rel_missing",
         "merge_id": "em_missing",
         "inbox_id": "inb_missing",
         "case_id": "eval_missing",

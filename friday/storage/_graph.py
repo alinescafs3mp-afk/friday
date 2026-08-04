@@ -329,6 +329,9 @@ class GraphMixin(StorageShared):
             f"source_entity_id IN ({placeholders})",
             f"target_entity_id IN ({placeholders})",
             "deleted_at IS NULL",
+            # Отменённая связь на общей картине не рисуется: «служит в в/ч А» и
+            # «служит в в/ч Б» рядом читаются как одновременные.
+            "valid_to IS NULL",
         ]
         relation_parameters: list[Any] = [user_id, *ids, *ids]
         wanted_relations = [str(item).strip() for item in (relation_types or []) if str(item).strip()]
@@ -808,9 +811,11 @@ class GraphMixin(StorageShared):
             try:
                 conn.execute(
                     """INSERT INTO relations(id, user_id, source_entity_id, target_entity_id,
-                       relation_type, weight, metadata_json, created_at, deleted_at)
+                       relation_type, weight, metadata_json, created_at, deleted_at,
+                       valid_from, valid_to, invalidated_at, superseded_by)
                        VALUES(:id, :user_id, :source_entity_id, :target_entity_id,
-                       :relation_type, :weight, :metadata_json, :created_at, :deleted_at)""",
+                       :relation_type, :weight, :metadata_json, :created_at, :deleted_at,
+                       :valid_from, :valid_to, :invalidated_at, :superseded_by)""",
                     relation.to_row(),
                 )
             except sqlite3.IntegrityError:
@@ -829,6 +834,66 @@ class GraphMixin(StorageShared):
                 else:
                     raise
         return relation
+
+    def invalidate_relation(
+        self,
+        user_id: str,
+        relation_id: str,
+        *,
+        valid_to: str = "",
+        superseded_by: str = "",
+        reason: str = "",
+    ) -> dict[str, Any] | None:
+        """Объявить связь недействующей, не стирая её.
+
+        Два времени, и они разные. `valid_to` — КОГДА ПЕРЕСТАЛО БЫТЬ ПРАВДОЙ
+        (человек переведён в другую часть первого марта); `invalidated_at` —
+        КОГДА МЫ ЭТО ЗАПИСАЛИ. Без второго нельзя ответить на вопрос «что система
+        считала верным на прошлой неделе», а именно им проверяют, почему она
+        тогда так ответила.
+
+        Связь остаётся в таблице. Мягкое удаление говорит «этого не было»,
+        а здесь сказано «это было и кончилось» — разные утверждения, и второе
+        нельзя выразить первым.
+        """
+
+        now = utc_now()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM relations WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                (relation_id, user_id),
+            ).fetchone()
+            if not row:
+                return None
+            if row["invalidated_at"]:
+                # Решение терминально, как у кандидатов: повторная отмена молча
+                # переписала бы дату, по которой потом восстанавливают картину.
+                raise ValueError("Связь уже объявлена недействующей")
+            if superseded_by:
+                replacement = conn.execute(
+                    "SELECT 1 FROM relations WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                    (superseded_by, user_id),
+                ).fetchone()
+                if not replacement:
+                    raise ValueError("Связь-замена не найдена")
+            metadata = _json_load(row["metadata_json"], {})
+            if reason:
+                metadata["invalidation_reason"] = str(reason)[:400]
+            conn.execute(
+                """UPDATE relations
+                   SET valid_to=?, invalidated_at=?, superseded_by=?, metadata_json=?
+                   WHERE id=? AND user_id=?""",
+                (
+                    valid_to or now,
+                    now,
+                    superseded_by or None,
+                    json.dumps(metadata, ensure_ascii=False),
+                    relation_id,
+                    user_id,
+                ),
+            )
+            updated = conn.execute("SELECT * FROM relations WHERE id=?", (relation_id,)).fetchone()
+        return dict(updated) if updated else None
 
     def count_entity_relations(self, entity_id: str, user_id: str | None = None) -> int:
         """Relation count without the two entity joins and the full rows.
@@ -850,19 +915,45 @@ class GraphMixin(StorageShared):
         ).fetchone()
         return int(row["count"] if row else 0)
 
-    def get_entity_relations(self, entity_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
+    def get_entity_relations(
+        self,
+        entity_id: str,
+        user_id: str | None = None,
+        *,
+        include_invalidated: bool = False,
+        as_of: str = "",
+    ) -> list[dict[str, Any]]:
+        """Связи узла. По умолчанию — только ДЕЙСТВУЮЩИЕ.
+
+        Отменённая связь остаётся в таблице (она была правдой и перестала ею
+        быть), но в обычный обход графа не попадает: иначе «служит в в/ч А» и
+        «служит в в/ч Б» покажутся одновременными, и картина соврёт.
+
+        `as_of` отвечает на вопрос «а как было тогда»: связь берётся, если на ту
+        дату она уже началась и ещё не кончилась. Пустой `valid_from` («начало
+        неизвестно») не исключает связь из ответа — неизвестное начало это не
+        «началось позже», а отсутствие сведений.
+        """
+
         params: list[Any] = [entity_id, entity_id]
-        user_clause = ""
+        clauses = ["r.deleted_at IS NULL"]
         if user_id is not None:
-            user_clause = " AND r.user_id=?"
+            clauses.append("r.user_id=?")
             params.append(user_id)
-        # ``user_clause`` is one fixed optional predicate; the value is bound.
+        if as_of:
+            clauses.append("(r.valid_from = '' OR r.valid_from <= ?)")
+            params.append(as_of)
+            clauses.append("(r.valid_to IS NULL OR r.valid_to > ?)")
+            params.append(as_of)
+        elif not include_invalidated:
+            clauses.append("r.valid_to IS NULL")
+        # Все предикаты — литералы, значения связаны параметрами.
         query = f"""SELECT r.*, s.name AS source_name, t.name AS target_name
                 FROM relations r
                 JOIN entities s ON s.id=r.source_entity_id
                 JOIN entities t ON t.id=r.target_entity_id
                 WHERE (r.source_entity_id=? OR r.target_entity_id=?)
-                  {user_clause} AND r.deleted_at IS NULL
+                  AND {" AND ".join(clauses)}
                 ORDER BY r.created_at DESC"""  # nosec B608
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]

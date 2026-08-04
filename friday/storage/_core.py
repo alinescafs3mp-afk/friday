@@ -559,6 +559,17 @@ class CoreMixin(StorageShared):
             # with. '' means "not chunked" -- exactly what every pre-0.41 row already
             # stores, so turning chunking off re-indexes nothing.
             "knowledge_embeddings": {"chunk_scheme": "TEXT NOT NULL DEFAULT ''"},
+            # Время связи (схема 27). Пустой `valid_from` у прежних строк — это
+            # «начало неизвестно», и оно НЕ подменяется датой записи: `created_at`
+            # говорит, когда мы узнали, а не когда стало правдой. Выдать одно за
+            # другое значило бы задним числом объявить, что человек служит в части
+            # с того дня, когда его рапорт попал в архив.
+            "relations": {
+                "valid_from": "TEXT NOT NULL DEFAULT ''",
+                "valid_to": "TEXT",
+                "invalidated_at": "TEXT",
+                "superseded_by": "TEXT",
+            },
         }
         for table, columns in additions.items():
             if table not in table_names:

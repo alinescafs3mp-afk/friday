@@ -360,6 +360,14 @@ class Relation:
     metadata_json: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now)
     deleted_at: str | None = None
+    #: Когда связь стала верна. Пусто — начало неизвестно; см. схему таблицы.
+    valid_from: str = ""
+    #: Когда перестала быть верной. None — действует.
+    valid_to: str | None = None
+    #: Когда МЫ УЗНАЛИ о недействительности (второе время пары).
+    invalidated_at: str | None = None
+    #: Чем заменена.
+    superseded_by: str | None = None
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -372,6 +380,10 @@ class Relation:
             "metadata_json": json_dump(self.metadata_json),
             "created_at": self.created_at,
             "deleted_at": self.deleted_at,
+            "valid_from": self.valid_from,
+            "valid_to": self.valid_to,
+            "invalidated_at": self.invalidated_at,
+            "superseded_by": self.superseded_by,
         }
 
 

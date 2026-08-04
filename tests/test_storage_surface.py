@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 329
+EXPECTED_MEMBER_COUNT = 330
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -206,6 +206,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "create_mission": "(self, mission: 'Mission') -> 'dict[str, Any]'",
     "create_mission_unless_twin": "(self, mission: 'Mission', *, statuses: 'Sequence[str]', since: 'str') -> 'tuple[dict[str, Any], bool]'",
     "create_relation": "(self, relation: 'Relation') -> 'Relation'",
+    "invalidate_relation": (
+        "(self, user_id: 'str', relation_id: 'str', *, valid_to: 'str' = '', "
+        "superseded_by: 'str' = '', reason: 'str' = '') -> 'dict[str, Any] | None'"
+    ),
     "delete_conversation": "(self, conversation_id: 'str', user_id: 'str') -> 'dict[str, Any]'",
     "delete_entity_time": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'bool'",
     "delete_eval_case": "(self, user_id: 'str', case_id: 'str') -> 'bool'",
@@ -240,7 +244,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_entity": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'dict[str, Any] | None'",
     "get_entity_graph": "(self, user_id: 'str', entity_id: 'str', depth: 'int' = 2) -> 'dict[str, Any]'",
     "get_entity_knowledge": "(self, user_id: 'str', entity_id: 'str', *, limit: 'int' = 50) -> 'list[dict[str, Any]]'",
-    "get_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'list[dict[str, Any]]'",
+    "get_entity_relations": (
+        "(self, entity_id: 'str', user_id: 'str | None' = None, *, "
+        "include_invalidated: 'bool' = False, as_of: 'str' = '') -> 'list[dict[str, Any]]'"
+    ),
     "get_entity_time": "(self, entity_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "get_feedback_for_target": "(self, user_id: 'str', target_type: 'str', target_id: 'str') -> 'list[dict[str, Any]]'",
     "get_feedback_state": "(self, user_id: 'str', *, target_type: 'str | None' = None, target_id: 'str | None' = None, feedback_type: 'str | None' = None, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
