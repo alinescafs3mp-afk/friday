@@ -148,7 +148,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 321
+EXPECTED_MEMBER_COUNT = 322
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -199,6 +199,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "create_conversation": "(self, user_id: 'str', title: 'str' = '', *, mode: 'str' = 'dialogue') -> 'dict[str, Any]'",
     "create_entity": "(self, entity: 'Entity') -> 'Entity'",
     "create_mission": "(self, mission: 'Mission') -> 'dict[str, Any]'",
+    "create_mission_unless_twin": "(self, mission: 'Mission', *, statuses: 'Sequence[str]', since: 'str') -> 'tuple[dict[str, Any], bool]'",
     "create_relation": "(self, relation: 'Relation') -> 'Relation'",
     "delete_conversation": "(self, conversation_id: 'str', user_id: 'str') -> 'dict[str, Any]'",
     "delete_entity_time": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'bool'",

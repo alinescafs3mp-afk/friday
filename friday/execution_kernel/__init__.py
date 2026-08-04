@@ -1707,6 +1707,11 @@ class ExecutionKernel:
             "title": mission.get("title"),
             "task_count": mission.get("task_count"),
             "queued_for_review": mission.get("status") == "proposed",
+            # Признак повтора обязан доехать до модели. Служба уже не заводит
+            # вторую миссию с той же целью, но без этого поля модель отчитается
+            # человеку о создании новой — то есть дедупликация починит дубли и
+            # заведёт на их месте ложное подтверждение.
+            "existing": bool(mission.get("existing")),
         }
 
     def _zone(self) -> Any:

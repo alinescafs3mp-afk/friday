@@ -35,6 +35,64 @@ class MissionsMixin(StorageShared):
             )
         return self.get_mission(mission.id, mission.user_id) or {}
 
+    def create_mission_unless_twin(
+        self,
+        mission: Mission,
+        *,
+        statuses: Sequence[str],
+        since: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Завести миссию, если такой же живой ещё нет. Второе значение — «завели ли».
+
+        Замерено 2026-08-04: два одинаковых вызова `mission_propose` подряд давали
+        две миссии и два набора шагов. При включённой полной автономии исполняются
+        ОБЕ, а бегунок активных миссий общий на всех людей (потолок восемь), так
+        что близнецы из одного разговора вытесняют работу остальных участников.
+
+        Признак «завели» возвращается ЯВНО, и это главное здесь. Молча не вставить
+        и вернуть чужую строку — как сделано у заявок — тут нельзя: вызывающая
+        сторона возврат не читает, и пошла бы дальше со своим идентификатором.
+        Получилась бы призрачная миссия: лишний поход планировщика в модель,
+        запись в аудит о создании несуществующего, второе уведомление человеку
+        (ключ очереди содержит идентификатор, у призрака он другой) и `None`
+        вместо ответа модели.
+
+        Поиск стоит ВНУТРИ той же транзакции, что и вставка: «прочитать, проверить,
+        записать» двумя запросами — гонка. Строка читается ПОСЛЕ выхода из неё.
+
+        Границы задаёт вызывающая сторона, и обе обязательны. `statuses` — только
+        незавершённые: повторить законченную работу человек вправе, это прямая
+        просьба «сделай ещё раз». `since` — срок: при выключенной автономии
+        агентская миссия садится в `proposed` и висит там до решения человека, так
+        что бессрочный ключ означал бы, что июльская просьба глушит августовскую.
+        """
+        self.ensure_user(mission.user_id)
+        marks = ",".join("?" for _ in statuses) or "''"
+        found = ""
+        with self.transaction() as conn:
+            row = conn.execute(
+                f"""SELECT id FROM missions
+                     WHERE user_id=? AND goal=? AND created_by=?
+                       AND status IN ({marks}) AND created_at > ?
+                     ORDER BY created_at ASC, id ASC LIMIT 1""",
+                (mission.user_id, mission.goal, mission.created_by, *statuses, since),
+            ).fetchone()
+            if row:
+                found = str(row["id"])
+            else:
+                conn.execute(
+                    """INSERT INTO missions(id, user_id, goal, title, status, origin, plan_summary,
+                       created_by, error, task_count, done_count, metadata_json, version,
+                       created_at, updated_at, started_at, completed_at)
+                       VALUES(:id, :user_id, :goal, :title, :status, :origin, :plan_summary,
+                       :created_by, :error, :task_count, :done_count, :metadata_json, :version,
+                       :created_at, :updated_at, :started_at, :completed_at)""",
+                    mission.to_row(),
+                )
+        if found:
+            return self.get_mission(found, mission.user_id) or {}, False
+        return self.get_mission(mission.id, mission.user_id) or {}, True
+
     def set_mission_plan(
         self,
         mission_id: str,

@@ -90,6 +90,15 @@ _PROPOSE_INBOX_THRESHOLD = 10
 # the next cognition tick, short enough that a genuinely growing queue still gets
 # attention the same day.
 _PROPOSE_COOLDOWN = timedelta(hours=6)
+
+#: Сколько времени такая же живая миссия считается той же самой.
+#:
+#: То же число и по той же причине, что срок жизни заявки на подтверждение:
+#: просьба, произнесённая вчера, относилась к вчерашней картине мира. Без срока
+#: ключ становится вечным — при выключенной автономии агентская миссия садится в
+#: `proposed` и висит до решения человека, и июльская просьба глушила бы
+#: августовскую молча.
+_TWIN_MISSION_WINDOW = timedelta(hours=24)
 _NON_TERMINAL_STATUSES = ("proposed", "ready", "running", "paused", "blocked")
 
 _TASK_SYSTEM_PROMPT = (
@@ -161,7 +170,23 @@ class ExecutiveService:
             origin=origin_enum,
             created_by=created_by or origin_enum.value,
         )
-        self.storage.create_mission(mission)
+        # Такая же живая миссия того же автора — не повод заводить вторую.
+        #
+        # Выход стоит ДО планировщика намеренно, и не только ради сэкономленного
+        # вызова модели: `set_mission_plan` начинается с удаления шагов миссии, и
+        # дедуп, который вернул бы существующую миссию и поехал дальше, стёр бы
+        # шаги ИДУЩЕЙ работы вместе с их результатами.
+        _existing, created = self.storage.create_mission_unless_twin(
+            mission,
+            statuses=list(_NON_TERMINAL_STATUSES),
+            since=(datetime.now(UTC) - _TWIN_MISSION_WINDOW).isoformat(timespec="seconds"),
+        )
+        if not created:
+            twin_id = str(_existing.get("id") or "")
+            view = self.get_mission_view(twin_id, user_id) or _existing
+            # `existing` обязан доехать до модели: иначе она отчитается человеку о
+            # создании новой миссии, которой не появилось.
+            return {**view, "existing": True}
         try:
             plan_title, tasks = await self.planner.plan(goal)
         except BaseException:
