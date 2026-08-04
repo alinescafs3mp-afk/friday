@@ -156,8 +156,27 @@ def incidents_of_a_turn(metadata: dict[str, Any]) -> list[str]:
     return found
 
 
+#: Счётчики, которые считаются ТОЛЬКО по структурной метке хода.
+#:
+#: Отделены от `total_turns` и `ignored_orders` намеренно: те считаются по самим
+#: ходам и честны всегда, а эти живут ровно там, где метка есть.
+_STRUCTURAL_COUNTERS = ("structural_answers", "model_answers", "corrections_accepted", "refusals")
+
+
 def counters_of_a_day(rows: Sequence[dict[str, Any]]) -> dict[str, int]:
-    """Шесть счётчиков, которые просил владелец. Все — из признаков."""
+    """Счётчики суток. «Признака не было» и «случаев не было» — РАЗНЫЕ ответы.
+
+    Первый настоящий прогон это и показал: сутки на 747 ходов вернули
+    `model_answers: 0`, то есть утверждение, что модель за день не сказала ни
+    слова. Правда была другая — структурную метку начали писать вечером того же
+    дня, и у ходов её просто нет. Ноль здесь не осторожная оценка, а ложь в ту
+    сторону, где её примут за факт: сводку читает человек и делает по ней выводы.
+
+    Поэтому счётчики, живущие на метке, при её полном отсутствии НЕ ПИШУТСЯ
+    вовсе — читающая сторона показывает прочерк. А когда метка есть у части
+    ходов, рядом едет `measured_turns`: три случая из семисот сорока семи и три
+    из трёх — разные сутки, и по одному числу их не различить.
+    """
     counters = {
         "total_turns": 0,
         "structural_answers": 0,
@@ -166,10 +185,13 @@ def counters_of_a_day(rows: Sequence[dict[str, Any]]) -> dict[str, int]:
         "refusals": 0,
         "ignored_orders": 0,
     }
+    measured = 0
     for metadata in rows:
         marks = _marks(metadata)
         structural = dict(marks.get("structural") or {})
         counters["total_turns"] += 1
+        if structural:
+            measured += 1
         if structural.get("answer_present"):
             counters["structural_answers"] += 1
         if structural.get("model_spoke"):
@@ -180,6 +202,10 @@ def counters_of_a_day(rows: Sequence[dict[str, Any]]) -> dict[str, int]:
             counters["refusals"] += 1
         if "order_ignored" in incidents_of_a_turn(metadata):
             counters["ignored_orders"] += 1
+    if not measured:
+        for name in _STRUCTURAL_COUNTERS:
+            counters.pop(name)
+    counters["measured_turns"] = measured
     return counters
 
 

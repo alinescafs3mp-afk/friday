@@ -948,11 +948,20 @@ function compactBody(item){
   const patterns=(item.patterns||[]).map(p=>
     `<div class="toolbar"><span class="badge warn">${Number(p.days||0)} дня подряд</span>`
     +`<span>${esc(p.text||p.code)}</span></div>`).join('');
+  // Прочерк, а не ноль. Счётчики поведения живут на структурной метке хода, и
+  // когда её нет вовсе, «0» читается как «модель за сутки не сказала ни слова» —
+  // утверждение, а не осторожная оценка. Первый настоящий прогон вернул именно
+  // такие нули на 747 ходах.
+  const measured=item.counters&&item.counters.measured_turns;
+  const partial=(typeof measured==='number')&&measured>0&&measured<Number(item.source_turns||0);
   return `<h2>${esc(item.local_date)}</h2>`
-    +`<div class="grid stats">${numbers.map(([l,v])=>`<div class="card stat"><div class="value">${Number(v||0)}</div><div class="label">${l}</div></div>`).join('')}</div>`
+    +`<div class="grid stats">${numbers.map(([l,v])=>`<div class="card stat"><div class="value">${v===undefined||v===null?'—':Number(v)}</div><div class="label">${l}</div></div>`).join('')}</div>`
     +(patterns?`<h2 class="mt16">Повторяется</h2>${patterns}`:'')
     +`<h2 class="mt16">Происшествия</h2>${incidents||empty('За эти сутки ничего не отмечено')}`
-    +`<div class="muted mt10">Собрано по ${Number(item.source_turns||0)} ходам. В сводке нет текста переписки: только коды и числа.</div>`;
+    +`<div class="muted mt10">Собрано по ${Number(item.source_turns||0)} ходам. В сводке нет текста переписки: только коды и числа.`
+    +(measured===0?' Прочерк там, где признак за эти сутки не собирался вовсе.'
+      :partial?` Поведение посчитано по ${Number(measured)} ходам из ${Number(item.source_turns||0)} — на остальных признака не было.`:'')
+    +`</div>`;
 }
 renderers.compacts=async gen=>{
   const who=state.userId?`&user_id=${encodeURIComponent(state.userId)}`:'';
