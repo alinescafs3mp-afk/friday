@@ -17,7 +17,7 @@ import logging
 import re
 import socket
 import urllib.parse
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,6 +71,8 @@ def _host_of(url: str) -> str:
     except ValueError:
         return ""
     return host[4:] if host.startswith("www.") else host
+
+
 # CPU wall-clock for pypdf after the body is already in memory. Declared with the
 # PDF allowlist (G22 / PROPOSALS №3): measured 9/10 public PDFs extracted clean
 # text in <0.5 s; 8 s leaves headroom for a multi-megabyte report without letting
@@ -396,6 +398,81 @@ def _duckduckgo_target(href: str) -> str:
     return urllib.parse.unquote(target) if target else absolute
 
 
+#: Сколько мест в выдаче может занять ОДИН сайт.
+#:
+#: Замерено 2026-08-05 на живом провайдере, десять настоящих запросов по восемь
+#: результатов: в девяти из десяти один домен занимал два места и больше, всего
+#: 21 «лишний» результат из 80 — четверть выдачи. «Рецепт борща» дал четыре
+#: страницы одного кулинарного сайта из восьми, «курс доллара» — три cbr.ru.
+#:
+#: Два, а не один: у запроса «курс доллара цб рф» две страницы cbr.ru — это
+#: нормальный ответ, а не шум. Потолок отсекает третью и дальше.
+_PER_HOST_LIMIT = 2
+
+
+def _canonical_url(url: str) -> str:
+    """Ключ, по которому два адреса — один документ.
+
+    Схема, `www.`, метки перехода (`utm_*`, `yclid`, `from`), якорь и хвостовой
+    слэш к содержимому страницы отношения не имеют. Замер на той же выдаче: сама
+    по себе канонизация ловит всего 2 совпадения из 80 — зеркала оказались
+    РАЗНЫМИ страницами одного сайта, а не вариантами одного адреса. Поэтому она
+    здесь не главный механизм, а дешёвая страховка.
+    """
+
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    without_scheme = re.sub(r"(?i)^https?://", "", text)
+    without_scheme = re.sub(r"(?i)^www\.", "", without_scheme)
+    without_anchor = without_scheme.split("#", 1)[0]
+    head, _, query = without_anchor.partition("?")
+    if query:
+        kept = [
+            part
+            for part in query.split("&")
+            if part and not re.match(r"(?i)^(utm_[a-z]+|yclid|gclid|fbclid|from|ref|referrer)=", part)
+        ]
+        head = head + ("?" + "&".join(sorted(kept)) if kept else "")
+    return head.rstrip("/").lower()
+
+
+def _result_host(url: str) -> str:
+    host = re.sub(r"(?i)^https?://", "", str(url or "").strip()).split("/", 1)[0]
+    host = re.sub(r"(?i)^(www|m|amp)\.", "", host)
+    return host.split(":", 1)[0].lower()
+
+
+def _diversify(results: Sequence[SearchResult], limit: int) -> list[SearchResult]:
+    """Убрать повторы адресов и не дать одному сайту занять всю выдачу.
+
+    Отброшенные по потолку НЕ теряются: если после отбора мест осталось меньше,
+    чем просили, они возвращаются в конец в исходном порядке. Иначе «не больше
+    двух с сайта» превращалось бы в «меньше результатов», а это уже не
+    разнообразие, а потеря — на узком запросе, где отвечает один сайт, выдача
+    схлопнулась бы до двух строк.
+    """
+
+    picked: list[SearchResult] = []
+    overflow: list[SearchResult] = []
+    seen: set[str] = set()
+    per_host: dict[str, int] = {}
+    for item in results:
+        key = _canonical_url(item.url)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        host = _result_host(item.url)
+        if host and per_host.get(host, 0) >= _PER_HOST_LIMIT:
+            overflow.append(item)
+            continue
+        per_host[host] = per_host.get(host, 0) + 1
+        picked.append(item)
+    if len(picked) < limit:
+        picked.extend(overflow[: limit - len(picked)])
+    return picked[:limit]
+
+
 class WebSurfer:
     """Search and fetch public sources under strict byte and time budgets."""
 
@@ -457,19 +534,9 @@ class WebSurfer:
         if not answered and refused:
             # Ни один не ответил по существу. Сказать «ничего не найдено» здесь
             # значило бы выдать чужой отказ за факт об интернете.
-            raise AllProvidersRefusedError(
-                "поисковые провайдеры не ответили: " + ", ".join(refused)
-            )
+            raise AllProvidersRefusedError("поисковые провайдеры не ответили: " + ", ".join(refused))
 
-        deduped: list[SearchResult] = []
-        seen: set[str] = set()
-        for item in results:
-            normalized = item.url.strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            deduped.append(item)
-        return deduped[:limit]
+        return _diversify(results, limit)
 
     async def _search_duckduckgo_html(self, query: str, limit: int) -> list[SearchResult]:
         client = await self._get_client()
@@ -680,7 +747,9 @@ class WebSurfer:
         if _ASKS_FOR_FOREIGN_SOURCES.search(query):
             return "SEARCH_TYPE_COM"
         letters = [character for character in query if character.isalpha()]
-        if letters and not any("а" <= character.casefold() <= "я" or character == "ё" for character in letters):
+        if letters and not any(
+            "а" <= character.casefold() <= "я" or character == "ё" for character in letters
+        ):
             # Ни одной кириллической буквы — запрос набран на другом языке.
             return "SEARCH_TYPE_COM"
         return "SEARCH_TYPE_RU"
@@ -914,9 +983,7 @@ class WebSurfer:
                     # pypdf внутри страницы нечем. Запас внешнему даётся намеренно,
                     # чтобы обычный случай завершался изнутри, с частичным текстом,
                     # а не выглядел отказом.
-                    parse_budget = getattr(
-                        self.settings, "pdf_parse_budget_sec", _PDF_PARSE_BUDGET
-                    )
+                    parse_budget = getattr(self.settings, "pdf_parse_budget_sec", _PDF_PARSE_BUDGET)
                     async with asyncio.timeout(parse_budget * 2):
                         text, title, parse_error = await asyncio.to_thread(
                             self._extract_pdf_text,
@@ -1130,9 +1197,7 @@ class WebSurfer:
             same_place = [item for item in spare if _host_of(item.url) in refused]
             extra = (elsewhere + same_place)[:source_limit]
             requested_sources += len(extra)
-            extra_tasks = [
-                asyncio.create_task(self.fetch(item.url, max_length=20_000)) for item in extra
-            ]
+            extra_tasks = [asyncio.create_task(self.fetch(item.url, max_length=20_000)) for item in extra]
             try:
                 extra_done, extra_pending = await asyncio.wait(
                     extra_tasks, timeout=min(_RESEARCH_FETCH_BUDGET, remaining - 1.0)
