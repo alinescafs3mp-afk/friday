@@ -14,11 +14,17 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
+from friday import dedup as dedup_module
 from friday.dedup import NEAR_DUPLICATE_TYPE, detect_near_duplicates, find_near_duplicate_pairs
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.retrieval import pack_vector
 from friday.server import create_app
 from friday.storage.models import KnowledgeObject, RawObject, new_id
+
+requires_numpy = pytest.mark.skipif(
+    dedup_module._np is None,  # noqa: SLF001 - проверяется выбранный product backend
+    reason="requires optional friday[vectors]",
+)
 
 # --- pure detector --------------------------------------------------------
 
@@ -495,11 +501,11 @@ def test_kernel_skips_zero_norm_mismatched_dim_and_self_pairs():
     assert {(low, high) for low, high, _ in pairs} == {("a", "b"), ("wide", "wide2")}
 
 
+@requires_numpy
 def test_numpy_and_python_kernels_agree(monkeypatch):
     """The optional extra must not change WHICH pairs are reported."""
     import random
 
-    from friday import dedup as dedup_module
     from friday.dedup import find_near_duplicate_pairs_against
 
     random.seed(11)
@@ -696,12 +702,12 @@ def test_pair_accumulator_is_bounded_on_a_duplicate_cluster(settings, storage, m
     assert result["incomplete"] is True  # ...but the run says work was left over
 
 
+@requires_numpy
 def test_numpy_and_python_agree_at_the_threshold_boundary(monkeypatch):
     """float32 sgemm drifts ~5e-7 — enough to move a pair across the threshold and
     make the optional extra report a DIFFERENT set of duplicates."""
     import math
 
-    from friday import dedup as dedup_module
     from friday.dedup import find_near_duplicate_pairs_against
 
     threshold = 0.92

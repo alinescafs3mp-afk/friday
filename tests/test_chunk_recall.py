@@ -36,9 +36,19 @@ from friday.retrieval import (
     knowledge_search_text,
     pack_vector,
 )
+from friday.retrieval import _dense_cache as dense_cache_module
 from friday.storage import SCHEMA_VERSION, FridayStorage
 from friday.storage.models import KnowledgeObject, RawObject, new_id
 from friday.workers import WorkersManager
+
+requires_retrieval_numpy = pytest.mark.skipif(
+    retrieval_module._np is None,  # noqa: SLF001 - проверяется выбранный product backend
+    reason="requires optional friday[vectors]",
+)
+requires_dense_cache_numpy = pytest.mark.skipif(
+    dense_cache_module._np is None,  # noqa: SLF001 - проверяется backend резидентного кэша
+    reason="requires optional friday[vectors]",
+)
 
 # A composite "semantic" embedding: unlike a one-hot toy vector it reproduces
 # DILUTION, which is the whole point — a topic that owns 1/40th of a document
@@ -566,6 +576,7 @@ async def test_chunk_scan_cap_is_object_granular_and_reported(storage, settings)
 
 
 @pytest.mark.asyncio
+@requires_retrieval_numpy
 async def test_numpy_and_python_agree_on_chunk_recall(storage, settings, monkeypatch):
     """The optional numpy extra must not rank differently from the pure-Python path."""
     # Кэш выключен: сравнивается именно пара реализаций dense_scores, а не
@@ -926,6 +937,7 @@ async def test_the_pool_fallback_bounds_what_it_sends(storage, settings):
 
 
 @pytest.mark.asyncio
+@requires_dense_cache_numpy
 async def test_resident_cache_scans_the_whole_corpus_without_caps(storage, settings):
     """Окно «новейшие N» было предохранителем ЦЕНЫ скана BLOB-ов; у матрицы в
     памяти этой цены нет, и потолок, вытесняющий старейшие документы из
@@ -950,6 +962,7 @@ async def test_resident_cache_scans_the_whole_corpus_without_caps(storage, setti
 
 
 @pytest.mark.asyncio
+@requires_dense_cache_numpy
 async def test_resident_cache_is_an_optimisation_not_a_ranking_change(storage, settings):
     """Кэш обязан выбирать те же скоры, что скан BLOB-ов, на одном корпусе
     (потолки сняты в обоих путях, чтобы сравнивались реализации, а не окна)."""
@@ -970,6 +983,7 @@ async def test_resident_cache_is_an_optimisation_not_a_ranking_change(storage, s
 
 
 @pytest.mark.asyncio
+@requires_dense_cache_numpy
 async def test_resident_cache_reloads_on_change_and_respects_the_stale_window(storage, settings):
     """Подпись таблиц пересобирает матрицу; внутри окна выдержки поиск живёт со
     старой (во время массовой индексации пересборка на каждый запрос стоила бы

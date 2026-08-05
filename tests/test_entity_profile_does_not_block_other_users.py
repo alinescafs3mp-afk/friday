@@ -9,15 +9,15 @@
 болезнь, что уже чинили у поиска (см. `test_search_does_not_block_other_tenants`),
 и лечится тем же способом.
 
-Тик-тест, а не проверка «в коде есть слово run_blocking»: синтаксическое наличие
-вызова ничего не доказывает, а вот непрерывность тиков соседней корутины —
-доказывает.
+Синхронизационный тест, а не проверка «в коде есть слово run_blocking»:
+синтаксическое наличие вызова ничего не доказывает, а вот способность event loop
+отпустить ожидающий синхронный профиль во время запроса — доказывает.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
+import threading
 
 import httpx
 import pytest
@@ -29,15 +29,15 @@ from friday.storage.models import Entity, EntityType, new_id
 
 @pytest.mark.asyncio
 async def test_entity_profile_route_does_not_block_the_event_loop(settings, monkeypatch):
-    """Соседняя корутина обязана продолжать тикать, ПОКА идёт медленный профиль.
+    """Event loop обязан сделать шаг, ПОКА синхронный профиль ждёт в другом потоке.
 
     Мутация: вернуть в `entity_profile_by_name` прямой вызов
     `kg.entity_profile(...)` вместо `await run_blocking(...)` — тест обязан
-    покраснеть (один разрыв ~0.3 с вместо ровных 0.01 с).
+    покраснеть: callback не сможет освободить профиль до защитного таймаута.
 
-    Меряется максимальный разрыв между тиками, а не их сумма: маршрут делает ДВА
-    отложенных вызова (`find_entity` и `entity_profile`), и сумма позволила бы
-    одному заблокировать, пока второй «догоняет».
+    Handshake проверяет именно прогресс loop, а не wall-clock задержку процесса:
+    на перегруженном CI отдельный pytest worker может не получать CPU заметно
+    дольше обычного, хотя его event loop ничем не заблокирован.
     """
     app = create_app(settings)
     async with app.router.lifespan_context(app):
@@ -52,24 +52,26 @@ async def test_entity_profile_route_does_not_block_the_event_loop(settings, monk
         storage.create_entity(entity)
 
         real_profile = kg.entity_profile
+        loop = asyncio.get_running_loop()
+        loop_progress = asyncio.Event()
+        release_profile = threading.Event()
+        handshake_succeeded: list[bool] = []
 
         def _slow_profile(*args, **kwargs):
-            time.sleep(0.3)
+            # Если профиль исполняется через run_blocking, loop свободен: он
+            # обработает callback, соседняя coroutine отпустит этот поток. При
+            # прямом вызове callback останется в очереди до истечения таймаута.
+            loop.call_soon_threadsafe(loop_progress.set)
+            handshake_succeeded.append(release_profile.wait(2.0))
             return real_profile(*args, **kwargs)
 
         monkeypatch.setattr(kg, "entity_profile", _slow_profile)
 
-        tick_times: list[float] = []
+        async def _release_after_loop_progress() -> None:
+            await loop_progress.wait()
+            release_profile.set()
 
-        async def _ticker() -> None:
-            while True:
-                tick_times.append(time.monotonic())
-                await asyncio.sleep(0.01)
-
-        ticker_task = asyncio.create_task(_ticker())
-        # Тикер только ПОСТАВЛЕН в очередь; без явной уступки управления
-        # блокировка в начале обработчика успела бы пройти до первого тика, и
-        # мерить было бы нечего.
+        release_task = asyncio.create_task(_release_after_loop_progress())
         await asyncio.sleep(0)
         transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 9000))
         try:
@@ -81,16 +83,11 @@ async def test_entity_profile_route_does_not_block_the_event_loop(settings, monk
                 )
                 assert response.status_code == 200, response.text
         finally:
-            # Записывается ДО отмены: блокировка, дотянувшая до самого возврата,
-            # иначе осталась бы невидимой — отмена выигрывает у просроченного
-            # таймера тикера, и хвост разрыва просто не попал бы в список.
-            tick_times.append(time.monotonic())
-            ticker_task.cancel()
+            release_profile.set()
+            loop_progress.set()
+            await release_task
 
-        assert len(tick_times) >= 5, f"тиков всего {len(tick_times)} — стенд сломан"
-        gaps = [second - first for first, second in zip(tick_times, tick_times[1:], strict=False)]
-        max_gap = max(gaps)
-        assert max_gap < 0.15, (
-            f"наибольший разрыв между тиками {max_gap:.3f} с (ожидалось ~0.01) — "
-            "event loop замирал, то есть карточка объекта морозила остальных пользователей"
+        assert handshake_succeeded == [True], (
+            "event loop не смог отпустить синхронный профиль, пока тот выполнялся — "
+            "карточка объекта морозила остальных пользователей"
         )

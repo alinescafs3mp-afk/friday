@@ -14,6 +14,7 @@ import hashlib
 
 import pytest
 
+from friday import retrieval as retrieval_module
 from friday.retrieval import (
     EmbeddingBackend,
     HybridSearcher,
@@ -24,6 +25,11 @@ from friday.retrieval import (
 )
 from friday.storage.models import KnowledgeObject, RawObject, new_id
 from friday.workers import WorkersManager
+
+requires_numpy = pytest.mark.skipif(
+    retrieval_module._np is None,  # noqa: SLF001 - проверяется выбранный product backend
+    reason="requires optional friday[vectors]",
+)
 
 
 def _make_ko(storage, user_id: str, content: str, *, title: str) -> dict:
@@ -296,6 +302,7 @@ def _rand_vectors(seed, count, dim):
     return [(f"d{i}", pack_vector([rng.gauss(0, 1) for _ in range(dim)])) for i in range(count)]
 
 
+@requires_numpy
 def test_numpy_and_python_dense_scores_agree():
     # The BLAS path must match the pure-Python reference in ranking (and value).
     dim = 64
