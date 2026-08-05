@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import defaultdict, deque
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
-from typing import Any
+from typing import Any, NamedTuple
 
 from friday.entity_phrases import mention_phrase_candidates
 from friday.mentions import inflected_mentions
@@ -98,9 +99,106 @@ _GRAPH_CORROBORATION_DAMPING = 0.5
 # taken — a weight of exactly zero makes the last seed's presence meaningless and
 # quietly ties the result to how many seeds retrieval happens to pass.
 _GRAPH_SEED_RANK_DECAY = 0.9
+_MAX_PUBLISHED_GRAPH_PATHS = 10
+_REVIEW_PROVENANCE_KEYS = (
+    "source",
+    "candidate_id",
+    "reviewed_by",
+    "confidence",
+)
 _ISO_FULL_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})[-./](\d{1,2})\b")
 _DAY_FIRST_RE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")
 _YEAR_MONTH_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})\b")
+
+
+class _GraphPathState(NamedTuple):
+    """The score and the route that earned it, moved through BFS as one value."""
+
+    root: str
+    current: str
+    score: float
+    query_grounded: bool
+    entity_ids: tuple[str, ...]
+    edges: tuple[dict[str, Any], ...]
+
+
+def _relation_provenance(relation: dict[str, Any]) -> dict[str, Any]:
+    """Compact non-secret provenance for a path step.
+
+    Relation metadata may contain excerpts and arbitrary caller fields.  A graph
+    route needs the review lineage, not that unbounded payload.  The Knowledge
+    Object anchor is intentionally recovered from the nested review evidence,
+    where accepted relation candidates store it.
+    """
+
+    metadata = _json_dict(relation.get("metadata_json"))
+    provenance: dict[str, Any] = {}
+    origin = str(metadata.get("origin") or "").strip()[:80]
+    if origin:
+        provenance["origin"] = origin
+    created_by = metadata.get("created_by")
+    if isinstance(created_by, str) and created_by.strip():
+        provenance["created_by"] = created_by.strip()[:160]
+
+    # Only the storage review path can mint evidence-backed provenance.  The
+    # public relation API stamps another origin and may carry arbitrary user
+    # metadata; accepting an evidence-looking nested object from that path would
+    # let a caller turn any existing Knowledge Object ID into grounded=True.
+    trusted_review = (
+        origin == "review"
+        and metadata.get("source") == "reviewed_relation_candidate"
+        and isinstance(metadata.get("candidate_id"), str)
+        and bool(str(metadata.get("candidate_id") or "").strip())
+        and isinstance(metadata.get("reviewed_by"), str)
+        and bool(str(metadata.get("reviewed_by") or "").strip())
+    )
+    if not trusted_review:
+        return provenance
+
+    for key in _REVIEW_PROVENANCE_KEYS:
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            provenance[key] = value.strip()[:160]
+        elif key == "confidence" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            provenance[key] = value
+    nested_evidence = metadata.get("evidence")
+    if isinstance(nested_evidence, dict):
+        nested_knowledge_id = nested_evidence.get("knowledge_object_id")
+        knowledge_object_id = (
+            nested_knowledge_id.strip()[:160] if isinstance(nested_knowledge_id, str) else ""
+        )
+    else:
+        knowledge_object_id = ""
+    if not knowledge_object_id:
+        direct_knowledge_id = metadata.get("knowledge_object_id")
+        knowledge_object_id = (
+            direct_knowledge_id.strip()[:160] if isinstance(direct_knowledge_id, str) else ""
+        )
+    if knowledge_object_id:
+        provenance["knowledge_object_id"] = knowledge_object_id
+    return provenance
+
+
+def _graph_path_id(state: _GraphPathState) -> str:
+    """Stable opaque ID for exactly one root/edge route."""
+
+    route = [state.root, *state.entity_ids, *(str(edge["id"]) for edge in state.edges)]
+    digest = hashlib.sha256("\x1f".join(route).encode()).hexdigest()[:20]
+    return f"gpath_{digest}"
+
+
+def _path_state_is_better(candidate: _GraphPathState, current: _GraphPathState | None) -> bool:
+    """Total deterministic order: score, then shorter path, then stable IDs."""
+
+    if current is None:
+        return True
+    if candidate.score != current.score:
+        return candidate.score > current.score
+    if len(candidate.edges) != len(current.edges):
+        return len(candidate.edges) < len(current.edges)
+    candidate_route = (candidate.entity_ids, tuple(str(edge["id"]) for edge in candidate.edges))
+    current_route = (current.entity_ids, tuple(str(edge["id"]) for edge in current.edges))
+    return candidate_route < current_route
 
 
 def _valid_iso(year: int, month: int, day: int) -> str | None:
@@ -883,6 +981,7 @@ class KnowledgeGraph:
         entity_limit: int = 8,
         knowledge_limit: int = 30,
         seed_knowledge_ids: list[str] | None = None,
+        as_of: str = "",
     ) -> dict[str, Any]:
         """Build a compact scored subgraph for retrieval and agent context.
 
@@ -892,26 +991,73 @@ class KnowledgeGraph:
         Knowledge Object. Those implicit edges are labelled and never persisted as asserted facts.
         """
 
+        # Validate before even looking up roots.  A malformed historical query
+        # must fail explicitly even when the graph happens to be empty.
+        cleaned_as_of = str(as_of or "").strip()
+        normalized_as_of = normalize_event_date(cleaned_as_of)[0] if cleaned_as_of else ""
+
+        raw_entity_cache: dict[str, dict[str, Any] | None] = {}
+        canonical_id_cache: dict[str, str | None] = {}
+
+        def get_raw_entity(entity_id: str) -> dict[str, Any] | None:
+            if entity_id not in raw_entity_cache:
+                raw_entity_cache[entity_id] = self.get_entity(entity_id, user_id)
+            return raw_entity_cache[entity_id]
+
+        def canonical_entity_id(entity_id: str) -> str | None:
+            """Follow a legacy merge tombstone to one live canonical endpoint."""
+
+            if entity_id in canonical_id_cache:
+                return canonical_id_cache[entity_id]
+            visited: list[str] = []
+            current_id = entity_id
+            while current_id and current_id not in visited:
+                visited.append(current_id)
+                current = get_raw_entity(current_id)
+                if not current:
+                    current_id = ""
+                    break
+                merged_into = str(current.get("merged_into_id") or "")
+                if merged_into:
+                    current_id = merged_into
+                    continue
+                if current.get("deleted_at") or not bool(current.get("canonical", 1)):
+                    current_id = ""
+                break
+            if current_id in visited[:-1]:
+                current_id = ""
+            resolved = current_id or None
+            for visited_id in visited:
+                canonical_id_cache[visited_id] = resolved
+            return resolved
+
+        def get_entity(entity_id: str) -> dict[str, Any] | None:
+            canonical_id = canonical_entity_id(entity_id)
+            return get_raw_entity(canonical_id) if canonical_id else None
+
         roots = self.search_entities(user_id, query, limit=entity_limit)
-        root_scores: dict[str, float] = {
-            str(root["id"]): float(root.get("_match_score", 0.0)) for root in roots
-        }
+        root_scores: dict[str, float] = {}
         # Entities the QUERY itself matched. Only these corroborate a document
         # below: an entity discovered by traversal was very often discovered
         # THROUGH the document it would then vouch for, and letting that count
         # would pay a document for its own entity count rather than for agreeing
         # with the question.
-        query_matched_ids = set(root_scores)
+        query_matched_ids: set[str] = set()
         # Entities whose presence traces back to the question — the query matched
         # them, or they are reachable from such a match through relations the
         # USER asserted. Co-occurrence edges and seed documents do NOT ground:
         # «Альфа зависит от Беты» is the owner's own claim and makes Beta's
         # document relevant to a question about Alpha, while «эти двое
         # встретились в одном документе» is an observation about that document.
-        grounded_ids: set[str] = set(root_scores)
         evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for root in roots:
-            evidence[str(root["id"])].append(
+            entity_id = canonical_entity_id(str(root["id"]))
+            if not entity_id:
+                continue
+            score = float(root.get("_match_score", 0.0))
+            root_scores[entity_id] = max(root_scores.get(entity_id, 0.0), score)
+            query_matched_ids.add(entity_id)
+            evidence[entity_id].append(
                 {
                     "kind": "query_match",
                     "method": root.get("_match_method"),
@@ -937,7 +1083,9 @@ class KnowledgeGraph:
                 status="accepted",
                 limit=30,
             ):
-                entity_id = str(link["entity_id"])
+                entity_id = canonical_entity_id(str(link["entity_id"]))
+                if not entity_id:
+                    continue
                 score = 0.72 * rank_factor * float(link.get("confidence", 1.0) or 1.0)
                 root_scores[entity_id] = max(root_scores.get(entity_id, 0.0), score)
                 evidence[entity_id].append(
@@ -957,18 +1105,16 @@ class KnowledgeGraph:
                 "knowledge": [],
                 "knowledge_candidates": [],
                 "paths": [],
+                "paths_matched_at_least": 0,
+                "paths_truncated": False,
+                "temporal_basis": "valid_time",
+                "as_of": normalized_as_of,
             }
 
         max_depth = max(0, min(depth, _MAX_TRAVERSAL_DEPTH))
-        entity_cache: dict[str, dict[str, Any] | None] = {}
         entity_knowledge_cache: dict[str, list[dict[str, Any]]] = {}
         entity_relation_cache: dict[str, list[dict[str, Any]]] = {}
         knowledge_links_cache: dict[str, list[dict[str, Any]]] = {}
-
-        def get_entity(entity_id: str) -> dict[str, Any] | None:
-            if entity_id not in entity_cache:
-                entity_cache[entity_id] = self.get_entity(entity_id, user_id)
-            return entity_cache[entity_id]
 
         def get_entity_knowledge(entity_id: str) -> list[dict[str, Any]]:
             if entity_id not in entity_knowledge_cache:
@@ -995,7 +1141,11 @@ class KnowledgeGraph:
 
         def get_entity_relations(entity_id: str) -> list[dict[str, Any]]:
             if entity_id not in entity_relation_cache:
-                entity_relation_cache[entity_id] = self.get_entity_relations(entity_id, user_id)
+                entity_relation_cache[entity_id] = self.get_entity_relations(
+                    entity_id,
+                    user_id,
+                    as_of=normalized_as_of,
+                )
             return entity_relation_cache[entity_id]
 
         def get_knowledge_links(knowledge_id: str) -> list[dict[str, Any]]:
@@ -1010,74 +1160,79 @@ class KnowledgeGraph:
 
         entities: dict[str, dict[str, Any]] = {}
         relations: dict[str, dict[str, Any]] = {}
-        paths: list[dict[str, Any]] = []
-        best_score = dict(root_scores)
-        best_depth: dict[str, int] = {entity_id: 0 for entity_id in root_scores}
-        queue: deque[tuple[str, int, list[str]]] = deque(
-            (entity_id, 0, [entity_id]) for entity_id in root_scores
-        )
+        best_states: dict[str, _GraphPathState] = {}
+        path_evidence: dict[str, dict[str, Any]] = {}
+        for entity_id in sorted(root_scores, key=lambda item: (-root_scores[item], item)):
+            state = _GraphPathState(
+                root=entity_id,
+                current=entity_id,
+                score=root_scores[entity_id],
+                query_grounded=entity_id in query_matched_ids,
+                entity_ids=(entity_id,),
+                edges=(),
+            )
+            best_states[entity_id] = state
+        queue: deque[_GraphPathState] = deque(best_states.values())
 
         def offer_neighbour(
             *,
-            from_entity_id: str,
+            state: _GraphPathState,
             neighbour_id: str,
-            next_depth: int,
             propagated: float,
-            relation_id: str,
-            relation_type: str,
+            edge: dict[str, Any],
             evidence_item: dict[str, Any],
-            path_ids: list[str],
             grounds: bool = False,
         ) -> None:
-            if neighbour_id == from_entity_id or propagated < 0.12:
+            if neighbour_id == state.current or neighbour_id in state.entity_ids or propagated < 0.12:
                 return
-            # Grounding travels along asserted relations only, and only from an
-            # already-grounded entity — one hop of "the owner said these are
-            # connected" from something the question actually named.
-            if grounds and from_entity_id in grounded_ids:
-                grounded_ids.add(neighbour_id)
-            existing_depth = best_depth.get(neighbour_id, 999)
-            existing_score = best_score.get(neighbour_id, 0.0)
-            if existing_depth < next_depth and existing_score >= propagated:
-                return
-            if propagated <= existing_score and existing_depth <= next_depth:
-                return
-            best_score[neighbour_id] = max(existing_score, propagated)
-            best_depth[neighbour_id] = min(existing_depth, next_depth)
-            evidence[neighbour_id].append(evidence_item)
-            next_path = [*path_ids, neighbour_id]
-            paths.append(
-                {
-                    "entity_ids": next_path,
-                    "relation_id": relation_id,
-                    "relation_type": relation_type,
-                }
+            candidate = _GraphPathState(
+                root=state.root,
+                current=neighbour_id,
+                score=propagated,
+                # Query grounding belongs to the same immutable route as score
+                # and edges.  Updating a detached set before accepting this state
+                # let a rejected low-score A→B offer ground a stronger seed-root
+                # B→C path that was not connected to the query at all.
+                query_grounded=state.query_grounded and grounds,
+                entity_ids=(*state.entity_ids, neighbour_id),
+                edges=(*state.edges, edge),
             )
-            queue.append((neighbour_id, next_depth, next_path))
+            if not _path_state_is_better(candidate, best_states.get(neighbour_id)):
+                return
+            best_states[neighbour_id] = candidate
+            path_evidence[neighbour_id] = evidence_item
+            queue.append(candidate)
 
         prefetched_depth: int | None = None
         while queue:
-            frontier_depth = queue[0][1]
+            frontier_depth = len(queue[0].edges)
             if frontier_depth != prefetched_depth:
                 prefetch_entity_knowledge(
                     [
-                        queued_entity_id
-                        for queued_entity_id, queued_depth, _path in queue
-                        if queued_depth == frontier_depth
+                        state.current
+                        for state in queue
+                        if len(state.edges) == frontier_depth and best_states.get(state.current) == state
                     ]
                 )
                 prefetched_depth = frontier_depth
-            entity_id, current_depth, path_ids = queue.popleft()
+            state = queue.popleft()
+            if best_states.get(state.current) != state:
+                continue
+            entity_id = state.current
+            current_depth = len(state.edges)
             entity = get_entity(entity_id)
-            if not entity or entity.get("deleted_at"):
+            if not entity:
                 continue
             linked_knowledge = get_entity_knowledge(entity_id)
             explicit_relations = get_entity_relations(entity_id)
+            route_evidence = [*evidence[entity_id]]
+            if entity_id in path_evidence:
+                route_evidence.append(path_evidence[entity_id])
             entities[entity_id] = {
                 **entity,
                 "_graph_depth": current_depth,
-                "_graph_score": round(best_score.get(entity_id, 0.0), 6),
-                "_evidence": evidence[entity_id],
+                "_graph_score": round(state.score, 6),
+                "_evidence": route_evidence,
                 "_relation_count": len(explicit_relations),
                 "_knowledge_count": len(linked_knowledge),
             }
@@ -1085,23 +1240,60 @@ class KnowledgeGraph:
                 continue
 
             next_depth = current_depth + 1
-            for relation in explicit_relations:
+            for relation in sorted(explicit_relations, key=lambda item: str(item.get("id") or "")):
                 relation_id = str(relation["id"])
-                relations[relation_id] = {**relation, "implicit": False}
-                neighbour_id = (
-                    str(relation["target_entity_id"])
-                    if str(relation["source_entity_id"]) == entity_id
-                    else str(relation["source_entity_id"])
-                )
+                source_id = canonical_entity_id(str(relation["source_entity_id"]))
+                target_id = canonical_entity_id(str(relation["target_entity_id"]))
+                if not source_id or not target_id or source_id == target_id:
+                    continue
+                if source_id == entity_id:
+                    neighbour_id = target_id
+                    direction = "forward"
+                elif target_id == entity_id:
+                    neighbour_id = source_id
+                    direction = "reverse"
+                else:
+                    # A corrupt/legacy row that is not incident to this canonical
+                    # endpoint cannot be used to construct a coherent route.
+                    continue
+                source_entity = get_entity(source_id) or {}
+                target_entity = get_entity(target_id) or {}
+                relations[relation_id] = {
+                    **relation,
+                    "source_entity_id": source_id,
+                    "target_entity_id": target_id,
+                    "source_name": source_entity.get("name", ""),
+                    "target_name": target_entity.get("name", ""),
+                    "implicit": False,
+                }
                 relation_weight = max(0.0, min(1.5, float(relation.get("weight", 1.0))))
-                propagated = best_score.get(entity_id, 0.0) * 0.52 * relation_weight / next_depth
+                propagated = state.score * 0.52 * relation_weight / next_depth
+                provenance = _relation_provenance(relation)
+                edge: dict[str, Any] = {
+                    "id": relation_id,
+                    "from": entity_id,
+                    "to": neighbour_id,
+                    "direction": direction,
+                    "source": source_id,
+                    "target": target_id,
+                    "type": str(relation.get("relation_type") or "related_to"),
+                    "weight": relation_weight,
+                    "implicit": False,
+                    "valid_from": str(relation.get("valid_from") or ""),
+                    "valid_to": relation.get("valid_to"),
+                    "created_at": str(relation.get("created_at") or ""),
+                    "invalidated_at": relation.get("invalidated_at"),
+                    "superseded_by": relation.get("superseded_by"),
+                    "provenance": provenance,
+                }
+                knowledge_object_id = str(provenance.get("knowledge_object_id") or "")
+                if knowledge_object_id:
+                    edge["knowledge_object_id"] = knowledge_object_id
                 offer_neighbour(
-                    from_entity_id=entity_id,
+                    state=state,
                     neighbour_id=neighbour_id,
-                    next_depth=next_depth,
                     propagated=propagated,
-                    relation_id=relation_id,
-                    relation_type=str(relation.get("relation_type") or "related_to"),
+                    edge=edge,
                     evidence_item={
                         "kind": "explicit_relation",
                         "from_entity_id": entity_id,
@@ -1109,20 +1301,43 @@ class KnowledgeGraph:
                         "relation_type": relation.get("relation_type"),
                         "depth": next_depth,
                     },
-                    path_ids=path_ids,
                     grounds=True,
                 )
+
+            if normalized_as_of:
+                # Entity links have no valid-time or append-only history.  Their
+                # present-day co-occurrence cannot answer a historical question.
+                continue
 
             # Accepted links to one Knowledge Object provide useful graph structure without
             # asserting a semantic relation that the user never confirmed.
             for knowledge_item in linked_knowledge[: max(20, min(120, knowledge_limit * 2))]:
                 knowledge_id = str(knowledge_item["id"])
+                normalized_links: dict[str, dict[str, Any]] = {}
+                for link in get_knowledge_links(knowledge_id):
+                    linked_entity_id = canonical_entity_id(str(link["entity_id"]))
+                    if not linked_entity_id:
+                        continue
+                    current_link = normalized_links.get(linked_entity_id)
+                    link_rank = (float(link.get("confidence", 1.0) or 1.0), str(link.get("id") or ""))
+                    current_rank = (
+                        (
+                            float(current_link.get("confidence", 1.0) or 1.0),
+                            str(current_link.get("id") or ""),
+                        )
+                        if current_link
+                        else (-1.0, "")
+                    )
+                    if link_rank > current_rank:
+                        normalized_links[linked_entity_id] = link
+                source_link = normalized_links.get(entity_id)
+                if not source_link:
+                    continue
                 source_confidence = max(
                     0.0,
-                    min(1.0, float(knowledge_item.get("_link_confidence", 1.0) or 1.0)),
+                    min(1.0, float(source_link.get("confidence", 1.0) or 1.0)),
                 )
-                for link in get_knowledge_links(knowledge_id):
-                    neighbour_id = str(link["entity_id"])
+                for neighbour_id, link in sorted(normalized_links.items()):
                     if neighbour_id == entity_id:
                         continue
                     target_confidence = max(
@@ -1131,34 +1346,64 @@ class KnowledgeGraph:
                     )
                     pair = sorted((entity_id, neighbour_id))
                     relation_id = f"co:{knowledge_id}:{pair[0]}:{pair[1]}"
-                    source_entity = get_entity(entity_id) or {}
-                    target_entity = get_entity(neighbour_id) or {}
+                    pair_source = get_entity(pair[0]) or {}
+                    pair_target = get_entity(pair[1]) or {}
+                    link_ids = sorted(
+                        {
+                            str(source_link.get("id") or ""),
+                            str(link.get("id") or ""),
+                        }
+                        - {""}
+                    )
+                    weight = round(source_confidence * target_confidence, 6)
                     relations[relation_id] = {
                         "id": relation_id,
                         "user_id": user_id,
-                        "source_entity_id": entity_id,
-                        "target_entity_id": neighbour_id,
-                        "source_name": source_entity.get("name", ""),
-                        "target_name": target_entity.get("name", ""),
+                        "source_entity_id": pair[0],
+                        "target_entity_id": pair[1],
+                        "source_name": pair_source.get("name", ""),
+                        "target_name": pair_target.get("name", ""),
                         "relation_type": "co_occurs_in",
-                        "weight": round(source_confidence * target_confidence, 6),
+                        "weight": weight,
                         "implicit": True,
                         "knowledge_object_id": knowledge_id,
                         "knowledge_title": knowledge_item.get("title", ""),
+                        "link_ids": link_ids,
                     }
                     propagated = (
-                        best_score.get(entity_id, 0.0)
-                        * 0.42
-                        * (source_confidence * target_confidence) ** 0.5
-                        / next_depth
+                        state.score * 0.42 * (source_confidence * target_confidence) ** 0.5 / next_depth
                     )
+                    edge = {
+                        "id": relation_id,
+                        "from": entity_id,
+                        "to": neighbour_id,
+                        "direction": "forward" if entity_id == pair[0] else "reverse",
+                        "source": pair[0],
+                        "target": pair[1],
+                        "type": "co_occurs_in",
+                        "weight": weight,
+                        "implicit": True,
+                        "valid_from": "",
+                        "valid_to": None,
+                        "created_at": max(
+                            str(source_link.get("created_at") or ""),
+                            str(link.get("created_at") or ""),
+                        ),
+                        "invalidated_at": None,
+                        "superseded_by": None,
+                        "provenance": {
+                            "origin": "implicit_cooccurrence",
+                            "source": "accepted_knowledge_links",
+                            "knowledge_object_id": knowledge_id,
+                        },
+                        "knowledge_object_id": knowledge_id,
+                        "link_ids": link_ids,
+                    }
                     offer_neighbour(
-                        from_entity_id=entity_id,
+                        state=state,
                         neighbour_id=neighbour_id,
-                        next_depth=next_depth,
                         propagated=propagated,
-                        relation_id=relation_id,
-                        relation_type="co_occurs_in",
+                        edge=edge,
                         evidence_item={
                             "kind": "shared_knowledge_object",
                             "from_entity_id": entity_id,
@@ -1166,8 +1411,39 @@ class KnowledgeGraph:
                             "knowledge_title": knowledge_item.get("title", ""),
                             "depth": next_depth,
                         },
-                        path_ids=path_ids,
                     )
+
+        path_states = sorted(
+            (state for state in best_states.values() if state.edges),
+            key=lambda state: (
+                -state.score,
+                len(state.edges),
+                state.root,
+                state.current,
+                tuple(str(edge["id"]) for edge in state.edges),
+            ),
+        )
+        published_states = path_states[:_MAX_PUBLISHED_GRAPH_PATHS]
+        paths = [
+            {
+                "path_id": _graph_path_id(state),
+                "root": state.root,
+                "target": state.current,
+                "score": round(state.score, 6),
+                "entity_ids": list(state.entity_ids),
+                "entities": [
+                    {
+                        "id": entity_id,
+                        "name": str((entities.get(entity_id) or {}).get("name") or ""),
+                        "entity_type": str((entities.get(entity_id) or {}).get("entity_type") or "other"),
+                    }
+                    for entity_id in state.entity_ids
+                ],
+                "edges": [dict(edge) for edge in state.edges],
+            }
+            for state in published_states
+        ]
+        published_path_by_target = {str(path["target"]): str(path["path_id"]) for path in paths}
 
         knowledge_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
         # Per-document contributions, one slot per DISTINCT entity: the strongest
@@ -1233,25 +1509,39 @@ class KnowledgeGraph:
                 -float(item.get("importance", 0.5)),
             ),
         )[: max(1, min(knowledge_limit, 500))]
-        knowledge_candidates = [
-            {
+        knowledge_candidates: list[dict[str, Any]] = []
+        grounded_ids = {entity_id for entity_id, state in best_states.items() if state.query_grounded}
+        for item in ordered_knowledge:
+            document_evidence = [dict(entry) for entry in knowledge_evidence[str(item["id"])]]
+            # The scoring loop above handles many documents.  Never reuse its last
+            # local ``best_entity_id`` here: each candidate must point only at the
+            # route that earned this particular document's published score.
+            best_entity_id = str(item.get("_graph_entity_id") or "")
+            best_published_path = published_path_by_target.get(best_entity_id, "")
+            if best_published_path:
+                best_evidence = next(
+                    (
+                        entry
+                        for entry in document_evidence
+                        if str(entry.get("entity_id") or "") == best_entity_id
+                    ),
+                    None,
+                )
+                if best_evidence is not None:
+                    best_evidence["path_id"] = best_published_path
+            candidate: dict[str, Any] = {
                 "knowledge_object_id": item["id"],
                 "score": item.get("_graph_score", 0.0),
-                "evidence": knowledge_evidence[str(item["id"])],
-                # Did the QUERY name one of the entities vouching for this
-                # document, or was it reached because some other document did?
-                # The two are different claims — "this is about what you asked
-                # about" versus "this is near something that matched" — and only
-                # the first is evidence on its own. Retrieval decides what to do
-                # with the distinction; the graph just has to report it, because
-                # by the time the score arrives it is one number either way.
-                "query_matched": any(
-                    str(entry.get("entity_id") or "") in grounded_ids
-                    for entry in knowledge_evidence[str(item["id"])]
-                ),
+                "evidence": document_evidence,
+                # The evidence gate must follow the SAME entity-state that earned
+                # this candidate's score. Letting any weaker linked entity set the
+                # flag mixed an ungrounded seed-root score with an unrelated lower
+                # grounded route at document aggregation time.
+                "query_matched": best_entity_id in grounded_ids,
             }
-            for item in ordered_knowledge
-        ]
+            if best_published_path:
+                candidate["path_id"] = best_published_path
+            knowledge_candidates.append(candidate)
         root_ids = set(root_scores)
         node_items = sorted(
             entities.values(),
@@ -1278,6 +1568,10 @@ class KnowledgeGraph:
             "knowledge": ordered_knowledge,
             "knowledge_candidates": knowledge_candidates,
             "paths": paths,
+            "paths_matched_at_least": len(path_states),
+            "paths_truncated": len(path_states) > _MAX_PUBLISHED_GRAPH_PATHS,
+            "temporal_basis": "valid_time",
+            "as_of": normalized_as_of,
         }
 
     def update_entity(self, user_id: str, entity_id: str, **fields: Any) -> dict[str, Any] | None:

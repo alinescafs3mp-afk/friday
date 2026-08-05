@@ -70,6 +70,20 @@ async def test_vertical_ingestion_graph_retrieval_and_idempotency(settings, stor
         # там, где найденного больше страницы.
         "matched_at_least": 0,
         "entity_matches": [],
+        "as_of": "",
+        "graph_context": {
+            "query": "DevFest",
+            "expanded": True,
+            "as_of": "",
+            "temporal_basis": "valid_time",
+            "roots": [],
+            "nodes": [],
+            "entities": [],
+            "relations": [],
+            "paths": [],
+            "paths_matched_at_least": 0,
+            "paths_truncated": False,
+        },
         "strategy": {
             "fts": True,
             "lexical": True,

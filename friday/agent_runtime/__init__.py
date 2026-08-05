@@ -1129,6 +1129,264 @@ def _matched_region(hit: dict[str, Any]) -> str:
     return body
 
 
+_AGENT_GRAPH_PATHS_MAX_CHARS = 8_000
+_AGENT_GRAPH_COUNT_CAP = 1_000_000_000
+
+
+def _graph_count(value: Any, *, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return minimum
+    return max(minimum, min(max(0, parsed), _AGENT_GRAPH_COUNT_CAP))
+
+
+def _graph_text_for_prompt(value: Any, *, limit: int) -> str:
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def _graph_endpoint_id_for_prompt(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("id")
+    return _graph_text_for_prompt(value, limit=120)
+
+
+def _graph_endpoint_for_prompt(
+    value: Any,
+    entity_lookup: dict[str, dict[str, Any]] | None = None,
+) -> str | dict[str, str]:
+    """Keep an endpoint identifiable without forwarding an entity's raw metadata."""
+
+    if isinstance(value, dict):
+        endpoint: dict[str, str] = {}
+        for key, limit in (("id", 120), ("name", 200), ("entity_type", 80)):
+            item = value.get(key)
+            if isinstance(item, str):
+                endpoint[key] = item[:limit]
+        return endpoint
+    entity_id = _graph_text_for_prompt(value, limit=120)
+    known = (entity_lookup or {}).get(entity_id)
+    if known:
+        endpoint = {"id": entity_id}
+        for key, limit in (("name", 200), ("entity_type", 80)):
+            item = known.get(key)
+            if isinstance(item, str):
+                endpoint[key] = item[:limit]
+        return endpoint
+    return entity_id
+
+
+def _graph_number(value: Any) -> float | None:
+    """A JSON-safe finite graph score/weight, or no value for legacy garbage."""
+
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    # NaN and infinities would make the JSON envelope non-portable.  This comparison
+    # rejects all three without another dependency.
+    if not -1e308 <= number <= 1e308:
+        return None
+    return round(number, 6)
+
+
+def _graph_paths_for_prompt(
+    graph_context: dict[str, Any],
+    knowledge_labels: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Render bounded ordered paths and bind their evidence to existing ``K`` labels.
+
+    The graph snapshot is untrusted retrieval data.  In particular, relation
+    ``metadata_json`` and free-form evidence text must not become a second route into
+    the prompt.  A compact allowlist makes the temporal claim inspectable while the
+    existing Knowledge Object envelope remains the only source of quotable evidence.
+    """
+
+    raw_paths = graph_context.get("paths")
+    if not isinstance(raw_paths, list):
+        return []
+    entity_lookup: dict[str, dict[str, Any]] = {}
+    for collection_name in ("nodes", "entities", "roots"):
+        raw_entities = graph_context.get(collection_name)
+        if not isinstance(raw_entities, list):
+            continue
+        for raw_entity in raw_entities:
+            if not isinstance(raw_entity, dict):
+                continue
+            entity_id = _graph_endpoint_id_for_prompt(raw_entity.get("id"))
+            if entity_id:
+                entity_lookup.setdefault(entity_id, raw_entity)
+    rendered: list[dict[str, Any]] = []
+    for raw_path in raw_paths[:6]:
+        if not isinstance(raw_path, dict):
+            continue
+        # Public snapshots keep a path-local endpoint legend because the global
+        # node list has an independent cap.  Fold it into the same safe lookup
+        # before rendering root/target and individual steps.
+        raw_path_entities = raw_path.get("entities")
+        if isinstance(raw_path_entities, list):
+            for raw_entity in raw_path_entities[:5]:
+                if not isinstance(raw_entity, dict):
+                    continue
+                entity_id = _graph_endpoint_id_for_prompt(raw_entity.get("id"))
+                if entity_id:
+                    entity_lookup.setdefault(entity_id, raw_entity)
+        # ``edges`` is proposal 26's canonical snapshot contract.  ``steps`` is
+        # accepted only for short-lived fakes written while the contract landed.
+        raw_steps = raw_path.get("edges")
+        if not isinstance(raw_steps, list):
+            raw_steps = raw_path.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            continue
+        steps: list[dict[str, Any]] = []
+        anchors: list[bool] = []
+        steps_complete = True
+        for raw_step in raw_steps[:4]:
+            if not isinstance(raw_step, dict):
+                steps_complete = False
+                continue
+            step: dict[str, Any] = {}
+            for key, limit in (
+                ("id", 120),
+                ("direction", 16),
+                ("type", 80),
+                ("valid_from", 32),
+                ("valid_to", 32),
+                ("created_at", 40),
+                ("invalidated_at", 40),
+                ("superseded_by", 120),
+            ):
+                value = raw_step.get(key)
+                if isinstance(value, str):
+                    step[key] = value[:limit]
+            for key in ("from", "to", "source", "target"):
+                if key in raw_step:
+                    step[key] = _graph_endpoint_for_prompt(raw_step[key], entity_lookup)
+            weight = _graph_number(raw_step.get("weight"))
+            if weight is not None:
+                step["weight"] = weight
+            step["implicit"] = bool(raw_step.get("implicit"))
+
+            raw_provenance = raw_step.get("provenance")
+            provenance_source = raw_provenance if isinstance(raw_provenance, dict) else {}
+            provenance: dict[str, Any] = {}
+            origin = _graph_text_for_prompt(provenance_source.get("origin"), limit=80)
+            source = _graph_text_for_prompt(provenance_source.get("source"), limit=80)
+            candidate_id = _graph_text_for_prompt(provenance_source.get("candidate_id"), limit=120)
+            reviewed_by = _graph_text_for_prompt(provenance_source.get("reviewed_by"), limit=120)
+            trusted_review = (
+                not bool(raw_step.get("implicit"))
+                and origin == "review"
+                and source == "reviewed_relation_candidate"
+                and bool(candidate_id)
+                and bool(reviewed_by)
+            )
+            trusted_implicit = (
+                bool(raw_step.get("implicit"))
+                and origin == "implicit_cooccurrence"
+                and source == "accepted_knowledge_links"
+            )
+            trusted_anchor = trusted_review or trusted_implicit
+            for key, limit in (("origin", 80), ("created_by", 120)):
+                value = provenance_source.get(key)
+                if isinstance(value, str):
+                    provenance[key] = value[:limit]
+            if trusted_anchor:
+                for key, limit in (
+                    ("source", 80),
+                    ("candidate_id", 120),
+                    ("reviewed_by", 120),
+                    ("created_by", 120),
+                    ("status", 40),
+                    ("created_at", 40),
+                    ("method", 80),
+                    ("reviewed_at", 40),
+                ):
+                    value = provenance_source.get(key)
+                    if isinstance(value, str):
+                        provenance[key] = value[:limit]
+                confidence = _graph_number(provenance_source.get("confidence"))
+                if confidence is not None:
+                    provenance["confidence"] = confidence
+            knowledge_id = ""
+            if trusted_anchor:
+                knowledge_id = _graph_text_for_prompt(
+                    provenance_source.get("knowledge_object_id") or raw_step.get("knowledge_object_id"),
+                    limit=120,
+                )
+                if knowledge_id:
+                    provenance["knowledge_object_id"] = knowledge_id
+            citation = knowledge_labels.get(knowledge_id)
+            if citation:
+                provenance["citation"] = citation
+            if provenance:
+                step["provenance"] = provenance
+            traversal_from = _graph_endpoint_id_for_prompt(raw_step.get("from"))
+            traversal_to = _graph_endpoint_id_for_prompt(raw_step.get("to"))
+            assertion_source = _graph_endpoint_id_for_prompt(raw_step.get("source"))
+            assertion_target = _graph_endpoint_id_for_prompt(raw_step.get("target"))
+            direction = _graph_text_for_prompt(raw_step.get("direction"), limit=16)
+            expected_assertion = (
+                (traversal_from, traversal_to) if direction == "forward" else (traversal_to, traversal_from)
+            )
+            coherent_step = (
+                bool(_graph_text_for_prompt(raw_step.get("id"), limit=120))
+                and bool(traversal_from)
+                and bool(traversal_to)
+                and direction in {"forward", "reverse"}
+                and (assertion_source, assertion_target) == expected_assertion
+            )
+            anchors.append(bool(citation) and coherent_step)
+            steps.append(step)
+        if not steps:
+            continue
+
+        raw_entity_ids = raw_path.get("entity_ids")
+        entity_ids = (
+            [_graph_endpoint_id_for_prompt(item) for item in raw_entity_ids[:5]]
+            if isinstance(raw_entity_ids, list)
+            else []
+        )
+        path_id = _graph_text_for_prompt(raw_path.get("path_id") or raw_path.get("id"), limit=120)
+        root_id = _graph_endpoint_id_for_prompt(raw_path.get("root"))
+        target_id = _graph_endpoint_id_for_prompt(raw_path.get("target"))
+        coherent_chain = (
+            steps_complete
+            and len(steps) == len(raw_steps)
+            and len(entity_ids) == len(raw_steps) + 1
+            and bool(path_id)
+            and all(entity_ids)
+            and len(set(entity_ids)) == len(entity_ids)
+            and root_id == entity_ids[0]
+            and target_id == entity_ids[-1]
+            and all(
+                isinstance(raw_step, dict)
+                and _graph_endpoint_id_for_prompt(raw_step.get("from")) == entity_ids[index]
+                and _graph_endpoint_id_for_prompt(raw_step.get("to")) == entity_ids[index + 1]
+                for index, raw_step in enumerate(raw_steps)
+            )
+        )
+        path: dict[str, Any] = {
+            "path_id": path_id,
+            "root": _graph_endpoint_for_prompt(raw_path.get("root"), entity_lookup),
+            "target": _graph_endpoint_for_prompt(raw_path.get("target"), entity_lookup),
+            "entity_ids": entity_ids,
+            "steps": steps,
+            # An incomplete path must never be promoted to grounded merely because
+            # its first four edges happen to have anchors.
+            "grounded": len(raw_steps) <= 4 and coherent_chain and bool(anchors) and all(anchors),
+        }
+        score = _graph_number(raw_path.get("score"))
+        if score is not None:
+            path["score"] = score
+        if len(raw_steps) > 4:
+            path["steps_truncated"] = True
+        rendered.append(path)
+    while rendered and len(json.dumps(rendered, ensure_ascii=False)) > _AGENT_GRAPH_PATHS_MAX_CHARS:
+        rendered.pop()
+    return rendered
+
+
 # What an assistant turn's [K#] becomes when the record it named is not in this
 # turn's retrieval at all. Losing the marker silently would be worse: the sentence
 # would read as an unattributed claim.
@@ -2314,6 +2572,18 @@ class AgentRuntime:
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.
         citation_check = self._citation_overlap_report(content, context)
+        raw_graph_paths = context.graph_context.get("paths")
+        graph_paths_shown = len(raw_graph_paths) if isinstance(raw_graph_paths, list) else 0
+        graph_paths_matched = _graph_count(
+            context.graph_context.get("paths_matched_at_least") or graph_paths_shown,
+            minimum=graph_paths_shown,
+        )
+        graph_snapshot_summary = {
+            "as_of": _graph_text_for_prompt(context.graph_context.get("as_of"), limit=32),
+            "paths": graph_paths_shown,
+            "paths_matched_at_least": max(0, graph_paths_matched),
+            "paths_truncated": bool(context.graph_context.get("paths_truncated")),
+        }
 
         assistant_message = self.storage.store_message(
             conversation_id,
@@ -2334,6 +2604,10 @@ class AgentRuntime:
                 "retrieval_confidence": context.retrieval_confidence,
                 "search_query": context.search_query,
                 "retrieval_trace": context.retrieval_trace,
+                # Counts and the requested valid-time only.  The path payload can
+                # contain personal entity names and provenance, so the full raw
+                # snapshot must not become durable message metadata.
+                "graph_snapshot": graph_snapshot_summary,
                 "ingestion_action": context.ingestion.get("action", "not_assessed"),
                 "interaction_mode": context.interaction_mode,
                 "knowledge_object_ids": attributed_knowledge_ids,
@@ -2422,6 +2696,10 @@ class AgentRuntime:
                 "answer_mode": context.answer_mode,
                 "retrieval_confidence": context.retrieval_confidence,
                 "graph_entities": len(context.graph_context.get("entities", [])),
+                "graph_paths": graph_snapshot_summary["paths"],
+                "graph_paths_matched_at_least": graph_snapshot_summary["paths_matched_at_least"],
+                "graph_paths_truncated": graph_snapshot_summary["paths_truncated"],
+                "graph_as_of": graph_snapshot_summary["as_of"],
                 "ingestion_action": context.ingestion.get("action", "not_assessed"),
                 "interaction_mode": context.interaction_mode,
                 "pending_relations": context.pending_relations,
@@ -2720,6 +2998,16 @@ class AgentRuntime:
                     found = []
                 context.knowledge_hits = found
                 context.entity_hits = retrieval_result.get("entity_matches", [])
+                # Ranking already traversed the graph.  Re-running it here used a
+                # different query (notably after query repair), different limits and
+                # no temporal snapshot, so the explanation shown to the model could
+                # describe a route that did not select the result.  Presence of the
+                # key is the version boundary: a new searcher owns the snapshot even
+                # when it is empty; legacy/fake searchers omit it and retain the old
+                # fallback below.
+                if "graph_context" in retrieval_result:
+                    returned_graph = retrieval_result.get("graph_context")
+                    context.graph_context = returned_graph if isinstance(returned_graph, dict) else {}
                 strategy = retrieval_result.get("strategy")
                 if isinstance(strategy, dict):
                     try:
@@ -2873,20 +3161,21 @@ class AgentRuntime:
                 context.pending_resolutions = int(stats.get("pending_resolutions", 0))
                 context.pending_relations = int(stats.get("pending_relation_candidates", 0))
                 context.pending_conflicts = int(stats.get("pending_conflicts", 0))
-                context.graph_context = kg.context_for_query(
-                    user_id,
-                    search_query,
-                    depth=(
-                        self.settings.graph_max_depth
-                        if context.interaction_mode in {"knowledge_work", "research"}
-                        else 1
-                    ),
-                    entity_limit=12 if context.interaction_mode == "knowledge_work" else 8,
-                    knowledge_limit=32 if context.interaction_mode == "knowledge_work" else 20,
-                    seed_knowledge_ids=[
-                        str(item["id"]) for item in context.knowledge_hits[:12] if item.get("id")
-                    ],
-                )
+                if "graph_context" not in retrieval_result:
+                    context.graph_context = kg.context_for_query(
+                        user_id,
+                        search_query,
+                        depth=(
+                            self.settings.graph_max_depth
+                            if context.interaction_mode in {"knowledge_work", "research"}
+                            else 1
+                        ),
+                        entity_limit=12 if context.interaction_mode == "knowledge_work" else 8,
+                        knowledge_limit=32 if context.interaction_mode == "knowledge_work" else 20,
+                        seed_knowledge_ids=[
+                            str(item["id"]) for item in context.knowledge_hits[:12] if item.get("id")
+                        ],
+                    )
                 if not context.entity_hits:
                     context.entity_hits = context.graph_context.get("roots", [])[:6]
             except Exception:
@@ -6002,6 +6291,28 @@ class AgentRuntime:
         id_to_label = {
             str(hit["id"]): f"K{index}" for index, hit in enumerate(selected_hits, start=1) if hit.get("id")
         }
+        graph_paths = _graph_paths_for_prompt(context.graph_context, id_to_label)
+        context_payload["graph_paths"] = graph_paths
+        if context.graph_context:
+            raw_paths = context.graph_context.get("paths")
+            raw_path_count = len(raw_paths) if isinstance(raw_paths, list) else 0
+            matched_paths = _graph_count(
+                context.graph_context.get("paths_matched_at_least") or raw_path_count,
+                minimum=raw_path_count,
+            )
+            context_payload["graph_snapshot"] = {
+                # This is the EFFECTIVE query used by ranking (possibly repaired),
+                # not a reconstruction from the user's original message.
+                "query": _graph_text_for_prompt(context.graph_context.get("query"), limit=700),
+                "as_of": _graph_text_for_prompt(context.graph_context.get("as_of"), limit=32),
+                "temporal_basis": _graph_text_for_prompt(
+                    context.graph_context.get("temporal_basis"), limit=40
+                ),
+                "expanded": bool(context.graph_context.get("expanded")),
+                "paths_matched_at_least": max(0, matched_paths),
+                "paths_truncated": bool(context.graph_context.get("paths_truncated"))
+                or raw_path_count > len(graph_paths),
+            }
         # Contradiction/lifecycle/recency signals must reach the model so it can reason
         # about stale or conflicting personal knowledge instead of stating one side as fact.
         conflict_map = self._conflict_map(context.user_id, set(id_to_label))
@@ -6046,27 +6357,34 @@ class AgentRuntime:
         for entity in context.entity_hits[:6]:
             context_payload["graph_entities"].append(
                 {
-                    "name": str(entity.get("name") or "")[:200],
-                    "entity_type": str(entity.get("entity_type") or "other")[:80],
-                    "relation_count": int(entity.get("_relation_count", 0) or 0),
-                    "knowledge_count": int(entity.get("_knowledge_count", 0) or 0),
+                    "id": _graph_text_for_prompt(entity.get("id"), limit=120),
+                    "name": _graph_text_for_prompt(entity.get("name"), limit=200),
+                    "entity_type": _graph_text_for_prompt(entity.get("entity_type"), limit=80) or "other",
+                    "relation_count": _graph_count(entity.get("_relation_count", 0)),
+                    "knowledge_count": _graph_count(entity.get("_knowledge_count", 0)),
                 }
             )
-        for relation in context.graph_context.get("relations", [])[:10]:
-            if not isinstance(relation, dict):
-                continue
-            context_payload["graph_relations"].append(
-                {
-                    "source": str(relation.get("source_name") or "")[:200],
-                    "relation_type": str(relation.get("relation_type") or "related_to")[:80],
-                    "target": str(relation.get("target_name") or "")[:200],
-                    "evidence_note": (
-                        "co_occurs_in means co-mention, not a confirmed semantic relation"
-                        if relation.get("relation_type") == "co_occurs_in"
-                        else ""
-                    ),
-                }
-            )
+        # Compatibility for legacy/fake graph implementations that return only a
+        # flat relation list.  New snapshots use ordered paths instead; presenting
+        # both would invite the model to reconstruct a different route from the one
+        # that ranking actually used.
+        if not graph_paths:
+            for relation in context.graph_context.get("relations", [])[:10]:
+                if not isinstance(relation, dict):
+                    continue
+                context_payload["graph_relations"].append(
+                    {
+                        "source": _graph_text_for_prompt(relation.get("source_name"), limit=200),
+                        "relation_type": _graph_text_for_prompt(relation.get("relation_type"), limit=80)
+                        or "related_to",
+                        "target": _graph_text_for_prompt(relation.get("target_name"), limit=200),
+                        "evidence_note": (
+                            "co_occurs_in means co-mention, not a confirmed semantic relation"
+                            if relation.get("relation_type") == "co_occurs_in"
+                            else ""
+                        ),
+                    }
+                )
         if attachments:
             context_payload["attachment_names"] = [
                 str(item.get("filename") or item.get("name") or "file")[:260]
@@ -6079,6 +6397,8 @@ class AgentRuntime:
                 context_payload["knowledge_objects"],
                 context_payload["graph_entities"],
                 context_payload["graph_relations"],
+                context_payload["graph_paths"],
+                context_payload.get("graph_snapshot"),
                 context_payload["suggested_next_step"],
                 context_payload.get("attachment_names"),
                 context_payload.get("user_model"),
@@ -6103,7 +6423,11 @@ class AgentRuntime:
                         "опирается на Knowledge Object, поставь соответствующую метку [K1], [K2] и т.д. "
                         "knowledge_matched_at_least — сколько записей ПОДОШЛО по запросу; "
                         "knowledge_objects — сколько из них показано здесь. Если первое больше, "
-                        "перечисленное неполно, и говорить о нём как обо всём архиве нельзя."
+                        "перечисленное неполно, и говорить о нём как обо всём архиве нельзя. "
+                        "graph_paths — упорядоченные пути ровно того снимка, который участвовал "
+                        "в поиске. grounded=true означает, что каждый шаг привязан к уже показанной "
+                        "метке K; используй только эти существующие K-метки и не придумывай "
+                        "отдельные графовые ссылки."
                     ),
                 }
             )

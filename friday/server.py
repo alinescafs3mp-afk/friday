@@ -64,7 +64,7 @@ from friday.ingestion import (
     IdempotencyInProgressError,
     IngestionPipeline,
 )
-from friday.knowledge_graph import KnowledgeGraph
+from friday.knowledge_graph import KnowledgeGraph, normalize_event_date
 from friday.memory import MemoryVault
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.permissions import (
@@ -2182,6 +2182,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         q: str = Query(min_length=1, max_length=2000),
         limit: int = Query(20, ge=1, le=100),
         explain: bool = Query(False),
+        as_of: str = Query("", max_length=32),
     ) -> dict[str, Any]:
         """Search one's own knowledge. `explain=true` adds the ranking trace.
 
@@ -2193,12 +2194,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         own tenant data, so `search.use` is the whole gate.
         """
         actor = _require(request, "search.use")
+        normalized_as_of = ""
+        if as_of.strip():
+            try:
+                normalized_as_of = normalize_event_date(as_of)[0]
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Некорректная дата as_of") from exc
         return await request.app.state.hybrid_searcher.search(
             actor.user_id,
             q,
             limit=limit,
             kg=request.app.state.kg,
             explain=explain,
+            as_of=normalized_as_of,
         )
 
     application.include_router(missions_router)

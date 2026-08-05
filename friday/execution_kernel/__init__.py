@@ -38,7 +38,7 @@ from friday.permissions import (
     current_actor,
 )
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
-from friday.retrieval import best_snippet
+from friday.retrieval import _public_graph_context, best_snippet, is_relational_query
 from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
 from friday.storage.models import (
@@ -1011,6 +1011,74 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
         encoded = json.dumps(root, ensure_ascii=False, indent=2)
 
     return encoded, compacted
+
+
+_MEMORY_GRAPH_CONTEXT_MAX_CHARS = 3_200
+
+
+def _memory_graph_context_for_llm(
+    raw: Any,
+    *,
+    query: str,
+    as_of: str,
+) -> dict[str, Any]:
+    """Bound a memory-search graph snapshot before it enters a tool result.
+
+    Retrieval already publishes an allowlisted graph projection, but the kernel
+    also runs with test/legacy searchers.  Treat their return as untrusted: applying
+    the canonical projection here keeps raw relation metadata and long evidence text
+    out of the model's tool envelope.  A structural six-path/four-edge cap is
+    followed by a serialized-size cap so document excerpts still fit the fixed
+    12k tool budget.
+    """
+
+    source = raw if isinstance(raw, dict) else {}
+    source_query = source.get("query")
+    effective_query = (
+        source_query[:700] if isinstance(source_query, str) else query[:700] if isinstance(query, str) else ""
+    )
+    bounded = _public_graph_context(
+        source,
+        query=effective_query,
+        as_of=as_of,
+        expanded=bool(source.get("expanded")),
+    )
+    paths = list(bounded.get("paths") or [])
+    shown_paths = paths[:6]
+    bounded["paths"] = shown_paths
+    try:
+        matched = max(len(paths), int(bounded.get("paths_matched_at_least") or len(paths)))
+    except (TypeError, ValueError):
+        matched = len(paths)
+    bounded["paths_matched_at_least"] = matched
+    bounded["paths_truncated"] = bool(bounded.get("paths_truncated")) or matched > len(shown_paths)
+    # Row caps alone are not a byte budget: six four-hop paths with maximal IDs
+    # can still exceed the whole tool envelope.  Remove redundant flat projections
+    # first, then tail paths, always as complete JSON objects.  ToolResult's final
+    # character guard must never be the first thing that makes this structure fit,
+    # because slicing serialized JSON would make it unparsable.
+    while len(json.dumps(bounded, ensure_ascii=False)) > _MEMORY_GRAPH_CONTEXT_MAX_CHARS:
+        relations = bounded.get("relations")
+        entities = bounded.get("entities")
+        nodes = bounded.get("nodes")
+        roots = bounded.get("roots")
+        current_paths = bounded.get("paths")
+        if isinstance(relations, list) and relations:
+            relations.pop()
+        elif isinstance(entities, list) and entities:
+            entities.pop()
+        elif isinstance(nodes, list) and nodes:
+            nodes.pop()
+        elif isinstance(roots, list) and roots:
+            roots.pop()
+        elif isinstance(current_paths, list) and current_paths:
+            current_paths.pop()
+            bounded["paths_truncated"] = True
+        else:
+            break
+    # Search may have repaired the query.  This is the effective string that built
+    # the snapshot, not a reconstruction from the original tool arguments.
+    return bounded
 
 
 # Длина выдержки в ответе инструмента. Десять результатов по 600 знаков — это 6 000
@@ -2272,6 +2340,7 @@ class ExecutionKernel:
         limit: int = 10,
         since: str | None = None,
         until: str | None = None,
+        as_of: str = "",
     ) -> dict[str, Any]:
         """Поиск по своему архиву — ВЫДЕРЖКАМИ, а не телами документов.
 
@@ -2298,6 +2367,22 @@ class ExecutionKernel:
         if storage is None:
             raise RuntimeError("Execution kernel storage is not initialized")
         limit = max(1, min(int(limit), 50))
+        requested_as_of = " ".join(str(as_of or "").split())
+        parsed_as_of = iso_date(requested_as_of) if requested_as_of else None
+        if requested_as_of and not parsed_as_of:
+            # This refusal happens before either the hybrid or SQLite search.  A
+            # malformed historical date must not silently become a current answer.
+            return {
+                "count": 0,
+                "query": query,
+                "as_of": "",
+                "empty_because": "as_of_unparsed",
+                "detail": (
+                    f"не понял дату снимка: {requested_as_of}. Ожидается календарная дата ГГГГ-ММ-ДД."
+                ),
+                "results": [],
+            }
+        normalized_as_of = parsed_as_of or ""
         # Границы периода нормализуются ДО поиска. Непонятая граница — это отказ, а не
         # «искать по всему архиву»: молча снятый фильтр выдаёт документы чужого периода
         # как документы запрошенного, и человек об этом не узнаёт. См. `_window_bound`.
@@ -2326,7 +2411,19 @@ class ExecutionKernel:
         # ветка `else` не задаёт стратегию вовсе, и чтение ниже роняло весь инструмент.
         strategy: Any = None
         if self.searcher is not None:
-            found = await self.searcher.search(actor.user_id, query, limit=limit, since=since, until=until)
+            found = await self.searcher.search(
+                actor.user_id,
+                query,
+                limit=limit,
+                since=since,
+                until=until,
+                as_of=normalized_as_of,
+                kg=self.kg,
+                # Ordinary archive recall measured worse with graph expansion.
+                # A named historical snapshot or relational-language query is the
+                # explicit, measured class in which the graph is part of the ask.
+                graph_expansion=bool(normalized_as_of or is_relational_query(query)),
+            )
             rows = list(found.get("results") or [])
             strategy = found.get("strategy")
             if isinstance(strategy, dict):
@@ -2355,7 +2452,11 @@ class ExecutionKernel:
             }
             for row in rows
         ]
-        payload: dict[str, Any] = {"count": len(results), "query": query}
+        payload: dict[str, Any] = {
+            "count": len(results),
+            "query": query,
+            "as_of": normalized_as_of,
+        }
         # «Показано 10» и «в архиве ровно 10» — разные утверждения, и модель без
         # этой строки делает второе из первого. Замерено на живом корпусе: на
         # вопрос «кто из Уфы» она называла ОДНОГО человека как полный ответ, тогда
@@ -2380,6 +2481,21 @@ class ExecutionKernel:
             # `to_llm_message` режет длинный ответ по хвосту, и счётчик, стоящий
             # после выдержек, до модели не доживал.
             payload["filtered_out"] = dropped
+        if isinstance(found, dict) and "graph_context" in found:
+            payload["graph_context"] = _memory_graph_context_for_llm(
+                found.get("graph_context"),
+                query=str(found.get("query") or query),
+                as_of=normalized_as_of,
+            )
+        elif normalized_as_of:
+            # A kernel assembled without the hybrid searcher cannot fabricate a
+            # historical traversal.  Echo an explicitly empty snapshot instead of
+            # making the valid-time qualifier disappear from the tool response.
+            payload["graph_context"] = _memory_graph_context_for_llm(
+                {},
+                query=query,
+                as_of=normalized_as_of,
+            )
         payload["results"] = results
         return payload
 
@@ -3909,13 +4025,20 @@ class ExecutionKernel:
             "Непонятную запись периода инструмент отвергает, а не ищет по всему архиву. "
             "берётся собственная дата документа, а при её отсутствии — даты, упомянутые "
             "в тексте. Если в ответе empty_because=date_window, то в архиве материал "
-            "есть, но не в этом периоде — скажи именно так.",
+            "есть, но не в этом периоде — скажи именно так. as_of задаёт отдельный "
+            "valid-time снимок графовых связей на календарную дату; используй его для "
+            "вопросов «кто с кем был связан тогда». Неверный as_of отвергается, а не "
+            "подменяется сегодняшней картиной.",
             "search.use",
             {
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                 "since": {"type": "string", "description": "ГГГГ-ММ-ДД, начало периода"},
                 "until": {"type": "string", "description": "ГГГГ-ММ-ДД, конец периода"},
+                "as_of": {
+                    "type": "string",
+                    "description": "Дата ГГГГ-ММ-ДД: графовые связи, верные на этот день",
+                },
             },
             ["query"],
             risk="observe",

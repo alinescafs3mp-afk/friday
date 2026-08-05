@@ -40,6 +40,342 @@ _TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁ][0-9a-zA-Zа-яёА-ЯЁ._+#-]
 # `+` and `#` are excluded on purpose: C++ and C# end in them legitimately.
 _TRAILING_PUNCTUATION = ".-"
 
+# Public graph snapshots are deliberately much smaller than the traversal's
+# internal working set.  The latter contains full entity rows and knowledge
+# candidates because ranking needs them; returning it would leak descriptions,
+# metadata_json and (through future additions) possibly document bodies through
+# an otherwise innocuous search response.
+_PUBLIC_GRAPH_NODE_CAP = 12
+_PUBLIC_GRAPH_RELATION_CAP = 20
+_PUBLIC_GRAPH_PATH_CAP = 10
+_PUBLIC_GRAPH_PATH_STEP_CAP = 4
+_PUBLIC_GRAPH_COUNT_CAP = 1_000_000_000
+_PUBLIC_GRAPH_ENDPOINT_FIELDS = frozenset({"id", "name", "entity_type"})
+
+_PUBLIC_GRAPH_NODE_FIELDS = frozenset(
+    {
+        "id",
+        "name",
+        "entity_type",
+        "canonical",
+        "merged_into_id",
+        "_graph_depth",
+        "_graph_score",
+        "_relation_count",
+        "_knowledge_count",
+    }
+)
+_PUBLIC_GRAPH_RELATION_FIELDS = frozenset(
+    {
+        "id",
+        "source_entity_id",
+        "target_entity_id",
+        "source_name",
+        "target_name",
+        "relation_type",
+        "weight",
+        "confidence",
+        "status",
+        "implicit",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at",
+        "invalidated_at",
+        "invalidated_reason",
+        "superseded_by",
+        "reviewed_by",
+        "knowledge_object_id",
+        "evidence_knowledge_object_id",
+    }
+)
+_PUBLIC_GRAPH_PATH_FIELDS = frozenset(
+    {
+        "path_id",
+        "root",
+        "target",
+        "score",
+    }
+)
+_PUBLIC_GRAPH_STEP_FIELDS = frozenset(
+    {
+        "id",
+        "from",
+        "to",
+        "source",
+        "target",
+        "type",
+        "weight",
+        "implicit",
+        "direction",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at",
+        "invalidated_at",
+        "invalidated_reason",
+        "superseded_by",
+    }
+)
+_PUBLIC_GRAPH_PROVENANCE_FIELDS = frozenset(
+    {
+        "kind",
+        "origin",
+        "knowledge_object_id",
+        "candidate_id",
+        "reviewed_by",
+        "created_by",
+        "source",
+        "confidence",
+        "status",
+        "created_at",
+    }
+)
+
+
+def _bounded_graph_text(value: Any, *, limit: int = 240) -> str:
+    # IDs, names and query text are strings by contract.  Refuse other scalar
+    # types instead of stringifying them: Python itself rejects decimal rendering
+    # of pathological integers beyond its safety limit, before a slice can bound
+    # the result.
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def _bounded_graph_count(value: Any, *, minimum: int = 0) -> int:
+    """A compact honest lower bound from an untrusted count-like value."""
+
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return minimum
+    return max(minimum, min(max(0, parsed), _PUBLIC_GRAPH_COUNT_CAP))
+
+
+def _project_graph_fields(value: Any, allowed: frozenset[str]) -> dict[str, Any]:
+    """Copy only compact scalar graph fields from an internal row."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    projected: dict[str, Any] = {}
+    for key in allowed:
+        if key not in value:
+            continue
+        item = value[key]
+        if item is None or isinstance(item, bool):
+            projected[key] = item
+        elif isinstance(item, int):
+            projected[key] = max(-_PUBLIC_GRAPH_COUNT_CAP, min(item, _PUBLIC_GRAPH_COUNT_CAP))
+        elif isinstance(item, float):
+            if math.isfinite(item):
+                projected[key] = max(
+                    -float(_PUBLIC_GRAPH_COUNT_CAP),
+                    min(item, float(_PUBLIC_GRAPH_COUNT_CAP)),
+                )
+        elif isinstance(item, str):
+            projected[key] = _bounded_graph_text(item)
+    return projected
+
+
+def _graph_endpoint_id(value: Any) -> str:
+    if isinstance(value, Mapping):
+        value = value.get("id")
+    return _bounded_graph_text(value, limit=160)
+
+
+def _project_graph_path(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    raw_edges = value.get("edges")
+    if not isinstance(raw_edges, Sequence) or isinstance(raw_edges, (str, bytes)):
+        raw_edges = value.get("steps")
+    # Core traversal never publishes an empty or partial path.  Reject an invalid
+    # legacy/fake path as one unit: truncating five edges to four, or dropping one
+    # malformed edge, could otherwise turn the surviving prefix into grounded
+    # evidence later in Agent Runtime.
+    if (
+        not isinstance(raw_edges, Sequence)
+        or isinstance(raw_edges, (str, bytes))
+        or not raw_edges
+        or len(raw_edges) > _PUBLIC_GRAPH_PATH_STEP_CAP
+        or any(not isinstance(raw_edge, Mapping) for raw_edge in raw_edges)
+    ):
+        return {}
+
+    entity_ids = value.get("entity_ids")
+    if not isinstance(entity_ids, Sequence) or isinstance(entity_ids, (str, bytes)):
+        return {}
+    projected_entity_ids = [_graph_endpoint_id(entity_id) for entity_id in entity_ids]
+    if (
+        len(projected_entity_ids) != len(raw_edges) + 1
+        or any(not entity_id for entity_id in projected_entity_ids)
+        or len(set(projected_entity_ids)) != len(projected_entity_ids)
+    ):
+        return {}
+
+    path_id = _bounded_graph_text(value.get("path_id") or value.get("id"), limit=160)
+    root = _graph_endpoint_id(value.get("root"))
+    target = _graph_endpoint_id(value.get("target"))
+    if not path_id or root != projected_entity_ids[0] or target != projected_entity_ids[-1]:
+        return {}
+
+    projected = _project_graph_fields(value, _PUBLIC_GRAPH_PATH_FIELDS)
+    projected.update(
+        {
+            "path_id": path_id,
+            "root": root,
+            "target": target,
+            "entity_ids": projected_entity_ids,
+        }
+    )
+    # A path must remain intelligible even when its endpoints fall beyond the
+    # independent top-level node cap.  Core paths carry their own tiny, ordered
+    # label table; project it with a stricter allowlist than ordinary graph nodes.
+    raw_path_entities = value.get("entities")
+    if isinstance(raw_path_entities, Sequence) and not isinstance(raw_path_entities, (str, bytes)):
+        path_entities = [
+            entity
+            for entity in (
+                _project_graph_fields(item, _PUBLIC_GRAPH_ENDPOINT_FIELDS)
+                for item in raw_path_entities[: _PUBLIC_GRAPH_PATH_STEP_CAP + 1]
+            )
+            if entity
+        ]
+        if path_entities:
+            projected["entities"] = path_entities
+    edges: list[dict[str, Any]] = []
+    for index, raw_edge in enumerate(raw_edges):
+        edge_id = _bounded_graph_text(raw_edge.get("id"), limit=160)
+        traversal_from = _graph_endpoint_id(raw_edge.get("from"))
+        traversal_to = _graph_endpoint_id(raw_edge.get("to"))
+        assertion_source = _graph_endpoint_id(raw_edge.get("source"))
+        assertion_target = _graph_endpoint_id(raw_edge.get("target"))
+        direction = _bounded_graph_text(raw_edge.get("direction"), limit=16)
+        expected_assertion = (
+            (traversal_from, traversal_to) if direction == "forward" else (traversal_to, traversal_from)
+        )
+        if (
+            not edge_id
+            or traversal_from != projected_entity_ids[index]
+            or traversal_to != projected_entity_ids[index + 1]
+            or direction not in {"forward", "reverse"}
+            or (assertion_source, assertion_target) != expected_assertion
+        ):
+            return {}
+        edge = _project_graph_fields(raw_edge, _PUBLIC_GRAPH_STEP_FIELDS)
+        edge.update(
+            {
+                "id": edge_id,
+                "from": traversal_from,
+                "to": traversal_to,
+                "source": assertion_source,
+                "target": assertion_target,
+                "direction": direction,
+            }
+        )
+        provenance = _project_graph_fields(raw_edge.get("provenance"), _PUBLIC_GRAPH_PROVENANCE_FIELDS)
+        if provenance:
+            edge["provenance"] = provenance
+        edges.append(edge)
+    projected["edges"] = edges
+    return projected
+
+
+def _public_graph_context(
+    raw: Any,
+    *,
+    query: str,
+    as_of: str,
+    expanded: bool,
+    fallback_nodes: Sequence[Any] = (),
+) -> dict[str, Any]:
+    """Return the authoritative traversal snapshot without internal/raw rows."""
+
+    context = raw if isinstance(raw, Mapping) else {}
+    raw_nodes = context.get("nodes") or context.get("entities") or fallback_nodes
+    if not isinstance(raw_nodes, Sequence) or isinstance(raw_nodes, (str, bytes)):
+        raw_nodes = fallback_nodes
+    nodes = [
+        node
+        for node in (
+            _project_graph_fields(item, _PUBLIC_GRAPH_NODE_FIELDS)
+            for item in raw_nodes[:_PUBLIC_GRAPH_NODE_CAP]
+        )
+        if node
+    ]
+
+    raw_roots = context.get("roots") or (fallback_nodes if not expanded else ())
+    if not isinstance(raw_roots, Sequence) or isinstance(raw_roots, (str, bytes)):
+        raw_roots = ()
+    roots = [
+        root
+        for root in (
+            _project_graph_fields(item, _PUBLIC_GRAPH_NODE_FIELDS)
+            for item in raw_roots[:_PUBLIC_GRAPH_NODE_CAP]
+        )
+        if root
+    ]
+
+    raw_relations = context.get("relations")
+    if not isinstance(raw_relations, Sequence) or isinstance(raw_relations, (str, bytes)):
+        raw_relations = ()
+    relations = [
+        relation
+        for relation in (
+            _project_graph_fields(item, _PUBLIC_GRAPH_RELATION_FIELDS)
+            for item in raw_relations[:_PUBLIC_GRAPH_RELATION_CAP]
+        )
+        if relation
+    ]
+
+    raw_paths = context.get("paths")
+    if not isinstance(raw_paths, Sequence) or isinstance(raw_paths, (str, bytes)):
+        raw_paths = ()
+    paths = [
+        path for path in (_project_graph_path(item) for item in raw_paths[:_PUBLIC_GRAPH_PATH_CAP]) if path
+    ]
+    matched = _bounded_graph_count(
+        context.get("paths_matched_at_least", len(raw_paths)),
+        minimum=len(raw_paths),
+    )
+
+    temporal_basis = _bounded_graph_text(context.get("temporal_basis") or "valid_time", limit=32)
+    return {
+        # The effective query can differ from the user's raw text after the
+        # deterministic keyboard-layout/typo repair above.  Keep the query that
+        # actually ranked this snapshot so the runtime never has to reconstruct it.
+        "query": _bounded_graph_text(query, limit=700),
+        "expanded": bool(expanded),
+        "as_of": as_of,
+        "temporal_basis": temporal_basis,
+        "roots": roots,
+        "nodes": nodes,
+        # ``entities`` is the compatibility spelling used by AgentContext. Both
+        # names intentionally point at the same bounded projection.
+        "entities": nodes,
+        "relations": relations,
+        "paths": paths,
+        "paths_matched_at_least": matched,
+        "paths_truncated": bool(
+            context.get("paths_truncated") or matched > len(paths) or len(raw_paths) > len(paths)
+        ),
+    }
+
+
+def _normalize_search_as_of(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    # ``knowledge_graph -> mentions -> retrieval`` is an intentional dependency
+    # elsewhere in the package, so importing the shared calendar normalizer at
+    # module load would close a cycle. Validation is once per historical search;
+    # defer this import instead of duplicating temporal semantics.
+    from friday.knowledge_graph import normalize_event_date
+
+    try:
+        return normalize_event_date(cleaned)[0]
+    except ValueError as exc:
+        raise ValueError(f"Некорректная дата as_of: {cleaned!r}") from exc
+
 
 def tokens_of(text: str, *, fold_yo: bool = True) -> list[str]:
     """Tokenize the way every part of retrieval must agree to tokenize.
@@ -1498,6 +1834,7 @@ class HybridSearcher:
         explain: bool = False,
         since: str | None = None,
         until: str | None = None,
+        as_of: str = "",
         record_usage: bool | None = None,
     ) -> dict[str, Any]:
         # Deferred: `friday.workers` (the package, not just `_blocking`) imports
@@ -1507,6 +1844,11 @@ class HybridSearcher:
         from friday.workers._blocking import run_blocking
 
         limit = max(1, min(int(limit), 100))
+        # Parse outside graph enrichment's best-effort ``except Exception``. A bad
+        # user date is input refusal, not an unavailable optional graph channel;
+        # swallowing it would turn an invalid historical question into a current,
+        # graphless HTTP 200.
+        normalized_as_of = _normalize_search_as_of(as_of)
         # Ширина отбора кандидатов считается от ГЛУБИНЫ ОТБОРА, а не от размера
         # страницы. Раньше и то и другое росло от `limit`, и пул для переранжирования
         # усыхал вместе со страницей: Telegram просит восемь — FTS приносил сорок
@@ -1518,7 +1860,14 @@ class HybridSearcher:
         depth = max(limit, self._rerank_top) if self._reranker is not None else limit
         clean_query = " ".join((query or "").split()).strip()
         if not clean_query:
-            return {"query": query, "results": [], "count": 0, "entity_matches": []}
+            return {
+                "query": query,
+                "results": [],
+                "count": 0,
+                "entity_matches": [],
+                "as_of": normalized_as_of,
+                "graph_context": _public_graph_context({}, query="", as_of=normalized_as_of, expanded=False),
+            }
 
         # ЖЁСТКИЙ предфильтр по периоду — ДО отбора кандидатов, а не после.
         #
@@ -1537,6 +1886,10 @@ class HybridSearcher:
                 "results": [],
                 "count": 0,
                 "entity_matches": [],
+                "as_of": normalized_as_of,
+                "graph_context": _public_graph_context(
+                    {}, query=clean_query, as_of=normalized_as_of, expanded=False
+                ),
                 # Сказано вслух: пусто ИМЕННО из-за периода, а не потому, что в архиве
                 # нет ничего по теме. Совет «загляните в Inbox» здесь был бы неверен.
                 "strategy": {"date_window": True, "date_window_empty": True},
@@ -1644,6 +1997,7 @@ class HybridSearcher:
         # — see the gate below.
         graph_query_matched: set[str] = set()
         graph_evidence: dict[str, list[dict[str, Any]]] = {}
+        graph_expanded = False
         graph_depth = self._graph_max_depth if is_relational_query(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
         if kg and graph_expansion:
@@ -1669,14 +2023,19 @@ class HybridSearcher:
                 if document_id in fts_ranking or lexical_scores.get(document_id, 0.0) >= _LEXICAL_EVIDENCE_MIN
             ]
             try:
-                graph_context = kg.context_for_query(
-                    user_id,
-                    clean_query,
-                    seed_knowledge_ids=seed_ids,
-                    entity_limit=8,
-                    depth=graph_depth,
-                    knowledge_limit=max(depth * 6, 50),
-                )
+                graph_kwargs: dict[str, Any] = {
+                    "seed_knowledge_ids": seed_ids,
+                    "entity_limit": 8,
+                    "depth": graph_depth,
+                    "knowledge_limit": max(depth * 6, 50),
+                }
+                # Keep old test/double implementations compatible on the current
+                # path while making every explicit historical traversal carry its
+                # valid-time boundary at every hop.
+                if normalized_as_of:
+                    graph_kwargs["as_of"] = normalized_as_of
+                graph_context = kg.context_for_query(user_id, clean_query, **graph_kwargs)
+                graph_expanded = True
                 for candidate in graph_context.get("knowledge_candidates", []):
                     document_id = str(candidate.get("knowledge_object_id") or "")
                     if not document_id:
@@ -2125,6 +2484,20 @@ class HybridSearcher:
                 entity_matches = kg.search_entities(user_id, clean_query, limit=5)
         else:
             entity_matches = []
+        public_graph_context = _public_graph_context(
+            graph_context,
+            query=clean_query,
+            as_of=normalized_as_of,
+            expanded=graph_expanded,
+            fallback_nodes=entity_matches,
+        )
+        public_entity_matches = [
+            item
+            for item in (
+                _project_graph_fields(match, _PUBLIC_GRAPH_NODE_FIELDS) for match in entity_matches[:5]
+            )
+            if item
+        ]
         strategy: dict[str, Any] = {
             "fts": True,
             "lexical": True,
@@ -2188,7 +2561,9 @@ class HybridSearcher:
             # «кто из Уфы» модель получала `count: 10`, отвечала одним человеком и
             # звучала как полный перечень, тогда как Уфу упоминают 29 документов.
             "matched_at_least": matched_before_page,
-            "entity_matches": entity_matches,
+            "entity_matches": public_entity_matches,
+            "as_of": normalized_as_of,
+            "graph_context": public_graph_context,
             "strategy": strategy,
         }
         if explain:

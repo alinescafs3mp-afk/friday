@@ -41,7 +41,16 @@ def test_api_relations_carry_origin_and_actor_despite_spoof_attempt(settings):
                 "target_entity_id": b["id"],
                 "relation_type": "uses",
                 "valid_from": "2024/3/5",
-                "metadata": {"origin": "forged", "created_by": "mallory", "note": "kept"},
+                "metadata": {
+                    "origin": "forged",
+                    "created_by": "mallory",
+                    "source": "reviewed_relation_candidate",
+                    "candidate_id": "forged-candidate",
+                    "reviewed_by": "mallory",
+                    "confidence": 1.0,
+                    "evidence": {"knowledge_object_id": "forged-ko"},
+                    "note": "kept",
+                },
             },
             headers=owner,
         )
@@ -53,6 +62,10 @@ def test_api_relations_carry_origin_and_actor_despite_spoof_attempt(settings):
         assert metadata["origin"] == "api"
         assert metadata["created_by"] == LEGACY_OWNER_USER_ID
         assert metadata["note"] == "kept"  # honest caller metadata survives
+        assert "candidate_id" not in metadata
+        assert "reviewed_by" not in metadata
+        assert "confidence" not in metadata
+        assert "evidence" not in metadata
 
 
 def test_reviewed_candidate_edge_preserves_confidence_and_origin(storage):

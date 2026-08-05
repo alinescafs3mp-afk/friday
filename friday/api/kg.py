@@ -19,6 +19,21 @@ from friday.workers._blocking import run_blocking
 
 router = APIRouter(prefix="/api/kg", tags=["knowledge-graph"])
 
+_RESERVED_RELATION_PROVENANCE_KEYS = frozenset(
+    {
+        "origin",
+        "source",
+        "candidate_id",
+        "reviewed_by",
+        "reviewed_at",
+        "created_by",
+        "confidence",
+        "evidence",
+        "knowledge_object_id",
+        "link_ids",
+    }
+)
+
 
 @router.get("/stats", tags=["knowledge-graph"])
 async def graph_stats(request: Request) -> dict[str, Any]:
@@ -281,7 +296,15 @@ async def create_relation(request: Request) -> dict[str, Any]:
     body = await _request_json(request)
     try:
         raw_metadata = body.get("metadata")
-        user_metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        user_metadata: dict[str, Any] = (
+            {
+                str(key): value
+                for key, value in raw_metadata.items()
+                if str(key) not in _RESERVED_RELATION_PROVENANCE_KEYS
+            }
+            if isinstance(raw_metadata, dict)
+            else {}
+        )
         relation = request.app.state.kg.create_relation(
             actor.user_id,
             str(body.get("source_entity_id") or ""),

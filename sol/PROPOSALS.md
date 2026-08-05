@@ -915,3 +915,66 @@
 - **Цена и риск:** только короткие JSON-списки внутри уже открытой транзакции, без
   миграции. Старые записи без `target_after_json` должны отказывать fail-closed:
   честно вычислить исторический delta без снимка результата нельзя.
+
+## 26. Один temporal/provenance путь от graph-ranking до ответа агента
+
+- **Статус:** сделано; контракт и критерии записаны до изменения продуктового
+  кода, baseline подтверждён чтением боевого пути и отдельными красными пробами.
+- **Что не так:** `context_for_query()` строит `paths`, но у многошагового пути
+  сохраняет все `entity_ids` и только ПОСЛЕДНЕЕ ребро. `HybridSearcher` использует
+  этот граф для ranking и затем выбрасывает его из ответа. `AgentRuntime` повторно
+  вызывает граф с другим query/seeds/depth/limits и отдаёт модели первые десять
+  несвязанных relations без времени и provenance. Поэтому объяснение не является
+  объяснением реально выбранного результата, а `as_of` за пределы storage/API
+  вообще не выходит.
+- **Baseline:** двухшаговый `A <- B -> C` нельзя восстановить из существующего
+  `paths`; spy на основной дороге видит два несовпадающих вызова
+  `context_for_query`; future hop участвует в retrieval, потому что ни один hop не
+  получает `as_of`; query repair строит ranking по исправленной строке, а второй
+  graph-context — по исходной. Это не отсутствие компонентов, а разорванная
+  проводка между уже существующими компонентами.
+- **Единственный кандидат до правки:** `context_for_query(as_of=...)` нормализует
+  дату до поиска корней и ведёт очередь единым immutable path-state: root, current
+  entity, score, ordered entity IDs и ordered edge objects. На один target остаётся
+  один лучший согласованный state; stale queue entries не могут скрестить score
+  одного маршрута с edges другого. Каждый explicit step сохраняет направление
+  утверждения и отдельно направление обхода, weight, valid-time, transaction-time,
+  superseding и только allowlisted provenance. Ответ содержит максимум 10
+  детерминированно отсортированных путей плюс `matched_at_least/truncated`.
+  `HybridSearcher` возвращает тот же bounded graph snapshot, который участвовал в
+  ranking; runtime использует его и не делает второй traversal. Для legacy/fake
+  searcher без нового ключа остаётся совместимый fallback.
+- **Temporal semantics:** `as_of` — только valid-time и применяется на КАЖДОМ hop;
+  дата возвращается в payload как `temporal_basis=valid_time`. При непустом
+  `as_of` implicit `co_occurs_in` не участвует: у перезаписываемых entity links нет
+  valid-time/history, и сегодняшнюю совместную встречаемость нельзя выдавать за
+  прошлую. Пустой `valid_from` остаётся «начало неизвестно», а не подменяется
+  `created_at`. `created_at/invalidated_at` показываются как transaction evidence,
+  но не фильтруются до появления честного `known_at`.
+- **Grounding:** отдельные `[G#]` пока не вводятся. Reviewed edge переносит ID
+  доказательного Knowledge Object; при сборке prompt он связывается с уже
+  существующим `[K#]`, если этот объект действительно подан модели. Сырой
+  `metadata_json` и длинный evidence-текст не публикуются. Manual/implicit edge без
+  K-якоря остаётся явно `grounded=false` и сам не делает ответ проверенным.
+- **Критерий:** (1) `A <- B -> C` содержит два ordered step с `reverse/forward` и
+  неизменными canonical endpoints; (2) `as_of` исключает future/ended hop на каждом
+  уровне и эхо-возвращается даже при пустом результате; (3) путь, score и
+  `_graph_evidence.path_id` принадлежат одной лучшей дороге; (4) звезда шире лимита
+  возвращает ровно 10 стабильных путей и честный total/truncated; (5) historical
+  traversal не пересекает timeless implicit edge; (6) search/runtime используют
+  один snapshot, включая случай query repair; (7) prompt получает bounded paths с
+  temporal/provenance и существующими K-якорями; (8) invalid `as_of` даёт явный 400
+  или tool refusal, а не graphless success. Возврат второго traversal, потеря одного
+  step, снятие cap, сырой metadata или забытый `as_of` на одном hop должны красить
+  независимые тесты.
+- **Сценарий отказа:** восстановить path по плоскому списку relations постфактум;
+  считать первые десять рёбер объяснением; проглотить неверную дату широким
+  `except`; подставить `created_at` в `valid_from`; пропустить co-occurrence в
+  прошлое; ввести непроверяемые `[G#]`; либо назвать текущие endpoints/status
+  ответом на `known_at`.
+- **Цена и риск:** схема не меняется. До 10 путей при depth <= 4 — максимум 40
+  компактных steps; общие node/relation проекции также ограничиваются перед
+  публичным ответом. Возможен сдвиг graph-score там, где старый код смешивал лучший
+  score с кратчайшей чужой дорогой — это исправление наблюдаемости, которое
+  проверяется действующим retrieval-набором. Исторические имена/merge-topology пока
+  остаются текущими и называются ограничением, а не скрываются.
