@@ -71,6 +71,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("mission", "многошаговая миссия в фоне"),
     ("missions", "список миссий и управление"),
     ("status", "состояние базы"),
+    ("compact", "ночные сводки: что происходило с системой"),
     ("why", "почему был такой ответ: запрос, источники, что отброшено"),
     ("new", "начать новый диалог"),
     ("archive", "архивировать текущий разговор"),
@@ -293,6 +294,7 @@ class BridgeShared:
     _send_missions: Callable[..., Any]
     _send_search: Callable[..., Any]
     _send_tags: Callable[..., Any]
+    _send_compacts: Callable[..., Any]
     _structured_text: Callable[..., Any]
     _typing_loop: Callable[..., Any]
     _unsupported_label: Callable[..., Any]

@@ -444,6 +444,9 @@ class CommandsMixin(BridgeShared):
         if command == "/tags":
             await self._send_tags(telegram, backend, chat_id, external_user_id, user)
             return
+        if command == "/compact":
+            await self._send_compacts(telegram, backend, chat_id, external_user_id, user)
+            return
         if command == "/browse":
             query = argument
             await self._send_browse(telegram, backend, chat_id, external_user_id, user, query)
@@ -520,9 +523,7 @@ class CommandsMixin(BridgeShared):
             )
             tail = self._uncertain_guidance(unknown)
             if not items:
-                await self._send_message(
-                    telegram, chat_id, "Ничего не ждёт вашего решения." + tail
-                )
+                await self._send_message(telegram, chat_id, "Ничего не ждёт вашего решения." + tail)
                 return
             total = int(data.get("total") or len(items))
             lines = [f"Ждут вашего решения: {total}." if total else "Ждут вашего решения:"]
@@ -618,8 +619,7 @@ class CommandsMixin(BridgeShared):
                 await self._send_message(
                     telegram,
                     chat_id,
-                    notice
-                    or f"Объект «{entity_name}» не найден. Карточка: /profile {entity_name}",
+                    notice or f"Объект «{entity_name}» не найден. Карточка: /profile {entity_name}",
                 )
                 return
             raw_found = found.get("entity") if isinstance(found, dict) else None

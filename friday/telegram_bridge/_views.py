@@ -367,6 +367,70 @@ class ViewsMixin(BridgeShared):
         lines.append("\nПоказать записи: /browse тег")
         await self._send_message(telegram, chat_id, "\n".join(lines))
 
+    async def _send_compacts(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+    ) -> None:
+        """Ночные сводки о поведении системы — там же, где человек живёт.
+
+        Орган-компактор считает их с 3 августа, читать их можно было только через
+        HTTP или вкладку панели. То есть наблюдение за системой существовало для
+        того, кто откроет браузер, а владелец переписывается в Telegram.
+
+        Показывается ТРИ последних дня, а не один: происшествие, случившееся
+        трижды подряд, и происшествие вчерашнее — разные новости, и по одному дню
+        их не различить.
+        """
+
+        data = await self._backend_json(
+            backend,
+            "GET",
+            "/api/compacts?limit=3",
+            {"telegram_user": telegram_user},
+            external_user_id,
+            str(chat_id),
+        )
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        if not items:
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Сводок пока нет. Они собираются раз в сутки по вашим разговорам за прошедший день.",
+            )
+            return
+        total = int(data.get("total") or 0)
+        head = "Сводки за последние дни:"
+        if total > len(items):
+            head = f"Сводки — показаны {len(items)} последних из {total}:"
+        lines = [head]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            counters = item.get("counters") if isinstance(item.get("counters"), dict) else {}
+            turns = counters.get("total_turns")
+            # «Признака не было» и «случаев не было» — разные ответы, и ноль
+            # здесь врал бы в ту сторону, где его примут за факт.
+            measured = "—" if turns is None else str(int(turns))
+            lines.append(f"\n📅 {item.get('local_date') or '—'} · ходов: {measured}")
+            incidents = item.get("incidents") if isinstance(item.get("incidents"), list) else []
+            if not incidents:
+                lines.append("  Происшествий не отмечено.")
+                continue
+            for incident in incidents[:5]:
+                if not isinstance(incident, dict):
+                    continue
+                text = str(incident.get("text") or incident.get("code") or "").strip()
+                times = int(incident.get("count") or 0)
+                lines.append(f"  • {text}{f' ×{times}' if times > 1 else ''}")
+            if len(incidents) > 5:
+                # Обрез называется вслух: «пять» и «всего пять» — разные факты.
+                lines.append(f"  …и ещё {len(incidents) - 5} — целиком в панели, вкладка «Сводки».")
+        await self._send_message(telegram, chat_id, "\n".join(lines))
+
     async def _send_entity_profile(
         self,
         telegram: httpx.AsyncClient,

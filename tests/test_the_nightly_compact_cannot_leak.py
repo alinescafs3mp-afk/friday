@@ -214,7 +214,9 @@ def test_a_short_history_claims_nothing() -> None:
 @pytest.mark.parametrize(
     "code",
     [
-        "structural_softened",
+        # `structural_softened` снят 2026-08-05: пути, которым он мог бы
+        # сработать, в системе нет — утверждение структуры приписывается
+        # дословно, модель его не видит, доставка режет текст, а не обрезает.
         "claimed_archive_without_data",
         "called_itself_someone_else",
         "order_ignored",

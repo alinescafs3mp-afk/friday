@@ -53,6 +53,23 @@ COMPACT_CAPABILITY = CapabilityDefinition(
     source="organ",
 )
 
+#: Собрать сводку ЗАНОВО может не всякий, кто её читает.
+#:
+#: Проект объявил это право с самого начала («`compact.read` — владелец и надзор,
+#: `compact.run` — админ»), а заведено оно не было: `POST /api/compacts/run`
+#: спрашивал `compact.read`, то есть сборку суток за любого запускал каждый
+#: участник — а `compact.read` роздан пресету `user`, и участников одиннадцать.
+#: Разница не в секретности, а в цене: чтение отдаёт готовую строку, сборка
+#: перечитывает все ходы суток и пишет в базу.
+RUN_CAPABILITY = CapabilityDefinition(
+    "compact.run",
+    "Пересобрать сводку за названные сутки",
+    "compactor",
+    1,
+    ("admin",),
+    source="organ",
+)
+
 #: Раз в час: сам прогон дёшев, а редкая проверка «наступил ли новый день»
 #: означала бы, что перезапуск в неудачный момент стоит суток наблюдений.
 COMPACTOR_INTERVAL_SEC = 3600.0
@@ -86,7 +103,6 @@ _ALLOWED_FIELDS = frozenset(
 #: Инциденты: код → (условие, тяжесть). Формулировка человеку рендерится ОТСЮДА,
 #: при чтении, и в базу не попадает: в сводке хранится только код.
 _INCIDENT_TEXT = {
-    "structural_softened": "Решение структуры не дошло до человека в исходном виде.",
     "claimed_archive_without_data": "Ответ сослался на архив, не имея из него ни одной записи.",
     "called_itself_someone_else": "Ответ назвал систему чужим продуктом; текст заменён.",
     "order_ignored": "Поручение распознано, но ни один инструмент не сработал.",
@@ -97,8 +113,30 @@ _INCIDENT_TEXT = {
     "rights_demanded": "Человек просил расширить права; отказано структурой.",
 }
 
+#: Коды, ОБЪЯВЛЕННЫЕ без детектора, и причина, по которой это не забывчивость.
+#:
+#: Объявление без механизма — обещание, на которое ссылаются: человек читает
+#: список кодов как перечень того, за чем следят. Поэтому такой код либо получает
+#: детектор, либо стоит здесь с причиной, и за этим следит тест.
+#:
+#: `structural_softened` («решение структуры не дошло до человека в исходном
+#: виде») отсюда УБРАН вовсе, а не перенесён: пути, которым он мог бы сработать,
+#: в системе нет. Утверждение структуры приписывается к ответу дословно и первым
+#: (`agent_runtime`), модель его вообще не видит, а доставка в Telegram РЕЖЕТ
+#: длинный текст на части, а не обрезает. Код остался от той редакции, где
+#: формулировку решения поручали модели — от неё отказались, потому что уговорами
+#: модель не чинится.
+_WITHOUT_A_DETECTOR = {
+    "correction_not_applied": (
+        "Нужен арбитр: «ответ не следовал поправке» — суждение о смысле, а не "
+        "признак хода. Замер 2026-08-05 на живом архиве: структурная метка есть "
+        "у 21 ответа из 1562 (её начали писать 4 августа), и ходов с принятой "
+        "поправкой среди них НОЛЬ. Это «нечем мерить», а не «класс не "
+        "встречается», — поэтому код не снимается и детектор не сочиняется."
+    ),
+}
+
 _SEVERITY = {
-    "structural_softened": "high",
     "claimed_archive_without_data": "high",
     "called_itself_someone_else": "high",
     "correction_not_applied": "high",
@@ -228,9 +266,7 @@ def patterns_across_days(recent: Sequence[dict[str, Any]]) -> list[dict[str, Any
     """
     if len(recent) < _PATTERN_DAYS:
         return []
-    by_day = [
-        {str(item.get("code") or "") for item in (day.get("incidents") or [])} for day in recent
-    ]
+    by_day = [{str(item.get("code") or "") for item in (day.get("incidents") or [])} for day in recent]
     found: list[dict[str, Any]] = []
     # Цепочка может тянуться только от САМОГО СВЕЖЕГО дня: код, пропавший вчера,
     # сегодня уже не поведение, чем бы он ни был позавчера.
@@ -245,7 +281,9 @@ def patterns_across_days(recent: Sequence[dict[str, Any]]) -> list[dict[str, Any
     return sorted(found, key=lambda item: (-item["days"], item["code"]))
 
 
-def chain_for(storage: Any, principal: str, day: str, incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def chain_for(
+    storage: Any, principal: str, day: str, incidents: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Цепочка суток для поиска повторяющегося: сегодня + прошлые дни, БЕЗ двойника.
 
     Найдено ревью 2026-08-04 и подтверждено замером: раздел «Повторяется» не
@@ -296,7 +334,7 @@ class CompactorOrgan(Organ):
     version = "1"
 
     def capabilities(self) -> Sequence[CapabilityDefinition]:
-        return (COMPACT_CAPABILITY,)
+        return (COMPACT_CAPABILITY, RUN_CAPABILITY)
 
     def workers(self, ctx: ServiceContext) -> Sequence[OrganWorker]:
         async def run(context: ServiceContext) -> Any:
@@ -369,7 +407,9 @@ class CompactorOrgan(Organ):
             if not _LOOKS_LIKE_A_DAY.fullmatch(day):
                 raise HTTPException(status_code=400, detail="Нужна дата вида ГГГГ-ММ-ДД")
             storage = request.app.state.storage
-            actor = _require(request, "compact.read")
+            # Читать и ПЕРЕСОБИРАТЬ — разные права: сборка перечитывает все ходы
+            # суток и пишет в базу, чтение отдаёт готовую строку.
+            actor = _require(request, "compact.run")
             principal = _whose_compacts(actor, str((payload or {}).get("user_id") or ""))
             compact_id = storage.begin_day_compact(principal, day)
             try:
@@ -430,8 +470,7 @@ async def compact_pending_days(ctx: ServiceContext) -> dict[str, Any]:
     storage = ctx.storage
     now = local_now(ctx.settings)
     wanted = [
-        (now - timedelta(days=offset)).date().isoformat()
-        for offset in range(1, COMPACTOR_BACKFILL_DAYS + 1)
+        (now - timedelta(days=offset)).date().isoformat() for offset in range(1, COMPACTOR_BACKFILL_DAYS + 1)
     ]
     made = 0
     for principal in _people_with_conversations(storage):
@@ -463,9 +502,7 @@ def _people_with_conversations(storage: Any) -> list[str]:
     return [str(row["user_id"]) for row in rows if row["user_id"]]
 
 
-def _metadata_of_a_day(
-    storage: Any, principal: str, day: str, settings: Any
-) -> list[dict[str, Any]]:
+def _metadata_of_a_day(storage: Any, principal: str, day: str, settings: Any) -> list[dict[str, Any]]:
     """Метаданные ответов за местные сутки.
 
     Поле `content` В ВЫБОРКУ НЕ ВХОДИТ, и это главная строка модуля. Тела
@@ -474,8 +511,13 @@ def _metadata_of_a_day(
     """
     offset = timedelta(minutes=int(getattr(settings, "utc_offset_minutes", 0) or 0))
     start = local_now(settings).replace(
-        year=int(day[:4]), month=int(day[5:7]), day=int(day[8:10]),
-        hour=0, minute=0, second=0, microsecond=0,
+        year=int(day[:4]),
+        month=int(day[5:7]),
+        day=int(day[8:10]),
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
     )
     begins = (start - offset).isoformat()
     ends = (start + timedelta(days=1) - offset).isoformat()
