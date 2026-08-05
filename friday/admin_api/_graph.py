@@ -142,21 +142,24 @@ async def graph_overview(
     """
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.graph.read", user_id, scope="overview")
-    return await asyncio.to_thread(
-        functools.partial(
-            _services(request).storage.graph_overview,
-            user_id,
-            limit=limit,
-            entity_types=[item for item in entity_types.split(",") if item.strip()],
-            relation_types=[item for item in relation_types.split(",") if item.strip()],
-            only_relations=only_relations,
-            min_weight=min_weight,
-            min_confidence=min_confidence,
-            as_of=as_of,
-            search=search,
-            hide_isolates=hide_isolates,
+    try:
+        return await asyncio.to_thread(
+            functools.partial(
+                _services(request).storage.graph_overview,
+                user_id,
+                limit=limit,
+                entity_types=[item for item in entity_types.split(",") if item.strip()],
+                relation_types=[item for item in relation_types.split(",") if item.strip()],
+                only_relations=only_relations,
+                min_weight=min_weight,
+                min_confidence=min_confidence,
+                as_of=as_of,
+                search=search,
+                hide_isolates=hide_isolates,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/graph/{entity_id}")
@@ -183,16 +186,19 @@ async def graph(
 
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.graph.read", user_id, entity_id=entity_id, depth=depth)
-    return _services(request).kg.get_entity_graph(
-        user_id,
-        entity_id,
-        depth,
-        as_of=as_of,
-        entity_types=[item for item in entity_types.split(",") if item.strip()],
-        relation_types=[item for item in relation_types.split(",") if item.strip()],
-        min_weight=min_weight,
-        min_confidence=min_confidence,
-    )
+    try:
+        return _services(request).kg.get_entity_graph(
+            user_id,
+            entity_id,
+            depth,
+            as_of=as_of,
+            entity_types=[item for item in entity_types.split(",") if item.strip()],
+            relation_types=[item for item in relation_types.split(",") if item.strip()],
+            min_weight=min_weight,
+            min_confidence=min_confidence,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/relation-candidates")

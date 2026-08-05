@@ -7,7 +7,9 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Sequence
+from datetime import date
 
 from friday.storage._base import (
     LOGGER,
@@ -31,13 +33,34 @@ from friday.storage._base import (
     utc_now,
 )
 
+_GRAPH_DATE_RE = re.compile(r"^\d{4}(?:[-./]\d{1,2}(?:[-./]\d{1,2})?)?$")
+
+
+def _normalize_graph_date(value: str, field: str, *, allow_empty: bool = True) -> str:
+    """One comparable calendar representation for relation valid-time boundaries."""
+    cleaned = str(value or "").strip()
+    if not cleaned and allow_empty:
+        return ""
+    if not _GRAPH_DATE_RE.fullmatch(cleaned):
+        raise ValueError(f"{field}: нужна календарная дата ГГГГ, ГГГГ-ММ или ГГГГ-ММ-ДД")
+    parts = re.split(r"[-./]", cleaned)
+    try:
+        numbers = [int(part) for part in parts]
+        if len(numbers) == 1:
+            return date(numbers[0], 1, 1).isoformat()
+        if len(numbers) == 2:
+            return date(numbers[0], numbers[1], 1).isoformat()
+        return date(numbers[0], numbers[1], numbers[2]).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"{field}: такой календарной даты нет") from exc
+
 
 class GraphMixin(StorageShared):
     def list_part_of_relations(self, user_id: str) -> list[dict[str, Any]]:
         """Active PART_OF edges; source is the child, target the parent."""
         rows = self.execute(
             "SELECT source_entity_id, target_entity_id, weight FROM relations"
-            " WHERE user_id=? AND relation_type=? AND deleted_at IS NULL"
+            " WHERE user_id=? AND relation_type=? AND deleted_at IS NULL AND valid_to IS NULL"
             " ORDER BY weight DESC",
             (user_id, RelationType.PART_OF.value),
         ).fetchall()
@@ -278,6 +301,7 @@ class GraphMixin(StorageShared):
         этом продолжает считать весь граф — это свойство архива, а не запроса.
         """
         bounded = max(1, min(int(limit), 500))
+        as_of = _normalize_graph_date(as_of, "as_of") if as_of else ""
         conditions = ["e.user_id = ?", "e.deleted_at IS NULL", "e.merged_into_id IS NULL"]
         parameters: list[Any] = [user_id]
         wanted_types = [str(item).strip() for item in (entity_types or []) if str(item).strip()]
@@ -813,6 +837,11 @@ class GraphMixin(StorageShared):
         if not math.isfinite(relation_weight) or not 0.0 <= relation_weight <= 1.5:
             raise ValueError("Relation weight must be a finite number between 0 and 1.5")
         relation.weight = relation_weight
+        relation.valid_from = _normalize_graph_date(relation.valid_from, "valid_from")
+        if relation.valid_to:
+            relation.valid_to = _normalize_graph_date(relation.valid_to, "valid_to")
+            if relation.valid_from and relation.valid_to < relation.valid_from:
+                raise ValueError("valid_to не может предшествовать valid_from")
         source = self.get_entity(relation.source_entity_id, relation.user_id)
         target = self.get_entity(relation.target_entity_id, relation.user_id)
         if not source or not target or source.get("deleted_at") or target.get("deleted_at"):
@@ -831,7 +860,8 @@ class GraphMixin(StorageShared):
             except sqlite3.IntegrityError:
                 row = conn.execute(
                     """SELECT id FROM relations WHERE user_id=? AND source_entity_id=?
-                       AND target_entity_id=? AND relation_type=? AND deleted_at IS NULL""",
+                       AND target_entity_id=? AND relation_type=?
+                       AND deleted_at IS NULL AND valid_to IS NULL""",
                     (
                         relation.user_id,
                         relation.source_entity_id,
@@ -868,6 +898,7 @@ class GraphMixin(StorageShared):
         """
 
         now = utc_now()
+        normalized_valid_to = _normalize_graph_date(valid_to or now[:10], "valid_to", allow_empty=False)
         with self.transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM relations WHERE id=? AND user_id=? AND deleted_at IS NULL",
@@ -879,6 +910,9 @@ class GraphMixin(StorageShared):
                 # Решение терминально, как у кандидатов: повторная отмена молча
                 # переписала бы дату, по которой потом восстанавливают картину.
                 raise ValueError("Связь уже объявлена недействующей")
+            normalized_valid_from = _normalize_graph_date(str(row["valid_from"] or ""), "valid_from")
+            if normalized_valid_from and normalized_valid_to < normalized_valid_from:
+                raise ValueError("valid_to не может предшествовать valid_from")
             if superseded_by:
                 replacement = conn.execute(
                     "SELECT 1 FROM relations WHERE id=? AND user_id=? AND deleted_at IS NULL",
@@ -894,7 +928,7 @@ class GraphMixin(StorageShared):
                    SET valid_to=?, invalidated_at=?, superseded_by=?, metadata_json=?
                    WHERE id=? AND user_id=?""",
                 (
-                    valid_to or now,
+                    normalized_valid_to,
                     now,
                     superseded_by or None,
                     json.dumps(metadata, ensure_ascii=False),
@@ -945,6 +979,7 @@ class GraphMixin(StorageShared):
         «началось позже», а отсутствие сведений.
         """
 
+        as_of = _normalize_graph_date(as_of, "as_of") if as_of else ""
         params: list[Any] = [entity_id, entity_id]
         clauses = ["r.deleted_at IS NULL"]
         if user_id is not None:
@@ -993,6 +1028,7 @@ class GraphMixin(StorageShared):
         root = self.get_entity(entity_id, user_id)
         if not root or root.get("deleted_at"):
             return {"nodes": [], "edges": [], "root": entity_id}
+        as_of = _normalize_graph_date(as_of, "as_of") if as_of else ""
         max_depth = max(0, min(depth, 5))
         # Фильтры сужают ОБХОД, а не рисование: отсеяв рёбра после обхода, вид
         # показал бы соседей второго круга, добытых через связь, которую человек
@@ -1524,11 +1560,16 @@ class GraphMixin(StorageShared):
             target_aliases = _json_load(target.get("aliases_json"), [])
             aliases = {
                 item.strip()
-                for item in [*source_aliases, *target_aliases, source["name"]]
+                for item in target_aliases
+                if item and item.strip()
+            }
+            aliases.update(
+                item.strip()
+                for item in [*source_aliases, source["name"]]
                 if item
                 and item.strip()
                 and normalize_entity_name(item) != normalize_entity_name(target["name"])
-            }
+            )
             now = utc_now()
             target_after = dict(target)
             target_after["aliases_json"] = json.dumps(sorted(aliases, key=str.casefold), ensure_ascii=False)
@@ -1611,8 +1652,9 @@ class GraphMixin(StorageShared):
                 ).fetchall()
             ]
             relations_transfer: list[dict[str, Any]] = []
+            relation_replacements: dict[str, str | None] = {}
             for relation in relations:
-                conn.execute("DELETE FROM relations WHERE id=?", (relation["id"],))
+                relation_id = str(relation["id"])
                 new_source = (
                     target_id if relation["source_entity_id"] == source_id else relation["source_entity_id"]
                 )
@@ -1620,43 +1662,81 @@ class GraphMixin(StorageShared):
                     target_id if relation["target_entity_id"] == source_id else relation["target_entity_id"]
                 )
                 if new_source == new_target:
+                    conn.execute("DELETE FROM relations WHERE id=? AND user_id=?", (relation_id, user_id))
                     relations_transfer.append({"original": relation, "fate": "self_loop_dropped"})
+                    relation_replacements[relation_id] = None
                     continue
-                existing = conn.execute(
-                    """SELECT id FROM relations
-                       WHERE user_id=? AND source_entity_id=? AND target_entity_id=?
-                         AND relation_type=? AND deleted_at IS NULL LIMIT 1""",
-                    (user_id, new_source, new_target, relation["relation_type"]),
-                ).fetchone()
+                # Only two CURRENT intervals conflict. Historical intervals are
+                # separate facts and the schema-30 unique index deliberately
+                # permits them to share endpoints/type.
+                existing = None
+                if relation["valid_to"] is None:
+                    existing = conn.execute(
+                        """SELECT id FROM relations
+                           WHERE user_id=? AND source_entity_id=? AND target_entity_id=?
+                             AND relation_type=? AND deleted_at IS NULL AND valid_to IS NULL
+                             AND id<>? LIMIT 1""",
+                        (user_id, new_source, new_target, relation["relation_type"], relation_id),
+                    ).fetchone()
                 if existing:
-                    relations_transfer.append({"original": relation, "fate": "suppressed_duplicate"})
+                    kept_relation_id = str(existing["id"])
+                    conn.execute("DELETE FROM relations WHERE id=? AND user_id=?", (relation_id, user_id))
+                    relations_transfer.append(
+                        {
+                            "original": relation,
+                            "fate": "suppressed_duplicate",
+                            "kept_relation_id": kept_relation_id,
+                        }
+                    )
+                    relation_replacements[relation_id] = kept_relation_id
                     continue
+                # Preserve the row rather than reconstructing it from a column
+                # list. Besides keeping both times today, this automatically keeps
+                # future provenance columns and lets unmerge retain decisions made
+                # after the merge.
                 conn.execute(
-                    """INSERT INTO relations(id, user_id, source_entity_id, target_entity_id,
-                       relation_type, weight, metadata_json, created_at, deleted_at)
-                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
-                    (
-                        relation["id"],
-                        user_id,
-                        new_source,
-                        new_target,
-                        relation["relation_type"],
-                        relation["weight"],
-                        relation["metadata_json"],
-                        relation["created_at"],
-                    ),
+                    """UPDATE relations SET source_entity_id=?, target_entity_id=?
+                       WHERE id=? AND user_id=?""",
+                    (new_source, new_target, relation_id, user_id),
                 )
                 relations_transfer.append(
                     {
                         "original": relation,
                         "fate": "moved",
                         "rewritten": {
-                            "id": relation["id"],
+                            "id": relation_id,
                             "source_entity_id": new_source,
                             "target_entity_id": new_target,
                         },
                     }
                 )
+                relation_replacements[relation_id] = relation_id
+
+            # `superseded_by` is an edge between RELATION rows. If a replacement
+            # collapsed into a target duplicate (or into a self-loop), preserving
+            # its old id would leave a dangling reference. Record every rewrite so
+            # unmerge can put the original relation graph back without guessing.
+            relation_reference_rewrites: list[dict[str, Any]] = []
+            for old_relation_id, replacement_relation_id in relation_replacements.items():
+                if old_relation_id == replacement_relation_id:
+                    continue
+                references = conn.execute(
+                    "SELECT id FROM relations WHERE user_id=? AND superseded_by=?",
+                    (user_id, old_relation_id),
+                ).fetchall()
+                for reference in references:
+                    reference_id = str(reference["id"])
+                    conn.execute(
+                        "UPDATE relations SET superseded_by=? WHERE id=? AND user_id=?",
+                        (replacement_relation_id, reference_id, user_id),
+                    )
+                    relation_reference_rewrites.append(
+                        {
+                            "relation_id": reference_id,
+                            "before": old_relation_id,
+                            "after": replacement_relation_id,
+                        }
+                    )
 
             conn.execute(
                 """UPDATE entities SET merged_into_id=?, canonical=0, deleted_at=?, updated_at=?
@@ -1716,10 +1796,15 @@ class GraphMixin(StorageShared):
                     (user_id, source_id),
                 )
             transfer = {
+                # v2 moves a surviving relation by endpoint-only UPDATE. Older
+                # histories reconstructed the row and may therefore carry the
+                # temporal defaults that buggy merge wrote at the time.
+                "relation_transfer_version": 2,
                 "links_moved": links_moved,
                 "links_suppressed": links_suppressed,
                 "primary_moved": primary_moved,
                 "relations": relations_transfer,
+                "relation_reference_rewrites": relation_reference_rewrites,
                 "closed_candidates": closed_candidates,
                 "time_moved": time_moved,
             }
@@ -1796,7 +1881,8 @@ class GraphMixin(StorageShared):
             target_id = str(history["target_entity_id"])
             source_snap = _json_load(history.get("source_snapshot_json"), {})
             target_before = _json_load(history.get("target_before_json"), {})
-            if not source_snap or not target_before:
+            target_after = _json_load(history.get("target_after_json"), {})
+            if not source_snap or not target_before or not target_after:
                 raise ValueError("Merge snapshots are incomplete")
 
             source_now = self.get_entity(source_id, user_id)
@@ -1834,23 +1920,81 @@ class GraphMixin(StorageShared):
                 ),
             )
 
-            # 2. Restore target aliases/description to the pre-merge state. Version
-            # advances: the undo is a new edit, not a silent rewrite of history.
-            restored_aliases = target_before.get("aliases_json")
-            if not isinstance(restored_aliases, str):
-                restored_aliases = json.dumps(_json_load(restored_aliases, []), ensure_ascii=False)
-            restored_meta = target_before.get("metadata_json")
-            if not isinstance(restored_meta, str):
-                restored_meta = json.dumps(_json_load(restored_meta, {}), ensure_ascii=False)
+            # 2. Reverse only the alias delta introduced by THIS merge.  A target
+            # can be edited after merging; restoring the complete before-snapshot
+            # used to erase those later aliases, its description and its metadata.
+            # If the alias list itself was untouched, preserve the exact old JSON
+            # ordering. Otherwise this is a three-way inverse patch: later additions
+            # and removals win, while aliases contributed by the merged source leave.
+            before_aliases = [
+                str(item)
+                for item in _json_load(target_before.get("aliases_json"), [])
+                if str(item).strip()
+            ]
+            after_aliases = [
+                str(item)
+                for item in _json_load(target_after.get("aliases_json"), [])
+                if str(item).strip()
+            ]
+            current_aliases = [
+                str(item)
+                for item in _json_load(target_now.get("aliases_json"), [])
+                if str(item).strip()
+            ]
+            if current_aliases == after_aliases:
+                restored_alias_items = before_aliases
+            else:
+                merge_added_aliases = set(after_aliases) - set(before_aliases)
+                merge_removed_aliases = set(before_aliases) - set(after_aliases)
+                restored_alias_items = sorted(
+                    (set(current_aliases) - merge_added_aliases) | merge_removed_aliases,
+                    key=str.casefold,
+                )
+
+            # A later merge may borrow an alias first added by this one.  Its own
+            # before/after delta is then empty for that spelling, so removing the
+            # earlier bridge out of order would make the still-merged source
+            # unreachable.  Refuse that dependency rather than inventing alias
+            # ownership or silently breaking the other live merge.
+            current_coverage = {
+                normalize_entity_name(item)
+                for item in [str(target_now.get("name") or ""), *current_aliases]
+                if normalize_entity_name(item)
+            }
+            restored_coverage = {
+                normalize_entity_name(item)
+                for item in [str(target_now.get("name") or ""), *restored_alias_items]
+                if normalize_entity_name(item)
+            }
+            lost_coverage = current_coverage - restored_coverage
+            if lost_coverage:
+                other_live_merges = conn.execute(
+                    """SELECT id, source_snapshot_json FROM entity_merge_history
+                       WHERE user_id=? AND target_entity_id=? AND undone_at IS NULL AND id<>?""",
+                    (user_id, target_id, merge_id),
+                ).fetchall()
+                for other_merge in other_live_merges:
+                    other_source = _json_load(other_merge["source_snapshot_json"], {})
+                    if not isinstance(other_source, dict):
+                        raise ValueError("Another live merge has an invalid source snapshot")
+                    other_aliases = _json_load(other_source.get("aliases_json"), [])
+                    required_coverage = {
+                        normalize_entity_name(str(item))
+                        for item in [other_source.get("name") or "", *other_aliases]
+                        if normalize_entity_name(str(item))
+                    }
+                    if lost_coverage & required_coverage:
+                        raise ValueError(
+                            "Another live merge depends on an alias introduced by this merge; "
+                            "undo the dependent merge first"
+                        )
+            restored_aliases = json.dumps(restored_alias_items, ensure_ascii=False)
             target_version = int(target_now.get("version") or 1) + 1
             conn.execute(
-                """UPDATE entities SET aliases_json=?, description=?, metadata_json=?,
-                   version=?, updated_at=?
+                """UPDATE entities SET aliases_json=?, version=?, updated_at=?
                    WHERE id=? AND user_id=?""",
                 (
                     restored_aliases,
-                    target_before.get("description") or "",
-                    restored_meta,
                     target_version,
                     now,
                     target_id,
@@ -1859,8 +2003,6 @@ class GraphMixin(StorageShared):
             )
             target_restored = dict(target_now)
             target_restored["aliases_json"] = restored_aliases
-            target_restored["description"] = target_before.get("description") or ""
-            target_restored["metadata_json"] = restored_meta
             target_restored["version"] = target_version
             target_restored["updated_at"] = now
             self._store_entity_version(conn, target_restored)
@@ -1934,6 +2076,10 @@ class GraphMixin(StorageShared):
                 )
 
             # 6. Relations: reverse each recorded fate.
+            try:
+                relation_transfer_version = int(transfer.get("relation_transfer_version") or 1)
+            except (TypeError, ValueError):
+                relation_transfer_version = 1
             for item in transfer.get("relations") or []:
                 if not isinstance(item, dict):
                     continue
@@ -1943,15 +2089,70 @@ class GraphMixin(StorageShared):
                 fate = str(item.get("fate") or "")
                 if fate == "moved":
                     rewritten = item.get("rewritten") or {}
-                    conn.execute(
-                        "DELETE FROM relations WHERE id=? AND user_id=?",
-                        (rewritten.get("id") or original["id"], user_id),
-                    )
+                    relation_id = str(rewritten.get("id") or original["id"])
+                    current = conn.execute(
+                        """SELECT source_entity_id, target_entity_id, valid_from, valid_to,
+                                  invalidated_at, superseded_by
+                           FROM relations
+                           WHERE id=? AND user_id=?""",
+                        (relation_id, user_id),
+                    ).fetchone()
+                    if not current:
+                        raise ValueError("A moved relation is missing; refuse to resurrect it on unmerge")
+                    if (
+                        str(current["source_entity_id"])
+                        != str(rewritten.get("source_entity_id") or "")
+                        or str(current["target_entity_id"])
+                        != str(rewritten.get("target_entity_id") or "")
+                    ):
+                        raise ValueError("A moved relation changed endpoints; refuse an unsafe unmerge")
+                    # Only undo the endpoint rewrite. A human may have ended or
+                    # otherwise annotated the relation after merge; reconstructing
+                    # the pre-merge row would silently undo that later decision.
+                    if relation_transfer_version >= 2:
+                        conn.execute(
+                            """UPDATE relations SET source_entity_id=?, target_entity_id=?
+                               WHERE id=? AND user_id=?""",
+                            (
+                                original["source_entity_id"],
+                                original["target_entity_id"],
+                                relation_id,
+                                user_id,
+                            ),
+                        )
+                    else:
+                        # Legacy merge rebuilt the row without temporal columns.
+                        # Restore only values that are STILL the legacy defaults;
+                        # a later relation_end decision must win.
+                        conn.execute(
+                            """UPDATE relations
+                               SET source_entity_id=?, target_entity_id=?,
+                                   valid_from=?, valid_to=?, invalidated_at=?, superseded_by=?
+                               WHERE id=? AND user_id=?""",
+                            (
+                                original["source_entity_id"],
+                                original["target_entity_id"],
+                                current["valid_from"] or original.get("valid_from") or "",
+                                current["valid_to"]
+                                if current["valid_to"] is not None
+                                else original.get("valid_to"),
+                                current["invalidated_at"]
+                                if current["invalidated_at"] is not None
+                                else original.get("invalidated_at"),
+                                current["superseded_by"]
+                                if current["superseded_by"] is not None
+                                else original.get("superseded_by"),
+                                relation_id,
+                                user_id,
+                            ),
+                        )
+                    continue
                 # self_loop_dropped / suppressed_duplicate: nothing on target to remove
                 conn.execute(
                     """INSERT OR IGNORE INTO relations(id, user_id, source_entity_id, target_entity_id,
-                       relation_type, weight, metadata_json, created_at, deleted_at)
-                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+                       relation_type, weight, metadata_json, created_at, deleted_at,
+                       valid_from, valid_to, invalidated_at, superseded_by)
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)""",
                     (
                         original["id"],
                         user_id,
@@ -1961,8 +2162,37 @@ class GraphMixin(StorageShared):
                         original.get("weight") if original.get("weight") is not None else 1.0,
                         original.get("metadata_json") or "{}",
                         original.get("created_at") or now,
+                        original.get("valid_from") or "",
+                        original.get("valid_to"),
+                        original.get("invalidated_at"),
+                        original.get("superseded_by"),
                     ),
                 )
+
+            # Restore only reference rewrites that still have the merge-produced
+            # value. A later human decision wins; the guarded predicate prevents
+            # unmerge from overwriting it.
+            for rewrite in transfer.get("relation_reference_rewrites") or []:
+                if not isinstance(rewrite, dict) or not rewrite.get("relation_id"):
+                    continue
+                after = rewrite.get("after")
+                if after is None:
+                    conn.execute(
+                        """UPDATE relations SET superseded_by=?
+                           WHERE id=? AND user_id=? AND superseded_by IS NULL""",
+                        (rewrite.get("before"), str(rewrite["relation_id"]), user_id),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE relations SET superseded_by=?
+                           WHERE id=? AND user_id=? AND superseded_by=?""",
+                        (
+                            rewrite.get("before"),
+                            str(rewrite["relation_id"]),
+                            user_id,
+                            str(after),
+                        ),
+                    )
 
             # 7. Очередь: пары, которые закрыло это слияние, возвращаются на
             # разбор. Иначе откат хоронил их навсегда — строка оставалась
@@ -1970,12 +2200,6 @@ class GraphMixin(StorageShared):
             # «решённое человеком durable», а другого пути слить две сущности в
             # системе нет. Возвращаются ТОЛЬКО те строки, что закрыло именно это
             # слияние, и только если человек не решил по ним что-то ещё позже.
-            # 7. Очередь: пары, которые закрыло это слияние, возвращаются на
-            # разбор. Иначе откат хоронил их навсегда — строка оставалась
-            # 'merged', повторное предложение той же пары гасилось правилом
-            # «решённое человеком durable», а другого пути слить две сущности в
-            # системе нет. Возвращаются ТОЛЬКО те строки, что закрыло именно это
-            # слияние.
             for candidate_id in transfer.get("closed_candidates") or []:
                 conn.execute(
                     """UPDATE entity_resolution_candidates

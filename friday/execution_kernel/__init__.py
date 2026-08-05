@@ -2863,6 +2863,7 @@ class ExecutionKernel:
         actor: ActorContext,
         source: str,
         target: str,
+        relation_type: str = "",
         valid_to: str = "",
         reason: str = "",
     ) -> dict[str, Any]:
@@ -2878,33 +2879,94 @@ class ExecutionKernel:
         прошлое. Рапорт 2024 года остаётся фактом о 2024-м после перевода.
         """
 
+        selected_type = str(relation_type or "").strip()
+        if selected_type:
+            try:
+                selected_type = RelationType(selected_type).value
+            except ValueError:
+                return {
+                    "ended": False,
+                    "ambiguous": False,
+                    "reason": f"Неизвестный тип связи: {selected_type}",
+                    "candidates": [],
+                }
+
         _, kg, _, _ = self._require_services()
         first = await run_blocking(kg.find_entity, actor.user_id, source)
         second = await run_blocking(kg.find_entity, actor.user_id, target)
         if not first or not second:
             missing = source if not first else target
-            return {"ended": False, "reason": f"Объект «{missing}» в графе не найден"}
+            return {
+                "ended": False,
+                "ambiguous": False,
+                "reason": f"Объект «{missing}» в графе не найден",
+                "candidates": [],
+            }
         edges = await run_blocking(kg.get_entity_relations, str(first["id"]), actor.user_id)
         wanted = {str(second["id"])}
         matches = [
             edge
             for edge in edges
-            if str(edge.get("source_entity_id")) in wanted or str(edge.get("target_entity_id")) in wanted
+            if (
+                str(edge.get("source_entity_id")) in wanted
+                or str(edge.get("target_entity_id")) in wanted
+            )
+            and (not selected_type or str(edge.get("relation_type") or "") == selected_type)
         ]
         if not matches:
-            return {"ended": False, "reason": "Действующей связи между ними нет"}
-        ended = []
-        for edge in matches:
-            result = await run_blocking(
-                kg.invalidate_relation,
-                actor.user_id,
-                str(edge["id"]),
-                valid_to=str(valid_to or "").strip(),
-                reason=str(reason or "").strip()[:300],
+            suffix = f" типа {selected_type}" if selected_type else ""
+            return {
+                "ended": False,
+                "ambiguous": False,
+                "reason": f"Действующей связи{suffix} между ними нет",
+                "candidates": [],
+            }
+        if len(matches) > 1:
+            candidates = sorted(
+                (
+                    {
+                        "id": str(edge["id"]),
+                        "type": str(edge.get("relation_type") or ""),
+                        "source": str(edge.get("source_entity_id") or ""),
+                        "target": str(edge.get("target_entity_id") or ""),
+                    }
+                    for edge in matches
+                ),
+                key=lambda item: (item["type"], item["id"]),
             )
-            if result:
-                ended.append({"type": edge.get("relation_type"), "valid_to": result.get("valid_to") or ""})
-        return {"ended": bool(ended), "relations": ended, "source": first["name"], "target": second["name"]}
+            return {
+                "ended": False,
+                "ambiguous": True,
+                "reason": "Между объектами несколько действующих связей; укажите relation_type",
+                "source": first["name"],
+                "target": second["name"],
+                "candidates": candidates,
+            }
+
+        edge = matches[0]
+        result = await run_blocking(
+            kg.invalidate_relation,
+            actor.user_id,
+            str(edge["id"]),
+            valid_to=str(valid_to or "").strip(),
+            reason=str(reason or "").strip()[:300],
+        )
+        ended = []
+        if result:
+            ended.append(
+                {
+                    "id": str(edge["id"]),
+                    "type": edge.get("relation_type"),
+                    "valid_to": result.get("valid_to") or "",
+                }
+            )
+        return {
+            "ended": bool(ended),
+            "ambiguous": False,
+            "relations": ended,
+            "source": first["name"],
+            "target": second["name"],
+        }
 
     async def _entity_link(
         self,
@@ -3986,11 +4048,18 @@ class ExecutionKernel:
             "Связь КОНЧИЛАСЬ: человек говорит «он перевёлся», «она там больше не "
             "работает», «этого больше нет». Отмечает связь оконченной, но НЕ стирает "
             "её: прошлое остаётся правдой о прошлом, и вопрос «как было тогда» на неё "
-            "по-прежнему отвечается. Дату конца, если названа, передай в `valid_to`.",
+            "по-прежнему отвечается. Если между объектами несколько типов, инструмент "
+            "ничего не меняет и возвращает candidates: повтори вызов с `relation_type`. "
+            "Дату конца, если названа, передай в `valid_to`.",
             "kg.write",
             {
                 "source": {"type": "string", "description": "Имя объекта, от которого связь"},
                 "target": {"type": "string", "description": "Имя объекта, к которому связь"},
+                "relation_type": {
+                    "type": "string",
+                    "enum": [item.value for item in RelationType],
+                    "description": "Тип из candidates, если между объектами несколько связей",
+                },
                 "valid_to": {"type": "string", "description": "Дата конца ГГГГ-ММ-ДД, если названа"},
                 "reason": {"type": "string", "description": "Чем это сказано, дословно"},
             },

@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from friday.knowledge_graph import KnowledgeGraph
-from friday.storage.models import EntityType, KnowledgeObject, RawObject, new_id
+from friday.storage.models import EntityType, KnowledgeObject, RawObject, RelationType, new_id
 
 
 def _knowledge(storage, user_id: str, title: str) -> str:
@@ -91,6 +93,285 @@ def test_unmerge_restores_overlapping_and_exclusive_documents(storage):
     history_after = storage.get_merge_history(merge_id, "alice")
     assert history_after and history_after.get("undone_at")
     assert history_after.get("undone_by") == "owner"
+
+
+def test_unmerge_preserves_later_target_edits_and_reverses_only_the_merge_delta(storage):
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity(
+        "alice", "Source Alpha", EntityType.PROJECT, aliases=["Source Alias"]
+    )
+    target = graph.create_entity(
+        "alice",
+        "Canonical Alpha",
+        EntityType.PROJECT,
+        aliases=["Target Before"],
+        description="before description",
+        metadata={"phase": "before"},
+    )
+
+    merged = storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+    after_merge = storage.get_entity(target["id"], "alice")
+    assert after_merge is not None
+    merge_aliases = json.loads(after_merge["aliases_json"])
+    assert {"Source Alpha", "Source Alias", "Target Before"} <= set(merge_aliases)
+
+    # A normal PATCH sends the whole alias list.  The human removes an old target
+    # alias, leaves the merge-produced aliases visible, and adds one of their own.
+    edited_aliases = [alias for alias in merge_aliases if alias != "Target Before"]
+    edited_aliases.append("Added Later")
+    edited = graph.update_entity(
+        "alice",
+        target["id"],
+        aliases=edited_aliases,
+        description="edited after merge",
+        metadata={"phase": "after", "reviewed": True},
+    )
+    assert edited is not None
+
+    storage.unmerge_entities("alice", merged["_merge_id"], undone_by="owner")
+
+    restored = storage.get_entity(target["id"], "alice")
+    assert restored is not None
+    aliases = json.loads(restored["aliases_json"])
+    assert aliases == ["Added Later"]
+    assert restored["description"] == "edited after merge"
+    assert json.loads(restored["metadata_json"]) == {"phase": "after", "reviewed": True}
+    assert int(restored["version"]) == int(edited["version"]) + 1
+
+    latest_version = storage.list_entity_versions(target["id"], "alice")[0]
+    snapshot = json.loads(latest_version["snapshot_json"])
+    assert json.loads(snapshot["aliases_json"]) == ["Added Later"]
+    assert snapshot["description"] == "edited after merge"
+    assert json.loads(snapshot["metadata_json"]) == {"phase": "after", "reviewed": True}
+
+
+def test_independent_merges_can_be_undone_out_of_order_without_losing_the_other_aliases(storage):
+    graph = KnowledgeGraph(storage)
+    first = graph.create_entity("alice", "First Source", EntityType.PROJECT, aliases=["First Bridge"])
+    second = graph.create_entity(
+        "alice", "Second Source", EntityType.PROJECT, aliases=["Second Bridge"]
+    )
+    target = graph.create_entity("alice", "Canonical", EntityType.PROJECT, aliases=["Original"])
+
+    first_merge = storage.merge_entities("alice", first["id"], target["id"], merged_by="owner")
+    second_merge = storage.merge_entities("alice", second["id"], target["id"], merged_by="owner")
+
+    storage.unmerge_entities("alice", first_merge["_merge_id"], undone_by="owner")
+    after_first_undo = json.loads(storage.get_entity(target["id"], "alice")["aliases_json"])
+    assert set(after_first_undo) == {"Original", "Second Source", "Second Bridge"}
+
+    storage.unmerge_entities("alice", second_merge["_merge_id"], undone_by="owner")
+    after_both = json.loads(storage.get_entity(target["id"], "alice")["aliases_json"])
+    assert after_both == ["Original"]
+
+
+def test_unmerge_refuses_to_remove_an_alias_borrowed_by_another_live_merge(storage):
+    graph = KnowledgeGraph(storage)
+    first = graph.create_entity("alice", "First Source", EntityType.PROJECT, aliases=["Shared Bridge"])
+    second = graph.create_entity(
+        "alice", "Second Source", EntityType.PROJECT, aliases=["Shared Bridge"]
+    )
+    target = graph.create_entity("alice", "Canonical", EntityType.PROJECT)
+
+    first_merge = storage.merge_entities("alice", first["id"], target["id"], merged_by="owner")
+    second_merge = storage.merge_entities("alice", second["id"], target["id"], merged_by="owner")
+    before = storage.get_entity(target["id"], "alice")
+    assert before is not None
+
+    with pytest.raises(ValueError, match="dependent merge"):
+        storage.unmerge_entities("alice", first_merge["_merge_id"], undone_by="owner")
+
+    after_refusal = storage.get_entity(target["id"], "alice")
+    assert after_refusal == before, "the failed dependency check must roll back every earlier undo write"
+    history = storage.get_merge_history(first_merge["_merge_id"], "alice")
+    assert history and history["undone_at"] is None
+    assert storage.get_entity(first["id"], "alice")["merged_into_id"] == target["id"]
+
+    storage.unmerge_entities("alice", second_merge["_merge_id"], undone_by="owner")
+    storage.unmerge_entities("alice", first_merge["_merge_id"], undone_by="owner")
+    assert json.loads(storage.get_entity(target["id"], "alice")["aliases_json"]) == []
+
+
+def test_merge_never_removes_a_preexisting_target_alias_equal_to_its_name(storage):
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Source", EntityType.PROJECT)
+    target = graph.create_entity(
+        "alice", "Canonical Alpha", EntityType.PROJECT, aliases=["CANONICAL ALPHA"]
+    )
+
+    storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+
+    aliases = json.loads(storage.get_entity(target["id"], "alice")["aliases_json"])
+    assert "CANONICAL ALPHA" in aliases
+
+
+def test_merge_and_unmerge_preserve_the_two_times_of_a_relation(storage):
+    """An ended relation must not become current merely because its entity was merged.
+
+    The transfer set already records the full original row.  The mutation guarded
+    here is narrower: both INSERT statements used to restore only the pre-temporal
+    columns, silently resetting ``valid_*``/``invalidated_at``/``superseded_by``.
+    """
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Проект Альфа", EntityType.PROJECT)
+    target = graph.create_entity("alice", "Альфа", EntityType.PROJECT)
+    person = graph.create_entity("alice", "Иван Петров", EntityType.PERSON)
+    successor = graph.create_entity("alice", "Проект Бета", EntityType.PROJECT)
+
+    old = graph.create_relation(
+        "alice",
+        source["id"],
+        person["id"],
+        RelationType.MEMBER_OF,
+        valid_from="2024-01-01",
+    )
+    replacement = graph.create_relation(
+        "alice", source["id"], successor["id"], RelationType.WORKS_ON, valid_from="2025-01-10"
+    )
+    graph.invalidate_relation(
+        "alice",
+        old.id,
+        valid_to="2025-01-10",
+        superseded_by=replacement.id,
+        reason="перешёл в другой проект",
+    )
+    before = dict(storage.execute("SELECT * FROM relations WHERE id=?", (old.id,)).fetchone())
+    temporal = ("valid_from", "valid_to", "invalidated_at", "superseded_by")
+
+    merged = storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+    after_merge = dict(storage.execute("SELECT * FROM relations WHERE id=?", (old.id,)).fetchone())
+    assert {field: after_merge[field] for field in temporal} == {
+        field: before[field] for field in temporal
+    }
+    assert old.id not in {
+        relation["id"] for relation in storage.get_entity_relations(target["id"], "alice")
+    }, "ended relation was resurrected in the current graph by merge"
+
+    storage.unmerge_entities("alice", merged["_merge_id"], undone_by="owner")
+    after_unmerge = dict(storage.execute("SELECT * FROM relations WHERE id=?", (old.id,)).fetchone())
+    assert {field: after_unmerge[field] for field in temporal} == {
+        field: before[field] for field in temporal
+    }
+
+
+def test_unmerge_keeps_a_relation_ended_after_the_merge(storage):
+    """Undo moves endpoints back; it must not undo a later human temporal decision."""
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Проект Гамма", EntityType.PROJECT)
+    target = graph.create_entity("alice", "Гамма", EntityType.PROJECT)
+    person = graph.create_entity("alice", "Пётр Иванов", EntityType.PERSON)
+    relation = graph.create_relation(
+        "alice", source["id"], person["id"], RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+
+    merged = storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+    graph.invalidate_relation(
+        "alice", relation.id, valid_to="2026-01-01", reason="решение после слияния"
+    )
+    decided = dict(storage.execute("SELECT * FROM relations WHERE id=?", (relation.id,)).fetchone())
+
+    storage.unmerge_entities("alice", merged["_merge_id"], undone_by="owner")
+    restored = dict(storage.execute("SELECT * FROM relations WHERE id=?", (relation.id,)).fetchone())
+
+    assert restored["source_entity_id"] == source["id"]
+    for field in ("valid_from", "valid_to", "invalidated_at", "superseded_by", "metadata_json"):
+        assert restored[field] == decided[field], f"unmerge undid the later decision in {field}"
+    assert storage.get_entity_relations(source["id"], "alice") == []
+
+
+def test_merge_retargets_a_superseded_relation_that_is_suppressed(storage):
+    """A replacement collapsed into an existing target edge must not leave a dangling id."""
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Проект Дельта", EntityType.PROJECT)
+    target = graph.create_entity("alice", "Дельта", EntityType.PROJECT)
+    person = graph.create_entity("alice", "Анна Петрова", EntityType.PERSON)
+    successor = graph.create_entity("alice", "Проект Эпсилон", EntityType.PROJECT)
+
+    ended = graph.create_relation(
+        "alice", source["id"], person["id"], RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+    source_replacement = graph.create_relation(
+        "alice", source["id"], successor["id"], RelationType.WORKS_ON, valid_from="2025-01-10"
+    )
+    kept_replacement = graph.create_relation(
+        "alice", target["id"], successor["id"], RelationType.WORKS_ON, valid_from="2025-01-10"
+    )
+    graph.invalidate_relation(
+        "alice",
+        ended.id,
+        valid_to="2025-01-10",
+        superseded_by=source_replacement.id,
+    )
+
+    merged = storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+    after_merge = dict(storage.execute("SELECT * FROM relations WHERE id=?", (ended.id,)).fetchone())
+    assert after_merge["superseded_by"] == kept_replacement.id
+    assert storage.execute(
+        "SELECT 1 FROM relations WHERE id=? AND user_id=?",
+        (after_merge["superseded_by"], "alice"),
+    ).fetchone(), "merge left superseded_by dangling"
+
+    storage.unmerge_entities("alice", merged["_merge_id"], undone_by="owner")
+    after_unmerge = dict(storage.execute("SELECT * FROM relations WHERE id=?", (ended.id,)).fetchone())
+    assert after_unmerge["superseded_by"] == source_replacement.id
+    assert storage.execute(
+        "SELECT 1 FROM relations WHERE id=? AND user_id=?",
+        (source_replacement.id, "alice"),
+    ).fetchone()
+
+
+def test_merge_keeps_an_ended_and_a_current_interval_of_the_same_relation(storage):
+    """Duplicate suppression must not collapse two different real-world epochs."""
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Проект Зета", EntityType.PROJECT)
+    target = graph.create_entity("alice", "Зета", EntityType.PROJECT)
+    person = graph.create_entity("alice", "Сергей Орлов", EntityType.PERSON)
+
+    historical = graph.create_relation(
+        "alice", target["id"], person["id"], RelationType.MEMBER_OF, valid_from="2019-01-01"
+    )
+    graph.invalidate_relation("alice", historical.id, valid_to="2020-01-01")
+    current = graph.create_relation(
+        "alice", source["id"], person["id"], RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+
+    storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+
+    assert [row["id"] for row in storage.get_entity_relations(target["id"], "alice")] == [current.id]
+    assert {
+        row["id"]
+        for row in storage.get_entity_relations(target["id"], "alice", include_invalidated=True)
+    } == {historical.id, current.id}
+
+
+def test_merge_temporarily_clears_a_superseded_self_loop_without_dangling(storage):
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Проект Эта", EntityType.PROJECT)
+    target = graph.create_entity("alice", "Эта", EntityType.PROJECT)
+    person = graph.create_entity("alice", "Олег Серов", EntityType.PERSON)
+    ended = graph.create_relation(
+        "alice", source["id"], person["id"], RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+    replacement = graph.create_relation(
+        "alice", source["id"], target["id"], RelationType.RELATED_TO, valid_from="2025-01-01"
+    )
+    graph.invalidate_relation(
+        "alice", ended.id, valid_to="2025-01-01", superseded_by=replacement.id
+    )
+
+    merged = storage.merge_entities("alice", source["id"], target["id"], merged_by="owner")
+    after_merge = storage.execute(
+        "SELECT superseded_by FROM relations WHERE id=?", (ended.id,)
+    ).fetchone()
+    assert after_merge["superseded_by"] is None
+    assert not storage.execute("SELECT 1 FROM relations WHERE id=?", (replacement.id,)).fetchone()
+
+    storage.unmerge_entities("alice", merged["_merge_id"], undone_by="owner")
+    after_unmerge = storage.execute(
+        "SELECT superseded_by FROM relations WHERE id=?", (ended.id,)
+    ).fetchone()
+    assert after_unmerge["superseded_by"] == replacement.id
+    assert storage.execute("SELECT 1 FROM relations WHERE id=?", (replacement.id,)).fetchone()
 
 
 def test_unmerge_refuses_a_second_undo(storage):

@@ -40,11 +40,17 @@ def test_api_relations_carry_origin_and_actor_despite_spoof_attempt(settings):
                 "source_entity_id": a["id"],
                 "target_entity_id": b["id"],
                 "relation_type": "uses",
+                "valid_from": "2024/3/5",
                 "metadata": {"origin": "forged", "created_by": "mallory", "note": "kept"},
             },
             headers=owner,
         )
         assert response.status_code == 200
+        assert response.json()["relation"]["valid_from"] == "2024-03-05"
+        invalid_graph = client.get(
+            f"/api/kg/graph/{a['id']}", params={"as_of": "not-a-date"}, headers=owner
+        )
+        assert invalid_graph.status_code == 400
         metadata = _edge_metadata(app.state.storage, LEGACY_OWNER_USER_ID)
         assert metadata["origin"] == "api"
         assert metadata["created_by"] == LEGACY_OWNER_USER_ID

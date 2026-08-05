@@ -115,6 +115,71 @@ def test_invalidating_twice_is_refused(storage):
         graph.invalidate_relation("alice", relation.id, valid_to="2026-04-01")
 
 
+def test_an_ended_relation_can_start_again_without_erasing_history(storage):
+    """A repeated real-world interval is history, not a duplicate INSERT."""
+    graph, person, unit, _other = _three(storage)
+    first = graph.create_relation(
+        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2020-01-01"
+    )
+    graph.invalidate_relation("alice", first.id, valid_to="2023-06-01")
+
+    second = graph.create_relation(
+        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+
+    assert second.id != first.id
+    assert [row["id"] for row in storage.get_entity_relations(person, "alice")] == [second.id]
+    assert {row["id"] for row in storage.get_entity_relations(person, "alice", include_invalidated=True)} == {
+        first.id,
+        second.id,
+    }
+    assert [row["id"] for row in storage.get_entity_relations(person, "alice", as_of="2022-01-01")] == [
+        first.id
+    ]
+    assert [row["id"] for row in storage.get_entity_relations(person, "alice", as_of="2025-01-01")] == [
+        second.id
+    ]
+
+
+def test_creating_the_same_active_interval_remains_idempotent(storage):
+    graph, person, unit, _other = _three(storage)
+    first = graph.create_relation(
+        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+    repeated = graph.create_relation(
+        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01"
+    )
+
+    assert repeated.id == first.id
+    rows = storage.get_entity_relations(person, "alice", include_invalidated=True)
+    assert [row["id"] for row in rows] == [first.id]
+
+
+def test_relation_dates_are_normalized_and_a_backwards_interval_is_refused(storage):
+    graph, person, unit, _other = _three(storage)
+    relation = graph.create_relation(
+        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024/3/5"
+    )
+    stored = storage.execute("SELECT valid_from FROM relations WHERE id=?", (relation.id,)).fetchone()
+    assert stored["valid_from"] == "2024-03-05"
+
+    with pytest.raises(ValueError, match="valid_to"):
+        graph.invalidate_relation("alice", relation.id, valid_to="2024-02-30")
+    with pytest.raises(ValueError, match="предшествовать|precede"):
+        graph.invalidate_relation("alice", relation.id, valid_to="2024-03-04")
+
+    current = storage.get_entity_relations(person, "alice")
+    assert [row["id"] for row in current] == [relation.id], "failed validation mutated the relation"
+
+
+def test_an_invalid_as_of_is_rejected_instead_of_compared_as_text(storage):
+    graph, person, unit, _other = _three(storage)
+    graph.create_relation("alice", person, unit, RelationType.MEMBER_OF)
+
+    with pytest.raises(ValueError, match="as_of"):
+        storage.get_entity_relations(person, "alice", as_of="not-a-date")
+
+
 def test_the_overview_does_not_draw_an_ended_relation(storage):
     """Иначе «служит в в/ч А» и «служит в в/ч Б» читаются как одновременные."""
     from friday.storage.models import KnowledgeObject, RawObject, new_id

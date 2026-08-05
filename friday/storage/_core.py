@@ -475,6 +475,10 @@ class CoreMixin(StorageShared):
             # Схема 26: дедуп оповещений считается по адресату (chat_id), потому
             # что у одного человека бывает несколько учёток и один чат.
             "uq_outbound_dedup": "chat_id, dedup_key",
+            # Схема 30: законченная relation — исторический интервал, а не
+            # действующая строка. Старый partial index запрещал человеку снова
+            # вступить в ту же организацию после завершённого периода.
+            "uq_active_relation": "WHERE deleted_at IS NULL AND valid_to IS NULL",
         }
         for name, columns in wanted.items():
             row = conn.execute(

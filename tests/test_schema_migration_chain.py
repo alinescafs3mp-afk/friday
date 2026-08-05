@@ -354,3 +354,58 @@ def test_a_new_column_needs_a_new_schema_number(settings, tmp_path):
 
     assert "created_by" in columns, "миграция не добралась до существующей базы"
     assert str(version) == str(SCHEMA_VERSION)
+
+
+def test_schema_29_rebuilds_the_active_relation_index(settings, tmp_path):
+    """`IF NOT EXISTS` cannot update a partial index whose WHERE clause changed."""
+    from friday.knowledge_graph import KnowledgeGraph
+    from friday.storage.models import EntityType, RelationType
+
+    database = tmp_path / "schema-29-relation-index.sqlite3"
+    made = FridayStorage(replace(settings, database_path=database))
+    try:
+        graph = KnowledgeGraph(made)
+        person = graph.create_entity("alice", "Иван Иванов", EntityType.PERSON)
+        unit = graph.create_entity("alice", "Проект Альфа", EntityType.PROJECT)
+        first = graph.create_relation(
+            "alice",
+            str(person["id"]),
+            str(unit["id"]),
+            RelationType.MEMBER_OF,
+            valid_from="2020-01-01",
+        )
+        graph.invalidate_relation("alice", first.id, valid_to="2023-01-01")
+    finally:
+        made.close()
+
+    aged = sqlite3.connect(database)
+    try:
+        aged.execute("DROP INDEX uq_active_relation")
+        aged.execute(
+            """CREATE UNIQUE INDEX uq_active_relation
+               ON relations(user_id, source_entity_id, target_entity_id, relation_type)
+               WHERE deleted_at IS NULL"""
+        )
+        aged.execute("UPDATE schema_meta SET value='29' WHERE key='schema_version'")
+        aged.commit()
+    finally:
+        aged.close()
+
+    reopened = FridayStorage(replace(settings, database_path=database))
+    try:
+        sql = str(
+            reopened.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name='uq_active_relation'"
+            ).fetchone()[0]
+        )
+        assert "valid_to IS NULL" in sql
+        second = KnowledgeGraph(reopened).create_relation(
+            "alice",
+            str(person["id"]),
+            str(unit["id"]),
+            RelationType.MEMBER_OF,
+            valid_from="2024-01-01",
+        )
+        assert second.id != first.id
+    finally:
+        reopened.close()

@@ -24,7 +24,9 @@ CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 # статическим русским текстом. Число пинится, чтобы новый str(exc) не проскочил.
 #
 # 43: срез 2026-07-31 при закрытии #54 — все динамические detail= в admin_api/api.
-EXPECTED_DYNAMIC_DETAIL_SITES = 46
+# 49: три graph/as_of маршрута 2026-08-05 передают русскую ошибку единого
+# календарного валидатора; иначе API вернул бы 500 на пользовательскую дату.
+EXPECTED_DYNAMIC_DETAIL_SITES = 49
 
 
 def _detail_sites() -> list[tuple[pathlib.Path, int, str, ast.AST]]:

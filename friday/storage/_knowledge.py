@@ -2378,7 +2378,22 @@ class KnowledgeMixin(StorageShared):
         the space is left — which is the part that used to exist only as a log line.
         """
         pair_ceiling = _MAX_DUPLICATE_PAIRS if max_pairs is None else max(1, max_pairs)
-        entities = self.list_entities(user_id, limit=5000)
+        # This scan compares blocking keys across the whole tenant graph. A browse
+        # page is not a corpus: `list_entities` is intentionally capped at 5000 and
+        # used to make every entity after that alphabetical boundary invisible here.
+        # One statement also gives the scan a coherent row snapshot; LIMIT/OFFSET
+        # pages can shift when an entity is inserted between two reads. Only fields
+        # used below are carried across the full walk (not descriptions or bodies).
+        entities = [
+            dict(row)
+            for row in self.execute(
+                """SELECT id, name, entity_type, aliases_json, metadata_json
+                   FROM entities
+                   WHERE user_id=? AND deleted_at IS NULL AND canonical=1
+                   ORDER BY name COLLATE NOCASE, id""",
+                (user_id,),
+            )
+        ]
         knowledge_by_entity: dict[str, set[str]] = {}
         for row in self.execute(
             """SELECT entity_id, knowledge_object_id FROM knowledge_entity_links

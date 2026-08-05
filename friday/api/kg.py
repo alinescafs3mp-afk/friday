@@ -296,6 +296,7 @@ async def create_relation(request: Request) -> dict[str, Any]:
             # request body cannot forge who created the edge or how.
             metadata={**user_metadata, "created_by": actor.user_id},
             origin="api",
+            valid_from=str(body.get("valid_from") or ""),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -343,7 +344,10 @@ async def entity_graph(
     """
 
     actor = _require(request, "kg.read")
-    graph = request.app.state.kg.get_entity_graph(actor.user_id, entity_id, depth, as_of=as_of)
+    try:
+        graph = request.app.state.kg.get_entity_graph(actor.user_id, entity_id, depth, as_of=as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not graph.get("nodes"):
         raise HTTPException(status_code=404, detail="Сущность не найдена")
     return graph

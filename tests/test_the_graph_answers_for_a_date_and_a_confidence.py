@@ -217,3 +217,14 @@ def test_the_route_carries_the_date_and_the_floor(settings) -> None:
         )
         assert strict.status_code == 200
         assert not [edge for edge in strict.json()["edges"] if edge.get("kind") == "relation"]
+
+        invalid = client.get(
+            "/api/admin/graph", params={"user_id": "alice", "as_of": "not-a-date"}, headers=owner
+        )
+        assert invalid.status_code == 400
+        invalid_local = client.get(
+            f"/api/admin/graph/{person}",
+            params={"user_id": "alice", "as_of": "not-a-date"},
+            headers=owner,
+        )
+        assert invalid_local.status_code == 400

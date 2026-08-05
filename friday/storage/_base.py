@@ -64,7 +64,10 @@ LOGGER = logging.getLogger("friday.storage")
 # числа. Проверено на живой базе 2026-08-04 — со старым номером столбец не
 # появился, а код его уже читал, и маршрут слежений отдавал 500. Тесты этого не
 # видели: там база создаётся с нуля по актуальному CREATE TABLE.
-SCHEMA_VERSION = 29
+# 30 — `uq_active_relation` теперь уникален только для ДЕЙСТВУЮЩЕГО интервала.
+# Завершённая связь остаётся историей и не должна запрещать новый период той же
+# пары/типа. Старый индекс пересоздаётся в `_retire_outdated_indexes`.
+SCHEMA_VERSION = 30
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно
@@ -958,7 +961,7 @@ CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(user_id, source_ent
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(user_id, target_entity_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_active_relation
     ON relations(user_id, source_entity_id, target_entity_id, relation_type)
-    WHERE deleted_at IS NULL;
+    WHERE deleted_at IS NULL AND valid_to IS NULL;
 CREATE INDEX IF NOT EXISTS idx_resolution_status
     ON entity_resolution_candidates(user_id, status, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_target ON feedback(user_id, target_type, target_id);

@@ -171,6 +171,96 @@ async def test_ending_a_relation_that_does_not_exist_says_so(kernel_and_actor):
     assert "нет" in result["reason"].lower()
 
 
+@pytest.mark.asyncio
+async def test_ending_an_ambiguous_pair_is_a_noop_until_the_type_is_named(kernel_and_actor):
+    kernel, actor, storage = kernel_and_actor
+    graph = KnowledgeGraph(storage)
+    person = graph.create_entity("alice", "Иванов Иван Иванович", EntityType.PERSON)
+    unit = graph.create_entity("alice", "в/ч 30926", EntityType.ORGANIZATION)
+    member = graph.create_relation(
+        "alice", str(person["id"]), str(unit["id"]), RelationType.MEMBER_OF
+    )
+    work = graph.create_relation(
+        "alice", str(person["id"]), str(unit["id"]), RelationType.WORKS_ON
+    )
+
+    result = await kernel._relation_end(
+        actor=actor, source="Иванов Иван Иванович", target="в/ч 30926"
+    )
+
+    assert result["ended"] is False
+    assert result["ambiguous"] is True
+    assert [(item["type"], item["id"]) for item in result["candidates"]] == sorted(
+        [(RelationType.MEMBER_OF.value, member.id), (RelationType.WORKS_ON.value, work.id)]
+    )
+    current_ids = {
+        row["id"] for row in storage.get_entity_relations(str(person["id"]), "alice")
+    }
+    assert current_ids == {member.id, work.id}, "ambiguity must be resolved before any write"
+
+
+@pytest.mark.asyncio
+async def test_relation_end_type_selects_one_edge_and_is_published_in_the_tool_schema(
+    kernel_and_actor,
+):
+    kernel, actor, storage = kernel_and_actor
+    graph = KnowledgeGraph(storage)
+    person = graph.create_entity("alice", "Иванов Иван Иванович", EntityType.PERSON)
+    unit = graph.create_entity("alice", "в/ч 30926", EntityType.ORGANIZATION)
+    member = graph.create_relation(
+        "alice", str(person["id"]), str(unit["id"]), RelationType.MEMBER_OF
+    )
+    work = graph.create_relation(
+        "alice", str(person["id"]), str(unit["id"]), RelationType.WORKS_ON
+    )
+
+    result = await kernel._relation_end(
+        actor=actor,
+        source="Иванов Иван Иванович",
+        target="в/ч 30926",
+        relation_type=RelationType.MEMBER_OF.value,
+        valid_to="2025-01-10",
+    )
+
+    assert result["ended"] is True
+    current = storage.get_entity_relations(str(person["id"]), "alice")
+    assert [row["id"] for row in current] == [work.id]
+    history = {
+        row["id"]: row
+        for row in storage.get_entity_relations(
+            str(person["id"]), "alice", include_invalidated=True
+        )
+    }
+    assert history[member.id]["valid_to"] == "2025-01-10"
+    enum = kernel.get_tool("relation_end").parameters["properties"]["relation_type"]["enum"]
+    assert enum == [item.value for item in RelationType]
+
+
+@pytest.mark.asyncio
+async def test_relation_end_rejects_an_unknown_type_without_writing(kernel_and_actor):
+    kernel, actor, storage = kernel_and_actor
+    graph = KnowledgeGraph(storage)
+    person = graph.create_entity("alice", "Иванов Иван Иванович", EntityType.PERSON)
+    unit = graph.create_entity("alice", "в/ч 30926", EntityType.ORGANIZATION)
+    member = graph.create_relation(
+        "alice", str(person["id"]), str(unit["id"]), RelationType.MEMBER_OF
+    )
+
+    result = await kernel._relation_end(
+        actor=actor,
+        source="Иванов Иван Иванович",
+        target="в/ч 30926",
+        relation_type="invented_relation",
+    )
+
+    assert result["ended"] is False
+    assert result["ambiguous"] is False
+    assert "тип" in result["reason"].lower()
+    assert [
+        row["id"] for row in storage.get_entity_relations(str(person["id"]), "alice")
+    ] == [member.id]
+
+
 def test_the_backfill_gives_old_relations_the_date_of_their_paper(storage, settings, monkeypatch):
     """Правило действует вперёд — принятые раньше связи остаются без начала.
 
