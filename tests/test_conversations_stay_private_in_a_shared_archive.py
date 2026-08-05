@@ -80,7 +80,8 @@ def test_the_approval_notice_goes_to_its_author() -> None:
     # Комментарии в счёт не идут: там `actor.user_id` объясняет, ПОЧЕМУ его
     # нельзя брать. Смотрим на исполняемые строки.
     code = "\n".join(
-        line for line in inspect.getsource(ExecutionKernel._notify_pending_approval).splitlines()
+        line
+        for line in inspect.getsource(ExecutionKernel._notify_pending_approval).splitlines()
         if not line.strip().startswith("#")
     )
     assert "actor.user_id" not in code, "заявка снова адресуется арендатору"

@@ -146,8 +146,12 @@ def test_a_day_that_never_existed_is_reported_not_guessed(settings, storage) -> 
 async def test_the_archive_carries_the_original_files(settings, storage) -> None:
     """Мутация: не класть содержимое — архив пуст, тест краснеет."""
     storage.ensure_user("alice", preset_key="admin")
-    _put_file(settings, storage, "alice", name="Отчёт.docx", when="2026-07-29T10:00:00+00:00", body=b"A" * 500)
-    _put_file(settings, storage, "alice", name="Смета.xlsx", when="2026-07-29T14:00:00+00:00", body=b"B" * 700)
+    _put_file(
+        settings, storage, "alice", name="Отчёт.docx", when="2026-07-29T10:00:00+00:00", body=b"A" * 500
+    )
+    _put_file(
+        settings, storage, "alice", name="Смета.xlsx", when="2026-07-29T14:00:00+00:00", body=b"B" * 700
+    )
     kernel = _kernel(settings, storage)
     actor = ActorContext(user_id="alice", preset_key="admin", source="test")
 
@@ -247,9 +251,7 @@ async def test_what_did_not_fit_is_named(settings, storage) -> None:
 
 
 @pytest.mark.anyio
-async def test_the_tool_reports_the_whole_day_not_its_own_page(
-    settings, storage, monkeypatch
-) -> None:
+async def test_the_tool_reports_the_whole_day_not_its_own_page(settings, storage, monkeypatch) -> None:
     """Проверяется ПОДКЛЮЧЕНИЕ отдельного счёта, а не сам счёт.
 
     Первая редакция проверяла `count_files_received_on` напрямую — и мутация
@@ -718,9 +720,7 @@ async def test_the_days_survive_the_trip_from_the_model() -> None:
         enabled = True
 
         async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
-            return {
-                "content": '{"вид": "файл", "запрос": "", "кто": "", "дни": ["10", "13", "25"]}'
-            }
+            return {"content": '{"вид": "файл", "запрос": "", "кто": "", "дни": ["10", "13", "25"]}'}
 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.llm = _LLM()

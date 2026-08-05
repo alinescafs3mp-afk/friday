@@ -136,9 +136,7 @@ class CompactsMixin(StorageShared):
         ).fetchone()
         return self._compact_row(row) if row else None
 
-    def list_day_compacts(
-        self, principal: str, *, limit: int = 30, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    def list_day_compacts(self, principal: str, *, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
         rows = self.execute(
             """
             SELECT * FROM day_compacts

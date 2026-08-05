@@ -51,9 +51,9 @@ def test_arrivals_are_counted_for_the_person_who_brought_them(storage) -> None:
     where, params = storage._arrival_window(  # noqa: SLF001
         "tenant", None, None, uploaded_by="person-a"
     )
-    count = storage.execute(
-        f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where}", tuple(params)
-    ).fetchone()["n"]
+    count = storage.execute(f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where}", tuple(params)).fetchone()[
+        "n"
+    ]
 
     assert count == 1, "надзор по человеку считает чужие материалы"
 
@@ -81,9 +81,9 @@ def test_old_material_is_not_attributed_to_anybody(storage) -> None:
     where, params = storage._arrival_window(  # noqa: SLF001
         "tenant", None, None, uploaded_by="tenant"
     )
-    count = storage.execute(
-        f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where}", tuple(params)
-    ).fetchone()["n"]
+    count = storage.execute(f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where}", tuple(params)).fetchone()[
+        "n"
+    ]
 
     assert count == 0, "материал без автора приписан владельцу архива"
 
@@ -98,9 +98,9 @@ def test_the_window_without_an_author_still_sees_everything(storage) -> None:
     _arrived(storage, "tenant", uploaded_by=None, at="2026-07-01T10:00:00+00:00")
 
     where, params = storage._arrival_window("tenant", None, None)  # noqa: SLF001
-    count = storage.execute(
-        f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where}", tuple(params)
-    ).fetchone()["n"]
+    count = storage.execute(f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where}", tuple(params)).fetchone()[
+        "n"
+    ]
 
     assert count == 2
 
@@ -138,9 +138,12 @@ def test_the_marker_is_json_readable(storage) -> None:
     ).fetchone()
 
     assert row["who"] == "person-a"
-    assert json.loads(
-        storage.execute("SELECT metadata_json AS m FROM raw_objects LIMIT 1").fetchone()["m"]
-    )["uploaded_by"] == "person-a"
+    assert (
+        json.loads(storage.execute("SELECT metadata_json AS m FROM raw_objects LIMIT 1").fetchone()["m"])[
+            "uploaded_by"
+        ]
+        == "person-a"
+    )
 
 
 @pytest.mark.asyncio

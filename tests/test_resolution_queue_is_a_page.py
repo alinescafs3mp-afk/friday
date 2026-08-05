@@ -144,9 +144,7 @@ def test_the_document_count_of_a_row_is_a_count_not_a_page_length(admin) -> None
         storage.store_knowledge_object(knowledge)
         storage.link_knowledge_entity(user_id, knowledge.id, entity_id, status="accepted")
 
-    body = client.get(
-        f"/api/admin/resolutions?user_id={user_id}&status=suggested", headers=headers
-    ).json()
+    body = client.get(f"/api/admin/resolutions?user_id={user_id}&status=suggested", headers=headers).json()
     row = next(item for item in body["items"] if item["id"] == ids[0])
     assert row["entity_a"]["knowledge_count"] == documents, (
         "счётчик документов взят из длины страницы выборки, а не посчитан"

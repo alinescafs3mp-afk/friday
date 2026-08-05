@@ -114,9 +114,7 @@ async def list_users(
     if not granted_full:
         # Читать чужой список учёток без полного доступа — событие для следа:
         # соседний `/identities` пишет его ровно по этой причине.
-        _audit_cross_tenant_read(
-            request, "admin.users.list", None, content="redacted", count=len(users)
-        )
+        _audit_cross_tenant_read(request, "admin.users.list", None, content="redacted", count=len(users))
     return {
         "items": users,
         "count": len(users),
@@ -212,9 +210,7 @@ async def user_activity(
     payload: dict[str, Any] = {
         "user_id": user_id,
         "content": "full" if include_content else "redacted",
-        "summary": storage.user_activity_summary(
-            tenant, since=since, until=until, uploaded_by=by_author
-        ),
+        "summary": storage.user_activity_summary(tenant, since=since, until=until, uploaded_by=by_author),
         "items": storage.user_activity(
             tenant,
             since=since,

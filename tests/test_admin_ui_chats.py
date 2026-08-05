@@ -27,12 +27,8 @@ TOKEN = "C" * 48
 
 
 def _seed(storage) -> None:
-    storage.ensure_user(
-        "usr_petrov", source="telegram", display_name="Петров", preset_key="user"
-    )
-    storage.update_user(
-        "usr_petrov", display_name="Петров", metadata_json={"chat_id": "5001"}
-    )
+    storage.ensure_user("usr_petrov", source="telegram", display_name="Петров", preset_key="user")
+    storage.update_user("usr_petrov", display_name="Петров", metadata_json={"chat_id": "5001"})
     storage.ensure_user("usr_bez_chata", source="local", display_name="Без чата", preset_key="user")
     storage.update_user("usr_bez_chata", display_name="Без чата")
 

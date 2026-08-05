@@ -35,9 +35,7 @@ from friday.eval_bootstrap import (
 
 def test_a_rare_word_points_at_the_document() -> None:
     """«Поверка» — примета, если поверок в архиве единицы."""
-    corpus = corpus_stems(
-        ["график поверки весов", "устав караульной службы", "приказ о переводе"]
-    )
+    corpus = corpus_stems(["график поверки весов", "устав караульной службы", "приказ о переводе"])
     document = content_tokens("график поверки весов на 2026 год")
 
     assert pointing_words("что там по поверке весов", document, corpus)

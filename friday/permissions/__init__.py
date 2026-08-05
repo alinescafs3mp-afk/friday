@@ -390,7 +390,7 @@ class AuthorizationService:
             )
         if not core_name and capability.source == "core":
             raise ValueError(
-                f"{capability.security_id}: объявлена как системная (`source=\"core\"`), но "
+                f'{capability.security_id}: объявлена как системная (`source="core"`), но '
                 "в ядровом списке её нет. Укажите, откуда она пришла — иначе в журнале "
                 "принесённое право не отличить от системного."
             )

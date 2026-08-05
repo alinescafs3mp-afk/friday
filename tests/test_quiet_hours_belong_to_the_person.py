@@ -124,9 +124,7 @@ def test_today_and_tomorrow_are_the_persons_days():
 
     by_utc = half_past_midnight.astimezone(UTC).date()
     assert by_utc.isoformat() == "2026-08-02"
-    assert "завтра" in _format_reminder(event, by_utc), (
-        "контроль: именно так и выглядел дефект"
-    )
+    assert "завтра" in _format_reminder(event, by_utc), "контроль: именно так и выглядел дефект"
 
     tomorrow = {"name": "Поверка", "occurred_at": (today + timedelta(days=1)).isoformat()}
     assert "завтра" in _format_reminder(tomorrow, today)

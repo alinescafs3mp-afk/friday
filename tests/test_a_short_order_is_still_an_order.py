@@ -65,9 +65,9 @@ def test_the_clearing_happens_after_the_verdict_not_before() -> None:
     после того, как арбитр сказал, поручение это или одинокое слово.
     """
     source = inspect.getsource(AgentRuntime._prepare_context)
-    assert source.index("context.terse_request = (") < source.index(
-        "context.terse_request = False"
-    ), "снятие переспроса уехало выше вердикта — понимания там ещё нет"
+    assert source.index("context.terse_request = (") < source.index("context.terse_request = False"), (
+        "снятие переспроса уехало выше вердикта — понимания там ещё нет"
+    )
 
 
 def test_a_lonely_word_still_gets_a_question() -> None:
@@ -103,9 +103,7 @@ def test_the_action_kind_does_not_offer_the_web() -> None:
 
     Лишний веб-вызов стоит человеку секунд и уводит ответ от его же архива.
     """
-    assert not {"web_search", "web_research", "web_fetch"} & ExecutionKernel._RELEVANT_TOOLS[
-        "действие"
-    ]
+    assert not {"web_search", "web_research", "web_fetch"} & ExecutionKernel._RELEVANT_TOOLS["действие"]
 
 
 def test_every_named_tool_exists() -> None:

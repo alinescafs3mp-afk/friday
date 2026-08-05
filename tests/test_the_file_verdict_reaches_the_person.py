@@ -115,9 +115,7 @@ def test_the_server_marks_an_unrecognised_voice():
     assert 'file_ingestion["voice_unrecognised"] = True' in source
     marker = source.index('file_ingestion["voice_unrecognised"] = True')
     guard = source[max(0, marker - 400) : marker]
-    assert "is_voice and not transcript" in guard, (
-        "флаг ставится не по факту «голос без транскрипта»"
-    )
+    assert "is_voice and not transcript" in guard, "флаг ставится не по факту «голос без транскрипта»"
 
 
 def test_a_parse_stopped_by_the_deadline_says_only_the_beginning_was_read():
@@ -129,8 +127,12 @@ def test_a_parse_stopped_by_the_deadline_says_only_the_beginning_was_read():
     """
     partial = {
         "queued_for_review": True,
-        "extraction": {"success": True, "text_success": True, "parse_deadline_reached": True,
-                       "parse_pages_read": 12},
+        "extraction": {
+            "success": True,
+            "text_success": True,
+            "parse_deadline_reached": True,
+            "parse_pages_read": 12,
+        },
     }
     line = _file_fate_line(partial)
     assert "принято только начало" in line
@@ -139,16 +141,12 @@ def test_a_parse_stopped_by_the_deadline_says_only_the_beginning_was_read():
     promoted = dict(partial, promoted=True, queued_for_review=False)
     promoted_line = _file_fate_line(promoted)
     assert "стал знанием" in promoted_line
-    assert "принято только начало" in promoted_line, (
-        "продвинутый файл тоже мог быть прочитан наполовину"
-    )
+    assert "принято только начало" in promoted_line, "продвинутый файл тоже мог быть прочитан наполовину"
 
 
 def test_a_whole_file_says_nothing_extra():
     """Контроль: обычный разбор не обрастает оговорками."""
-    line = _file_fate_line(
-        {"promoted": True, "extraction": {"success": True, "text_success": True}}
-    )
+    line = _file_fate_line({"promoted": True, "extraction": {"success": True, "text_success": True}})
     assert line == "✅ Файл стал знанием — можно спрашивать."
 
 
@@ -164,13 +162,21 @@ def test_the_same_file_sent_twice_is_accepted_once(pipeline):
     payload = "Договор №7 от 1 августа 2026 года. Стороны: ООО «Заря» и ИП Кузнецов.".encode()
     first = asyncio.run(
         pipeline.ingest_file(
-            "alice", None, payload, filename="dogovor.txt", mime_type="text/plain",
+            "alice",
+            None,
+            payload,
+            filename="dogovor.txt",
+            mime_type="text/plain",
             source_ref="telegram-file:AAA:111",
         )
     )
     second = asyncio.run(
         pipeline.ingest_file(
-            "alice", None, payload, filename="dogovor.txt", mime_type="text/plain",
+            "alice",
+            None,
+            payload,
+            filename="dogovor.txt",
+            mime_type="text/plain",
             source_ref="telegram-file:BBB:222",  # другая отправка того же файла
         )
     )
@@ -187,13 +193,21 @@ def test_a_different_file_is_still_a_different_file(pipeline):
     """Контроль: дедуп по содержимому не склеивает разные документы."""
     one = asyncio.run(
         pipeline.ingest_file(
-            "alice", None, b"first document body", filename="a.txt", mime_type="text/plain",
+            "alice",
+            None,
+            b"first document body",
+            filename="a.txt",
+            mime_type="text/plain",
             source_ref="telegram-file:AAA:1",
         )
     )
     two = asyncio.run(
         pipeline.ingest_file(
-            "alice", None, b"second document body", filename="b.txt", mime_type="text/plain",
+            "alice",
+            None,
+            b"second document body",
+            filename="b.txt",
+            mime_type="text/plain",
             source_ref="telegram-file:BBB:2",
         )
     )
@@ -269,7 +283,11 @@ def test_a_word_document_gives_up_its_paragraphs_and_its_table(pipeline):
 
 def test_a_spreadsheet_gives_up_every_row(pipeline):
     payload = _xlsx(
-        [["Дата", "ФИО", "Тип"], ["2026-07-11", "Зайцев М.", "увольнение"], ["2026-08-07", "Целио Ю.Ю.", "выходные"]],
+        [
+            ["Дата", "ФИО", "Тип"],
+            ["2026-07-11", "Зайцев М.", "увольнение"],
+            ["2026-08-07", "Целио Ю.Ю.", "выходные"],
+        ],
         sheet="Рапорты",
     )
     result = _ingest(pipeline, payload, "raporty.xlsx", "")

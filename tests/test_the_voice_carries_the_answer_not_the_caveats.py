@@ -46,9 +46,7 @@ def _speak(content: str, *, caution: str = "", warning: str = "") -> tuple[str, 
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
     bound = AgentRuntime._voice_of_the_final_answer.__get__(runtime, AgentRuntime)
-    asyncio.run(
-        bound(None, content, warning=warning, caution=caution, actor=None, asked_for_voice=True)
-    )
+    asyncio.run(bound(None, content, warning=warning, caution=caution, actor=None, asked_for_voice=True))
     return runtime.kernel.spoken[0], runtime
 
 

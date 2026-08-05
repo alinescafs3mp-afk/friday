@@ -343,7 +343,10 @@ async def test_a_structural_rejection_is_not_asked_twice(storage):
         people["Котельников Олег Сергеевич"],
         "member_of",
         confidence=0.9,
-        evidence={"knowledge_object_id": document.id, "excerpt": "Водитель | рядовой | Котельников Олег Сергеевич"},
+        evidence={
+            "knowledge_object_id": document.id,
+            "excerpt": "Водитель | рядовой | Котельников Олег Сергеевич",
+        },
     )
     model = _Model({"verdict": "подтверждаю", "about": "", "reason": "не должно быть спрошено"})
 

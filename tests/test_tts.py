@@ -398,9 +398,7 @@ async def test_chars_reports_what_was_spoken_not_what_was_asked(settings, storag
     kernel, actor = _kernel(settings, storage)
 
     def _fake_synthesize(text, *, voice, download_root, max_chars):
-        return Speech(
-            audio_bytes=b"OggS", sample_rate=48000, duration_sec=1.0, voice=voice, truncated=True
-        )
+        return Speech(audio_bytes=b"OggS", sample_rate=48000, duration_sec=1.0, voice=voice, truncated=True)
 
     monkeypatch.setattr(execution_kernel_module, "synthesize_speech", _fake_synthesize)
     result = await kernel.execute("speak", {"text": "с" * 500}, actor=actor)
@@ -474,9 +472,7 @@ def test_the_voice_request_is_read_from_the_person_s_message():
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime.chat)
-    assert "_ASKS_FOR_VOICE.search(clean_message)" in source, (
-        "просьба озвучить не доходит до сборки ответа"
-    )
+    assert "_ASKS_FOR_VOICE.search(clean_message)" in source, "просьба озвучить не доходит до сборки ответа"
     # И голосовой вопрос сам по себе — просьба ответить голосом: человек
     # записывает голосовое, когда ему неудобно печатать.
     assert "answer_with_voice or" in source, "на голосовое отвечают только текстом"

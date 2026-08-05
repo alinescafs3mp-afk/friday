@@ -58,9 +58,7 @@ def _buttons(markup: dict | None) -> list[str]:
     if not markup:
         return []
     return [
-        str(button.get("callback_data") or "")
-        for row in markup.get("inline_keyboard", [])
-        for button in row
+        str(button.get("callback_data") or "") for row in markup.get("inline_keyboard", []) for button in row
     ]
 
 

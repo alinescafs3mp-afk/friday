@@ -43,9 +43,7 @@ def test_the_text_of_a_message_cannot_be_rewritten(storage):
     conversation_id, _ = _say(storage)
 
     with pytest.raises(sqlite3.IntegrityError), storage.transaction() as conn:
-        conn.execute(
-            "UPDATE messages SET content='другое' WHERE conversation_id=?", (conversation_id,)
-        )
+        conn.execute("UPDATE messages SET content='другое' WHERE conversation_id=?", (conversation_id,))
 
     kept = storage.execute(
         "SELECT content FROM messages WHERE conversation_id=?", (conversation_id,)

@@ -65,8 +65,7 @@ def _file_fate_line(file_ingestion: Any) -> str:
     read_pages = int(extraction.get("parse_pages_read") or 0)
     total_pages = int(extraction.get("parse_total_pages") or 0)
     pages_line = (
-        f" В документе {total_pages} страниц, прочитано {read_pages} — "
-        "по концу спрашивать бесполезно."
+        f" В документе {total_pages} страниц, прочитано {read_pages} — по концу спрашивать бесполезно."
         if beyond_the_pages and total_pages
         else ""
     )
@@ -785,8 +784,7 @@ class CallbacksMixin(BridgeShared):
                 await self._send_message(
                     telegram,
                     chat_id,
-                    "Ответ длиннее, чем помещается в голосовое, — озвучено начало. "
-                    "Полный текст выше.",
+                    "Ответ длиннее, чем помещается в голосовое, — озвучено начало. Полный текст выше.",
                 )
 
     async def _deliver_generated_files(

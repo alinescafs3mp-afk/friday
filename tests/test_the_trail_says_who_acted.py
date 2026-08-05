@@ -86,7 +86,9 @@ def test_reading_the_shared_archive_leaves_a_trace(settings, storage):
     request.app.state.admin_services.storage = storage
 
     _audit_cross_tenant_read(request, "admin.knowledge.read", actor.user_id, knowledge_id="k1")
-    written = [row for row in storage.list_audit_log("bob", limit=20) if row["action"] == "admin.knowledge.read"]
+    written = [
+        row for row in storage.list_audit_log("bob", limit=20) if row["action"] == "admin.knowledge.read"
+    ]
     assert written, "чтение общего архива не оставило следа вовсе"
     assert '"scope": "shared_archive"' in str(written[0].get("after_json") or ""), (
         "чтение общего архива записано так, будто человек читал только своё"
@@ -148,5 +150,7 @@ def test_reading_ones_own_data_still_stays_quiet(settings, storage):
     request.app.state.storage = storage
 
     _audit_cross_tenant_read(request, "admin.knowledge.read", actor.own_id, knowledge_id="k1")
-    rows = [row for row in storage.list_audit_log("solo", limit=20) if row["action"] == "admin.knowledge.read"]
+    rows = [
+        row for row in storage.list_audit_log("solo", limit=20) if row["action"] == "admin.knowledge.read"
+    ]
     assert not rows, "чтение собственных данных засоряет журнал"

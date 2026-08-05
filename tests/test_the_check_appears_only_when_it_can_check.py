@@ -61,7 +61,7 @@ def test_the_verification_needs_something_to_compare_against() -> None:
     """
     source = inspect.getsource(AgentRuntime.chat)
     checks = source[source.index("self.settings.verify_answers") : source.index("_verify_response")]
-    assert "context.knowledge_hits or response.get(\"tool_evidence\")" in checks, (
+    assert 'context.knowledge_hits or response.get("tool_evidence")' in checks, (
         "проверка снова запускается там, где сверять не с чем"
     )
     assert "not context.small_talk" in checks, "болтовню снова проверяют на обоснованность"

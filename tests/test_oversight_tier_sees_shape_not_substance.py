@@ -204,9 +204,7 @@ def test_the_account_list_does_not_hand_over_what_a_person_wrote_about_themselve
 def test_the_full_administrator_still_sees_the_metadata(instance):
     """Контроль: владелец не потерял ничего — он решил видеть всё."""
     client, storage, owner, _ = instance
-    storage.update_user(
-        "subject", metadata_json={"custom_instructions": PRIVATE_NOTE, "chat_id": "778899"}
-    )
+    storage.update_user("subject", metadata_json={"custom_instructions": PRIVATE_NOTE, "chat_id": "778899"})
     payload = client.get("/api/admin/users", headers=owner).json()
     subject = next(row for row in payload["items"] if row["id"] == "subject")
     assert PRIVATE_NOTE in subject["metadata_json"]

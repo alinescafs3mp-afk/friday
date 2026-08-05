@@ -167,9 +167,7 @@ async def test_an_empty_report_is_refused_rather_than_sent_blank(settings, stora
     kernel.bind_services(storage, None, None, None)
     actor = ActorContext(user_id="alice", preset_key="admin", source="test")
 
-    result = await kernel.execute(
-        "make_file", {"kind": "pdf", "title": "Пустой", "blocks": []}, actor=actor
-    )
+    result = await kernel.execute("make_file", {"kind": "pdf", "title": "Пустой", "blocks": []}, actor=actor)
     assert result.data["created"] is False
     assert result.attachment is None
 
@@ -294,9 +292,7 @@ def test_a_list_item_never_becomes_the_document_title():
     assert _title_from_text(content) == "Суть: ходатайство о выплате премии личному составу."
 
     # Маркеры тоже не заголовок.
-    assert _title_from_text("- первый пункт\nОтчёт по документам за июль") == (
-        "Отчёт по документам за июль"
-    )
+    assert _title_from_text("- первый пункт\nОтчёт по документам за июль") == ("Отчёт по документам за июль")
 
 
 def test_a_promise_in_the_present_tense_is_still_a_promise():
@@ -454,9 +450,7 @@ def test_a_picture_that_cannot_hold_everything_says_so():
     spec = reports.ReportSpec(
         title="Длинная сводка",
         blocks=[
-            reports.Block(
-                "table", rows=[["№", "строка"]] + [[str(i), f"значение-{i}"] for i in range(300)]
-            )
+            reports.Block("table", rows=[["№", "строка"]] + [[str(i), f"значение-{i}"] for i in range(300)])
         ],
     )
     payload = reports.render("png", spec)

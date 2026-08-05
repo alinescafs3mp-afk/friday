@@ -346,9 +346,7 @@ def test_a_new_column_needs_a_new_schema_number(settings, tmp_path):
     reopened = FridayStorage(replace(settings, database_path=database))
     try:
         columns = {row[1] for row in reopened.execute("PRAGMA table_info(monitors)").fetchall()}
-        version = reopened.execute(
-            "SELECT value FROM schema_meta WHERE key='schema_version'"
-        ).fetchone()[0]
+        version = reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
     finally:
         reopened.close()
 

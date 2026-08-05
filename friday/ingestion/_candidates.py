@@ -223,9 +223,9 @@ class CandidatesMixin(PipelineShared):
         никогда. Та же болезнь, что у пересланных документов, и лечение то же:
         запасной поиск по естественному ключу — содержимому.
         """
-        since = (
-            datetime.now(UTC) - timedelta(seconds=AGENT_CANDIDATE_REPEAT_WINDOW_SEC)
-        ).isoformat(timespec="seconds")
+        since = (datetime.now(UTC) - timedelta(seconds=AGENT_CANDIDATE_REPEAT_WINDOW_SEC)).isoformat(
+            timespec="seconds"
+        )
         return self.storage.find_fresh_agent_candidate(
             user_id,
             source,
@@ -235,9 +235,7 @@ class CandidatesMixin(PipelineShared):
             since=since,
         )
 
-    def _replay_of(
-        self, existing: dict[str, Any], user_id: str, candidate_type: str
-    ) -> dict[str, Any]:
+    def _replay_of(self, existing: dict[str, Any], user_id: str, candidate_type: str) -> dict[str, Any]:
         """Ответ на повтор. Обязан говорить, что новой карточки НЕ появилось.
 
         Без `reason` наверх уходит словарь, неотличимый от обычного успеха, и
@@ -265,10 +263,7 @@ class CandidatesMixin(PipelineShared):
             "queued_for_review": bool(inbox),
             "action": "review",
             "candidate_type": found_type,
-            "reason": (
-                "такое же предложение уже лежит во входящих и ждёт разбора; "
-                "новой записи не создано"
-            ),
+            "reason": ("такое же предложение уже лежит во входящих и ждёт разбора; новой записи не создано"),
             "raw_object_id": existing["id"],
             "inbox_id": inbox.get("id") if inbox else None,
         }

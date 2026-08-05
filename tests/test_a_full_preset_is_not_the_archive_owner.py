@@ -102,7 +102,9 @@ async def test_a_participant_cannot_mint_a_token_for_the_owner(storage):
 
     def _request(actor: ActorContext):
         request = type("Request", (), {})()
-        request.app = type("App", (), {"state": type("S", (), {"storage": storage, "auth_service": auth})()})()
+        request.app = type(
+            "App", (), {"state": type("S", (), {"storage": storage, "auth_service": auth})()}
+        )()
         request.state = type("RS", (), {"actor": actor, "json_body": {"user_id": LEGACY_OWNER_USER_ID}})()
         return request
 
@@ -144,7 +146,9 @@ def test_a_participant_cannot_touch_the_owner_account(storage):
 
     class _Request:
         def __init__(self, actor: ActorContext) -> None:
-            self.app = type("App", (), {"state": type("S", (), {"storage": storage, "auth_service": auth})()})()
+            self.app = type(
+                "App", (), {"state": type("S", (), {"storage": storage, "auth_service": auth})()}
+            )()
             self.state = type("RS", (), {"actor": actor})()
 
     with pytest.raises(HTTPException) as denied:

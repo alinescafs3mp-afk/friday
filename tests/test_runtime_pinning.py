@@ -81,9 +81,7 @@ def _dependency_closure(requirements: list[Requirement]) -> set[str]:
         marker_extras = extras or ("",)
         for child_text in children:
             child = Requirement(child_text)
-            if child.marker and not any(
-                child.marker.evaluate({"extra": extra}) for extra in marker_extras
-            ):
+            if child.marker and not any(child.marker.evaluate({"extra": extra}) for extra in marker_extras):
                 continue
             # The marker was evaluated in the PARENT distribution's extra
             # context.  Carrying it into the child queue and evaluating it again

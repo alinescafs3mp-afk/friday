@@ -36,7 +36,9 @@ class _Model:
 
     async def chat(self, messages, **_kwargs):
         self.calls.append(messages)
-        content = self.payload if isinstance(self.payload, str) else json.dumps(self.payload, ensure_ascii=False)
+        content = (
+            self.payload if isinstance(self.payload, str) else json.dumps(self.payload, ensure_ascii=False)
+        )
         return {"content": content, "finish_reason": "stop"}
 
 

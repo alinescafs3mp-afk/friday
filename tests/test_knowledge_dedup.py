@@ -252,7 +252,11 @@ def test_second_run_with_no_changes_compares_nothing(settings, storage):
     storage.ensure_user("alice")
     for index, vector in enumerate(([1.0, 0.0, 0.0], [0.98, 0.2, 0.0], [0.0, 0.0, 1.0])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"), vector, "test-embed"
+            storage,
+            "alice",
+            _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"),
+            vector,
+            "test-embed",
         )
 
     first = _run(storage, cfg)
@@ -312,7 +316,11 @@ def test_backfill_walks_the_whole_corpus_across_ticks(settings, storage):
     _index(storage, "alice", old_b, [0.98, 0.2, 0.0], "test-embed")
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Прочее {index}", f"P-{chr(65 + index)}"), vector, "test-embed"
+            storage,
+            "alice",
+            _store(storage, "alice", f"Прочее {index}", f"P-{chr(65 + index)}"),
+            vector,
+            "test-embed",
         )
 
     seen_modes = set()
@@ -397,7 +405,11 @@ def test_deadline_stops_without_losing_progress(settings, storage):
     storage.ensure_user("alice")
     for index, vector in enumerate(([1.0, 0.0, 0.0], [0.98, 0.2, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"), vector, "test-embed"
+            storage,
+            "alice",
+            _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"),
+            vector,
+            "test-embed",
         )
 
     starved = _run(storage, cfg, max_seconds=0.0)
@@ -546,7 +558,13 @@ def test_vector_pages_exclude_soft_deleted_and_respect_the_second_bound(settings
 def test_count_user_vectors_before_a_cursor(settings, storage):
     storage.ensure_user("alice")
     for index in range(4):
-        _index(storage, "alice", _store(storage, "alice", f"T-{chr(65 + index)}", f"T-{chr(65 + index)}"), [1.0, 0.0], "test-embed")
+        _index(
+            storage,
+            "alice",
+            _store(storage, "alice", f"T-{chr(65 + index)}", f"T-{chr(65 + index)}"),
+            [1.0, 0.0],
+            "test-embed",
+        )
     storage.execute("UPDATE knowledge_embeddings SET updated_at='1500-01-01T00:00:00+00:00'")
     rows = storage.list_user_vectors_page("alice", "test-embed")
     middle = (rows[2][1], rows[2][0])
@@ -588,7 +606,13 @@ def test_a_tile_costlier_than_the_budget_still_makes_progress(settings, storage,
     storage.ensure_user("alice")
     vectors = ([1.0, 0.0, 0.0], [0.98, 0.2, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])
     for index, vector in enumerate(vectors):
-        _index(storage, "alice", _store(storage, "alice", f"T-{chr(65 + index)}", f"T-{chr(65 + index)}"), vector, "test-embed")
+        _index(
+            storage,
+            "alice",
+            _store(storage, "alice", f"T-{chr(65 + index)}", f"T-{chr(65 + index)}"),
+            vector,
+            "test-embed",
+        )
 
     seen = []
     for _ in range(6):
@@ -623,7 +647,13 @@ def test_end_of_history_comes_from_an_empty_page_not_a_short_one(settings, stora
     _index(storage, "alice", old_a, [1.0, 0.0, 0.0], "test-embed")
     _index(storage, "alice", old_b, [0.98, 0.2, 0.0], "test-embed")
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.7, 0.71])):
-        _index(storage, "alice", _store(storage, "alice", f"P-{chr(65 + index)}", f"P-{chr(65 + index)}"), vector, "test-embed")
+        _index(
+            storage,
+            "alice",
+            _store(storage, "alice", f"P-{chr(65 + index)}", f"P-{chr(65 + index)}"),
+            vector,
+            "test-embed",
+        )
 
     for _ in range(6):
         result = _run(storage, cfg)
@@ -720,7 +750,13 @@ def test_a_row_appearing_below_the_watermark_reopens_the_backfill(settings, stor
     cfg = _dedup_settings(settings)
     storage.ensure_user("alice")
     for index, vector in enumerate(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
-        _index(storage, "alice", _store(storage, "alice", f"P-{chr(65 + index)}", f"P-{chr(65 + index)}"), vector, "test-embed")
+        _index(
+            storage,
+            "alice",
+            _store(storage, "alice", f"P-{chr(65 + index)}", f"P-{chr(65 + index)}"),
+            vector,
+            "test-embed",
+        )
     for _ in range(4):
         result = _run(storage, cfg)
         if result["pending"] == 0 and result["objects_compared"] == 0:
@@ -791,7 +827,11 @@ def test_an_ordinary_new_object_does_not_reopen_history(settings, storage):
     storage.ensure_user("alice")
     for index, vector in enumerate(([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])):
         _index(
-            storage, "alice", _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"), vector, "test-embed"
+            storage,
+            "alice",
+            _store(storage, "alice", f"Текст {index}", f"T-{chr(65 + index)}"),
+            vector,
+            "test-embed",
         )
     first = _run(storage, cfg)
     assert first["objects_compared"] == 3

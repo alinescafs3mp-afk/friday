@@ -71,9 +71,12 @@ async def test_without_named_issues_there_is_nothing_to_repair():
     router = _Router()
     runtime = _runtime(router)
 
-    assert await runtime._repair_once(  # noqa: SLF001
-        "вопрос", "ответ", _context(), {"status": VERDICT_FAILED, "issues": []}
-    ) == ""
+    assert (
+        await runtime._repair_once(  # noqa: SLF001
+            "вопрос", "ответ", _context(), {"status": VERDICT_FAILED, "issues": []}
+        )
+        == ""
+    )
     assert router.calls == 0
 
 
@@ -88,9 +91,12 @@ async def test_a_truncated_repair_is_not_an_improvement():
     runtime = _runtime(router)
 
     long_answer = "Командиром расчёта назначен Иванов. " * 10
-    assert await runtime._repair_once(  # noqa: SLF001
-        "кто командир?", long_answer, _context(), {"status": VERDICT_FAILED, "issues": ["не тот человек"]}
-    ) == ""
+    assert (
+        await runtime._repair_once(  # noqa: SLF001
+            "кто командир?", long_answer, _context(), {"status": VERDICT_FAILED, "issues": ["не тот человек"]}
+        )
+        == ""
+    )
 
 
 @pytest.mark.anyio
@@ -102,10 +108,15 @@ async def test_a_dead_model_leaves_the_answer_alone():
 
     router = _Dead()
     runtime = _runtime(router)
-    assert await runtime._repair_once(  # noqa: SLF001
-        "вопрос", "достаточно длинный исходный ответ про записи", _context(),
-        {"status": VERDICT_FAILED, "issues": ["что-то не так"]},
-    ) == ""
+    assert (
+        await runtime._repair_once(  # noqa: SLF001
+            "вопрос",
+            "достаточно длинный исходный ответ про записи",
+            _context(),
+            {"status": VERDICT_FAILED, "issues": ["что-то не так"]},
+        )
+        == ""
+    )
 
 
 def test_the_loop_cannot_run_twice():
@@ -137,7 +148,7 @@ def test_a_passed_verification_is_left_alone():
 
     source = inspect.getsource(AgentRuntime.chat)
     guard = source[: source.index("_repair_once(")]
-    assert f'== {VERDICT_FAILED!r}' in guard or "VERDICT_FAILED" in guard, (
+    assert f"== {VERDICT_FAILED!r}" in guard or "VERDICT_FAILED" in guard, (
         "починка запускается не только на провалившейся проверке"
     )
     assert VERDICT_PASSED in {"passed"}

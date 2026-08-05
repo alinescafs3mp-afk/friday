@@ -35,7 +35,11 @@ def test_two_accounts_one_chat_get_one_message(storage):
     storage.commit()
 
     first = storage.enqueue_notification(
-        "owner-api", "467035772", "🚨 Модель не отвечает", kind="sentinel", dedup_key="sentinel:llm:2026-08-04"
+        "owner-api",
+        "467035772",
+        "🚨 Модель не отвечает",
+        kind="sentinel",
+        dedup_key="sentinel:llm:2026-08-04",
     )
     second = storage.enqueue_notification(
         "telegram:telegram:467035772",
@@ -113,8 +117,15 @@ def test_the_index_is_rebuilt_on_an_old_database(settings, tmp_path):
             conn.execute(
                 "INSERT INTO outbound_notifications(id, user_id, chat_id, kind, dedup_key, body,"
                 " status, attempts, created_at) VALUES(?,?,?,?,?,?,'sent',0,?)",
-                (f"notif-{index}", person, "467035772", "sentinel", "sentinel:llm:2026-08-04",
-                 "🚨 Модель не отвечает", f"2026-08-04T10:49:3{index}+00:00"),
+                (
+                    f"notif-{index}",
+                    person,
+                    "467035772",
+                    "sentinel",
+                    "sentinel:llm:2026-08-04",
+                    "🚨 Модель не отвечает",
+                    f"2026-08-04T10:49:3{index}+00:00",
+                ),
             )
         conn.execute("UPDATE schema_meta SET value='25' WHERE key='schema_version'")
     first.close()

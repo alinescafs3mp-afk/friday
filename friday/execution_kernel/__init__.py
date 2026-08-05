@@ -2907,10 +2907,7 @@ class ExecutionKernel:
         matches = [
             edge
             for edge in edges
-            if (
-                str(edge.get("source_entity_id")) in wanted
-                or str(edge.get("target_entity_id")) in wanted
-            )
+            if (str(edge.get("source_entity_id")) in wanted or str(edge.get("target_entity_id")) in wanted)
             and (not selected_type or str(edge.get("relation_type") or "") == selected_type)
         ]
         if not matches:

@@ -83,9 +83,7 @@ class _Hostile:
         if "РАЗГОВОР или ЗАПРОС" in asked:
             return {"content": "ЗАПРОС"}
         if '"вид": "интернет' in asked:
-            return {
-                "content": '{"вид": "действие", "правило": "", "запрос": "", "кто": "", "дни": []}'
-            }
+            return {"content": '{"вид": "действие", "правило": "", "запрос": "", "кто": "", "дни": []}'}
         if '"остаток"' in asked and "уже решена" in asked:
             # Общий разбор остатка: «часть решена, что осталось?». Без этой ветки
             # он падал бы в ветку финального ответа — и `final_calls` считал бы
@@ -99,11 +97,7 @@ class _Hostile:
             # заметила бы подмены остатка исходной репликой.
             self.reminder_asked.append(str(messages[-1].get("content") or ""))
             rest = "" if self.rest is None else f', "остаток": "{self.rest}"'
-            return {
-                "content": (
-                    '{"напоминание": "да", "что": "отчёт", "когда": "в пятницу"' + rest + "}"
-                )
-            }
+            return {"content": ('{"напоминание": "да", "что": "отчёт", "когда": "в пятницу"' + rest + "}")}
         self.final_calls += 1
         self.final_prompts.append(asked)
         return {"content": self.final}
@@ -148,9 +142,7 @@ def test_a_question_beside_the_deed_is_still_answered(settings, storage) -> None
     """Половина реплики — поручение, половина — вопрос. Вторую нельзя терять."""
     llm = _Hostile(rest="как там дела с проектом")
 
-    said, _ = _answer(
-        settings, storage, llm, "напомни про отчёт в пятницу, и как там дела с проектом"
-    )
+    said, _ = _answer(settings, storage, llm, "напомни про отчёт в пятницу, и как там дела с проектом")
 
     assert "поставлено" in said.casefold(), "факт о сделанном пропал"
     assert llm.final_calls == 1, "вопрос человека потерян МОЛЧА"
@@ -174,10 +166,7 @@ def test_a_reminder_beside_an_archive_is_not_swallowed(settings, storage) -> Non
         async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
             asked = " ".join(str(m.get("content") or "") for m in messages)
             if '"вид": "интернет' in asked:
-                return {
-                    "content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "",'
-                    ' "дни": ["26"]}'
-                }
+                return {"content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "", "дни": ["26"]}'}
             return await super().chat(messages, tools=tools, **kwargs)
 
     class _Packs(_Kernel):
@@ -242,10 +231,7 @@ def test_a_question_beside_an_archive_still_reaches_the_model(settings, storage)
         async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
             asked = " ".join(str(m.get("content") or "") for m in messages)
             if '"вид": "интернет' in asked:
-                return {
-                    "content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "",'
-                    ' "дни": ["26"]}'
-                }
+                return {"content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "", "дни": ["26"]}'}
             return await super().chat(messages, tools=tools, **kwargs)
 
     class _Packs(_Kernel):
@@ -270,9 +256,7 @@ def test_a_question_beside_an_archive_still_reaches_the_model(settings, storage)
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
 
     result = asyncio.run(
-        agent.chat(
-            "alice", "собери документы за 26 число, и что там по проекту", actor=actor
-        )
+        agent.chat("alice", "собери документы за 26 число, и что там по проекту", actor=actor)
     )
 
     said = str(result.get("message") or "")
@@ -296,10 +280,7 @@ def test_a_pure_archive_request_needs_no_model(settings, storage) -> None:
         async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
             asked = " ".join(str(m.get("content") or "") for m in messages)
             if '"вид": "интернет' in asked:
-                return {
-                    "content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "",'
-                    ' "дни": ["26"]}'
-                }
+                return {"content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "", "дни": ["26"]}'}
             return await super().chat(messages, tools=tools, **kwargs)
 
     class _Packs(_Kernel):
@@ -344,10 +325,7 @@ def test_an_unparsed_remainder_keeps_the_turn_for_the_model(settings, storage) -
         async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
             asked = " ".join(str(m.get("content") or "") for m in messages)
             if '"вид": "интернет' in asked:
-                return {
-                    "content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "",'
-                    ' "дни": ["26"]}'
-                }
+                return {"content": '{"вид": "файл", "правило": "", "запрос": "", "кто": "", "дни": ["26"]}'}
             return await super().chat(messages, tools=tools, **kwargs)
 
     class _Packs(_Kernel):

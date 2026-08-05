@@ -50,9 +50,7 @@ def _store(storage, title: str, content: str) -> str:
 
 
 def _usage_total(storage) -> int:
-    row = storage.execute(
-        "SELECT COALESCE(SUM(retrieval_count), 0) AS total FROM knowledge_usage"
-    ).fetchone()
+    row = storage.execute("SELECT COALESCE(SUM(retrieval_count), 0) AS total FROM knowledge_usage").fetchone()
     return int(row["total"] if row else 0)
 
 

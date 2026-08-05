@@ -82,9 +82,7 @@ def test_the_sanitiser_also_runs_after_the_final_synthesis():
     assert "_strip_tool_call_markup(final_turn.text)" in synthesis, (
         "итог синтеза после инструментов уходит человеку без очистки"
     )
-    assert '"content": clean' in synthesis, (
-        "очистка вычисляется, но человеку отдаётся неочищенный текст"
-    )
+    assert '"content": clean' in synthesis, "очистка вычисляется, но человеку отдаётся неочищенный текст"
 
 
 def test_the_protocol_parser_still_sees_raw_markup():

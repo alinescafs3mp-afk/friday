@@ -42,9 +42,7 @@ FABRICATED = (
 
 def test_a_world_question_answered_from_memory_is_flagged():
     """Мутация: убрать ветку `asked_about_the_world` — тест краснеет."""
-    warning = _grounding_warning(
-        FABRICATED, None, asked_about_the_world=True, nothing_arrived=True
-    )
+    warning = _grounding_warning(FABRICATED, None, asked_about_the_world=True, nothing_arrived=True)
 
     assert warning, "выдуманное наличие и цены ушли человеку без единой оговорки"
     assert "в интернет" in warning.casefold()
@@ -57,10 +55,7 @@ def test_a_world_question_with_a_real_search_is_not_flagged():
     Предупреждение не по делу обесценивает те, что по делу; владелец дважды
     просил убрать именно такое.
     """
-    assert (
-        _grounding_warning(FABRICATED, None, asked_about_the_world=True, nothing_arrived=False)
-        == ""
-    )
+    assert _grounding_warning(FABRICATED, None, asked_about_the_world=True, nothing_arrived=False) == ""
 
 
 def test_an_honest_refusal_is_not_flagged():
@@ -76,9 +71,7 @@ def test_an_honest_refusal_is_not_flagged():
 
 def test_a_short_answer_is_not_flagged():
     """Короткая реплика — не «ответ, выданный за проверенный»."""
-    assert (
-        _grounding_warning("Не знаю.", None, asked_about_the_world=True, nothing_arrived=True) == ""
-    )
+    assert _grounding_warning("Не знаю.", None, asked_about_the_world=True, nothing_arrived=True) == ""
 
 
 @pytest.mark.asyncio
@@ -136,9 +129,7 @@ async def test_a_tool_that_ran_and_failed_counts_as_nothing_arrived(settings, st
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
 
     answer = await asyncio.to_thread(
-        lambda: asyncio.run(
-            agent.chat("alice", "где в Донецке есть RPI5 в наличии?", actor=actor)
-        )
+        lambda: asyncio.run(agent.chat("alice", "где в Донецке есть RPI5 в наличии?", actor=actor))
     )
 
     warning = str(answer.get("grounding_warning") or "")
@@ -224,9 +215,7 @@ async def test_the_user_model_riding_along_does_not_cancel_the_warning(settings,
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
 
     answer = await asyncio.to_thread(
-        lambda: asyncio.run(
-            agent.chat("alice", "Медведев в какие годы президентом был?", actor=actor)
-        )
+        lambda: asyncio.run(agent.chat("alice", "Медведев в какие годы президентом был?", actor=actor))
     )
 
     warning = str(answer.get("grounding_warning") or "")

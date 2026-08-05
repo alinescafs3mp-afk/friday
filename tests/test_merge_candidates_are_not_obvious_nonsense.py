@@ -35,10 +35,7 @@ def _entity(storage, name: str, kind: EntityType = EntityType.PERSON) -> str:
 def _pairs(storage) -> set[frozenset[str]]:
     found, _ = storage.sweep_entity_duplicates("alice", max_pairs=100_000)
     names = {row["id"]: row["name"] for row in storage.execute("SELECT id, name FROM entities")}
-    return {
-        frozenset((names.get(item.entity_a_id, "?"), names.get(item.entity_b_id, "?")))
-        for item in found
-    }
+    return {frozenset((names.get(item.entity_a_id, "?"), names.get(item.entity_b_id, "?"))) for item in found}
 
 
 def test_two_people_whose_surname_matches_the_others_first_name_are_not_a_duplicate(storage):

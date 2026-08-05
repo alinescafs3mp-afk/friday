@@ -107,8 +107,11 @@ def test_the_search_still_goes_to_the_shared_corpus(settings, storage) -> None:
 
     asyncio.run(
         agent.chat(
-            "tenant", "что там по поверке приборов", actor=actor,
-            enable_tools=False, hybrid_searcher=_Searcher(),
+            "tenant",
+            "что там по поверке приборов",
+            actor=actor,
+            enable_tools=False,
+            hybrid_searcher=_Searcher(),
         )
     )
 
@@ -138,9 +141,7 @@ def test_both_personal_lists_are_read_by_person(settings, storage, field: str) -
         storage.remember_correction("person-a", "День морской пехоты — 27 ноября")
     agent = AgentRuntime(settings, storage)
 
-    context = AgentContext(
-        conversation_id="c", user_id="tenant", person_id="person-a", search_query=""
-    )
+    context = AgentContext(conversation_id="c", user_id="tenant", person_id="person-a", search_query="")
     messages = agent._build_initial_messages(context, "", None, tool_enabled=False)
 
     data = [m["content"] for m in messages if m.get("role") == "user"]

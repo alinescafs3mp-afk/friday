@@ -58,7 +58,8 @@ def test_a_working_model_is_reported_as_working(monkeypatch) -> None:
             return False
 
     monkeypatch.setattr(
-        "friday.diagnostics.urllib.request.urlopen", lambda *a, **k: _Response()  # noqa: ARG005
+        "friday.diagnostics.urllib.request.urlopen",
+        lambda *a, **k: _Response(),  # noqa: ARG005
     )
 
     status = _llm_generates("http://model:8001/v1", "dispatcher")

@@ -631,4 +631,8 @@ class ConversationsMixin(StorageShared):
                WHERE user_id=? AND deleted_at IS NULL AND created_at >= ? AND created_at <= ?""",
             (user_id, since, until),
         ).fetchone()["c"]
-        return {"messages": int(messages), "documents": int(documents), "total": int(messages) + int(documents)}
+        return {
+            "messages": int(messages),
+            "documents": int(documents),
+            "total": int(messages) + int(documents),
+        }

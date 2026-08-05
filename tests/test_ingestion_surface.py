@@ -123,7 +123,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_stage_file": "(self, user_id: 'str', content: 'bytes', digest: 'str', filename: 'str') -> 'tuple[Path, Path | None]'",
     "_store_file": "(self, user_id: 'str', content: 'bytes', digest: 'str', filename: 'str') -> 'Path'",
     "_remembered_assessment": "(self, current: 'dict[str, Any]', content: 'str') -> 'Any'",
-    "_store_review_inbox":"(self, raw: 'RawObject', assessment: 'PromotionAssessment', enrichment: 'KnowledgeEnrichment') -> 'InboxItem'",
+    "_store_review_inbox": "(self, raw: 'RawObject', assessment: 'PromotionAssessment', enrichment: 'KnowledgeEnrichment') -> 'InboxItem'",
     "_transcribe_audio": "(self, content: 'bytes', *, filename: 'str', mime_type: 'str', metadata: 'dict[str, Any] | None') -> 'dict[str, Any] | None'",
     "_validate_existing_file_source": "(self, existing: 'dict[str, Any]', digest: 'str') -> 'None'",
     "advise_inbox_item": "(self, user_id: 'str', inbox_id: 'str', *, llm: 'LLMRouter', requested_by: 'str' = '', force: 'bool' = False) -> 'dict[str, Any]'",

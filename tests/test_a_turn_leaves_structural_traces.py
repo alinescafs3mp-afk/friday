@@ -63,9 +63,7 @@ def _structural(settings, storage, message: str = HE_WROTE, *, kind: str = "пр
 
     result = asyncio.run(agent.chat("alice", message, actor=actor, enable_tools=False))
 
-    row = storage.execute(
-        "SELECT metadata_json FROM messages WHERE id=?", (result["message_id"],)
-    ).fetchone()
+    row = storage.execute("SELECT metadata_json FROM messages WHERE id=?", (result["message_id"],)).fetchone()
     meta = json.loads(str(row["metadata_json"] or "{}"))
     return dict(meta.get("structural") or {})
 
@@ -110,8 +108,18 @@ def test_the_marks_are_only_flags_and_a_closed_verdict(settings, storage) -> Non
     marks = _structural(settings, storage)
 
     known_kinds = {
-        "", "интернет", "знание", "архив", "человек", "файл", "действие",
-        "быт", "правило", "поправка", "материал", "другое",
+        "",
+        "интернет",
+        "знание",
+        "архив",
+        "человек",
+        "файл",
+        "действие",
+        "быт",
+        "правило",
+        "поправка",
+        "материал",
+        "другое",
     }
     for name, value in marks.items():
         if name == "verdict_kind":

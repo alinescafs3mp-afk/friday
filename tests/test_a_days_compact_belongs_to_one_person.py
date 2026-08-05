@@ -30,13 +30,9 @@ def test_a_compact_belongs_to_the_person_not_the_tenant(storage) -> None:
         storage.ensure_user(name)
 
     first = storage.begin_day_compact("person-a", "2026-08-03")
-    storage.finish_day_compact(
-        first, source_turns=7, counters={"total_turns": 7}, incidents=[], patterns=[]
-    )
+    storage.finish_day_compact(first, source_turns=7, counters={"total_turns": 7}, incidents=[], patterns=[])
     second = storage.begin_day_compact("person-b", "2026-08-03")
-    storage.finish_day_compact(
-        second, source_turns=2, counters={"total_turns": 2}, incidents=[], patterns=[]
-    )
+    storage.finish_day_compact(second, source_turns=2, counters={"total_turns": 2}, incidents=[], patterns=[])
 
     mine = storage.get_day_compact("person-a", "2026-08-03")
     yours = storage.get_day_compact("person-b", "2026-08-03")
@@ -54,13 +50,9 @@ def test_a_second_run_of_the_same_day_makes_no_duplicate(storage) -> None:
     storage.ensure_user("alice")
 
     first = storage.begin_day_compact("alice", "2026-08-03")
-    storage.finish_day_compact(
-        first, source_turns=5, counters={"total_turns": 5}, incidents=[], patterns=[]
-    )
+    storage.finish_day_compact(first, source_turns=5, counters={"total_turns": 5}, incidents=[], patterns=[])
     again = storage.begin_day_compact("alice", "2026-08-03")
-    storage.finish_day_compact(
-        again, source_turns=5, counters={"total_turns": 5}, incidents=[], patterns=[]
-    )
+    storage.finish_day_compact(again, source_turns=5, counters={"total_turns": 5}, incidents=[], patterns=[])
 
     assert again == first, "повторный прогон завёл вторую запись"
     assert storage.count_day_compacts("alice") == 1
@@ -89,9 +81,7 @@ def test_a_rerun_rebuilds_the_day_instead_of_adding_to_it(storage) -> None:
     assert fresh["status"] == "started", "прошлый результат остался на месте"
     assert fresh["counters"] == {}, "счётчики прошлой сборки пережили пересборку"
     assert fresh["incidents"] == []
-    storage.finish_day_compact(
-        again, source_turns=6, counters={"total_turns": 6}, incidents=[], patterns=[]
-    )
+    storage.finish_day_compact(again, source_turns=6, counters={"total_turns": 6}, incidents=[], patterns=[])
     assert storage.get_day_compact("alice", "2026-08-03")["counters"]["total_turns"] == 6
 
 
@@ -124,9 +114,7 @@ def test_a_finished_day_is_not_redone(storage) -> None:
     """
     storage.ensure_user("alice")
     done = storage.begin_day_compact("alice", "2026-08-02")
-    storage.finish_day_compact(
-        done, source_turns=1, counters={}, incidents=[], patterns=[]
-    )
+    storage.finish_day_compact(done, source_turns=1, counters={}, incidents=[], patterns=[])
 
     pending = storage.days_needing_a_compact("alice", ["2026-08-01", "2026-08-02"])
 

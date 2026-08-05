@@ -116,8 +116,7 @@ def _mission_to_control(request: Request, actor: Any, mission_id: str) -> dict[s
         raise HTTPException(
             status_code=403,
             detail=(
-                "Это чужая миссия. Запустить или остановить её может тот, кто её завёл, "
-                "или владелец архива."
+                "Это чужая миссия. Запустить или остановить её может тот, кто её завёл, или владелец архива."
             ),
         )
     return mission

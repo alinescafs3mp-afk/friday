@@ -649,9 +649,7 @@ class MaintenanceMixin(StorageShared):
                 # база на месте. Раньше здесь безусловно печаталось «no previous
                 # database existed» — прямая ложь ровно в тот момент, когда база
                 # была и только что была удалена этой же веткой.
-                recovery = (
-                    "the restore never started and the active database was left untouched"
-                )
+                recovery = "the restore never started and the active database was left untouched"
             else:
                 recovery = "no database was present and none was created"
             raise RuntimeError(

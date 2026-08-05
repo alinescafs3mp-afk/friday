@@ -25,7 +25,9 @@ async def graph_stats(request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.read")
     state = request.app.state
     stats = state.kg.get_stats(actor.user_id)
-    channel_id = str(request.headers.get("x-friday-chat") or request.headers.get("x-jericho-chat") or "").strip()
+    channel_id = str(
+        request.headers.get("x-friday-chat") or request.headers.get("x-jericho-chat") or ""
+    ).strip()
     if channel_id:
         session = state.storage.get_channel_session(
             actor.user_id,

@@ -134,7 +134,9 @@ def test_in_a_shared_archive_the_person_is_the_key(storage) -> None:
     payload = {"left": "ko_1", "right": "ko_2"}
 
     mine = storage.create_action_approval("tenant", tool="kg_merge", payload=payload, requested_by="person-a")
-    theirs = storage.create_action_approval("tenant", tool="kg_merge", payload=payload, requested_by="person-b")
+    theirs = storage.create_action_approval(
+        "tenant", tool="kg_merge", payload=payload, requested_by="person-b"
+    )
 
     assert theirs["id"] != mine["id"], "просьба участника заглушена просьбой соседа"
     assert storage.count_action_approvals("tenant", person_id="person-b") == 1

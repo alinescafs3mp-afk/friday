@@ -139,9 +139,7 @@ def served_model_name(base_url: str, *, api_key: str = "", timeout: float = 3.0)
     return root.rsplit("/", 1)[-1] if root else str(first.get("id") or "").strip()
 
 
-def _llm_generates(
-    base_url: str, model: str, *, api_key: str = "", timeout: float = 25.0
-) -> dict[str, Any]:
+def _llm_generates(base_url: str, model: str, *, api_key: str = "", timeout: float = 25.0) -> dict[str, Any]:
     """Отвечает ли модель НА САМОМ ДЕЛЕ — не «открыт ли порт» и не «есть ли в списке».
 
     Найдено на живом отказе 2026-08-03, и это единственная проверка, которая его

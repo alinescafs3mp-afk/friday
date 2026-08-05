@@ -43,9 +43,7 @@ def _write_first_message(client, settings, telegram_user=None) -> object:
 
 
 def _preset_of(storage, external_id: str) -> str:
-    row = storage.execute(
-        "SELECT preset_key FROM users WHERE external_id=?", (external_id,)
-    ).fetchone()
+    row = storage.execute("SELECT preset_key FROM users WHERE external_id=?", (external_id,)).fetchone()
     return str(row["preset_key"]) if row else ""
 
 

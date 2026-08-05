@@ -262,7 +262,7 @@ class OversightMixin(StorageShared):
         rows = self.execute(
             f"""SELECT m.created_at AS at, m.content, m.conversation_id
                 FROM messages m
-                WHERE {' AND '.join(clauses)}
+                WHERE {" AND ".join(clauses)}
                 ORDER BY m.created_at DESC LIMIT ?""",  # nosec B608
             tuple(params),
         ).fetchall()
@@ -291,9 +291,7 @@ class OversightMixin(StorageShared):
         totals sitting next to a windowed `arrivals`, so picking «7 дней» moved one
         card and left three showing the account's whole history in the same type.
         """
-        where, params = self._arrival_window(
-            user_id, since, until, uploaded_by=uploaded_by or None
-        )
+        where, params = self._arrival_window(user_id, since, until, uploaded_by=uploaded_by or None)
 
         # ``where`` holds fixed predicates only; every value is bound.
         totals = self.execute(

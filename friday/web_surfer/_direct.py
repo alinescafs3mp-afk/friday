@@ -289,9 +289,7 @@ async def _crypto_prices(client: httpx.AsyncClient, coins: list[str]) -> DirectA
         prices = payload.get(coin) or {}
         if not prices:
             continue
-        lines.append(
-            f"{names.get(coin, coin)}: {prices.get('usd', '—')} USD, {prices.get('rub', '—')} ₽"
-        )
+        lines.append(f"{names.get(coin, coin)}: {prices.get('usd', '—')} USD, {prices.get('rub', '—')} ₽")
     if not lines:
         return None
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")

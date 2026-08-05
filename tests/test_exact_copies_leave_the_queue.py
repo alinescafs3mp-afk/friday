@@ -118,8 +118,12 @@ def test_a_version_is_left_to_the_person(settings, storage, monkeypatch) -> None
     Иначе правка приказа молча погасила бы его прежнюю редакцию.
     """
     storage.ensure_user("alice", preset_key="admin")
-    _document(storage, "ko-v1", title="Приказ.docx", content="Поверку до 1 июня", when="2026-07-29T09:00:00+00:00")
-    _document(storage, "ko-v2", title="Приказ.docx", content="Поверку до 15 июня", when="2026-07-30T09:00:00+00:00")
+    _document(
+        storage, "ko-v1", title="Приказ.docx", content="Поверку до 1 июня", when="2026-07-29T09:00:00+00:00"
+    )
+    _document(
+        storage, "ko-v2", title="Приказ.docx", content="Поверку до 15 июня", when="2026-07-30T09:00:00+00:00"
+    )
     conflict_id = _conflict(storage, "ko-v1", "ko-v2")
     storage.close()
 
@@ -198,7 +202,11 @@ def test_a_cluster_of_copies_does_not_break_the_pass(settings, storage, monkeypa
             content=text,
             when=f"2026-07-29T{when}:00+00:00",
         )
-    ids = [_conflict(storage, "ko-c0", "ko-c1"), _conflict(storage, "ko-c1", "ko-c2"), _conflict(storage, "ko-c0", "ko-c2")]
+    ids = [
+        _conflict(storage, "ko-c0", "ko-c1"),
+        _conflict(storage, "ko-c1", "ko-c2"),
+        _conflict(storage, "ko-c0", "ko-c2"),
+    ]
     storage.close()
 
     _run(monkeypatch, settings, apply_changes=True)
@@ -220,9 +228,7 @@ def test_a_cluster_of_copies_does_not_break_the_pass(settings, storage, monkeypa
         fresh.close()
 
 
-def test_a_pair_whose_both_sides_are_already_gone_does_not_linger(
-    settings, storage, monkeypatch
-) -> None:
+def test_a_pair_whose_both_sides_are_already_gone_does_not_linger(settings, storage, monkeypatch) -> None:
     """Найдено на живом архиве ПОСЛЕ первой правки: вечный хвост в очереди.
 
     Когда обе стороны пары уже погашены другими парами кластера, выбирать не из
@@ -263,8 +269,12 @@ def test_a_pair_whose_both_sides_are_already_gone_does_not_linger(
 def test_whitespace_is_not_a_difference(settings, storage, monkeypatch) -> None:
     """Экспорт из Word и из PDF расставляет переносы по-разному."""
     storage.ensure_user("alice", preset_key="admin")
-    _document(storage, "ko-w1", title="а.docx", content="Приказ 214\nо поверке", when="2026-07-29T09:00:00+00:00")
-    _document(storage, "ko-w2", title="а.pdf", content="Приказ 214   о поверке", when="2026-07-29T10:00:00+00:00")
+    _document(
+        storage, "ko-w1", title="а.docx", content="Приказ 214\nо поверке", when="2026-07-29T09:00:00+00:00"
+    )
+    _document(
+        storage, "ko-w2", title="а.pdf", content="Приказ 214   о поверке", when="2026-07-29T10:00:00+00:00"
+    )
     conflict_id = _conflict(storage, "ko-w1", "ko-w2")
     storage.close()
 

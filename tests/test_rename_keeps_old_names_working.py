@@ -147,6 +147,5 @@ def test_no_module_reads_a_setting_behind_the_compatibility_point():
             if re.search(r'os\.environ\.get\(\s*["\']FRIDAY_', line):
                 offenders.append(f"{path.relative_to(root.parent)}:{number}")
     assert not offenders, (
-        "настройка читается в обход `config.env`, прежнее имя там работать не будет: "
-        + ", ".join(offenders)
+        "настройка читается в обход `config.env`, прежнее имя там работать не будет: " + ", ".join(offenders)
     )

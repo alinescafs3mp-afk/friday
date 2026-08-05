@@ -104,8 +104,7 @@ def test_the_field_list_is_an_allow_list() -> None:
     защищает будущее изменение, когда в сводку захотят положить что-то ещё. Но
     непроверяемый страховочный механизм гниёт, поэтому проверяется он сам.
     """
-    for forbidden in ("search_query", "retrieval_trace", "knowledge_citations",
-                      "knowledge_object_ids"):
+    for forbidden in ("search_query", "retrieval_trace", "knowledge_citations", "knowledge_object_ids"):
         assert forbidden not in _ALLOWED_FIELDS, f"{forbidden} читается компактором"
 
     passed = _marks({**A_SENSITIVE_TURN, "новое_поле_с_фамилией": "Нестеренко"})

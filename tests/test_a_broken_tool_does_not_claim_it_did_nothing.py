@@ -94,9 +94,7 @@ async def test_a_wrong_field_name_is_not_called_started_work(kernel, storage):
 
     Мутация: убрать сверку сигнатуры — тест краснеет.
     """
-    result = await kernel.execute(
-        "remind", {"текст": "позвонить", "when": "2027-03-01"}, actor=_actor()
-    )
+    result = await kernel.execute("remind", {"текст": "позвонить", "when": "2027-03-01"}, actor=_actor())
 
     assert result.success is False
     assert "НАЧАВ" not in result.error, f"неверное поле названо начатой работой: {result.error!r}"

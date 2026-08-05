@@ -837,8 +837,7 @@ def warn_if_service_holds_the_database(storage: Any, *, action: str) -> bool:
     if age is None:
         return False
     print(
-        f"⚠️  Базу держит живая служба (отметилась {age:.0f} с назад), а этот проход "
-        f"будет {action}.",
+        f"⚠️  Базу держит живая служба (отметилась {age:.0f} с назад), а этот проход будет {action}.",
         file=sys.stderr,
     )
     print(
@@ -1402,9 +1401,7 @@ def _retag_documents(args: argparse.Namespace) -> int:
         nonlocal seen, kinds_set, stale_removed, changed, asked
         cursor = 0
         while True:
-            batch = storage.knowledge_bodies_after(
-                after_rowid=cursor, user_id=args.user, limit=args.batch
-            )
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
             if not batch:
                 break
             for row in batch:
@@ -1497,9 +1494,7 @@ def _retag_documents(args: argparse.Namespace) -> int:
                     continue
                 changed += 1
                 if apply_changes:
-                    storage.update_knowledge_fields(
-                        str(row["id"]), str(row["user_id"]), tags_json=new_tags
-                    )
+                    storage.update_knowledge_fields(str(row["id"]), str(row["user_id"]), tags_json=new_tags)
             if args.limit and seen >= args.limit:
                 break
 
@@ -1573,7 +1568,9 @@ def _data_source(args: argparse.Namespace) -> int:
             for row in sources:
                 secret = "задана" if os.environ.get(str(row["dsn_env"])) else "НЕ ЗАДАНА"
                 used = row["last_used_at"] or "ни разу"
-                print(f"{row['name']:20s} {row['kind']:9s} {row['dsn_env']:28s} строка: {secret}; спрашивали: {used}")
+                print(
+                    f"{row['name']:20s} {row['kind']:9s} {row['dsn_env']:28s} строка: {secret}; спрашивали: {used}"
+                )
                 if row["description"]:
                     print(f"    {row['description']}")
             return 0
@@ -1618,9 +1615,7 @@ def _data_source(args: argparse.Namespace) -> int:
         )
         dsn = os.environ.get(source.dsn_env, "")
         if not dsn:
-            print(
-                f"Переменная {source.dsn_env} не задана — подключаться нечем.", file=sys.stderr
-            )
+            print(f"Переменная {source.dsn_env} не задана — подключаться нечем.", file=sys.stderr)
             return 2
         try:
             if action == "describe":
@@ -1701,7 +1696,9 @@ def _dismiss_series_conflicts(args: argparse.Namespace) -> int:
                     resolution_note=f"Не копия, а соседний документ серии: {reason}",
                 )
         if apply_changes:
-            storage.record_event("knowledge.series_conflicts_dismissed", {"seen": seen, "dismissed": dismissed})
+            storage.record_event(
+                "knowledge.series_conflicts_dismissed", {"seen": seen, "dismissed": dismissed}
+            )
     finally:
         storage.close()
 
@@ -1754,7 +1751,9 @@ def _backfill_relation_dates(args: argparse.Namespace) -> int:
             seen += 1
             metadata = json.loads(str(row["metadata_json"] or "{}") or "{}")
             evidence = metadata.get("evidence")
-            knowledge_id = str((evidence or {}).get("knowledge_object_id") or "") if isinstance(evidence, dict) else ""
+            knowledge_id = (
+                str((evidence or {}).get("knowledge_object_id") or "") if isinstance(evidence, dict) else ""
+            )
             if not knowledge_id:
                 no_source += 1
                 continue

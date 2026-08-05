@@ -108,9 +108,7 @@ async def test_the_start_of_the_call_is_recorded_before_the_effect(settings, sto
 
     async def _looks_at_the_journal(**_kwargs):
         seen_from_inside.extend(
-            row
-            for row in storage.list_audit_log("alice", limit=50)
-            if row["target_id"] == tool_name
+            row for row in storage.list_audit_log("alice", limit=50) if row["target_id"] == tool_name
         )
         return {"ok": True}
 

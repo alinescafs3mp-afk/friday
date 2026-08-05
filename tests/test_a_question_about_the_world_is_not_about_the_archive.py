@@ -99,9 +99,7 @@ def test_a_world_question_drops_documents_however_well_they_match(settings, stor
     правило («архив отвечает уверенно — значит вопрос про архив») здесь сработало
     бы и назначило режим личных знаний.
     """
-    context, searcher = _context_for(
-        settings, storage, "когда день морской пехоты", OUTWARD, score=0.85
-    )
+    context, searcher = _context_for(settings, storage, "когда день морской пехоты", OUTWARD, score=0.85)
 
     assert searcher.calls == 1, "поиск не отработал — проверка ничего не значит"
     assert context.knowledge_hits == [], "документы уехали в ответ на вопрос о внешнем мире"
@@ -111,9 +109,7 @@ def test_a_world_question_drops_documents_however_well_they_match(settings, stor
 
 def test_a_general_knowledge_question_too(settings, storage) -> None:
     """«Чем отличается лизинг от аренды» — тоже не про его документы."""
-    context, _ = _context_for(
-        settings, storage, "чем отличается лизинг от аренды", KNOWLEDGE, score=0.9
-    )
+    context, _ = _context_for(settings, storage, "чем отличается лизинг от аренды", KNOWLEDGE, score=0.9)
 
     assert context.knowledge_hits == []
     assert context.answer_mode != "personal_knowledge"
@@ -121,9 +117,7 @@ def test_a_general_knowledge_question_too(settings, storage) -> None:
 
 def test_an_archive_question_keeps_its_documents(settings, storage) -> None:
     """Обратная сторона. Без неё правка ломает то, ради чего система существует."""
-    context, _ = _context_for(
-        settings, storage, "что там по поверке приборов", ARCHIVE, score=0.85
-    )
+    context, _ = _context_for(settings, storage, "что там по поверке приборов", ARCHIVE, score=0.85)
 
     assert context.knowledge_hits, "прямой вопрос к архиву остался без документов"
     assert context.answer_mode == "personal_knowledge"
@@ -136,9 +130,7 @@ def test_my_own_stuff_survives_an_outward_verdict(settings, storage) -> None:
     материалы должно спасать документы. Иначе правка кренит систему в другую
     сторону — ошибка, за которой на этом проекте уже приходилось возвращаться.
     """
-    context, _ = _context_for(
-        settings, storage, "что там по моим приборам", OUTWARD, score=0.85
-    )
+    context, _ = _context_for(settings, storage, "что там по моим приборам", OUTWARD, score=0.85)
 
     assert context.knowledge_hits, "свои материалы выброшены по ошибке арбитра"
 

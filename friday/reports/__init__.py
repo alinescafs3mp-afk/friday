@@ -324,11 +324,7 @@ def _render_pdf(spec: ReportSpec) -> bytes:
 def _escape(text: str) -> str:
     """`<`, `&` — разметка для reportlab, а в тексте это обычные знаки."""
     return (
-        str(text or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\n", "<br/>")
+        str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
     )
 
 
@@ -453,9 +449,7 @@ def _render_png(spec: ReportSpec) -> bytes:
         if line.columns is not None and isinstance(line.text, list):
             for cell, column_offset in zip(line.text, line.columns, strict=False):
                 if cell:
-                    draw.text(
-                        (margin + column_offset, offset), cell, font=line.font, fill=(24, 24, 24)
-                    )
+                    draw.text((margin + column_offset, offset), cell, font=line.font, fill=(24, 24, 24))
         elif isinstance(line.text, str) and line.text:
             draw.text((margin, offset), line.text, font=line.font, fill=(24, 24, 24))
         offset += line.step

@@ -62,9 +62,7 @@ def test_no_grounds_still_means_no_file() -> None:
     assert "return None" in source[source.index("No content and no grounds") :][:400]
 
 
-@pytest.mark.parametrize(
-    "word", ["как думаешь", "стоит ли", "посоветуй", "твоё мнение", "что лучше выбрать"]
-)
+@pytest.mark.parametrize("word", ["как думаешь", "стоит ли", "посоветуй", "твоё мнение", "что лучше выбрать"])
 def test_the_arbiter_is_told_that_advice_is_not_a_search(word: str) -> None:
     """Просьба о суждении — не поиск факта: в сети нет ответа про ЭТОГО человека."""
     source = inspect.getsource(AgentRuntime._web_query_by_arbiter)

@@ -70,7 +70,14 @@ async def test_everyone_sees_everyone_until_a_supervisor_is_named(people):
 
     auth = AuthorizationService(people, shared_tenant=LEGACY_OWNER_USER_ID)
     answer = await user_activity(
-        STRANGER, _request(people, auth, _viewer()), since=None, until=None, limit=10, offset=0, analysis=[], top=10
+        STRANGER,
+        _request(people, auth, _viewer()),
+        since=None,
+        until=None,
+        limit=10,
+        offset=0,
+        analysis=[],
+        top=10,
     )
 
     assert answer["user_id"] == STRANGER
@@ -118,7 +125,14 @@ async def test_a_supervisor_still_sees_his_own_people(people):
     auth = AuthorizationService(people, shared_tenant=LEGACY_OWNER_USER_ID)
 
     answer = await user_activity(
-        STRANGER, _request(people, auth, _viewer()), since=None, until=None, limit=10, offset=0, analysis=[], top=10
+        STRANGER,
+        _request(people, auth, _viewer()),
+        since=None,
+        until=None,
+        limit=10,
+        offset=0,
+        analysis=[],
+        top=10,
     )
 
     assert answer["user_id"] == STRANGER
@@ -147,5 +161,7 @@ async def test_the_refusal_leaves_a_trail(people):
             top=10,
         )
 
-    trail = " ".join(json.dumps(row, ensure_ascii=False, default=str) for row in people.list_audit_log(limit=10))
+    trail = " ".join(
+        json.dumps(row, ensure_ascii=False, default=str) for row in people.list_audit_log(limit=10)
+    )
     assert "out_of_scope" in trail, f"попытка посмотреть чужое не записана: {trail!r}"

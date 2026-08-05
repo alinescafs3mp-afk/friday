@@ -41,7 +41,7 @@ def test_a_bare_code_style_call_is_not_an_answer(text: str) -> None:
         'Чтобы найти это, я зову memory_search.search(query="поверка") и смотрю выдачу.',
         "Цена RTX 5090 — около 210 000 рублей.",
         "Функция print(x) выводит значение на экран.",
-        'В конфиге пишут timeout(seconds=30), это стандартная запись.',
+        "В конфиге пишут timeout(seconds=30), это стандартная запись.",
     ],
 )
 def test_a_real_answer_survives(text: str) -> None:

@@ -99,9 +99,7 @@ def _pushed_for(storage, mission_id: str) -> list[dict]:
 @pytest.mark.asyncio
 async def test_every_road_reaches_a_person(storage, executive, road: str, created_by: str) -> None:
     """Мутация: вернуть поиск чата по сырому `created_by` — четыре дороги краснеют."""
-    made = await executive.create_mission(
-        "tenant", f"Цель для {road}", origin="agent", created_by=created_by
-    )
+    made = await executive.create_mission("tenant", f"Цель для {road}", origin="agent", created_by=created_by)
 
     assert made["status"] == MissionStatus.PROPOSED.value
     assert _pushed_for(storage, made["id"]), f"дорога «{road}» оставила миссию незамеченной"

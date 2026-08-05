@@ -250,13 +250,10 @@ class ApprovalsMixin(StorageShared):
             tuple(params),
         ).fetchall()
         return [
-            self._approval_row(dict(row)["id"], user_id, person_id=person_id) or dict(row)
-            for row in rows
+            self._approval_row(dict(row)["id"], user_id, person_id=person_id) or dict(row) for row in rows
         ]
 
-    def count_action_approvals(
-        self, user_id: str, *, status: str | None = None, person_id: str = ""
-    ) -> int:
+    def count_action_approvals(self, user_id: str, *, status: str | None = None, person_id: str = "") -> int:
         """Число рядом со списком обязано считать ровно то, что список показывает."""
         where = ["user_id=?"]
         params: list[Any] = [user_id]

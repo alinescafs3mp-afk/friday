@@ -1901,9 +1901,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # хотя в профиле стоял `language_code: ru`.
                     speaker = state.storage.get_user(actor.own_id) or {}
                     speaker_meta = _json_load(speaker.get("metadata_json"), {})
-                    language_code = str(
-                        (speaker_meta or {}).get("language_code") or ""
-                    ).strip()
+                    language_code = str((speaker_meta or {}).get("language_code") or "").strip()
                     if language_code:
                         file_metadata["language_code"] = language_code
                     if isinstance(document.get("duration"), int):
@@ -1947,9 +1945,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # ронять запрос; считаем голос длинным и идём прежним путём.
                     voice_duration = float("inf")
                 is_voice = str(document.get("media_kind") or "") == "voice"
-                spoken_question = bool(
-                    transcript and is_voice and voice_duration <= _VOICE_QUESTION_MAX_SEC
-                )
+                spoken_question = bool(transcript and is_voice and voice_duration <= _VOICE_QUESTION_MAX_SEC)
                 # Голос, который не распознался, обязан быть НАЗВАН нераспознанным.
                 # Иначе ход молча превращается в «Загружен документ: voice-7.ogg»:
                 # человек наговорил вопрос, получил ответ про какой-то документ и

@@ -108,9 +108,7 @@ async def test_the_research_road_is_closed_too(kernel_and_wire):
     """Обе дороги наружу, а не одна: ворота на одной не охраняют ничего."""
     kernel, went_out = kernel_and_wire
 
-    await kernel.execute(
-        "web_research", {"query": "что пишут про Хасанова"}, actor=_actor()
-    )
+    await kernel.execute("web_research", {"query": "что пишут про Хасанова"}, actor=_actor())
 
     assert went_out == [], f"вторая дорога осталась открытой: {went_out}"
 

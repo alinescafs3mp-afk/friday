@@ -99,9 +99,7 @@ async def test_the_same_text_twice_is_still_one_card(storage, executive) -> None
     again = await executive._route_to_inbox(mission, task, "один и тот же текст")  # noqa: SLF001
 
     assert again == first
-    cards = storage.execute(
-        "SELECT COUNT(*) AS n FROM inbox WHERE user_id='alice'"
-    ).fetchone()["n"]
+    cards = storage.execute("SELECT COUNT(*) AS n FROM inbox WHERE user_id='alice'").fetchone()["n"]
     assert cards == 1
 
 

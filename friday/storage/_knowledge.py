@@ -1490,7 +1490,9 @@ class KnowledgeMixin(StorageShared):
 
         if not self._fts_available or not terms:
             return {}
-        unique = [term for term in dict.fromkeys(str(item).strip().casefold() for item in terms) if term][:200]
+        unique = [term for term in dict.fromkeys(str(item).strip().casefold() for item in terms) if term][
+            :200
+        ]
         if not unique:
             return {}
         placeholders = ",".join("?" for _ in unique)
@@ -2837,9 +2839,7 @@ class KnowledgeMixin(StorageShared):
                 )
             }
             lowered = content.casefold()
-            candidates = self.find_entities_by_normalized_names(
-                user_id, mention_phrase_candidates(content)
-            )
+            candidates = self.find_entities_by_normalized_names(user_id, mention_phrase_candidates(content))
             # Косвенный падеж — рядом с буквальной проверкой, а не вместо неё:
             # у идентификаторов границы слова строже, а падежей нет. См.
             # `inflected_mentions` и ту же добавку в `match_existing_entities`:

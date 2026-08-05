@@ -44,9 +44,7 @@ def test_understanding_is_no_longer_gated_on_the_question_shape() -> None:
     guard = source[start : source.index("asyncio.create_task", start)]
     # Комментарии отбрасываются: там имя условия названо намеренно — объяснить,
     # почему его убрали. Проверяется КОД.
-    code = "\n".join(
-        line for line in guard.splitlines() if not line.strip().startswith("#")
-    )
+    code = "\n".join(line for line in guard.splitlines() if not line.strip().startswith("#"))
     assert "_might_be_a_question" not in code, "просьбы снова остались без понимания"
     assert "worth_understanding" in code
 

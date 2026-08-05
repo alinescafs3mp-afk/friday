@@ -89,7 +89,9 @@ def test_a_real_question_still_gets_the_model(agent_with_a_model) -> None:
     её у настоящего вопроса значило бы лечить утечку ценой работы.
     """
     context = AgentContext(
-        conversation_id="c", user_id="alice", search_query="что там по графику?",
+        conversation_id="c",
+        user_id="alice",
+        search_query="что там по графику?",
         outward_verdict=("архив", None),
     )
 
@@ -99,7 +101,9 @@ def test_a_real_question_still_gets_the_model(agent_with_a_model) -> None:
 def test_the_turn_records_that_the_model_was_offered(agent_with_a_model) -> None:
     """Признак нужен предупреждению: данные приезжают тремя дорогами."""
     context = AgentContext(
-        conversation_id="c", user_id="alice", search_query="что там по графику?",
+        conversation_id="c",
+        user_id="alice",
+        search_query="что там по графику?",
         outward_verdict=("архив", None),
     )
 

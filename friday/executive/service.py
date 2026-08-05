@@ -136,8 +136,7 @@ def _compensation_for(tool_name: str, arguments: dict[str, Any] | None) -> str:
     if known:
         return f"{known}{hint}"
     return (
-        f"проверить, не осталось ли следа от вызова «{tool_name}»{hint}, "
-        "и убрать его вручную, если остался"
+        f"проверить, не осталось ли следа от вызова «{tool_name}»{hint}, и убрать его вручную, если остался"
     )
 
 
@@ -572,7 +571,9 @@ class ExecutiveService:
                     task["id"],
                     mission["user_id"],
                     status=TaskStatus.PENDING.value,
-                    error=f"сверено с состоянием: действие не выполнено ({detail}); шаг можно повторить"[:2000],
+                    error=f"сверено с состоянием: действие не выполнено ({detail}); шаг можно повторить"[
+                        :2000
+                    ],
                     started_at="",
                 )
             reconciled += 1
@@ -829,7 +830,9 @@ class ExecutiveService:
             # Named separately from a crash so the operator can tell "the model was
             # down" from "the step is broken" without opening the logs.
             LOGGER.warning("Mission task could not run: %s (%s)", task_id, exc)
-            self.storage.add_mission_spend(mission["id"], user_id, seconds=time.monotonic() - began, retries=1)
+            self.storage.add_mission_spend(
+                mission["id"], user_id, seconds=time.monotonic() - began, retries=1
+            )
             self.storage.update_mission_task_fields(
                 task_id,
                 user_id,
@@ -840,7 +843,9 @@ class ExecutiveService:
             return
         except Exception:
             LOGGER.exception("Mission task execution failed: %s", task_id)
-            self.storage.add_mission_spend(mission["id"], user_id, seconds=time.monotonic() - began, retries=1)
+            self.storage.add_mission_spend(
+                mission["id"], user_id, seconds=time.monotonic() - began, retries=1
+            )
             self.storage.update_mission_task_fields(
                 task_id,
                 user_id,
@@ -955,15 +960,11 @@ class ExecutiveService:
             # не нашлось — значит конфликт не про наш ключ, и тогда честнее вернуть
             # пустоту, чем выдумать идентификатор.
             LOGGER.warning("Mission task inbox candidate conflicted for %s", source_ref)
-            existing = self.storage.find_raw_by_source_ref(
-                mission["user_id"], "knowledge_work", source_ref
-            )
+            existing = self.storage.find_raw_by_source_ref(mission["user_id"], "knowledge_work", source_ref)
             if existing:
                 waiting = self.storage.find_inbox_by_raw(str(existing["id"]), mission["user_id"])
                 if waiting:
-                    LOGGER.info(
-                        "Mission task %s already delivered its result to the inbox", source_ref
-                    )
+                    LOGGER.info("Mission task %s already delivered its result to the inbox", source_ref)
                     return str(waiting.get("id") or "") or None
             return None
         inbox_id = result.get("inbox_id")

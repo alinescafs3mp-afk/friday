@@ -374,9 +374,7 @@ def test_an_unparsed_moment_never_becomes_an_empty_timeline():
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)  # noqa: SLF001
-    assert 'get("understood") is False' in source, (
-        "неразобранный момент подаётся модели как пустая лента"
-    )
+    assert 'get("understood") is False' in source, "неразобранный момент подаётся модели как пустая лента"
     branch = source[source.index('get("understood") is False') :][:900]
     assert "НЕ утверждай" in branch
 

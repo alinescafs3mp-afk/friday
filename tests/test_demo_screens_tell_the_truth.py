@@ -42,9 +42,7 @@ def test_a_pending_count_is_still_worth_saying():
     from friday.telegram_bridge._views import ViewsMixin
 
     source = inspect.getsource(ViewsMixin._send_entity_profile)  # noqa: SLF001
-    assert "Связей на проверке" in source, (
-        "при нулe подтверждённых очередь на проверку тоже замолчала"
-    )
+    assert "Связей на проверке" in source, "при нулe подтверждённых очередь на проверку тоже замолчала"
 
 
 @pytest.mark.parametrize(
@@ -555,7 +553,8 @@ def test_the_graph_card_counts_exactly_like_the_circle(storage):
 
     overview = {node["id"]: node["knowledge_count"] for node in storage.graph_overview("alice")["nodes"]}
     card = next(
-        node for node in storage.get_entity_graph("alice", entity.id, depth=1)["nodes"]
+        node
+        for node in storage.get_entity_graph("alice", entity.id, depth=1)["nodes"]
         if node["id"] == entity.id
     )
     assert card["knowledge_count"] == 2, "предложенные и отклонённые связи попали в счёт"

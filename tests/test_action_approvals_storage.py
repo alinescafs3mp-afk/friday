@@ -51,8 +51,7 @@ def test_a_rejected_request_stays_rejected(storage):
     assert storage.claim_action_approval(record["id"], "alice") is None
     # Второе решение по уже решённой заявке не проходит: решают один раз.
     assert (
-        storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice")
-        is None
+        storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice") is None
     )
     assert storage.get_action_approval(record["id"], "alice")["status"] == "rejected"
 
@@ -67,9 +66,7 @@ def test_a_claim_happens_exactly_once_under_concurrency(storage):
     storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(
-            pool.map(lambda _: storage.claim_action_approval(record["id"], "alice"), range(8))
-        )
+        results = list(pool.map(lambda _: storage.claim_action_approval(record["id"], "alice"), range(8)))
 
     winners = [item for item in results if item is not None]
     assert len(winners) == 1, f"подтверждение заявлено {len(winners)} раз вместо одного"
@@ -124,8 +121,7 @@ def test_an_expired_request_cannot_be_decided_or_claimed(storage):
     )
     storage.commit()
     assert (
-        storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice")
-        is None
+        storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice") is None
     ), "решение принято по просроченной заявке"
     assert storage.expire_action_approvals() >= 1
     assert storage.get_action_approval(record["id"], "alice")["status"] == "expired"
@@ -163,9 +159,7 @@ def test_a_finished_action_records_its_outcome(storage):
     record = _approval(storage)
     storage.decide_action_approval(record["id"], "alice", decision="approve", decided_by="alice")
     storage.claim_action_approval(record["id"], "alice")
-    done = storage.finish_action_approval(
-        record["id"], "alice", success=True, result={"status": "merged"}
-    )
+    done = storage.finish_action_approval(record["id"], "alice", success=True, result={"status": "merged"})
     assert done["status"] == "done" and done["result"] == {"status": "merged"}
     # Повторное завершение не проходит: заявка уже не «исполняется».
     assert storage.finish_action_approval(record["id"], "alice", success=True) is None
@@ -175,9 +169,7 @@ def test_approvals_do_not_cross_tenants(storage):
     record = _approval(storage)
     storage.ensure_user("bob")
     assert storage.get_action_approval(record["id"], "bob") is None
-    assert (
-        storage.decide_action_approval(record["id"], "bob", decision="approve", decided_by="bob") is None
-    )
+    assert storage.decide_action_approval(record["id"], "bob", decision="approve", decided_by="bob") is None
     assert storage.count_action_approvals("bob") == 0
     assert storage.count_action_approvals("alice", status="pending") == 1
 

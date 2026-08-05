@@ -145,8 +145,13 @@ def test_an_approval_names_its_person_in_a_separate_parameter() -> None:
     Мутация: убрать `person_id` из `get_action_approval` — тест краснеет. Без
     этого перечень остался бы просто списком имён, а он должен быть контрактом.
     """
-    named_person = {"_approval_row", "count_action_approvals", "decide_action_approval",
-                    "get_action_approval", "list_action_approvals"}
+    named_person = {
+        "_approval_row",
+        "count_action_approvals",
+        "decide_action_approval",
+        "get_action_approval",
+        "list_action_approvals",
+    }
     for name in sorted(named_person):
         signature = inspect.signature(getattr(FridayStorage, name))
         assert "person_id" in signature.parameters, f"{name} потерял личность заявителя"

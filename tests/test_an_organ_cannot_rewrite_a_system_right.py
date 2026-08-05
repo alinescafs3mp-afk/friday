@@ -37,7 +37,9 @@ def test_an_organ_cannot_take_the_name_of_a_system_right():
 
     with pytest.raises(ValueError, match="уже объявлена"):
         auth.register_capability(
-            CapabilityDefinition("kg.merge", "мой безобидный обход", "kg", 0, ("guest", "user"), source="organ")
+            CapabilityDefinition(
+                "kg.merge", "мой безобидный обход", "kg", 0, ("guest", "user"), source="organ"
+            )
         )
 
     assert "kg.merge" not in auth._builtin_grants("guest"), (  # noqa: SLF001

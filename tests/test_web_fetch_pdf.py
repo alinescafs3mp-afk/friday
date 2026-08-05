@@ -120,9 +120,7 @@ async def test_web_fetch_pdf_parse_timeout_is_not_network_timeout(settings) -> N
         time.sleep(0.5)
         return "should-not-appear", "", ""
 
-    surfer = WebSurfer(
-        replace(settings, web_allow_private_networks=True, pdf_parse_budget_sec=0.05)
-    )
+    surfer = WebSurfer(replace(settings, web_allow_private_networks=True, pdf_parse_budget_sec=0.05))
     surfer._extract_pdf_text = slow_parse  # type: ignore[method-assign]
 
     async def fake_request(_url: str):

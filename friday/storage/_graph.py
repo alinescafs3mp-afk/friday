@@ -1558,11 +1558,7 @@ class GraphMixin(StorageShared):
             recorded_merge_id = ""
             source_aliases = _json_load(source.get("aliases_json"), [])
             target_aliases = _json_load(target.get("aliases_json"), [])
-            aliases = {
-                item.strip()
-                for item in target_aliases
-                if item and item.strip()
-            }
+            aliases = {item.strip() for item in target_aliases if item and item.strip()}
             aliases.update(
                 item.strip()
                 for item in [*source_aliases, source["name"]]
@@ -1927,19 +1923,13 @@ class GraphMixin(StorageShared):
             # ordering. Otherwise this is a three-way inverse patch: later additions
             # and removals win, while aliases contributed by the merged source leave.
             before_aliases = [
-                str(item)
-                for item in _json_load(target_before.get("aliases_json"), [])
-                if str(item).strip()
+                str(item) for item in _json_load(target_before.get("aliases_json"), []) if str(item).strip()
             ]
             after_aliases = [
-                str(item)
-                for item in _json_load(target_after.get("aliases_json"), [])
-                if str(item).strip()
+                str(item) for item in _json_load(target_after.get("aliases_json"), []) if str(item).strip()
             ]
             current_aliases = [
-                str(item)
-                for item in _json_load(target_now.get("aliases_json"), [])
-                if str(item).strip()
+                str(item) for item in _json_load(target_now.get("aliases_json"), []) if str(item).strip()
             ]
             if current_aliases == after_aliases:
                 restored_alias_items = before_aliases
@@ -2099,12 +2089,9 @@ class GraphMixin(StorageShared):
                     ).fetchone()
                     if not current:
                         raise ValueError("A moved relation is missing; refuse to resurrect it on unmerge")
-                    if (
-                        str(current["source_entity_id"])
-                        != str(rewritten.get("source_entity_id") or "")
-                        or str(current["target_entity_id"])
-                        != str(rewritten.get("target_entity_id") or "")
-                    ):
+                    if str(current["source_entity_id"]) != str(
+                        rewritten.get("source_entity_id") or ""
+                    ) or str(current["target_entity_id"]) != str(rewritten.get("target_entity_id") or ""):
                         raise ValueError("A moved relation changed endpoints; refuse an unsafe unmerge")
                     # Only undo the endpoint rewrite. A human may have ended or
                     # otherwise annotated the relation after merge; reconstructing

@@ -211,10 +211,12 @@ def test_a_request_to_search_is_not_material_for_the_archive(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
-        before = len(app.state.storage.list_inbox_pending_for_tests()) if hasattr(
-            app.state.storage, "list_inbox_pending_for_tests"
-        ) else len(
-            [row for row in app.state.storage.execute("SELECT id FROM inbox WHERE status='pending'")]
+        before = (
+            len(app.state.storage.list_inbox_pending_for_tests())
+            if hasattr(app.state.storage, "list_inbox_pending_for_tests")
+            else len(
+                [row for row in app.state.storage.execute("SELECT id FROM inbox WHERE status='pending'")]
+            )
         )
 
         response = client.post(
@@ -227,9 +229,7 @@ def test_a_request_to_search_is_not_material_for_the_archive(settings):
         assert ingestion.get("queued_for_review") is False
         assert ingestion.get("category") == "web_request", ingestion
 
-        after = len(
-            [row for row in app.state.storage.execute("SELECT id FROM inbox WHERE status='pending'")]
-        )
+        after = len([row for row in app.state.storage.execute("SELECT id FROM inbox WHERE status='pending'")])
         assert after == before, "просьба поискать всё-таки осела во «Входящих»"
 
 
@@ -265,11 +265,7 @@ async def test_an_encyclopedia_fallback_is_never_passed_off_as_fresh(monkeypatch
     class _Result:
         success = True
         attachment = None
-        data = {
-            "sources": [
-                {"url": "https://ru.wikipedia.org/wiki/Погода", "title": "Погода", "text": "…"}
-            ]
-        }
+        data = {"sources": [{"url": "https://ru.wikipedia.org/wiki/Погода", "title": "Погода", "text": "…"}]}
 
         def to_llm_message(self) -> str:
             return "Результат web_research: статья «Погода»"

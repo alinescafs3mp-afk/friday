@@ -61,14 +61,12 @@ def test_regenerate_replays_last_user_message_not_an_earlier_one(settings):
         # дважды, не дождавшись ответа.
         storage = client.app.state.storage
         owner_id = str(
-            storage.execute(
-                "SELECT user_id FROM conversations WHERE id=?", (conversation_id,)
-            ).fetchone()["user_id"]
+            storage.execute("SELECT user_id FROM conversations WHERE id=?", (conversation_id,)).fetchone()[
+                "user_id"
+            ]
         )
         storage.store_message(conversation_id, owner_id, "user", "первый вопрос подряд")
-        storage.store_message(
-            conversation_id, owner_id, "user", "второй вопрос — именно его надо повторить"
-        )
+        storage.store_message(conversation_id, owner_id, "user", "второй вопрос — именно его надо повторить")
 
         seen: list[str] = []
 

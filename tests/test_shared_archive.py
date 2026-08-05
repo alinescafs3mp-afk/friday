@@ -138,9 +138,9 @@ def test_the_correspondence_stays_private(shared):
         assert "Личный разговор Коли" not in titles, "чужая переписка видна"
 
         mine = client.get("/api/conversations", headers=kolya).json()
-        assert "Личный разговор Коли" in [
-            str(item.get("title")) for item in mine.get("items") or []
-        ], "человек потерял собственную переписку"
+        assert "Личный разговор Коли" in [str(item.get("title")) for item in mine.get("items") or []], (
+            "человек потерял собственную переписку"
+        )
 
 
 def test_without_the_setting_isolation_is_intact(settings):
@@ -207,10 +207,10 @@ def test_a_telegram_turn_survives_the_shared_archive(shared):
 
     source = inspect.getsource(server)
     assert "get_channel_session(\n                actor.own_id" in source or (
-        "actor.own_id,\n                \"telegram\"," in source
+        'actor.own_id,\n                "telegram",' in source
     ), "сессия канала ищется по арендатору, а не по человеку"
     # И привязка, и чтение — обе стороны, иначе ход рвётся на второй реплике.
-    bindings = source.count('set_channel_conversation(\n                    actor.own_id')
+    bindings = source.count("set_channel_conversation(\n                    actor.own_id")
     assert bindings == 2, f"привязок канала на личный идентификатор: {bindings}, ожидалось 2"
 
 

@@ -234,9 +234,7 @@ async def test_a_truncated_pass_says_how_much_it_did_not_read(storage):
     graph.link_knowledge_to_entity(document.id, first, "alice")
     graph.link_knowledge_to_entity(document.id, second, "alice")
 
-    result = await graph.suggest_relations_from_structure(
-        "alice", document.id, llm=_Model({"relations": []})
-    )
+    result = await graph.suggest_relations_from_structure("alice", document.id, llm=_Model({"relations": []}))
     assert result["windows"] == 8
     assert result["windows_skipped"] > 0
 
@@ -354,9 +352,7 @@ async def test_a_dry_pass_writes_nothing(storage):
             ]
         }
     )
-    result = await graph.suggest_relations_from_structure(
-        "alice", document.id, llm=model, store=False
-    )
+    result = await graph.suggest_relations_from_structure("alice", document.id, llm=model, store=False)
 
     assert len(result["candidates"]) == 1
     assert result["candidates"][0]["status"] == "not_stored"

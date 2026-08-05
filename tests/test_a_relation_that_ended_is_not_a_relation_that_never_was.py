@@ -118,14 +118,10 @@ def test_invalidating_twice_is_refused(storage):
 def test_an_ended_relation_can_start_again_without_erasing_history(storage):
     """A repeated real-world interval is history, not a duplicate INSERT."""
     graph, person, unit, _other = _three(storage)
-    first = graph.create_relation(
-        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2020-01-01"
-    )
+    first = graph.create_relation("alice", person, unit, RelationType.MEMBER_OF, valid_from="2020-01-01")
     graph.invalidate_relation("alice", first.id, valid_to="2023-06-01")
 
-    second = graph.create_relation(
-        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01"
-    )
+    second = graph.create_relation("alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01")
 
     assert second.id != first.id
     assert [row["id"] for row in storage.get_entity_relations(person, "alice")] == [second.id]
@@ -143,12 +139,8 @@ def test_an_ended_relation_can_start_again_without_erasing_history(storage):
 
 def test_creating_the_same_active_interval_remains_idempotent(storage):
     graph, person, unit, _other = _three(storage)
-    first = graph.create_relation(
-        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01"
-    )
-    repeated = graph.create_relation(
-        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01"
-    )
+    first = graph.create_relation("alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01")
+    repeated = graph.create_relation("alice", person, unit, RelationType.MEMBER_OF, valid_from="2024-01-01")
 
     assert repeated.id == first.id
     rows = storage.get_entity_relations(person, "alice", include_invalidated=True)
@@ -157,9 +149,7 @@ def test_creating_the_same_active_interval_remains_idempotent(storage):
 
 def test_relation_dates_are_normalized_and_a_backwards_interval_is_refused(storage):
     graph, person, unit, _other = _three(storage)
-    relation = graph.create_relation(
-        "alice", person, unit, RelationType.MEMBER_OF, valid_from="2024/3/5"
-    )
+    relation = graph.create_relation("alice", person, unit, RelationType.MEMBER_OF, valid_from="2024/3/5")
     stored = storage.execute("SELECT valid_from FROM relations WHERE id=?", (relation.id,)).fetchone()
     assert stored["valid_from"] == "2024-03-05"
 

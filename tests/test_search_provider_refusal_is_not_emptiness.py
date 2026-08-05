@@ -121,9 +121,7 @@ async def test_yandex_xml_is_parsed_into_results(settings):
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Api-Key test-key"
-        return httpx.Response(
-            200, json={"rawData": base64.b64encode(_YANDEX_XML.encode()).decode()}
-        )
+        return httpx.Response(200, json={"rawData": base64.b64encode(_YANDEX_XML.encode()).decode()})
 
     surfer = _surfer(settings, handler, yandex_search_api_key="test-key")
     results = await surfer.search("ключевая ставка", max_results=5)
@@ -177,7 +175,7 @@ async def test_duckduckgo_200_without_markup_is_also_a_refusal(settings):
 _WIKIPEDIA_JSON = {
     "query": {
         "search": [
-            {"title": "Эльбрус", "snippet": "<span class=\"searchmatch\">Эльбру́с</span> — стратовулкан"},
+            {"title": "Эльбрус", "snippet": '<span class="searchmatch">Эльбру́с</span> — стратовулкан'},
             {"title": "Эльбрус (микропроцессор)", "snippet": "Серия микропроцессоров"},
         ]
     }
@@ -234,9 +232,7 @@ async def test_the_encyclopedia_is_asked_last_not_first(settings):
     surfer = _surfer(settings, handler, yandex_search_api_key="")
     results = await surfer.search("ключевая ставка")
     await surfer.close()
-    assert results and results[0].source != "wikipedia-ru", (
-        "энциклопедия обогнала поисковики"
-    )
+    assert results and results[0].source != "wikipedia-ru", "энциклопедия обогнала поисковики"
 
 
 @pytest.mark.anyio

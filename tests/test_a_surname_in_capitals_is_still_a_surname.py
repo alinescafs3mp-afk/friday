@@ -31,8 +31,7 @@ def _people(text: str) -> set[str]:
     return {
         str(item["name"])
         for item in _extract_entities(text)
-        if str(item["entity_type"]) == "person"
-        and str(item["method"]) == "explicit_person_patronymic"
+        if str(item["entity_type"]) == "person" and str(item["method"]) == "explicit_person_patronymic"
     }
 
 

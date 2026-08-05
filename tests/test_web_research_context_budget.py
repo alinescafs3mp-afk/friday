@@ -185,8 +185,7 @@ class _UnreadableFirstPagesHarness:
     async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
         del query, max_results
         return [
-            SearchResult(f"Source {n}", f"https://source-{n}.example/", "", "fixture")
-            for n in range(1, 7)
+            SearchResult(f"Source {n}", f"https://source-{n}.example/", "", "fixture") for n in range(1, 7)
         ]
 
     async def fetch(self, url: str, *, max_length: int) -> FetchResult:
@@ -214,9 +213,7 @@ async def test_the_spare_results_are_used_when_the_first_pages_are_unreadable() 
 
     assert len(harness.fetched) > 3, "запас из выдачи так и не прочитан"
     readable = [
-        item
-        for item in result["sources"]
-        if not item["error"] and str(item.get("text") or "").strip()
+        item for item in result["sources"] if not item["error"] and str(item.get("text") or "").strip()
     ]
     assert readable, "все источники пусты, хотя четвёртая ссылка отвечала"
     assert "78,40" in readable[0]["text"]

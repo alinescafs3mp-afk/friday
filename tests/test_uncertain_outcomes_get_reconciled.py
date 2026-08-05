@@ -89,10 +89,9 @@ def test_only_an_uncertain_approval_can_be_settled(storage) -> None:
     storage.claim_action_approval(approval_id, "alice")
     storage.finish_action_approval(approval_id, "alice", success=True, result={"ok": True})
 
-    assert (
-        storage.settle_uncertain_approval(approval_id, "alice", happened=False, detail="поздно")
-        is None
-    ), "сверка переписала исход, который уже известен точнее"
+    assert storage.settle_uncertain_approval(approval_id, "alice", happened=False, detail="поздно") is None, (
+        "сверка переписала исход, который уже известен точнее"
+    )
     assert storage.get_action_approval(approval_id, "alice")["status"] == "done"
 
 

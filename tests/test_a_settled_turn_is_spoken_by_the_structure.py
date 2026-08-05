@@ -73,17 +73,12 @@ class _Hostile:
         if '"вид": "интернет' in asked:
             return {
                 "content": (
-                    f'{{"вид": "{self.kind}", "правило": "{self.rule}", '
-                    '"запрос": "", "кто": "", "дни": []}'
+                    f'{{"вид": "{self.kind}", "правило": "{self.rule}", "запрос": "", "кто": "", "дни": []}}'
                 )
             }
         if '"запомнить|забыть|ничего"' in asked:
             rest = "" if self.rest is None else f', "остаток": "{self.rest}"'
-            return {
-                "content": (
-                    f'{{"действие": "запомнить", "правило": "{self.rule}", "прежнее": 0{rest}}}'
-                )
-            }
+            return {"content": (f'{{"действие": "запомнить", "правило": "{self.rule}", "прежнее": 0{rest}}}')}
         self.final_calls += 1
         self.final_prompts.append(asked)
         return {"content": self.final}

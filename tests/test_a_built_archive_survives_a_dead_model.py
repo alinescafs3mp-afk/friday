@@ -48,7 +48,9 @@ async def test_the_archive_is_returned_even_when_the_model_is_silent(settings, s
     context = AgentContext(conversation_id="c", user_id="alice", search_query="")
     context.kb_size = 10
 
-    async def _collected(context, actor, messages, tools_used, tool_evidence, file_clips, tools, *, message=""):  # noqa: ANN001, ANN003, ARG001
+    async def _collected(
+        context, actor, messages, tools_used, tool_evidence, file_clips, tools, *, message=""
+    ):  # noqa: ANN001, ANN003, ARG001
         """Предвыборка успела собрать файл до того, как модель замолчала."""
         file_clips.append(made)
 
@@ -89,17 +91,13 @@ def test_every_exit_of_the_loop_carries_the_files() -> None:
     # тексту, ловила один вместо шести и краснела на верном коде.
     tree = ast.parse(textwrap.dedent(inspect.getsource(AgentRuntime._agentic_loop)))  # noqa: SLF001
     exits = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
+        node for node in ast.walk(tree) if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
     ]
 
     assert len(exits) >= 4, f"выходов найдено {len(exits)} — проверь, не переписан ли цикл"
     without = [
         node.lineno
         for node in exits
-        if "file_clips" not in {
-            key.value for key in node.value.keys if isinstance(key, ast.Constant)
-        }
+        if "file_clips" not in {key.value for key in node.value.keys if isinstance(key, ast.Constant)}
     ]
     assert not without, f"выходы цикла в строках {without} теряют собранный файл"

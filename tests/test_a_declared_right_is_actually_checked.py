@@ -93,7 +93,9 @@ async def test_a_guest_cannot_read_the_nightly_compacts(settings, storage):
         actor = ActorContext(user_id=person, preset_key=preset, source="api")
         request = type("Request", (), {})()
         request.app = type(
-            "App", (), {"state": type("S", (), {"storage": storage, "auth_service": auth, "settings": settings})()}
+            "App",
+            (),
+            {"state": type("S", (), {"storage": storage, "auth_service": auth, "settings": settings})()},
         )()
         request.state = type("RS", (), {"actor": actor})()
         return request

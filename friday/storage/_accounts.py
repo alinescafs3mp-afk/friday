@@ -219,8 +219,13 @@ class AccountsMixin(StorageShared):
         что неверно и что верно, — а правило одно.
         """
         return self._remember_personal_line(
-            user_id, "corrections", correction, replaces=replaces, forget=forget,
-            limit=limit, chars=chars,
+            user_id,
+            "corrections",
+            correction,
+            replaces=replaces,
+            forget=forget,
+            limit=limit,
+            chars=chars,
         )
 
     def remember_standing_rule(
@@ -252,8 +257,13 @@ class AccountsMixin(StorageShared):
         положить в контекст ЭТОГО же хода, а не следующего.
         """
         return self._remember_personal_line(
-            user_id, "standing_rules", rule, replaces=replaces, forget=forget,
-            limit=limit, chars=chars,
+            user_id,
+            "standing_rules",
+            rule,
+            replaces=replaces,
+            forget=forget,
+            limit=limit,
+            chars=chars,
         )
 
     def _remember_personal_line(

@@ -81,7 +81,10 @@ def test_grouping_by_extension_collapses_the_queue(seeded):
 
 
 def test_grouping_by_directory_uses_the_immediate_parent(seeded):
-    groups = {group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="directory")["groups"]}
+    groups = {
+        group["key"]: group["total"]
+        for group in seeded.group_pending_inbox("alice", by="directory")["groups"]
+    }
 
     assert groups["/home/u/Проекты/код"] == 5
     assert groups["/home/u/Документы"] == 2
@@ -90,7 +93,9 @@ def test_grouping_by_directory_uses_the_immediate_parent(seeded):
 
 
 def test_grouping_by_source_separates_import_from_chat(seeded):
-    groups = {group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="source")["groups"]}
+    groups = {
+        group["key"]: group["total"] for group in seeded.group_pending_inbox("alice", by="source")["groups"]
+    }
     assert groups == {"upload": 7, "telegram": 1}
 
 

@@ -50,8 +50,7 @@ def test_a_request_survives_rephrasing_and_typos(message):
     "message",
     [
         # Тот самый текст, который уходил целиком в Яндекс, Brave и DuckDuckGo.
-        "Приказ №214: с 1 августа доступ в интернете к порталу ограничить, "
-        "ответственный Проскурин В.А.",
+        "Приказ №214: с 1 августа доступ в интернете к порталу ограничить, ответственный Проскурин В.А.",
         "в интернете полно ерунды, запиши это",
         "запиши в блокнот: интернет отключат в среду",
         "сохрани заметку про интернет-магазин",
@@ -166,9 +165,7 @@ def test_the_prefetch_actually_asks_the_arbiter():
     )
     assert "_might_be_a_question(message)" in source, "предфильтр не подключён"
     # Явная просьба остаётся исполненной, даже если арбитр её не признал.
-    assert "web_query_from(message)" in source, (
-        "при отказе арбитра прямая просьба человека теряется"
-    )
+    assert "web_query_from(message)" in source, "при отказе арбитра прямая просьба человека теряется"
 
 
 def test_a_question_about_the_timeline_never_goes_to_a_search_engine():
@@ -318,6 +315,7 @@ def test_a_person_found_in_the_graph_stops_the_search():
     assert asyncio.run(
         runtime._mentions_someone_from_the_archive("расскажи про Хасанову", _Actor())  # noqa: SLF001
     )
+
     # Не человек — не повод отменять поиск: «Москва» в графе как локация не
     # должна запрещать вопрос о погоде в Москве.
     class _Places:

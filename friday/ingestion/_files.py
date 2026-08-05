@@ -813,9 +813,7 @@ class FilesMixin(PipelineShared):
                         # тест был зелёным, потому что звал потребителя с
                         # рукотворным словарём, то есть подменял ровно то место,
                         # где обрыв и был.
-                        "parse_pages_truncated": bool(
-                            (extraction.metadata or {}).get("pages_truncated")
-                        ),
+                        "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
                         "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
                         "vision": {
                             key: value

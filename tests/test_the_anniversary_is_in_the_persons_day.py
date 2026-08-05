@@ -92,7 +92,5 @@ def test_a_naive_moment_does_not_break_the_call(storage) -> None:
     storage.ensure_user("alice")
     _seed(storage, "Без пояса", datetime(2025, 8, 3, 12, 0, tzinfo=UTC).isoformat())
 
-    titles = [
-        item["title"] for item in build_on_this_day(storage, "alice", datetime(2026, 8, 3, 10, 0))
-    ]
+    titles = [item["title"] for item in build_on_this_day(storage, "alice", datetime(2026, 8, 3, 10, 0))]
     assert "Без пояса" in titles

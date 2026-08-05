@@ -111,9 +111,7 @@ def test_the_budget_is_one_knob_for_both_intake_paths(settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_parse_is_recorded_on_the_stored_object(
-    settings, storage, monkeypatch
-) -> None:
+async def test_a_truncated_parse_is_recorded_on_the_stored_object(settings, storage, monkeypatch) -> None:
     """Частичность — свойство хранимого документа, а не подробность одного ответа."""
     import friday.ingestion._core as core
 
@@ -157,9 +155,7 @@ async def test_a_complete_parse_does_not_claim_truncation(settings, storage) -> 
 
 
 @pytest.mark.asyncio
-async def test_the_transient_preview_separates_its_two_truncations(
-    settings, storage, monkeypatch
-) -> None:
+async def test_the_transient_preview_separates_its_two_truncations(settings, storage, monkeypatch) -> None:
     """`text_truncated` — короткий предпросмотр; обрыв разбора — это другое.
 
     Читатель, которому показали только первое, решит, что полный текст есть и его
@@ -170,9 +166,7 @@ async def test_the_transient_preview_separates_its_two_truncations(
     monkeypatch.setattr(core, "DocumentExtractor", _TruncatingExtractor)
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
 
-    preview = await pipeline.inspect_file_transient(
-        _PDF, filename="lease.pdf", mime_type="application/pdf"
-    )
+    preview = await pipeline.inspect_file_transient(_PDF, filename="lease.pdf", mime_type="application/pdf")
     assert preview["parse_deadline_reached"] is True
     assert preview["parse_pages_read"] == 12
     assert preview["text_truncated"] is False, "предпросмотр влез целиком — обрезки предпросмотра тут нет"

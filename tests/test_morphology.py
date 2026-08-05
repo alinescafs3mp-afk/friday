@@ -145,9 +145,7 @@ def test_short_but_ordinary_words_lose_their_case_endings():
         ("дома", "дом"),
         ("сына", "сын"),
     ):
-        assert stem(surface, LEXICAL_MIN_STEM_INPUT) == expected, (
-            f"{surface!r} не свёлся к {expected!r}"
-        )
+        assert stem(surface, LEXICAL_MIN_STEM_INPUT) == expected, f"{surface!r} не свёлся к {expected!r}"
         # По умолчанию порог прежний: имена («Иван» → «ива») ломать нельзя.
         assert stem("Иван") == "Иван"
 

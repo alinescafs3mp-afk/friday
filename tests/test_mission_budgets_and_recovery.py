@@ -103,7 +103,9 @@ def test_spent_budget_survives_a_restart(storage, settings):
     assert (row["spent_seconds"], row["spent_tool_calls"], row["spent_retries"]) == (42, 7, 2)
 
 
-@pytest.mark.parametrize("state", ["pending", "running", "done", "failed", "skipped", "uncertain", "compensated"])
+@pytest.mark.parametrize(
+    "state", ["pending", "running", "done", "failed", "skipped", "uncertain", "compensated"]
+)
 def test_every_recovery_state_is_allowed(storage, state):
     """Мутация: вернуть прежний CHECK без `uncertain` — тест краснеет.
 
@@ -115,9 +117,10 @@ def test_every_recovery_state_is_allowed(storage, state):
     task_id = _task(storage, mission_id)
     with storage.transaction() as conn:
         conn.execute("UPDATE mission_tasks SET status=? WHERE id=?", (state, task_id))
-    assert storage.execute(
-        "SELECT status FROM mission_tasks WHERE id=?", (task_id,)
-    ).fetchone()["status"] == state
+    assert (
+        storage.execute("SELECT status FROM mission_tasks WHERE id=?", (task_id,)).fetchone()["status"]
+        == state
+    )
 
 
 def test_an_invented_state_is_still_refused(storage):
@@ -164,9 +167,12 @@ def test_attempts_are_counted_on_the_step_itself(storage):
     for expected in (1, 2, 3):
         with storage.transaction() as conn:
             conn.execute("UPDATE mission_tasks SET attempts = attempts + 1 WHERE id=?", (task_id,))
-        assert storage.execute(
-            "SELECT attempts FROM mission_tasks WHERE id=?", (task_id,)
-        ).fetchone()["attempts"] == expected
+        assert (
+            storage.execute("SELECT attempts FROM mission_tasks WHERE id=?", (task_id,)).fetchone()[
+                "attempts"
+            ]
+            == expected
+        )
 
 
 def test_spend_accumulates_without_losing_a_tick(storage):

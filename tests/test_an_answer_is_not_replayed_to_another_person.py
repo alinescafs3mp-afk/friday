@@ -64,9 +64,7 @@ def test_the_collision_this_prevents(shared) -> None:
     """
     tenant = "tenant"
     first = shared.idempotency_claim(tenant, "ref-1", request_hash=SAME_HASH, lease_seconds=60)
-    shared.idempotency_complete(
-        tenant, "ref-1", first["lease_token"], {"conversation_id": "conv-a"}
-    )
+    shared.idempotency_complete(tenant, "ref-1", first["lease_token"], {"conversation_id": "conv-a"})
 
     second = shared.idempotency_claim(tenant, "ref-1", request_hash=SAME_HASH, lease_seconds=60)
 

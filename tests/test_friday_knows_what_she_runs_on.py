@@ -55,9 +55,7 @@ class _Hostile:
         if "РАЗГОВОР или ЗАПРОС" in asked:
             return {"content": "ЗАПРОС"}
         if '"вид": "интернет' in asked:
-            return {
-                "content": '{"вид": "знание", "правило": "", "запрос": "", "кто": "", "дни": []}'
-            }
+            return {"content": '{"вид": "знание", "правило": "", "запрос": "", "кто": "", "дни": []}'}
         if '"остаток"' in asked and "уже решена" in asked:
             return {"content": '{"остаток": "%s"}' % ("" if self.rest is None else self.rest)}
         self.final_calls += 1
@@ -110,9 +108,7 @@ def test_a_question_beside_it_is_still_answered(settings, storage) -> None:
     """
     llm = _Hostile(rest="и что там по отчёту за июль")
 
-    said = _answer(
-        settings, storage, llm, "а какая ты модель? и что там по отчёту за июль"
-    )
+    said = _answer(settings, storage, llm, "а какая ты модель? и что там по отчёту за июль")
 
     assert llm.final_calls == 1, "вопрос человека потерян МОЛЧА"
     assert "gpt-4o" not in said.casefold(), "выдумка вернулась вместе с остатком"
@@ -141,8 +137,7 @@ def test_talking_about_other_models_is_left_alone(settings, storage) -> None:
     from friday.agent_runtime import _CALLS_ITSELF_SOMEONE_ELSE
 
     innocent = (
-        "GPT-4o — это модель OpenAI, вышедшая в 2024 году. Работает в дата-центрах "
-        "на ускорителях NVIDIA."
+        "GPT-4o — это модель OpenAI, вышедшая в 2024 году. Работает в дата-центрах на ускорителях NVIDIA."
     )
 
     assert not _CALLS_ITSELF_SOMEONE_ELSE.search(innocent), "подменили бы законный ответ"

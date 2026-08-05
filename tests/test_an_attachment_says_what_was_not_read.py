@@ -74,9 +74,7 @@ def test_a_whole_document_says_nothing():
 
 def test_the_line_is_a_fact_not_an_instruction():
     """Служебная строка не должна читаться как поручение модели."""
-    line = _what_is_missing_from_this_attachment(
-        {"extraction_success": False, "extraction_error": "сломан"}
-    )
+    line = _what_is_missing_from_this_attachment({"extraction_success": False, "extraction_error": "сломан"})
     for imperative in ("скажи", "сообщи", "не обещай", "предупреди"):
         assert imperative not in line.lower(), f"строка написана как приказ: {line!r}"
 

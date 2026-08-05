@@ -58,10 +58,7 @@ def _learn(runtime: AgentRuntime, message: str, *, kind: str = "поправка
     return context
 
 
-FIXED = (
-    '{"действие": "запомнить", "правило": "День морской пехоты — 27 ноября, '
-    'а не 27 июля", "прежнее": 0}'
-)
+FIXED = '{"действие": "запомнить", "правило": "День морской пехоты — 27 ноября, а не 27 июля", "прежнее": 0}'
 NOTHING = '{"действие": "ничего", "правило": "", "прежнее": 0}'
 
 
@@ -92,9 +89,7 @@ def test_it_rides_in_every_later_turn(settings, storage) -> None:
     storage.remember_correction("alice", "День морской пехоты — 27 ноября")
     agent = AgentRuntime(settings, storage)
 
-    context = AgentContext(
-        conversation_id="conv", user_id="alice", conversation_history=[], search_query=""
-    )
+    context = AgentContext(conversation_id="conv", user_id="alice", conversation_history=[], search_query="")
     messages = agent._build_initial_messages(context, "", None, tool_enabled=False)
 
     data = [m["content"] for m in messages if m.get("role") == "user"]
@@ -213,6 +208,7 @@ def test_rules_and_corrections_do_not_mix(settings, storage) -> None:
     assert agent._standing_rules("alice") == ["не ставить смайлики"]
     assert agent._corrections("alice") == ["День морской пехоты — 27 ноября"]
 
+
 def test_a_correction_does_not_raise_the_timeline() -> None:
     """Дата в поправке не должна поднимать ленту событий.
 
@@ -225,7 +221,7 @@ def test_a_correction_does_not_raise_the_timeline() -> None:
     перечня — тест краснеет.
     """
     source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)
-    at = source.index('startswith((')
+    at = source.index("startswith((")
     guard = source[at : at + 160]
     for kind in ("поправка", "правило", "быт", "действие", "интернет"):
         assert f'"{kind}"' in guard, f"вид «{kind}» не защищён от ленты событий"

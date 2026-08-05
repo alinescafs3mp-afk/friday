@@ -41,8 +41,7 @@ class _AsksForTheWeb:
         asked = " ".join(str(item.get("content") or "") for item in messages)
         if '"вид": "интернет' in asked:
             return {
-                "content": '{"вид": "интернет", "запрос": "курс евро", "кто": "", '
-                '"дни": [], "правило": ""}'
+                "content": '{"вид": "интернет", "запрос": "курс евро", "кто": "", "дни": [], "правило": ""}'
             }
         return {"content": "готово"}
 
@@ -93,9 +92,7 @@ def test_the_page_text_does_reach_the_model(settings, storage):
     """Ошибка в другую сторону: рамка не должна съедать саму выдачу."""
     messages = _prefetched(settings, storage)
 
-    user_text = " ".join(
-        str(item.get("content") or "") for item in messages if item.get("role") == "user"
-    )
+    user_text = " ".join(str(item.get("content") or "") for item in messages if item.get("role") == "user")
     assert "92,4" in user_text, "выдача потерялась вместе с защитой"
     assert "untrusted" in user_text.casefold()
 

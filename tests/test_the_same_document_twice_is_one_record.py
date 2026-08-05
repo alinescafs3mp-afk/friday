@@ -85,7 +85,9 @@ async def test_a_resaved_document_does_not_become_a_second_record(settings, stor
     )
 
     # Тот же текст, набранный с другими переносами, — тот же документ.
-    found = storage.find_file_by_extracted_text("alice", digest("Приказ №214 от 3 мая.\nО проведении поверки приборов."))
+    found = storage.find_file_by_extracted_text(
+        "alice", digest("Приказ №214 от 3 мая.\nО проведении поверки приборов.")
+    )
 
     assert found is not None, "тот же документ под другим файлом снова заведёт вторую запись"
     assert found["id"] == "raw-first"
@@ -240,12 +242,20 @@ async def test_a_changed_document_is_ingested_as_its_own_record(settings, storag
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
 
     await pipeline.ingest_file(
-        "alice", None, "Поверку провести до 1 июня".encode(), filename="a.txt",
-        mime_type="text/plain", source_ref="upload:1",
+        "alice",
+        None,
+        "Поверку провести до 1 июня".encode(),
+        filename="a.txt",
+        mime_type="text/plain",
+        source_ref="upload:1",
     )
     changed = await pipeline.ingest_file(
-        "alice", None, "Поверку провести до 15 июня".encode(), filename="b.txt",
-        mime_type="text/plain", source_ref="upload:2",
+        "alice",
+        None,
+        "Поверку провести до 15 июня".encode(),
+        filename="b.txt",
+        mime_type="text/plain",
+        source_ref="upload:2",
     )
 
     assert not changed.get("idempotent_replay"), "изменённый документ молча слился с прежним"

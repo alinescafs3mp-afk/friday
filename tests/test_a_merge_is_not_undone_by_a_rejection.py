@@ -58,9 +58,7 @@ def test_a_rejection_does_not_overwrite_a_merge(storage) -> None:
     candidate = _pair(storage, left, right)
     storage.merge_entities("alice", left.id, right.id)
 
-    changed = storage.resolve_candidate(
-        candidate.id, ResolutionStatus.REJECTED, "alice", user_id="alice"
-    )
+    changed = storage.resolve_candidate(candidate.id, ResolutionStatus.REJECTED, "alice", user_id="alice")
 
     assert changed is False, "отказ переписал состоявшееся слияние"
     assert str(storage.get_resolution_candidate(candidate.id, "alice")["status"]) == "merged"
@@ -77,9 +75,7 @@ def test_an_undo_can_still_return_the_pair_to_the_queue(storage) -> None:
     candidate = _pair(storage, left, right)
     storage.merge_entities("alice", left.id, right.id)
 
-    returned = storage.resolve_candidate(
-        candidate.id, ResolutionStatus.SUGGESTED, "alice", user_id="alice"
-    )
+    returned = storage.resolve_candidate(candidate.id, ResolutionStatus.SUGGESTED, "alice", user_id="alice")
 
     assert returned is True
     assert str(storage.get_resolution_candidate(candidate.id, "alice")["status"]) == "suggested"
@@ -92,9 +88,7 @@ def test_a_rejected_pair_can_still_be_merged_later(storage) -> None:
     candidate = _pair(storage, left, right)
     storage.resolve_candidate(candidate.id, ResolutionStatus.REJECTED, "alice", user_id="alice")
 
-    merged = storage.resolve_candidate(
-        candidate.id, ResolutionStatus.MERGED, "alice", user_id="alice"
-    )
+    merged = storage.resolve_candidate(candidate.id, ResolutionStatus.MERGED, "alice", user_id="alice")
 
     assert merged is True
 

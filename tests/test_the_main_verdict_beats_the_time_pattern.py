@@ -87,9 +87,7 @@ def test_a_question_without_a_verdict_behaves_as_before() -> None:
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel()
     bound = AgentRuntime._prefetch_the_timeline_if_asked.__get__(runtime, AgentRuntime)
-    asyncio.run(
-        bound("что было 26 июля", None, [{"function": {"name": "what_happened"}}], [], [], [])
-    )
+    asyncio.run(bound("что было 26 июля", None, [{"function": {"name": "what_happened"}}], [], [], []))
     assert runtime.kernel.calls == ["what_happened"]
 
 

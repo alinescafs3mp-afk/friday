@@ -43,18 +43,14 @@ def kernel_for(settings, storage):
         auth = AuthorizationService(storage)
         graph = KnowledgeGraph(storage)
         kernel = ExecutionKernel(auth, settings)
-        kernel.bind_services(
-            storage, graph, WebSurfer(settings), IngestionPipeline(settings, storage, graph)
-        )
+        kernel.bind_services(storage, graph, WebSurfer(settings), IngestionPipeline(settings, storage, graph))
         return kernel, auth.actor_for_user(user_id, source="test")
 
     return build
 
 
 def _cards(storage, user_id: str = "alice") -> int:
-    return storage.execute(
-        "SELECT COUNT(*) AS n FROM inbox WHERE user_id=?", (user_id,)
-    ).fetchone()["n"]
+    return storage.execute("SELECT COUNT(*) AS n FROM inbox WHERE user_id=?", (user_id,)).fetchone()["n"]
 
 
 @pytest.mark.asyncio
@@ -212,8 +208,6 @@ async def test_in_a_shared_archive_each_person_gets_their_card(settings, storage
     assert _cards(storage, "tenant") == 2, "предложение участника заглушено предложением соседа"
     authors = {
         json.loads(row["metadata_json"] or "{}").get("requested_by")
-        for row in storage.execute(
-            "SELECT metadata_json FROM raw_objects WHERE user_id='tenant'"
-        ).fetchall()
+        for row in storage.execute("SELECT metadata_json FROM raw_objects WHERE user_id='tenant'").fetchall()
     }
     assert authors == {"person-a", "person-b"}

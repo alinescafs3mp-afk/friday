@@ -42,9 +42,7 @@ def test_a_neighbour_directory_does_not_pass_as_the_store(tmp_path) -> None:
     neighbour.mkdir()
     (neighbour / "чужой.txt").write_bytes("чужой".encode())
 
-    payload, left_out, _size = _pack_archive(
-        store, _rows("свой.txt", "../files_backup/чужой.txt"), name="a"
-    )
+    payload, left_out, _size = _pack_archive(store, _rows("свой.txt", "../files_backup/чужой.txt"), name="a")
 
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         inside = archive.namelist()

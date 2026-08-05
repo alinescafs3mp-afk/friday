@@ -44,11 +44,18 @@ def _archive(storage) -> dict[str, str]:
     graph.link_knowledge_to_entity(place.id, town, "alice")
 
     graph.create_relation(
-        "alice", people["Кублик Александр Юрьевич"], people["Варламова Ольга Васильевна"],
-        RelationType.FAMILY_OF, weight=0.9,
+        "alice",
+        people["Кублик Александр Юрьевич"],
+        people["Варламова Ольга Васильевна"],
+        RelationType.FAMILY_OF,
+        weight=0.9,
     )
     graph.create_relation(
-        "alice", people["Кублик Александр Юрьевич"], unit, RelationType.MEMBER_OF, weight=0.8,
+        "alice",
+        people["Кублик Александр Юрьевич"],
+        unit,
+        RelationType.MEMBER_OF,
+        weight=0.8,
     )
     return people
 
@@ -122,9 +129,7 @@ def test_the_route_passes_filters_through(settings):
         people = _archive(storage)
         assert people
 
-        everything = client.get(
-            "/api/admin/graph", params={"user_id": "alice"}, headers=owner
-        )
+        everything = client.get("/api/admin/graph", params={"user_id": "alice"}, headers=owner)
         assert everything.status_code == 200
         assert {edge["kind"] for edge in everything.json()["edges"]} == {"relation", "cooccurrence"}
 

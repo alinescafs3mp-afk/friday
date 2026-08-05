@@ -34,8 +34,7 @@ class _Surfer:
                 {
                     "url": "https://cbr.ru/hd_base/KeyRate/",
                     "title": "Ключевая ставка Банка России",
-                    "text": "Ключевая ставка Банка России составляет 14,00% годовых на 31.07.2026. "
-                    * 6,
+                    "text": "Ключевая ставка Банка России составляет 14,00% годовых на 31.07.2026. " * 6,
                 },
                 {"url": "https://example.org/empty", "title": "Пусто", "text": ""},
             ]
@@ -136,9 +135,7 @@ async def test_searching_is_allowed_without_the_right_to_write(settings, storage
 
     assert result.success, f"поиск запретили вместе с записью: {result.error}"
     assert result.data.get("sources"), "выдача не дошла до того, кому искать можно"
-    assert not (result.data.get("captured") or []), (
-        "права на запись нет, а страница всё равно сохранена"
-    )
+    assert not (result.data.get("captured") or []), "права на запись нет, а страница всё равно сохранена"
     assert storage.list_inbox("reader") == []
 
 

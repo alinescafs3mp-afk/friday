@@ -112,9 +112,10 @@ def series_neighbour_reason(storage: Any, user_id: str, id_a: str, id_b: str) ->
     right = storage.get_knowledge_object(id_b, user_id)
     if not left or not right:
         return ""
-    if _WHITESPACE.sub(" ", str(left.get("content") or "")).strip() == _WHITESPACE.sub(
-        " ", str(right.get("content") or "")
-    ).strip():
+    if (
+        _WHITESPACE.sub(" ", str(left.get("content") or "")).strip()
+        == _WHITESPACE.sub(" ", str(right.get("content") or "")).strip()
+    ):
         # Текст совпал знак в знак — это копия, как бы ни назывались файлы.
         return ""
     left_meta = left.get("metadata_json")

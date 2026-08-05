@@ -35,6 +35,8 @@ def citation_labels(text: str) -> list[str]:
             if upper and upper not in seen:
                 seen.append(upper)
     return seen
+
+
 _CLAIM_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
 # Below this the claim and the object share almost no vocabulary. Calibrated against
 # the measured gap between a supported claim (~0.25-0.51) and an unrelated one

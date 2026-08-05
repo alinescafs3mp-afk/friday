@@ -83,10 +83,7 @@ def test_an_honest_empty_answer_is_not_flagged() -> None:
 
 def test_a_short_answer_is_not_flagged() -> None:
     """Короткая реплика утверждением не является, и оговорка была бы длиннее её."""
-    assert (
-        _grounding_warning("Не помню такого.", None, asked_about_his_own=True, nothing_arrived=True)
-        == ""
-    )
+    assert _grounding_warning("Не помню такого.", None, asked_about_his_own=True, nothing_arrived=True) == ""
 
 
 def test_the_older_warnings_still_win_when_they_apply() -> None:

@@ -119,9 +119,7 @@ def test_an_event_from_a_document_is_everyones_business(settings, storage) -> No
     core.bind_services(storage, graph, WebSurfer(shared), IngestionPipeline(shared, storage, graph))
 
     event = graph.create_entity(LEGACY_OWNER_USER_ID, "Совещание по поверке", EntityType.EVENT)
-    graph.set_event_time(
-        LEGACY_OWNER_USER_ID, event["id"], (date.today() + timedelta(days=2)).isoformat()
-    )
+    graph.set_event_time(LEGACY_OWNER_USER_ID, event["id"], (date.today() + timedelta(days=2)).isoformat())
 
     owner = auth.actor_for_user(LEGACY_OWNER_USER_ID, source="test")
     result = asyncio.run(core.execute("upcoming", {}, actor=owner))

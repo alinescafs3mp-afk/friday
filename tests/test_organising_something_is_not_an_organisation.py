@@ -24,9 +24,7 @@ from friday.ingestion._base import _extract_entities
 
 def _organisations(text: str) -> set[str]:
     return {
-        str(item["name"])
-        for item in _extract_entities(text)
-        if str(item["entity_type"]) == "organization"
+        str(item["name"]) for item in _extract_entities(text) if str(item["entity_type"]) == "organization"
     }
 
 

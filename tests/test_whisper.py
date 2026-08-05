@@ -400,10 +400,8 @@ def test_the_language_is_pinned_not_guessed():
     from friday.ingestion._files import FilesMixin
 
     source = inspect.getsource(FilesMixin._transcribe_audio)  # noqa: SLF001
-    assert 'self.settings.whisper_language' in source
-    assert '(metadata or {}).get("language_code")' in source, (
-        "язык человека из профиля не используется"
-    )
+    assert "self.settings.whisper_language" in source
+    assert '(metadata or {}).get("language_code")' in source, "язык человека из профиля не используется"
     assert "language=language or None" in source
 
     # И профиль до приёма доезжает: без этого поле в метаданных всегда пусто.

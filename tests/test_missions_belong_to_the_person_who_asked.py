@@ -162,9 +162,7 @@ async def test_a_participant_sees_every_goal(executive) -> None:
     await executive.create_mission("tenant", "цель одного", created_by="person-a")
     await executive.create_mission("tenant", "цель другого", created_by="person-b")
 
-    answer = await list_missions(
-        _request(executive, _actor("person-a")), status=None, limit=50, offset=0
-    )
+    answer = await list_missions(_request(executive, _actor("person-a")), status=None, limit=50, offset=0)
 
     assert {row["goal"] for row in answer["items"]} == {"цель одного", "цель другого"}
 

@@ -89,9 +89,7 @@ def executive(settings, storage):
 
 
 def _missions(storage, user_id: str = "alice") -> int:
-    return storage.execute(
-        "SELECT COUNT(*) AS n FROM missions WHERE user_id=?", (user_id,)
-    ).fetchone()["n"]
+    return storage.execute("SELECT COUNT(*) AS n FROM missions WHERE user_id=?", (user_id,)).fetchone()["n"]
 
 
 @pytest.mark.asyncio

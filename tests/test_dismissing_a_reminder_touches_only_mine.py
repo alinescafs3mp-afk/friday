@@ -54,8 +54,7 @@ def _queued(storage, user_id: str, key: str) -> list[dict]:
     return [
         dict(row)
         for row in storage.execute(
-            "SELECT user_id, dedup_key, status FROM outbound_notifications "
-            "WHERE user_id=? AND dedup_key=?",
+            "SELECT user_id, dedup_key, status FROM outbound_notifications WHERE user_id=? AND dedup_key=?",
             (user_id, key),
         ).fetchall()
     ]

@@ -133,8 +133,20 @@ _SPOKEN_HOURS = (
 )
 #: Числительные словом: «в два часа ночи» — это два, а не один.
 _SPOKEN_NUMBERS = {
-    "час": 1, "один": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6,
-    "семь": 7, "восемь": 8, "девять": 9, "десять": 10, "одиннадцать": 11, "двенадцать": 12,
+    "час": 1,
+    "один": 1,
+    "два": 2,
+    "две": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9,
+    "десять": 10,
+    "одиннадцать": 11,
+    "двенадцать": 12,
 }
 _SPOKEN_HOUR_RE = re.compile(
     r"\b(" + "|".join(sorted(_SPOKEN_NUMBERS, key=len, reverse=True)) + r")\s+час\w*",
@@ -470,6 +482,7 @@ _QUESTION_LENGTH_LIMIT = 300
 #: — с запасом: в живой переписке, по которой это делалось, человек за сорок
 #: сообщений сформулировал три.
 
+
 def _trace(message: str) -> str:
     """Отпечаток реплики для журнала: соотнести можно, прочитать нельзя.
 
@@ -490,6 +503,7 @@ def _trace(message: str) -> str:
         return "пусто"
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
     return f"#{digest}/{len(text)}зн"
+
 
 _STANDING_RULE_LIMIT = 12
 #: Указание — одна фраза, а не изложение. Всё длиннее почти наверняка не правило,
@@ -550,6 +564,7 @@ def _settled_answer(*, learned: str = "", forgotten: str = "", corrected: str = 
     if corrected:
         return f"Поправила: {corrected}. Дальше считаю верным это, а не прежнее."
     return ""
+
 
 #: Указание о поведении, которое пытается расширить права, — не указание.
 #:
@@ -647,14 +662,70 @@ _ASKS_FOR_VOICE = re.compile(
 #: Слова, которые именем человека не бывают: спрашивать про них граф незачем.
 _NOT_A_NAME = frozenset(
     {
-        "что", "кто", "где", "когда", "сколько", "какой", "какая", "какие", "какое",
-        "почему", "зачем", "чем", "куда", "откуда", "известно", "расскажи", "покажи",
-        "напомни", "найди", "поищи", "посмотри", "скажи", "можешь", "нужно", "хочу",
-        "пожалуйста", "сегодня", "вчера", "завтра", "сейчас", "потом", "тогда",
-        "документ", "документы", "документов", "файл", "файлы", "база", "базе",
-        "архив", "архиве", "интернет", "интернете", "поиск", "погода", "курс",
-        "новости", "цена", "стоит", "такое", "такой", "этот", "эта", "тебе", "меня",
-        "него", "неё", "нас", "вас", "them", "what", "who", "when", "where",
+        "что",
+        "кто",
+        "где",
+        "когда",
+        "сколько",
+        "какой",
+        "какая",
+        "какие",
+        "какое",
+        "почему",
+        "зачем",
+        "чем",
+        "куда",
+        "откуда",
+        "известно",
+        "расскажи",
+        "покажи",
+        "напомни",
+        "найди",
+        "поищи",
+        "посмотри",
+        "скажи",
+        "можешь",
+        "нужно",
+        "хочу",
+        "пожалуйста",
+        "сегодня",
+        "вчера",
+        "завтра",
+        "сейчас",
+        "потом",
+        "тогда",
+        "документ",
+        "документы",
+        "документов",
+        "файл",
+        "файлы",
+        "база",
+        "базе",
+        "архив",
+        "архиве",
+        "интернет",
+        "интернете",
+        "поиск",
+        "погода",
+        "курс",
+        "новости",
+        "цена",
+        "стоит",
+        "такое",
+        "такой",
+        "этот",
+        "эта",
+        "тебе",
+        "меня",
+        "него",
+        "неё",
+        "нас",
+        "вас",
+        "them",
+        "what",
+        "who",
+        "when",
+        "where",
     }
 )
 
@@ -734,7 +805,9 @@ _ORDERS_SILENCE = re.compile(
 #: случай, когда понимания нет. Понимание тут и не спасло бы — арбитр видов
 #: назовёт такую реплику «знанием», а знание уходит модели, которая о себе знает
 #: только то, что ей рассказали при обучении: «моё ядро — GPT-4o».
-_THINGS_I_AM_MADE_OF = r"ядр\w*|модел\w*|нейросет\w*|движ\w*|железе?|видеокарт\w*|процессор\w*|сервер\w*|архитектур\w*|весах?"
+_THINGS_I_AM_MADE_OF = (
+    r"ядр\w*|модел\w*|нейросет\w*|движ\w*|железе?|видеокарт\w*|процессор\w*|сервер\w*|архитектур\w*|весах?"
+)
 _ASKS_WHAT_I_AM = re.compile(
     r"(?:^|\W)(?:"
     # «твоё ядро», «твоим ядром», «какая ты модель», «что за модель у тебя»
@@ -1412,7 +1485,12 @@ def _grounding_warning(
     # появлялась под каждым ответом о внешнем мире и потому обесценилась. Здесь
     # условие другое — вид «интернет» поставил арбитр, то есть вопрос сам требовал
     # свежих сведений, а не пришло ничего.
-    if asked_about_the_world and nothing_arrived and len(body) >= 200 and not _ADMITS_NOTHING_FOUND.search(body):
+    if (
+        asked_about_the_world
+        and nothing_arrived
+        and len(body) >= 200
+        and not _ADMITS_NOTHING_FOUND.search(body)
+    ):
         return (
             "⚠️ В интернет по этому вопросу не ходили: ни одна страница не читалась. "
             "Всё ниже — по памяти модели, а она устаревает и не знает наличия, цен и "
@@ -2081,8 +2159,7 @@ class AgentRuntime:
         # говорить о «несоответствии с вашими данными» здесь неправда: своих
         # данных по курсу доллара у человека и нет.
         from_the_web = any(
-            str(entry.get("tool") or "").startswith("web_")
-            for entry in (response.get("tool_evidence") or [])
+            str(entry.get("tool") or "").startswith("web_") for entry in (response.get("tool_evidence") or [])
         )
         verification_caution = _verification_caution(
             verification_status,
@@ -2332,9 +2409,7 @@ class AgentRuntime:
                 # голосовое, когда ему неудобно печатать; отвечать ему стеной
                 # текста — предлагать читать там, где он выбрал слушать. Текст
                 # приходит рядом, как и раньше, так что ничего не теряется.
-                asked_for_voice=(
-                    answer_with_voice or bool(_ASKS_FOR_VOICE.search(clean_message))
-                ),
+                asked_for_voice=(answer_with_voice or bool(_ASKS_FOR_VOICE.search(clean_message))),
             ),
             "files": response.get("file_clips") or [],
             "context": {
@@ -2356,9 +2431,7 @@ class AgentRuntime:
             },
         }
 
-    def _silence_acknowledged(
-        self, conversation_id: str, user_id: str, message: str
-    ) -> dict[str, Any]:
+    def _silence_acknowledged(self, conversation_id: str, user_id: str, message: str) -> dict[str, Any]:
         """Ответ на приказ замолчать: одна строка и полная остановка хода.
 
         Ни поиска, ни арбитров, ни модели — иначе приказ ничем не отличается от
@@ -2528,15 +2601,10 @@ class AgentRuntime:
         #
         # Ограничение длины осталось: присланный документ вопросом не является, и
         # гнать его текст через модель незачем.
-        worth_understanding = bool(
-            " ".join((message or "").split())
-        ) and len(message or "") <= _QUESTION_LENGTH_LIMIT * 4
-        if (
-            not context.small_talk
-            and not looking_outward
-            and self.llm.enabled
-            and worth_understanding
-        ):
+        worth_understanding = (
+            bool(" ".join((message or "").split())) and len(message or "") <= _QUESTION_LENGTH_LIMIT * 4
+        )
+        if not context.small_talk and not looking_outward and self.llm.enabled and worth_understanding:
             # Последняя реплика человека до этой: вопрос-продолжение («а сроки
             # какие?») без неё читается как чужой.
             # Берутся ДВЕ последние реплики человека, а не одна.
@@ -2568,9 +2636,7 @@ class AgentRuntime:
                 if str(item.get("role") or "") == "assistant":
                     context.previous_answer = str(item.get("content") or "")[:400]
                     break
-            arbiter = asyncio.create_task(
-                self._web_query_by_arbiter(message, previous_turn=previous)
-            )
+            arbiter = asyncio.create_task(self._web_query_by_arbiter(message, previous_turn=previous))
         # Вопрос о деятельности участника архивом не отвечается.
         #
         # Найдено владельцем 2026-08-03, уже ПОСЛЕ того, как инструмент начал
@@ -2642,8 +2708,10 @@ class AgentRuntime:
                 # канала), второе — «вычислен и равен нулю». Отбрасывается только
                 # второе; первая редакция правки этого не различала и выбрасывала
                 # законные совпадения — поймано одиннадцатью упавшими тестами.
-                if found and len(scored) == len(found) and not any(
-                    float(item["_score"]) > _NOISE_FLOOR for item in scored
+                if (
+                    found
+                    and len(scored) == len(found)
+                    and not any(float(item["_score"]) > _NOISE_FLOOR for item in scored)
                 ):
                     LOGGER.info(
                         "retrieval: %d hit(s) with no relevance at all — treated as nothing found",
@@ -3140,9 +3208,7 @@ class AgentRuntime:
             except Exception as exc:
                 LOGGER.error("LLM tool loop failed: %s", exc)
                 return {
-                    "content": self._offline_response(
-                        context, unreachable=self.llm.enabled, message=message
-                    ),
+                    "content": self._offline_response(context, unreachable=self.llm.enabled, message=message),
                     "tools_used": tools_used,
                     "web_query_notice": " ".join(web_notice),
                     "tool_evidence": tool_evidence,
@@ -3247,8 +3313,7 @@ class AgentRuntime:
                 body = str(older.get("content") or "")
                 if len(body) > _SPENT_TOOL_RESULT_CHARS:
                     older["content"] = (
-                        body[:_SPENT_TOOL_RESULT_CHARS]
-                        + "\n… (остальное убрано, чтобы поместился разговор)"
+                        body[:_SPENT_TOOL_RESULT_CHARS] + "\n… (остальное убрано, чтобы поместился разговор)"
                     )
             messages.append(
                 {
@@ -3696,8 +3761,7 @@ class AgentRuntime:
                             {
                                 "role": "system",
                                 "content": (
-                                    "Твой ответ, который сейчас исправляют: "
-                                    f"{corrected_answer[:400]}"
+                                    f"Твой ответ, который сейчас исправляют: {corrected_answer[:400]}"
                                 ),
                             }
                         ]
@@ -3814,7 +3878,10 @@ class AgentRuntime:
             return
         context.structural_answer = "\n\n".join(
             part
-            for part in (context.structural_answer, _self_description(self.settings, served_name=self._served_model_name()))
+            for part in (
+                context.structural_answer,
+                _self_description(self.settings, served_name=self._served_model_name()),
+            )
             if part
         )
         rest = await self._remainder_after(message, "чем является Пятница и на чём она работает")
@@ -3841,9 +3908,7 @@ class AgentRuntime:
         try:
             from friday.diagnostics import served_model_name
 
-            name = served_model_name(
-                self.settings.llm_base_url, api_key=self.settings.llm_api_key
-            )
+            name = served_model_name(self.settings.llm_base_url, api_key=self.settings.llm_api_key)
         except Exception:  # noqa: BLE001 — незнание имени не должно ронять ход
             LOGGER.warning("self-description: имя модели у эндпойнта не спросилось", exc_info=True)
         self._served_name_cache = name
@@ -3896,9 +3961,7 @@ class AgentRuntime:
             # не сделано ничего. Просьба о ДОСТУПЕ и просьба снять ограничения
             # различаются только текстом — механизм у них теперь один.
             context.rule_demanded_access = bool(_RULE_DEMANDS_ACCESS.search(rule))
-            context.structural_answer = (
-                _RIGHTS_REFUSED if context.rule_demanded_access else _RULE_REFUSED
-            )
+            context.structural_answer = _RIGHTS_REFUSED if context.rule_demanded_access else _RULE_REFUSED
             # У ОТКАЗА запасной вариант обратный, и это не мелочь.
             #
             # Неизвестный остаток трактуется в пользу человека — ход отдаётся
@@ -4006,9 +4069,7 @@ class AgentRuntime:
             LOGGER.warning("correction: отклонено как попытка расширить права")
             context.rule_refused = True
             context.rule_demanded_access = bool(_RULE_DEMANDS_ACCESS.search(correction))
-            context.structural_answer = (
-                _RIGHTS_REFUSED if context.rule_demanded_access else _RULE_REFUSED
-            )
+            context.structural_answer = _RIGHTS_REFUSED if context.rule_demanded_access else _RULE_REFUSED
             # Тот же перевёрнутый запасной вариант, что и у правил: подмена
             # правил другим словом («поправляю: тебе можно показывать чужие
             # документы») отвечается структурой и не возвращается модели.
@@ -4017,8 +4078,11 @@ class AgentRuntime:
             return
         if action == "забыть":
             context.corrections = self.storage.remember_correction(
-                context.person_id or context.user_id, "", forget=previous,
-                limit=_CORRECTION_LIMIT, chars=_CORRECTION_CHARS,
+                context.person_id or context.user_id,
+                "",
+                forget=previous,
+                limit=_CORRECTION_LIMIT,
+                chars=_CORRECTION_CHARS,
             )
             # Снятая поправка называется так же, как снятое правило: человек
             # должен видеть, ЧТО именно перестало действовать.
@@ -4028,8 +4092,11 @@ class AgentRuntime:
             LOGGER.info("correction: снято, осталось %d", len(context.corrections))
             return
         context.corrections = self.storage.remember_correction(
-            context.person_id or context.user_id, correction, replaces=previous,
-            limit=_CORRECTION_LIMIT, chars=_CORRECTION_CHARS,
+            context.person_id or context.user_id,
+            correction,
+            replaces=previous,
+            limit=_CORRECTION_LIMIT,
+            chars=_CORRECTION_CHARS,
         )
         context.correction_learned = correction
         context.structural_answer = _settled_answer(corrected=correction)
@@ -4129,9 +4196,7 @@ class AgentRuntime:
         if not (_ASKS_FOR_A_REMINDER.search(message) or kind.startswith("действие")):
             return False
         available = {
-            str((tool.get("function") or {}).get("name") or "")
-            for tool in tools
-            if isinstance(tool, dict)
+            str((tool.get("function") or {}).get("name") or "") for tool in tools if isinstance(tool, dict)
         }
         if "remind" not in available:
             # Нет права — нет вызова: предварительное выполнение прав не обходит.
@@ -4207,11 +4272,7 @@ class AgentRuntime:
             tool_evidence.append({"tool": "remind", "output": result.to_llm_message()})
         # Инструмент убирается: иначе модель поставит ВТОРОЕ такое же напоминание,
         # и человека разбудят дважды. Ровно та же беда, что с двумя архивами.
-        tools[:] = [
-            tool
-            for tool in tools
-            if str((tool.get("function") or {}).get("name") or "") != "remind"
-        ]
+        tools[:] = [tool for tool in tools if str((tool.get("function") or {}).get("name") or "") != "remind"]
         # О СДЕЛАННОМ ГОВОРИТ СТРУКТУРА, а не модель.
         #
         # Прежде здесь стояла служебная строка, написанная «фактами в прошедшем
@@ -4371,9 +4432,7 @@ class AgentRuntime:
         if data.get("unclear_days"):
             unclear = ", ".join(str(day) for day in data["unclear_days"])
             fact += f" Не разобрала, какие дни имелись в виду: {unclear}."
-        context.structural_answer = "\n\n".join(
-            part for part in (context.structural_answer, fact) if part
-        )
+        context.structural_answer = "\n\n".join(part for part in (context.structural_answer, fact) if part)
         rest = await self._remainder_after(message, "сборка присланных файлов за названные дни")
         if rest is not None:
             context.open_remainder = rest
@@ -4489,9 +4548,7 @@ class AgentRuntime:
         # Когда ответа не получилось, заголовок берётся из просьбы человека:
         # иначе им становится «Не удалось безопасно завершить вызов инструмента»,
         # и это же попадает в имя файла.
-        return await self._make_file_from_answer(
-            request, "" if failed else answer, actor, blocks=blocks
-        )
+        return await self._make_file_from_answer(request, "" if failed else answer, actor, blocks=blocks)
 
     async def _make_file_from_answer(
         self, request: str, answer: str, actor: ActorContext, *, blocks: list[dict[str, Any]] | None = None
@@ -4646,9 +4703,7 @@ class AgentRuntime:
         if not rendered:
             LOGGER.info("person-prefetch: инструмент вернул пустоту для %r", chosen.display_name)
             return False
-        LOGGER.info(
-            "person-prefetch: сработал для %r, данных %d знаков", chosen.display_name, len(rendered)
-        )
+        LOGGER.info("person-prefetch: сработал для %r, данных %d знаков", chosen.display_name, len(rendered))
         tools_used.append("user_activity")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "user_activity", "output": str(rendered)})
@@ -5113,9 +5168,7 @@ class AgentRuntime:
         verdict = str(answer.get("content") or "").strip().casefold()
         return verdict.startswith("разговор")
 
-    async def _web_query_by_arbiter(
-        self, message: str, *, previous_turn: str = ""
-    ) -> tuple[str, str | None]:
+    async def _web_query_by_arbiter(self, message: str, *, previous_turn: str = "") -> tuple[str, str | None]:
         """Спросить модель, не нужен ли тут интернет, когда шаблон молчит.
 
         Владелец сформулировал требование прямо: другая формулировка или опечатка
@@ -5213,7 +5266,7 @@ class AgentRuntime:
                             "Если просят собрать ПРИСЛАННЫЕ файлы за какие-то дни («собери "
                             "документы за 10, 13 и 25 число», «скинь архивом всё за вчера», "
                             "«выгрузи файлы за 29 июля»), это тоже «файл», и дни перечисли в "
-                            "поле «дни» списком: [\"10\",\"13\",\"25\"] или [\"2026-07-29\"]. "
+                            'поле «дни» списком: ["10","13","25"] или ["2026-07-29"]. '
                             "Три числа — это три дня, а не отрезок между ними. Если про дни "
                             "речи нет, поле «дни» оставь пустым.\n"
                             "интернет — ответ мог ИЗМЕНИТЬСЯ с тех пор, как ты училась: новости, "
@@ -5552,9 +5605,7 @@ class AgentRuntime:
             # России» уходили в интернет и стоили по полминуты — при том что
             # ответ у модели есть. Идти наружу за таким фактом незачем; честность
             # сохраняется тем, что ответ помечается как знание из головы.
-            notice.append(
-                "🧠 Отвечаю из собственных знаний, без поиска в интернете."
-            )
+            notice.append("🧠 Отвечаю из собственных знаний, без поиска в интернете.")
             messages.append(
                 {
                     "role": "system",
@@ -6150,17 +6201,13 @@ class AgentRuntime:
         # `unreachable` — только когда модель ВКЛЮЧЕНА и всё же не ответила.
         # Выключенная модель — настройка человека, а не поломка связи.
         return {
-            "content": self._offline_response(
-                context, unreachable=self.llm.enabled, message=message
-            ),
+            "content": self._offline_response(context, unreachable=self.llm.enabled, message=message),
             "tools_used": [],
             "llm_failed": True,
         }
 
     @staticmethod
-    def _offline_response(
-        context: AgentContext, *, unreachable: bool = False, message: str = ""
-    ) -> str:
+    def _offline_response(context: AgentContext, *, unreachable: bool = False, message: str = "") -> str:
         """Ответ без модели: сначала ПРИЧИНА, потом то немногое, что есть.
 
         Замерено на живом отказе 2026-08-02: сервер модели перестал отвечать, и
@@ -6201,11 +6248,9 @@ class AgentRuntime:
         )
         header = (
             (
-                "⚠️ Не могу связаться с моделью — она не отвечает. Пробую обойтись тем, "
-                "что есть в архиве.\n\n"
+                "⚠️ Не могу связаться с моделью — она не отвечает. Пробую обойтись тем, что есть в архиве.\n\n"
                 if shows_archive
-                else "⚠️ Не могу связаться с моделью — она не отвечает. "
-                "Отвечу, как только она поднимется.\n\n"
+                else "⚠️ Не могу связаться с моделью — она не отвечает. Отвечу, как только она поднимется.\n\n"
             )
             if unreachable
             else ""
@@ -6684,7 +6729,10 @@ def _title_from_request(request: str) -> str:
     # Название формата в заголовке — след просьбы, а не имя документа:
     # «Pdf со сводкой по базе знаний» вместо «Сводка по базе знаний».
     cleaned = re.sub(
-        r"^(?:pdf|docx?|xlsx?|word|ворд\w*|excel|эксель|png|картинк\w*|таблиц\w*)\s+", "", cleaned, flags=re.IGNORECASE
+        r"^(?:pdf|docx?|xlsx?|word|ворд\w*|excel|эксель|png|картинк\w*|таблиц\w*)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
     ).strip()
     # Предлог после названия формата НЕ срезается: «по Хасанову Руслану» без него
     # превращается в «Хасанову Руслану», и заголовок начинает хромать падежом.

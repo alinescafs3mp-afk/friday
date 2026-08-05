@@ -258,9 +258,7 @@ async def propose_cases(
             proposal.reason = "такой вопрос уже есть в наборе"
         else:
             proposal.accepted, proposal.reason, proposal.shared_tokens = audit(proposal.query, body)
-            if proposal.accepted and not pointing_words(
-                proposal.query, content_tokens(body), corpus
-            ):
+            if proposal.accepted and not pointing_words(proposal.query, content_tokens(body), corpus):
                 # Вторая половина проверки: есть ли в вопросе слово, указывающее
                 # именно на эту заметку. Модель просят об однозначности прямо в
                 # промпте, но полагаться на послушание нельзя.
