@@ -7,7 +7,6 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -34,7 +33,7 @@ def _system_first(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     The Qwen chat template used by the pinned runtime accepts one system message
     and requires it to be the first item.  Friday assembles several independent
     system blocks (policy, small-KB guidance, retrieved knowledge), so the router
-    normalizes them at the single boundary shared by chat and streaming calls.
+    normalizes them at the single boundary every chat call goes through.
     """
 
     system = [message for message in messages if message.get("role") == "system"]
@@ -288,9 +287,7 @@ def _tools_unsupported(body: str) -> bool:
     )
 
 
-_TOOL_CALL_MARKUP = re.compile(
-    r"<\s*tool_call\s*>.*?(?:<\s*/\s*tool_call\s*>|$)", re.S | re.I
-)
+_TOOL_CALL_MARKUP = re.compile(r"<\s*tool_call\s*>.*?(?:<\s*/\s*tool_call\s*>|$)", re.S | re.I)
 
 
 def _strip_tool_call_markup(content: str) -> str:
@@ -421,31 +418,12 @@ class LLMRouter:
         result["_queue_wait_sec"] = queue_wait_sec
         return result
 
-    async def chat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        priority: str = "foreground",
-        tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
-        if not self.enabled:
-            raise LLMUnavailableError("LLM is disabled")
-
-        sem = self._foreground_sem if priority == "foreground" else self._background_sem
-        async with sem:
-            async for chunk in self._stream_impl(messages, temperature, max_tokens, tools):
-                yield chunk
-
     def _prepare_payload(
         self,
         messages: list[dict[str, Any]],
         temperature: float | None,
         max_tokens: int | None,
         tools: list[dict[str, Any]] | None,
-        *,
-        stream: bool,
     ) -> dict[str, Any]:
         requested_output = max_tokens if max_tokens is not None else self.max_tokens
         requested_output = max(64, min(int(requested_output), self.settings.profile.max_model_len - 512))
@@ -466,7 +444,12 @@ class LLMRouter:
             "messages": fitted,
             "temperature": temperature if temperature is not None else self.settings.profile.temperature,
             "max_tokens": min(requested_output, available_output),
-            "stream": stream,
+            # Потоковой выдачи у этого клиента нет: она была написана целиком и
+            # никем не звалась — ни кодом, ни тестом, — и удалена 2026-08-05.
+            # История в git; при возвращении её придётся написать заново вместе
+            # с потребителем, потому что непроверяемый сетевой код доверия не
+            # заслуживает.
+            "stream": False,
         }
         if tools:
             payload["tools"] = tools
@@ -483,7 +466,7 @@ class LLMRouter:
         max_tokens: int | None,
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        payload = self._prepare_payload(messages, temperature, max_tokens, tools, stream=False)
+        payload = self._prepare_payload(messages, temperature, max_tokens, tools)
         last_error: Exception | None = None
 
         # One budget for the whole series, not per attempt. Each attempt is allowed
@@ -557,9 +540,7 @@ class LLMRouter:
 
                 finish_reason = str(choice.get("finish_reason") or "stop")
                 if self.settings.profile.suppress_model_thinking and content:
-                    content = self._strip_thinking(
-                        content, finish_reason, thinking_seen=self._thinking_seen
-                    )
+                    content = self._strip_thinking(content, finish_reason, thinking_seen=self._thinking_seen)
                 if "</think>" in content or "<think>" in content:
                     # Профиль всё-таки рассуждает вслух — значит обрыв по длине у
                     # него действительно может оставить один монолог.
@@ -618,57 +599,6 @@ class LLMRouter:
                 await asyncio.sleep(delay)
 
         raise last_error or LLMUnavailableError("LLM request failed after all retries")
-
-    async def _stream_impl(
-        self,
-        messages: list[dict[str, Any]],
-        temperature: float | None,
-        max_tokens: int | None,
-        tools: list[dict[str, Any]] | None,
-    ) -> AsyncIterator[dict[str, Any]]:
-        payload = self._prepare_payload(messages, temperature, max_tokens, tools, stream=True)
-        try:
-            timeout = httpx.Timeout(self.timeout_sec, connect=15.0)
-            async with (
-                httpx.AsyncClient(timeout=timeout, trust_env=False, headers=self._auth_headers()) as client,
-                client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as response,
-            ):
-                response.raise_for_status()
-                buffer = ""
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[len("data: ") :]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    choices = chunk.get("choices") if isinstance(chunk, dict) else None
-                    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-                        continue
-                    choice = choices[0]
-                    delta_value = choice.get("delta")
-                    delta: dict[str, Any] = delta_value if isinstance(delta_value, dict) else {}
-                    content = delta.get("content") or ""
-                    finish = choice.get("finish_reason")
-                    if content:
-                        content = str(content)
-                        buffer += content
-                        yield {"type": "delta", "content": content}
-                    if finish:
-                        if self.settings.profile.suppress_model_thinking:
-                            buffer = self._strip_thinking(buffer, str(finish))
-                        if detect_repeated_token_degeneration(buffer):
-                            yield {
-                                "type": "error",
-                                "error": "LLM response rejected: repeated-token degeneration detected",
-                            }
-                            return
-                        yield {"type": "done", "content": buffer, "finish_reason": finish}
-        except Exception as exc:
-            yield {"type": "error", "error": str(exc)}
 
     @staticmethod
     def _strip_thinking(content: str, finish_reason: str = "stop", thinking_seen: bool = True) -> str:

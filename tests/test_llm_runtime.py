@@ -65,7 +65,6 @@ def test_qwen_payload_disables_model_thinking_and_has_one_system(settings):
         temperature=None,
         max_tokens=256,
         tools=None,
-        stream=False,
     )
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
     assert sum(item["role"] == "system" for item in payload["messages"]) == 1
