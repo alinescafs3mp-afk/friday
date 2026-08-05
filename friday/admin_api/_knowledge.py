@@ -858,7 +858,15 @@ async def restore_knowledge_version(knowledge_id: str, request: Request) -> dict
     actor = getattr(request.state, "actor", None)
     try:
         after = state.storage.restore_knowledge_version(
-            knowledge_id, target, version, reviewed_by=getattr(actor, "user_id", None)
+            knowledge_id,
+            target,
+            version,
+            # Кто ОТКАТИЛ, а не в чьём архиве. `user_id` — арендатор, и в общем
+            # архиве он один на всех: подпись «откатил common» не отвечает ни на
+            # один вопрос, ради которого её пишут. Ровно так же считает аудит
+            # (`_audit` берёт `own_id`) и все девять соседних вызовов
+            # `reviewed_by` в этом коде — этот был единственным исключением.
+            reviewed_by=getattr(actor, "own_id", None) or getattr(actor, "user_id", None),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
