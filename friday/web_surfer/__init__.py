@@ -479,6 +479,29 @@ class WebSurfer:
     def __init__(self, settings: FridaySettings) -> None:
         self.settings = settings
         self._client: httpx.AsyncClient | None = None
+        # Когда мы в последний раз стучались на каждый сайт. Вежливость к чужому
+        # серверу: три страницы одного домена подряд, взятые в одну сотую
+        # секунды, выглядят молотилкой, и блокируют за это адрес целиком.
+        self._last_touch: dict[str, float] = {}
+        self._host_locks: dict[str, asyncio.Lock] = {}
+
+    async def _be_polite_to(self, host: str) -> None:
+        """Выдержать паузу перед повторным обращением к тому же сайту.
+
+        Замок НА ХОСТ, а не общий: пауза для `ria.ru` не должна задерживать
+        соседний `tass.ru` — иначе исследование по трём источникам, которое
+        сейчас идёт параллельно, станет последовательным и втрое дольше.
+        """
+
+        pause = float(getattr(self.settings, "web_host_pause_sec", 0.0) or 0.0)
+        if pause <= 0 or not host:
+            return
+        lock = self._host_locks.setdefault(host, asyncio.Lock())
+        async with lock:
+            waited = asyncio.get_running_loop().time() - self._last_touch.get(host, 0.0)
+            if waited < pause:
+                await asyncio.sleep(pause - waited)
+            self._last_touch[host] = asyncio.get_running_loop().time()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -933,6 +956,7 @@ class WebSurfer:
 
     async def fetch(self, url: str, *, max_length: int = 50_000) -> FetchResult:
         requested = str(url or "").strip()
+        await self._be_polite_to(_host_of(requested))
         try:
             # httpx timeouts are PER OPERATION: `read=20` means «no more than twenty
             # seconds between chunks», not «no more than twenty seconds». A server

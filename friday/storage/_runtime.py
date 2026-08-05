@@ -490,6 +490,49 @@ class RuntimeMixin(StorageShared):
                 (key, value, utc_now()),
             )
 
+    def bump_daily_counter(self, name: str, user_id: str, day: str) -> int:
+        """Счётчик «сколько раз за эти сутки», атомарный. Возвращает НОВОЕ значение.
+
+        Читать-прибавить-записать здесь нельзя: за веб-инструментами ходят
+        параллельные ходы разговора и фоновые органы, и два одновременных вызова
+        прочитали бы одно и то же число. Прибавление идёт ВНУТРИ SQL, поэтому
+        считает база, а не питон.
+
+        Ключ содержит сутки, поэтому вчерашний счёт не мешает сегодняшнему и
+        чистить ничего не нужно: `sweep_daily_counters` уносит старое пачкой.
+        """
+
+        key = f"quota:{name}:{user_id}:{day}"
+        with self.transaction() as conn:
+            row = conn.execute(
+                """INSERT INTO runtime_kv(key, value, updated_at) VALUES(?, '1', ?)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = CAST(runtime_kv.value AS INTEGER) + 1,
+                       updated_at = excluded.updated_at
+                   RETURNING value""",
+                (key, utc_now()),
+            ).fetchone()
+        return int(row["value"]) if row else 1
+
+    def daily_counter(self, name: str, user_id: str, day: str) -> int:
+        raw = self.kv_get(f"quota:{name}:{user_id}:{day}")
+        try:
+            return int(raw or 0)
+        except ValueError:  # pragma: no cover - только при ручной правке базы
+            return 0
+
+    def sweep_daily_counters(self, name: str, *, keep_days: str) -> int:
+        """Унести счётчики старее названного дня. Возвращает, сколько унесено."""
+
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                # Ключ кончается датой в ISO — сравнение строк здесь и есть
+                # сравнение дат, ровно потому что формат фиксированной ширины.
+                "DELETE FROM runtime_kv WHERE key LIKE ? AND substr(key, -10) < ?",
+                (f"quota:{name}:%", keep_days),
+            )
+        return int(cursor.rowcount or 0)
+
     def kv_delete(self, key: str) -> None:
         with self.transaction() as conn:
             conn.execute("DELETE FROM runtime_kv WHERE key=?", (key,))

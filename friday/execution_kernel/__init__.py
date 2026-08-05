@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from friday.failures import safe_failure_text
+from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
 from friday.permissions import (
@@ -273,9 +274,7 @@ _MONTHS_RU = {
     "дек": 12,
 }
 #: «26 июля», «3-го августа 2026» — день с месяцем, с порядковым окончанием или без.
-_DAY_MONTH_RE = re.compile(
-    r"^(\d{1,2})(?:\s*-?\s*(?:го|е|ое))?\s+([а-яё]+)(?:\s+(\d{4}))?$", re.IGNORECASE
-)
+_DAY_MONTH_RE = re.compile(r"^(\d{1,2})(?:\s*-?\s*(?:го|е|ое))?\s+([а-яё]+)(?:\s+(\d{4}))?$", re.IGNORECASE)
 _DAYS_AGO_RE = re.compile(r"^(\d{1,3})\s+(?:дн\w*|сут\w*)\s+назад$", re.IGNORECASE)
 #: «29го», «29-го», «3-е» — порядковый день без месяца. Так пишут в переписке,
 #: и на демо это одна из сценарных строк.
@@ -341,9 +340,7 @@ def _spoken_day(text: str, *, today: date) -> str | None:
     if not spoken:
         return None
     day, month_word, year_text = spoken.groups()
-    month = next(
-        (number for prefix, number in _MONTHS_RU.items() if month_word.startswith(prefix)), 0
-    )
+    month = next((number for prefix, number in _MONTHS_RU.items() if month_word.startswith(prefix)), 0)
     if not month:
         return None
     year = int(year_text) if year_text else today.year
@@ -363,8 +360,13 @@ _CLOCK_IN_TEXT = re.compile(
 
 #: Дни недели по-русски → номер в неделе, как их считает `date.weekday()`.
 _WEEKDAY_NUMBERS = (
-    ("понедельник", 0), ("вторник", 1), ("сред", 2), ("четверг", 3),
-    ("пятниц", 4), ("суббот", 5), ("воскресен", 6),
+    ("понедельник", 0),
+    ("вторник", 1),
+    ("сред", 2),
+    ("четверг", 3),
+    ("пятниц", 4),
+    ("суббот", 5),
+    ("воскресен", 6),
 )
 
 
@@ -387,7 +389,9 @@ def _future_day(text: str, *, today: date) -> str | None:
         return (today + timedelta(days=1)).isoformat()
     if "сегодня" in lowered or "вечером" in lowered or "к вечеру" in lowered:
         return today.isoformat()
-    through = re.search(r"через\s+(\d+|неделю|день|дня|дней|месяц)\s*(день|дня|дней|недел\w*|месяц\w*)?", lowered)
+    through = re.search(
+        r"через\s+(\d+|неделю|день|дня|дней|месяц)\s*(день|дня|дней|недел\w*|месяц\w*)?", lowered
+    )
     if through:
         amount_text, unit_text = through.group(1), through.group(2) or ""
         amount = 1 if not amount_text.isdigit() else int(amount_text)
@@ -878,6 +882,8 @@ def _inbox_row_for_llm(row: dict[str, Any]) -> dict[str, Any]:
         "kind": suggestions.get("knowledge_kind"),
         "created_at": row.get("created_at"),
     }
+
+
 _WEB_SOURCE_STRING_LIMITS = {
     "id": 120,
     "url": 800,
@@ -1028,14 +1034,70 @@ _MAX_OUTBOUND_QUERY_CHARS = 200
 #: не должно зависеть от слоя, который его вызывает.
 _NOT_A_NAME_OUTBOUND = frozenset(
     {
-        "что", "кто", "где", "когда", "сколько", "какой", "какая", "какие", "какое",
-        "почему", "зачем", "чем", "куда", "откуда", "известно", "расскажи", "покажи",
-        "напомни", "найди", "поищи", "посмотри", "скажи", "можешь", "нужно", "хочу",
-        "пожалуйста", "сегодня", "вчера", "завтра", "сейчас", "потом", "тогда",
-        "документ", "документы", "документов", "файл", "файлы", "база", "базе",
-        "архив", "архиве", "интернет", "интернете", "поиск", "погода", "курс",
-        "новости", "цена", "стоит", "такое", "такой", "этот", "эта", "тебе", "меня",
-        "него", "неё", "нас", "вас", "them", "what", "who", "when", "where",
+        "что",
+        "кто",
+        "где",
+        "когда",
+        "сколько",
+        "какой",
+        "какая",
+        "какие",
+        "какое",
+        "почему",
+        "зачем",
+        "чем",
+        "куда",
+        "откуда",
+        "известно",
+        "расскажи",
+        "покажи",
+        "напомни",
+        "найди",
+        "поищи",
+        "посмотри",
+        "скажи",
+        "можешь",
+        "нужно",
+        "хочу",
+        "пожалуйста",
+        "сегодня",
+        "вчера",
+        "завтра",
+        "сейчас",
+        "потом",
+        "тогда",
+        "документ",
+        "документы",
+        "документов",
+        "файл",
+        "файлы",
+        "база",
+        "базе",
+        "архив",
+        "архиве",
+        "интернет",
+        "интернете",
+        "поиск",
+        "погода",
+        "курс",
+        "новости",
+        "цена",
+        "стоит",
+        "такое",
+        "такой",
+        "этот",
+        "эта",
+        "тебе",
+        "меня",
+        "него",
+        "неё",
+        "нас",
+        "вас",
+        "them",
+        "what",
+        "who",
+        "when",
+        "where",
     }
 )
 
@@ -1168,13 +1230,9 @@ class ExecutionKernel:
         missing_declaration = sorted(name for name in with_predicate - declared if name in self._tools)
         problems = []
         if missing_predicate:
-            problems.append(
-                "объявлены high, но предиката нет: " + ", ".join(missing_predicate)
-            )
+            problems.append("объявлены high, но предиката нет: " + ", ".join(missing_predicate))
         if missing_declaration:
-            problems.append(
-                "предикат есть, а класс риска не high: " + ", ".join(missing_declaration)
-            )
+            problems.append("предикат есть, а класс риска не high: " + ", ".join(missing_declaration))
         if problems:
             raise ValueError("Декларации риска разошлись с гейтом — " + "; ".join(problems))
 
@@ -1359,9 +1417,7 @@ class ExecutionKernel:
             return await self._request_approval(actor, name, arguments or {}, details)
         needs_person = HIGH_RISK_TOOLS.get(name)
         if tool.risk == "high" and needs_person is None:
-            LOGGER.warning(
-                "tool %s объявлен high, но предиката риска нет — требуем человека", name
-            )
+            LOGGER.warning("tool %s объявлен high, но предиката риска нет — требуем человека", name)
             return await self._request_approval(actor, name, arguments or {}, details)
         if needs_person and needs_person(arguments or {}):
             return await self._request_approval(actor, name, arguments or {}, details)
@@ -1604,9 +1660,7 @@ class ExecutionKernel:
                 keep_a = decision == "keep_a"
                 winner = str(conflict.get("knowledge_a_title" if keep_a else "knowledge_b_title") or "")
                 loser = str(conflict.get("knowledge_b_title" if keep_a else "knowledge_a_title") or "")
-                return (
-                    f"Признать верной запись «{winner[:70]}» и объявить устаревшей «{loser[:70]}»"
-                )
+                return f"Признать верной запись «{winner[:70]}» и объявить устаревшей «{loser[:70]}»"
             return f"Разрешить противоречие {arguments.get('conflict_id')}: {decision}"
         if name == "code_run":
             code = str(arguments.get("code") or "")
@@ -2414,6 +2468,9 @@ class ExecutionKernel:
         refusal = await self._what_must_not_leave(query, actor)
         if refusal:
             return refusal
+        exhausted = self._web_quota_refusal(actor)
+        if exhausted:
+            return {**exhausted, "query": query}
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         try:
             results = await web.search(query, max_results=max(1, min(int(max_results), 10)))
@@ -2448,8 +2505,10 @@ class ExecutionKernel:
         return {"query": query, "results": [item.to_dict() for item in results]}
 
     async def _web_fetch(self, *, actor: ActorContext, url: str, query: str = "") -> dict[str, Any]:
-        del actor
         _, _, web, _ = self._require_services()
+        exhausted = self._web_quota_refusal(actor)
+        if exhausted:
+            return {**exhausted, "url": url, "text": "", "text_length": 0}
         # `query` необязателен и означает «что искать на странице»: с ним модель
         # получает кусок вокруг совпадения, без него — начало страницы.
         return (await web.fetch(url)).to_dict(query=query)
@@ -2459,10 +2518,53 @@ class ExecutionKernel:
         refusal = await self._what_must_not_leave(query, actor)
         if refusal:
             return refusal
+        exhausted = self._web_quota_refusal(actor)
+        if exhausted:
+            return {**exhausted, "query": query, "sources": []}
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         report = await web.research(query, max_sources=max(1, min(int(max_sources), 8)))
         captured = await self._capture_web_sources(actor, query, report)
         return {**report, "captured": captured} if captured else report
+
+    def _web_quota_refusal(self, actor: ActorContext) -> dict[str, Any] | None:
+        """Не исчерпан ли суточный выход в интернет. `None` — можно идти.
+
+        Ворота стоят на ВСЕХ трёх дорогах (`web_search`, `web_fetch`,
+        `web_research`), а не на одной: `_what_must_not_leave` зовут только две
+        из них, и квота на том же месте охраняла бы через раз.
+
+        Размер взят замером на живом архиве: пик 135 вызовов на человека за
+        сутки, медиана по человеко-дням 76. Потолок 400 — тройной запас над
+        настоящим пиком, потому что защита нужна не от человека, а от цикла.
+
+        Отказ НАЗЫВАЕТ причину и число. Молчаливое «ничего не нашлось» модель
+        пересказала бы человеку как факт об интернете — тот же класс, что чужой
+        отказ поисковика, выданный за пустую выдачу.
+        """
+
+        storage, _, _, _ = self._require_services()
+        settings = self.settings
+        if settings is None:  # pragma: no cover - ядро без настроек не работает
+            return None
+        limit = int(getattr(settings, "web_daily_quota", 0) or 0)
+        if limit <= 0:
+            return None
+        # Сутки — местные для ЧЕЛОВЕКА, а не UTC: иначе счёт обнуляется среди
+        # его рабочего дня. Тот же выбор, что у ночной сводки.
+        day = local_now(settings).date().isoformat()
+        used = storage.bump_daily_counter("web", actor.user_id, day)
+        if used <= limit:
+            return None
+        LOGGER.warning("web quota exhausted for %s: %d > %d", actor.user_id, used, limit)
+        return {
+            "results": [],
+            "quota_exhausted": True,
+            "error": (
+                f"Суточный лимит обращений в интернет исчерпан: {limit} за сутки. "
+                "Счёт обнулится в полночь по вашему времени."
+            ),
+            "note": "Сведений из интернета в этом результате нет: наружу не ходили вовсе.",
+        }
 
     async def _what_must_not_leave(self, query: str, actor: ActorContext) -> dict[str, Any] | None:
         """Не уходит ли наружу имя человека из архива. `None` — можно искать.
@@ -2497,9 +2599,7 @@ class ExecutionKernel:
         if not stems:
             return None
         try:
-            found = await run_blocking(
-                storage.people_whose_name_starts_with, actor.user_id, stems
-            )
+            found = await run_blocking(storage.people_whose_name_starts_with, actor.user_id, stems)
         except Exception:  # noqa: BLE001 — проверка не должна ронять ход
             LOGGER.warning("Could not check the graph before a web search", exc_info=True)
             return None
@@ -3431,9 +3531,7 @@ class ExecutionKernel:
         answer: dict[str, Any] = {
             "resolved": chosen.to_dict(),
             "content": "full" if include_content else "redacted",
-            "summary": storage.user_activity_summary(
-                tenant, since=since, until=until, uploaded_by=by_author
-            ),
+            "summary": storage.user_activity_summary(tenant, since=since, until=until, uploaded_by=by_author),
             # Что человек ПИСАЛ. Без этого инструмент выполнял своё название
             # наполовину: у того, кто только переписывается, загрузок ноль, и на
             # «что писал JBL?» приходило «сообщений 42, но записи не загрузились».
@@ -3463,9 +3561,7 @@ class ExecutionKernel:
             # того как новые документы приходят уже с отметкой, безымянных в
             # СВЕЖЕМ окне становится ноль — и отрицание делается законным, без
             # единой правки здесь.
-            "arrivals_without_an_author": storage.arrivals_without_an_author(
-                actor.user_id, since, until
-            ),
+            "arrivals_without_an_author": storage.arrivals_without_an_author(actor.user_id, since, until),
         }
         if analysis:
             try:
@@ -4234,9 +4330,7 @@ class ExecutionKernel:
         )
 
 
-def _pack_archive(
-    root: Path, rows: list[dict[str, Any]], name: str
-) -> tuple[bytes, list[str], int]:
+def _pack_archive(root: Path, rows: list[dict[str, Any]], name: str) -> tuple[bytes, list[str], int]:
     """Сложить исходные файлы в zip. Возврат: (архив, что не вошло, размер).
 
     Синхронная и блокирующая: вызывается через `run_blocking`, потому что читает
@@ -4308,8 +4402,6 @@ def _safe_filename(title: str, extension: str) -> str:
     Заголовок пишет модель, а он становится именем на диске и в Telegram: слэш
     или `..` в нём — это уже не косметика.
     """
-    cleaned = "".join(
-        char if char.isalnum() or char in " -_()" else " " for char in str(title or "").strip()
-    )
+    cleaned = "".join(char if char.isalnum() or char in " -_()" else " " for char in str(title or "").strip())
     cleaned = " ".join(cleaned.split())[:80].strip() or "Отчёт"
     return f"{cleaned}.{extension}"

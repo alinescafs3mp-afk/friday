@@ -587,6 +587,17 @@ class FridaySettings:
     llm_foreground_slots: int
     web_allow_private_networks: bool
     web_max_response_bytes: int
+    #: Сколько раз ОДИН человек может выйти в интернет за сутки.
+    #:
+    #: Размер взят из замера, а не из головы: на живом архиве пик — 135 вызовов
+    #: веб-инструментов на человека за сутки, медиана по человеко-дням 76.
+    #: Потолок ниже этого сломал бы обычную работу, поэтому 400 — примерно
+    #: тройной запас над настоящим пиком. Защита не от человека, а от цикла:
+    #: способность `web.search` есть у пресета `user`, участников одиннадцать, и
+    #: один зациклившийся research бьёт по платному ключу и по репутации адреса.
+    web_daily_quota: int
+    #: Пауза между обращениями к ОДНОМУ сайту, секунды.
+    web_host_pause_sec: float
 
     max_upload_bytes: int
     max_extracted_text_chars: int
@@ -736,9 +747,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         model_root=model_root,
         model_dir=model_root / profile.model_dir_name,
         state_dir=state_dir,
-        database_path=Path(env("FRIDAY_DATABASE_PATH", _existing_database(state_dir)))
-        .expanduser()
-        .resolve(),
+        database_path=Path(env("FRIDAY_DATABASE_PATH", _existing_database(state_dir))).expanduser().resolve(),
         files_dir=Path(env("FRIDAY_FILES_DIR", data_dir / "files")).expanduser().resolve(),
         memory_vault_dir=Path(env("FRIDAY_MEMORY_VAULT_DIR", data_dir / "memory-vault"))
         .expanduser()
@@ -772,8 +781,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # Authorization header at all. Observed as 401 on every indexing request while
         # a single-key check passed, because it resolved the fallback differently.
         embeddings_api_key=(
-            env("FRIDAY_EMBEDDINGS_API_KEY", "").strip()
-            or env("FRIDAY_LLM_API_KEY", "").strip()
+            env("FRIDAY_EMBEDDINGS_API_KEY", "").strip() or env("FRIDAY_LLM_API_KEY", "").strip()
         ),
         embeddings_model=env("FRIDAY_EMBEDDINGS_MODEL", ""),
         embeddings_index_batch=_int_env("FRIDAY_EMBEDDINGS_INDEX_BATCH", 64, minimum=1),
@@ -797,9 +805,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         embeddings_chunk_blend=_float_env("FRIDAY_EMBEDDINGS_CHUNK_BLEND", 0.25, minimum=0.0),
         embeddings_chunk_scan_multiplier=_int_env("FRIDAY_EMBEDDINGS_CHUNK_SCAN_MULTIPLIER", 4, minimum=1),
         embeddings_resident_cache=_bool_env("FRIDAY_EMBEDDINGS_RESIDENT_CACHE", True),
-        embeddings_max_inputs_per_request=_int_env(
-            "FRIDAY_EMBEDDINGS_MAX_INPUTS_PER_REQUEST", 64, minimum=1
-        ),
+        embeddings_max_inputs_per_request=_int_env("FRIDAY_EMBEDDINGS_MAX_INPUTS_PER_REQUEST", 64, minimum=1),
         # 0.95, not the previous 0.92, which sat INSIDE the measured distribution of
         # non-duplicates (two weekly meeting notes from one template: 0.928; two
         # entries about one apartment: 0.917 and 0.914). Whether a series of minutes
@@ -850,10 +856,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # Ключ падает обратно на ключ LLM — как у эмбеддингов, и по той же причине:
         # на этой установке все три сервиса за одним ключом, а пустой ключ в проверке
         # уже однажды увёл меня в ложный диагноз (401 приняли за требование сервиса).
-        rerank_api_key=(
-            env("FRIDAY_RERANK_API_KEY", "").strip()
-            or env("FRIDAY_LLM_API_KEY", "").strip()
-        ),
+        rerank_api_key=(env("FRIDAY_RERANK_API_KEY", "").strip() or env("FRIDAY_LLM_API_KEY", "").strip()),
         rerank_timeout_sec=_float_env("FRIDAY_RERANK_TIMEOUT_SEC", 20.0, minimum=1.0),
         # Сколько верхних кандидатов отдавать на переранжирование. 0 — выключено.
         # Для явно включённого reranker измеренная глубина — 40: на 20 трудных живых
@@ -878,9 +881,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         api_token=env("FRIDAY_API_TOKEN", ""),
         api_require_token_on_loopback=_bool_env("FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK", True),
         api_user_rate_limit_per_minute=_int_env("FRIDAY_API_USER_RATE_LIMIT_PER_MINUTE", 240, minimum=1),
-        api_auth_failure_limit_per_minute=_int_env(
-            "FRIDAY_API_AUTH_FAILURE_LIMIT_PER_MINUTE", 10, minimum=1
-        ),
+        api_auth_failure_limit_per_minute=_int_env("FRIDAY_API_AUTH_FAILURE_LIMIT_PER_MINUTE", 10, minimum=1),
         # Diagnostics/sentinel raise a warning when auth failures over the last 24h
         # reach this count (possible brute-force / leaked-token abuse). The 24h
         # window (vs. the hourly sentinel tick and quiet hours) means a sustained or
@@ -979,6 +980,8 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         llm_foreground_slots=_int_env("FRIDAY_LLM_FOREGROUND_SLOTS", 4, minimum=1),
         web_allow_private_networks=_bool_env("FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS", False),
         web_max_response_bytes=_int_env("FRIDAY_WEB_MAX_RESPONSE_BYTES", 5 * 1024 * 1024, minimum=64 * 1024),
+        web_daily_quota=_int_env("FRIDAY_WEB_DAILY_QUOTA", 400, minimum=0),
+        web_host_pause_sec=_float_env("FRIDAY_WEB_HOST_PAUSE_SEC", 1.0, minimum=0.0),
         max_upload_bytes=_int_env("FRIDAY_MAX_UPLOAD_BYTES", 50 * 1024 * 1024, minimum=1024),
         max_extracted_text_chars=_int_env("FRIDAY_MAX_EXTRACTED_TEXT_CHARS", 2_000_000, minimum=10_000),
         # Стенное время pypdf после того, как тело уже в памяти. Одна ручка на ОБА
