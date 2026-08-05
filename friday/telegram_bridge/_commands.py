@@ -795,7 +795,7 @@ class CommandsMixin(BridgeShared):
             events = await self._backend_json(
                 backend,
                 "GET",
-                f"/api/kg/timeline?start={since}&end={until}&limit=15",
+                f"/api/kg/timeline?start={since}&end={until}&limit={_TIMELINE_SHOWN}",
                 None,
                 external_user_id,
                 str(chat_id),

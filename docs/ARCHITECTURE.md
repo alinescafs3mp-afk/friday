@@ -23,7 +23,7 @@ Friday — local-first система. Единственные ожидаемы
 |---|---|
 | `telegram_bridge` | long polling, durable inbox, команды, файлы, подпись backend-запросов |
 | `ingestion` | moderate classification, Raw Object, Inbox, promotion, deterministic enrichment, advisory model refinement |
-| `knowledge_graph` | сущности, связи, links к знаниям, graph context, duplicate suggestions, merge history, время событий (occurred_at) и timeline |
+| `knowledge_graph` | сущности, связи, links к знаниям, graph context, duplicate suggestions, merge history и единая timeline событий/valid-time границ отношений |
 | `retrieval` | FTS, lexical similarity, persistent dense embeddings (corpus-wide recall), field/quality/graph/feedback/lifecycle ranking |
 | `agent_runtime` | диалог, сборка контекста, режим ответа, planning/tool calls, fail-closed автопроверка ответа (`passed`/`failed`/`unknown`/`skipped` + предупреждение), легенда источников `[K#]` и пометка неподкреплённых ответов, и ответ |
 | `executive` | миссии: планирование цели в ациклический план задач, фоновое пошаговое выполнение, управляемая автономия |
@@ -130,6 +130,17 @@ Inbox item связывает Raw Object и, при наличии, Knowledge Ob
 - `knowledge_conflicts` — потенциально несовместимые утверждения, ожидающие review;
 - `feedback_state` — последняя актуальная оценка цели при сохранённой append-only истории;
 - `knowledge_usage` — агрегаты retrieval/answer use без изменения содержания знания.
+
+`GET /api/kg/timeline` объединяет два вида строк: EVENT с `at=occurred_at` и
+изменение relation с `boundary=confirmed` на непустом `valid_from` либо
+`boundary=ended` на непустом `valid_to`. После единой стабильной сортировки
+применяется один общий `limit`; `total` и `truncated` считают весь период, а не
+страницу. В положение строки входят только valid-time поля. `created_at` и
+`invalidated_at` возвращаются отдельно как transaction evidence, но не заменяют
+неизвестную границу; relation metadata наружу не выходит. Invalidated relation
+остаётся частью истории, soft-deleted relation исключается. Имена концов и
+merge-topology пока берутся из текущего графа — историческая identity projection
+требует отдельной transaction-time истории.
 
 ## 6. Entity extraction и resolution
 

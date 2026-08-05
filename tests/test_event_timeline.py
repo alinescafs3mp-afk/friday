@@ -8,6 +8,8 @@ auto-extraction on ingestion, and the HTTP surface.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,7 +22,7 @@ from friday.knowledge_graph import (
 )
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.server import create_app
-from friday.storage.models import EntityType
+from friday.storage.models import EntityType, RelationType, utc_now
 
 # --- pure date helpers ----------------------------------------------------
 
@@ -66,7 +68,7 @@ def test_set_event_time_validates_type_dates_and_range(storage):
     assert graph.get_event_time("alice", event["id"])["occurred_at"] == "2024-06-12"
 
 
-def test_timeline_is_ordered_bounded_and_event_only(storage):
+def test_timeline_keeps_event_rows_ordered_bounded_and_compatible(storage):
     graph = KnowledgeGraph(storage)
     launch = graph.create_entity("alice", "Launch", EntityType.EVENT)
     review = graph.create_entity("alice", "Review", EntityType.EVENT)
@@ -82,6 +84,161 @@ def test_timeline_is_ordered_bounded_and_event_only(storage):
 
     windowed = graph.timeline("alice", start="2024-08-01", end="2024-12-31")
     assert [item["name"] for item in windowed] == ["Review"]
+
+
+def test_timeline_page_unifies_events_and_relation_changes_under_one_limit(storage):
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Альфа", EntityType.PERSON)
+    target = graph.create_entity("alice", "Бета", EntityType.ORGANIZATION)
+    event = graph.create_entity("alice", "Совещание", EntityType.EVENT)
+    graph.set_event_time("alice", event["id"], "2024-03-02")
+    relation = graph.create_relation(
+        "alice",
+        source["id"],
+        target["id"],
+        RelationType.MEMBER_OF,
+        metadata={"private": "RAW RELATION METADATA"},
+        valid_from="2024-03-01",
+    )
+    graph.invalidate_relation(
+        "alice",
+        relation.id,
+        valid_to="2024-03-03",
+        reason="RAW INVALIDATION REASON",
+    )
+
+    page = graph.timeline_page(
+        "alice",
+        start="2024/3",
+        end="2024-03-03",
+        limit=2,
+    )
+
+    assert page["start"] == "2024-03-01"
+    assert page["end"] == "2024-03-03"
+    assert page["count"] == 2
+    assert page["total"] == 3
+    assert page["truncated"] is True
+    assert [(item["kind"], item["at"], item["boundary"]) for item in page["items"]] == [
+        ("relation", "2024-03-01", "confirmed"),
+        ("event", "2024-03-02", "occurred_at"),
+    ]
+    confirmed = page["items"][0]
+    assert confirmed == {
+        "kind": "relation",
+        "at": "2024-03-01",
+        "boundary": "confirmed",
+        "relation_id": relation.id,
+        "relation_type": RelationType.MEMBER_OF.value,
+        "source": {"id": source["id"], "name": "Альфа"},
+        "target": {"id": target["id"], "name": "Бета"},
+        "valid_from": "2024-03-01",
+        "valid_to": "2024-03-03",
+        "created_at": relation.created_at,
+        "invalidated_at": confirmed["invalidated_at"],
+        "superseded_by": None,
+    }
+    assert confirmed["invalidated_at"]
+    assert "RAW RELATION METADATA" not in json.dumps(page, ensure_ascii=False)
+    assert "RAW INVALIDATION REASON" not in json.dumps(page, ensure_ascii=False)
+
+    whole = graph.timeline_page("alice", start="2024-03-01", end="2024-03-03", limit=10)
+    assert whole["count"] == whole["total"] == 3
+    assert whole["truncated"] is False
+    assert whole["items"][1]["name"] == "Совещание"
+    assert whole["items"][1]["relation"] == EVENT_TIME_RELATION
+    assert whole["items"][2]["boundary"] == "ended"
+
+
+def test_relation_timeline_is_stable_tenant_scoped_and_keeps_only_real_boundaries(storage):
+    graph = KnowledgeGraph(storage)
+    alice_source = graph.create_entity("alice", "Источник", EntityType.PERSON)
+    alice_target = graph.create_entity("alice", "Цель", EntityType.ORGANIZATION)
+    bob_source = graph.create_entity("bob", "Чужой источник", EntityType.PERSON)
+    bob_target = graph.create_entity("bob", "Чужая цель", EntityType.ORGANIZATION)
+
+    unknown_start = graph.create_relation(
+        "alice",
+        alice_source["id"],
+        alice_target["id"],
+        RelationType.WORKS_ON,
+    )
+    graph.invalidate_relation("alice", unknown_start.id, valid_to="2024-04-04")
+    deleted = graph.create_relation(
+        "alice",
+        alice_source["id"],
+        alice_target["id"],
+        RelationType.MANAGES,
+        valid_from="2024-04-01",
+    )
+    with storage.transaction() as conn:
+        conn.execute("UPDATE relations SET deleted_at=? WHERE id=?", (utc_now(), deleted.id))
+    graph.create_relation(
+        "bob",
+        bob_source["id"],
+        bob_target["id"],
+        RelationType.MANAGES,
+        valid_from="2024-04-01",
+    )
+
+    first = graph.timeline_page("alice", start="2024-04", end="2024-04-30", limit=10)
+    second = graph.timeline_page("alice", start="2024-04", end="2024-04-30", limit=10)
+
+    assert first == second
+    assert first["total"] == 1
+    assert [(item["relation_id"], item["boundary"]) for item in first["items"]] == [
+        (unknown_start.id, "ended")
+    ]
+    assert all(item["source"]["name"] != "Чужой источник" for item in first["items"])
+
+
+def test_timeline_ties_have_one_explicit_stable_cross_kind_order(storage):
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Альфа", EntityType.PERSON)
+    target = graph.create_entity("alice", "Бета", EntityType.ORGANIZATION)
+    event = graph.create_entity("alice", "Событие", EntityType.EVENT)
+    graph.set_event_time("alice", event["id"], "2024-05-05")
+    confirmed = graph.create_relation(
+        "alice",
+        source["id"],
+        target["id"],
+        RelationType.MANAGES,
+        valid_from="2024-05-05",
+    )
+    ended = graph.create_relation(
+        "alice",
+        source["id"],
+        target["id"],
+        RelationType.WORKS_ON,
+        valid_from="2024-01-01",
+    )
+    graph.invalidate_relation("alice", ended.id, valid_to="2024-05-05")
+
+    page = graph.timeline_page("alice", start="2024-05-05", end="2024-05-05", limit=10)
+
+    assert [
+        (item["kind"], item["boundary"], item.get("entity_id") or item.get("relation_id"))
+        for item in page["items"]
+    ] == [
+        ("event", "occurred_at", event["id"]),
+        ("relation", "confirmed", confirmed.id),
+        ("relation", "ended", ended.id),
+    ]
+
+
+def test_timeline_rejects_a_reversed_window_before_reading_storage(storage, monkeypatch):
+    graph = KnowledgeGraph(storage)
+
+    def must_not_read(*_args, **_kwargs):
+        raise AssertionError("storage was read before the range was rejected")
+
+    monkeypatch.setattr(storage, "list_events_in_range", must_not_read)
+    monkeypatch.setattr(storage, "count_events_in_range", must_not_read)
+
+    with pytest.raises(ValueError, match="end"):
+        graph.timeline_page("alice", start="2025", end="2024")
+    with pytest.raises(ValueError, match="Invalid date"):
+        graph.timeline_page("alice", start="not-a-date")
 
 
 # --- ingestion auto-extraction --------------------------------------------
@@ -146,3 +303,42 @@ def test_timeline_and_set_time_over_http(settings):
         assert timeline.status_code == 200
         names = [item["name"] for item in timeline.json()["items"]]
         assert names == ["Product Launch"]
+
+
+def test_unified_timeline_page_is_exposed_over_http(settings):
+    app = create_app(settings)
+    with TestClient(app) as client:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        graph = app.state.kg
+        source = graph.create_entity(LEGACY_OWNER_USER_ID, "Иван", EntityType.PERSON)
+        target = graph.create_entity(LEGACY_OWNER_USER_ID, "Проект", EntityType.PROJECT)
+        event = graph.create_entity(LEGACY_OWNER_USER_ID, "Приёмка", EntityType.EVENT)
+        graph.set_event_time(LEGACY_OWNER_USER_ID, event["id"], "2024-03-02")
+        relation = graph.create_relation(
+            LEGACY_OWNER_USER_ID,
+            source["id"],
+            target["id"],
+            RelationType.WORKS_ON,
+            valid_from="2024-03-01",
+        )
+        graph.invalidate_relation(LEGACY_OWNER_USER_ID, relation.id, valid_to="2024-03-03")
+
+        response = client.get(
+            "/api/kg/timeline?start=2024.3&end=2024-03-03&limit=2",
+            headers=owner,
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["start"] == "2024-03-01"
+        assert body["end"] == "2024-03-03"
+        assert body["count"] == 2
+        assert body["total"] == 3
+        assert body["truncated"] is True
+        assert [item["kind"] for item in body["items"]] == ["relation", "event"]
+
+        reversed_window = client.get(
+            "/api/kg/timeline?start=2025&end=2024",
+            headers=owner,
+        )
+        assert reversed_window.status_code == 400

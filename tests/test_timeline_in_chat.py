@@ -146,6 +146,59 @@ def test_the_chat_answer_shows_both_lanes_and_offers_buttons():
     ]
 
 
+def test_the_chat_timeline_names_relation_boundaries_instead_of_printing_empty_events():
+    graph_items = {
+        "items": [
+            {"kind": "event", "at": "2023-03-02", "name": "Приёмка", "occurred_at": "2023-03-02"},
+            {
+                "kind": "relation",
+                "at": "2023-03-03",
+                "boundary": "confirmed",
+                "relation_type": "member_of",
+                "source": {"id": "ent_person", "name": "Иванов"},
+                "target": {"id": "ent_unit", "name": "в/ч 12345"},
+            },
+            {
+                "kind": "relation",
+                "at": "2023-03-05",
+                "boundary": "ended",
+                "relation_type": "works_on",
+                "source": {"id": "ent_person", "name": "Иванов"},
+                "target": {"id": "ent_project", "name": "Атлас"},
+            },
+        ],
+        "count": 3,
+        "total": 3,
+        "truncated": False,
+    }
+
+    text = TelegramBridge._format_timeline("март 2023", {"items": []}, graph_items)  # noqa: SLF001
+
+    assert "2023-03-02 — Приёмка" in text
+    assert "2023-03-03 — связь подтверждена: Иванов — состоит в — в/ч 12345" in text
+    assert "2023-03-05 — связь завершена: Иванов — занят — Атлас" in text
+    assert "без названия" not in text
+
+
+def test_the_chat_names_a_truncated_graph_timeline():
+    items = [
+        {
+            "kind": "relation",
+            "at": f"2023-03-{index + 1:02d}",
+            "boundary": "confirmed",
+            "relation_type": "related_to",
+            "source": {"id": f"ent_a_{index}", "name": f"A{index}"},
+            "target": {"id": f"ent_b_{index}", "name": f"B{index}"},
+        }
+        for index in range(10)
+    ]
+    page = {"items": items, "count": 10, "total": 14, "truncated": True}
+
+    text = TelegramBridge._format_timeline("март 2023", {"items": []}, page)  # noqa: SLF001
+
+    assert "Показаны первые 10 из 14 событий и изменений связей" in text
+
+
 def test_an_empty_period_explains_itself_instead_of_looking_like_an_empty_archive():
     text = TelegramBridge._format_timeline("2019", {"items": []}, {"items": []})
 

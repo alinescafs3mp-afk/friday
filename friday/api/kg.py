@@ -583,10 +583,16 @@ async def event_timeline(
 ) -> dict[str, Any]:
     actor = _require(request, "kg.read")
     try:
-        events = request.app.state.kg.timeline(actor.user_id, start=start, end=end, limit=limit)
+        page = await run_blocking(
+            request.app.state.kg.timeline_page,
+            actor.user_id,
+            start=start,
+            end=end,
+            limit=limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"items": events, "count": len(events), "start": start, "end": end}
+    return page
 
 
 @router.post("/entities/{entity_id}/time", tags=["knowledge-graph"])

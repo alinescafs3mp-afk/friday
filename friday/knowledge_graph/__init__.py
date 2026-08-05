@@ -251,6 +251,35 @@ def normalize_event_date(value: str) -> tuple[str, str]:
     raise ValueError(f"Invalid date: {value!r}")
 
 
+def _timeline_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    """One deterministic order shared by event and relation timeline rows."""
+
+    at = str(item.get("at") or "")
+    if item.get("kind") == "event":
+        return (
+            at,
+            0,
+            0,
+            str(item.get("name") or ""),
+            "",
+            str(item.get("entity_id") or ""),
+        )
+    raw_source = item.get("source")
+    raw_target = item.get("target")
+    source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
+    target: dict[str, Any] = raw_target if isinstance(raw_target, dict) else {}
+    boundary_rank = 0 if item.get("boundary") == "confirmed" else 1
+    return (
+        at,
+        1,
+        boundary_rank,
+        str(item.get("relation_type") or ""),
+        str(source.get("name") or ""),
+        str(target.get("name") or ""),
+        str(item.get("relation_id") or ""),
+    )
+
+
 def _json_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
@@ -814,16 +843,68 @@ class KnowledgeGraph:
         end: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        """Chronologically ordered dated events, optionally bounded to a window."""
-        bounds = {}
-        if start:
-            bounds["start"] = normalize_event_date(start)[0]
-        if end:
-            bounds["end"] = normalize_event_date(end)[0]
-        events = self.storage.list_events_in_range(user_id, limit=limit, **bounds)
-        for event in events:
+        """Backward-compatible item list from the exact unified timeline page."""
+
+        return self.timeline_page(user_id, start=start, end=end, limit=limit)["items"]
+
+    def timeline_page(
+        self,
+        user_id: str,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Events and relation valid-time changes under one stable global limit."""
+
+        normalized_start = normalize_event_date(start)[0] if start else None
+        normalized_end = normalize_event_date(end)[0] if end else None
+        if normalized_start and normalized_end and normalized_end < normalized_start:
+            raise ValueError("end не может предшествовать start")
+
+        bounded_limit = max(1, min(int(limit), 2000))
+        events = self.storage.list_events_in_range(
+            user_id,
+            start=normalized_start,
+            end=normalized_end,
+            limit=bounded_limit,
+        )
+        relation_changes = self.storage.list_relation_changes_in_range(
+            user_id,
+            start=normalized_start,
+            end=normalized_end,
+            limit=bounded_limit,
+        )
+
+        items: list[dict[str, Any]] = []
+        for raw_event in events:
+            event = dict(raw_event)
             event["relation"] = EVENT_TIME_RELATION
-        return events
+            event["kind"] = "event"
+            event["at"] = event.get("occurred_at")
+            event["boundary"] = EVENT_TIME_RELATION
+            items.append(event)
+        items.extend(dict(change) for change in relation_changes)
+        items.sort(key=_timeline_sort_key)
+        shown = items[:bounded_limit]
+
+        total = self.storage.count_events_in_range(
+            user_id,
+            start=normalized_start,
+            end=normalized_end,
+        ) + self.storage.count_relation_changes_in_range(
+            user_id,
+            start=normalized_start,
+            end=normalized_end,
+        )
+        return {
+            "items": shown,
+            "count": len(shown),
+            "total": total,
+            "truncated": total > len(shown),
+            "start": normalized_start,
+            "end": normalized_end,
+        }
 
     def list_entities(
         self,

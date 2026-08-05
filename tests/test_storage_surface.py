@@ -148,7 +148,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: Заказ владельца 2026-08-04. Сводка хранит коды инцидентов и счётчики; текста
 #: из переписки в ней нет по построению, поэтому отдельного «очистителя» в этом
 #: списке не появилось — очищать нечего.
-EXPECTED_MEMBER_COUNT = 342
+# 342 → 344: relation valid-time boundaries have their own bounded list and exact
+# count; the unified KG timeline must not infer a total from the returned page.
+EXPECTED_MEMBER_COUNT = 344
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -192,6 +194,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_chat_feed": "(self) -> 'int'",
     "count_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False) -> 'int'",
     "count_events_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, mine: 'str' = '') -> 'int'",
+    "count_relation_changes_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None) -> 'int'",
     "count_entities_by_type": "(self, user_id: 'str', *, include_merged: 'bool' = False) -> 'dict[str, int]'",
     "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
@@ -296,6 +299,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_entity_versions": "(self, entity_id: 'str', user_id: 'str') -> 'list[dict[str, Any]]'",
     "list_eval_cases": "(self, user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
     "list_events_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
+    "list_relation_changes_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_inbox": "(self, user_id: 'str', status: 'InboxStatus | None' = None, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_inbox_detailed": "(self, user_id: 'str', status: 'InboxStatus | None' = None, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_knowledge_conflicts": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",

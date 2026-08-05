@@ -111,7 +111,9 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 #: вопрос «арендатор или человек?». Если ответ «человек», имя идёт в
 #: `PERSON_SCOPED` выше; если «арендатор» — просто число растёт, и это тоже
 #: решение, принятое явно.
-EXPECTED_USER_ID_METHODS = 237
+# 237 → 239: обе relation-timeline операции принимают tenant общего графа;
+# личность человека к этой ленте не относится.
+EXPECTED_USER_ID_METHODS = 239
 
 
 def _methods_taking_user_id() -> set[str]:

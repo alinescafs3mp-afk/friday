@@ -783,7 +783,7 @@ class GraphMixin(StorageShared):
             "t.occurred_end AS occurred_end, t.precision AS precision, t.source AS source "
             "FROM entity_time t JOIN entities e ON e.id=t.entity_id "
             f"WHERE {' AND '.join(clauses)} "  # nosec B608
-            "ORDER BY t.occurred_at ASC, e.name ASC LIMIT ?",
+            "ORDER BY t.occurred_at ASC, e.name ASC, e.id ASC LIMIT ?",
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -827,6 +827,146 @@ class GraphMixin(StorageShared):
             "SELECT COUNT(*) AS count FROM entity_time t JOIN entities e ON e.id=t.entity_id "
             f"WHERE {' AND '.join(clauses)}",  # nosec B608
             tuple(params),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_relation_changes_in_range(
+        self,
+        user_id: str,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Valid-time boundary changes for one tenant, without relation metadata.
+
+        A relation may contribute two immutable timeline rows: ``confirmed`` at a
+        known ``valid_from`` and ``ended`` at ``valid_to``.  Transaction timestamps
+        are evidence carried by a row, never a substitute for either boundary.
+        """
+
+        bounded_limit = max(1, min(int(limit), 2000))
+        rows = self.execute(
+            """WITH relation_changes AS (
+                   SELECT r.id AS relation_id, r.relation_type AS relation_type,
+                          r.source_entity_id AS source_entity_id, s.name AS source_name,
+                          r.target_entity_id AS target_entity_id, t.name AS target_name,
+                          r.valid_from AS valid_from, r.valid_to AS valid_to,
+                          r.created_at AS created_at, r.invalidated_at AS invalidated_at,
+                          r.superseded_by AS superseded_by, r.valid_from AS at,
+                          'confirmed' AS boundary
+                   FROM relations r
+                   JOIN entities s ON s.id=r.source_entity_id AND s.user_id=r.user_id
+                   JOIN entities t ON t.id=r.target_entity_id AND t.user_id=r.user_id
+                   WHERE r.user_id=? AND r.deleted_at IS NULL AND r.valid_from <> ''
+                     AND (? IS NULL OR r.valid_from >= ?)
+                     AND (? IS NULL OR r.valid_from <= ?)
+                   UNION ALL
+                   SELECT r.id AS relation_id, r.relation_type AS relation_type,
+                          r.source_entity_id AS source_entity_id, s.name AS source_name,
+                          r.target_entity_id AS target_entity_id, t.name AS target_name,
+                          r.valid_from AS valid_from, r.valid_to AS valid_to,
+                          r.created_at AS created_at, r.invalidated_at AS invalidated_at,
+                          r.superseded_by AS superseded_by, r.valid_to AS at,
+                          'ended' AS boundary
+                   FROM relations r
+                   JOIN entities s ON s.id=r.source_entity_id AND s.user_id=r.user_id
+                   JOIN entities t ON t.id=r.target_entity_id AND t.user_id=r.user_id
+                   WHERE r.user_id=? AND r.deleted_at IS NULL
+                     AND r.valid_to IS NOT NULL AND r.valid_to <> ''
+                     AND (? IS NULL OR r.valid_to >= ?)
+                     AND (? IS NULL OR r.valid_to <= ?)
+               )
+               SELECT relation_id, relation_type, source_entity_id, source_name,
+                      target_entity_id, target_name, valid_from, valid_to, created_at,
+                      invalidated_at, superseded_by, at, boundary
+               FROM relation_changes
+               ORDER BY at ASC,
+                        CASE boundary WHEN 'confirmed' THEN 0 ELSE 1 END ASC,
+                        relation_type ASC, source_name ASC, target_name ASC, relation_id ASC
+               LIMIT ?""",
+            (
+                user_id,
+                start,
+                start,
+                end,
+                end,
+                user_id,
+                start,
+                start,
+                end,
+                end,
+                bounded_limit,
+            ),
+        ).fetchall()
+        changes: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            changes.append(
+                {
+                    "kind": "relation",
+                    "at": item["at"],
+                    "boundary": item["boundary"],
+                    "relation_id": item["relation_id"],
+                    "relation_type": item["relation_type"],
+                    "source": {
+                        "id": item["source_entity_id"],
+                        "name": item["source_name"],
+                    },
+                    "target": {
+                        "id": item["target_entity_id"],
+                        "name": item["target_name"],
+                    },
+                    "valid_from": item["valid_from"],
+                    "valid_to": item["valid_to"],
+                    "created_at": item["created_at"],
+                    "invalidated_at": item["invalidated_at"],
+                    "superseded_by": item["superseded_by"],
+                }
+            )
+        return changes
+
+    def count_relation_changes_in_range(
+        self,
+        user_id: str,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> int:
+        """Exact number of relation valid-time boundaries in the same window."""
+
+        row = self.execute(
+            """SELECT COUNT(*) AS count
+               FROM (
+                   SELECT r.id
+                   FROM relations r
+                   JOIN entities s ON s.id=r.source_entity_id AND s.user_id=r.user_id
+                   JOIN entities t ON t.id=r.target_entity_id AND t.user_id=r.user_id
+                   WHERE r.user_id=? AND r.deleted_at IS NULL AND r.valid_from <> ''
+                     AND (? IS NULL OR r.valid_from >= ?)
+                     AND (? IS NULL OR r.valid_from <= ?)
+                   UNION ALL
+                   SELECT r.id
+                   FROM relations r
+                   JOIN entities s ON s.id=r.source_entity_id AND s.user_id=r.user_id
+                   JOIN entities t ON t.id=r.target_entity_id AND t.user_id=r.user_id
+                   WHERE r.user_id=? AND r.deleted_at IS NULL
+                     AND r.valid_to IS NOT NULL AND r.valid_to <> ''
+                     AND (? IS NULL OR r.valid_to >= ?)
+                     AND (? IS NULL OR r.valid_to <= ?)
+               )""",
+            (
+                user_id,
+                start,
+                start,
+                end,
+                end,
+                user_id,
+                start,
+                start,
+                end,
+                end,
+            ),
         ).fetchone()
         return int(row["count"] if row else 0)
 

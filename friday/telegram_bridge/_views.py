@@ -19,11 +19,27 @@ from friday.telegram_bridge._base import (
     refusal_notice,
 )
 
-# Сколько документов хроники показывать в чате. Прежде их было десять, но лента
-# просила у бэкенда пятнадцать и пять выбрасывала молча — и о самой обрезке не
-# говорила ни слова: на сорока документах марта человек видел десять последних, а
-# первая половина месяца для него не существовала.
+# Сколько строк каждой видимой части хроники показывать в чате. Сервер сообщает
+# полный total отдельно: выбрасывать хвост молча значило бы выдать страницу за всю
+# историю периода.
 _TIMELINE_SHOWN = 10
+_RELATION_LABELS = {
+    "family_of": "родня",
+    "member_of": "состоит в",
+    "manages": "руководит",
+    "part_of": "входит в",
+    "located_at": "находится в",
+    "works_on": "занят",
+    "related_to": "связано с",
+    "occurred_at": "произошло",
+    "created_by": "создано",
+    "mentions": "упоминает",
+    "references": "ссылается на",
+    "derived_from": "выведено из",
+    "same_as": "то же, что",
+    "uses": "использует",
+    "depends_on": "зависит от",
+}
 
 
 class ViewsMixin(BridgeShared):
@@ -1070,12 +1086,33 @@ class ViewsMixin(BridgeShared):
         lines = [f"Хроника {label}:"]
         if event_items:
             lines.append("")
-            lines.append("События:")
+            has_relations = any(
+                isinstance(item, dict) and item.get("kind") == "relation" for item in event_items
+            )
+            lines.append("События и изменения связей:" if has_relations else "События:")
             for item in event_items[:10]:
                 if not isinstance(item, dict):
                     continue
-                when = str(item.get("occurred_at") or "")[:10]
-                lines.append(f"• {when} — {str(item.get('name') or 'без названия')[:80]}")
+                when = str(item.get("at") or item.get("occurred_at") or "")[:10]
+                if item.get("kind") != "relation":
+                    lines.append(f"• {when} — {str(item.get('name') or 'без названия')[:80]}")
+                    continue
+                raw_source = item.get("source")
+                raw_target = item.get("target")
+                source = raw_source if isinstance(raw_source, dict) else {}
+                target = raw_target if isinstance(raw_target, dict) else {}
+                source_name = str(source.get("name") or "неизвестный объект")[:80]
+                target_name = str(target.get("name") or "неизвестный объект")[:80]
+                relation_label = _RELATION_LABELS.get(str(item.get("relation_type") or ""), "связано с")
+                boundary = "связь завершена" if item.get("boundary") == "ended" else "связь подтверждена"
+                lines.append(f"• {when} — {boundary}: {source_name} — {relation_label} — {target_name}")
+            graph_total = events.get("total") if isinstance(events, dict) else None
+            total_graph_items = int(graph_total) if isinstance(graph_total, int) else len(event_items)
+            if total_graph_items > _TIMELINE_SHOWN:
+                lines.append(
+                    f"Показаны первые {_TIMELINE_SHOWN} из {total_graph_items} "
+                    "событий и изменений связей — сузьте период."
+                )
         if doc_items:
             lines.append("")
             lines.append("Документы по их собственной дате:")
