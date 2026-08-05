@@ -94,9 +94,9 @@
 
 ```
 .venv/bin/ruff check .
-.venv/bin/ruff format --check jericho tests tools
-.venv/bin/mypy jericho
-.venv/bin/bandit -r jericho -q          # 0 HIGH
+.venv/bin/ruff format --check friday tests tools
+.venv/bin/mypy friday
+.venv/bin/bandit -r friday -q          # 0 HIGH
 node --check friday/admin_ui/static/app.js
 .venv/bin/python -m pytest -q
 ```

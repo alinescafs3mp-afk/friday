@@ -584,7 +584,7 @@ function graphLayout(nodes,edges){
 // Фильтры и режим — состояние ЭКРАНА, а не запроса: их читает и загрузка данных,
 // и отрисовка, поэтому умолчания заданы в одном месте.
 function graphState(){
-  if(!state.graphFilters)state.graphFilters={types:[],relations:[],onlyRelations:false,minWeight:1,search:'',hideIsolates:false};
+  if(!state.graphFilters)state.graphFilters={types:[],relations:[],onlyRelations:false,minWeight:1,minConfidence:0,asOf:'',search:'',hideIsolates:false};
   if(!state.graphView)state.graphView='global';
   if(!state.graphDepth)state.graphDepth=2;
   return state.graphFilters;
@@ -615,11 +615,21 @@ function graphControls(data){
     <div class="toolbar">
       ${chip(f.onlyRelations,'только подтверждённые связи',call('toggleGraphOnlyRelations'))}
       ${chip(f.hideIsolates,'скрыть одиночек',call('toggleGraphIsolates'))}
-      <span class="muted">общих документов не меньше</span>
-      ${[1,2,3,5,10].map(w=>chip(f.minWeight===w,String(w),call('setGraphMinWeight',w))).join(' ')}
+      ${local?'':`<span class="muted">общих документов не меньше</span>
+      ${[1,2,3,5,10].map(w=>chip(f.minWeight===w,String(w),call('setGraphMinWeight',w))).join(' ')}`}
       <span class="grow"></span>
       <span class="muted">узлов: ${Number(data.shown||0)} из ${Number(data.total||0)}</span>
-    </div>`;
+    </div>
+    <div class="toolbar">
+      <span class="muted">уверенность связи не ниже</span>
+      ${[0,0.3,0.5,0.7,0.9].map(c=>chip(f.minConfidence===c,c?c.toFixed(1):'любая',call('setGraphMinConfidence',c))).join(' ')}
+      <span class="grow"></span>
+      <span class="muted">картина на дату</span>
+      <input id="graphAsOf" class="field graph-asof" type="date" value="${esc(f.asOf)}">
+      <button class="btn small" ${call('applyGraphAsOf')}>Показать</button>
+      ${f.asOf?`<button class="btn small" ${call('clearGraphAsOf')}>сегодня</button>`:''}
+    </div>
+    ${f.asOf?`<div class="notice">Картина на ${esc(f.asOf)}: связь показана, если на эту дату она уже началась и ещё не кончилась. Связь с неизвестным началом не исключается — «неизвестно, когда началось» это не «началось позже».</div>`:''}`;
 }
 
 // Локальный вид отдаёт рёбра строками таблицы связей (`source_entity_id`), а
@@ -635,6 +645,42 @@ function normalizeGraph(data){
     total:data.total!==undefined?data.total:(data.nodes||[]).length};
 }
 
+// Пути от узла-фокуса до найденных: подсветить сам узел мало — человек видит,
+// ЧТО нашлось, и не видит, КАК оно связано с тем, на что он смотрит. Поиск в
+// ширину по нарисованным рёбрам, то есть путь показывается ровно тот, который на
+// картинке есть; путь через отфильтрованное ребро подсвечивать было бы враньём.
+function graphPaths(nodes,edges,anchorId,matched){
+  const painted=new Set();
+  if(!anchorId||!matched.size)return painted;
+  if(!nodes.some(n=>n.id===anchorId))return painted;
+  const near=new Map();
+  edges.forEach((e,i)=>{
+    if(!near.has(e.source))near.set(e.source,[]);
+    if(!near.has(e.target))near.set(e.target,[]);
+    near.get(e.source).push([e.target,i]);
+    near.get(e.target).push([e.source,i]);
+  });
+  const cameFrom=new Map([[anchorId,null]]);
+  const queue=[anchorId];
+  const left=new Set(matched);
+  left.delete(anchorId);
+  while(queue.length&&left.size){
+    const current=queue.shift();
+    for(const [next,edgeIndex] of (near.get(current)||[])){
+      if(cameFrom.has(next))continue;
+      cameFrom.set(next,[current,edgeIndex]);
+      if(left.has(next)){
+        left.delete(next);
+        // Разматываем назад ровно один раз на каждую находку.
+        let step=next;
+        while(cameFrom.get(step)){const [previous,index]=cameFrom.get(step);painted.add(index);step=previous}
+      }
+      queue.push(next);
+    }
+  }
+  return painted;
+}
+
 function graphMarkup(raw){
   const data=normalizeGraph(raw);
   const f=graphState();
@@ -648,6 +694,9 @@ function graphMarkup(raw){
   const byId=new Map(nodes.map(x=>[x.id,x]));
   const maxCount=Math.max(1,...nodes.map(x=>x.knowledge_count||0));
   const needle=(f.search||'').trim().toLowerCase();
+  const matched=new Set(needle?nodes.filter(n=>String(n.name||'').toLowerCase().includes(needle)).map(n=>n.id):[]);
+  const anchor=state.graphView==='local'?state.graphFocus:'';
+  const onPath=graphPaths(nodes,edges,anchor,matched);
   const lines=edges.map((e,i)=>{const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
     const rel=e.kind==='relation';
     const kind=String(e.relation_type||'');
@@ -657,10 +706,14 @@ function graphMarkup(raw){
     const w=rel?(1.4+1.8*Math.min(1,Number(e.weight)||1)):Math.min(3,0.6+(e.weight||1)*0.35);
     const color=rel?(RELATION_COLORS[kind]||'#4c9aff'):'#5a6472';
     const label=rel?(RELATION_LABELS[kind]||kind||'подтверждённая связь'):('общих документов: '+e.weight);
-    return `<line data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"`
+    // Ребро на пути к найденному рисуется тем же цветом вида связи, но заметно
+    // толще и без прозрачности: подменять цвет значило бы соврать про вид связи
+    // ради поиска — ровно как с цветом узла, который занят типом сущности.
+    const lit=onPath.has(i);
+    return `<line data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"${lit?' class="gpath"':''}`
       +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
-      +` stroke="${color}" stroke-width="${w.toFixed(1)}"${rel?'':' stroke-dasharray="3 4"'}`
-      +` opacity="${rel?0.92:0.4}"><title>${esc(s.name)} → ${esc(t.name)}: ${esc(label)}</title></line>`}).join('');
+      +` stroke="${color}" stroke-width="${(lit?w+2.2:w).toFixed(1)}"${rel&&!lit?'':(lit?'':' stroke-dasharray="3 4"')}`
+      +` opacity="${lit?1:rel?0.92:0.4}"><title>${esc(s.name)} → ${esc(t.name)}: ${esc(label)}</title></line>`}).join('');
   const circles=nodes.map(node=>{const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
     const kind=GRAPH_COLORS[node.entity_type]?node.entity_type:'other';
     // Найденное подсвечивается кольцом, а не заменой цвета: цвет уже занят типом
@@ -684,8 +737,15 @@ function graphMarkup(raw){
   // Обрез называется вслух: картинка, молча показывающая часть графа, хуже отсутствующей.
   const capped=(data.total||0)>(data.shown||0)
     ? `<div class="notice">Показано ${data.shown} сущностей из ${data.total} — самые связанные с документами. Остальные не поместились, а не отсутствуют.</div>`:'';
-  const found=needle?nodes.filter(n=>String(n.name||'').toLowerCase().includes(needle)).length:0;
-  const searchNote=needle?`<div class="notice">Найдено на картине: ${found}. Подсвечены жёлтым.</div>`:'';
+  const found=matched.size;
+  // Про пути говорится ровно то, что есть: подсвечен путь ОТ ФОКУСА, и только в
+  // окрестности узла. На общей картине точки отсчёта нет, и молчать об этом
+  // нельзя — иначе отсутствие подсветки читается как «пути нет».
+  const pathNote=onPath.size
+    ? ` Путь от «${esc(state.graphFocusName||'фокуса')}» подсвечен: рёбер в пути ${onPath.size}.`
+    : (needle&&anchor?' Пути от фокуса к найденному на этой картине нет.'
+      : needle?' Чтобы увидеть пути, откройте окрестность узла — на общей картине точки отсчёта нет.':'');
+  const searchNote=needle?`<div class="notice">Найдено на картине: ${found}. Подсвечены жёлтым.${pathNote}</div>`:'';
   return `${capped}${searchNote}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>${relLegend}
     <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}">${lines}${circles}</svg>
     <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — переставить (запомнится), клик по узлу — карточка и переход к его окрестности</div></div>`;
@@ -773,7 +833,12 @@ async function graphData(uid){
     const local=[`user_id=${q(uid)}`,`depth=${Number(state.graphDepth)||2}`];
     if(f.types.length)local.push(`entity_types=${q(f.types.join(','))}`);
     if(f.relations.length)local.push(`relation_types=${q(f.relations.join(','))}`);
-    if(f.minWeight>1)local.push(`min_weight=${Number(f.minWeight)/50}`);
+    // Порог уверенности передаётся своим именем. Прежде сюда уезжало «общих
+    // документов не меньше», делённое на 50: человек двигал число документов, а
+    // на деле менял порог уверенности связи — два разных смысла под одним
+    // органом управления. Теперь у общей картины свой орган, у окрестности свой.
+    if(f.minConfidence>0)local.push(`min_confidence=${Number(f.minConfidence)}`);
+    if(f.asOf)local.push(`as_of=${q(f.asOf)}`);
     return api(`/api/admin/graph/${q(state.graphFocus)}?${local.join('&')}`);
   }
   const params=[`user_id=${q(uid)}`,'limit=150'];
@@ -782,6 +847,8 @@ async function graphData(uid){
   if(f.onlyRelations)params.push('only_relations=true');
   if(f.hideIsolates)params.push('hide_isolates=true');
   if(f.minWeight>1)params.push(`min_weight=${Number(f.minWeight)}`);
+  if(f.minConfidence>0)params.push(`min_confidence=${Number(f.minConfidence)}`);
+  if(f.asOf)params.push(`as_of=${q(f.asOf)}`);
   if(f.search)params.push(`search=${q(f.search)}`);
   return api(`/api/admin/graph?${params.join('&')}`);
 }
@@ -795,6 +862,9 @@ actions.clearGraphRelations=()=>{graphState().relations=[];refresh()};
 actions.toggleGraphOnlyRelations=()=>{const f=graphState();f.onlyRelations=!f.onlyRelations;refresh()};
 actions.toggleGraphIsolates=()=>{const f=graphState();f.hideIsolates=!f.hideIsolates;refresh()};
 actions.setGraphMinWeight=weight=>{graphState().minWeight=Number(weight)||1;refresh()};
+actions.setGraphMinConfidence=value=>{graphState().minConfidence=Number(value)||0;refresh()};
+actions.applyGraphAsOf=()=>{const el=document.getElementById('graphAsOf');graphState().asOf=el?el.value.trim():'';refresh()};
+actions.clearGraphAsOf=()=>{graphState().asOf='';refresh()};
 actions.applyGraphSearch=()=>{const el=document.getElementById('graphSearch');graphState().search=el?el.value.trim():'';refresh()};
 actions.focusGraphNode=(id,name)=>{closeModal();state.graphView='local';state.graphFocus=id;state.graphFocusName=name||'';refresh()};
 actions.resetGraphLayout=()=>{try{localStorage.removeItem(graphLayoutKey())}catch(e){}toast('Раскладка сброшена');refresh()};

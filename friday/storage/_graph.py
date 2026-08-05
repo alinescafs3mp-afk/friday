@@ -250,6 +250,8 @@ class GraphMixin(StorageShared):
         relation_types: Sequence[str] | None = None,
         only_relations: bool = False,
         min_weight: int = 1,
+        min_confidence: float = 0.0,
+        as_of: str = "",
         search: str = "",
         hide_isolates: bool = False,
     ) -> dict[str, Any]:
@@ -329,16 +331,28 @@ class GraphMixin(StorageShared):
             f"source_entity_id IN ({placeholders})",
             f"target_entity_id IN ({placeholders})",
             "deleted_at IS NULL",
-            # Отменённая связь на общей картине не рисуется: «служит в в/ч А» и
-            # «служит в в/ч Б» рядом читаются как одновременные.
-            "valid_to IS NULL",
         ]
         relation_parameters: list[Any] = [user_id, *ids, *ids]
+        if as_of:
+            # «А как было тогда»: связь берётся, если на ту дату она уже началась
+            # и ещё не кончилась. Пустое начало не исключает — «неизвестно, когда
+            # началось» это не «началось позже». То же правило, что в обходе
+            # окрестности узла: две картины одной даты обязаны совпадать.
+            relation_conditions.append("(valid_from = '' OR valid_from <= ?)")
+            relation_parameters.append(as_of)
+            relation_conditions.append("(valid_to IS NULL OR valid_to > ?)")
+            relation_parameters.append(as_of)
+        else:
+            # Отменённая связь на общей картине не рисуется: «служит в в/ч А» и
+            # «служит в в/ч Б» рядом читаются как одновременные.
+            relation_conditions.append("valid_to IS NULL")
+        floor_confidence = max(0.0, min(float(min_confidence), 1.0))
+        if floor_confidence > 0:
+            relation_conditions.append("weight >= ?")
+            relation_parameters.append(floor_confidence)
         wanted_relations = [str(item).strip() for item in (relation_types or []) if str(item).strip()]
         if wanted_relations:
-            relation_conditions.append(
-                f"relation_type IN ({','.join('?' * len(wanted_relations))})"
-            )
+            relation_conditions.append(f"relation_type IN ({','.join('?' * len(wanted_relations))})")
             relation_parameters.extend(wanted_relations)
         relations = self.execute(
             f"""SELECT source_entity_id AS source, target_entity_id AS target, relation_type, weight
@@ -353,9 +367,7 @@ class GraphMixin(StorageShared):
             # Узел без единого ребра занимает место и ничего не рассказывает. Убирать
             # его — решение ЗРИТЕЛЯ, поэтому по умолчанию он на месте, а `shown`
             # ниже считается после отсева, чтобы подпись не расходилась с картинкой.
-            connected = {str(edge["source"]) for edge in edges} | {
-                str(edge["target"]) for edge in edges
-            }
+            connected = {str(edge["source"]) for edge in edges} | {str(edge["target"]) for edge in edges}
             nodes = [node for node in nodes if str(node["id"]) in connected]
         return {
             "nodes": nodes,
@@ -785,9 +797,7 @@ class GraphMixin(StorageShared):
             clauses.append("t.occurred_at <= ?")
             params.append(end)
         if mine:
-            clauses.append(
-                "(COALESCE(t.source,'') NOT LIKE 'reminder:%' OR COALESCE(t.source,'') = ?)"
-            )
+            clauses.append("(COALESCE(t.source,'') NOT LIKE 'reminder:%' OR COALESCE(t.source,'') = ?)")
             params.append(f"reminder:{mine}")
         row = self.execute(
             "SELECT COUNT(*) AS count FROM entity_time t JOIN entities e ON e.id=t.entity_id "
@@ -968,6 +978,7 @@ class GraphMixin(StorageShared):
         entity_types: Sequence[str] = (),
         relation_types: Sequence[str] = (),
         min_weight: float = 0.0,
+        min_confidence: float = 0.0,
     ) -> dict[str, Any]:
         """Окрестность узла. `as_of` — «как это выглядело на ту дату».
 
@@ -990,7 +1001,13 @@ class GraphMixin(StorageShared):
         # узла и молча получал всё.
         wanted_entities = {str(item).strip() for item in entity_types if str(item).strip()}
         wanted_relations = {str(item).strip() for item in relation_types if str(item).strip()}
-        floor = max(0.0, float(min_weight))
+        # Порог у связи один — её вес, — но имён у него исторически два. `weight`
+        # здесь и есть уверенность связи, а `min_weight` в общей картине означает
+        # ДРУГОЕ: число общих документов у совместной встречаемости. Панель звала
+        # оба одним органом управления и делила число на 50, чтобы попасть в
+        # диапазон 0..1 — то есть человек двигал «общих документов», а получал
+        # порог уверенности. Здесь принимаются оба имени, берётся строгое из них.
+        floor = max(0.0, float(min_weight), float(min_confidence))
         seen = {entity_id}
         frontier = {entity_id}
         nodes: dict[str, dict[str, Any]] = {entity_id: root}
@@ -1032,7 +1049,9 @@ class GraphMixin(StorageShared):
         # «Документов: —», хотя ровно это число стоит в подсказке кружка и задаёт
         # его радиус: два экрана об одной сущности говорили разное.
         counts = self._knowledge_counts_for(user_id, list(nodes))
-        enriched = [{**node, "knowledge_count": counts.get(str(node.get("id")), 0)} for node in nodes.values()]
+        enriched = [
+            {**node, "knowledge_count": counts.get(str(node.get("id")), 0)} for node in nodes.values()
+        ]
         # Дата названа В ОТВЕТЕ: картина «на 2024» и картина «сегодня» выглядят
         # одинаково, и потребитель обязан видеть, какую из двух он получил.
         return {"root": entity_id, "nodes": enriched, "edges": list(edges.values()), "as_of": as_of}

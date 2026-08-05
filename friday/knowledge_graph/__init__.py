@@ -1805,9 +1805,7 @@ class KnowledgeGraph:
             resolution_note=resolution_note,
         )
 
-    def get_entity_relations(
-        self, entity_id: str, user_id: str, *, as_of: str = ""
-    ) -> list[dict[str, Any]]:
+    def get_entity_relations(self, entity_id: str, user_id: str, *, as_of: str = "") -> list[dict[str, Any]]:
         """Связи узла; `as_of` — какими они были на ту дату.
 
         Обёртка обязана пропускать дату дальше: без этого «как было тогда»
@@ -1835,6 +1833,7 @@ class KnowledgeGraph:
         entity_types: Any = (),
         relation_types: Any = (),
         min_weight: float = 0.0,
+        min_confidence: float = 0.0,
     ) -> dict[str, Any]:
         return self.storage.get_entity_graph(
             user_id,
@@ -1844,6 +1843,7 @@ class KnowledgeGraph:
             entity_types=entity_types,
             relation_types=relation_types,
             min_weight=min_weight,
+            min_confidence=min_confidence,
         )
 
     def link_knowledge_to_entity(

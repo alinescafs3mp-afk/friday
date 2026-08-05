@@ -125,6 +125,8 @@ async def graph_overview(
     relation_types: str = "",
     only_relations: bool = False,
     min_weight: int = Query(1, ge=1, le=50),
+    min_confidence: float = Query(0.0, ge=0.0, le=1.0),
+    as_of: str = "",
     search: str = "",
     hide_isolates: bool = False,
 ) -> dict[str, Any]:
@@ -149,6 +151,8 @@ async def graph_overview(
             relation_types=[item for item in relation_types.split(",") if item.strip()],
             only_relations=only_relations,
             min_weight=min_weight,
+            min_confidence=min_confidence,
+            as_of=as_of,
             search=search,
             hide_isolates=hide_isolates,
         )
@@ -164,6 +168,7 @@ async def graph(
     entity_types: str = "",
     relation_types: str = "",
     min_weight: float = Query(0.0, ge=0.0, le=1.0),
+    min_confidence: float = Query(0.0, ge=0.0, le=1.0),
     as_of: str = "",
 ) -> dict[str, Any]:
     """Окрестность узла — с теми же фильтрами, что и общий вид.
@@ -186,6 +191,7 @@ async def graph(
         entity_types=[item for item in entity_types.split(",") if item.strip()],
         relation_types=[item for item in relation_types.split(",") if item.strip()],
         min_weight=min_weight,
+        min_confidence=min_confidence,
     )
 
 
