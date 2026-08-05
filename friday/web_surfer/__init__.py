@@ -17,6 +17,7 @@ import logging
 import re
 import socket
 import urllib.parse
+import urllib.robotparser
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -58,6 +59,9 @@ _FETCH_TOTAL_BUDGET = 60.0
 # completed pages because one peer was still streaming.
 _RESEARCH_TOTAL_BUDGET = 27.0
 _RESEARCH_FETCH_BUDGET = 12.0
+#: Срок на чтение `robots.txt`. Отдельный и короткий: файл правил крошечный, а
+#: без своего срока он становится дорогой в обход страничного бюджета.
+_ROBOTS_TIMEOUT = 10.0
 
 
 def _host_of(url: str) -> str:
@@ -484,6 +488,27 @@ class WebSurfer:
         # секунды, выглядят молотилкой, и блокируют за это адрес целиком.
         self._last_touch: dict[str, float] = {}
         self._host_locks: dict[str, asyncio.Lock] = {}
+        # Правила сайта читаются один раз на процесс: спрашивать `robots.txt`
+        # перед каждой страницей — удвоить нагрузку на чужой сервер ради
+        # вежливости к нему же.
+        self._robots: dict[str, urllib.robotparser.RobotFileParser] = {}
+        # Темп, названный самим сайтом (`Crawl-delay`), — он главнее умолчания.
+        self._host_pause: dict[str, float] = {}
+
+    def _default_pause(self) -> float:
+        return float(getattr(self.settings, "web_host_pause_sec", 0.0) or 0.0)
+
+    def _pause_for(self, host: str) -> float:
+        """Сколько ждать перед этим сайтом: его просьба или наше умолчание.
+
+        Названный сайтом темп берётся ТОЛЬКО если он больше нашего: `Crawl-delay`
+        меньше нашей паузы — разрешение спешить, а не обязанность. Заодно
+        замечено при проверке: стандартный разборщик понимает лишь ЦЕЛУЮ
+        задержку, дробную (`0.1`) молча отбрасывает — так что до этого сравнения
+        доходят только целые секунды.
+        """
+
+        return self._host_pause.get(host, self._default_pause())
 
     async def _be_polite_to(self, host: str) -> None:
         """Выдержать паузу перед повторным обращением к тому же сайту.
@@ -493,7 +518,7 @@ class WebSurfer:
         сейчас идёт параллельно, станет последовательным и втрое дольше.
         """
 
-        pause = float(getattr(self.settings, "web_host_pause_sec", 0.0) or 0.0)
+        pause = self._pause_for(host)
         if pause <= 0 or not host:
             return
         lock = self._host_locks.setdefault(host, asyncio.Lock())
@@ -954,8 +979,66 @@ class WebSurfer:
                 return b"".join(chunks), response, current
         raise ValueError(f"Too many redirects (>{_MAX_REDIRECTS})")
 
+    async def _robots_verdict(self, url: str) -> str:
+        """Разрешает ли сайт брать эту страницу. Пустая строка — можно.
+
+        Читается ОДИН раз на сайт и держится в памяти процесса: спрашивать
+        `robots.txt` перед каждой страницей значило бы удвоить число обращений к
+        чужому серверу ради вежливости к нему же.
+
+        Недоступный или битый `robots.txt` означает РАЗРЕШЕНО. Обратное правило
+        («не смогли прочитать — не пойдём») делало бы любой сбой сети запретом на
+        весь интернет, и человек получал бы отказ вместо страницы.
+        """
+
+        host = _host_of(url)
+        if not host:
+            return ""
+        cached = self._robots.get(host)
+        if cached is None:
+            parser = urllib.robotparser.RobotFileParser()
+            try:
+                scheme = "https" if str(url or "").lower().startswith("https") else "http"
+                # СВОЙ срок, и короткий. Без него сервер, отдающий по байту в
+                # пять секунд, держал бы нас на `robots.txt` — то есть вежливость
+                # к чужому серверу открыла бы дыру, которую страничный бюджет уже
+                # закрыл. Поймано сторожем `test_a_drip_feeding_server…`: загрузка
+                # растянулась с секунд до тридцати. Файл правил крошечный,
+                # десяти секунд ему более чем достаточно.
+                # Срок берётся ДОЛЕЙ от страничного бюджета, а не константой:
+                # иначе чтение правил переживает бюджет самой страницы и правило
+                # «одна загрузка не длится дольше X» перестаёт быть правдой.
+                # Ровно это и поймал сторож: с фиксированными десятью секундами
+                # загрузка при урезанном бюджете растянулась на тридцать.
+                async with asyncio.timeout(min(_ROBOTS_TIMEOUT, _FETCH_TOTAL_BUDGET / 4)):
+                    body, response, _ = await self._request_bytes(f"{scheme}://{host}/robots.txt")
+                if 200 <= response.status_code < 300:
+                    parser.parse(body.decode("utf-8", errors="replace").splitlines())
+                else:
+                    # 404 — «правил нет», и это разрешение, а не молчание.
+                    parser.parse([])
+            except Exception as exc:  # noqa: BLE001 — сбой чтения правил не запрет
+                LOGGER.debug("robots.txt недоступен для %s: %s", host, type(exc).__name__)
+                parser.parse([])
+            self._robots[host] = parser
+            cached = parser
+        # Заголовок мы шлём браузерный, поэтому и правило спрашиваем для «*»:
+        # представляться одним, а правила читать для другого — обман.
+        if not cached.can_fetch("*", url):
+            return "Сайт запрещает автоматический доступ к этой странице (robots.txt)"
+        delay = cached.crawl_delay("*")
+        if delay:
+            # Хозяин сайта назвал свой темп — он главнее нашего умолчания.
+            self._host_pause[host] = max(float(delay), self._default_pause())
+        return ""
+
     async def fetch(self, url: str, *, max_length: int = 50_000) -> FetchResult:
         requested = str(url or "").strip()
+        forbidden = await self._robots_verdict(requested)
+        if forbidden:
+            # Отказ НАЗЫВАЕТСЯ. Пустая страница без причины читалась бы как
+            # «там ничего нет», и модель пересказала бы это человеку как факт.
+            return FetchResult(url=requested, title="", text="", text_length=0, error=forbidden)
         await self._be_polite_to(_host_of(requested))
         try:
             # httpx timeouts are PER OPERATION: `read=20` means «no more than twenty
