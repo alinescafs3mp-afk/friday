@@ -3,33 +3,59 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
-
-from setuptools import Distribution
-from setuptools.command.build_py import build_py
-from setuptools.config.pyprojecttoml import apply_configuration
 
 REPO = Path(__file__).resolve().parents[1]
 
 
-def test_the_distribution_carries_every_admin_ui_asset(tmp_path, monkeypatch):
-    """Exercise setuptools' package-data selection in a clean source tree."""
+def test_real_wheel_ignores_a_stale_manifest_and_carries_admin_ui(tmp_path):
+    """Build the artifact users install, including with poisoned local metadata."""
     project = tmp_path / "project"
-    package = project / "friday"
-    shutil.copytree(REPO / "friday" / "admin_ui", package / "admin_ui")
-    (package / "__init__.py").write_text("", encoding="utf-8")
+    shutil.copytree(
+        REPO / "friday",
+        project / "friday",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     for name in ("pyproject.toml", "README.md", "LICENSE"):
         shutil.copy2(REPO / name, project / name)
 
-    monkeypatch.chdir(project)
-    distribution = Distribution()
-    distribution.script_name = "pyproject.toml"
-    apply_configuration(distribution, "pyproject.toml")
+    # Setuptools normally carries this ignored cache across builds.  One tool
+    # invocation with an absolute script_name used to poison it permanently and
+    # make every later ``python -m build`` fail before producing a wheel.
+    egg_info = project / "friday.egg-info"
+    egg_info.mkdir()
+    (egg_info / "SOURCES.txt").write_text(
+        f"pyproject.toml\n{project / 'pyproject.toml'}\n",
+        encoding="utf-8",
+    )
 
-    command = build_py(distribution)
-    command.ensure_finalized()
-    command.build_lib = str(project / "wheel-layout")
-    command.run()
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "build",
+            "--wheel",
+            "--no-isolation",
+            "--outdir",
+            str(project / "dist"),
+        ),
+        cwd=project,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
-    packaged = Path(command.build_lib) / "friday" / "admin_ui" / "static"
-    assert {"index.html", "app.js", "app.css"} <= {path.name for path in packaged.iterdir()}
+    wheels = list((project / "dist").glob("*.whl"))
+    assert len(wheels) == 1
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        packaged = set(wheel.namelist())
+
+    assert {
+        "friday/admin_ui/static/index.html",
+        "friday/admin_ui/static/app.js",
+        "friday/admin_ui/static/app.css",
+    } <= packaged

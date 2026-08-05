@@ -79,6 +79,12 @@ jericho = "friday.cli:main"
 requires = ["setuptools>=75", "wheel>=0.45"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# Every non-Python file shipped by Friday is declared explicitly below.  Keeping
+# implicit manifest discovery disabled also makes wheel builds independent of a
+# stale ``*.egg-info/SOURCES.txt`` left by editable installs or packaging tools.
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["friday*"]
