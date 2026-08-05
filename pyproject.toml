@@ -111,6 +111,16 @@ testpaths = ["tests"]
 addopts = "-ra -n 12"
 asyncio_mode = "auto"
 
+[tool.mypy]
+
+# Voice and vector acceleration are deliberately optional, lazy imports.  The
+# canonical CI environment installs only ``.[dev]`` so static analysis must treat
+# those declared module boundaries as unavailable rather than forcing heavyweight
+# runtime extras into every development install.
+[[tool.mypy.overrides]]
+module = ["av", "faster_whisper", "numpy", "piper", "piper.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"
