@@ -25,6 +25,7 @@ logs/
 *.sqlite3.lock
 *.lock
 !requirements.lock
+!requirements-dev.lock
 *.manifest.json
 
 # Model weights (the empty model directory and its README stay tracked)
@@ -59,4 +60,3 @@ scratch*/
 
 # Grok task watcher local state (never commit)
 grok/.task_watch_state.json
-

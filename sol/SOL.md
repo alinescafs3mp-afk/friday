@@ -90,16 +90,25 @@
 
 ## 4. Как проверяется работа
 
-Прогоняй перед каждым предложением и перед каждой веткой:
+Полный канонический гейт перед каждым предложением и перед каждой веткой запускается
+одной командой:
 
 ```
-.venv/bin/ruff check .
-.venv/bin/ruff format --check friday tests tools
-.venv/bin/mypy friday
-.venv/bin/bandit -r friday -q          # 0 HIGH
-node --check friday/admin_ui/static/app.js
-.venv/bin/python -m pytest -q
+.venv/bin/python tools/quality_gate.py
 ```
+
+Runner выполняет три фазы в фиксированном порядке:
+
+1. `static` — Ruff lint/format для актуальных путей, mypy для `friday`, Bandit с
+   запретом HIGH и синтаксическую проверку Admin JavaScript через Node;
+2. `tests` — весь не-браузерный pytest отдельно и параллельно;
+3. `ui` — preflight реального Playwright Chromium и браузерные модули с изоляцией
+   module-scoped серверов. Отсутствующий браузер и любой skipped UI-тест — красный
+   гейт, а не молчаливая потеря покрытия.
+
+Для короткой итерации можно выбрать фазу, например
+`.venv/bin/python tools/quality_gate.py --phase static` или `--phase ui --ui-workers 1`.
+Частичный прогон не заменяет полную команду перед пушем.
 
 **Мутация обязательна для нового теста.** Сломай код, который тест якобы защищает, и
 убедись, что тест падает. В этом проекте зелёный тест на сломанном коде ловили

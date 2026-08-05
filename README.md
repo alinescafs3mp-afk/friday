@@ -176,7 +176,7 @@ Compose сам собирает закреплённый image `friday/vllm-open
 2. Сделайте копию каталога `data/` и файлов конфигурации.
 3. Замените только исходники проекта; не переносите из архива runtime-каталоги поверх своих данных.
 4. Повторите `pip install -e ".[dev]"` и запустите `jericho doctor`.
-5. Схема SQLite — **29**; обновление её не переписывает: авторитетные знания, граф, Inbox и разговоры не переписываются. При открытии могут идемпотентно достраиваться отсутствующие производные projections вроде usage state. Более новая неизвестная схема отклоняется без изменений.
+5. Схема SQLite — **30**; обновление её не переписывает: авторитетные знания, граф, Inbox и разговоры не переписываются. При открытии могут идемпотентно достраиваться отсутствующие производные projections вроде usage state. Более новая неизвестная схема отклоняется без изменений.
 
 Перед обновлением выполните `jericho backup --label before-upgrade` и `jericho verify-backup`: совместимость схемы не заменяет проверенную резервную копию.
 
@@ -365,11 +365,19 @@ Runtime-каталоги и секреты исключены из Git и из �
 
 ## Проверки
 
-```powershell
-pytest -q
-python -m compileall -q jericho tests
+```bash
+.venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+.venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev]"
+.venv/bin/python -m playwright install chromium
+.venv/bin/python tools/quality_gate.py
 jericho doctor
 ```
+
+`tools/quality_gate.py` — единая проверка репозитория: сначала static checks, затем
+не-браузерный pytest и отдельная UI-фаза. UI требует запускаемого Playwright
+Chromium; отсутствующий браузер и любой skipped UI-тест считаются ошибкой. Для
+локальной итерации есть `--phase static`, `--phase tests` и `--phase ui`, но перед
+пушем выполняется полная команда без `--phase`.
 
 Тесты покрывают provenance, tenant isolation, versions, soft delete, review-only lifecycle, backup verification/restore/rollback, entity resolution, терминальные relation decisions и монотонные conflict decisions, три исхода ingestion, feedback replacement и точную attribution, usage-aware retrieval, agent modes, knowledge-work/research-to-Inbox, grounded bounded vision/OCR, bulk Admin workflows, worker timeout/partial failure health, backend singleton lease, capability default-deny и безопасное делегирование, инструментальное ядро и завершение дерева процессов, архивные лимиты, SSRF, подписанный Telegram/API vertical slice, inline callbacks, миграцию/повторы/dead-letter очереди Telegram, redaction логов, tool-call protocol и закреплённый vLLM image/profile.
 

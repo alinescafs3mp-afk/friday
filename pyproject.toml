@@ -52,6 +52,9 @@ dev = [
     "bandit>=1.8,<2",
     "build>=1.2,<2",
     "mypy>=1.15,<2",
+    # Admin UI tests are release tests, not optional skips.  The browser binary
+    # is installed explicitly by the quality gate/CI preflight.
+    "playwright>=1.55,<2",
     "pytest>=9,<10",
     "pytest-asyncio>=1,<2",
     "pytest-cov>=7,<8",
@@ -61,6 +64,8 @@ dev = [
     # не отказал — это и было главной неизвестностью.
     "pytest-xdist>=3,<4",
     "ruff>=0.8,<1",
+    # Required by the declared build backend and by the clean-wheel release phase.
+    "wheel>=0.45,<1",
 ]
 
 [project.scripts]
@@ -79,7 +84,7 @@ where = ["."]
 include = ["friday*"]
 
 [tool.setuptools.package-data]
-"friday.admin_ui" = ["static/*.html"]
+"friday.admin_ui" = ["static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

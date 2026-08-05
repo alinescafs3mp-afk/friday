@@ -410,7 +410,8 @@ class ViewsMixin(BridgeShared):
         for item in items:
             if not isinstance(item, dict):
                 continue
-            counters = item.get("counters") if isinstance(item.get("counters"), dict) else {}
+            raw_counters = item.get("counters")
+            counters = raw_counters if isinstance(raw_counters, dict) else {}
             turns = counters.get("total_turns")
             # «Признака не было» и «случаев не было» — разные ответы, и ноль
             # здесь врал бы в ту сторону, где его примут за факт.

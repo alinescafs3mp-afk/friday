@@ -6,22 +6,30 @@
 
 ## 1. Source tree
 
-```powershell
-ruff check jericho tests
-ruff format --check jericho tests
-mypy jericho
-pytest -q --cov=jericho --cov-report=term-missing
-python -m compileall -q jericho tests
-bandit -r jericho -f json -o bandit.json
+Подготовить dev-окружение и Chromium, затем запустить единый репозиторный гейт:
+
+```bash
+.venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+.venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev]"
+.venv/bin/python -m playwright install chromium
+.venv/bin/python tools/quality_gate.py
 ```
+
+Гейт всегда идёт тремя фазами: `static` (Ruff, mypy, Bandit HIGH и `node --check`),
+`tests` (не-браузерный pytest) и `ui` (Playwright). UI-модули отделены от общего
+pytest, чтобы их process-wide серверы не пересекались; preflight должен запустить
+реальный Chromium, а JUnit-отчёт с любым skipped UI-тестом делает гейт красным.
+`--phase static|tests|ui` предназначен только для локальной итерации и не заменяет
+полный запуск перед выпуском.
 
 Обязательные условия:
 
-- нет failed tests;
-- Ruff/mypy/compileall clean;
-- Bandit HIGH = 0, каждый MEDIUM/LOW рассмотрен и объяснён;
+- канонический гейт завершился с кодом 0;
+- нет failed tests и нет skipped UI-тестов;
+- Ruff/mypy clean;
+- Bandit HIGH = 0; каждый MEDIUM/LOW отдельно рассмотрен и объяснён в release evidence;
 - `git diff --check` clean;
-- Admin JavaScript проходит `node --check`;
+- Admin JavaScript проходит встроенный в гейт `node --check`;
 - Markdown links/fences и Compose YAML разбираются без ошибок.
 
 ## 2. Product regressions
