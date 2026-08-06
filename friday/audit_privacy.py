@@ -271,6 +271,8 @@ _SAFE_AUDIT_ACTIONS = frozenset(
         "monitor.stop",
         "relation.create",
         "relation.create.idempotent",
+        "relation_candidate.accepted",
+        "relation_candidate.rejected",
         "request.throttled",
         "tool.invoke",
         "tool.user_activity",

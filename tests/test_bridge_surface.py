@@ -219,6 +219,7 @@ EXPECTED_CALLBACK_NAMESPACES = {
     "feedback",
     "inbox",
     "merge",
+    "relation",
     "mission",
     "mon",
     "remind",
@@ -248,6 +249,7 @@ EXPECTED_COMMANDS = {
     "/watching",
     "/approvals",
     "/reminders",
+    "/relations",
     "/rename",
     "/research",
     "/retry",
@@ -287,7 +289,7 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
-EXPECTED_BRIDGE_COUNT = 63
+EXPECTED_BRIDGE_COUNT = 64
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -329,6 +331,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_history": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
+    "_send_relations": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_reminders": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_document": "(self, client: 'httpx.AsyncClient', chat_id: 'int', filename: 'str', content_bytes: 'bytes', *, caption: 'str' = '', mime_type: 'str' = 'text/plain; charset=utf-8') -> 'None'",
     "_send_voice": "(self, client: 'httpx.AsyncClient', chat_id: 'int', audio_bytes: 'bytes') -> 'None'",

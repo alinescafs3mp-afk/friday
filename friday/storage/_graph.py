@@ -443,7 +443,7 @@ def _bounded_relation_candidate_by_id(
     user_id: str,
     candidate_id: str,
 ) -> dict[str, Any] | None:
-    """One visible relation-review card without its arbitrary evidence body."""
+    """One live, visible relation-review card without its evidence body."""
 
     row = storage.execute(
         f"""SELECT substr(c.id, 1, 160) AS id,
@@ -463,8 +463,10 @@ def _bounded_relation_candidate_by_id(
                        AS evidence_bytes
               FROM relation_candidates c
               JOIN entities s ON s.id=c.source_entity_id AND s.user_id=c.user_id
+                   AND s.deleted_at IS NULL AND s.canonical=1 AND s.merged_into_id IS NULL
                    AND {_not_private_entity_material_dependency("s")}
               JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id
+                   AND t.deleted_at IS NULL AND t.canonical=1 AND t.merged_into_id IS NULL
                    AND {_not_private_entity_material_dependency("t")}
              WHERE c.id=? AND c.user_id=?
                AND {_not_private_relation_candidate_dependency("c")}
@@ -4066,6 +4068,13 @@ class GraphMixin(StorageShared):
                 f"""SELECT c.id, c.user_id, c.source_entity_id, c.target_entity_id,
                             c.relation_type, c.confidence, c.status, c.created_at,
                             c.reviewed_at, c.reviewed_by,
+                            substr(s.name,1,240) AS source_name,
+                            substr(s.entity_type,1,80) AS source_type,
+                            substr(t.name,1,240) AS target_name,
+                            substr(t.entity_type,1,80) AS target_type,
+                            CASE WHEN COALESCE(c.evidence_json,'')
+                                           NOT IN ('', '{{}}', '[]', 'null')
+                                 THEN 1 ELSE 0 END AS evidence_present,
                             MIN(length(CAST(COALESCE(c.evidence_json,'') AS BLOB)),
                                 1000000000) AS evidence_bytes,
                             CASE WHEN length(CAST(COALESCE(c.evidence_json,'') AS BLOB))
@@ -4077,8 +4086,10 @@ class GraphMixin(StorageShared):
                                  ELSE '{{}}' END AS evidence_json
                      FROM relation_candidates c
                      JOIN entities s ON s.id=c.source_entity_id AND s.user_id=c.user_id
+                          AND s.deleted_at IS NULL AND s.canonical=1 AND s.merged_into_id IS NULL
                           AND {_not_private_entity_material_dependency("s")}
                      JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id
+                          AND t.deleted_at IS NULL AND t.canonical=1 AND t.merged_into_id IS NULL
                           AND {_not_private_entity_material_dependency("t")}
                      WHERE c.id=? AND c.user_id=?
                        AND {_not_private_relation_candidate_dependency("c")}""",  # nosec B608
@@ -4087,6 +4098,7 @@ class GraphMixin(StorageShared):
             if not row:
                 return None
             current_status = str(row["status"] or "suggested")
+            reviewed_at = str(row["reviewed_at"] or "")
             if current_status in {"accepted", "rejected"}:
                 if current_status != status:
                     raise ValueError(
@@ -4117,6 +4129,7 @@ class GraphMixin(StorageShared):
                                 "(сущность удалена или слита)"
                             )
                 now = utc_now()
+                reviewed_at = now
                 conn.execute(
                     """UPDATE relation_candidates SET status=?, reviewed_at=?, reviewed_by=?
                        WHERE id=? AND user_id=?""",
@@ -4190,7 +4203,28 @@ class GraphMixin(StorageShared):
                                :valid_from, :valid_to, :invalidated_at, :superseded_by)""",
                             relation.to_row(),
                         )
-        return _bounded_relation_candidate_by_id(self, user_id, candidate_id)
+            # The decision and this bounded response are one authority snapshot.
+            # Re-reading after COMMIT used to open a race: an endpoint could be
+            # deleted in that gap, making a successful mutation return 404 and
+            # skip its audit record.  Arbitrary evidence and reviewer identity do
+            # not enter the snapshot; only their content-free shape survives.
+            result = {
+                "id": str(row["id"] or "")[:160],
+                "source_entity_id": str(row["source_entity_id"] or "")[:160],
+                "target_entity_id": str(row["target_entity_id"] or "")[:160],
+                "relation_type": str(row["relation_type"] or "")[:80],
+                "confidence": float(row["confidence"] or 0.0),
+                "status": status,
+                "created_at": str(row["created_at"] or "")[:64],
+                "reviewed_at": reviewed_at[:64],
+                "source_name": str(row["source_name"] or "")[:240],
+                "source_type": str(row["source_type"] or "")[:80],
+                "target_name": str(row["target_name"] or "")[:240],
+                "target_type": str(row["target_type"] or "")[:80],
+                "evidence_present": bool(row["evidence_present"]),
+                "evidence_bytes": int(row["evidence_bytes"] or 0),
+            }
+        return result
 
     def store_resolution_candidate(self, candidate: EntityResolutionCandidate) -> EntityResolutionCandidate:
         if candidate.entity_a_id == candidate.entity_b_id:

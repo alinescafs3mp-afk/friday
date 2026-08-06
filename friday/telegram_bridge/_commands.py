@@ -315,6 +315,7 @@ class CommandsMixin(BridgeShared):
                 "/missions — список миссий и управление\n"
                 "/inbox — разобрать ближайшие предложения\n"
                 "/conflicts — разобрать конфликты знаний (порциями)\n"
+                "/relations — принять или отклонить предложенные связи (порциями)\n"
                 "/merges — подтвердить или отклонить объединение дубликатов\n"
                 "/tags — теги базы знаний с количеством записей\n"
                 "/browse тег или название — записи по тегу, проекту или сущности\n"
@@ -434,6 +435,9 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/conflicts":
             await self._send_conflicts(telegram, backend, chat_id, external_user_id, user)
+            return
+        if command == "/relations":
+            await self._send_relations(telegram, backend, chat_id, external_user_id, user)
             return
         if command == "/merges":
             await self._send_merges(telegram, backend, chat_id, external_user_id, user)

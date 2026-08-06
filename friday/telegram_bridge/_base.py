@@ -67,6 +67,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("approvals", "что ждёт вашего решения перед выполнением"),
     ("inbox", "разобрать ближайшие предложения"),
     ("conflicts", "разобрать конфликты знаний"),
+    ("relations", "разобрать предложенные связи"),
     ("merges", "подтвердить объединение дубликатов"),
     ("mission", "многошаговая миссия в фоне"),
     ("missions", "список миссий и управление"),
@@ -310,6 +311,7 @@ class BridgeShared:
     _send_entity_profile: Callable[..., Any]
     _send_inbox: Callable[..., Any]
     _send_conflicts: Callable[..., Any]
+    _send_relations: Callable[..., Any]
     _send_history: Callable[..., Any]
     _send_merges: Callable[..., Any]
     _deliver_generated_files: Callable[..., Any]

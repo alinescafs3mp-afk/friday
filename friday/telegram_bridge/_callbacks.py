@@ -17,6 +17,7 @@ from friday.telegram_bridge._base import (
     PermanentUpdateError,
     base64,
     httpx,
+    quote,
 )
 
 
@@ -511,6 +512,36 @@ class CallbacksMixin(BridgeShared):
                     telegram,
                     callback_id,
                     "Сущности объединены" if action == "accept" else "Отмечено: не дубликат",
+                )
+                clear_markup = True
+            elif family == "relation" and action in {"accept", "reject"}:
+                candidate_id, separator, invoker_id = target_id.rpartition(".")
+                if not separator or not candidate_id or not invoker_id.isdigit():
+                    raise PermanentUpdateError("Invalid relation review target")
+                # Buttons in an allowlisted group are visible to everyone. The
+                # decision must still belong to the person who requested this
+                # review card, not to whichever capable participant taps first.
+                if invoker_id != external_user_id:
+                    await self._answer_callback(
+                        telegram,
+                        callback_id,
+                        "Эта кнопка не для вас",
+                        alert=True,
+                    )
+                    return
+                status = "accepted" if action == "accept" else "rejected"
+                await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/kg/relation-candidates/{quote(candidate_id, safe='')}/review",
+                    {"status": status, "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(
+                    telegram,
+                    callback_id,
+                    "Связь принята" if action == "accept" else "Связь отклонена",
                 )
                 clear_markup = True
             elif family == "conflict" and action in {"dismiss", "keep_a", "keep_b"}:

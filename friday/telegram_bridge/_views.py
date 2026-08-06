@@ -7,6 +7,9 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import math
+import unicodedata
+
 from friday.agent_runtime.llm import strip_service_markup
 from friday.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
@@ -40,6 +43,34 @@ _RELATION_LABELS = {
     "uses": "использует",
     "depends_on": "зависит от",
 }
+_SYMMETRIC_RELATION_TYPES = frozenset({"family_of", "related_to", "same_as"})
+_DIRECTED_RELATION_TYPES = frozenset(_RELATION_LABELS) - _SYMMETRIC_RELATION_TYPES
+_ENTITY_TYPE_LABELS = {
+    "person": "человек",
+    "project": "проект",
+    "concept": "понятие",
+    "event": "событие",
+    "organization": "организация",
+    "location": "место",
+    "document": "документ",
+    "collection": "коллекция",
+    "other": "объект",
+}
+_CARD_MARKUP_TRANSLATION = str.maketrans({"`": "ˋ"})
+
+
+def _safe_relation_card_line(value: Any, *, fallback: str = "", limit: int = 240) -> str:
+    """One control-free, markup-neutral line for a code-wrapped graph label."""
+
+    plain = "".join(
+        " " if char.isspace() or unicodedata.category(char) in {"Cc", "Cf", "Cs"} else char
+        for char in str(value or "")
+    )
+    # The whole value is rendered as Telegram ``<code>`` below, which preserves
+    # canonical punctuation and suppresses Markdown/URL auto-linking.  Only a
+    # literal backtick must be neutralised because it would close that wrapper.
+    plain = " ".join(plain.split()).translate(_CARD_MARKUP_TRANSLATION)
+    return plain[:limit] or fallback
 
 
 class ViewsMixin(BridgeShared):
@@ -247,6 +278,98 @@ class ViewsMixin(BridgeShared):
                 },
             )
 
+    async def _send_relations(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+    ) -> None:
+        """Next five relation proposals, without copying their evidence into Telegram."""
+
+        data = await self._backend_json(
+            backend,
+            "GET",
+            "/api/kg/relation-candidates?status=suggested&limit=5",
+            {"telegram_user": telegram_user},
+            external_user_id,
+            str(chat_id),
+        )
+        raw_items = data.get("items")
+        items: list[Any] = raw_items if isinstance(raw_items, list) else []
+        total = int(data.get("total") or 0)
+        if not items:
+            await self._send_message(telegram, chat_id, "Предложенных связей на разбор нет.")
+            return
+        await self._send_message(
+            telegram,
+            chat_id,
+            f"Предложенные связи: показаны {min(len(items), 5)} из {total}. "
+            "Принятая связь становится фактом графа; отклонённая больше не появится в очереди.",
+        )
+        for item in items[:5]:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("id") or "")
+            source_name = _safe_relation_card_line(item.get("source_name"), fallback="неизвестный объект")
+            target_name = _safe_relation_card_line(item.get("target_name"), fallback="неизвестный объект")
+            relation_type = str(item.get("relation_type") or "").casefold().strip()
+            relation_label = _RELATION_LABELS.get(relation_type, "связь")
+            if relation_type in _SYMMETRIC_RELATION_TYPES:
+                connector = "↔"
+            elif relation_type in _DIRECTED_RELATION_TYPES:
+                connector = "→"
+            else:
+                connector = "—"
+            source_type = _ENTITY_TYPE_LABELS.get(str(item.get("source_type") or "").casefold().strip(), "")
+            target_type = _ENTITY_TYPE_LABELS.get(str(item.get("target_type") or "").casefold().strip(), "")
+            try:
+                raw_confidence = float(item.get("confidence") or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                raw_confidence = 0.0
+            if not math.isfinite(raw_confidence):
+                raw_confidence = 0.0
+            confidence = round(max(0.0, min(raw_confidence, 1.0)) * 100)
+            if source_type and target_type:
+                type_line = f"Типы объектов: {source_type} {connector} {target_type}.\n"
+            elif source_type:
+                type_line = f"Тип первого объекта: {source_type}.\n"
+            elif target_type:
+                type_line = f"Тип второго объекта: {target_type}.\n"
+            else:
+                type_line = ""
+            body = (
+                f"`{source_name}`\n— {relation_label} {connector}\n`{target_name}`\n\n"
+                f"{type_line}Уверенность предложения: {confidence}%."
+            )
+            callback_target = f"{candidate_id}.{external_user_id}"
+            callback_values = (
+                f"relation:accept:{callback_target}",
+                f"relation:reject:{callback_target}",
+            )
+            markup = None
+            if CALLBACK_TARGET_RE.fullmatch(callback_target) and all(
+                len(value.encode("utf-8")) <= 64 for value in callback_values
+            ):
+                markup = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "✓ Принять связь",
+                                "callback_data": f"relation:accept:{callback_target}",
+                            },
+                            {
+                                "text": "✕ Отклонить",
+                                "callback_data": f"relation:reject:{callback_target}",
+                            },
+                        ]
+                    ]
+                }
+            else:
+                body += "\n\nКнопки недоступны: идентификатор предложения некорректен."
+            await self._send_message(telegram, chat_id, body, reply_markup=markup)
+
     async def _send_reminders(
         self,
         telegram: httpx.AsyncClient,
@@ -322,7 +445,7 @@ class ViewsMixin(BridgeShared):
         lines.append(f"• во входящих: {int(data.get('pending_inbox') or 0)}")
         candidates = int(data.get("pending_relation_candidates") or 0)
         if candidates:
-            lines.append(f"• связей на review: {candidates}")
+            lines.append(f"• связей на review: {candidates} — /relations")
         lines.append(f"• конфликтов на review: {int(data.get('pending_conflicts') or 0)}")
         lines.append(f"• предложений объединить сущности: {int(data.get('pending_resolutions') or 0)}")
         return "\n".join(lines)

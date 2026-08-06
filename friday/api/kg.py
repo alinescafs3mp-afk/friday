@@ -1,16 +1,15 @@
 """Knowledge-graph HTTP routes.
 
-Eighteen of the application's forty-nine endpoints, previously declared as nested
-closures inside a 1295-line ``create_app``. Moved verbatim: same paths, methods,
-capabilities, bodies and responses — only the decorator target changed, with the
-``/api/kg`` prefix lifted onto the router. ``tests/test_route_inventory.py`` pins the
-whole HTTP surface so the move is verified wholesale, not endpoint by endpoint.
+These routes were previously nested inside ``create_app``. The ``/api/kg`` prefix
+lives on this router, while ``tests/test_route_inventory.py`` pins the HTTP surface
+so later extraction work cannot silently add or lose an operation.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -33,6 +32,8 @@ from friday.storage._graph import (
     _bounded_entity_by_id,
     _bounded_entity_listing_rows,
     _bounded_merge_history_rows,
+    _bounded_relation_candidate_by_id,
+    _bounded_relation_candidate_rows,
     _count_merge_history,
 )
 from friday.storage._knowledge import (
@@ -82,6 +83,7 @@ _PUBLIC_ENTITY_VERSION_LIMIT = 100
 _PUBLIC_ENTITY_VERSION_SNAPSHOT_MAX_BYTES = 1_048_576
 _PUBLIC_ENTITY_LIST_LIMIT = 200
 _PUBLIC_ENTITY_SEARCH_LIMIT = 25
+_RELATION_CANDIDATE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,160}$")
 
 
 def _public_count(value: Any) -> int:
@@ -1114,6 +1116,104 @@ async def undo_merge(merge_id: str, request: Request) -> dict[str, Any]:
         after=_merge_audit_fingerprint(result),
     )
     return {"result": _public_merge_result(result)}
+
+
+@router.get("/relation-candidates", tags=["knowledge-graph"])
+async def list_own_relation_candidates(
+    request: Request,
+    status: str | None = "suggested",
+    limit: int = Query(5, ge=1, le=20),
+    offset: int = Query(0, ge=0, le=1_000_000),
+) -> dict[str, Any]:
+    """A bounded, content-free relation-review page for the current tenant."""
+
+    actor = _require(request, "kg.read")
+    storage = request.app.state.storage
+
+    def _collect() -> tuple[list[dict[str, Any]], int]:
+        rows = _bounded_relation_candidate_rows(
+            storage,
+            actor.user_id,
+            status=status,
+            limit=limit + 1,
+            offset=offset,
+        )
+        total = storage.count_relation_candidates(actor.user_id, status=status)
+        return rows, total
+
+    try:
+        rows, total = await run_blocking(_collect)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Неизвестный статус кандидата связи") from exc
+    items = [_public_relation_candidate_card(item) for item in rows[:limit]]
+    return {
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "status": status,
+        "limit": limit,
+        "offset": offset,
+        "matched_at_least": total,
+        "truncated": offset + len(items) < total,
+    }
+
+
+@router.post("/relation-candidates/{candidate_id}/review", tags=["knowledge-graph"])
+async def review_own_relation_candidate(candidate_id: str, request: Request) -> dict[str, Any]:
+    """Accept or reject one tenant-owned proposal without publishing its evidence body."""
+
+    actor = _require(request, "kg.write")
+    # The mutation response contains the two bounded entity cards. A custom
+    # write-only grant must not turn into an accidental graph-read capability.
+    request.app.state.auth_service.require(actor, "kg.read")
+    if not _RELATION_CANDIDATE_ID_RE.fullmatch(candidate_id):
+        raise HTTPException(status_code=404, detail="Кандидат связи не найден")
+    body = await _request_json(request)
+    status = str(body.get("status") or "").casefold().strip()
+    if status not in {"accepted", "rejected"}:
+        raise HTTPException(status_code=400, detail="status должен быть accepted или rejected")
+
+    storage = request.app.state.storage
+    before = await run_blocking(
+        _bounded_relation_candidate_by_id,
+        storage,
+        actor.user_id,
+        candidate_id,
+    )
+    if before is None:
+        raise HTTPException(status_code=404, detail="Кандидат связи не найден")
+    current_status = str(before.get("status") or "suggested")
+    if current_status in {"accepted", "rejected"} and current_status != status:
+        raise HTTPException(status_code=409, detail="Кандидат связи уже решён другим образом")
+
+    try:
+        result = await run_blocking(
+            request.app.state.kg.review_relation_candidate,
+            actor.user_id,
+            candidate_id,
+            status,
+            reviewed_by=actor.own_id,
+        )
+    except ValueError as exc:
+        # A live candidate can race from suggested to the opposite terminal
+        # state after the bounded preflight read. Dead endpoints return None at
+        # storage authority and are deliberately indistinguishable from absence.
+        raise HTTPException(
+            status_code=409,
+            detail="Кандидат связи уже решён другим образом",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Кандидат связи не найден")
+
+    public_result = _public_relation_candidate_card(result)
+    _audit(
+        request,
+        f"relation_candidate.{status}",
+        "relation_candidate",
+        candidate_id,
+        after=_relation_candidate_audit_fingerprint(result),
+    )
+    return {"status": status, "item": public_result}
 
 
 @router.get("/conflicts", tags=["knowledge-graph"])

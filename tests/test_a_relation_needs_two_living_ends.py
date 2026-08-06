@@ -36,10 +36,10 @@ def _pair(storage, user_id: str = "alice") -> tuple[str, str, str]:
 
 @pytest.mark.parametrize("dead_side", ["начало", "конец"])
 def test_accepting_a_relation_onto_a_deleted_entity_is_refused(storage, dead_side):
-    """Мутация: убрать проверку живости в `review_relation_candidate` — тест краснеет.
+    """Мутация: убрать live-JOIN в `review_relation_candidate` — тест краснеет.
 
-    Проверяется не только отказ, но и ОТСУТСТВИЕ ребра: молчаливый пропуск с
-    зелёным ответом был бы тем же дефектом под другим соусом.
+    Скрытый из очереди кандидат выглядит отсутствующим и не мутирует: guessed id
+    не должен ни раскрыть карточку, ни превратить её в терминальное решение.
 
     Стороны перебираются обе. Найдено мутацией: проверка одного лишь начала
     оставляла тест зелёным, потому что в нём удалялось всегда начало — а связь
@@ -48,11 +48,16 @@ def test_accepting_a_relation_onto_a_deleted_entity_is_refused(storage, dead_sid
     left_id, right_id, candidate_id = _pair(storage)
     storage.soft_delete_entity(left_id if dead_side == "начало" else right_id, "alice")
 
-    with pytest.raises(ValueError, match="больше не существует"):
-        storage.review_relation_candidate("alice", candidate_id, "accepted", reviewed_by="alice")
+    result = storage.review_relation_candidate("alice", candidate_id, "accepted", reviewed_by="alice")
+    assert result is None
 
     rows = storage.execute("SELECT COUNT(*) FROM relations WHERE user_id='alice'").fetchone()
     assert rows[0] == 0, "ребро в никуда всё-таки создано"
+    candidate = storage.execute(
+        "SELECT status, reviewed_by FROM relation_candidates WHERE id=?", (candidate_id,)
+    ).fetchone()
+    assert candidate["status"] == "suggested"
+    assert not candidate["reviewed_by"]
 
 
 def test_a_pair_with_a_dead_end_leaves_the_queue(storage):
@@ -91,13 +96,14 @@ def test_a_living_pair_is_still_accepted(storage):
     assert rows[0] == 1, "принятая связь не создалась"
 
 
-def test_rejecting_a_stale_pair_still_works(storage):
-    """Отклонить можно и то, чего уже нет: это не создаёт ничего.
-
-    Запрет на обе стороны сразу оставил бы такую пару неразрешимой навсегда — а
-    отклонение как раз и есть способ закрыть её честно.
-    """
+def test_a_stale_pair_cannot_be_reviewed_by_a_guessed_id(storage):
+    """Скрытая из очереди пара не раскрывается и не мутирует по старому id."""
     left_id, _right_id, candidate_id = _pair(storage)
     storage.soft_delete_entity(left_id, "alice")
     result = storage.review_relation_candidate("alice", candidate_id, "rejected", reviewed_by="alice")
-    assert result and result["status"] == "rejected"
+    assert result is None
+    row = storage.execute(
+        "SELECT status, reviewed_by FROM relation_candidates WHERE id=?", (candidate_id,)
+    ).fetchone()
+    assert row["status"] == "suggested"
+    assert not row["reviewed_by"]
