@@ -431,7 +431,11 @@ async def knowledge_entity_mentions(knowledge_id: str, request: Request, user_id
         name = str(entity.get("name") or link.get("entity_name") or "")
         if name:
             named.append((name, str(link.get("entity_id") or "")))
-    spans = mention_spans(str(knowledge.get("content") or ""), named)
+    # A large document still requires one full tokenization and can carry hundreds
+    # of accepted entity cards.  Keep that CPU work off the serving event loop; the
+    # matcher itself bounds candidate rescans to the first public page plus overlap
+    # halo, but parsing the source text is necessarily linear in its size.
+    spans = await asyncio.to_thread(mention_spans, str(knowledge.get("content") or ""), named)
     return {
         "knowledge_object_id": knowledge_id,
         "items": [

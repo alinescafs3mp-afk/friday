@@ -596,6 +596,32 @@ def test_inflected_longest_first_survives_a_phrase_page_boundary(storage, monkey
     assert linked == {long_id}
 
 
+def test_inflected_overlap_winners_do_not_depend_on_the_5000th_candidate_or_input_order():
+    """A private collection wall must not change which overlapping name wins.
+
+    The independent filler and the longer person label have equal raw lengths, so
+    their old stable-sort order decided who reached candidate 5000 first.  Once the
+    wall was full, the later label occupied only one of its two occurrences and its
+    shorter suffix leaked through the other.  Reversing input happened to hide the
+    bug, even though both inputs describe the same candidate set.
+
+    Mutation: return from ``_inflected_spans`` after 5000 shared matches; the two
+    permutations disagree and one result contains ``short``.
+    """
+
+    text = ("Шумовые Объекты. " * 5_000) + "Ивану Петру Сидору. Ивану Петру Сидору."
+    filler = ("Шумовые Объекты", "filler")
+    long = ("Иван Петр Сидор", "long")
+    short = ("Петр Сидор", "short")
+
+    first = inflected_mentions(text, [filler, long, short])
+    second = inflected_mentions(text, [long, filler, short])
+
+    assert first == second
+    assert set(first) == {"filler", "long"}
+    assert first["long"] == (85_020, 85_038)
+
+
 def test_inflected_halo_never_turns_a_long_token_suffix_into_a_name():
     """Mutation: stopping left-boundary repair at cursor creates a false match."""
 

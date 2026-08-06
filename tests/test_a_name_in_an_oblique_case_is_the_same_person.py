@@ -92,6 +92,108 @@ def test_a_single_word_name_is_not_folded_onto_a_different_person(storage):
     assert matches == []
 
 
+def test_online_exact_mentions_choose_the_long_name_regardless_of_row_order(storage):
+    """An unordered SQL candidate page must not let a prefix occupy the full name."""
+
+    graph = KnowledgeGraph(storage)
+    short = graph.create_entity("alice", "Иван", EntityType.PERSON)
+    long = graph.create_entity("alice", "Иван Петров", EntityType.PERSON)
+
+    matches = graph.match_mentions("alice", "Иван Петров подписал приказ")
+
+    assert {str(item["entity_id"]) for item in matches} == {str(long["id"])}
+    assert str(short["id"]) not in {str(item["entity_id"]) for item in matches}
+    assert matches[0]["matched_text"] == "Иван Петров"
+
+
+def test_every_long_exact_occurrence_blocks_its_short_prefix(storage):
+    """Reporting one entity once must not release its later occupied spans."""
+
+    graph = KnowledgeGraph(storage)
+    short = graph.create_entity("alice", "Иван", EntityType.PERSON)
+    long = graph.create_entity("alice", "Иван Петров", EntityType.PERSON)
+
+    matches = graph.match_mentions("alice", "Иван Петров. Иван Петров.")
+    found = {str(item["entity_id"]) for item in matches}
+
+    assert found == {str(long["id"])}
+    assert str(short["id"]) not in found
+
+
+def test_every_long_inflected_occurrence_blocks_its_short_suffix(storage):
+    """Inflected occupancy covers all repeats even though one card is returned."""
+
+    graph = KnowledgeGraph(storage)
+    short = graph.create_entity("alice", "Петр Сидор", EntityType.PERSON)
+    long = graph.create_entity("alice", "Иван Петр Сидор", EntityType.PERSON)
+
+    matches = graph.match_mentions(
+        "alice",
+        "Ивану Петру Сидору. Ивану Петру Сидору.",
+    )
+    found = {str(item["entity_id"]) for item in matches}
+
+    assert found == {str(long["id"])}
+    assert str(short["id"]) not in found
+
+
+def test_a_short_alias_does_not_borrow_priority_from_a_long_inflected_match(storage):
+    """Each actual matcher competes at its own width, not at its entity card's width."""
+
+    graph = KnowledgeGraph(storage)
+    person = graph.create_entity(
+        "alice",
+        "Кублик Александр",
+        EntityType.PERSON,
+        aliases=["Иван"],
+    )
+    full_name = graph.create_entity("alice", "Иван Петров", EntityType.PERSON)
+    text = "Иван Петров подписал. Кублику" + (" " * 1_000) + "Александру"
+
+    matches = graph.match_mentions("alice", text)
+    found = {str(item["entity_id"]): item for item in matches}
+
+    assert set(found) == {str(person["id"]), str(full_name["id"])}
+    assert found[str(full_name["id"])]["matched_text"] == "Иван Петров"
+    assert found[str(person["id"])]["method"] == "existing_canonical_name_inflected"
+
+
+def test_a_blocked_long_alias_falls_back_only_at_its_real_short_priority(storage):
+    """A blocked alias must not let its short canonical prefix outrank another name."""
+
+    graph = KnowledgeGraph(storage)
+    outer = graph.create_entity("alice", "Александр Иван Петров", EntityType.PERSON)
+    prefix = graph.create_entity("alice", "Иван", EntityType.PERSON, aliases=["Иван Петров"])
+    second = graph.create_entity("alice", "Иван Сидор", EntityType.PERSON)
+    text = "Александр Иван Петров подписал. Потом Иван Сидор пришёл."
+
+    matches = graph.match_mentions("alice", text)
+    found = {str(item["entity_id"]) for item in matches}
+
+    assert found == {str(outer["id"]), str(second["id"])}
+    assert str(prefix["id"]) not in found
+
+
+def test_a_blocked_inflected_candidate_does_not_erase_a_shorter_valid_one(storage):
+    """Literal and inflected matchers must share one reversible priority pass."""
+
+    graph = KnowledgeGraph(storage)
+    shorter = graph.create_entity("alice", "Яков Петров", EntityType.PERSON)
+    blocked = graph.create_entity("alice", "Петров Александров", EntityType.PERSON)
+    literal = graph.create_entity(
+        "alice",
+        "Совсем Другая Сущность",
+        EntityType.PERSON,
+        aliases=["Александрову Бориславову"],
+    )
+
+    matches = graph.match_mentions("alice", "Якову Петрову Александрову Бориславову")
+    found = {str(item["entity_id"]) for item in matches}
+
+    assert found == {str(shorter["id"]), str(literal["id"])}
+    assert str(blocked["id"]) not in found
+
+
 def test_an_identifier_with_a_dot_keeps_its_strict_boundaries(storage):
     # Падежный проход не должен ослабить границы у идентификаторов: `BRK` внутри
     # `BRK.A` — другое обозначение, а не упоминание.

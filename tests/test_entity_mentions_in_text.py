@@ -49,6 +49,25 @@ def test_a_substring_inside_another_word_is_not_a_mention():
     assert _marked("Иванов и новость", [("Нов", "e1")]) == []
 
 
+def test_an_impossible_long_word_is_rejected_without_walking_its_whole_tail(monkeypatch):
+    """The closed suffix table makes work independent of an invalid token's size."""
+
+    import friday.mentions as mention_module
+
+    original = mention_module._is_word_char
+    calls = 0
+
+    def counted(character: str) -> bool:
+        nonlocal calls
+        calls += 1
+        return original(character)
+
+    monkeypatch.setattr(mention_module, "_is_word_char", counted)
+
+    assert mention_spans("Иван" + ("а" * 50_000), [("Иван", "person")]) == []
+    assert calls < 32, "an already-impossible ending was scanned to the end of the token"
+
+
 def test_the_longer_name_wins_so_marks_never_nest():
     text = "Совещание вёл Иван Петров, затем Иван ушёл."
     spans = mention_spans(text, [("Иван", "e1"), ("Иван Петров", "e2")])
@@ -76,15 +95,31 @@ def test_empty_inputs_are_safe():
     assert mention_spans("текст", [("", "e1")]) == []
 
 
-def test_the_route_marks_only_confirmed_entities(settings, storage):
+def test_the_route_marks_only_confirmed_entities(settings, storage, monkeypatch):
     """Подсветить предложенное значило бы показать догадку так же, как решение
     человека, — ровно та подмена, которую чинили в легенде источников."""
+    import asyncio
+
     from fastapi.testclient import TestClient
 
+    import friday.admin_api._knowledge as knowledge_routes
     from friday.knowledge_graph import KnowledgeGraph
     from friday.permissions import LEGACY_OWNER_USER_ID
     from friday.server import create_app
 
+    original_mentions = knowledge_routes.mention_spans
+    ran_off_loop: list[bool] = []
+
+    def guarded_mentions(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            ran_off_loop.append(True)
+        else:
+            ran_off_loop.append(False)
+        return original_mentions(*args, **kwargs)
+
+    monkeypatch.setattr(knowledge_routes, "mention_spans", guarded_mentions)
     app = create_app(settings)
     with TestClient(app) as client:
         live = app.state.storage
@@ -133,6 +168,7 @@ def test_the_route_marks_only_confirmed_entities(settings, storage):
         assert body["truncated"] is False
         marked = text[body["items"][0]["start"] : body["items"][0]["end"]]
         assert marked == "Иванов"
+        assert ran_off_loop == [True], "large-document matching ran on the serving event loop"
 
 
 def test_reading_someone_elses_document_is_audited(settings, storage):
@@ -196,6 +232,57 @@ def test_the_cap_keeps_the_first_mentions_in_the_text_not_the_first_name_parsed(
     assert spans[0].name == "Петров", "первое слово документа осталось без подсветки"
     # И порядок ответа — по тексту, а не по именам.
     assert [span.start for span in spans] == sorted(span.start for span in spans)
+
+
+def test_internal_collection_never_hides_an_earlier_lower_priority_name():
+    """The public cap is 500 spans; an internal 5000-candidate wall is not semantics.
+
+    The longer name is resolved first and occurs only after the short standalone
+    mention.  The old shared ``found`` list filled with 5000 long-name matches,
+    then stopped the literal pass before it ever considered the first word of the
+    document.  Sorting that already-truncated pool could not recover the omitted
+    winner.
+
+    Mutation: restore ``while len(found) < _COLLECT_LIMIT`` in ``mention_spans``
+    (or stop the shared inflected collector at 5000); ``short`` disappears.
+    """
+
+    text = "Иван ушёл. " + ("Александр Иванов пришёл. " * 5_001)
+    entities = [("Иван", "short"), ("Александр Иванов", "long")]
+
+    spans = mention_spans(text, entities)
+
+    assert len(spans) == 500
+    assert spans[0].entity_id == "short"
+    assert text[spans[0].start : spans[0].end] == "Иван"
+    assert [span.start for span in spans] == sorted(span.start for span in spans)
+
+
+def test_full_output_page_bounds_lower_priority_literal_rescans(monkeypatch):
+    """After top-k is full, duplicate entity cards may inspect only its safe prefix."""
+
+    import friday.mentions as mention_module
+
+    search_ends: list[int | None] = []
+
+    class FindProbe(str):
+        def find(self, sub, start=0, end=None):  # noqa: ANN001
+            search_ends.append(end)
+            if end is None:
+                return super().find(sub, start)
+            return super().find(sub, start, end)
+
+    monkeypatch.setattr(mention_module, "_MAX_SPANS", 5)
+    text = "Иванов. " * 10_000
+    folded = FindProbe(text.casefold())
+    monkeypatch.setattr(mention_module, "_snippet_fold", lambda _body: folded)
+
+    spans = mention_spans(text, [("Иванов", f"person-{index}") for index in range(50)])
+
+    assert len(spans) == 5
+    assert search_ends
+    assert sum(end is None or end >= len(text) for end in search_ends) <= 5
+    assert search_ends[-1] is not None and search_ends[-1] < len(text) // 10
 
 
 def test_the_browser_marks_the_same_word_the_server_pointed_at():

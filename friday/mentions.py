@@ -18,8 +18,10 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from bisect import bisect_left
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from heapq import heappush, heapreplace
 
 from friday.morphology import stem_to_fixpoint
 from friday.retrieval import _search_form, _snippet_fold
@@ -28,9 +30,6 @@ from friday.retrieval import _search_form, _snippet_fold
 # встречается тысячу раз, разметка перестаёт помогать и начинает мешать, а ответ
 # раздувается. Обрезка называет себя в ответе, а не молчит.
 _MAX_SPANS = 500
-# Сколько собрать, прежде чем отобрать первые по тексту. Запас нужен, чтобы обрезка
-# считалась по положению: см. цикл ниже.
-_COLLECT_LIMIT = 5000
 # Основа короче трёх знаков совпадает с половиной алфавита.
 _MIN_STEM = 3
 # Что разрешено дописать к основе, чтобы совпадение осталось ТЕМ ЖЕ словом.
@@ -189,6 +188,24 @@ class Mention:
     entity_id: str
 
 
+def _ordered_entities(entities: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Apply the established stable longest-first priority, then clean names.
+
+    The cooperative backfill receives rows in ``(-raw length, rowid)`` order and
+    resolves overlapping pages incrementally.  Keeping that exact priority here is
+    part of online/backfill parity: an extra lexical tie-breaker could discard a
+    candidate on one page before a later page displaced the row that blocked it.
+    """
+
+    ordered = sorted(enumerate(entities), key=lambda item: (-len(item[1][0]), item[0]))
+    prepared: list[tuple[str, str]] = []
+    for _index, (name, entity_id) in ordered:
+        clean = " ".join(str(name or "").split()).strip()
+        if clean:
+            prepared.append((clean, str(entity_id)))
+    return prepared
+
+
 def _is_word_char(character: str) -> bool:
     return character.isalnum() or character in "_-"
 
@@ -221,9 +238,9 @@ def _inflected_spans(
     tokens: list[tuple[int, int, str]],
     name: str,
     entity_id: str,
-    taken: list[bool],
-    found: list[Mention],
-) -> None:
+    taken: bytearray,
+    start_limit: Callable[[], int] | None = None,
+) -> Iterator[Mention]:
     """Места, где многословное имя стоит в косвенном падеже.
 
     Без этого прохода имя из нескольких слов не находится ВООБЩЕ, как только
@@ -257,17 +274,16 @@ def _inflected_spans(
         return
     span = len(words)
     for start_index in range(len(tokens) - span + 1):
+        if start_limit is not None and tokens[start_index][0] >= start_limit():
+            return
         if any(tokens[start_index + offset][2] != words[offset] for offset in range(span)):
             continue
         start = tokens[start_index][0]
         end = tokens[start_index + span - 1][1]
-        if any(taken[start:end]):
+        if taken.find(b"\x01", start, end) >= 0:
             continue
-        for index in range(start, end):
-            taken[index] = True
-        found.append(Mention(start=start, end=end, name=name, entity_id=entity_id))
-        if len(found) >= _COLLECT_LIMIT:
-            return
+        taken[start:end] = b"\x01" * (end - start)
+        yield Mention(start=start, end=end, name=name, entity_id=entity_id)
 
 
 def inflected_mentions(text: str, entities: list[tuple[str, str]]) -> dict[str, tuple[int, int]]:
@@ -286,13 +302,44 @@ def inflected_mentions(text: str, entities: list[tuple[str, str]]) -> dict[str, 
     tokens = [(m.start(), m.end(), _fold_word(m.group(0))) for m in _TOKEN_RE.finditer(body)]
     if not tokens:
         return {}
-    taken = [False] * len(body)
-    found: list[Mention] = []
-    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
-        clean = " ".join(str(name or "").split()).strip()
-        if clean:
-            _inflected_spans(body, tokens, clean, entity_id, taken, found)
-    return {item.entity_id: (item.start, item.end) for item in found}
+    taken = bytearray(len(body))
+    found: dict[str, tuple[int, int]] = {}
+    for clean, entity_id in _ordered_entities(entities):
+        for item in _inflected_spans(body, tokens, clean, entity_id, taken):
+            # Preserve the previous last-occurrence contract without retaining
+            # every occurrence in an unbounded intermediate list.
+            found[item.entity_id] = (item.start, item.end)
+    return found
+
+
+def inflected_token_context(text: str) -> list[tuple[int, int, str]]:
+    """Fold a text once for several independent inflected-name matchers."""
+
+    return [
+        (match.start(), match.end(), _fold_word(match.group(0))) for match in _TOKEN_RE.finditer(text or "")
+    ]
+
+
+def inflected_mention_occurrences(
+    text: str,
+    name: str,
+    *,
+    token_context: Sequence[tuple[int, int, str]] | None = None,
+) -> Iterator[tuple[int, int]]:
+    """Yield every raw occurrence for one name; cross-entity occupancy is external."""
+
+    body = text or ""
+    signature = inflected_mention_signature(name)
+    if not body or signature is None:
+        return
+    tokens = token_context if token_context is not None else inflected_token_context(body)
+    width = len(signature)
+    if width > len(tokens):
+        return
+    for index in range(len(tokens) - width + 1):
+        if any(tokens[index + offset][2] != signature[offset] for offset in range(width)):
+            continue
+        yield tokens[index][0], tokens[index + width - 1][1]
 
 
 def exact_mentions_page(
@@ -561,7 +608,7 @@ def inflected_mentions_tokens(
     taken = [False] * len(positions)
     matches: dict[str, tuple[int, int]] = {}
     active: set[str] = set()
-    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
+    for name, entity_id in _ordered_entities(entities):
         signature = inflected_mention_signature(name)
         if signature is None or len(signature) > len(folded):
             continue
@@ -710,20 +757,15 @@ def inflected_mentions_window(
     tokens = [(m.start(), m.end(), _fold_word(m.group(0))) for m in _TOKEN_RE.finditer(chunk)]
     if not tokens:
         return {}, set(), central_end, central_end < len(body), True
-    taken = [False] * len(chunk)
-    found: list[Mention] = []
-    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
-        clean = " ".join(str(name or "").split()).strip()
-        if clean:
-            _inflected_spans(chunk, tokens, clean, str(entity_id), taken, found)
-
+    taken = bytearray(len(chunk))
     matches: dict[str, tuple[int, int]] = {}
     active: set[str] = set()
-    for item in found:
-        active.add(item.entity_id)
-        absolute_start = chunk_start + item.start
-        if start <= absolute_start < central_end:
-            matches[item.entity_id] = (absolute_start, chunk_start + item.end)
+    for clean, entity_id in _ordered_entities(entities):
+        for item in _inflected_spans(chunk, tokens, clean, entity_id, taken):
+            active.add(item.entity_id)
+            absolute_start = chunk_start + item.start
+            if start <= absolute_start < central_end:
+                matches[item.entity_id] = (absolute_start, chunk_start + item.end)
     return matches, active, central_end, central_end < len(body), True
 
 
@@ -762,33 +804,92 @@ def mention_spans(text: str, entities: list[tuple[str, str]]) -> list[Mention]:
     body = text or ""
     if not body or not entities:
         return []
+    ordered = _ordered_entities(entities)
+    if not ordered:
+        return []
     folded = _snippet_fold(body)
-    taken = [False] * len(body)
-    found: list[Mention] = []
+    taken = bytearray(len(body))
+    # A max-heap written with negative offsets retains exactly the earliest public
+    # page.  Candidate discovery itself must continue: a fixed-size intermediate
+    # pool tied semantics to entity priority and could omit a mention at character
+    # zero merely because 5000 later matches of a longer name were visited first.
+    earliest: list[tuple[int, int, int, Mention]] = []
+    sequence = 0
+
+    def retain(item: Mention) -> None:
+        nonlocal sequence
+        entry = (-item.start, -item.end, sequence, item)
+        sequence += 1
+        if len(earliest) < _MAX_SPANS:
+            heappush(earliest, entry)
+            return
+        latest_start = -earliest[0][0]
+        latest_end = -earliest[0][1]
+        if (item.start, item.end) < (latest_start, latest_end):
+            heapreplace(earliest, entry)
+
     # Свёрнутые слова текста считаются ОДИН раз на документ: их перебирает
     # `_inflected_spans` для каждого имени, а документы бывают в миллион знаков.
     tokens = [(m.start(), m.end(), _fold_word(m.group(0))) for m in _TOKEN_RE.finditer(body)]
-    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
-        clean = " ".join(str(name or "").split()).strip()
-        if not clean:
-            continue
+    token_starts = [item[0] for item in tokens]
+    max_entity_tokens = max(
+        1,
+        max(sum(1 for _match in _TOKEN_RE.finditer(clean)) for clean, _entity_id in ordered),
+    )
+    max_literal_chars = max(
+        max(len(clean), len(_search_form(clean))) + _MAX_ENDING for clean, _entity_id in ordered
+    )
+    cached_frontier = -1
+    cached_limit = len(body)
+
+    def scan_limit() -> int:
+        """How far a lower-priority start can still affect the public top 500.
+
+        Once the heap is full, a later start cannot enter it.  We retain a
+        conservative overlap halo, though: a lower-priority name beginning before
+        the 500th result may span across arbitrary whitespace and be suppressed by
+        a higher-priority match beginning just after that result.  Token width
+        bounds the inflected case; literal matches are bounded by cleaned label plus
+        the closed ending table.
+        """
+
+        nonlocal cached_frontier, cached_limit
+        if len(earliest) < _MAX_SPANS:
+            return len(body)
+        frontier = -earliest[0][0]
+        if frontier == cached_frontier:
+            return cached_limit
+        token_index = bisect_left(token_starts, frontier)
+        if tokens:
+            halo_index = min(len(tokens) - 1, token_index + max_entity_tokens)
+            token_limit = tokens[halo_index][1]
+        else:
+            token_limit = frontier
+        cached_frontier = frontier
+        cached_limit = min(len(body), max(frontier + max_literal_chars, token_limit))
+        return cached_limit
+
+    for clean, entity_id in ordered:
         # Косвенный падеж разбирается ПЕРВЫМ: он занимает слово целиком, а
         # буквальный проход ниже поставил бы разметку на первое слово имени и
         # оставил остальные снаружи — «Кублику» вместо «Кублику Александру
         # Юрьевичу». Занятые места уважают оба прохода.
-        _inflected_spans(body, tokens, clean, entity_id, taken, found)
+        for item in _inflected_spans(body, tokens, clean, entity_id, taken, scan_limit):
+            retain(item)
         needle = _search_form(clean)
         if len(needle) < _MIN_STEM:
             continue
         start = 0
-        # Потолок на СБОР намеренно выше показанного: обрезать надо по положению в
-        # тексте, а не по порядку разбора имён. Прежняя версия резала прямо здесь, и
-        # документ с шестьюстами упоминаниями одного имени съедал весь запас — вторая
-        # подтверждённая сущность не получала ни одной подсветки, хотя подпись обещала
-        # «первые 500 упоминаний». Первые — значит первые по тексту.
-        while len(found) < _COLLECT_LIMIT:
-            position = folded.find(needle, start)
-            if position < 0:
+        # Every accepted occurrence still updates the global occupancy mask, while
+        # only the earliest public page is retained.  Thus overlap resolution stays
+        # longest-first without an arbitrary candidate wall or unbounded list.  The
+        # bounded search end keeps lower-priority names from rescanning a discarded
+        # suffix of a very large document.
+        while True:
+            limit = scan_limit()
+            search_end = min(len(body), limit + len(needle) + _MAX_ENDING)
+            position = folded.find(needle, start, search_end)
+            if position < 0 or position >= limit:
                 break
             start = position + len(needle)
             # Совпадение должно начинаться на границе слова: «нов» внутри «Иванов»
@@ -798,18 +899,21 @@ def mention_spans(text: str, entities: list[tuple[str, str]]) -> list[Mention]:
             # Слово целиком: имя ищется по основе, поэтому «Иванов» находится в
             # «Иванову», и выделять надо до конца слова, а не до конца основы.
             end = position + len(needle)
-            while end < len(body) and _is_word_char(body[end]):
+            tail_start = end
+            # The accepted ending table is closed and bounded.  Walking the rest
+            # of an adversarial megabyte-long token cannot change rejection, so
+            # inspect at most one character beyond the longest possible ending.
+            while end < len(body) and end - tail_start <= _MAX_ENDING and _is_word_char(body[end]):
                 end += 1
+            if end - tail_start > _MAX_ENDING:
+                continue
             tail = body[position + len(needle) : end].casefold()
             if len(tail) > _MAX_ENDING or tail not in _NOMINAL_TAILS:
                 # Дописано не окончание, а продолжение другого слова: «работ»+«ать»,
                 # «побед»+«или», «москв»+«ичи». См. `_NOMINAL_TAILS`.
                 continue
-            if any(taken[position:end]):
+            if taken.find(b"\x01", position, end) >= 0:
                 continue
-            for index in range(position, end):
-                taken[index] = True
-            found.append(Mention(start=position, end=end, name=clean, entity_id=entity_id))
-    found.sort(key=lambda item: item.start)
-    # Обрезка по положению, а не по порядку разбора: подпись обещает «первые N».
-    return found[:_MAX_SPANS]
+            taken[position:end] = b"\x01" * (end - position)
+            retain(Mention(start=position, end=end, name=clean, entity_id=entity_id))
+    return sorted((entry[3] for entry in earliest), key=lambda item: item.start)

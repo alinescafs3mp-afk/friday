@@ -14,7 +14,11 @@ from functools import lru_cache
 from typing import Any, NamedTuple
 
 from friday.entity_phrases import mention_phrase_candidates
-from friday.mentions import inflected_mentions
+from friday.mentions import (
+    inflected_mention_occurrences,
+    inflected_mention_signature,
+    inflected_token_context,
+)
 from friday.storage import FridayStorage
 from friday.storage._graph import (
     _assert_entities_existed_at_boundary,
@@ -1446,66 +1450,81 @@ class KnowledgeGraph:
             limit=min(800, bounded * 4),
         )
         matches: list[dict[str, Any]] = []
-        occupied: list[tuple[int, int]] = []
+        occupied = bytearray(len(text))
         lowered = text.casefold()
-        # Косвенный падеж. Инвертированный поиск выше УЖЕ находит такую сущность —
-        # `normalized_name` складывает падежи пословно, поэтому «Кублику Александру
-        # Юрьевичу» и «Кублик Александр Юрьевич» это один узел, — а буквальная
-        # проверка ниже её отбрасывала. Замерено на архиве владельца: в рапорте
-        # «Прошу… Прапорщику Кублику Александру Юрьевичу» не привязывался ни один
-        # из четырёх военнослужащих, ради которых он написан; привязывались только
-        # их родственники, названные в именительном. Оттуда же росли неверные
-        # кандидаты в связи: субъекта документа не было среди его сущностей.
-        inflected = inflected_mentions(
-            text,
-            [(str(entity.get("name") or ""), str(entity["id"])) for entity in entities],
-        )
+        candidates: list[tuple[tuple[int, int, str, str], dict[str, Any], str | None, str]] = []
         for entity in entities:
-            best: dict[str, Any] | None = None
+            entity_id = str(entity["id"])
             for term, source in _entity_terms(entity):
-                # Necessary condition first, at C speed. The pattern below is the same
-                # literal term with word boundaries, so it cannot match unless the term
-                # occurs as a substring — and a term matching under IGNORECASE is equal
-                # under casefold, so this never hides a real mention.
                 if term.casefold() not in lowered:
                     continue
-                pattern = _mention_pattern(term)
+                method_priority = 0 if source == "canonical_name" else 1
+                candidates.append(
+                    ((-len(term), method_priority, entity_id, term.casefold()), entity, term, source)
+                )
+            name = str(entity.get("name") or "")
+            if inflected_mention_signature(name) is not None:
+                candidates.append(
+                    (
+                        (-len(name), 2, entity_id, name.casefold()),
+                        entity,
+                        None,
+                        "canonical_name_inflected",
+                    )
+                )
+        # SQL intentionally returns a bounded set, not a semantic order.  Resolve
+        # the actual canonical/alias/inflected matchers globally, longest label
+        # first.  Ranking whole entity cards is insufficient: a card may have one
+        # long inflected occurrence and a short alias elsewhere, and must not use
+        # that long occurrence merely as priority for occupying the short alias.
+        candidates.sort(key=lambda item: item[0])
+        token_context = inflected_token_context(text) if any(item[2] is None for item in candidates) else []
+        accepted: set[str] = set()
+        for _priority, entity, candidate_term, candidate_source in candidates:
+            entity_id = str(entity["id"])
+            best: dict[str, Any] | None = None
+            if candidate_term is not None:
+                pattern = _mention_pattern(candidate_term)
                 for hit in pattern.finditer(text):
-                    # Prefer the longest non-overlapping interpretation.  The
-                    # same entity may still appear more than once, but one link
-                    # proposal is enough.
-                    if any(hit.start() < end and hit.end() > start for start, end in occupied):
+                    if occupied.find(b"\x01", hit.start(), hit.end()) >= 0:
                         continue
-                    confidence = 0.99 if source == "canonical_name" else 0.96
-                    candidate = {
-                        "entity_id": entity["id"],
-                        "name": entity["name"],
-                        "entity_type": entity["entity_type"],
-                        "matched_text": hit.group(0),
-                        "span": [hit.start(), hit.end()],
-                        "confidence": confidence,
-                        "method": f"existing_{source}_exact",
-                    }
-                    if best is None or len(candidate["matched_text"]) > len(best["matched_text"]):
-                        best = candidate
-            if best is None:
-                position = inflected.get(str(entity["id"]))
-                if position and not any(position[0] < end and position[1] > start for start, end in occupied):
-                    best = {
-                        "entity_id": entity["id"],
-                        "name": entity["name"],
-                        "entity_type": entity["entity_type"],
-                        "matched_text": text[position[0] : position[1]],
-                        "span": [position[0], position[1]],
-                        # Ниже буквального совпадения: падеж сложен свёрткой, а
-                        # свёртка — приближение, пусть и то же самое, которым
-                        # определяется тождество самого узла.
-                        "confidence": 0.97,
-                        "method": "existing_canonical_name_inflected",
-                    }
+                    occupied[hit.start() : hit.end()] = b"\x01" * (hit.end() - hit.start())
+                    if best is None and entity_id not in accepted:
+                        confidence = 0.99 if candidate_source == "canonical_name" else 0.96
+                        best = {
+                            "entity_id": entity["id"],
+                            "name": entity["name"],
+                            "entity_type": entity["entity_type"],
+                            "matched_text": hit.group(0),
+                            "span": [hit.start(), hit.end()],
+                            "confidence": confidence,
+                            "method": f"existing_{candidate_source}_exact",
+                        }
+            else:
+                for start, end in inflected_mention_occurrences(
+                    text,
+                    str(entity.get("name") or ""),
+                    token_context=token_context,
+                ):
+                    if occupied.find(b"\x01", start, end) >= 0:
+                        continue
+                    occupied[start:end] = b"\x01" * (end - start)
+                    if best is None and entity_id not in accepted:
+                        best = {
+                            "entity_id": entity["id"],
+                            "name": entity["name"],
+                            "entity_type": entity["entity_type"],
+                            "matched_text": text[start:end],
+                            "span": [start, end],
+                            # Ниже буквального совпадения: падеж сложен свёрткой, а
+                            # свёртка — приближение, пусть и то же самое, которым
+                            # определяется тождество самого узла.
+                            "confidence": 0.97,
+                            "method": "existing_canonical_name_inflected",
+                        }
             if best:
                 matches.append(best)
-                occupied.append(tuple(best["span"]))
+                accepted.add(entity_id)
         matches.sort(
             key=lambda item: (-float(item["confidence"]), item["span"][0], -len(item["matched_text"]))
         )
