@@ -62,6 +62,60 @@ Backend проверяет HMAC-SHA256, допустимый возраст time
 
 Новые методы storage должны принимать `user_id`; запрос без tenant filter допустим только внутри явно административного endpoint после `admin.all_data.*`.
 
+### Личное напоминание внутри общего tenant
+
+В shared-режиме `user_id` обозначает общий архив, а не конкретного человека.
+Поэтому напоминание получает отдельную долговечную authority:
+`private_entity_owners(entity_id, person_id, privacy_kind='reminder')`. Запись
+события, точного `entity_time.source='reminder:<person_id>'` и owner marker
+происходит одной транзакцией. Свободная строка `source`, Telegram chat ID и само
+имя сущности не являются доказательством владения.
+
+Generic graph/retrieval/profile/organs/model/admin readers не видят ни личную
+сущность, ни производную копию её ID, current или authenticated historical
+имени/алиаса в Raw/Knowledge Object, Inbox, relation/candidate/resolution/merge
+evidence, версиях, feedback/eval/usage, notification queue и диагностических
+агрегатах. Alias containers декодируются рекурсивно с жёстким byte/node budget;
+malformed, oversized либо повторно закодированный material отклоняется fail-closed.
+Сопоставление выполняется после Unicode NFC → casefold → NFC, чтобы иной регистр или
+NFD не открывал копию. Mutation path повторяет ту же проверку внутри транзакции и
+отвечает как на отсутствующий объект, не создавая oracle существования.
+
+Materialized authority не создаёт дополнительных копий identity/content text. Sparse entity cache/work
+содержит только quarantined entity IDs; второй cache/work — только
+`(material_kind, object_id, user_id)` видимых Raw/Knowledge/Inbox и bounded
+`knowledge_hidden` helper. У каждой пары свой singleton state, valid лишь при
+точном равенстве; все generic material surfaces требуют оба valid state.
+Persistent UDF-free guards сначала инвалидируют нужный state даже у внешнего raw
+SQLite writer. После регистрации Unicode UDF managed connection создаёт только в
+TEMP schema identity views и AFTER triggers: обычный insert/non-flipping update
+меняет один ID, privacy flip пересобирает ordered authority в той же transaction,
+а raw/offline write остаётся invalid до exact heal новым соединением. Поэтому
+обычный `ALTER TABLE` не обязан знать application UDF. Per-connection SQLite
+authorizer запрещает прямой caller DML над обоими cache/work/state, DDL над owned
+privacy objects и `writable_schema`; startup отдельно доказывает обе пары
+`cache == live`. Повреждённая derivative authority поэтому закрывает generic
+чтение, а не открывает его.
+
+Личный reminder-reader и доставка возвращают запись только точному `person_id`,
+когда одновременно совпали durable marker, time provenance, валидные
+current/history states и нет ни конфликтующего владельца, ни зависимости от иной
+cached private identity. Обычные строки идут по ID-cache fast path; public carrier
+даже собственного reminder консервативно остаётся скрытым. Person export —
+отдельная разрешённая граница: в одной SQLite snapshot он
+строит fresh recursive closure от всех запрещённых direct-private seeds, исключая
+только точное непротиворечивое marker/time/source экспортирующего человека. Так его
+собственная private запись и зависимости только от неё остаются в архиве, а чужая,
+неоднозначная, malformed и транзитивная history исключается. Уже созданный
+самостоятельный export или backup не переписывается скрыто: до отдельной
+owner-approved rotation он остаётся чувствительным артефактом.
+
+Локальные каталоги runtime/backups/exports/vault имеют режим `0700`, а SQLite,
+WAL/SHM, bridge DB, manifests и data files — `0600`, включая момент до первого
+открытия SQLite при обычном `umask 022`. HTTP-download не оставляет отложенный
+дескриптор на повторно подменяемый путь: файл проверяется и копируется в
+контролируемый private snapshot до ответа.
+
 ## 5. Admin UI и HTTP
 
 - Admin UI обслуживается backend-ом и защищается строгой Content Security Policy **без `unsafe-inline`** (`script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` и запретом framing. UI разделён на внешние `app.js`/`app.css`; обработчики событий — только делегированные (`data-call` с JSON-payload в явный реестр действий), поэтому XSS в отрендеренном контенте не может исполнить скрипт даже при ошибке экранирования.
@@ -148,6 +202,7 @@ Extractor:
 - `.env`, `.env.local`, токены и bridge secret исключены из Git/архива.
 - Не выводите их в screenshots. Стандартный logging formatter дополнительно редактирует известные credentials, Authorization values и Telegram token внутри URL/traceback, но это defense in depth, а не разрешение логировать секреты намеренно.
 - **Приватность запросов в логах**: access-log uvicorn проходит через фильтр, срезающий query string (`/api/search?[stripped]`) — поисковые запросы и browse-фильтры суть персональные данные, которые редактор секретов распознать не может. `web_surfer` логирует только hostname и класс исключения — `str()` httpx-ошибок содержит полный URL с параметрами поисковых провайдеров.
+- **Все application-логи content-free by construction.** В них разрешены фиксированный event, числовые счётчики, жёстко заданные enum, класс ошибки и обезличенный hostname. Запрещены текст/запрос/ответ, URL, имя файла и путь, user/chat/callback/entity ID, `str(exception)`, traceback, `exc_info`, `stack_info` и произвольный `extra`. AST-contract проверяет все logger aliases и inline `logging.getLogger`; synthetic caplog-тесты подставляют длинные маркеры в exception/query/backend response.
 - Храните backup secrets отдельно и зашифрованно.
 - После подозрения на утечку одновременно смените API token, bridge secret и Telegram bot token.
 - Перезапустите backend/bridge после ротации.
@@ -159,11 +214,43 @@ Audit log фиксирует actor, action, target, before/after, request ID и 
 - **Egress логируется всегда**: скачивание файлов (`admin.file.download`, user-scoped `file.download`), резервных копий (`admin.backup.download` — копия содержит данные всех tenant'ов), экспортов (`admin.export.download` — именно скачивание, не только создание) и чтение самого аудит-лога (`admin.audit.read`).
 - **Cross-tenant чтения** (админ читает контент чужого аккаунта: знания, inbox, сущности, диалоги, сообщения, файлы) логируются с целевым пользователем в `target_id`. Чтение собственных данных не логируется — иначе владелец, листающий свою же админку, заполнил бы журнал шумом без privacy-сигнала.
 
-**Отказ на границе — не одно событие, а два.** `auth.failed` означает «не пустили»: неверные или неразобранные учётные данные, отказ по возможностям, исчерпанный бюджет неудачных попыток. `request.throttled` означает «своего придержали»: ограничитель частоты сработал ПОСЛЕ успешной аутентификации, актор действителен и назван по имени. Ни то ни другое не хранит предъявленный секрет — только метод, путь, причину, статус, адрес и request id.
+**Отказ на границе — не одно событие, а два.** `auth.failed` означает «не пустили»: неверные или неразобранные учётные данные, отказ по возможностям, исчерпанный бюджет неудачных попыток. `request.throttled` означает «своего придержали»: ограничитель частоты сработал ПОСЛЕ успешной аутентификации, актор действителен и назван по имени. Ни то ни другое не хранит предъявленный секрет: остаются allowlisted причина/статус, точный canonical IP только с in-process provenance наблюдаемого ASGI peer и непрозрачная ссылка на request ID; raw path и заголовок запроса в audit не попадают. Равная по форме строка прямого caller-а становится HMAC ref, а не доказательством адреса.
 
 Разделение появилось по замеру на живой установке: из 1302 записей `auth.failed` **1188** были собственной массовой работой владельца (разбор Inbox пачкой с верным токеном с 127.0.0.1), ещё 89 — обращениями к `/health`, пути, которого не существовало. Диагностика при пороге 60 за сутки кричала «возможен брутфорс» постоянно, а **три** настоящих обращения с чужого адреса лежали под этой лавиной невидимыми. Сигнал безопасности, который горит всегда, перестаёт быть сигналом; поэтому `/health` теперь публичный синоним `/api/health` (он и так был публичен), а троттлинг вошедшего пользователя считается отдельно и в порог брутфорса не входит.
 
 **Append-only обеспечивается на уровне БД**: триггеры `audit_log_no_update`/`audit_log_no_delete` (`RAISE(ABORT)`) отклоняют любую попытку изменить или удалить строку журнала — включая будущие баги кода. Purge, удаление диалогов и экспорт журнал не трогают. Это по-прежнему не криптографически неизменяемый ledger: администратор с прямым доступом к файлу SQLite может удалить триггеры; для tamper evidence можно позже добавить hash chaining и периодическую подпись checkpoint внешним ключом.
+
+Append-only не означает «разрешено навсегда сохранить payload». Перед каждой
+записью storage-boundary приводит **всю строку** к ограниченной типизированной
+проекции: `action`/`target_type` имеют точные allowlist; actor обязан существовать
+в локальных users; audit/target IDs сохраняются точно только с in-process generated
+marker либо доказанным существованием в authoritative table; IP — только с marker
+ASGI peer; created-at обязан быть offset-aware. Текст, запрос, код и URL в
+`before`/`after` заменяются длиной и domain-separated keyed fingerprint;
+filename/path — длиной и suffix; произвольные ключи и идентификаторы не проходят.
+Это единственная обязательная граница, поэтому правило действует и при прямом
+вызове storage в обход HTTP-хелперов.
+
+Request ID, private target label, unproven IP/structural ID и fingerprint любого
+content/query/code/URL получают стабильную домен-разделённую ссылку через
+installation-local 256-bit HMAC key. Обычный SHA для короткого prompt, PIN, URL или
+имени не используется: читатель audit-log не должен иметь возможность перебрать
+словарь и восстановить значение. Ключ лежит только в локальном `schema_meta`, не
+входит в user export; его отсутствие или порча останавливает startup. Одинаковые
+ссылки остаются сопоставимы только внутри своего домена и установки, исходная
+строка — нет.
+
+При первом открытии старой БД миграция `audit_payload_privacy=v3` переписывает
+прежние JSON и scalar columns под тем же контрактом; v2 plain SHA fingerprints
+переиздаются как keyed refs. Она временно снимает только два append-only trigger
+внутри `BEGIN IMMEDIATE`, включает и проверяет SQLite `secure_delete`, возвращает
+точные канонические trigger definitions и требует успешный
+`wal_checkpoint(TRUNCATE)`. Любой сбой откатывает строки и triggers; startup
+остаётся fail-closed до завершённого checkpoint; pending-v3 retry не меняет уже
+выданные opaque refs. Уже созданные автономные backup
+файлы эта операция не меняет: восстановленная старая копия будет очищена при
+открытии, но до удаления по отдельной retention-политике сам backup следует считать
+содержащим прежние audit payload.
 
 ## 12. Контрольный список перед публикацией
 

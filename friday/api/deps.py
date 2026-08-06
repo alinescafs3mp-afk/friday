@@ -108,7 +108,7 @@ def _audit(
             target_id=target_id,
             before_json=before,
             after_json=after,
-            ip_address=getattr(request.state, "client_ip", ""),
+            ip_address=getattr(request.state, "audit_ip", ""),
             request_id=getattr(request.state, "request_id", ""),
         )
     )

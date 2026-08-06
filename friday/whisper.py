@@ -152,7 +152,7 @@ def _load_model(model: str, *, device: str, compute_type: str, download_root: st
         except Exception as exc:  # noqa: BLE001 - surface any load failure uniformly
             raise WhisperUnavailable(f"could not load Whisper model {model!r}: {exc}") from exc
         _MODEL_CACHE[key] = engine
-        logger.info("whisper: loaded model=%s device=%s compute_type=%s", model, device, compute_type)
+        logger.info("whisper: configured model loaded")
         return engine
 
 

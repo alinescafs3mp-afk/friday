@@ -15,10 +15,20 @@ repeat that at the largest scale yet.
 
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 from friday.server import create_app
-from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.storage.models import (
+    Entity,
+    EntityType,
+    InboxItem,
+    InboxStatus,
+    KnowledgeObject,
+    RawObject,
+    new_id,
+)
 
 PHRASE = "autovacuum_vacuum_scale_factor"
 
@@ -77,6 +87,78 @@ def test_source_search_is_tenant_scoped(storage):
     _ingest(storage, "alice", f"личное {PHRASE} алисы", status=InboxStatus.PENDING)
     assert storage.search_raw_objects("alice", PHRASE)
     assert storage.search_raw_objects("bob", PHRASE) == []
+
+
+def test_raw_replay_keys_cannot_reopen_a_quarantined_source(storage):
+    """Source-ref/hash/text-hash replay readers share the full raw dependency guard."""
+
+    user_id = "alice"
+    sentinel = "PRIVATE RAW REPLAY SENTINEL"
+    content_hash = "a" * 64
+    text_hash = "b" * 64
+    storage.ensure_user(user_id)
+    raw = RawObject(
+        id="raw-private-replay",
+        user_id=user_id,
+        source="agent_tool",
+        source_ref="private-replay-ref",
+        raw_content=sentinel,
+        content_type="file",
+        content_hash=content_hash,
+        metadata_json={
+            "text_sha256": text_hash,
+            "candidate_type": "memory_save",
+            "requested_by": "alice",
+        },
+    )
+    storage.store_raw_object(raw)
+    storage.store_inbox_item(
+        InboxItem(
+            id="inbox-private-replay",
+            user_id=user_id,
+            raw_object_id=raw.id,
+            status=InboxStatus.PENDING,
+        )
+    )
+    knowledge = KnowledgeObject(
+        id="ko-private-replay",
+        user_id=user_id,
+        raw_object_id=raw.id,
+        content=sentinel,
+        content_type="text",
+        title=sentinel,
+    )
+    storage.store_knowledge_object(knowledge)
+    hidden = Entity(
+        id="ent-private-replay",
+        user_id=user_id,
+        name=sentinel,
+        entity_type=EntityType.EVENT,
+    )
+    storage.create_entity(hidden)
+    storage.link_knowledge_entity(user_id, knowledge.id, hidden.id, status="accepted")
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO private_entity_owners(entity_id, person_id, privacy_kind, created_at)
+               VALUES(?, ?, 'reminder', ?)""",
+            (hidden.id, "bob", "2026-08-05T00:00:00Z"),
+        )
+
+    assert storage.get_raw_object(raw.id, user_id) is None
+    assert storage.find_raw_by_source_ref(user_id, raw.source, raw.source_ref) is None
+    assert storage.find_file_by_content_hash(user_id, content_hash) is None
+    assert storage.find_file_by_extracted_text(user_id, text_hash) is None
+    assert (
+        storage.find_fresh_agent_candidate(
+            user_id,
+            raw.source,
+            "memory_save",
+            content_hash,
+            requested_by="alice",
+            since="2000-01-01T00:00:00Z",
+        )
+        is None
+    )
 
 
 def test_the_index_is_only_ever_read_through_the_filtered_helper():
@@ -182,7 +264,7 @@ def test_one_rejection_hides_the_source_even_among_several_inbox_rows(storage):
     assert storage.search_raw_objects("owner", PHRASE) == []
 
 
-def test_the_index_is_rebuilt_over_rows_that_predate_it(settings, tmp_path):
+def test_the_index_is_rebuilt_over_rows_that_predate_it(settings, tmp_path, simulate_legacy_schema):
     """An external-content FTS table created over existing rows starts EMPTY.
 
     The rebuild is guarded on "did this table already exist", and probing that
@@ -204,9 +286,11 @@ def test_the_index_is_rebuilt_over_rows_that_predate_it(settings, tmp_path):
             conn.execute("DROP TABLE IF EXISTS raw_fts")
             for name in ("raw_objects_ai", "raw_objects_ad", "raw_objects_au"):
                 conn.execute(f"DROP TRIGGER IF EXISTS {name}")
-            conn.execute("UPDATE schema_meta SET value='16' WHERE key='schema_version'")
     finally:
         first.close(final=True)
+
+    with sqlite3.connect(database) as legacy:
+        simulate_legacy_schema(legacy, 16)
 
     migrated = FridayStorage(replace(settings, database_path=database))
     try:

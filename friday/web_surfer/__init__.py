@@ -40,9 +40,16 @@ def _log_safe_host(url: str) -> str:
     user's query in path or parameters — logs get the host and nothing else.
     """
     try:
-        return urllib.parse.urlsplit(str(url)).netloc or "<invalid-url>"
+        return urllib.parse.urlsplit(str(url)).hostname or "<invalid-url>"
     except ValueError:
         return "<invalid-url>"
+
+
+def _failure_url(url: str) -> str:
+    """Host-only identifier for an unsuccessful fetch payload."""
+
+    host = _log_safe_host(url)
+    return "" if host == "<invalid-url>" else host
 
 
 _SEARCH_TIMEOUT = 15.0
@@ -565,7 +572,7 @@ class WebSurfer:
             try:
                 batch = await provider()
             except ProviderRefusedError as exc:
-                LOGGER.warning("Search provider %s refused: %s", name, exc)
+                LOGGER.warning("Search provider %s refused (%s)", name, type(exc).__name__)
                 refused.append(name)
                 continue
             except Exception as exc:  # noqa: BLE001 — падение провайдера тоже отказ
@@ -1038,7 +1045,7 @@ class WebSurfer:
         if forbidden:
             # Отказ НАЗЫВАЕТСЯ. Пустая страница без причины читалась бы как
             # «там ничего нет», и модель пересказала бы это человеку как факт.
-            return FetchResult(url=requested, title="", text="", text_length=0, error=forbidden)
+            return FetchResult(url=_failure_url(requested), title="", text="", text_length=0, error=forbidden)
         await self._be_polite_to(_host_of(requested))
         try:
             # httpx timeouts are PER OPERATION: `read=20` means «no more than twenty
@@ -1053,7 +1060,7 @@ class WebSurfer:
             status = response.status_code
             if status < 200 or status >= 300:
                 return FetchResult(
-                    url=final_url,
+                    url=_failure_url(final_url),
                     title="",
                     text="",
                     text_length=0,
@@ -1070,12 +1077,15 @@ class WebSurfer:
             content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
             if content_type not in _ALLOWED_CONTENT_TYPES:
                 return FetchResult(
-                    url=final_url,
+                    url=_failure_url(final_url),
                     title="",
                     text="",
                     text_length=0,
                     status_code=status,
-                    error=f"Unsupported content type: {content_type or 'missing'}",
+                    # A remote Content-Type is attacker-controlled.  Returning it
+                    # through the tool/API would turn an error header into model
+                    # context and durable evidence.
+                    error="unsupported_content_type",
                 )
             text_budget = max(1_000, min(int(max_length), self.settings.max_extracted_text_chars))
             if content_type == "application/pdf":
@@ -1100,7 +1110,7 @@ class WebSurfer:
                         )
                 except TimeoutError:
                     return FetchResult(
-                        url=final_url,
+                        url=_failure_url(final_url),
                         title="",
                         text="",
                         text_length=0,
@@ -1123,7 +1133,7 @@ class WebSurfer:
                     )
                 if parse_error:
                     return FetchResult(
-                        url=final_url,
+                        url=_failure_url(final_url),
                         title="",
                         text="",
                         text_length=0,
@@ -1156,12 +1166,24 @@ class WebSurfer:
             # and `str(TimeoutError())` is the empty string — falling through to the
             # generic handler would return a blank error, which `POST /api/ingest/url`
             # then reports as «empty content» instead of a timeout.
-            return FetchResult(requested, "", "", 0, error="Timeout")
-        except UnsafeURLError as exc:
-            return FetchResult(requested, "", "", 0, error=f"Blocked URL: {exc}")
+            return FetchResult(_failure_url(requested), "", "", 0, error="Timeout")
+        except UnsafeURLError:
+            # UnsafeURLError may contain the hostname.  More importantly, future
+            # validation errors may quote the full requested URL.  The caller needs
+            # a stable reason, never the exception text.
+            return FetchResult(_failure_url(requested), "", "", 0, error="blocked_url")
         except Exception as exc:
             LOGGER.info("Web fetch failed for %s: %s", _log_safe_host(requested), type(exc).__name__)
-            return FetchResult(requested, "", "", 0, error=str(exc))
+            # httpx exception strings include request URLs, including query tokens.
+            # This field reaches the model, API responses and evidence; keep only
+            # the exception class as an allowlisted diagnostic signal.
+            return FetchResult(
+                _failure_url(requested),
+                "",
+                "",
+                0,
+                error=f"fetch_failed:{type(exc).__name__}",
+            )
 
     async def research(self, query: str, *, max_sources: int = _DEFAULT_MAX_SOURCES) -> dict[str, Any]:
         source_limit = max(1, min(int(max_sources), 8))
@@ -1224,8 +1246,8 @@ class WebSurfer:
         direct: list[dict[str, Any]] = []
         try:
             direct = await direct_answers(query, await self._get_client())
-        except Exception:  # noqa: BLE001 — прямой источник не должен ронять исследование
-            LOGGER.warning("Прямые источники данных не ответили", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — прямой источник не должен ронять исследование
+            LOGGER.warning("Прямые источники данных не ответили (%s)", type(exc).__name__)
 
         selected = results[:source_limit]
         tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in selected]

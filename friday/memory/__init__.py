@@ -18,6 +18,12 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from friday.private_fs import (
+    ensure_private_directory,
+    restrict_private_file,
+    write_private_text_if_missing,
+)
+
 LOGGER = logging.getLogger(__name__)
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 # Filenames may keep any letter — the user's titles are Russian, and the ASCII-only
@@ -71,7 +77,8 @@ class MemoryVault:
     def __init__(self, vault_dir: Path) -> None:
         self._vault_dir = Path(vault_dir).resolve()
         self._users_dir = self._vault_dir / "users"
-        self._users_dir.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self._vault_dir)
+        ensure_private_directory(self._users_dir)
 
     def _user_dir(self, user_id: str) -> Path:
         return self._users_dir / _safe_component(user_id)
@@ -106,9 +113,11 @@ class MemoryVault:
         """
         readme = user_dir / "README.md"
         if readme.exists():
+            restrict_private_file(readme)
             return
         with suppress(OSError):
-            readme.write_text(
+            write_private_text_if_missing(
+                readme,
                 f"# Хранилище знаний Friday\n\n"
                 f"Аккаунт: `{user_id}`\n\n"
                 "Это **проекция**: источник истины — SQLite внутри Friday. Правки в этих\n"
@@ -132,7 +141,7 @@ class MemoryVault:
             return None
 
         user_dir = self._user_dir(user_id)
-        user_dir.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(user_dir)
         self._ensure_readme(user_dir, user_id)
         filepath = self._note_path(user_dir, ko)
         content = self._render_markdown(ko)
@@ -240,7 +249,7 @@ class MemoryVault:
                         }
                     )
                 except (OSError, UnicodeError, ValueError) as exc:
-                    LOGGER.warning("Failed to read vault file %s: %s", md_file, exc)
+                    LOGGER.warning("Failed to read vault file (%s)", type(exc).__name__)
         return notes
 
     def _render_markdown(self, ko: dict[str, Any]) -> str:

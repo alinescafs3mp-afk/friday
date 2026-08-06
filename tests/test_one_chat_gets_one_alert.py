@@ -25,6 +25,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 
@@ -86,7 +88,7 @@ def test_an_empty_key_never_deduplicates(storage):
     assert storage.enqueue_notification("person-a", "111", "второе")
 
 
-def test_the_index_is_rebuilt_on_an_old_database(settings, tmp_path):
+def test_the_index_is_rebuilt_on_an_old_database(settings, tmp_path, simulate_legacy_schema):
     """Правка обязана доехать до ЖИВОЙ базы, а не только до созданной с нуля.
 
     `CREATE ... IF NOT EXISTS` смотрит только на имя: индекс с прежним набором
@@ -127,8 +129,10 @@ def test_the_index_is_rebuilt_on_an_old_database(settings, tmp_path):
                     f"2026-08-04T10:49:3{index}+00:00",
                 ),
             )
-        conn.execute("UPDATE schema_meta SET value='25' WHERE key='schema_version'")
     first.close()
+
+    with sqlite3.connect(settings.database_path) as legacy:
+        simulate_legacy_schema(legacy, 25)
 
     storage = init_storage(settings)
     try:

@@ -17,6 +17,11 @@ import json
 from typing import Any
 
 from friday.storage._base import StorageShared
+from friday.storage._privacy import (
+    _not_private_inbox_dependency,
+    _not_private_knowledge_dependency,
+    _not_private_raw_dependency,
+)
 
 # How much of a body one timeline row carries. The point of the preview is to make a
 # row identifiable at a glance; the full text has its own endpoint, and one 205 KB
@@ -78,7 +83,12 @@ class OversightMixin(StorageShared):
         a row that cannot exist.
         """
         prefix = f"{alias}." if alias else ""
-        clauses = [f"{prefix}user_id=?", f"{prefix}deleted_at IS NULL"]
+        raw_alias = alias or "raw_objects"
+        clauses = [
+            f"{prefix}user_id=?",
+            f"{prefix}deleted_at IS NULL",
+            _not_private_raw_dependency(raw_alias),
+        ]
         params: list[Any] = [user_id]
         if since:
             clauses.append(f"{prefix}received_at >= ?")
@@ -126,7 +136,13 @@ class OversightMixin(StorageShared):
         they read as «this is what the person did in the last 7 days» while actually
         answering «ever» — the reader has no way to tell the two numbers apart.
         """
+        table_privacy = {
+            "knowledge_objects": _not_private_knowledge_dependency("knowledge_objects"),
+            "inbox": _not_private_inbox_dependency("inbox"),
+        }
         clauses = ["user_id=?"]
+        if table in table_privacy:
+            clauses.append(table_privacy[table])
         params: list[Any] = [user_id]
         if extra:
             clauses.append(extra)
@@ -525,10 +541,12 @@ class OversightMixin(StorageShared):
         end = until or "9999"
 
         totals = self.execute(
-            """SELECT SUM(CASE WHEN received_at >= ? THEN 1 ELSE 0 END) AS now,
-                      SUM(CASE WHEN received_at < ? THEN 1 ELSE 0 END) AS before
-               FROM raw_objects
-               WHERE user_id=? AND deleted_at IS NULL AND received_at >= ? AND received_at <= ?""",
+            f"""SELECT SUM(CASE WHEN r.received_at >= ? THEN 1 ELSE 0 END) AS now,
+                      SUM(CASE WHEN r.received_at < ? THEN 1 ELSE 0 END) AS before
+               FROM raw_objects r
+               WHERE r.user_id=? AND r.deleted_at IS NULL
+                 AND {_not_private_raw_dependency("r")}
+                 AND r.received_at >= ? AND r.received_at <= ?""",  # nosec B608
             (since, since, user_id, previous_since, end),
         ).fetchone()
 
@@ -536,15 +554,17 @@ class OversightMixin(StorageShared):
             [
                 dict(row)
                 for row in self.execute(
-                    """SELECT jericho_casefold(tag.value) AS topic,
+                    f"""SELECT jericho_casefold(tag.value) AS topic,
                           SUM(CASE WHEN r.received_at >= ? THEN 1 ELSE 0 END) AS now,
                           SUM(CASE WHEN r.received_at < ? THEN 1 ELSE 0 END) AS before
                    FROM raw_objects r
                    JOIN inbox i ON i.raw_object_id=r.id AND i.user_id=r.user_id
+                        AND {_not_private_inbox_dependency("i")}
                    JOIN json_each(i.suggested_tags_json) AS tag
                    WHERE r.user_id=? AND r.deleted_at IS NULL
+                     AND {_not_private_raw_dependency("r")}
                      AND r.received_at >= ? AND r.received_at <= ? AND tag.value <> ''
-                   GROUP BY topic ORDER BY (now - before) DESC, topic ASC""",
+                   GROUP BY topic ORDER BY (now - before) DESC, topic ASC""",  # nosec B608
                     (since, since, user_id, previous_since, end),
                 ).fetchall()
             ]

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
+import math
 import re
 from collections import defaultdict, deque
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from typing import Any, NamedTuple
@@ -13,14 +16,37 @@ from typing import Any, NamedTuple
 from friday.entity_phrases import mention_phrase_candidates
 from friday.mentions import inflected_mentions
 from friday.storage import FridayStorage
+from friday.storage._graph import (
+    _assert_entities_existed_at_boundary,
+    _bounded_entity_by_id,
+    _bounded_entity_listing_rows,
+    _bounded_entity_relation_rows,
+    _bounded_resolution_candidate_by_id,
+    _bounded_resolution_candidate_rows,
+    _bounded_visible_timeline_event_rows,
+    _count_visible_relations,
+    _count_visible_timeline_events,
+    _current_entity_relations_for_traversal,
+    _graph_entity_for_traversal,
+    _historical_entity_relations,
+    _iter_entities_for_graph_search,
+    _relation_revision_watermark,
+)
+from friday.storage._privacy import (
+    _not_private_entity_material_dependency,
+    _not_private_relation_dependency,
+)
 from friday.storage.models import (
     Entity,
     EntityResolutionCandidate,
     EntityType,
+    InboxStatus,
     Relation,
+    RelationHistorySnapshotError,
     RelationType,
     ResolutionStatus,
     new_id,
+    normalize_known_at,
     utc_now,
 )
 
@@ -58,15 +84,25 @@ def build_user_model(storage: FridayStorage, user_id: str) -> dict[str, Any]:
     return {
         "knowledge_total": knowledge_total,
         "recent_30d": recent_count,
-        "people": [{"name": e["name"], "knowledge_count": e["knowledge_count"]} for e in people],
+        "people": [
+            {"name": str(e.get("name") or "")[:240], "knowledge_count": int(e.get("knowledge_count") or 0)}
+            for e in people[:5]
+        ],
         "organizations": [
-            {"name": e["name"], "knowledge_count": e["knowledge_count"]} for e in organizations
+            {"name": str(e.get("name") or "")[:240], "knowledge_count": int(e.get("knowledge_count") or 0)}
+            for e in organizations[:5]
         ],
         "projects": [
-            {"name": c["name"], "kind": c["entity_type"], "knowledge_count": c["knowledge_count"]}
+            {
+                "name": str(c.get("name") or "")[:240],
+                "kind": str(c.get("entity_type") or "")[:80],
+                "knowledge_count": int(c.get("knowledge_count") or 0),
+            }
             for c in projects[:5]
         ],
-        "interests": [{"tag": t["tag"], "count": t["count"]} for t in interests],
+        "interests": [
+            {"tag": str(t.get("tag") or "")[:120], "count": int(t.get("count") or 0)} for t in interests[:8]
+        ],
     }
 
 
@@ -100,12 +136,40 @@ _GRAPH_CORROBORATION_DAMPING = 0.5
 # quietly ties the result to how many seeds retrieval happens to pass.
 _GRAPH_SEED_RANK_DECAY = 0.9
 _MAX_PUBLISHED_GRAPH_PATHS = 10
+_MAX_CONTEXT_GRAPH_ENTITIES = 256
+_MAX_CONTEXT_GRAPH_RELATIONS = 512
+_MAX_CONTEXT_RELATION_PAGE = _MAX_CONTEXT_GRAPH_RELATIONS + 1
+_MAX_PUBLIC_ENTITY_RELATIONS = 200
+_MAX_PUBLIC_ENTITY_GRAPH_EDGES = 800
+_MAX_PUBLIC_ENTITY_GRAPH_NODES = _MAX_PUBLIC_ENTITY_GRAPH_EDGES * 2 + 1
+_MAX_PUBLIC_GRAPH_COUNT = 1_000_000_000
+_PUBLIC_KNOWLEDGE_TAG_LIMIT = 20
+_PUBLIC_KNOWLEDGE_TAG_MAX_CHARS = 120
 _REVIEW_PROVENANCE_KEYS = (
     "source",
     "candidate_id",
-    "reviewed_by",
     "confidence",
 )
+_PUBLIC_RELATION_TEXT_LIMITS = {
+    "id": 160,
+    "source_entity_id": 160,
+    "target_entity_id": 160,
+    "source_name": 240,
+    "target_name": 240,
+    "relation_type": 80,
+    "valid_from": 64,
+    "valid_to": 64,
+    "created_at": 64,
+    "invalidated_at": 64,
+    "superseded_by": 160,
+}
+_PUBLIC_RELATION_FIELDS = tuple(_PUBLIC_RELATION_TEXT_LIMITS)
+_PUBLIC_GRAPH_NODE_TEXT_LIMITS = {
+    "id": 160,
+    "name": 240,
+    "entity_type": 80,
+}
+_PUBLIC_GRAPH_NUMBER_LIMIT = 1_000_000_000.0
 _ISO_FULL_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})[-./](\d{1,2})\b")
 _DAY_FIRST_RE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")
 _YEAR_MONTH_RE = re.compile(r"\b(\d{4})[-./](\d{1,2})\b")
@@ -122,6 +186,36 @@ class _GraphPathState(NamedTuple):
     edges: tuple[dict[str, Any], ...]
 
 
+class _BoundedRelationList(list[dict[str, Any]]):
+    """List-compatible relation page carrying honest public cap metadata."""
+
+    def __init__(
+        self,
+        values: list[dict[str, Any]],
+        *,
+        matched_at_least: int,
+        truncated: bool,
+    ) -> None:
+        super().__init__(values)
+        self.matched_at_least = max(len(values), int(matched_at_least))
+        self.truncated = bool(truncated or self.matched_at_least > len(values))
+
+
+class _BoundedEntityList(list[dict[str, Any]]):
+    """List-compatible entity page with an honest lower bound."""
+
+    def __init__(
+        self,
+        values: list[dict[str, Any]],
+        *,
+        matched_at_least: int,
+        truncated: bool,
+    ) -> None:
+        super().__init__(values)
+        self.matched_at_least = max(len(values), int(matched_at_least))
+        self.truncated = bool(truncated or self.matched_at_least > len(values))
+
+
 def _relation_provenance(relation: dict[str, Any]) -> dict[str, Any]:
     """Compact non-secret provenance for a path step.
 
@@ -132,14 +226,29 @@ def _relation_provenance(relation: dict[str, Any]) -> dict[str, Any]:
     """
 
     metadata = _json_dict(relation.get("metadata_json"))
+    if not metadata:
+        # `get_entity_relations` is also the traversal seam.  Its public
+        # projection has already reduced raw metadata to this allowlisted shape;
+        # keep that safe provenance usable for path grounding without ever
+        # reintroducing the original metadata row.
+        projected = relation.get("provenance")
+        if isinstance(projected, Mapping):
+            output: dict[str, Any] = {}
+            for key in ("origin", *_REVIEW_PROVENANCE_KEYS, "knowledge_object_id"):
+                value = projected.get(key)
+                if isinstance(value, str) and value.strip():
+                    output[key] = value.strip()[:160]
+                elif key == "confidence" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                    numeric = float(value)
+                    if math.isfinite(numeric):
+                        output[key] = max(0.0, min(numeric, 1.0))
+            if projected.get("reviewed") is True:
+                output["reviewed"] = True
+            return output
     provenance: dict[str, Any] = {}
     origin = str(metadata.get("origin") or "").strip()[:80]
     if origin:
         provenance["origin"] = origin
-    created_by = metadata.get("created_by")
-    if isinstance(created_by, str) and created_by.strip():
-        provenance["created_by"] = created_by.strip()[:160]
-
     # Only the storage review path can mint evidence-backed provenance.  The
     # public relation API stamps another origin and may carry arbitrary user
     # metadata; accepting an evidence-looking nested object from that path would
@@ -154,13 +263,16 @@ def _relation_provenance(relation: dict[str, Any]) -> dict[str, Any]:
     )
     if not trusted_review:
         return provenance
+    provenance["reviewed"] = True
 
     for key in _REVIEW_PROVENANCE_KEYS:
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             provenance[key] = value.strip()[:160]
         elif key == "confidence" and isinstance(value, (int, float)) and not isinstance(value, bool):
-            provenance[key] = value
+            numeric = float(value)
+            if math.isfinite(numeric):
+                provenance[key] = max(0.0, min(numeric, 1.0))
     nested_evidence = metadata.get("evidence")
     if isinstance(nested_evidence, dict):
         nested_knowledge_id = nested_evidence.get("knowledge_object_id")
@@ -177,6 +289,318 @@ def _relation_provenance(relation: dict[str, Any]) -> dict[str, Any]:
     if knowledge_object_id:
         provenance["knowledge_object_id"] = knowledge_object_id
     return provenance
+
+
+def _public_relation(relation: Mapping[str, Any]) -> dict[str, Any]:
+    """One bounded allowlisted relation shape for every KG/public graph seam.
+
+    Storage rows deliberately retain full revision metadata for trusted internal
+    consumers and tenant export.  Relation metadata is arbitrary and may contain
+    excerpts, credentials, or very large caller fields, so it must never be
+    copied wholesale into direct entity or neighbourhood responses.
+    """
+
+    projected: dict[str, Any] = {}
+    for field in _PUBLIC_RELATION_FIELDS:
+        if field not in relation:
+            continue
+        value = relation[field]
+        if value is None:
+            projected[field] = None
+        elif isinstance(value, str):
+            projected[field] = value[: _PUBLIC_RELATION_TEXT_LIMITS[field]]
+    weight = relation.get("weight")
+    if isinstance(weight, (int, float)) and not isinstance(weight, bool):
+        numeric_weight = float(weight)
+        if math.isfinite(numeric_weight):
+            projected["weight"] = max(
+                -_PUBLIC_GRAPH_NUMBER_LIMIT,
+                min(numeric_weight, _PUBLIC_GRAPH_NUMBER_LIMIT),
+            )
+    provenance = _relation_provenance(dict(relation))
+    if provenance:
+        projected["provenance"] = provenance
+    return projected
+
+
+def _validated_history_snapshot_status(
+    status: Mapping[str, Any],
+    *,
+    requested_known_at: str,
+) -> dict[str, Any]:
+    """Canonical complete provenance for one transaction-time graph snapshot."""
+
+    required = ("known_at", "known_at_floor", "history_complete", "identity_basis")
+    if any(field not in status for field in required):
+        raise RelationHistorySnapshotError("relation history status is incomplete")
+    expected = normalize_known_at(requested_known_at)
+    returned = str(status["known_at"] or "")
+    try:
+        canonical_returned = normalize_known_at(returned, reject_future=False)
+    except ValueError as exc:
+        raise RelationHistorySnapshotError(
+            "relation history returned an unreadable known_at boundary"
+        ) from exc
+    if returned != canonical_returned or canonical_returned != expected:
+        raise RelationHistorySnapshotError("relation history changed the requested known_at boundary")
+    raw_floor = str(status["known_at_floor"] or "")
+    try:
+        floor = normalize_known_at(raw_floor, reject_future=False)
+    except ValueError as exc:
+        raise RelationHistorySnapshotError("relation history completeness floor is unreadable") from exc
+    if not raw_floor or raw_floor != floor or floor > expected:
+        raise RelationHistorySnapshotError("relation history completeness floor is inconsistent")
+    if status["history_complete"] is not True:
+        raise RelationHistorySnapshotError("relation history is not complete for the requested boundary")
+    if status["identity_basis"] != "current_names":
+        raise RelationHistorySnapshotError("relation history identity basis is unsupported")
+    return {
+        "known_at": expected,
+        "known_at_floor": floor,
+        "history_complete": True,
+        "identity_basis": "current_names",
+    }
+
+
+def _public_graph_node(node: Mapping[str, Any]) -> dict[str, Any]:
+    """Bounded allowlist for graph nodes; arbitrary entity fields stay internal."""
+
+    projected: dict[str, Any] = {
+        field: str(node.get(field) or "")[:limit] for field, limit in _PUBLIC_GRAPH_NODE_TEXT_LIMITS.items()
+    }
+    raw_count = node.get("knowledge_count")
+    if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool):
+        numeric = float(raw_count)
+        if math.isfinite(numeric):
+            projected["knowledge_count"] = max(
+                0,
+                min(int(numeric), _MAX_PUBLIC_GRAPH_COUNT),
+            )
+        else:
+            projected["knowledge_count"] = 0
+    else:
+        projected["knowledge_count"] = 0
+    return projected
+
+
+def _is_live_graph_entity(entity: Mapping[str, Any] | None) -> bool:
+    """One public definition of an entity which may anchor a graph response."""
+
+    return bool(
+        entity
+        and not entity.get("deleted_at")
+        and bool(entity.get("canonical", 1))
+        and not entity.get("merged_into_id")
+    )
+
+
+def _bounded_graph_count(value: Any, fallback: int) -> int:
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return max(fallback, min(numeric, _MAX_PUBLIC_GRAPH_COUNT))
+
+
+def _safe_merge_result(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Small merge mutation result safe for HTTP and model tool boundaries."""
+
+    output: dict[str, Any] = {
+        "merge_id": str(raw.get("merge_id") or raw.get("_merge_id") or "")[:160],
+        "source_entity_id": str(raw.get("source_entity_id") or "")[:160],
+        "target_entity_id": str(raw.get("target_entity_id") or "")[:160],
+    }
+    for field in ("merged_into", "source", "target"):
+        entity = raw.get(field)
+        if isinstance(entity, Mapping):
+            output[field] = _public_graph_node(entity)
+    if raw.get("undone_at"):
+        output["undone_at"] = str(raw.get("undone_at") or "")[:64]
+    return output
+
+
+def _bounded_public_number(value: Any, *, maximum: float = 1.0) -> float:
+    try:
+        numeric = float(value or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    if not math.isfinite(numeric):
+        return 0.0
+    return max(0.0, min(numeric, maximum))
+
+
+def _bounded_public_count(value: Any) -> int:
+    try:
+        return max(0, min(int(value or 0), _MAX_PUBLIC_GRAPH_COUNT))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _safe_knowledge_card(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Small document card shared by HTTP profiles and the model tool."""
+
+    try:
+        decoded = json.loads(str(raw.get("tags_json") or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        decoded = []
+    tags: list[str] = []
+    if isinstance(decoded, list):
+        for item in decoded:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            tags.append(item[:_PUBLIC_KNOWLEDGE_TAG_MAX_CHARS])
+            if len(tags) >= _PUBLIC_KNOWLEDGE_TAG_LIMIT:
+                break
+    card: dict[str, Any] = {
+        "id": str(raw.get("id") or "")[:160],
+        "title": str(raw.get("title") or "")[:240],
+        "summary": str(raw.get("summary") or "")[:500],
+        "tags": tags,
+        # Compatibility for clients which still decode the storage-shaped field.
+        "tags_json": json.dumps(tags, ensure_ascii=False),
+        "importance": _bounded_public_number(raw.get("importance")),
+        "quality_score": _bounded_public_number(raw.get("quality_score")),
+        "document_date": str(raw.get("document_date") or "")[:64],
+        "lifecycle_stage": str(raw.get("lifecycle_stage") or "")[:80],
+        "knowledge_kind": str(raw.get("knowledge_kind") or "")[:80],
+        "created_at": str(raw.get("created_at") or "")[:64],
+        "updated_at": str(raw.get("updated_at") or "")[:64],
+    }
+    if "_link_confidence" in raw:
+        card["_link_confidence"] = _bounded_public_number(raw.get("_link_confidence"))
+    return card
+
+
+def _safe_conflict_card(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Bounded conflict review shape; evidence and notes stay in SQLite."""
+
+    text_limits = {
+        "id": 160,
+        "knowledge_a_id": 160,
+        "knowledge_b_id": 160,
+        "conflict_type": 80,
+        "status": 40,
+        "created_at": 64,
+        "reviewed_at": 64,
+        "knowledge_a_title": 240,
+        "knowledge_a_summary": 500,
+        "knowledge_a_stage": 80,
+        "knowledge_a_superseded_by": 160,
+        "knowledge_b_title": 240,
+        "knowledge_b_summary": 500,
+        "knowledge_b_stage": 80,
+        "knowledge_b_superseded_by": 160,
+    }
+    card: dict[str, Any] = {field: str(raw.get(field) or "")[:limit] for field, limit in text_limits.items()}
+    card["confidence"] = _bounded_public_number(raw.get("confidence"))
+    raw_evidence = str(raw.get("evidence_json") or "")
+    evidence_present = (
+        bool(raw.get("evidence_present"))
+        if "evidence_present" in raw
+        else raw_evidence not in {"", "{}", "[]", "null"}
+    )
+    evidence_bytes = (
+        raw.get("evidence_bytes")
+        if "evidence_bytes" in raw
+        else len(raw_evidence.encode("utf-8", errors="replace"))
+    )
+    card["evidence"] = {
+        "present": evidence_present,
+        "bytes": _bounded_public_count(evidence_bytes),
+    }
+    note_chars = (
+        raw.get("resolution_note_chars")
+        if "resolution_note_chars" in raw
+        else len(str(raw.get("resolution_note") or ""))
+    )
+    card["resolution_note_chars"] = _bounded_public_count(note_chars)
+    triage = raw.get("triage")
+    if isinstance(triage, Mapping):
+        card["triage"] = {
+            "hint": str(triage.get("hint") or "")[:40],
+            "label_ru": str(triage.get("label_ru") or "")[:120],
+            "jaccard": _bounded_public_number(triage.get("jaccard")),
+            "length_ratio": _bounded_public_number(triage.get("length_ratio")),
+            "data_diff_share": _bounded_public_number(triage.get("data_diff_share")),
+        }
+    return card
+
+
+def _safe_conflict_result(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Mutation result without conflict evidence, resolution prose, or bodies."""
+
+    nested = raw.get("conflict")
+    if isinstance(nested, Mapping):
+        output: dict[str, Any] = {"conflict": _safe_conflict_card(nested)}
+        for field in ("winner_id", "deprecated_id"):
+            if field in raw:
+                output[field] = str(raw.get(field) or "")[:160]
+        return output
+    return _safe_conflict_card(raw)
+
+
+def _public_event_source(value: Any) -> str:
+    source = str(value or "")
+    if source.startswith("reminder:"):
+        return "reminder"
+    if source in {"user", "ingestion"}:
+        return source
+    return "other" if source else ""
+
+
+def _safe_event_time(raw: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    return {
+        "entity_id": str(raw.get("entity_id") or "")[:160],
+        "occurred_at": str(raw.get("occurred_at") or "")[:64],
+        "occurred_end": str(raw.get("occurred_end") or "")[:64] or None,
+        "precision": str(raw.get("precision") or "")[:40],
+        "source": _public_event_source(raw.get("source")),
+        "updated_at": str(raw.get("updated_at") or "")[:64],
+        "relation": EVENT_TIME_RELATION,
+    }
+
+
+def _safe_timeline_item(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Allowlisted timeline row with bounded text and no reminder identity."""
+
+    if raw.get("kind") == "event":
+        event_time = _safe_event_time(raw) or {}
+        return {
+            "kind": "event",
+            "entity_id": str(raw.get("entity_id") or "")[:160],
+            "name": str(raw.get("name") or "")[:240],
+            "entity_type": str(raw.get("entity_type") or "")[:80],
+            "description": str(raw.get("description") or "")[:500],
+            **event_time,
+            "at": str(raw.get("at") or raw.get("occurred_at") or "")[:64],
+            "boundary": EVENT_TIME_RELATION,
+        }
+    raw_source = raw.get("source")
+    raw_target = raw.get("target")
+    source: Mapping[str, Any] = raw_source if isinstance(raw_source, Mapping) else {}
+    target: Mapping[str, Any] = raw_target if isinstance(raw_target, Mapping) else {}
+    return {
+        "kind": "relation",
+        "at": str(raw.get("at") or "")[:64],
+        "boundary": str(raw.get("boundary") or "")[:40],
+        "relation_id": str(raw.get("relation_id") or "")[:160],
+        "relation_type": str(raw.get("relation_type") or "")[:80],
+        "source": {
+            "id": str(source.get("id") or "")[:160],
+            "name": str(source.get("name") or "")[:240],
+        },
+        "target": {
+            "id": str(target.get("id") or "")[:160],
+            "name": str(target.get("name") or "")[:240],
+        },
+        "valid_from": str(raw.get("valid_from") or "")[:64],
+        "valid_to": str(raw.get("valid_to") or "")[:64] or None,
+        "created_at": str(raw.get("created_at") or "")[:64],
+        "invalidated_at": str(raw.get("invalidated_at") or "")[:64] or None,
+        "superseded_by": str(raw.get("superseded_by") or "")[:160] or None,
+    }
 
 
 def _graph_path_id(state: _GraphPathState) -> str:
@@ -609,39 +1033,72 @@ class EntityResolver:
             min_confidence=max(0.0, min(1.0, min_confidence)),
             max_pairs=max_pairs,
         )
+        # The durable cursor has already been stored by storage. Its key can
+        # contain a private name/alias token and must not cross into an HTTP or
+        # model result; only structural progress survives this boundary.
+        report = {
+            key: value
+            for key, value in report.items()
+            if key
+            in {
+                "entities",
+                "pairs_examined",
+                "keys_total",
+                "keys_examined",
+                "keys_pending",
+                "partial",
+                "sweeps",
+                "resumed",
+                "complete",
+                "candidates",
+            }
+        }
         stored_suggested = 0
         for candidate in candidates:
             stored = self.storage.store_resolution_candidate(candidate)
             if str(stored.status) in {ResolutionStatus.SUGGESTED.value, str(ResolutionStatus.SUGGESTED)}:
                 stored_suggested += 1
         report["suggested"] = stored_suggested
-        report["pending_total"] = len(
-            self.storage.list_resolution_candidates(user_id, ResolutionStatus.SUGGESTED)
+        report["pending_total"] = self.storage.count_resolution_candidates(
+            user_id,
+            ResolutionStatus.SUGGESTED,
         )
         return report
 
-    def get_pending_resolutions(self, user_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        """Обогащённые кандидатуры — СТРАНИЦЕЙ.
+    def get_resolutions(
+        self,
+        user_id: str,
+        status: ResolutionStatus | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Bounded structural review cards, shared by owner and admin APIs.
 
         Обогащение стоит шесть запросов на кандидата, из них два — по объектам
         знаний. Без предела это множилось на всю таблицу: на 5000 сущностях фоновый
         обход накопил 4012 кандидатур, и один вызов занимал 317 секунд.
         Читателю нужны те, что сверху по уверенности, а не все.
         """
-        pending = self.storage.list_resolution_candidates(
-            user_id, ResolutionStatus.SUGGESTED, limit=max(1, min(int(limit), 500))
+        bounded = max(1, min(int(limit), 500))
+        candidates = _bounded_resolution_candidate_rows(
+            self.storage,
+            user_id,
+            status,
+            limit=bounded + 1,
+            offset=max(0, int(offset)),
         )
         enriched: list[dict[str, Any]] = []
-        for candidate in pending:
-            left = self.storage.get_entity(candidate["entity_a_id"], user_id)
-            right = self.storage.get_entity(candidate["entity_b_id"], user_id)
+        for candidate in candidates[:bounded]:
+            left = _bounded_entity_by_id(self.storage, candidate["entity_a_id"], user_id)
+            right = _bounded_entity_by_id(self.storage, candidate["entity_b_id"], user_id)
             if not left or not right:
                 continue
-            left_links = self.storage.get_entity_knowledge(user_id, left["id"], limit=1000)
-            right_links = self.storage.get_entity_knowledge(user_id, right["id"], limit=1000)
-            left_relations = self.storage.get_entity_relations(left["id"], user_id)
-            right_relations = self.storage.get_entity_relations(right["id"], user_id)
-            confidence = float(candidate.get("confidence", 0.0))
+            try:
+                confidence = float(candidate.get("confidence", 0.0))
+            except (TypeError, ValueError, OverflowError):
+                confidence = 0.0
+            confidence = max(0.0, min(confidence, 1.0)) if math.isfinite(confidence) else 0.0
             if confidence >= 0.95:
                 recommendation = "strong_merge_candidate"
             elif confidence >= 0.78:
@@ -650,22 +1107,39 @@ class EntityResolver:
                 recommendation = "manual_review"
             enriched.append(
                 {
-                    **candidate,
-                    "evidence": _json_dict(candidate.get("evidence_json")),
+                    "id": str(candidate.get("id") or "")[:160],
+                    "entity_a_id": str(candidate.get("entity_a_id") or "")[:160],
+                    "entity_b_id": str(candidate.get("entity_b_id") or "")[:160],
+                    "confidence": confidence,
+                    "resolution_method": str(candidate.get("resolution_method") or "")[:80],
+                    "status": str(candidate.get("status") or "")[:40],
+                    "created_at": str(candidate.get("created_at") or "")[:64],
+                    "resolved_at": str(candidate.get("resolved_at") or "")[:64],
                     "entity_a": {
-                        **left,
-                        "knowledge_count": len(left_links),
-                        "relation_count": len(left_relations),
+                        "id": str(left.get("id") or "")[:160],
+                        "name": str(left.get("name") or "")[:240],
+                        "entity_type": str(left.get("entity_type") or "")[:80],
+                        "knowledge_count": self.storage.count_entity_knowledge(user_id, left["id"]),
+                        "relation_count": self.storage.count_entity_relations(left["id"], user_id),
                     },
                     "entity_b": {
-                        **right,
-                        "knowledge_count": len(right_links),
-                        "relation_count": len(right_relations),
+                        "id": str(right.get("id") or "")[:160],
+                        "name": str(right.get("name") or "")[:240],
+                        "entity_type": str(right.get("entity_type") or "")[:80],
+                        "knowledge_count": self.storage.count_entity_knowledge(user_id, right["id"]),
+                        "relation_count": self.storage.count_entity_relations(right["id"], user_id),
                     },
                     "recommendation": recommendation,
                 }
             )
-        return enriched
+        return _BoundedEntityList(
+            enriched,
+            matched_at_least=len(candidates),
+            truncated=len(candidates) > bounded,
+        )
+
+    def get_pending_resolutions(self, user_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        return self.get_resolutions(user_id, ResolutionStatus.SUGGESTED, limit=limit)
 
     def accept_resolution(
         self,
@@ -675,7 +1149,7 @@ class EntityResolver:
         target_entity_id: str | None = None,
         resolved_by: str | None = None,
     ) -> dict[str, Any]:
-        candidate = self.storage.get_resolution_candidate(candidate_id, user_id)
+        candidate = _bounded_resolution_candidate_by_id(self.storage, candidate_id, user_id)
         if not candidate or candidate["status"] != ResolutionStatus.SUGGESTED.value:
             raise ValueError("Resolution candidate was not found or is no longer pending")
         pair = {candidate["entity_a_id"], candidate["entity_b_id"]}
@@ -684,10 +1158,10 @@ class EntityResolver:
 
         if target_entity_id is None:
             left, right = candidate["entity_a_id"], candidate["entity_b_id"]
-            left_relations = len(self.storage.get_entity_relations(left, user_id))
-            right_relations = len(self.storage.get_entity_relations(right, user_id))
-            left_knowledge = len(self.storage.get_entity_knowledge(user_id, left, limit=1000))
-            right_knowledge = len(self.storage.get_entity_knowledge(user_id, right, limit=1000))
+            left_relations = self.storage.count_entity_relations(left, user_id)
+            right_relations = self.storage.count_entity_relations(right, user_id)
+            left_knowledge = self.storage.count_entity_knowledge(user_id, left)
+            right_knowledge = self.storage.count_entity_knowledge(user_id, right)
             # Stable tie-break: richer entity, then older record (candidate A).
             target_entity_id = (
                 left if (left_relations + left_knowledge) >= (right_relations + right_knowledge) else right
@@ -713,6 +1187,9 @@ class EntityResolver:
         }
 
     def reject_resolution(self, candidate_id: str, user_id: str, *, resolved_by: str | None = None) -> bool:
+        candidate = _bounded_resolution_candidate_by_id(self.storage, candidate_id, user_id)
+        if not candidate or candidate["status"] == ResolutionStatus.MERGED.value:
+            raise ValueError("Resolution candidate not found")
         if not self.storage.resolve_candidate(
             candidate_id,
             ResolutionStatus.REJECTED,
@@ -790,7 +1267,7 @@ class KnowledgeGraph:
         Both ends are normalized to a valid ISO date; an end before the start is
         rejected. Only ``event`` entities may carry a time.
         """
-        entity = self.storage.get_entity(entity_id, user_id)
+        entity = _bounded_entity_by_id(self.storage, entity_id, user_id)
         if not entity or entity.get("deleted_at"):
             raise ValueError("Event entity not found")
         if str(entity.get("entity_type")) != EntityType.EVENT.value:
@@ -842,10 +1319,17 @@ class KnowledgeGraph:
         start: str | None = None,
         end: str | None = None,
         limit: int = 200,
+        person_id: str = "",
     ) -> list[dict[str, Any]]:
         """Backward-compatible item list from the exact unified timeline page."""
 
-        return self.timeline_page(user_id, start=start, end=end, limit=limit)["items"]
+        return self.timeline_page(
+            user_id,
+            start=start,
+            end=end,
+            limit=limit,
+            person_id=person_id,
+        )["items"]
 
     def timeline_page(
         self,
@@ -854,6 +1338,7 @@ class KnowledgeGraph:
         start: str | None = None,
         end: str | None = None,
         limit: int = 200,
+        person_id: str = "",
     ) -> dict[str, Any]:
         """Events and relation valid-time changes under one stable global limit."""
 
@@ -863,8 +1348,10 @@ class KnowledgeGraph:
             raise ValueError("end не может предшествовать start")
 
         bounded_limit = max(1, min(int(limit), 2000))
-        events = self.storage.list_events_in_range(
+        events = _bounded_visible_timeline_event_rows(
+            self.storage,
             user_id,
+            person_id,
             start=normalized_start,
             end=normalized_end,
             limit=bounded_limit,
@@ -886,10 +1373,12 @@ class KnowledgeGraph:
             items.append(event)
         items.extend(dict(change) for change in relation_changes)
         items.sort(key=_timeline_sort_key)
-        shown = items[:bounded_limit]
+        shown = [_safe_timeline_item(item) for item in items[:bounded_limit]]
 
-        total = self.storage.count_events_in_range(
+        total = _count_visible_timeline_events(
+            self.storage,
             user_id,
+            person_id,
             start=normalized_start,
             end=normalized_end,
         ) + self.storage.count_relation_changes_in_range(
@@ -925,7 +1414,7 @@ class KnowledgeGraph:
         direct = self.storage.find_entity_by_name(user_id, name)
         if direct:
             return direct
-        aliases = self.storage.find_entity_by_alias(user_id, name)
+        aliases = self.storage.find_entity_by_alias(user_id, name, limit=1)
         return aliases[0] if aliases else None
 
     def match_mentions(
@@ -950,7 +1439,12 @@ class KnowledgeGraph:
         if not text.strip():
             return []
         phrases = mention_phrase_candidates(text)
-        entities = self.storage.find_entities_by_normalized_names(user_id, phrases)
+        bounded = max(1, min(int(limit), 200))
+        entities = self.storage.find_entities_by_normalized_names(
+            user_id,
+            phrases,
+            limit=min(800, bounded * 4),
+        )
         matches: list[dict[str, Any]] = []
         occupied: list[tuple[int, int]] = []
         lowered = text.casefold()
@@ -1015,20 +1509,62 @@ class KnowledgeGraph:
         matches.sort(
             key=lambda item: (-float(item["confidence"]), item["span"][0], -len(item["matched_text"]))
         )
-        return matches[: max(1, min(limit, 200))]
+        return matches[:bounded]
 
-    def search_entities(self, user_id: str, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        """Find graph entry points using exact mentions plus conservative token overlap."""
-        exact = {item["entity_id"]: item for item in self.match_mentions(user_id, query, limit=limit * 2)}
-        scored: list[tuple[dict[str, Any], float, str]] = []
+    def search_entities(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int = 10,
+        entity_type: EntityType | None = None,
+    ) -> list[dict[str, Any]]:
+        """Find graph entry points with a deterministic, bounded-memory top-k."""
+
+        bounded = max(1, min(int(limit), 500))
+        exact = {
+            item["entity_id"]: item
+            for item in self.match_mentions(user_id, query, limit=min(200, bounded * 2))
+        }
+        wanted_type = entity_type.value if entity_type is not None else ""
+        # Entries stay in final rank order. Insertion is O(k), but k is capped at
+        # 500 and the resident set never grows with tenant size. The former
+        # append-then-sort retained every broad token match (including each 8-KB
+        # alias card) until the full tenant scan had completed.
+        ranked: list[tuple[tuple[float, str, str], dict[str, Any], str]] = []
+
+        def offer(entity: dict[str, Any], score: float, method: str) -> None:
+            rank = (
+                -float(score),
+                str(entity.get("name") or "").casefold(),
+                str(entity.get("id") or ""),
+            )
+            if len(ranked) >= bounded and rank >= ranked[-1][0]:
+                return
+            low = 0
+            high = len(ranked)
+            while low < high:
+                middle = (low + high) // 2
+                if ranked[middle][0] < rank:
+                    low = middle + 1
+                else:
+                    high = middle
+            ranked.insert(low, (rank, entity, method))
+            if len(ranked) > bounded:
+                ranked.pop()
+
         # Token-overlap still needs every entity's terms: a short query can hit a
         # name that shares only one word with it, which phrase lookup alone would
-        # miss. ``iter_entities`` pages without the silent 5000 ceiling that made
-        # the alphabetical tail invisible to this path.
-        for entity in self.storage.iter_entities(user_id):
+        # miss. The iterator keyset-pages bounded cards without the silent 5000
+        # ceiling or OFFSET's quadratic rescan cost.
+        for entity in _iter_entities_for_graph_search(self.storage, user_id):
+            if wanted_type and entity.get("entity_type") != wanted_type:
+                continue
             if entity["id"] in exact:
-                scored.append(
-                    (entity, float(exact[entity["id"]]["confidence"]), exact[entity["id"]]["method"])
+                offer(
+                    entity,
+                    float(exact[entity["id"]]["confidence"]),
+                    str(exact[entity["id"]]["method"]),
                 )
                 continue
             score = 0.0
@@ -1037,12 +1573,11 @@ class KnowledgeGraph:
                 score = max(score, _token_overlap(query, term))
             score = max(score, _token_overlap(query, str(entity.get("description") or "")) * 0.65)
             if score >= 0.30:
-                scored.append((entity, min(0.85, score), method))
-        scored.sort(key=lambda item: (-item[1], item[0].get("name", "").casefold()))
+                offer(entity, min(0.85, score), method)
         return [
             {
                 **entity,
-                "_match_score": round(score, 4),
+                "_match_score": round(-rank[0], 4),
                 "_match_method": method,
                 # COUNT(*), not len(rows). This ran per returned entity and pulled
                 # up to 1000 full Knowledge Objects — bodies and all — to produce a
@@ -1050,7 +1585,7 @@ class KnowledgeGraph:
                 "_relation_count": self.storage.count_entity_relations(entity["id"], user_id),
                 "_knowledge_count": self.storage.count_entity_knowledge(user_id, entity["id"]),
             }
-            for entity, score, method in scored[: max(1, min(limit, 100))]
+            for rank, entity, method in ranked
         ]
 
     def context_for_query(
@@ -1063,6 +1598,7 @@ class KnowledgeGraph:
         knowledge_limit: int = 30,
         seed_knowledge_ids: list[str] | None = None,
         as_of: str = "",
+        known_at: str = "",
     ) -> dict[str, Any]:
         """Build a compact scored subgraph for retrieval and agent context.
 
@@ -1072,17 +1608,93 @@ class KnowledgeGraph:
         Knowledge Object. Those implicit edges are labelled and never persisted as asserted facts.
         """
 
-        # Validate before even looking up roots.  A malformed historical query
-        # must fail explicitly even when the graph happens to be empty.
+        # Validate both temporal axes before even looking up roots. A malformed
+        # or incomplete transaction-time snapshot must fail explicitly even when
+        # the graph happens to be empty; otherwise a merge-crossing/floor refusal
+        # would silently turn into an ordinary "nothing found" answer.
         cleaned_as_of = str(as_of or "").strip()
         normalized_as_of = normalize_event_date(cleaned_as_of)[0] if cleaned_as_of else ""
+        requested_known_at = str(known_at or "").strip()
+        if requested_known_at:
+            # Normalize independently, then require storage to echo that exact
+            # boundary and every provenance field. `bool(...)`/`.get(...)`
+            # fallbacks here would brand a current or incomplete graph as a
+            # reproducible historical snapshot.
+            normalized_requested_known_at = normalize_known_at(requested_known_at)
+            history_status = _validated_history_snapshot_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=requested_known_at,
+                ),
+                requested_known_at=normalized_requested_known_at,
+            )
+            history_watermark: int | None = _relation_revision_watermark(
+                self.storage,
+                user_id,
+                normalized_requested_known_at,
+            )
+        else:
+            # The current fast path predates relation history and must not become
+            # dependent on a migration-floor read. Snapshot provenance is only a
+            # fail-closed requirement when the caller explicitly asks for it.
+            history_status = {
+                "known_at": "",
+                "known_at_floor": "",
+                "history_complete": True,
+                "identity_basis": "current_names",
+            }
+            history_watermark = None
+        normalized_known_at = str(history_status["known_at"])
+
+        def public_snapshot_metadata(status: Mapping[str, Any]) -> dict[str, Any]:
+            return {
+                "known_at": str(status["known_at"]),
+                "known_at_floor": str(status["known_at_floor"]),
+                "history_complete": status["history_complete"],
+                "identity_basis": str(status["identity_basis"]),
+            }
+
+        snapshot_metadata = public_snapshot_metadata(history_status)
+
+        def confirm_history_snapshot() -> dict[str, Any]:
+            """Recheck merge topology after the last current-identity read."""
+
+            if not normalized_known_at:
+                return snapshot_metadata
+            if _relation_revision_watermark(self.storage, user_id, normalized_known_at) != history_watermark:
+                raise RelationHistorySnapshotError("relation history changed while building query context")
+            confirmed = _validated_history_snapshot_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=normalized_known_at,
+                ),
+                requested_known_at=normalized_known_at,
+            )
+            if confirmed != history_status:
+                raise RelationHistorySnapshotError(
+                    "relation history status changed while building query context"
+                )
+            return public_snapshot_metadata(confirmed)
+
+        temporal_basis = "bitemporal" if normalized_known_at else "valid_time"
 
         raw_entity_cache: dict[str, dict[str, Any] | None] = {}
         canonical_id_cache: dict[str, str | None] = {}
 
         def get_raw_entity(entity_id: str) -> dict[str, Any] | None:
             if entity_id not in raw_entity_cache:
-                raw_entity_cache[entity_id] = self.get_entity(entity_id, user_id)
+                if normalized_known_at:
+                    _assert_entities_existed_at_boundary(
+                        self.storage,
+                        user_id,
+                        [entity_id],
+                        normalized_known_at,
+                    )
+                raw_entity_cache[entity_id] = _graph_entity_for_traversal(
+                    self.storage,
+                    entity_id,
+                    user_id,
+                )
             return raw_entity_cache[entity_id]
 
         def canonical_entity_id(entity_id: str) -> str | None:
@@ -1178,6 +1790,10 @@ class KnowledgeGraph:
                 )
 
         if not root_scores:
+            # Root matching and canonicalization already read today's entity
+            # names/topology. A concurrent merge must therefore be caught even
+            # on this otherwise early empty-result path.
+            snapshot_metadata = confirm_history_snapshot()
             return {
                 "roots": [],
                 "entities": [],
@@ -1188,11 +1804,13 @@ class KnowledgeGraph:
                 "paths": [],
                 "paths_matched_at_least": 0,
                 "paths_truncated": False,
-                "temporal_basis": "valid_time",
+                "temporal_basis": temporal_basis,
                 "as_of": normalized_as_of,
+                **snapshot_metadata,
             }
 
         max_depth = max(0, min(depth, _MAX_TRAVERSAL_DEPTH))
+        traversal_truncated = False
         entity_knowledge_cache: dict[str, list[dict[str, Any]]] = {}
         entity_relation_cache: dict[str, list[dict[str, Any]]] = {}
         knowledge_links_cache: dict[str, list[dict[str, Any]]] = {}
@@ -1221,12 +1839,38 @@ class KnowledgeGraph:
             )
 
         def get_entity_relations(entity_id: str) -> list[dict[str, Any]]:
+            nonlocal traversal_truncated
             if entity_id not in entity_relation_cache:
-                entity_relation_cache[entity_id] = self.get_entity_relations(
-                    entity_id,
-                    user_id,
-                    as_of=normalized_as_of,
-                )
+                # The outer preflight is the validated snapshot token for this
+                # whole traversal. Calling the public wrapper here used to run
+                # KG + storage pre/post topology scans for every visited node.
+                # Historical hops read their fixed revision projection directly;
+                # one outer postflight still follows the final identity read.
+                if normalized_known_at:
+                    raw_relations = _historical_entity_relations(
+                        self.storage,
+                        entity_id,
+                        user_id,
+                        include_invalidated=False,
+                        as_of=normalized_as_of,
+                        known_at=normalized_known_at,
+                        require_live_endpoints=False,
+                        row_limit=_MAX_CONTEXT_RELATION_PAGE,
+                    )
+                else:
+                    raw_relations = _current_entity_relations_for_traversal(
+                        self.storage,
+                        entity_id,
+                        user_id,
+                        as_of=normalized_as_of,
+                        row_limit=_MAX_CONTEXT_RELATION_PAGE,
+                    )
+                if len(raw_relations) >= _MAX_CONTEXT_RELATION_PAGE:
+                    traversal_truncated = True
+                # Internal traversal needs legacy tombstones long enough to
+                # resolve them to a current canonical endpoint, but neither the
+                # cache nor the returned context may retain arbitrary metadata.
+                entity_relation_cache[entity_id] = [_public_relation(relation) for relation in raw_relations]
             return entity_relation_cache[entity_id]
 
         def get_knowledge_links(knowledge_id: str) -> list[dict[str, Any]]:
@@ -1243,7 +1887,10 @@ class KnowledgeGraph:
         relations: dict[str, dict[str, Any]] = {}
         best_states: dict[str, _GraphPathState] = {}
         path_evidence: dict[str, dict[str, Any]] = {}
-        for entity_id in sorted(root_scores, key=lambda item: (-root_scores[item], item)):
+        ordered_root_ids = sorted(root_scores, key=lambda item: (-root_scores[item], item))
+        if len(ordered_root_ids) > _MAX_CONTEXT_GRAPH_ENTITIES:
+            traversal_truncated = True
+        for entity_id in ordered_root_ids[:_MAX_CONTEXT_GRAPH_ENTITIES]:
             state = _GraphPathState(
                 root=entity_id,
                 current=entity_id,
@@ -1264,7 +1911,11 @@ class KnowledgeGraph:
             evidence_item: dict[str, Any],
             grounds: bool = False,
         ) -> None:
+            nonlocal traversal_truncated
             if neighbour_id == state.current or neighbour_id in state.entity_ids or propagated < 0.12:
+                return
+            if neighbour_id not in best_states and len(best_states) >= _MAX_CONTEXT_GRAPH_ENTITIES:
+                traversal_truncated = True
                 return
             candidate = _GraphPathState(
                 root=state.root,
@@ -1285,6 +1936,7 @@ class KnowledgeGraph:
             queue.append(candidate)
 
         prefetched_depth: int | None = None
+        stop_traversal = False
         while queue:
             frontier_depth = len(queue[0].edges)
             if frontier_depth != prefetched_depth:
@@ -1337,6 +1989,10 @@ class KnowledgeGraph:
                     # A corrupt/legacy row that is not incident to this canonical
                     # endpoint cannot be used to construct a coherent route.
                     continue
+                if relation_id not in relations and len(relations) >= _MAX_CONTEXT_GRAPH_RELATIONS:
+                    traversal_truncated = True
+                    stop_traversal = True
+                    break
                 source_entity = get_entity(source_id) or {}
                 target_entity = get_entity(target_id) or {}
                 relations[relation_id] = {
@@ -1385,9 +2041,13 @@ class KnowledgeGraph:
                     grounds=True,
                 )
 
-            if normalized_as_of:
-                # Entity links have no valid-time or append-only history.  Their
-                # present-day co-occurrence cannot answer a historical question.
+            if stop_traversal:
+                break
+
+            if normalized_as_of or normalized_known_at:
+                # Entity links have neither valid-time nor append-only history.
+                # Their present-day co-occurrence cannot answer a historical
+                # valid-time OR transaction-time question.
                 continue
 
             # Accepted links to one Knowledge Object provide useful graph structure without
@@ -1427,6 +2087,10 @@ class KnowledgeGraph:
                     )
                     pair = sorted((entity_id, neighbour_id))
                     relation_id = f"co:{knowledge_id}:{pair[0]}:{pair[1]}"
+                    if relation_id not in relations and len(relations) >= _MAX_CONTEXT_GRAPH_RELATIONS:
+                        traversal_truncated = True
+                        stop_traversal = True
+                        break
                     pair_source = get_entity(pair[0]) or {}
                     pair_target = get_entity(pair[1]) or {}
                     link_ids = sorted(
@@ -1493,6 +2157,10 @@ class KnowledgeGraph:
                             "depth": next_depth,
                         },
                     )
+                if stop_traversal:
+                    break
+            if stop_traversal:
+                break
 
         path_states = sorted(
             (state for state in best_states.values() if state.edges),
@@ -1641,6 +2309,11 @@ class KnowledgeGraph:
                 str(item.get("relation_type", "")),
             ),
         )
+        # Relation revision reads are historical, but entity names and merge
+        # tombstones above are intentionally current. Recheck only after every
+        # such lookup so a merge committed mid-build cannot escape as a mixed
+        # identity snapshot.
+        snapshot_metadata = confirm_history_snapshot()
         return {
             "roots": root_items,
             "entities": node_items,
@@ -1650,9 +2323,10 @@ class KnowledgeGraph:
             "knowledge_candidates": knowledge_candidates,
             "paths": paths,
             "paths_matched_at_least": len(path_states),
-            "paths_truncated": len(path_states) > _MAX_PUBLISHED_GRAPH_PATHS,
-            "temporal_basis": "valid_time",
+            "paths_truncated": traversal_truncated or len(path_states) > _MAX_PUBLISHED_GRAPH_PATHS,
+            "temporal_basis": temporal_basis,
             "as_of": normalized_as_of,
+            **snapshot_metadata,
         }
 
     def update_entity(self, user_id: str, entity_id: str, **fields: Any) -> dict[str, Any] | None:
@@ -1757,25 +2431,76 @@ class KnowledgeGraph:
     # Membership reuses knowledge_entity_links; hierarchy reuses PART_OF.
     # ------------------------------------------------------------------
 
-    def list_containers(self, user_id: str) -> list[dict[str, Any]]:
+    def list_containers(
+        self,
+        user_id: str,
+        *,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
         """Container entities with member counts and PART_OF parent links.
 
         Returns a flat list; each row carries ``knowledge_count`` and
         ``parent_id`` (the strongest active PART_OF edge to another
         container, or None for roots) so callers can render a tree.
         """
-        containers = self.storage.list_container_entities(user_id, tuple(sorted(CONTAINER_ENTITY_TYPES)))
+        bounded = max(1, min(int(limit), 200))
+        raw_containers = _bounded_entity_listing_rows(
+            self.storage,
+            user_id,
+            entity_types=tuple(sorted(CONTAINER_ENTITY_TYPES)),
+            limit=bounded + 1,
+        )
+        matched_at_least = len(raw_containers)
+        containers = raw_containers[:bounded]
         container_ids = {str(row["id"]) for row in containers}
         parent_by_child: dict[str, str] = {}
-        for edge in self.storage.list_part_of_relations(user_id):
-            child = str(edge["source_entity_id"])
-            parent = str(edge["target_entity_id"])
-            # Rows arrive weight DESC, so first-seen wins as the display parent.
-            if child in container_ids and parent in container_ids and child not in parent_by_child:
-                parent_by_child[child] = parent
+        if container_ids:
+            placeholders = ",".join("?" * len(container_ids))
+            container_types = tuple(sorted(CONTAINER_ENTITY_TYPES))
+            type_placeholders = ",".join("?" * len(container_types))
+            parent_rows = self.storage.execute(
+                f"""WITH ranked AS (
+                         SELECT r.source_entity_id, r.target_entity_id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY r.source_entity_id
+                                    ORDER BY r.weight DESC, r.id
+                                ) AS parent_rank
+                           FROM relations r
+                           JOIN entities parent
+                             ON parent.id=r.target_entity_id AND parent.user_id=r.user_id
+                          WHERE r.user_id=? AND r.relation_type=?
+                            AND r.deleted_at IS NULL AND r.valid_to IS NULL
+                            AND r.source_entity_id IN ({placeholders})
+                            AND parent.deleted_at IS NULL AND parent.canonical=1
+                            AND parent.merged_into_id IS NULL
+                            AND {_not_private_entity_material_dependency("parent")}
+                            AND {_not_private_relation_dependency("r")}
+                            AND parent.entity_type IN ({type_placeholders})
+                     )
+                     SELECT source_entity_id, target_entity_id
+                       FROM ranked WHERE parent_rank=1""",  # nosec B608
+                (
+                    user_id,
+                    RelationType.PART_OF.value,
+                    *sorted(container_ids),
+                    *container_types,
+                ),
+            ).fetchall()
+            parent_by_child = {
+                str(row["source_entity_id"]): str(row["target_entity_id"]) for row in parent_rows
+            }
+        knowledge_counts = self.storage._knowledge_counts_for(  # noqa: SLF001
+            user_id,
+            sorted(container_ids),
+        )
         for row in containers:
             row["parent_id"] = parent_by_child.get(str(row["id"]))
-        return containers
+            row["knowledge_count"] = knowledge_counts.get(str(row["id"]), 0)
+        return _BoundedEntityList(
+            containers,
+            matched_at_least=matched_at_least,
+            truncated=len(raw_containers) > bounded,
+        )
 
     def create_container(
         self,
@@ -2180,8 +2905,16 @@ class KnowledgeGraph:
             resolution_note=resolution_note,
         )
 
-    def get_entity_relations(self, entity_id: str, user_id: str, *, as_of: str = "") -> list[dict[str, Any]]:
-        """Связи узла; `as_of` — какими они были на ту дату.
+    def get_entity_relations(
+        self,
+        entity_id: str,
+        user_id: str,
+        *,
+        as_of: str = "",
+        known_at: str = "",
+        limit: int = _MAX_PUBLIC_ENTITY_RELATIONS,
+    ) -> list[dict[str, Any]]:
+        """Связи узла по valid-time и, при запросе, transaction-time.
 
         Обёртка обязана пропускать дату дальше: без этого «как было тогда»
         работало бы через обход графа и не работало через прямой вызов, а
@@ -2189,12 +2922,86 @@ class KnowledgeGraph:
         когда ворота стоят на одной из них.
         """
 
-        if not self.storage.get_entity(entity_id, user_id):
-            return []
-        return self.storage.get_entity_relations(entity_id, user_id, as_of=as_of)
+        cleaned_as_of = str(as_of or "").strip()
+        normalized_as_of = normalize_event_date(cleaned_as_of)[0] if cleaned_as_of else ""
+        requested_known_at = str(known_at or "").strip()
+        normalized_known_at = ""
+        history_status: dict[str, Any] | None = None
+        history_watermark: int | None = None
+        if requested_known_at:
+            # Normalize, floor-check and validate identity history before the
+            # first entity/current-projection read.  A missing entity must not
+            # hide an invalid or incomplete transaction snapshot as ordinary [].
+            normalized_known_at = normalize_known_at(requested_known_at)
+            history_status = _validated_history_snapshot_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=requested_known_at,
+                ),
+                requested_known_at=normalized_known_at,
+            )
+            history_watermark = _relation_revision_watermark(
+                self.storage,
+                user_id,
+                normalized_known_at,
+            )
+        entity = _bounded_entity_by_id(self.storage, entity_id, user_id)
+        if not _is_live_graph_entity(entity):
+            if history_status:
+                # The missing-entity decision used current identity topology too;
+                # catch a merge racing that read just like non-empty snapshots do.
+                confirmed = _validated_history_snapshot_status(
+                    self.storage.relation_history_status(
+                        user_id,
+                        known_at=normalized_known_at,
+                    ),
+                    requested_known_at=normalized_known_at,
+                )
+                if confirmed != history_status:
+                    raise RelationHistorySnapshotError(
+                        "relation history status changed while checking the graph entity"
+                    )
+                if (
+                    _relation_revision_watermark(self.storage, user_id, normalized_known_at)
+                    != history_watermark
+                ):
+                    raise RelationHistorySnapshotError(
+                        "relation history changed while checking the graph entity"
+                    )
+            return _BoundedRelationList([], matched_at_least=0, truncated=False)
+        rows, matched_at_least, truncated = _bounded_entity_relation_rows(
+            self.storage,
+            entity_id,
+            user_id,
+            as_of=normalized_as_of,
+            known_at=normalized_known_at,
+            history_status=history_status,
+            limit=limit,
+        )
+        if history_status:
+            if _relation_revision_watermark(self.storage, user_id, normalized_known_at) != history_watermark:
+                raise RelationHistorySnapshotError(
+                    "relation history changed while publishing entity relations"
+                )
+            confirmed = _validated_history_snapshot_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=normalized_known_at,
+                ),
+                requested_known_at=normalized_known_at,
+            )
+            if confirmed != history_status:
+                raise RelationHistorySnapshotError(
+                    "relation history status changed while publishing entity relations"
+                )
+        return _BoundedRelationList(
+            [_public_relation(row) for row in rows],
+            matched_at_least=matched_at_least,
+            truncated=truncated,
+        )
 
     def count_pending_relations(self, entity_id: str, user_id: str) -> int:
-        if not self.storage.get_entity(entity_id, user_id):
+        if not _bounded_entity_by_id(self.storage, entity_id, user_id):
             return 0
         return self.storage.count_relation_candidates_for_entity(user_id, entity_id)
 
@@ -2205,21 +3012,193 @@ class KnowledgeGraph:
         depth: int = 2,
         *,
         as_of: str = "",
+        known_at: str = "",
         entity_types: Any = (),
         relation_types: Any = (),
         min_weight: float = 0.0,
         min_confidence: float = 0.0,
     ) -> dict[str, Any]:
-        return self.storage.get_entity_graph(
+        cleaned_as_of = str(as_of or "").strip()
+        normalized_as_of = normalize_event_date(cleaned_as_of)[0] if cleaned_as_of else ""
+        requested_known_at = str(known_at or "").strip()
+        normalized_known_at = normalize_known_at(requested_known_at) if requested_known_at else ""
+        history_status: dict[str, Any] | None = None
+        if normalized_known_at:
+            history_status = _validated_history_snapshot_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=requested_known_at,
+                ),
+                requested_known_at=normalized_known_at,
+            )
+        raw_result = self.storage.get_entity_graph(
             user_id,
             entity_id,
             depth,
-            as_of=as_of,
+            as_of=normalized_as_of,
+            known_at=normalized_known_at,
             entity_types=entity_types,
             relation_types=relation_types,
             min_weight=min_weight,
             min_confidence=min_confidence,
         )
+        if not isinstance(raw_result, Mapping):
+            raise ValueError("entity graph result is not a mapping")
+        if str(raw_result.get("as_of") or "") != normalized_as_of:
+            raise ValueError("entity graph changed the normalized as_of boundary")
+        expected_temporal_basis = "bitemporal" if history_status else "valid_time"
+        if raw_result.get("temporal_basis") != expected_temporal_basis:
+            raise RelationHistorySnapshotError("entity graph returned an inconsistent temporal basis")
+        if history_status:
+            result_status = _validated_history_snapshot_status(
+                raw_result,
+                requested_known_at=normalized_known_at,
+            )
+            if result_status != history_status:
+                raise RelationHistorySnapshotError(
+                    "entity graph returned a different relation-history status"
+                )
+        elif str(raw_result.get("known_at") or ""):
+            raise RelationHistorySnapshotError(
+                "current entity graph unexpectedly returned a historical boundary"
+            )
+
+        raw_nodes = raw_result.get("nodes")
+        raw_edges = raw_result.get("edges")
+        if not isinstance(raw_nodes, list) or not all(isinstance(node, Mapping) for node in raw_nodes):
+            raise ValueError("entity graph nodes are not a list of mappings")
+        if not isinstance(raw_edges, list) or not all(isinstance(edge, Mapping) for edge in raw_edges):
+            raise ValueError("entity graph edges are not a list of mappings")
+
+        nodes_by_id: dict[str, dict[str, Any]] = {}
+        public_node_ids: set[str] = set()
+        for raw_node in raw_nodes:
+            raw_id = str(raw_node.get("id") or "")
+            if not raw_id or raw_id in nodes_by_id:
+                raise ValueError("entity graph contains a missing or duplicate node id")
+            projected_node = _public_graph_node(raw_node)
+            public_id = str(projected_node["id"])
+            if not public_id or public_id in public_node_ids:
+                raise ValueError("bounded entity graph node ids are not unique")
+            public_node_ids.add(public_id)
+            nodes_by_id[raw_id] = projected_node
+
+        sortable_edges: list[tuple[dict[str, Any], str, str]] = []
+        public_edge_ids: set[str] = set()
+        for raw_edge in raw_edges:
+            source_id = str(raw_edge.get("source_entity_id") or "")
+            target_id = str(raw_edge.get("target_entity_id") or "")
+            if source_id not in nodes_by_id or target_id not in nodes_by_id:
+                raise ValueError("entity graph edge refers to an unpublished endpoint")
+            projected = _public_relation(raw_edge)
+            public_edge_id = str(projected.get("id") or "")
+            if not public_edge_id or public_edge_id in public_edge_ids:
+                raise ValueError("bounded entity graph edge ids are missing or not unique")
+            public_edge_ids.add(public_edge_id)
+            sortable_edges.append((projected, source_id, target_id))
+
+        def edge_rank(item: tuple[dict[str, Any], str, str]) -> tuple[Any, ...]:
+            return (
+                -float(item[0].get("weight") or 0.0),
+                str(item[0].get("relation_type") or "").casefold(),
+                item[1],
+                item[2],
+                str(item[0].get("id") or ""),
+            )
+
+        sortable_edges.sort(key=edge_rank)
+        root_id = str(raw_result.get("root") or entity_id)
+        if nodes_by_id and root_id not in nodes_by_id:
+            raise ValueError("entity graph root is absent from its node set")
+
+        # A global weight slice can sever the only root→bridge edge and retain a
+        # high-weight second-hop component. Grow a deterministic connected prefix
+        # from the requested root instead: every published edge is reachable from
+        # the root through edges which precede it in this same bounded response.
+        adjacency: dict[str, list[int]] = defaultdict(list)
+        for index, (_, source_id, target_id) in enumerate(sortable_edges):
+            adjacency[source_id].append(index)
+            adjacency[target_id].append(index)
+        published_edge_items: list[tuple[dict[str, Any], str, str]] = []
+        selected_node_ids = {root_id} if root_id in nodes_by_id else set()
+        queued_edges: set[int] = set()
+        edge_heap: list[tuple[tuple[Any, ...], int]] = []
+
+        def queue_incident(node_id: str) -> None:
+            for edge_index in adjacency.get(node_id, []):
+                if edge_index in queued_edges:
+                    continue
+                queued_edges.add(edge_index)
+                heapq.heappush(edge_heap, (edge_rank(sortable_edges[edge_index]), edge_index))
+
+        if selected_node_ids:
+            queue_incident(root_id)
+        while edge_heap and len(published_edge_items) < _MAX_PUBLIC_ENTITY_GRAPH_EDGES:
+            _, edge_index = heapq.heappop(edge_heap)
+            item = sortable_edges[edge_index]
+            _, source_id, target_id = item
+            if source_id not in selected_node_ids and target_id not in selected_node_ids:
+                continue
+            published_edge_items.append(item)
+            for endpoint_id in (source_id, target_id):
+                if endpoint_id not in selected_node_ids:
+                    selected_node_ids.add(endpoint_id)
+                    queue_incident(endpoint_id)
+        published_edges = [item[0] for item in published_edge_items]
+        if len(selected_node_ids) > _MAX_PUBLIC_ENTITY_GRAPH_NODES:
+            raise ValueError("bounded entity graph edge set exceeds its node budget")
+        published_nodes = [nodes_by_id[item] for item in selected_node_ids if item in nodes_by_id]
+        published_nodes.sort(
+            key=lambda node: (
+                str(node.get("id") or "") != root_id,
+                str(node.get("name") or "").casefold(),
+                str(node.get("id") or ""),
+            )
+        )
+
+        nodes_matched = _bounded_graph_count(
+            raw_result.get("nodes_matched_at_least"),
+            len(raw_nodes),
+        )
+        edges_matched = _bounded_graph_count(
+            raw_result.get("edges_matched_at_least"),
+            len(raw_edges),
+        )
+        upstream_nodes_truncated = raw_result.get("nodes_truncated", False)
+        upstream_edges_truncated = raw_result.get("edges_truncated", False)
+        if not isinstance(upstream_nodes_truncated, bool) or not isinstance(upstream_edges_truncated, bool):
+            raise ValueError("entity graph truncation metadata is not boolean")
+        if upstream_nodes_truncated and nodes_matched <= len(raw_nodes):
+            nodes_matched = min(len(raw_nodes) + 1, _MAX_PUBLIC_GRAPH_COUNT)
+        if upstream_edges_truncated and edges_matched <= len(raw_edges):
+            edges_matched = min(len(raw_edges) + 1, _MAX_PUBLIC_GRAPH_COUNT)
+        result: dict[str, Any] = {
+            "root": root_id[:160],
+            "nodes": published_nodes,
+            "edges": published_edges,
+            "nodes_matched_at_least": nodes_matched,
+            "nodes_truncated": upstream_nodes_truncated or nodes_matched > len(published_nodes),
+            "edges_matched_at_least": edges_matched,
+            "edges_truncated": upstream_edges_truncated or edges_matched > len(published_edges),
+            "as_of": normalized_as_of,
+            "known_at": normalized_known_at,
+            "identity_basis": "current_names",
+            "temporal_basis": expected_temporal_basis,
+        }
+        if history_status:
+            confirmed = _validated_history_snapshot_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=normalized_known_at,
+                ),
+                requested_known_at=normalized_known_at,
+            )
+            if confirmed != history_status:
+                raise RelationHistorySnapshotError(
+                    "relation history status changed while publishing the entity graph"
+                )
+            result.update(confirmed)
+        return result
 
     def link_knowledge_to_entity(
         self,
@@ -2249,11 +3228,18 @@ class KnowledgeGraph:
         *,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        if not self.storage.get_entity(entity_id, user_id):
+        if not _bounded_entity_by_id(self.storage, entity_id, user_id):
             return []
         return self.storage.get_entity_knowledge(user_id, entity_id, limit=limit)
 
-    def entity_profile(self, entity_id: str, user_id: str, *, knowledge_limit: int = 10) -> dict[str, Any]:
+    def entity_profile(
+        self,
+        entity_id: str,
+        user_id: str,
+        *,
+        knowledge_limit: int = 10,
+        relation_limit: int = _MAX_PUBLIC_ENTITY_RELATIONS,
+    ) -> dict[str, Any]:
         """Everything an object-view needs about one entity: confirmed relations,
         linked documents, and derived tags/date-range/pending-review count.
 
@@ -2272,12 +3258,14 @@ class KnowledgeGraph:
         is exactly the mistake `document_date` vs `updated_at` already
         guards against elsewhere in this method.
         """
-        if not self.storage.get_entity(entity_id, user_id):
+        if not _bounded_entity_by_id(self.storage, entity_id, user_id):
             return {
                 "relations": [],
                 "pending_relations_count": 0,
                 "knowledge_objects": [],
                 "knowledge_objects_total": 0,
+                "knowledge_objects_matched_at_least": 0,
+                "knowledge_objects_truncated": False,
                 "profile": {"tags": [], "document_date_range": None, "documents_without_own_date": 0},
                 "event_time": None,
                 "edits": {"versions": 0, "last_edited_at": None, "restorable_version": None},
@@ -2286,9 +3274,17 @@ class KnowledgeGraph:
         # проекция без `content`: полный `k.*` давал замеренные 2.4–4.9 МБ на один
         # ответ, и та же тяжесть уходила модели через `entity_lookup`, где всё
         # равно обрезалась на 11 900 знаках.
-        knowledge_objects = self.storage.get_entity_knowledge_cards(user_id, entity_id, limit=knowledge_limit)
+        knowledge_objects = [
+            _safe_knowledge_card(item)
+            for item in self.storage.get_entity_knowledge_cards(
+                user_id,
+                entity_id,
+                limit=knowledge_limit,
+            )
+        ]
         summary = self.storage.entity_knowledge_summary(user_id, entity_id)
         knowledge_total = int(summary.get("total") or 0)
+        relations = self.get_entity_relations(entity_id, user_id, limit=relation_limit)
         # ПОРЯДОК КЛЮЧЕЙ ЗДЕСЬ — ЧАСТЬ КОНТРАКТА. Ответ инструмента агента режется
         # на 12 000 знаках (`ToolResult.to_llm_message`), а список документов —
         # самая длинная часть словаря. Пока сводка стояла ПОСЛЕ него, у трети
@@ -2303,6 +3299,8 @@ class KnowledgeGraph:
             # из 200 самых широких сущностей боевой копии.
             "profile": summary,
             "knowledge_objects_total": knowledge_total,
+            "knowledge_objects_matched_at_least": knowledge_total,
+            "knowledge_objects_truncated": knowledge_total > len(knowledge_objects),
             # Спека v3 §2: «derived properties identify their source objects,
             # calculation version and freshness; a derived value is never
             # presented as a sourced fact». Теги, диапазон дат и число «без своей
@@ -2317,9 +3315,15 @@ class KnowledgeGraph:
                 "computed_at": utc_now(),
                 "calculation": "entity_knowledge_summary/1",
             },
-            "relations": self.get_entity_relations(entity_id, user_id),
+            "relations": relations,
+            "relations_matched_at_least": getattr(
+                relations,
+                "matched_at_least",
+                len(relations),
+            ),
+            "relations_truncated": bool(getattr(relations, "truncated", False)),
             "pending_relations_count": self.count_pending_relations(entity_id, user_id),
-            "event_time": self.get_event_time(user_id, entity_id),
+            "event_time": _safe_event_time(self.get_event_time(user_id, entity_id)),
             # Четвёртый временной факт, теперь и для сущности: КОГДА ЕЁ ПРАВИЛИ —
             # отдельно от дат документов и от времени события (спека v3 §2).
             # `restorable_version` — та версия, к которой ведёт откат «отменить
@@ -2332,20 +3336,39 @@ class KnowledgeGraph:
         }
 
     def _entity_edit_history(self, user_id: str, entity_id: str) -> dict[str, Any]:
-        versions = self.storage.list_entity_versions(entity_id, user_id)  # новые первыми
-        if not versions:
+        aggregate = self.storage.execute(
+            """SELECT COUNT(DISTINCT version) AS versions, MAX(version) AS current_version
+                 FROM entity_versions WHERE entity_id=? AND user_id=?""",
+            (entity_id, user_id),
+        ).fetchone()
+        version_count = int(aggregate["versions"] or 0) if aggregate else 0
+        if not version_count:
             return {"versions": 0, "last_edited_at": None, "restorable_version": None}
-        numbers = sorted({int(row.get("version") or 0) for row in versions})
+        current_version = int(aggregate["current_version"] or 0)
+        latest = self.storage.execute(
+            """SELECT created_at FROM entity_versions
+                 WHERE entity_id=? AND user_id=?
+                 ORDER BY version DESC, id DESC LIMIT 1""",
+            (entity_id, user_id),
+        ).fetchone()
         # Слияние тоже правит цель и тоже пишет версию — но откатывать его надо
         # разъединением, а не «отменой последней правки»: иначе алиас-мост со
         # старым именем исчезает, а слитая сущность остаётся надгробием. Версии,
         # созданные живым слиянием, для этой кнопки закрыты.
         floor = self.storage.merge_version_floor(entity_id, user_id)
-        restorable = [number for number in numbers[:-1] if number >= floor]
+        restorable = self.storage.execute(
+            """SELECT MAX(version) AS version FROM entity_versions
+                 WHERE entity_id=? AND user_id=? AND version<? AND version>=?""",
+            (entity_id, user_id, current_version, floor),
+        ).fetchone()
         return {
-            "versions": len(numbers),
-            "last_edited_at": str(versions[0].get("created_at") or "") or None,
-            "restorable_version": restorable[-1] if restorable else None,
+            "versions": version_count,
+            "last_edited_at": str(latest["created_at"] or "") if latest else None,
+            "restorable_version": (
+                int(restorable["version"])
+                if restorable is not None and restorable["version"] is not None
+                else None
+            ),
         }
 
     def review_knowledge_link(
@@ -2364,28 +3387,12 @@ class KnowledgeGraph:
         )
 
     def get_stats(self, user_id: str) -> dict[str, Any]:
-        relation_row = self.storage.execute(
-            "SELECT COUNT(*) AS count FROM relations WHERE user_id=? AND deleted_at IS NULL",
-            (user_id,),
-        ).fetchone()
-        inbox_row = self.storage.execute(
-            "SELECT COUNT(*) AS count FROM inbox WHERE user_id=? AND status='pending'",
-            (user_id,),
-        ).fetchone()
-        relation_candidate_row = self.storage.execute(
-            "SELECT COUNT(*) AS count FROM relation_candidates WHERE user_id=? AND status='suggested'",
-            (user_id,),
-        ).fetchone()
-        conflict_row = self.storage.execute(
-            "SELECT COUNT(*) AS count FROM knowledge_conflicts WHERE user_id=? AND status='suggested'",
-            (user_id,),
-        ).fetchone()
         return {
             # Считается, а не меряется длиной выборки: `entities` взяты с потолком
             # 5000, и выше него это число застывало, продолжая выглядеть точным.
             # Замер: счётчик 0.9 мс против 16.6 мс у полной выборки — дешевле И честнее.
             "entity_count": self.storage.count_entities(user_id),
-            "relation_count": int(relation_row["count"] if relation_row else 0),
+            "relation_count": _count_visible_relations(self.storage, user_id),
             "knowledge_object_count": self.storage.count_knowledge_objects(user_id),
             # Тем же агрегатом, что и `entity_count` выше, и по тем же условиям:
             # разбивка считалась питоном по странице в 5000 строк и на большем
@@ -2394,11 +3401,11 @@ class KnowledgeGraph:
             "pending_resolutions": self.storage.count_resolution_candidates(
                 user_id, ResolutionStatus.SUGGESTED
             ),
-            "pending_inbox": int(inbox_row["count"] if inbox_row else 0),
-            "pending_relation_candidates": int(
-                relation_candidate_row["count"] if relation_candidate_row else 0
+            "pending_inbox": self.storage.count_inbox(user_id, InboxStatus.PENDING),
+            "pending_relation_candidates": self.storage.count_relation_candidates(
+                user_id, status="suggested"
             ),
-            "pending_conflicts": int(conflict_row["count"] if conflict_row else 0),
+            "pending_conflicts": self.storage.count_knowledge_conflicts(user_id, status="suggested"),
         }
 
     def is_empty(self, user_id: str) -> bool:

@@ -331,13 +331,18 @@ class DocumentExtractor:
                     "",
                     {"filename": safe_name, "mime_type": detected_mime, "size": len(content)},
                     False,
-                    f"Unsupported document format: {ext or detected_mime}",
+                    "unsupported_document_format",
                 )
-        except ArchiveLimitError as exc:
-            result = DocumentResult("", {"filename": safe_name}, False, str(exc))
+        except ArchiveLimitError:
+            result = DocumentResult("", {"filename": safe_name}, False, "archive_limit_exceeded")
         except Exception as exc:  # defensive boundary for optional parsers
-            LOGGER.info("Document extraction failed for %s: %s", safe_name, exc)
-            result = DocumentResult("", {"filename": safe_name}, False, str(exc))
+            LOGGER.info("Document extraction failed (%s)", type(exc).__name__)
+            result = DocumentResult(
+                "",
+                {"filename": safe_name},
+                False,
+                f"document_extract_failed:{type(exc).__name__}",
+            )
 
         text = result.text[: self.max_text_chars]
         metadata = {
@@ -464,8 +469,8 @@ class DocumentExtractor:
                             height=image.height,
                         )
                 return None
-        except Exception:
-            LOGGER.debug("Visual asset normalization failed for %s", source, exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("Visual asset normalization failed (%s)", type(exc).__name__)
             return None
 
     @staticmethod
@@ -504,8 +509,8 @@ class DocumentExtractor:
                         output.append((data, f"pdf-page-{page_index + 1}-image-{image_index + 1}"))
                     if len(output) >= max_candidates:
                         return output
-        except Exception:
-            LOGGER.debug("PDF embedded-image extraction failed", exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("PDF embedded-image extraction failed (%s)", type(exc).__name__)
         return output
 
     @staticmethod
@@ -530,22 +535,22 @@ class DocumentExtractor:
                         continue
                     try:
                         data = archive.read(info, pwd=None)
-                    except Exception:
+                    except Exception as exc:
                         # A single corrupted media stream (bit flip, interrupted save,
                         # adversarial upload) must not abort the whole document's
                         # extraction — zipfile.read() can raise things well outside
                         # the outer (OSError, BadZipFile, RuntimeError) tuple, e.g.
                         # zlib.error on a broken deflate stream. Skip this image and
                         # keep the others; found by adversarial review.
-                        LOGGER.debug("Office embedded image %r is corrupted", info.filename, exc_info=True)
+                        LOGGER.debug("Office embedded image is corrupted (%s)", type(exc).__name__)
                         continue
                     if len(data) != info.file_size:
                         continue
                     output.append((data, info.filename))
                     if len(output) >= max_candidates:
                         break
-        except (OSError, zipfile.BadZipFile, RuntimeError):
-            LOGGER.debug("Office embedded-image extraction failed", exc_info=True)
+        except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            LOGGER.debug("Office embedded-image extraction failed (%s)", type(exc).__name__)
         return output
 
     @staticmethod
@@ -776,8 +781,8 @@ class DocumentExtractor:
 
         try:
             text, metadata = extract_doc_text(content)
-        except OleError as exc:
-            return DocumentResult("", {"format": "doc"}, False, f"Unsupported document format: {exc}")
+        except OleError:
+            return DocumentResult("", {"format": "doc"}, False, "unsupported_legacy_doc")
         return DocumentResult(text, metadata)
 
     def _extract_xlsx(self, content: bytes) -> DocumentResult:

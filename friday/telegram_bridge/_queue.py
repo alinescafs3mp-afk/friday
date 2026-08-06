@@ -6,6 +6,7 @@ only its address changed.
 
 from __future__ import annotations
 
+from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.telegram_bridge._base import (
     BATCH_SIZE,
     MAX_ATTEMPTS,
@@ -64,7 +65,7 @@ class _UpdateInbox:
 
     def __init__(self, db_path: str) -> None:
         path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite(path)
         self._conn = sqlite3.connect(str(path), timeout=10.0)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(
@@ -95,6 +96,7 @@ class _UpdateInbox:
             );
             """
         )
+        restrict_sqlite_files(path)
         # Idempotent upgrade from the original durable-inbox schema.  Add
         # columns before recreating the index so an existing database can never
         # fail halfway through startup because an index references new fields.

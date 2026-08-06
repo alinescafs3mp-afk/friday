@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from friday.api.deps import _audit, _request_json, _require
+from friday.storage._knowledge import _bounded_public_knowledge_entity_links
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -137,10 +138,10 @@ async def get_knowledge(knowledge_id: str, request: Request) -> dict[str, Any]:
     return {
         "item": item,
         "versions": storage.list_knowledge_versions(knowledge_id, actor.user_id),
-        "entity_links": storage.list_knowledge_entity_links(
+        "entity_links": _bounded_public_knowledge_entity_links(
+            storage,
             actor.user_id,
-            knowledge_object_id=knowledge_id,
-            status=None,
+            knowledge_id,
         ),
         # Список выше смешивает статусы и ограничен сотней: считать его длину
         # значит выдавать отклонённые владельцем связи за связи и упираться в

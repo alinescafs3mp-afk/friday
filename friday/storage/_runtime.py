@@ -23,6 +23,7 @@ from friday.storage._base import (
     utc_now,
     validate_user_id,
 )
+from friday.storage._privacy import _not_private_notification_dependency
 
 
 class RuntimeMixin(StorageShared):
@@ -36,19 +37,33 @@ class RuntimeMixin(StorageShared):
         dedup_key: str = "",
     ) -> bool:
         """Queue a push message. Returns False when a same dedup_key already exists."""
+        notification_id = new_id("notif")
         with self.transaction() as conn:
             cursor = conn.execute(
                 """INSERT OR IGNORE INTO outbound_notifications(
                        id, user_id, chat_id, kind, dedup_key, body, status, attempts, created_at)
                    VALUES(?, ?, ?, ?, ?, ?, 'pending', 0, ?)""",
-                (new_id("notif"), user_id, str(chat_id), kind, dedup_key, body, utc_now()),
+                (notification_id, user_id, str(chat_id), kind, dedup_key, body, utc_now()),
             )
-        return cursor.rowcount > 0
+            queued = cursor.rowcount > 0
+            if queued:
+                visible = conn.execute(
+                    f"""SELECT 1 FROM outbound_notifications n WHERE n.id=?
+                         AND {_not_private_notification_dependency("n")}""",  # nosec B608
+                    (notification_id,),
+                ).fetchone()
+                if visible is None:
+                    conn.execute("DELETE FROM outbound_notifications WHERE id=?", (notification_id,))
+                    queued = False
+        return queued
 
     def list_pending_notifications(self, *, limit: int = 20, max_attempts: int = 5) -> list[dict[str, Any]]:
         rows = self.execute(
-            "SELECT id, user_id, chat_id, kind, dedup_key, body FROM outbound_notifications "
-            "WHERE status='pending' AND attempts < ? ORDER BY created_at ASC LIMIT ?",
+            f"""SELECT n.id, n.user_id, n.chat_id, n.kind, n.dedup_key, n.body
+                  FROM outbound_notifications n
+                 WHERE n.status='pending' AND n.attempts < ?
+                   AND {_not_private_notification_dependency("n")}
+                 ORDER BY n.created_at ASC LIMIT ?""",  # nosec B608
             (max(1, int(max_attempts)), max(1, min(int(limit), 100))),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -63,10 +78,12 @@ class RuntimeMixin(StorageShared):
         """
         user_id = validate_user_id(user_id)
         rows = self.execute(
-            "SELECT id, user_id, chat_id, kind, dedup_key, body, status, created_at "
-            "FROM outbound_notifications "
-            "WHERE user_id=? AND kind='reminder' AND status='pending' "
-            "ORDER BY created_at ASC LIMIT ?",
+            f"""SELECT n.id, n.user_id, n.chat_id, n.kind, n.dedup_key, n.body,
+                       n.status, n.created_at
+                  FROM outbound_notifications n
+                 WHERE n.user_id=? AND n.kind='reminder' AND n.status='pending'
+                   AND {_not_private_notification_dependency("n")}
+                 ORDER BY n.created_at ASC LIMIT ?""",  # nosec B608
             (user_id, max(1, min(int(limit), 100))),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -92,20 +109,22 @@ class RuntimeMixin(StorageShared):
             return False
         with self.transaction() as conn:
             cursor = conn.execute(
-                """UPDATE outbound_notifications
+                f"""UPDATE outbound_notifications AS n
                    SET status='dismissed'
                    WHERE user_id=? AND dedup_key=? AND kind='reminder'
-                     AND status IN ('pending', 'sent')""",
+                     AND status IN ('pending', 'sent')
+                     AND {_not_private_notification_dependency("n")}""",  # nosec B608
                 (user_id, dedup_key),
             )
             if cursor.rowcount > 0:
                 return True
+            notification_id = new_id("notif")
             inserted = conn.execute(
                 """INSERT OR IGNORE INTO outbound_notifications(
                        id, user_id, chat_id, kind, dedup_key, body, status, attempts, created_at)
                    VALUES(?, ?, ?, 'reminder', ?, ?, 'dismissed', 0, ?)""",
                 (
-                    new_id("notif"),
+                    notification_id,
                     user_id,
                     str(chat_id),
                     dedup_key,
@@ -113,6 +132,18 @@ class RuntimeMixin(StorageShared):
                     utc_now(),
                 ),
             )
+            if inserted.rowcount > 0:
+                visible = conn.execute(
+                    f"""SELECT 1 FROM outbound_notifications n WHERE n.id=?
+                         AND {_not_private_notification_dependency("n")}""",  # nosec B608
+                    (notification_id,),
+                ).fetchone()
+                if visible is None:
+                    conn.execute(
+                        "DELETE FROM outbound_notifications WHERE id=?",
+                        (notification_id,),
+                    )
+                    return False
         return inserted.rowcount > 0
 
     def reminder_states(self, user_id: str, dedup_keys: Sequence[str]) -> dict[str, str]:
@@ -123,8 +154,10 @@ class RuntimeMixin(StorageShared):
             return {}
         placeholders = ",".join("?" for _ in keys)
         rows = self.execute(
-            f"SELECT dedup_key, status FROM outbound_notifications "  # noqa: S608 — плейсхолдеры по счёту
-            f"WHERE user_id=? AND kind='reminder' AND dedup_key IN ({placeholders})",
+            f"""SELECT n.dedup_key, n.status FROM outbound_notifications n
+                 WHERE n.user_id=? AND n.kind='reminder'
+                   AND n.dedup_key IN ({placeholders})
+                   AND {_not_private_notification_dependency("n")}""",  # nosec B608
             (user_id, *keys),
         ).fetchall()
         return {str(row["dedup_key"]): str(row["status"]) for row in rows}
@@ -149,9 +182,10 @@ class RuntimeMixin(StorageShared):
             return False
         with self.transaction() as conn:
             cursor = conn.execute(
-                """UPDATE outbound_notifications
+                f"""UPDATE outbound_notifications AS n
                    SET status='dismissed'
-                   WHERE id=? AND user_id=? AND kind='reminder' AND status='pending'""",
+                   WHERE id=? AND user_id=? AND kind='reminder' AND status='pending'
+                     AND {_not_private_notification_dependency("n")}""",  # nosec B608
                 (notification_id, user_id),
             )
         return cursor.rowcount > 0
@@ -175,15 +209,18 @@ class RuntimeMixin(StorageShared):
         if not cleaned:
             return 0
         marker = f"undeliverable:{reason}"[:64]
+        changed = 0
         with self.transaction() as conn:
             for notification_id in cleaned:
-                conn.execute(
-                    """UPDATE outbound_notifications
+                cursor = conn.execute(
+                    f"""UPDATE outbound_notifications AS n
                        SET status='failed', dedup_key='', kind=?
-                       WHERE id=? AND status='pending'""",
+                       WHERE id=? AND status='pending'
+                         AND {_not_private_notification_dependency("n")}""",  # nosec B608
                     (marker, notification_id),
                 )
-        return len(cleaned)
+                changed += max(0, int(cursor.rowcount or 0))
+        return changed
 
     def mark_notifications(
         self,
@@ -195,7 +232,8 @@ class RuntimeMixin(StorageShared):
         with self.transaction() as conn:
             for notif_id in sent_ids:
                 conn.execute(
-                    "UPDATE outbound_notifications SET status='sent', sent_at=? WHERE id=?",
+                    f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
+                         WHERE id=? AND {_not_private_notification_dependency("n")}""",  # nosec B608
                     (utc_now(), str(notif_id)),
                 )
             for notif_id in failed_ids:
@@ -213,11 +251,11 @@ class RuntimeMixin(StorageShared):
                 # — a `sent` row keeps its key, or the same message would be sent
                 # twice.
                 conn.execute(
-                    """UPDATE outbound_notifications
+                    f"""UPDATE outbound_notifications AS n
                        SET attempts=attempts+1,
                            status=CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
                            dedup_key=CASE WHEN attempts + 1 >= ? THEN '' ELSE dedup_key END
-                       WHERE id=?""",
+                       WHERE id=? AND {_not_private_notification_dependency("n")}""",  # nosec B608
                     (max(1, int(max_attempts)), max(1, int(max_attempts)), str(notif_id)),
                 )
 
@@ -796,9 +834,11 @@ class RuntimeMixin(StorageShared):
         """
         user_id = validate_user_id(user_id)
         row = self.execute(
-            "SELECT id, status, dedup_key, attempts FROM outbound_notifications "
-            "WHERE user_id=? AND kind='monitor' AND dedup_key LIKE ? "
-            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            f"""SELECT n.id, n.status, n.dedup_key, n.attempts
+                  FROM outbound_notifications n
+                 WHERE n.user_id=? AND n.kind='monitor' AND n.dedup_key LIKE ?
+                   AND {_not_private_notification_dependency("n")}
+                 ORDER BY n.created_at DESC, n.id DESC LIMIT 1""",  # nosec B608
             (user_id, f"monitor:{monitor_id}:%"),
         ).fetchone()
         return dict(row) if row else None

@@ -547,14 +547,28 @@ class LLMRouter:
                     self._thinking_seen = True
                 if detect_repeated_token_degeneration(content):
                     raise RuntimeError("LLM response rejected: repeated-token degeneration detected")
-                usage = data.get("usage") or {}
+                usage_value = data.get("usage")
+                usage: dict[str, Any] = usage_value if isinstance(usage_value, dict) else {}
+                try:
+                    prompt_tokens = max(0, int(usage.get("prompt_tokens") or 0))
+                except (TypeError, ValueError):
+                    prompt_tokens = 0
+                try:
+                    completion_tokens = max(0, int(usage.get("completion_tokens") or 0))
+                except (TypeError, ValueError):
+                    completion_tokens = 0
+                safe_finish_reason = (
+                    finish_reason
+                    if finish_reason in {"stop", "length", "tool_calls", "content_filter", "function_call"}
+                    else "other"
+                )
                 LOGGER.info(
-                    "LLM call: %.1fs, промпт %s ток., ответ %s ток., инструментов %d, повод %s",
+                    "LLM call: %.1fs, промпт %d ток., ответ %d ток., инструментов %d, повод %s",
                     time.monotonic() - call_started,
-                    usage.get("prompt_tokens", "?"),
-                    usage.get("completion_tokens", "?"),
+                    prompt_tokens,
+                    completion_tokens,
                     len(payload.get("tools") or []),
-                    finish_reason,
+                    safe_finish_reason,
                 )
                 return {
                     "content": content,

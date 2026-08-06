@@ -1,8 +1,48 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
+
+_RELATION_HISTORY_TRIGGERS = (
+    "relations_revision_ai",
+    "relations_revision_au",
+    "relations_revision_bd",
+    "relations_revision_identity_immutable",
+    "relations_revision_insert_guard",
+    "relations_revision_update_conflict_guard",
+    "relation_revisions_append_only_update",
+    "relation_revisions_append_only_delete",
+    "relation_revisions_append_only_replace",
+    "relation_history_floor_immutable_update",
+    "relation_history_floor_immutable_delete",
+    "relation_history_floor_immutable_insert",
+)
+
+
+@pytest.fixture
+def simulate_legacy_schema():
+    """Remove schema-31 authority before a test rewinds an older schema marker.
+
+    Merely changing the number on a current database now and intentionally means
+    corruption: append-only relation history cannot be made legacy again. Tests
+    for older migrations use this helper only after arranging their own old table
+    shape, so the resulting synthetic database has no impossible v31 artifacts.
+    """
+
+    def downgrade(conn: sqlite3.Connection, version: int) -> None:
+        for trigger in _RELATION_HISTORY_TRIGGERS:
+            conn.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')  # nosec B608 - fixed allowlist
+        conn.execute("DROP TABLE IF EXISTS relation_revisions")
+        conn.execute("DROP TABLE IF EXISTS relation_revision_context")
+        conn.execute("DELETE FROM schema_meta WHERE key='relation_history_complete_from'")
+        conn.execute(
+            "UPDATE schema_meta SET value=? WHERE key IN ('schema_version', 'fts_build')",
+            (str(version),),
+        )
+
+    return downgrade
 
 
 @pytest.fixture

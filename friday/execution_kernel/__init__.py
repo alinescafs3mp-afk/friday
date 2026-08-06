@@ -18,7 +18,7 @@ import sys
 import tempfile
 import urllib.parse
 import zipfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -27,6 +27,11 @@ from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from friday.failures import safe_failure_text
+from friday.file_delivery import (
+    AuthorizedFileReadError,
+    FileRecordUnavailable,
+    read_authorized_file_in_transaction,
+)
 from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
@@ -37,6 +42,7 @@ from friday.permissions import (
     AuthorizationService,
     current_actor,
 )
+from friday.private_fs import open_private_text_write
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query
 from friday.storage._core import iso_date
@@ -48,6 +54,7 @@ from friday.storage.models import (
     RelationType,
     TaskStatus,
     new_id,
+    normalize_known_at,
     utc_now,
 )
 from friday.tts import TTSUnavailable, synthesize_speech
@@ -1014,6 +1021,109 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
 
 
 _MEMORY_GRAPH_CONTEXT_MAX_CHARS = 3_200
+_TEMPORAL_SNAPSHOT_FIELDS = (
+    "known_at",
+    "known_at_floor",
+    "history_complete",
+    "identity_basis",
+    "temporal_basis",
+)
+_ENTITY_LOOKUP_RELATION_CAP = 12
+
+
+def _validated_known_at_preflight(raw: Any, *, known_at: str) -> dict[str, Any]:
+    """Validate storage's status and derive the exact five-field public contract."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("relation-history status is missing")
+    boundary = raw.get("known_at")
+    floor = raw.get("known_at_floor")
+    if not known_at or not isinstance(boundary, str) or boundary != known_at:
+        raise ValueError("relation-history status returned a different known_at boundary")
+    if normalize_known_at(boundary) != boundary:
+        raise ValueError("relation-history status returned a non-normalized known_at boundary")
+    if not isinstance(floor, str) or normalize_known_at(floor, reject_future=False) != floor:
+        raise ValueError("relation-history status returned an invalid completeness floor")
+    if floor > known_at:
+        raise ValueError("known_at precedes the relation-history completeness floor")
+    if raw.get("history_complete") is not True:
+        raise ValueError("relation-history snapshot is incomplete")
+    if raw.get("identity_basis") != "current_names":
+        raise ValueError("relation-history snapshot has an unsupported identity basis")
+    temporal_basis = raw.get("temporal_basis")
+    if temporal_basis not in (None, "", "bitemporal"):
+        raise ValueError("relation-history snapshot has an unsupported temporal basis")
+    return {
+        "known_at": known_at,
+        "known_at_floor": floor,
+        "history_complete": True,
+        "identity_basis": "current_names",
+        "temporal_basis": "bitemporal",
+    }
+
+
+def _assert_temporal_snapshot_agrees(
+    raw: Any,
+    expected: Mapping[str, Any],
+    *,
+    label: str,
+) -> Mapping[str, Any]:
+    """Require a complete downstream contract, never an overlay on current data."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{label} is not a mapping")
+    for key in _TEMPORAL_SNAPSHOT_FIELDS:
+        if key not in raw:
+            raise ValueError(f"{label} is missing {key}")
+        if type(raw[key]) is not type(expected[key]) or raw[key] != expected[key]:
+            raise ValueError(f"{label} disagrees on {key}")
+    return raw
+
+
+def _assert_snapshot_as_of(raw: Any, *, as_of: str, label: str) -> Mapping[str, Any]:
+    """Require the normalized valid-time boundary to be echoed exactly."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{label} is not a mapping")
+    if "as_of" not in raw:
+        raise ValueError(f"{label} is missing as_of")
+    if raw["as_of"] != as_of:
+        raise ValueError(f"{label} disagrees on as_of")
+    return raw
+
+
+def _assert_valid_time_basis(raw: Any, *, label: str) -> Mapping[str, Any]:
+    """Reject an as-of response that does not explicitly name valid-time semantics."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{label} is not a mapping")
+    if raw.get("temporal_basis") != "valid_time":
+        raise ValueError(f"{label} disagrees on temporal_basis")
+    return raw
+
+
+def _entity_lookup_relation_projection(
+    edge: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+) -> dict[str, str]:
+    """One narrow human-readable historical edge, without raw provenance."""
+
+    relation_type = edge.get("relation_type")
+    source_name = edge.get("source_name")
+    target_name = edge.get("target_name")
+    valid_from = edge.get("valid_from")
+    valid_to = edge.get("valid_to")
+    if not isinstance(source_name, str):
+        source_name = (nodes.get(str(edge.get("source_entity_id"))) or {}).get("name")
+    if not isinstance(target_name, str):
+        target_name = (nodes.get(str(edge.get("target_entity_id"))) or {}).get("name")
+    return {
+        "type": relation_type[:80] if isinstance(relation_type, str) else "",
+        "source": source_name[:200] if isinstance(source_name, str) else "",
+        "target": target_name[:200] if isinstance(target_name, str) else "",
+        "valid_from": valid_from[:32] if isinstance(valid_from, str) else "",
+        "valid_to": valid_to[:32] if isinstance(valid_to, str) else "",
+    }
 
 
 def _memory_graph_context_for_llm(
@@ -1021,6 +1131,7 @@ def _memory_graph_context_for_llm(
     *,
     query: str,
     as_of: str,
+    known_at: str = "",
 ) -> dict[str, Any]:
     """Bound a memory-search graph snapshot before it enters a tool result.
 
@@ -1032,7 +1143,7 @@ def _memory_graph_context_for_llm(
     12k tool budget.
     """
 
-    source = raw if isinstance(raw, dict) else {}
+    source = raw if isinstance(raw, Mapping) else {}
     source_query = source.get("query")
     effective_query = (
         source_query[:700] if isinstance(source_query, str) else query[:700] if isinstance(query, str) else ""
@@ -1041,6 +1152,7 @@ def _memory_graph_context_for_llm(
         source,
         query=effective_query,
         as_of=as_of,
+        known_at=known_at,
         expanded=bool(source.get("expanded")),
     )
     paths = list(bounded.get("paths") or [])
@@ -1462,9 +1574,9 @@ class ExecutionKernel:
             return ToolResult(name, False, error="Tool is not initialized")
         try:
             self.authorization.require(actor, tool.security_id)
-        except AuthorizationError as exc:
+        except AuthorizationError:
             await self._audit(actor, name, False, "authorization_denied", details=details)
-            return ToolResult(name, False, error=str(exc))
+            return ToolResult(name, False, error="Authorization denied")
         if name == "code_run" and not (self.settings and self.settings.code_execution_enabled):
             await self._audit(actor, name, False, "disabled", details=details)
             return ToolResult(name, False, error="Code execution is disabled by configuration")
@@ -1521,9 +1633,9 @@ class ExecutionKernel:
         # человека) не верить предупреждению, которое в остальных случаях верно.
         try:
             inspect.signature(tool.handler).bind(actor=actor, **(arguments or {}))
-        except TypeError as exc:
+        except TypeError:
             await self._audit(actor, name, False, "invalid_arguments", details=details)
-            return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
+            return ToolResult(name, False, error="Invalid tool arguments: TypeError")
         if changes_data:
             await self._audit(actor, name, True, "started", details=details)
         try:
@@ -1580,11 +1692,13 @@ class ExecutionKernel:
             #
             # Слово «НЕИЗВЕСТНО» намеренно оставлено таймауту: там неизвестен сам
             # исход, здесь известен сбой и неизвестны его последствия.
-            LOGGER.exception("Tool %s failed", name)
+            LOGGER.warning("Tool %s failed (%s)", name, type(exc).__name__)
             if changes_data:
-                await self._audit(
-                    actor, name, False, f"failed_after_start:{type(exc).__name__}", details=details
-                )
+                # The durable reason is a closed structural code.  Exception
+                # class names are useful in the bounded runtime log above, but
+                # they are not part of the content-free audit schema (and a
+                # custom exception may have a caller-controlled class name).
+                await self._audit(actor, name, False, "failed_after_start", details=details)
                 return ToolResult(
                     name,
                     False,
@@ -1595,7 +1709,11 @@ class ExecutionKernel:
                 )
             if isinstance(exc, TypeError | ValueError):
                 await self._audit(actor, name, False, "invalid_arguments", details=details)
-                return ToolResult(name, False, error=f"Invalid tool arguments: {exc}")
+                return ToolResult(
+                    name,
+                    False,
+                    error=f"Invalid tool arguments: {type(exc).__name__}",
+                )
             await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
 
@@ -1629,7 +1747,11 @@ class ExecutionKernel:
                 requested_by=actor.own_id,
             )
         except Exception as exc:  # noqa: BLE001 - отказ в заявке не должен выполнять действие
-            LOGGER.exception("Could not create an approval request for %s", name)
+            LOGGER.warning(
+                "Could not create an approval request for %s (%s)",
+                name,
+                type(exc).__name__,
+            )
             await self._audit(actor, name, False, "approval_request_failed", details=details)
             return ToolResult(
                 name,
@@ -1685,8 +1807,11 @@ class ExecutionKernel:
                 kind="approval",
                 dedup_key=f"approval:{approval['id']}",
             )
-        except Exception:  # noqa: BLE001 - недоставленное уведомление не отменяет заявку
-            LOGGER.warning("Could not queue an approval notification", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - недоставленное уведомление не отменяет заявку
+            LOGGER.warning(
+                "Could not queue an approval notification (%s)",
+                type(exc).__name__,
+            )
 
     @staticmethod
     def _approval_summary(storage, user_id: str, name: str, arguments: dict[str, Any]) -> str:
@@ -1700,16 +1825,31 @@ class ExecutionKernel:
         видно.
         """
         if name == "entity_merge_decide":
+            from friday.storage._graph import (
+                _bounded_entity_by_id,
+                _bounded_resolution_candidate_by_id,
+            )
+
             candidate = None
             with suppress(Exception):
-                candidate = storage.get_resolution_candidate(
-                    str(arguments.get("candidate_id") or ""), user_id
+                candidate = _bounded_resolution_candidate_by_id(
+                    storage,
+                    str(arguments.get("candidate_id") or ""),
+                    user_id,
                 )
             if candidate:
                 left = right = None
                 with suppress(Exception):
-                    left = storage.get_entity(str(candidate.get("entity_a_id") or ""), user_id)
-                    right = storage.get_entity(str(candidate.get("entity_b_id") or ""), user_id)
+                    left = _bounded_entity_by_id(
+                        storage,
+                        str(candidate.get("entity_a_id") or ""),
+                        user_id,
+                    )
+                    right = _bounded_entity_by_id(
+                        storage,
+                        str(candidate.get("entity_b_id") or ""),
+                        user_id,
+                    )
                 left_name = str((left or {}).get("name") or candidate.get("entity_a_id") or "?")
                 right_name = str((right or {}).get("name") or candidate.get("entity_b_id") or "?")
                 confidence = float(candidate.get("confidence") or 0.0)
@@ -1720,10 +1860,16 @@ class ExecutionKernel:
                 )
             return f"Объединить сущности по кандидату {arguments.get('candidate_id')}"
         if name == "conflict_decide":
+            from friday.storage._knowledge import _bounded_knowledge_conflict_by_id
+
             decision = str(arguments.get("decision") or "")
             conflict = None
             with suppress(Exception):
-                conflict = storage.get_knowledge_conflict(user_id, str(arguments.get("conflict_id") or ""))
+                conflict = _bounded_knowledge_conflict_by_id(
+                    storage,
+                    user_id,
+                    str(arguments.get("conflict_id") or ""),
+                )
             if conflict:
                 keep_a = decision == "keep_a"
                 winner = str(conflict.get("knowledge_a_title" if keep_a else "knowledge_b_title") or "")
@@ -1764,9 +1910,9 @@ class ExecutionKernel:
             return ToolResult(name, False, error="Execution kernel has no authorization service")
         try:
             self.authorization.require(actor, tool.security_id)
-        except AuthorizationError as exc:
+        except AuthorizationError:
             await self._audit(actor, name, False, "authorization_denied", details={"approval": approval_id})
-            return ToolResult(name, False, error=str(exc))
+            return ToolResult(name, False, error="Authorization denied")
 
         arguments = dict(record.get("payload") or {})
         claimed = await run_blocking(
@@ -1807,7 +1953,7 @@ class ExecutionKernel:
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
         except Exception as exc:  # noqa: BLE001 - исход обязан быть записан любым
-            LOGGER.exception("Approved tool %s failed", name)
+            LOGGER.warning("Approved tool %s failed (%s)", name, type(exc).__name__)
             await run_blocking(
                 storage.finish_action_approval,
                 approval_id,
@@ -1822,7 +1968,7 @@ class ExecutionKernel:
             try:
                 verified, reason = await run_blocking(verifier, storage, actor.user_id, arguments)
             except Exception as exc:  # noqa: BLE001 - непроверенное не объявляется сделанным
-                verified, reason = False, f"проверку не удалось выполнить: {type(exc).__name__}: {exc}"
+                verified, reason = False, f"проверку не удалось выполнить: {type(exc).__name__}"
             if not verified:
                 # НЕ `failed`: обработчик отработал без ошибки, а факт не
                 # подтвердился — значит неизвестно, что именно случилось, и
@@ -2091,8 +2237,11 @@ class ExecutionKernel:
             return datetime.now().astimezone().tzinfo or UTC
         try:
             return ZoneInfo(name)
-        except Exception:  # noqa: BLE001 — кривое имя пояса не должно ронять ход
-            LOGGER.warning("Unknown timezone %r in settings; falling back to machine zone", name[:60])
+        except Exception as exc:  # noqa: BLE001 — кривое имя пояса не должно ронять ход
+            LOGGER.warning(
+                "Unknown timezone in settings; falling back to machine zone (%s)",
+                type(exc).__name__,
+            )
             return datetime.now().astimezone().tzinfo or UTC
 
     async def _remind(
@@ -2171,7 +2320,7 @@ class ExecutionKernel:
         # внешним разбором (Сол, 2026-08-04) при разборе «тип исключения не
         # доказывает, что эффекта не было».
         with storage.transaction():
-            entity = knowledge_graph.create_entity(actor.user_id, text[:120], EntityType.EVENT)
+            entity = knowledge_graph.create_entity(actor.own_id, text[:120], EntityType.EVENT)
             # Автор напоминания — в источнике временной привязки. В общем архиве
             # (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и без этой
             # отметки орган рассылки не мог узнать, чья это просьба: замерено — она
@@ -2179,7 +2328,10 @@ class ExecutionKernel:
             # События из документов остаются без отметки: у них автора нет, и
             # напоминает о них по-прежнему хозяин архива.
             knowledge_graph.set_event_time(
-                actor.user_id, entity["id"], occurred_at, source=f"reminder:{actor.own_id}"
+                actor.own_id,
+                entity["id"],
+                occurred_at,
+                source=f"reminder:{actor.own_id}",
             )
         # Час не теряется: он остаётся в названии, потому что напоминания
         # рассылаются по календарным дням — точное время человек прочитает в
@@ -2205,11 +2357,18 @@ class ExecutionKernel:
         отметка автора: чужие напоминания в чужие планы не попадают.
         """
         storage, _, _, _ = self._require_services()
+        from friday.storage._graph import (
+            _bounded_visible_timeline_event_rows,
+            _count_visible_timeline_events,
+        )
+
         horizon = max(1, min(int(days or 7), 60))
         today = datetime.now(self._zone()).date()
         rows = await run_blocking(
-            storage.list_events_in_range,
+            _bounded_visible_timeline_event_rows,
+            storage,
             actor.user_id,
+            actor.own_id,
             start=today.isoformat(),
             end=(today + timedelta(days=horizon)).isoformat(),
             limit=100,
@@ -2238,11 +2397,12 @@ class ExecutionKernel:
         # 100, показ 40), то есть размер запроса выдавался за содержимое
         # календаря: «на неделю запланировано 100» при потолке ровно 100.
         total = await run_blocking(
-            storage.count_events_in_range,
+            _count_visible_timeline_events,
+            storage,
             actor.user_id,
+            actor.own_id,
             start=today.isoformat(),
             end=(today + timedelta(days=horizon)).isoformat(),
-            mine=actor.own_id,
         )
         shown = items[:40]
         return {
@@ -2341,6 +2501,7 @@ class ExecutionKernel:
         since: str | None = None,
         until: str | None = None,
         as_of: str = "",
+        known_at: str = "",
     ) -> dict[str, Any]:
         """Поиск по своему архиву — ВЫДЕРЖКАМИ, а не телами документов.
 
@@ -2360,6 +2521,10 @@ class ExecutionKernel:
         Теперь: проекция полей плюс выдержка вокруг совпадения. Счётчик — ПЕРВЫМ
         ключом, чтобы он пережил любую обрезку.
         """
+        if not isinstance(as_of, str):
+            raise ValueError("as_of must be a string")
+        if not isinstance(known_at, str):
+            raise ValueError("known_at must be a string")
         # Требуется ТОЛЬКО хранилище: поиск по своему архиву не зависит ни от веба, ни
         # от конвейера приёма, и общий `_require_services` отказывал бы там, где
         # отказывать не за что.
@@ -2367,7 +2532,9 @@ class ExecutionKernel:
         if storage is None:
             raise RuntimeError("Execution kernel storage is not initialized")
         limit = max(1, min(int(limit), 50))
-        requested_as_of = " ".join(str(as_of or "").split())
+        requested_known_at = known_at.strip()
+        normalized_known_at = normalize_known_at(requested_known_at) if requested_known_at else ""
+        requested_as_of = " ".join(as_of.split())
         parsed_as_of = iso_date(requested_as_of) if requested_as_of else None
         if requested_as_of and not parsed_as_of:
             # This refusal happens before either the hybrid or SQLite search.  A
@@ -2383,6 +2550,7 @@ class ExecutionKernel:
                 "results": [],
             }
         normalized_as_of = parsed_as_of or ""
+        temporal_requested = bool(normalized_as_of or normalized_known_at)
         # Границы периода нормализуются ДО поиска. Непонятая граница — это отказ, а не
         # «искать по всему архиву»: молча снятый фильтр выдаёт документы чужого периода
         # как документы запрошенного, и человек об этом не узнаёт. См. `_window_bound`.
@@ -2398,6 +2566,18 @@ class ExecutionKernel:
                 ),
                 "results": [],
             }
+        history_status: dict[str, Any] = {}
+        if normalized_known_at:
+            # The timestamp parser above is deliberately pure and runs before this
+            # first database read. Valid-time alone needs no relation-history read.
+            history_status = _validated_known_at_preflight(
+                await run_blocking(
+                    storage.relation_history_status,
+                    actor.user_id,
+                    known_at=normalized_known_at,
+                ),
+                known_at=normalized_known_at,
+            )
         # Гибридный поиск, если он выдан: у инструмента был свой, на FTS-префиксе и
         # LIKE, без эмбеддингов и без морфологии. Замерено на живой базе: «поставка»
         # находит 0 документов, «поставк» — 2; «отчет» — 13, «отчёт» — 3. То есть
@@ -2405,26 +2585,49 @@ class ExecutionKernel:
         # вопрос, — давало честное «ничего не нашлось» при существующих документах, и
         # 1537 честных векторов на этом пути не участвовали.
         rows: list[dict[str, Any]]
-        found: dict[str, Any] | None = None
+        found: Mapping[str, Any] | None = None
         dropped = 0
         # Объявляется ДО ветвления: без поиска (ядро собирают и без него — тесты, CLI)
         # ветка `else` не задаёт стратегию вовсе, и чтение ниже роняло весь инструмент.
         strategy: Any = None
         if self.searcher is not None:
-            found = await self.searcher.search(
+            raw_found = await self.searcher.search(
                 actor.user_id,
                 query,
                 limit=limit,
                 since=since,
                 until=until,
                 as_of=normalized_as_of,
+                known_at=normalized_known_at,
                 kg=self.kg,
                 # Ordinary archive recall measured worse with graph expansion.
                 # A named historical snapshot or relational-language query is the
                 # explicit, measured class in which the graph is part of the ask.
-                graph_expansion=bool(normalized_as_of or is_relational_query(query)),
+                graph_expansion=bool(normalized_as_of or normalized_known_at or is_relational_query(query)),
             )
-            rows = list(found.get("results") or [])
+            if not isinstance(raw_found, Mapping):
+                raise ValueError("memory search response is not a mapping")
+            found = raw_found
+            if temporal_requested:
+                _assert_snapshot_as_of(
+                    found,
+                    as_of=normalized_as_of,
+                    label="memory search envelope",
+                )
+                if normalized_known_at:
+                    _assert_temporal_snapshot_agrees(
+                        found,
+                        history_status,
+                        label="memory search envelope",
+                    )
+                else:
+                    _assert_valid_time_basis(found, label="memory search envelope")
+            raw_rows = found.get("results")
+            rows = (
+                [dict(row) for row in raw_rows if isinstance(row, Mapping)]
+                if isinstance(raw_rows, list)
+                else []
+            )
             strategy = found.get("strategy")
             if isinstance(strategy, dict):
                 try:
@@ -2456,14 +2659,19 @@ class ExecutionKernel:
             "count": len(results),
             "query": query,
             "as_of": normalized_as_of,
+            "known_at": normalized_known_at,
         }
+        if normalized_known_at:
+            payload.update(history_status)
+        elif normalized_as_of:
+            payload["temporal_basis"] = "valid_time"
         # «Показано 10» и «в архиве ровно 10» — разные утверждения, и модель без
         # этой строки делает второе из первого. Замерено на живом корпусе: на
         # вопрос «кто из Уфы» она называла ОДНОГО человека как полный ответ, тогда
         # как Уфу упоминают 29 документов. Число стоит рядом с `count` и ДО
         # `results` — ответ инструмента режется по хвосту, и всё, что должно
         # пережить обрезку, стоит первым.
-        matched = found.get("matched_at_least") if isinstance(found, dict) else None
+        matched = found.get("matched_at_least") if isinstance(found, Mapping) else None
         if isinstance(matched, int) and matched > len(results):
             payload["matched_at_least"] = matched
             payload["shown"] = len(results)
@@ -2481,21 +2689,78 @@ class ExecutionKernel:
             # `to_llm_message` режет длинный ответ по хвосту, и счётчик, стоящий
             # после выдержек, до модели не доживал.
             payload["filtered_out"] = dropped
-        if isinstance(found, dict) and "graph_context" in found:
+        if isinstance(found, Mapping) and "graph_context" in found:
+            raw_graph = found.get("graph_context")
+            if temporal_requested:
+                graph_source = _assert_snapshot_as_of(
+                    raw_graph,
+                    as_of=normalized_as_of,
+                    label="memory graph_context",
+                )
+                if normalized_known_at:
+                    _assert_temporal_snapshot_agrees(
+                        graph_source,
+                        history_status,
+                        label="memory graph_context",
+                    )
+                else:
+                    _assert_valid_time_basis(graph_source, label="memory graph_context")
+            elif not isinstance(raw_graph, Mapping):
+                # Preserve the legacy/current behavior: an unusable optional graph
+                # projection becomes an empty public snapshot. Temporal calls take
+                # the strict branch above and may never degrade this way.
+                graph_source = {}
+            else:
+                graph_source = raw_graph
             payload["graph_context"] = _memory_graph_context_for_llm(
-                found.get("graph_context"),
+                graph_source,
                 query=str(found.get("query") or query),
                 as_of=normalized_as_of,
+                known_at=normalized_known_at,
             )
-        elif normalized_as_of:
-            # A kernel assembled without the hybrid searcher cannot fabricate a
-            # historical traversal.  Echo an explicitly empty snapshot instead of
-            # making the valid-time qualifier disappear from the tool response.
+        elif temporal_requested and self.kg is not None:
+            # A legacy/no-searcher kernel still owns the graph service.  Perform one
+            # explicitly bounded traversal and require it to echo every boundary;
+            # missing provenance cannot be overlaid onto possibly-current paths.
+            raw_graph_source = await run_blocking(
+                self.kg.context_for_query,
+                actor.user_id,
+                query,
+                as_of=normalized_as_of,
+                known_at=normalized_known_at,
+            )
+            graph_source = _assert_snapshot_as_of(
+                raw_graph_source,
+                as_of=normalized_as_of,
+                label="KG fallback snapshot",
+            )
+            if normalized_known_at:
+                _assert_temporal_snapshot_agrees(
+                    graph_source,
+                    history_status,
+                    label="KG fallback snapshot",
+                )
+            else:
+                _assert_valid_time_basis(graph_source, label="KG fallback snapshot")
             payload["graph_context"] = _memory_graph_context_for_llm(
-                {},
+                graph_source,
                 query=query,
                 as_of=normalized_as_of,
+                known_at=normalized_known_at,
             )
+        elif temporal_requested:
+            raise ValueError("historical graph snapshot is unavailable")
+        if normalized_known_at:
+            confirmed_status = _validated_known_at_preflight(
+                await run_blocking(
+                    storage.relation_history_status,
+                    actor.user_id,
+                    known_at=normalized_known_at,
+                ),
+                known_at=normalized_known_at,
+            )
+            if confirmed_status != history_status:
+                raise ValueError("relation-history status changed during memory_search")
         payload["results"] = results
         return payload
 
@@ -2671,7 +2936,7 @@ class ExecutionKernel:
         used = storage.bump_daily_counter("web", actor.user_id, day)
         if used <= limit:
             return None
-        LOGGER.warning("web quota exhausted for %s: %d > %d", actor.user_id, used, limit)
+        LOGGER.warning("web quota exhausted: %d > %d", used, limit)
         return {
             "results": [],
             "quota_exhausted": True,
@@ -2716,8 +2981,11 @@ class ExecutionKernel:
             return None
         try:
             found = await run_blocking(storage.people_whose_name_starts_with, actor.user_id, stems)
-        except Exception:  # noqa: BLE001 — проверка не должна ронять ход
-            LOGGER.warning("Could not check the graph before a web search", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — проверка не должна ронять ход
+            LOGGER.warning(
+                "Could not check the graph before a web search (%s)",
+                type(exc).__name__,
+            )
             return None
         if found:
             return {
@@ -2790,8 +3058,8 @@ class ExecutionKernel:
                         **({"content_truncated": True} if source.get("truncated") else {}),
                     },
                 )
-            except Exception:  # noqa: BLE001 — сохранение не должно ронять ответ
-                LOGGER.exception("Failed to capture web source %s", url[:120])
+            except Exception as exc:  # noqa: BLE001 — сохранение не должно ронять ответ
+                LOGGER.warning("Failed to capture web source (%s)", type(exc).__name__)
                 continue
             captured.append(
                 {
@@ -2804,8 +3072,15 @@ class ExecutionKernel:
             )
         return captured
 
-    async def _entity_lookup(self, *, actor: ActorContext, name: str, as_of: str = "") -> dict[str, Any]:
-        """Карточка объекта; `as_of` отвечает на вопрос «а как было тогда».
+    async def _entity_lookup(
+        self,
+        *,
+        actor: ActorContext,
+        name: str,
+        as_of: str = "",
+        known_at: str = "",
+    ) -> dict[str, Any]:
+        """Карточка объекта on valid-time and optional transaction-time axes.
 
         Без этого параметра вопрос «кто командовал батальоном в 2024» отвечался
         сегодняшней картиной: связи, отменённые с тех пор, из неё уже вычеркнуты,
@@ -2813,40 +3088,187 @@ class ExecutionKernel:
         и относился не к тому году.
         """
 
-        _, kg, _, _ = self._require_services()
+        if not isinstance(as_of, str):
+            raise ValueError("as_of must be a string")
+        if not isinstance(known_at, str):
+            raise ValueError("known_at must be a string")
+        requested_as_of = as_of.strip()
+        if requested_as_of:
+            # Local import avoids turning execution_kernel -> knowledge_graph into
+            # a module-initialization cycle while still sharing calendar semantics.
+            from friday.knowledge_graph import normalize_event_date
+
+            normalized_as_of = normalize_event_date(requested_as_of)[0]
+        else:
+            normalized_as_of = ""
+        requested_known_at = known_at.strip()
+        normalized_known_at = normalize_known_at(requested_known_at) if requested_known_at else ""
+        temporal_requested = bool(normalized_as_of or normalized_known_at)
+
+        # Both temporal axes are normalized before `_require_services` and before
+        # the first entity/status read. A malformed boundary can never reveal even
+        # whether the named entity exists.
+        storage, kg, _, _ = self._require_services()
+        history_status: dict[str, Any] = {}
+        if normalized_known_at:
+            # Validate strict syntax before the first database read, then validate
+            # completeness/identity before even revealing whether the entity exists.
+            history_status = _validated_known_at_preflight(
+                await run_blocking(
+                    storage.relation_history_status,
+                    actor.user_id,
+                    known_at=normalized_known_at,
+                ),
+                known_at=normalized_known_at,
+            )
         # Через поток, как и HTTP-двойник этой же карточки: профиль на широкой
         # сущности — несколько SQL по 22 тысячам связей. Маршрут перевели на
         # `run_blocking`, а этот путь забыли — и он ХУЖЕ, потому что инструмент
         # зовётся внутри агентского цикла, где ждут все остальные разговоры.
         entity = await run_blocking(kg.find_entity, actor.user_id, name)
         if not entity:
-            return {"found": False, "entity": None}
-        profile = await run_blocking(kg.entity_profile, entity["id"], actor.user_id)
-        if not str(as_of or "").strip():
-            return {"found": True, "entity": entity, **profile}
+            if not temporal_requested:
+                return {"found": False, "entity": None}
+            if normalized_known_at:
+                confirmed_status = _validated_known_at_preflight(
+                    await run_blocking(
+                        storage.relation_history_status,
+                        actor.user_id,
+                        known_at=normalized_known_at,
+                    ),
+                    known_at=normalized_known_at,
+                )
+                if confirmed_status != history_status:
+                    raise ValueError("relation-history status changed during entity_lookup")
+            return {
+                "found": False,
+                "entity": None,
+                "as_of": normalized_as_of,
+                **(
+                    history_status
+                    if normalized_known_at
+                    else {"known_at": "", "temporal_basis": "valid_time"}
+                ),
+            }
+        profile = await run_blocking(
+            kg.entity_profile,
+            entity["id"],
+            actor.user_id,
+            knowledge_limit=10,
+            relation_limit=_ENTITY_LOOKUP_RELATION_CAP,
+        )
+        if not isinstance(profile, Mapping):
+            raise ValueError("entity profile is not a mapping")
+        public_entity = {
+            key: str(entity.get(key) or "")[:limit]
+            for key, limit in (
+                ("id", 160),
+                ("name", 240),
+                ("entity_type", 80),
+                ("description", 500),
+            )
+            if entity.get(key) is not None
+        }
+        profile_fields = {
+            "profile",
+            "profile_provenance",
+            "knowledge_objects_total",
+            "pending_relations_count",
+            "event_time",
+            "edits",
+            "knowledge_objects",
+        }
+        safe_profile = {key: profile[key] for key in profile_fields if key in profile}
+        raw_current_relations = profile.get("relations")
+        current_relations = (
+            [edge for edge in raw_current_relations if isinstance(edge, Mapping)]
+            if isinstance(raw_current_relations, list)
+            else []
+        )
+        try:
+            current_relations_matched = max(
+                len(current_relations),
+                int(profile.get("relations_matched_at_least") or len(current_relations)),
+            )
+        except (TypeError, ValueError):
+            current_relations_matched = len(current_relations)
+        if not temporal_requested:
+            shown_current_relations = current_relations[:_ENTITY_LOOKUP_RELATION_CAP]
+            return {
+                "found": True,
+                "entity": public_entity,
+                **safe_profile,
+                "relations": [
+                    _entity_lookup_relation_projection(edge, {}) for edge in shown_current_relations
+                ],
+                "relations_matched_at_least": current_relations_matched,
+                "relations_truncated": bool(profile.get("relations_truncated"))
+                or current_relations_matched > len(shown_current_relations),
+            }
         # Картина на дату собирается ОТДЕЛЬНЫМ обходом, а не фильтром поверх
         # профиля: профиль уже отбросил отменённые связи, и восстановить их из
         # него нечем.
-        past = await run_blocking(
-            kg.get_entity_graph, actor.user_id, str(entity["id"]), 1, as_of=str(as_of).strip()
+        raw_past = await run_blocking(
+            kg.get_entity_graph,
+            actor.user_id,
+            str(entity["id"]),
+            1,
+            as_of=normalized_as_of,
+            known_at=normalized_known_at,
         )
-        by_id = {str(node.get("id")): node for node in (past.get("nodes") or [])}
-        return {
-            "found": True,
-            "entity": entity,
-            **profile,
-            "as_of": str(as_of).strip(),
-            "relations_as_of": [
-                {
-                    "type": edge.get("relation_type"),
-                    "source": (by_id.get(str(edge.get("source_entity_id"))) or {}).get("name"),
-                    "target": (by_id.get(str(edge.get("target_entity_id"))) or {}).get("name"),
-                    "valid_from": edge.get("valid_from") or "",
-                    "valid_to": edge.get("valid_to") or "",
-                }
-                for edge in (past.get("edges") or [])
-            ],
+        past = _assert_snapshot_as_of(
+            raw_past,
+            as_of=normalized_as_of,
+            label="entity graph snapshot",
+        )
+        if normalized_known_at:
+            _assert_temporal_snapshot_agrees(
+                past,
+                history_status,
+                label="entity graph snapshot",
+            )
+        else:
+            _assert_valid_time_basis(past, label="entity graph snapshot")
+        raw_nodes = past.get("nodes")
+        by_id = {
+            str(node.get("id")): node
+            for node in (raw_nodes if isinstance(raw_nodes, list) else [])
+            if isinstance(node, Mapping)
         }
+        raw_edges = past.get("edges")
+        edges = (
+            [edge for edge in raw_edges if isinstance(edge, Mapping)] if isinstance(raw_edges, list) else []
+        )
+        shown_edges = edges[:_ENTITY_LOOKUP_RELATION_CAP]
+        try:
+            matched_edges = max(
+                len(edges),
+                int(past.get("edges_matched_at_least") or len(edges)),
+            )
+        except (TypeError, ValueError):
+            matched_edges = len(edges)
+        result = {
+            "found": True,
+            "entity": public_entity,
+            **safe_profile,
+            "as_of": normalized_as_of,
+            **(history_status if normalized_known_at else {"known_at": "", "temporal_basis": "valid_time"}),
+            "relations": [_entity_lookup_relation_projection(edge, by_id) for edge in shown_edges],
+            "relations_matched_at_least": matched_edges,
+            "relations_truncated": matched_edges > len(shown_edges),
+        }
+        if normalized_known_at:
+            confirmed_status = _validated_known_at_preflight(
+                await run_blocking(
+                    storage.relation_history_status,
+                    actor.user_id,
+                    known_at=normalized_known_at,
+                ),
+                known_at=normalized_known_at,
+            )
+            if confirmed_status != history_status:
+                raise ValueError("relation-history status changed during entity_lookup")
+        return result
 
     async def _entity_create(
         self,
@@ -3160,7 +3582,7 @@ class ExecutionKernel:
                 max_chars=self.settings.tts_max_chars,
             )
         except TTSUnavailable as exc:
-            LOGGER.warning("tts: unavailable (%s)", exc)
+            LOGGER.warning("tts: unavailable (%s)", type(exc).__name__)
             return {"spoken": False, "reason": "voice engine unavailable"}
         except ValueError:
             return {"spoken": False, "reason": "nothing to speak"}
@@ -3211,10 +3633,10 @@ class ExecutionKernel:
             return {"created": False, "reason": "нечего писать: не передано ни одного блока"}
         try:
             payload = await run_blocking(render, kind, spec)
-        except ValueError as exc:
-            return {"created": False, "reason": str(exc)}
+        except ValueError:
+            return {"created": False, "reason": "не удалось собрать файл: ValueError"}
         except Exception as exc:  # noqa: BLE001 — вёрстка не должна ронять ход
-            LOGGER.exception("Report rendering failed")
+            LOGGER.warning("Report rendering failed (%s)", type(exc).__name__)
             return {"created": False, "reason": f"не удалось собрать файл: {type(exc).__name__}"}
         if len(payload) > _MAX_GENERATED_FILE_BYTES:
             return {
@@ -3329,13 +3751,6 @@ class ExecutionKernel:
             utc_offset_minutes=offset,
             limit=_MAX_ARCHIVE_FILES + 1,
         )
-        # Счёт отдельным запросом: длина страницы — не факт о корпусе.
-        total = await run_blocking(
-            storage.count_files_received_on,
-            actor.user_id,
-            days=wanted,
-            utc_offset_minutes=offset,
-        )
         if not rows:
             return {
                 "collected": False,
@@ -3348,8 +3763,15 @@ class ExecutionKernel:
         # от «больше потолка», — а пакуется ровно потолок. Без среза в архив
         # уезжал 301-й файл, и «вошли первые 300» было бы неправдой.
         page = rows[:_MAX_ARCHIVE_FILES]
-        packed, skipped, size = await run_blocking(
-            _pack_archive, Path(settings.files_dir), page, name or "archive"
+        packed, skipped, size, total, packed_count = await run_blocking(
+            _pack_authorized_archive,
+            storage,
+            Path(settings.files_dir),
+            page,
+            name or "archive",
+            user_id=actor.user_id,
+            days=wanted,
+            utc_offset_minutes=offset,
         )
         if not packed:
             return {
@@ -3362,7 +3784,7 @@ class ExecutionKernel:
         result: dict[str, Any] = {
             "collected": True,
             "days": wanted,
-            "files_in_archive": len(page) - len(skipped),
+            "files_in_archive": packed_count,
             "found_total": total,
             "bytes": size,
             "filename": filename,
@@ -3381,7 +3803,6 @@ class ExecutionKernel:
             # которым он и пришёл.
             result["left_out"] = skipped[:20]
             result["left_out_count"] = len(skipped)
-        packed_count = len(page) - len(skipped)
         if total > packed_count:
             # Готовая фраза, а не слагаемые. Замерено на живом экземпляре
             # 2026-08-03: инструмент отдавал «файлов 1671, вошли первые 160» и
@@ -3430,11 +3851,14 @@ class ExecutionKernel:
         the queue probe — a label for the reviewer, not an automatic decision.
         """
         from friday.conflict_triage import attach_conflict_hint
+        from friday.knowledge_graph import _safe_conflict_card
+        from friday.storage._knowledge import _bounded_knowledge_conflict_rows
 
         storage, _, _, _ = self._require_services()
         page = max(1, min(int(limit), 10))
         items = await run_blocking(
-            storage.list_knowledge_conflicts,
+            _bounded_knowledge_conflict_rows,
+            storage,
             actor.user_id,
             status="suggested",
             limit=page,
@@ -3446,22 +3870,24 @@ class ExecutionKernel:
             compact: list[dict[str, Any]] = []
             for item in items:
                 enriched = attach_conflict_hint(storage, actor.user_id, item)
+                safe = _safe_conflict_card(enriched)
                 compact.append(
                     {
-                        "id": str(enriched.get("id") or ""),
-                        "conflict_type": str(enriched.get("conflict_type") or ""),
-                        "confidence": float(enriched.get("confidence") or 0.0),
-                        "triage": enriched.get("triage") or {},
+                        "id": safe["id"],
+                        "conflict_type": safe["conflict_type"],
+                        "confidence": safe["confidence"],
+                        "triage": safe.get("triage") or {},
                         "a": {
-                            "id": str(enriched.get("knowledge_a_id") or ""),
-                            "title": str(enriched.get("knowledge_a_title") or "")[:200],
-                            "summary": str(enriched.get("knowledge_a_summary") or "")[:400],
+                            "id": safe["knowledge_a_id"],
+                            "title": safe["knowledge_a_title"],
+                            "summary": safe["knowledge_a_summary"],
                         },
                         "b": {
-                            "id": str(enriched.get("knowledge_b_id") or ""),
-                            "title": str(enriched.get("knowledge_b_title") or "")[:200],
-                            "summary": str(enriched.get("knowledge_b_summary") or "")[:400],
+                            "id": safe["knowledge_b_id"],
+                            "title": safe["knowledge_b_title"],
+                            "summary": safe["knowledge_b_summary"],
                         },
+                        "evidence": safe["evidence"],
                     }
                 )
             return compact
@@ -3488,10 +3914,18 @@ class ExecutionKernel:
           - keep_a / keep_b — resolve by keeping that side; the other is deprecated
         """
         _, kg, _, _ = self._require_services()
+        from friday.knowledge_graph import _safe_conflict_result
+        from friday.storage._knowledge import _bounded_knowledge_conflict_by_id
+
         choice = str(decision or "").casefold().strip()
         if choice not in {"dismiss", "keep_a", "keep_b"}:
             raise ValueError("decision must be dismiss, keep_a or keep_b")
-        conflict = await run_blocking(kg.storage.get_knowledge_conflict, actor.user_id, conflict_id)
+        conflict = await run_blocking(
+            _bounded_knowledge_conflict_by_id,
+            kg.storage,
+            actor.user_id,
+            conflict_id,
+        )
         if not conflict:
             raise ValueError("Conflict not found")
         if str(conflict.get("status") or "") != "suggested":
@@ -3505,7 +3939,13 @@ class ExecutionKernel:
                 reviewed_by=actor.own_id,
                 resolution_note="telegram/agent: dismissed",
             )
-            return {"status": "dismissed", "conflict_id": conflict_id, "item": result}
+            if not result:
+                raise ValueError("Conflict not found")
+            return {
+                "status": "dismissed",
+                "conflict_id": conflict_id,
+                "item": _safe_conflict_result(result),
+            }
         winner_id = str(conflict["knowledge_a_id"]) if choice == "keep_a" else str(conflict["knowledge_b_id"])
         result = await run_blocking(
             kg.resolve_conflict,
@@ -3515,7 +3955,14 @@ class ExecutionKernel:
             reviewed_by=actor.own_id,
             resolution_note=f"telegram/agent: {choice}",
         )
-        return {"status": "resolved", "conflict_id": conflict_id, "winner_id": winner_id, "item": result}
+        if not result:
+            raise ValueError("Conflict not found")
+        return {
+            "status": "resolved",
+            "conflict_id": conflict_id,
+            "winner_id": winner_id,
+            "item": _safe_conflict_result(result),
+        }
 
     async def _entity_merge_decide(
         self,
@@ -3545,7 +3992,13 @@ class ExecutionKernel:
             target_entity_id=target_entity_id,
             resolved_by=actor.own_id,
         )
-        return {"status": "merged", "candidate_id": candidate_id, "result": merged}
+        from friday.knowledge_graph import _safe_merge_result
+
+        return {
+            "status": "merged",
+            "candidate_id": candidate_id,
+            "result": _safe_merge_result(merged),
+        }
 
     async def _entity_merge_undo(
         self,
@@ -3561,7 +4014,13 @@ class ExecutionKernel:
             merge_id,
             undone_by=actor.own_id,
         )
-        return {"status": "undone", "merge_id": merge_id, "result": result}
+        from friday.knowledge_graph import _safe_merge_result
+
+        return {
+            "status": "undone",
+            "merge_id": merge_id,
+            "result": _safe_merge_result(result),
+        }
 
     async def _inbox_list(self, *, actor: ActorContext, status: str | None = None) -> dict[str, Any]:
         storage, _, _, _ = self._require_services()
@@ -3749,11 +4208,11 @@ class ExecutionKernel:
                     include_content=include_content,
                     uploaded_by=by_author,
                 )
-            except ValueError as exc:
+            except ValueError:
                 # The schema constrains the enum, so this is reachable only if the
                 # vocabulary and the schema drift apart. Say which values exist
                 # rather than failing the whole call.
-                answer["analysis_error"] = str(exc)
+                answer["analysis_error"] = "недопустимый вид анализа"
         return _person_answer_for_llm(answer, zone=self._zone())
 
     async def _user_knowledge_search(
@@ -3875,8 +4334,8 @@ class ExecutionKernel:
                 after_json={
                     "asked_for": person[:200],
                     "match_method": chosen.method,
-                    # Вопрос, а не только факт чтения: без него запись в журнале не
-                    # позволяет понять, что именно искали в чужом корпусе.
+                    # Audit storage fingerprints this locally: only SHA256 and
+                    # character count persist, never the raw private question.
                     "query": clean_query[:500],
                     "shown": len(rows),
                     "filtered_out": dropped,
@@ -3915,7 +4374,8 @@ class ExecutionKernel:
         # deployments should replace it with an isolated container executor.
         with tempfile.TemporaryDirectory(prefix="jericho-code-") as directory:
             script = Path(directory) / "main.py"
-            script.write_text(code, encoding="utf-8")
+            with open_private_text_write(script) as handle:
+                handle.write(code)
             env = {
                 "PATH": os.environ.get("PATH", ""),
                 "PYTHONIOENCODING": "utf-8",
@@ -4028,7 +4488,9 @@ class ExecutionKernel:
             "есть, но не в этом периоде — скажи именно так. as_of задаёт отдельный "
             "valid-time снимок графовых связей на календарную дату; используй его для "
             "вопросов «кто с кем был связан тогда». Неверный as_of отвергается, а не "
-            "подменяется сегодняшней картиной.",
+            "подменяется сегодняшней картиной. known_at задаёт transaction-time: что "
+            "Пятница уже знала к точному моменту RFC3339 с часовым поясом. Это не дата "
+            "действия факта и не замена as_of; неверный или неполный снимок отклоняется.",
             "search.use",
             {
                 "query": {"type": "string"},
@@ -4038,6 +4500,14 @@ class ExecutionKernel:
                 "as_of": {
                     "type": "string",
                     "description": "Дата ГГГГ-ММ-ДД: графовые связи, верные на этот день",
+                },
+                "known_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": (
+                        "Transaction-time RFC3339 с UTC offset: что уже было известно "
+                        "Пятнице к этому точному моменту"
+                    ),
                 },
             },
             ["query"],
@@ -4119,13 +4589,23 @@ class ExecutionKernel:
             "Используй для «расскажи про проект X», «что известно об Y». Если "
             "спрашивают о ПРОШЛОМ («кто командовал в 2024», «где он служил "
             "тогда»), передай дату в `as_of` — вернётся картина на тот день, а "
-            "не сегодняшняя.",
+            "не сегодняшняя. `known_at` — другой transaction-time срез: точный RFC3339-момент с "
+            "часовым поясом, к которому Пятница уже успела узнать эти связи. "
+            "Не подменяй им valid-time дату `as_of`.",
             "kg.read",
             {
                 "name": {"type": "string"},
                 "as_of": {
                     "type": "string",
                     "description": "Дата ГГГГ-ММ-ДД: показать связи, верные на неё",
+                },
+                "known_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": (
+                        "Transaction-time RFC3339 с UTC offset: показать только связи, "
+                        "уже известные Пятнице к этому моменту"
+                    ),
                 },
             },
             ["name"],
@@ -4519,7 +4999,82 @@ class ExecutionKernel:
         )
 
 
-def _pack_archive(root: Path, rows: list[dict[str, Any]], name: str) -> tuple[bytes, list[str], int]:
+_ArchiveReader = Callable[
+    [dict[str, Any], int],
+    tuple[bytes | None, str, str] | None,
+]
+
+
+def _pack_authorized_archive(
+    storage: Any,
+    root: Path,
+    rows: list[dict[str, Any]],
+    name: str,
+    *,
+    user_id: str,
+    days: list[str],
+    utc_offset_minutes: int,
+) -> tuple[bytes, list[str], int, int, int]:
+    """Revalidate every stale list row and consume all bytes in one DB unit."""
+
+    authorized_count = 0
+    with storage.transaction() as conn:
+        # This count and every file read share the same privacy snapshot.  A
+        # reminder quarantine cannot land between them and leave stale totals or
+        # names beside an archive assembled from a different authorization state.
+        total = storage.count_files_received_on(
+            user_id,
+            days=days,
+            utc_offset_minutes=utc_offset_minutes,
+        )
+
+        def authorized_reader(
+            row: dict[str, Any],
+            remaining_bytes: int,
+        ) -> tuple[bytes | None, str, str] | None:
+            nonlocal authorized_count
+            raw_id = row.get("raw_id")
+            if not isinstance(raw_id, str) or not raw_id:
+                return None
+            try:
+                stored = read_authorized_file_in_transaction(
+                    conn,
+                    root,
+                    raw_id,
+                    user_id,
+                    max_bytes=remaining_bytes,
+                )
+            except FileRecordUnavailable:
+                # The stale listing is not an authority.  Even its old filename
+                # must not be reflected in ``left_out`` after quarantine.
+                return None
+            except AuthorizedFileReadError as exc:
+                authorized_count += 1
+                return None, exc.filename, exc.reason
+            authorized_count += 1
+            return stored.content, stored.filename, ""
+
+        packed, skipped, size = _pack_archive(
+            root,
+            rows,
+            name,
+            _authorized_reader=authorized_reader,
+        )
+    packed_count = authorized_count - len(skipped)
+    # ``ZipFile`` emits a non-empty empty-container header.  Do not mistake that
+    # for a successful collection when every stale row became private.
+    if authorized_count == 0:
+        packed = b""
+    return packed, skipped, size, total, packed_count
+
+
+def _pack_archive(
+    root: Path,
+    rows: list[dict[str, Any]],
+    name: str,
+    *,
+    _authorized_reader: _ArchiveReader | None = None,
+) -> tuple[bytes, list[str], int]:
     """Сложить исходные файлы в zip. Возврат: (архив, что не вошло, размер).
 
     Синхронная и блокирующая: вызывается через `run_blocking`, потому что читает
@@ -4540,39 +5095,51 @@ def _pack_archive(root: Path, rows: list[dict[str, Any]], name: str) -> tuple[by
     size = 0
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for row in rows:
-            stored = str(row.get("stored_path") or "")
-            source = (root / stored).resolve()
-            # Путь пришёл из базы, но проверяется всё равно: запись могла быть
-            # сделана иначе, а `..` в ней увёл бы чтение за пределы хранилища.
-            #
-            # `is_relative_to`, а не сравнение начала строки. Разбор Сола
-            # 2026-08-03 и проверка: при хранилище `/data/files` путь
-            # `/data/files_backup/secret.pdf` проходит `startswith` — соседний
-            # каталог, чьё имя начинается так же, границей не отделён вовсе.
-            if not source.is_relative_to(base_root) or not source.is_file():
-                left_out.append(f"{row.get('filename') or row.get('title') or stored} — файла нет")
-                continue
-            # Размер спрашивается У ФАЙЛОВОЙ СИСТЕМЫ, а не после чтения.
-            #
-            # Прежде файл читался целиком и лишь потом сверялся с потолком: файл
-            # на несколько гигабайт сначала оказывался в памяти и только затем
-            # объявлялся не поместившимся. Потолок стоял, но защищал он архив, а
-            # не машину.
-            try:
-                on_disk = source.stat().st_size
-            except OSError as error:
-                left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
-                continue
-            if size + on_disk > _MAX_ARCHIVE_BYTES:
-                left_out.append(f"{row.get('filename') or stored} — не поместился по размеру")
-                continue
-            try:
-                payload = source.read_bytes()
-            except OSError as error:
-                left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
-                continue
-            base = str(row.get("filename") or row.get("title") or source.name).strip() or source.name
-            base = base.replace("/", "_").replace("\\", "_").lstrip(".") or source.name
+            if _authorized_reader is not None:
+                loaded = _authorized_reader(row, _MAX_ARCHIVE_BYTES - size)
+                if loaded is None:
+                    continue
+                payload, current_filename, failure = loaded
+                if payload is None:
+                    left_out.append(f"{current_filename} — {failure}")
+                    continue
+                fallback_name = current_filename or "file"
+            else:
+                stored = str(row.get("stored_path") or "")
+                source = (root / stored).resolve()
+                # Путь пришёл из базы, но проверяется всё равно: запись могла быть
+                # сделана иначе, а `..` в ней увёл бы чтение за пределы хранилища.
+                #
+                # `is_relative_to`, а не сравнение начала строки. Разбор Сола
+                # 2026-08-03 и проверка: при хранилище `/data/files` путь
+                # `/data/files_backup/secret.pdf` проходит `startswith` — соседний
+                # каталог, чьё имя начинается так же, границей не отделён вовсе.
+                if not source.is_relative_to(base_root) or not source.is_file():
+                    left_out.append(f"{row.get('filename') or row.get('title') or stored} — файла нет")
+                    continue
+                # Размер спрашивается У ФАЙЛОВОЙ СИСТЕМЫ, а не после чтения.
+                #
+                # Прежде файл читался целиком и лишь потом сверялся с потолком: файл
+                # на несколько гигабайт сначала оказывался в памяти и только затем
+                # объявлялся не поместившимся. Потолок стоял, но защищал он архив, а
+                # не машину.
+                try:
+                    on_disk = source.stat().st_size
+                except OSError as error:
+                    left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
+                    continue
+                if size + on_disk > _MAX_ARCHIVE_BYTES:
+                    left_out.append(f"{row.get('filename') or stored} — не поместился по размеру")
+                    continue
+                try:
+                    payload = source.read_bytes()
+                except OSError as error:
+                    left_out.append(f"{row.get('filename') or stored} — не прочитался ({error.errno})")
+                    continue
+                fallback_name = source.name
+                current_filename = str(row.get("filename") or row.get("title") or fallback_name)
+            base = current_filename.strip() or fallback_name
+            base = base.replace("/", "_").replace("\\", "_").lstrip(".") or fallback_name
             entry = base
             counter = 2
             while entry.casefold() in used:

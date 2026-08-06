@@ -8,10 +8,11 @@ owns ``/api/admin`` and the order these modules are included in.
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from friday.admin_api._deps import (
     Any,
-    FileResponse,
     HTTPException,
     Query,
     Request,
@@ -19,10 +20,16 @@ from friday.admin_api._deps import (
     _audit_cross_tenant_read,
     _json_value,
     _require,
-    _safe_runtime_file,
     _services,
     _target_user,
 )
+from friday.file_delivery import (
+    AuthorizedFileReadError,
+    FileRecordUnavailable,
+    attachment_content_disposition,
+    read_authorized_file,
+)
+from friday.storage._privacy import _not_private_raw_dependency
 
 router = APIRouter()
 
@@ -41,9 +48,10 @@ async def list_files(
     # `, id DESC` because `received_at` is written to second precision, so one upload
     # batch stamps every row identically and the order within it is not promised.
     rows = storage.execute(
-        """SELECT id, user_id, source_ref, metadata_json, received_at, deleted_at
-           FROM raw_objects WHERE user_id=? AND content_type='file'
-           ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?""",
+        f"""SELECT r.id, r.user_id, r.source_ref, r.metadata_json, r.received_at, r.deleted_at
+           FROM raw_objects r WHERE r.user_id=? AND r.content_type='file'
+             AND {_not_private_raw_dependency("r")}
+           ORDER BY r.received_at DESC, r.id DESC LIMIT ? OFFSET ?""",  # nosec B608
         (target, limit, offset),
     ).fetchall()
     # Deliberately WITHOUT `deleted_at IS NULL`, because the listing above is too:
@@ -51,7 +59,9 @@ async def list_files(
     # `GET /api/files` filters them. Copying the count from there would make the
     # total SMALLER than the page and stop «Вперёд» early.
     total_row = storage.execute(
-        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
+        f"""SELECT COUNT(*) AS count FROM raw_objects r
+             WHERE r.user_id=? AND r.content_type='file'
+               AND {_not_private_raw_dependency("r")}""",  # nosec B608
         (target,),
     ).fetchone()
     items = []
@@ -73,17 +83,27 @@ async def list_files(
 async def download_file(raw_id: str, request: Request, user_id: str):
     _require(request, "admin.all_data.read")
     state = _services(request)
-    raw = state.storage.get_raw_object(raw_id, user_id)
-    if not raw or raw.get("content_type") != "file":
-        raise HTTPException(status_code=404, detail="Файл не найден")
-    metadata = _json_value(raw.get("metadata_json"), {})
-    path = _safe_runtime_file(state.settings.files_dir, str(metadata.get("stored_path") or ""))
+    try:
+        stored = await run_in_threadpool(
+            read_authorized_file,
+            state.storage,
+            state.settings.files_dir,
+            raw_id,
+            user_id,
+            include_deleted=True,
+        )
+    except (FileRecordUnavailable, AuthorizedFileReadError):
+        raise HTTPException(status_code=404, detail="Файл не найден") from None
     # Data egress is always audited, unlike ordinary list reads.
     _audit(
         request,
         "admin.file.download",
         "raw_object",
         raw_id,
-        after={"target_user_id": user_id, "filename": str(metadata.get("filename") or "")},
+        after={"target_user_id": user_id, "filename": stored.filename},
     )
-    return FileResponse(path, filename=str(metadata.get("filename") or path.name))
+    return Response(
+        content=stored.content,
+        media_type=stored.mime_type,
+        headers={"Content-Disposition": attachment_content_disposition(stored.filename)},
+    )

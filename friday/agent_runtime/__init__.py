@@ -10,6 +10,7 @@ import logging
 import re
 import time
 import urllib.parse
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -25,13 +26,14 @@ from friday.citation_check import CITATION_MARKER_RE as _KNOWLEDGE_CITATION_RE
 from friday.citation_check import citation_labels as _citation_labels
 from friday.citation_check import citation_overlap
 from friday.config import FridaySettings
-from friday.execution_kernel import ExecutionKernel
-from friday.knowledge_graph import build_user_model
+from friday.execution_kernel import ExecutionKernel, _memory_graph_context_for_llm
+from friday.knowledge_graph import build_user_model, normalize_event_date
 from friday.people import resolve_person, unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval import best_snippet, is_relational_query
 from friday.storage import FridayStorage, normalize_conversation_mode
-from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id
+from friday.storage._core import iso_date
+from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id, normalize_known_at
 from friday.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -1190,6 +1192,439 @@ def _graph_number(value: Any) -> float | None:
     return round(number, 6)
 
 
+_TOOL_HISTORY_FIELDS = (
+    "known_at",
+    "known_at_floor",
+    "history_complete",
+    "identity_basis",
+    "temporal_basis",
+)
+_SAFE_GRAPH_TOOL_PAYLOAD_MAX_CHARS = 10_500
+_SAFE_MEMORY_RESULTS = 8
+_SAFE_ENTITY_RELATIONS = 12
+_SAFE_ENTITY_KNOWLEDGE = 8
+_CURRENT_GRAPH_TOOL_BOUNDARY = object()
+
+
+def _tool_request_boundaries(tool_name: str, arguments: Any) -> tuple[str, str]:
+    """Normalize explicit tool axes; present non-strings never mean "omitted"."""
+
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, Mapping):
+        raise ValueError("tool arguments are not a mapping")
+    normalized: dict[str, str] = {"as_of": "", "known_at": ""}
+    for key in ("as_of", "known_at"):
+        if key not in arguments:
+            continue
+        value = arguments[key]
+        if not isinstance(value, str):
+            raise ValueError(f"requested {key} must be a string")
+        cleaned = value.strip()
+        if not cleaned:
+            continue
+        if key == "known_at":
+            normalized[key] = normalize_known_at(cleaned)
+        elif tool_name == "memory_search":
+            parsed = iso_date(cleaned)
+            if parsed is None:
+                raise ValueError("requested as_of is invalid for memory_search")
+            normalized[key] = parsed
+        else:
+            normalized[key] = normalize_event_date(cleaned)[0]
+    return normalized["as_of"], normalized["known_at"]
+
+
+def _tool_temporal_contract(
+    raw: Any,
+    *,
+    requested_as_of: str,
+    requested_known_at: str,
+    label: str,
+) -> tuple[str, str, str, bool, str, str] | None:
+    """Validate one self-contained tool boundary without borrowing sibling fields."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{label} is not a mapping")
+    if (requested_as_of or requested_known_at) and ("as_of" not in raw or "known_at" not in raw):
+        raise ValueError(f"{label} must echo both temporal axes")
+    raw_as_of = raw.get("as_of", "")
+    raw_known_at = raw.get("known_at", "")
+    if not isinstance(raw_as_of, str):
+        raise ValueError(f"{label} returned a non-string as_of")
+    if not isinstance(raw_known_at, str):
+        raise ValueError(f"{label} returned a non-string known_at")
+    as_of = raw_as_of.strip()
+    known_at = raw_known_at.strip()
+    if as_of:
+        try:
+            normalized_as_of = normalize_event_date(as_of)[0]
+        except ValueError as exc:
+            raise ValueError(f"{label} returned an invalid as_of") from exc
+        if normalized_as_of != as_of:
+            raise ValueError(f"{label} returned a non-normalized as_of")
+    if known_at and normalize_known_at(known_at) != known_at:
+        raise ValueError(f"{label} returned a non-normalized known_at")
+    if requested_as_of or requested_known_at:
+        if as_of != requested_as_of:
+            raise ValueError(f"{label} returned a different requested as_of boundary")
+        if known_at != requested_known_at:
+            raise ValueError(f"{label} returned a different requested known_at boundary")
+    if not (as_of or known_at or requested_as_of or requested_known_at):
+        return None
+    if known_at:
+        for key in _TOOL_HISTORY_FIELDS:
+            if key not in raw:
+                raise ValueError(f"{label} is missing {key}")
+        floor = raw.get("known_at_floor")
+        if (
+            not isinstance(floor, str)
+            or not floor
+            or normalize_known_at(floor, reject_future=False) != floor
+            or floor > known_at
+        ):
+            raise ValueError(f"{label} returned an invalid relation-history floor")
+        if raw.get("history_complete") is not True:
+            raise ValueError(f"{label} returned an incomplete relation-history snapshot")
+        if raw.get("identity_basis") != "current_names" or raw.get("temporal_basis") != "bitemporal":
+            raise ValueError(f"{label} returned an unsupported graph snapshot basis")
+        return known_at, as_of, floor, True, "current_names", "bitemporal"
+    if raw.get("temporal_basis") != "valid_time":
+        raise ValueError(f"{label} returned an unsupported valid-time basis")
+    return "", as_of, "", False, "", "valid_time"
+
+
+def _historical_tool_graph_context(
+    tool_name: str,
+    data: Any,
+    arguments: Any = None,
+) -> dict[str, Any] | None:
+    """Adopt one independently complete valid-time or bitemporal tool snapshot."""
+
+    if tool_name not in {"memory_search", "entity_lookup"}:
+        return None
+    requested_as_of, requested_known_at = _tool_request_boundaries(tool_name, arguments)
+    if not isinstance(data, Mapping):
+        if requested_as_of or requested_known_at:
+            raise ValueError(f"{tool_name} result is not a mapping")
+        return None
+
+    if tool_name == "memory_search":
+        raw_snapshot = data.get("graph_context")
+        envelope_is_temporal = bool(data.get("as_of") or data.get("known_at"))
+        snapshot_is_temporal = bool(
+            isinstance(raw_snapshot, Mapping) and (raw_snapshot.get("as_of") or raw_snapshot.get("known_at"))
+        )
+        if not (requested_as_of or requested_known_at) and (envelope_is_temporal or snapshot_is_temporal):
+            raise ValueError("memory_search returned an unrequested temporal boundary")
+        if not (requested_as_of or requested_known_at or envelope_is_temporal or snapshot_is_temporal):
+            return None
+        envelope_contract = _tool_temporal_contract(
+            data,
+            requested_as_of=requested_as_of,
+            requested_known_at=requested_known_at,
+            label="memory_search envelope",
+        )
+        snapshot_contract = _tool_temporal_contract(
+            raw_snapshot,
+            requested_as_of=requested_as_of,
+            requested_known_at=requested_known_at,
+            label="memory_search graph_context",
+        )
+        if envelope_contract is None or snapshot_contract is None:
+            raise ValueError("memory_search dropped a temporal contract")
+        if envelope_contract != snapshot_contract:
+            raise ValueError("memory_search envelope and graph_context disagree")
+        contract = envelope_contract
+        assert isinstance(raw_snapshot, Mapping)
+        adopted = _memory_graph_context_for_llm(
+            raw_snapshot,
+            query=_graph_text_for_prompt(
+                raw_snapshot.get("query") or data.get("query"),
+                limit=700,
+            ),
+            as_of=contract[1],
+            known_at=contract[0],
+        )
+    else:
+        if not (requested_as_of or requested_known_at) and (data.get("as_of") or data.get("known_at")):
+            raise ValueError("entity_lookup returned an unrequested temporal boundary")
+        entity_contract = _tool_temporal_contract(
+            data,
+            requested_as_of=requested_as_of,
+            requested_known_at=requested_known_at,
+            label="entity_lookup payload",
+        )
+        if entity_contract is None:
+            return None
+        contract = entity_contract
+        adopted = {
+            "query": "",
+            "expanded": True,
+            "paths": [],
+            "paths_matched_at_least": 0,
+            "paths_truncated": False,
+        }
+
+    known_at, as_of, floor, history_complete, identity_basis, temporal_basis = contract
+    adopted.update(
+        {
+            "as_of": as_of,
+            "known_at": known_at,
+            "temporal_basis": temporal_basis,
+        }
+    )
+    if known_at:
+        adopted.update(
+            {
+                "known_at_floor": floor,
+                "history_complete": history_complete,
+                "identity_basis": identity_basis,
+            }
+        )
+    return adopted
+
+
+def _safe_memory_result(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    for key, limit in (
+        ("id", 160),
+        ("title", 240),
+        ("kind", 80),
+        ("updated_at", 40),
+        ("excerpt", 520),
+    ):
+        value = _graph_text_for_prompt(raw.get(key), limit=limit)
+        if value:
+            result[key] = value
+    return result
+
+
+def _safe_entity_relation(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, Mapping):
+        return {}
+    relation_type = raw.get("type") if isinstance(raw.get("type"), str) else raw.get("relation_type")
+    source = raw.get("source") if isinstance(raw.get("source"), str) else raw.get("source_name")
+    target = raw.get("target") if isinstance(raw.get("target"), str) else raw.get("target_name")
+    return {
+        "type": _graph_text_for_prompt(relation_type, limit=80),
+        "source": _graph_text_for_prompt(source, limit=200),
+        "target": _graph_text_for_prompt(target, limit=200),
+        "valid_from": _graph_text_for_prompt(raw.get("valid_from"), limit=32),
+        "valid_to": _graph_text_for_prompt(raw.get("valid_to"), limit=32),
+    }
+
+
+def _safe_graph_tool_payload(
+    tool_name: str,
+    data: Any,
+    adopted: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Allowlist graph-reading tool data before any LLM/evidence serialization."""
+
+    if not isinstance(data, Mapping):
+        raise ValueError(f"{tool_name} result is not a mapping")
+    safe: dict[str, Any] = {}
+    if tool_name == "memory_search":
+        for key in ("count", "matched_at_least", "shown", "filtered_out"):
+            if key in data:
+                safe[key] = _graph_count(data.get(key))
+        for key, limit in (
+            ("query", 700),
+            ("empty_because", 80),
+            ("detail", 400),
+            ("as_of", 32),
+            ("known_at", 40),
+            ("known_at_floor", 40),
+            ("identity_basis", 40),
+            ("temporal_basis", 40),
+        ):
+            if key in data:
+                safe[key] = _graph_text_for_prompt(data.get(key), limit=limit)
+        if "history_complete" in data:
+            safe["history_complete"] = data.get("history_complete") is True
+        raw_results = data.get("results")
+        results = (
+            [_safe_memory_result(item) for item in raw_results[:_SAFE_MEMORY_RESULTS]]
+            if isinstance(raw_results, list)
+            else []
+        )
+        safe["results"] = [item for item in results if item]
+        if isinstance(raw_results, list) and len(raw_results) > len(safe["results"]):
+            safe["results_shown"] = len(safe["results"])
+            safe["results_truncated"] = True
+        raw_graph = data.get("graph_context")
+        if isinstance(raw_graph, Mapping):
+            safe["graph_context"] = adopted or _memory_graph_context_for_llm(
+                raw_graph,
+                query=_graph_text_for_prompt(raw_graph.get("query") or data.get("query"), limit=700),
+                as_of=_graph_text_for_prompt(raw_graph.get("as_of") or data.get("as_of"), limit=32),
+                known_at=_graph_text_for_prompt(
+                    raw_graph.get("known_at") or data.get("known_at"),
+                    limit=40,
+                ),
+            )
+    elif tool_name == "entity_lookup":
+        safe["found"] = data.get("found") is True
+        raw_entity = data.get("entity")
+        if isinstance(raw_entity, Mapping):
+            entity: dict[str, Any] = {}
+            for key, limit in (
+                ("id", 160),
+                ("name", 240),
+                ("entity_type", 80),
+                ("description", 500),
+            ):
+                value = _graph_text_for_prompt(raw_entity.get(key), limit=limit)
+                if value:
+                    entity[key] = value
+            safe["entity"] = entity
+        else:
+            safe["entity"] = None
+        for key, limit in (
+            ("as_of", 32),
+            ("known_at", 40),
+            ("known_at_floor", 40),
+            ("identity_basis", 40),
+            ("temporal_basis", 40),
+        ):
+            if key in data:
+                safe[key] = _graph_text_for_prompt(data.get(key), limit=limit)
+        if "history_complete" in data:
+            safe["history_complete"] = data.get("history_complete") is True
+        profile = data.get("profile")
+        if isinstance(profile, Mapping):
+            raw_tags = profile.get("tags")
+            date_range = profile.get("document_date_range")
+            safe_profile: dict[str, Any] = {
+                "tags": [
+                    _graph_text_for_prompt(tag, limit=80)
+                    for tag in (raw_tags[:20] if isinstance(raw_tags, list) else [])
+                    if isinstance(tag, str)
+                ],
+                "documents_without_own_date": _graph_count(profile.get("documents_without_own_date")),
+            }
+            if isinstance(date_range, Mapping):
+                safe_profile["document_date_range"] = {
+                    "earliest": _graph_text_for_prompt(date_range.get("earliest"), limit=32),
+                    "latest": _graph_text_for_prompt(date_range.get("latest"), limit=32),
+                }
+            elif date_range is None:
+                safe_profile["document_date_range"] = None
+            safe["profile"] = safe_profile
+        for key in ("knowledge_objects_total", "pending_relations_count"):
+            if key in data:
+                safe[key] = _graph_count(data.get(key))
+        raw_provenance = data.get("profile_provenance")
+        if isinstance(raw_provenance, Mapping):
+            safe["profile_provenance"] = {
+                "derived": raw_provenance.get("derived") is True,
+                "derived_from": _graph_text_for_prompt(
+                    raw_provenance.get("derived_from"),
+                    limit=120,
+                ),
+                "source_count": _graph_count(raw_provenance.get("source_count")),
+                "computed_at": _graph_text_for_prompt(
+                    raw_provenance.get("computed_at"),
+                    limit=40,
+                ),
+                "calculation": _graph_text_for_prompt(
+                    raw_provenance.get("calculation"),
+                    limit=100,
+                ),
+            }
+        for key, fields in (
+            ("event_time", ("occurred_at", "occurred_end", "precision")),
+            ("edits", ("versions", "last_edited_at", "restorable_version")),
+        ):
+            raw_block = data.get(key)
+            if isinstance(raw_block, Mapping):
+                safe[key] = {
+                    field: (
+                        _graph_count(raw_block.get(field))
+                        if field in {"versions", "restorable_version"}
+                        else _graph_text_for_prompt(raw_block.get(field), limit=80)
+                    )
+                    for field in fields
+                    if field in raw_block
+                }
+            elif raw_block is None and key in data:
+                safe[key] = None
+        raw_relations = data.get("relations")
+        if isinstance(raw_relations, list):
+            relations = [_safe_entity_relation(item) for item in raw_relations[:_SAFE_ENTITY_RELATIONS]]
+            safe["relations"] = [item for item in relations if item]
+            matched = _graph_count(
+                data.get("relations_matched_at_least"),
+                minimum=len(raw_relations),
+            )
+            safe["relations_matched_at_least"] = matched
+            safe["relations_truncated"] = bool(data.get("relations_truncated")) or matched > len(
+                safe["relations"]
+            )
+        raw_knowledge = data.get("knowledge_objects")
+        knowledge = (
+            [_safe_memory_result(item) for item in raw_knowledge[:_SAFE_ENTITY_KNOWLEDGE]]
+            if isinstance(raw_knowledge, list)
+            else []
+        )
+        safe["knowledge_objects"] = [item for item in knowledge if item]
+        if isinstance(raw_knowledge, list) and len(raw_knowledge) > len(safe["knowledge_objects"]):
+            safe["knowledge_objects_truncated"] = True
+    else:
+        return dict(data)
+
+    # Keep JSON structurally valid. Remove complete tail objects; never rely on
+    # ToolResult's character slice to bisect an envelope.
+    while len(json.dumps(safe, ensure_ascii=False, indent=2)) > _SAFE_GRAPH_TOOL_PAYLOAD_MAX_CHARS:
+        result_items = safe.get("results")
+        knowledge_items = safe.get("knowledge_objects")
+        relation_items = safe.get("relations")
+        if isinstance(result_items, list) and result_items:
+            result_items.pop()
+            safe["results_shown"] = len(result_items)
+            safe["results_truncated"] = True
+        elif isinstance(knowledge_items, list) and knowledge_items:
+            knowledge_items.pop()
+            safe["knowledge_objects_truncated"] = True
+        elif isinstance(relation_items, list) and relation_items:
+            relation_items.pop()
+            safe["relations_truncated"] = True
+        else:
+            raise ValueError(f"safe {tool_name} payload exceeds its structural budget")
+    return safe
+
+
+def _graph_tool_result_is_graph_bearing(tool_name: str, data: Any) -> bool:
+    if not isinstance(data, Mapping):
+        return False
+    if tool_name == "memory_search":
+        return isinstance(data.get("graph_context"), Mapping)
+    if tool_name == "entity_lookup":
+        return isinstance(data.get("graph_context"), Mapping) or isinstance(data.get("relations"), list)
+    return False
+
+
+def _temporal_boundary_from_graph_context(
+    graph_context: Any,
+) -> tuple[str, str, str, bool, str, str] | None:
+    if not isinstance(graph_context, Mapping):
+        return None
+    if not (graph_context.get("as_of") or graph_context.get("known_at")):
+        return None
+    try:
+        return _tool_temporal_contract(
+            graph_context,
+            requested_as_of="",
+            requested_known_at="",
+            label="initial graph context",
+        )
+    except ValueError:
+        return None
+
+
 def _graph_paths_for_prompt(
     graph_context: dict[str, Any],
     knowledge_labels: dict[str, str],
@@ -1273,13 +1708,13 @@ def _graph_paths_for_prompt(
             origin = _graph_text_for_prompt(provenance_source.get("origin"), limit=80)
             source = _graph_text_for_prompt(provenance_source.get("source"), limit=80)
             candidate_id = _graph_text_for_prompt(provenance_source.get("candidate_id"), limit=120)
-            reviewed_by = _graph_text_for_prompt(provenance_source.get("reviewed_by"), limit=120)
+            reviewed = provenance_source.get("reviewed") is True
             trusted_review = (
                 not bool(raw_step.get("implicit"))
                 and origin == "review"
                 and source == "reviewed_relation_candidate"
                 and bool(candidate_id)
-                and bool(reviewed_by)
+                and reviewed
             )
             trusted_implicit = (
                 bool(raw_step.get("implicit"))
@@ -1287,7 +1722,7 @@ def _graph_paths_for_prompt(
                 and source == "accepted_knowledge_links"
             )
             trusted_anchor = trusted_review or trusted_implicit
-            for key, limit in (("origin", 80), ("created_by", 120)):
+            for key, limit in (("origin", 80),):
                 value = provenance_source.get(key)
                 if isinstance(value, str):
                     provenance[key] = value[:limit]
@@ -1295,8 +1730,6 @@ def _graph_paths_for_prompt(
                 for key, limit in (
                     ("source", 80),
                     ("candidate_id", 120),
-                    ("reviewed_by", 120),
-                    ("created_by", 120),
                     ("status", 40),
                     ("created_at", 40),
                     ("method", 80),
@@ -1305,6 +1738,8 @@ def _graph_paths_for_prompt(
                     value = provenance_source.get(key)
                     if isinstance(value, str):
                         provenance[key] = value[:limit]
+                if trusted_review:
+                    provenance["reviewed"] = True
                 confidence = _graph_number(provenance_source.get("confidence"))
                 if confidence is not None:
                     provenance["confidence"] = confidence
@@ -2584,6 +3019,32 @@ class AgentRuntime:
             "paths_matched_at_least": max(0, graph_paths_matched),
             "paths_truncated": bool(context.graph_context.get("paths_truncated")),
         }
+        effective_known_at = _graph_text_for_prompt(
+            context.graph_context.get("known_at"),
+            limit=40,
+        )
+        if effective_known_at:
+            # The full graph contains personal names and provenance.  Persist only
+            # the reproducibility contract and the already-existing bounded counts.
+            graph_snapshot_summary.update(
+                {
+                    "known_at": effective_known_at,
+                    "known_at_floor": _graph_text_for_prompt(
+                        context.graph_context.get("known_at_floor"),
+                        limit=40,
+                    ),
+                    "history_complete": context.graph_context.get("history_complete") is True,
+                    "identity_basis": (
+                        "current_names"
+                        if context.graph_context.get("identity_basis") == "current_names"
+                        else ""
+                    ),
+                    "temporal_basis": _graph_text_for_prompt(
+                        context.graph_context.get("temporal_basis"),
+                        limit=40,
+                    ),
+                }
+            )
 
         assistant_message = self.storage.store_message(
             conversation_id,
@@ -2700,6 +3161,7 @@ class AgentRuntime:
                 "graph_paths_matched_at_least": graph_snapshot_summary["paths_matched_at_least"],
                 "graph_paths_truncated": graph_snapshot_summary["paths_truncated"],
                 "graph_as_of": graph_snapshot_summary["as_of"],
+                "graph_known_at": effective_known_at,
                 "ingestion_action": context.ingestion.get("action", "not_assessed"),
                 "interaction_mode": context.interaction_mode,
                 "pending_relations": context.pending_relations,
@@ -2745,7 +3207,7 @@ class AgentRuntime:
                 },
             },
         )
-        LOGGER.info("silence-order: ход остановлен структурой — %s", _trace(message))
+        LOGGER.info("silence-order: ход остановлен структурой")
         return {
             "conversation_id": conversation_id,
             "message_id": assistant_message.get("id"),
@@ -3033,8 +3495,11 @@ class AgentRuntime:
                     }
                     for item in (retrieval_result.get("trace") or [])[:10]
                 ]
-            except Exception:
-                LOGGER.exception("Hybrid retrieval failed; using SQLite search")
+            except Exception as exc:
+                LOGGER.warning(
+                    "Hybrid retrieval failed; using SQLite search (%s)",
+                    type(exc).__name__,
+                )
                 context.knowledge_hits = self.storage.search_knowledge(
                     user_id,
                     search_query,
@@ -3058,8 +3523,8 @@ class AgentRuntime:
             # готов, и своих секунд к ответу он не добавил.
             try:
                 context.outward_verdict = await arbiter
-            except Exception:  # noqa: BLE001 — распознавание намерения не роняет ход
-                LOGGER.warning("Web intent check failed", exc_info=True)
+            except Exception as exc:  # noqa: BLE001 — распознавание намерения не роняет ход
+                LOGGER.warning("Web intent check failed (%s)", type(exc).__name__)
                 context.outward_verdict = None
             # Вопрос о человеке, узнанный ПОНИМАНИЕМ, а не шаблоном, чистит архив
             # здесь — раньше вердикта его не было.
@@ -3178,8 +3643,8 @@ class AgentRuntime:
                     )
                 if not context.entity_hits:
                     context.entity_hits = context.graph_context.get("roots", [])[:6]
-            except Exception:
-                LOGGER.exception("Graph context assembly failed")
+            except Exception as exc:
+                LOGGER.warning("Graph context assembly failed (%s)", type(exc).__name__)
 
         hit_scores = [float(item.get("_score", 0.0) or 0.0) for item in context.knowledge_hits]
         if hit_scores:
@@ -3254,10 +3719,10 @@ class AgentRuntime:
             and (household or looks_outward or _archive_is_weak(context.knowledge_hits))
         ):
             LOGGER.info(
-                "archive-gate: %s — %d документов не пойдут в ответ (%s)",
-                "быт" if household else ("вопрос наружу" if looks_outward else "слабое совпадение"),
+                "archive-gate: %d документов не пойдут в ответ; household=%s outward=%s",
                 len(context.knowledge_hits),
-                _trace(message),
+                household,
+                looks_outward,
             )
             context.knowledge_hits = []
             context.retrieval_confidence = 0.0
@@ -3350,6 +3815,56 @@ class AgentRuntime:
         # becomes an FTS term and spends the budget it was meant to protect.
         return f"{clean}\n{previous[:500]}"
 
+    def _replace_context_envelope(
+        self,
+        messages: list[dict[str, Any]],
+        context: AgentContext,
+        message: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> None:
+        """Replace the pre-tool graph envelope after adopting a tool snapshot."""
+
+        prefix = "FRIDAY_CONTEXT_DATA"
+        rebuilt = self._build_initial_messages(
+            context,
+            message,
+            attachments,
+            tool_enabled=True,
+        )
+        fresh_index = next(
+            (
+                index
+                for index, item in enumerate(rebuilt)
+                if item.get("role") == "user" and str(item.get("content") or "").startswith(prefix)
+            ),
+            None,
+        )
+        if fresh_index is None:
+            return
+        old_index = next(
+            (
+                index
+                for index, item in enumerate(messages)
+                if item.get("role") == "user" and str(item.get("content") or "").startswith(prefix)
+            ),
+            None,
+        )
+        if old_index is not None:
+            messages[old_index] = rebuilt[fresh_index]
+            return
+        insert_at = next(
+            (
+                index
+                for index, item in enumerate(messages)
+                if item.get("role") == "assistant" and item.get("tool_calls")
+            ),
+            len(messages),
+        )
+        context_messages = [rebuilt[fresh_index]]
+        if fresh_index and rebuilt[fresh_index - 1].get("role") == "system":
+            context_messages.insert(0, rebuilt[fresh_index - 1])
+        messages[insert_at:insert_at] = context_messages
+
     async def _agentic_loop(
         self,
         context: AgentContext,
@@ -3359,6 +3874,8 @@ class AgentRuntime:
         attachments: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
         messages = self._build_initial_messages(context, message, attachments, tool_enabled=True)
+        context_message = message
+        accepted_graph_boundary: object | None = _temporal_boundary_from_graph_context(context.graph_context)
         # Сколько сообщений было ДО предварительных вызовов. Всё, что они
         # добавят, лежит дальше этой границы — и переживёт пересборку списка,
         # если реплику придётся заменить остатком (см. ниже).
@@ -3456,6 +3973,7 @@ class AgentRuntime:
             added = messages[before_prefetch:]
             messages = self._build_initial_messages(context, rest, attachments, tool_enabled=True)
             messages.extend(added)
+            context_message = rest
         total_calls = 0
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
             context.interaction_mode,
@@ -3495,7 +4013,7 @@ class AgentRuntime:
                 result = await self.llm.chat(messages, tools=tools)
                 loop_deadline += float(result.get("_queue_wait_sec", 0.0) or 0.0)
             except Exception as exc:
-                LOGGER.error("LLM tool loop failed: %s", exc)
+                LOGGER.error("LLM tool loop failed (%s)", type(exc).__name__)
                 return {
                     "content": self._offline_response(context, unreachable=self.llm.enabled, message=message),
                     "tools_used": tools_used,
@@ -3615,8 +4133,64 @@ class AgentRuntime:
             for call, openai_call in zip(selected_calls, openai_calls, strict=True):
                 tool_result = await self.kernel.execute(call.name, call.arguments, actor=actor)
                 tools_used.append(call.name)
-                tool_knowledge_ids.extend(self._tool_knowledge_ids(call.name, tool_result.data))
-                tool_knowledge_ids = list(dict.fromkeys(tool_knowledge_ids))[:12]
+                if tool_result.success:
+                    raw_tool_data = tool_result.data
+                    graph_bearing = _graph_tool_result_is_graph_bearing(call.name, raw_tool_data)
+                    try:
+                        historical_context = _historical_tool_graph_context(
+                            call.name,
+                            raw_tool_data,
+                            call.arguments,
+                        )
+                        candidate_boundary = (
+                            _temporal_boundary_from_graph_context(historical_context)
+                            if historical_context is not None
+                            else None
+                        )
+                        if historical_context is not None and candidate_boundary is None:
+                            raise ValueError("adopted graph context has no valid temporal boundary")
+                        result_graph_boundary: object | None = candidate_boundary
+                        if result_graph_boundary is None and graph_bearing:
+                            result_graph_boundary = _CURRENT_GRAPH_TOOL_BOUNDARY
+                        if (
+                            accepted_graph_boundary is not None
+                            and result_graph_boundary is not None
+                            and result_graph_boundary != accepted_graph_boundary
+                        ):
+                            raise ValueError("tool graph boundary differs from the accepted turn boundary")
+                        # Current graph-bearing results cross the same model and
+                        # durable-evidence boundary as historical ones.  The
+                        # temporal adoption contract is conditional; the privacy
+                        # projection is not.  Keeping it inside the historical
+                        # branch let current entity metadata and relation payloads
+                        # bypass every size/field allowlist.
+                        if graph_bearing:
+                            tool_result.data = _safe_graph_tool_payload(
+                                call.name,
+                                raw_tool_data,
+                                historical_context,
+                            )
+                        if result_graph_boundary is not None:
+                            accepted_graph_boundary = result_graph_boundary
+                        if candidate_boundary is not None:
+                            assert historical_context is not None
+                            context.graph_context = historical_context
+                            self._replace_context_envelope(
+                                messages,
+                                context,
+                                context_message,
+                                attachments,
+                            )
+                    except ValueError as exc:
+                        # An incomplete historical result is not a graphless/current
+                        # success.  Refuse it before either the model or durable turn
+                        # metadata can treat it as evidence.
+                        tool_result.success = False
+                        tool_result.error = f"Historical graph snapshot refused: {type(exc).__name__}"
+                        tool_result.data = None
+                if tool_result.success:
+                    tool_knowledge_ids.extend(self._tool_knowledge_ids(call.name, tool_result.data))
+                    tool_knowledge_ids = list(dict.fromkeys(tool_knowledge_ids))[:12]
                 total_calls += 1
                 if tool_result.success and tool_result.attachment:
                     # Голос и собранный файл — разные вложения и разные способы
@@ -3711,8 +4285,8 @@ class AgentRuntime:
                 # Под разметкой не было ответа. Сбой, названный сбоем, лучше
                 # служебных маркеров на экране — падаем в общий возврат ниже.
                 LOGGER.warning("Final synthesis returned bare tool-call markup")
-        except Exception:
-            LOGGER.exception("Final LLM synthesis failed")
+        except Exception as exc:
+            LOGGER.warning("Final LLM synthesis failed (%s)", type(exc).__name__)
 
         # Последний заход — с ЧИСТОЙ историей. Замерено на боевой переписке:
         # 22 ответа из 381 (5.8%) были отказами «не удалось обработать запрос» /
@@ -3820,8 +4394,11 @@ class AgentRuntime:
             return None
         try:
             model = build_user_model(self.storage, user_id)
-        except Exception:
-            LOGGER.warning("User model build failed; answering without it", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning(
+                "User model build failed; answering without it (%s)",
+                type(exc).__name__,
+            )
             return None
         people = [str(p.get("name") or "")[:120] for p in model["people"][:3]]
         projects = [str(p.get("name") or "")[:120] for p in model["projects"][:3]]
@@ -3844,8 +4421,11 @@ class AgentRuntime:
         try:
             user = self.storage.get_user(user_id)
             metadata = json.loads(str((user or {}).get("metadata_json") or "{}"))
-        except Exception:
-            LOGGER.warning("Custom instructions read failed; answering without it", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning(
+                "Custom instructions read failed; answering without it (%s)",
+                type(exc).__name__,
+            )
             return ""
         return (
             str(metadata.get("custom_instructions") or "").strip()[:500] if isinstance(metadata, dict) else ""
@@ -3920,10 +4500,13 @@ class AgentRuntime:
                 user_id=user_id,
                 notes=f"обращение к системе (вид «{kind}»), а не материал для архива",
             )
-        except Exception:  # noqa: BLE001 — очистка очереди не должна ронять ответ
-            LOGGER.warning("Could not withdraw an inbox card for a request", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — очистка очереди не должна ронять ответ
+            LOGGER.warning(
+                "Could not withdraw an inbox card for a request (%s)",
+                type(exc).__name__,
+            )
             return
-        LOGGER.info("inbox: карточка %s снята — вид «%s», это обращение", inbox_id, kind)
+        LOGGER.info("inbox: карточка обращения снята")
         # Статус в контексте тоже правится: иначе модель получит системную строку
         # «сообщение ждёт подтверждения в Inbox» и скажет об этом человеку, хотя
         # карточки уже нет. Признак, не доехавший до места, — отдельный класс ошибок
@@ -3948,8 +4531,11 @@ class AgentRuntime:
         try:
             user = self.storage.get_user(user_id)
             metadata = json.loads(str((user or {}).get("metadata_json") or "{}"))
-        except Exception:
-            LOGGER.warning("Standing rules read failed; answering without them", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning(
+                "Standing rules read failed; answering without them (%s)",
+                type(exc).__name__,
+            )
             return []
         if not isinstance(metadata, dict):
             return []
@@ -4061,8 +4647,8 @@ class AgentRuntime:
                 ],
                 tools=[],
             )
-        except Exception:  # noqa: BLE001 — распознавание намерения не должно ронять ход
-            LOGGER.warning("Standing-rule check failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
+            LOGGER.warning("Standing-rule check failed (%s)", type(exc).__name__)
             return "", "", "", None
         raw = str(answer.get("content") or "")
         start, end = raw.find("{"), raw.rfind("}")
@@ -4132,8 +4718,8 @@ class AgentRuntime:
                 temperature=0.0,
                 priority="foreground",
             )
-        except Exception:  # noqa: BLE001 — разбор остатка не должен ронять ход
-            LOGGER.warning("remainder: разбор не удался", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — разбор остатка не должен ронять ход
+            LOGGER.warning("remainder: разбор не удался (%s)", type(exc).__name__)
             return None
         parsed = _extract_json_object(str(answer.get("content") or ""))
         if not isinstance(parsed, dict):
@@ -4176,7 +4762,10 @@ class AgentRuntime:
         rest = await self._remainder_after(message, "чем является Пятница и на чём она работает")
         context.open_remainder = message if rest is None else rest
         context.remainder_known = rest is not None
-        LOGGER.info("self-description: сказано структурой, остаток %r", (rest or "")[:60])
+        LOGGER.info(
+            "self-description: сказано структурой; остаток=%s",
+            bool(rest),
+        )
 
     def _served_model_name(self) -> str:
         """Настоящее имя модели — у эндпойнта, а не в `llm_model`.
@@ -4198,8 +4787,11 @@ class AgentRuntime:
             from friday.diagnostics import served_model_name
 
             name = served_model_name(self.settings.llm_base_url, api_key=self.settings.llm_api_key)
-        except Exception:  # noqa: BLE001 — незнание имени не должно ронять ход
-            LOGGER.warning("self-description: имя модели у эндпойнта не спросилось", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — незнание имени не должно ронять ход
+            LOGGER.warning(
+                "self-description: имя модели у эндпойнта не спросилось (%s)",
+                type(exc).__name__,
+            )
         self._served_name_cache = name
         return name
 
@@ -4235,7 +4827,10 @@ class AgentRuntime:
             # Арбитр видов ошибся или человек попросил разовое. Это НЕ повод
             # сохранять то, что предложил общий арбитр: он формулировал правило,
             # не зная ни прежних, ни того, отменяют ли его сейчас.
-            LOGGER.info("standing-rule: указание не подтвердилось, предложено было %r", proposed)
+            LOGGER.info(
+                "standing-rule: указание не подтвердилось; proposal=%s",
+                bool(proposed),
+            )
             return False
         if rule and _RULE_GRABS_RIGHTS.search(rule):
             # Структурный потолок. Правило едет в контекст каждым ходом и лежит
@@ -4303,8 +4898,11 @@ class AgentRuntime:
         try:
             user = self.storage.get_user(user_id)
             metadata = json.loads(str((user or {}).get("metadata_json") or "{}"))
-        except Exception:
-            LOGGER.warning("Corrections read failed; answering without them", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning(
+                "Corrections read failed; answering without them (%s)",
+                type(exc).__name__,
+            )
             return []
         if not isinstance(metadata, dict):
             return []
@@ -4352,7 +4950,10 @@ class AgentRuntime:
         )
         rest = message if remainder is None else remainder
         if not action:
-            LOGGER.info("correction: поправка не подтвердилась, предложено было %r", proposed)
+            LOGGER.info(
+                "correction: поправка не подтвердилась; proposal=%s",
+                bool(proposed),
+            )
             return
         if correction and _RULE_GRABS_RIGHTS.search(correction):
             LOGGER.warning("correction: отклонено как попытка расширить права")
@@ -4524,14 +5125,14 @@ class AgentRuntime:
                 temperature=0.0,
                 priority="foreground",
             )
-        except Exception:  # noqa: BLE001 — разбор не должен ронять ход
-            LOGGER.warning("reminder-prefetch: разбор не удался", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — разбор не должен ронять ход
+            LOGGER.warning("reminder-prefetch: разбор не удался (%s)", type(exc).__name__)
             return False
         parsed = _extract_json_object(str(answer.get("content") or ""))
         if not isinstance(parsed, dict):
             return False
         if not str(parsed.get("напоминание") or "").strip().casefold().startswith("да"):
-            LOGGER.info("reminder-prefetch: это не просьба напомнить — %s", _trace(message))
+            LOGGER.info("reminder-prefetch: это не просьба напомнить")
             return False
         what = " ".join(str(parsed.get("что") or "").split())[:300]
         when = " ".join(str(parsed.get("когда") or "").split())[:120]
@@ -4545,17 +5146,21 @@ class AgentRuntime:
             # Без обеих половин напоминание бессмысленно: «напомнить неизвестно о
             # чём» и «напомнить когда-нибудь» одинаково бесполезны. Пусть решает
             # модель — она переспросит.
-            LOGGER.info("reminder-prefetch: не хватает что=%r когда=%r", what[:40], when[:40])
+            LOGGER.info(
+                "reminder-prefetch: неполные поля; what=%s when=%s",
+                bool(what),
+                bool(when),
+            )
             return False
         try:
             result = await self.kernel.execute("remind", {"what": what, "when": when}, actor=actor)
-        except Exception:  # noqa: BLE001 — напоминание не должно ронять ответ
-            LOGGER.exception("reminder-prefetch: постановка не удалась")
+        except Exception as exc:  # noqa: BLE001 — напоминание не должно ронять ответ
+            LOGGER.warning("reminder-prefetch: постановка не удалась (%s)", type(exc).__name__)
             return False
         if not result.success:
-            LOGGER.info("reminder-prefetch: инструмент отказал — %s", str(result.error or "")[:120])
+            LOGGER.info("reminder-prefetch: инструмент отказал")
             return False
-        LOGGER.info("reminder-prefetch: поставлено %r на %r", what[:40], when[:40])
+        LOGGER.info("reminder-prefetch: поставлено")
         tools_used.append("remind")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "remind", "output": result.to_llm_message()})
@@ -4639,13 +5244,13 @@ class AgentRuntime:
         context.asked_for_an_archive = True
         try:
             result = await self.kernel.execute("collect_files", {"days": days}, actor=actor)
-        except Exception:  # noqa: BLE001 — сборка архива не должна ронять ответ
-            LOGGER.exception("Archive assembly failed")
+        except Exception as exc:  # noqa: BLE001 — сборка архива не должна ронять ответ
+            LOGGER.warning("Archive assembly failed (%s)", type(exc).__name__)
             return False
         data = result.data or {}
         if not result.success or not result.attachment:
             reason = str(data.get("reason") or result.error or "")
-            LOGGER.info("archive-prefetch: не собралось — %s", reason[:120])
+            LOGGER.info("archive-prefetch: не собралось")
             if reason:
                 # Неудача тоже уходит модели: иначе она пообещает архив, которого
                 # не будет. «За эти дни файлов не приходило» — законный ответ.
@@ -4665,7 +5270,10 @@ class AgentRuntime:
             return False
         collected = data.get("files_in_archive")
         filename = str(data.get("filename") or "")
-        LOGGER.info("archive-prefetch: собран %r, файлов %s", filename, collected)
+        LOGGER.info(
+            "archive-prefetch: собран; files=%s",
+            collected if isinstance(collected, int) else None,
+        )
         tools_used.append("collect_files")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "collect_files", "output": result.to_llm_message()})
@@ -4830,8 +5438,8 @@ class AgentRuntime:
                     # реплике из чата: «Собираю отчёт по документам которые
                     # появились в архиве в июле 2026 года.docx».
                     answer = clean
-            except Exception:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
-                LOGGER.warning("Could not obtain document content", exc_info=True)
+            except Exception as exc:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
+                LOGGER.warning("Could not obtain document content (%s)", type(exc).__name__)
         if not blocks:
             return None
         # Когда ответа не получилось, заголовок берётся из просьбы человека:
@@ -4870,8 +5478,8 @@ class AgentRuntime:
                 {"kind": kind, "title": title, "blocks": blocks},
                 actor=actor,
             )
-        except Exception:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
-            LOGGER.exception("Fallback file build failed")
+        except Exception as exc:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
+            LOGGER.warning("Fallback file build failed (%s)", type(exc).__name__)
             return None
         if not result.success or not result.attachment:
             return None
@@ -4921,16 +5529,15 @@ class AgentRuntime:
         verdict = (context.outward_verdict or ("", None)) if context is not None else ("", None)
         by_arbiter = str(verdict[0] or "").startswith("человек")
         if not asked_plainly and not by_arbiter:
-            LOGGER.info("person-prefetch: вопрос не про человека — %s", _trace(message))
+            LOGGER.info("person-prefetch: вопрос не про человека")
             return False
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
         if "user_activity" not in available:
             LOGGER.info(
-                "person-prefetch: инструмента нет среди доступных (%d шт.) — %s",
+                "person-prefetch: инструмента нет среди доступных (%d шт.)",
                 len(available),
-                _trace(message),
             )
             return False  # инструмент недоступен этому человеку — не обходим права
         storage = self.storage
@@ -4956,9 +5563,8 @@ class AgentRuntime:
                 break
         if chosen is None:
             LOGGER.info(
-                "person-prefetch: имя не опознано среди учёток; проверено слов: %d — %s",
+                "person-prefetch: имя не опознано среди учёток; проверено слов: %d",
                 len(candidates),
-                _trace(message),
             )
             if named:
                 # Имя НАЗВАНО, но учётки с ним нет: «что писал Иванов» про человека
@@ -4985,14 +5591,14 @@ class AgentRuntime:
             result = await self.kernel.execute(
                 "user_activity", {"person": chosen.display_name or chosen.user_id}, actor=actor
             )
-        except Exception:  # noqa: BLE001 — надзорный вызов не должен ронять ход
-            LOGGER.exception("Prefetch user activity failed")
+        except Exception as exc:  # noqa: BLE001 — надзорный вызов не должен ронять ход
+            LOGGER.warning("Prefetch user activity failed (%s)", type(exc).__name__)
             return False
         rendered = result.to_llm_message()
         if not rendered:
-            LOGGER.info("person-prefetch: инструмент вернул пустоту для %r", chosen.display_name)
+            LOGGER.info("person-prefetch: инструмент вернул пустоту")
             return False
-        LOGGER.info("person-prefetch: сработал для %r, данных %d знаков", chosen.display_name, len(rendered))
+        LOGGER.info("person-prefetch: сработал; данных %d знаков", len(rendered))
         tools_used.append("user_activity")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "user_activity", "output": str(rendered)})
@@ -5058,8 +5664,8 @@ class AgentRuntime:
             result = await self.kernel.execute(
                 "message_search", {"query": message[:200], "limit": 20}, actor=actor
             )
-        except Exception:  # noqa: BLE001 — поиск по своей переписке не должен ронять ход
-            LOGGER.exception("own-messages-prefetch: поиск не удался")
+        except Exception as exc:  # noqa: BLE001 — поиск по своей переписке не должен ронять ход
+            LOGGER.warning("own-messages-prefetch: поиск не удался (%s)", type(exc).__name__)
             return False
         rendered = result.to_llm_message() if result.success else ""
         tools_used.append("message_search")
@@ -5116,8 +5722,8 @@ class AgentRuntime:
                 continue
             try:
                 result = await self.kernel.execute(tool_name, {}, actor=actor)
-            except Exception:  # noqa: BLE001 — подсчёт не должен ронять ход
-                LOGGER.exception("Prefetch %s failed", tool_name)
+            except Exception as exc:  # noqa: BLE001 — подсчёт не должен ронять ход
+                LOGGER.warning("Prefetch %s failed (%s)", tool_name, type(exc).__name__)
                 continue
             rendered = result.to_llm_message()
             if not rendered:
@@ -5173,8 +5779,8 @@ class AgentRuntime:
                 ],
                 tools=[],
             )
-        except Exception:  # noqa: BLE001 — распознавание намерения не должно ронять ход
-            LOGGER.warning("Intent check failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
+            LOGGER.warning("Intent check failed (%s)", type(exc).__name__)
             return False
         verdict = str(answer.get("content") or "").strip().casefold()
         return "лент" in verdict
@@ -5234,14 +5840,14 @@ class AgentRuntime:
             if period:
                 arguments["until"] = period[1]
             result = await self.kernel.execute("what_happened", arguments, actor=actor)
-        except Exception:  # noqa: BLE001 — лента не должна ронять ход
-            LOGGER.exception("Prefetch timeline failed")
+        except Exception as exc:  # noqa: BLE001 — лента не должна ронять ход
+            LOGGER.warning("Prefetch timeline failed (%s)", type(exc).__name__)
             return
         # Момент, который ядро не разобрало, — это НЕ пустая лента. Разница
         # решающая: во втором случае человеку говорят «в тот момент ничего не
         # появилось», и это утверждение о его архиве, которого никто не проверял.
         if isinstance(result.data, dict) and result.data.get("understood") is False:
-            LOGGER.warning("Timeline prefetch: момент %r не разобран", moment[:40])
+            LOGGER.warning("Timeline prefetch: момент не разобран")
             messages.append(
                 {
                     "role": "system",
@@ -5296,8 +5902,11 @@ class AgentRuntime:
         for word in candidates:
             try:
                 found = await run_blocking(graph.search_entities, actor.user_id, word, limit=3)
-            except Exception:  # noqa: BLE001 — проверка не должна ронять ход
-                LOGGER.warning("Could not check the graph for a personal name", exc_info=True)
+            except Exception as exc:  # noqa: BLE001 — проверка не должна ронять ход
+                LOGGER.warning(
+                    "Could not check the graph for a personal name (%s)",
+                    type(exc).__name__,
+                )
                 return False
             for item in found or []:
                 if str(item.get("entity_type") or "") != "person":
@@ -5365,8 +5974,8 @@ class AgentRuntime:
             spoken = f"{head}\n\n{spoken}"
         try:
             result = await self.kernel.execute("speak", {"text": spoken}, actor=actor)
-        except Exception:  # noqa: BLE001 — озвучка не должна ронять готовый ответ
-            LOGGER.warning("tts: не удалось озвучить итоговый ответ", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — озвучка не должна ронять готовый ответ
+            LOGGER.warning("tts: не удалось озвучить итоговый ответ (%s)", type(exc).__name__)
             return clip
         attachment = result.attachment if result.success else None
         if not isinstance(attachment, dict):
@@ -5451,8 +6060,8 @@ class AgentRuntime:
                 ],
                 tools=[],
             )
-        except Exception:  # noqa: BLE001 — распознавание намерения не должно ронять ход
-            LOGGER.warning("Small-talk check failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
+            LOGGER.warning("Small-talk check failed (%s)", type(exc).__name__)
             return False
         verdict = str(answer.get("content") or "").strip().casefold()
         return verdict.startswith("разговор")
@@ -5704,8 +6313,8 @@ class AgentRuntime:
                 ],
                 tools=[],
             )
-        except Exception:  # noqa: BLE001 — распознавание намерения не должно ронять ход
-            LOGGER.warning("Web intent check failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
+            LOGGER.warning("Web intent check failed (%s)", type(exc).__name__)
             return "", None
         raw = str(answer.get("content") or "")
         start, end = raw.find("{"), raw.rfind("}")
@@ -5916,8 +6525,8 @@ class AgentRuntime:
             result = await self.kernel.execute(
                 "web_research", {"query": query, "max_sources": 3}, actor=actor
             )
-        except Exception:  # noqa: BLE001 — предварительный поиск не должен ронять ход
-            LOGGER.exception("Prefetch web search failed")
+        except Exception as exc:  # noqa: BLE001 — предварительный поиск не должен ронять ход
+            LOGGER.warning("Prefetch web search failed (%s)", type(exc).__name__)
             return
         rendered = result.to_llm_message()
         if not rendered:
@@ -6313,6 +6922,26 @@ class AgentRuntime:
                 "paths_truncated": bool(context.graph_context.get("paths_truncated"))
                 or raw_path_count > len(graph_paths),
             }
+            effective_known_at = _graph_text_for_prompt(
+                context.graph_context.get("known_at"),
+                limit=40,
+            )
+            if effective_known_at:
+                context_payload["graph_snapshot"].update(
+                    {
+                        "known_at": effective_known_at,
+                        "known_at_floor": _graph_text_for_prompt(
+                            context.graph_context.get("known_at_floor"),
+                            limit=40,
+                        ),
+                        "history_complete": context.graph_context.get("history_complete") is True,
+                        "identity_basis": (
+                            "current_names"
+                            if context.graph_context.get("identity_basis") == "current_names"
+                            else ""
+                        ),
+                    }
+                )
         # Contradiction/lifecycle/recency signals must reach the model so it can reason
         # about stale or conflicting personal knowledge instead of stating one side as fact.
         conflict_map = self._conflict_map(context.user_id, set(id_to_label))
@@ -6521,7 +7150,7 @@ class AgentRuntime:
                 )
                 return {"content": result.get("content", ""), "tools_used": []}
             except Exception as exc:
-                LOGGER.error("LLM unavailable: %s", exc)
+                LOGGER.error("LLM unavailable (%s)", type(exc).__name__)
         # `unreachable` — только когда модель ВКЛЮЧЕНА и всё же не ответила.
         # Выключенная модель — настройка человека, а не поломка связи.
         return {
@@ -6691,11 +7320,14 @@ class AgentRuntime:
                 ):
                     sent += 1
             if sent:
-                LOGGER.warning("модель молчит — владельцу отправлено предупреждение (ход %s)", user_id)
+                LOGGER.warning("модель молчит — владельцу отправлено предупреждение")
             else:
                 LOGGER.warning("модель молчит, но сказать об этом некому: нет служебного адресата")
-        except Exception:  # noqa: BLE001 — уведомление не имеет права ронять ход
-            LOGGER.warning("Не удалось предупредить владельца о молчании модели", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — уведомление не имеет права ронять ход
+            LOGGER.warning(
+                "Не удалось предупредить владельца о молчании модели (%s)",
+                type(exc).__name__,
+            )
 
     async def _answer_without_tools(
         self,
@@ -6715,8 +7347,8 @@ class AgentRuntime:
         try:
             clean = self._build_initial_messages(context, message, attachments, tool_enabled=False)
             result = await self.llm.chat(clean, tools=[])
-        except Exception:  # noqa: BLE001 — последняя ступень, падать здесь нечем
-            LOGGER.warning("Tool-free salvage failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — последняя ступень, падать здесь нечем
+            LOGGER.warning("Tool-free salvage failed (%s)", type(exc).__name__)
             return ""
         turn = classify_tool_turn(str(result.get("content") or ""))
         if turn.kind != "answer":
@@ -6770,8 +7402,8 @@ class AgentRuntime:
                 ],
                 tools=[],
             )
-        except Exception:  # noqa: BLE001 — неудачная починка не должна ронять ответ
-            LOGGER.warning("Repair pass failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — неудачная починка не должна ронять ответ
+            LOGGER.warning("Repair pass failed (%s)", type(exc).__name__)
             return ""
         text = _strip_tool_call_markup(str(fixed.get("content") or "")).strip()
         # Пустой или обрубленный результат — это не исправление: лучше оставить
@@ -6862,8 +7494,8 @@ class AgentRuntime:
             # это `verdict not parseable`, то есть «не удалось проверить», и
             # человек видел предупреждение там, где проверка на самом деле шла.
             result = await self.llm.chat(messages, temperature=0.0, max_tokens=900)
-        except Exception:
-            LOGGER.warning("answer verification failed to run", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning("answer verification failed to run (%s)", type(exc).__name__)
             return _unknown_verdict("verifier unavailable")
         return _normalize_verdict(str(result.get("content") or ""))
 
@@ -6938,8 +7570,8 @@ class AgentRuntime:
             if expected:
                 try:
                     self.storage.upsert_feedback_eval_case(user_id, mined_query, expected)
-                except Exception:
-                    LOGGER.debug("eval-case mining from feedback failed", exc_info=True)
+                except Exception as exc:
+                    LOGGER.debug("eval-case mining from feedback failed (%s)", type(exc).__name__)
         return feedback.to_row()
 
 

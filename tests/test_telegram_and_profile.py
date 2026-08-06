@@ -1096,8 +1096,10 @@ async def test_dead_lettered_update_replies_to_the_user(tmp_path, monkeypatch):
     telegram = _FakeTelegramClient()
     backend = _FakeBackendClient({})
 
+    private = "BRIDGE-DEAD-LETTER-SENTINEL-7d2e41"
+
     async def _reject(*args, **kwargs):
-        raise PermanentUpdateError("backend rejected")
+        raise PermanentUpdateError(f"backend echoed private text {private}")
 
     monkeypatch.setattr(bridge, "_process_update", _reject)
     bridge._inbox.store(
@@ -1109,6 +1111,9 @@ async def test_dead_lettered_update_replies_to_the_user(tmp_path, monkeypatch):
         assert sends and sends[-1]["chat_id"] == 5001
         assert "отклонено" in sends[-1]["text"]  # the user is told, not left silent
         assert bridge._inbox.stats()["dead_letter"] == 1
+        dead = bridge._inbox.dead_letters()[0]
+        assert dead["last_error"] == "PermanentUpdateError"
+        assert private not in json.dumps(dead, ensure_ascii=False)
     finally:
         bridge._inbox.close()
 
@@ -1122,12 +1127,14 @@ async def test_transient_update_failure_isolated_by_chat_without_reordering(tmp_
     attempts: list[int] = []
     processed: list[int] = []
 
+    private = "BRIDGE-RETRY-SENTINEL-914c3b"
+
     async def _process(*args, **kwargs):
         update = args[2]
         update_id = int(update["update_id"])
         attempts.append(update_id)
         if update_id == 602 and attempts.count(update_id) == 1:
-            raise RuntimeError("temporary backend outage")
+            raise RuntimeError(f"temporary backend echoed {private}")
         processed.append(update_id)
 
     monkeypatch.setattr(bridge, "_process_update", _process)
@@ -1146,7 +1153,10 @@ async def test_transient_update_failure_isolated_by_chat_without_reordering(tmp_
         # drain. 603 belongs to 602's chat and must not overtake it.
         assert attempts == [601, 602, 604]
         assert processed == [601, 604]
-        assert [row["update_id"] for row in bridge._inbox.pending(now=time.time() + 3600)] == [602]
+        pending = bridge._inbox.pending(now=time.time() + 3600)
+        assert [row["update_id"] for row in pending] == [602]
+        assert pending[0]["last_error"] == "RuntimeError"
+        assert private not in json.dumps(pending[0], ensure_ascii=False)
 
         # The retry delay on 602 must keep 603 blocked on the next tick as well.
         await bridge._drain_inbox(telegram, backend)

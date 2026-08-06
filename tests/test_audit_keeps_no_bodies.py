@@ -87,4 +87,5 @@ def test_the_journal_still_identifies_what_was_purged(client, settings):
     before = json.loads(row["before_json"])
     assert before["id"] == knowledge_id
     assert before["content_chars"] == len(SECRET_TEXT)
-    assert len(before["content_sha256"]) == 64  # provable identity without the text
+    assert str(before["content_ref"]).startswith("fpref_")  # keyed identity without the text
+    assert "content_sha256" not in before

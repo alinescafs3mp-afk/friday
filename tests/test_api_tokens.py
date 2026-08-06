@@ -210,7 +210,9 @@ def test_create_api_token_rejects_out_of_range_ttl(storage):
     assert ok["expires_at"] is not None
 
 
-def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(settings, tmp_path):
+def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(
+    settings, tmp_path, simulate_legacy_schema
+):
     database = tmp_path / "legacy-tokens.sqlite3"
     seed = FridayStorage(replace(settings, database_path=database))
     seed.ensure_user("leg", preset_key="user")
@@ -221,7 +223,7 @@ def test_legacy_db_without_expires_at_migrates_and_keeps_tokens_perpetual(settin
     # Simulate a pre-expires_at database (schema 14): drop the column and marker.
     raw = sqlite3.connect(database)
     raw.execute("ALTER TABLE api_tokens DROP COLUMN expires_at")
-    raw.execute("UPDATE schema_meta SET value='14' WHERE key='schema_version'")
+    simulate_legacy_schema(raw, 14)
     raw.commit()
     raw.close()
 

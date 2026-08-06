@@ -226,12 +226,20 @@ def test_delegated_admin_cannot_export_owner_archive(settings):
         # Own archive still works for the delegated admin.
         own = client.post("/api/admin/exports", headers=admin, json={"user_id": "adm_export"})
         assert own.status_code == 200, own.text
-        assert own.json()["export"]["filename"]
+        own_filename = own.json()["export"]["filename"]
+        assert own_filename
+        assert client.get(f"/api/admin/exports/{own_filename}/download", headers=admin).status_code == 200
 
         # Owner may still export themselves.
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         ok = client.post("/api/admin/exports", headers=owner, json={})
         assert ok.status_code == 200, ok.text
+        owner_filename = ok.json()["export"]["filename"]
+        refused_download = client.get(
+            f"/api/admin/exports/{owner_filename}/download",
+            headers=admin,
+        )
+        assert refused_download.status_code == 403, refused_download.text
 
 
 def test_every_admin_mutation_against_owner_is_forbidden(settings):

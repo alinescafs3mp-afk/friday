@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, TypeVar, overload
 from urllib.parse import urlparse
 
+from friday.private_fs import ensure_private_directory
+
 # Прежнее имя проекта. Переименование не должно ломать чужие запуски: у владельца
 # `FRIDAY_*` стоят в systemd-юнитах, в `.env.local` и в скриптах, и «поменяли имя —
 # перенастраивай всё заново» это не работа, а перекладывание её на человека.
@@ -1017,7 +1019,7 @@ def ensure_runtime_dirs(settings: FridaySettings) -> list[Path]:
         settings.exports_dir,
     ]
     for path in paths:
-        path.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(path)
     return paths
 
 

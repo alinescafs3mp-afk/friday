@@ -73,8 +73,11 @@ class MissionPlanner:
                 priority="background",
                 tools=[],
             )
-        except Exception:
-            LOGGER.exception("Mission planning LLM call failed; using fallback plan")
+        except Exception as exc:
+            LOGGER.error(
+                "Mission planning LLM call failed; using fallback plan (%s)",
+                type(exc).__name__,
+            )
             return self._fallback(goal)
         title, tasks = self._parse(str(result.get("content") or ""), goal)
         if not tasks:

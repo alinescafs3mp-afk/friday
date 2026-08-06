@@ -15,13 +15,19 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import signal
 import subprocess  # nosec B404 - supervising our own CLI subcommands
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from friday.private_fs import (
+    copy_private_file,
+    open_private_binary_append,
+    restrict_private_file,
+    restrict_private_tree,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -93,13 +99,17 @@ class Supervisor:
         the right one here: the alternative is piping every child through the
         supervisor, which makes a stalled supervisor able to block the backend.
         """
+        restrict_private_file(path)
         if self._log_backups:
             path.with_name(f"{path.name}.{self._log_backups}").unlink(missing_ok=True)
             for index in range(self._log_backups - 1, 0, -1):
                 generation = path.with_name(f"{path.name}.{index}")
+                if generation.is_symlink():
+                    raise ValueError("rotated log cannot be a symlink")
                 if generation.exists():
-                    generation.replace(path.with_name(f"{path.name}.{index + 1}"))
-            shutil.copyfile(path, path.with_name(f"{path.name}.1"))
+                    shifted = generation.replace(path.with_name(f"{path.name}.{index + 1}"))
+                    restrict_private_file(shifted)
+            copy_private_file(path, path.with_name(f"{path.name}.1"))
         os.truncate(path, 0)
 
     def _rotate_logs_if_needed(self) -> None:
@@ -119,17 +129,17 @@ class Supervisor:
                 continue
             try:
                 self._rotate(path)
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 # An unrotatable log must not take the supervisor down with it.
-                LOGGER.warning("Не смог провернуть лог %s: %s", path, exc)
+                LOGGER.warning("Не смог провернуть лог (%s)", type(exc).__name__)
                 continue
-            LOGGER.info("Лог %s превысил %d байт — провёрнут", path, self._log_max_bytes)
+            LOGGER.info("Лог превысил %d байт — провёрнут", self._log_max_bytes)
 
     # -- lifecycle ---------------------------------------------------------
 
     def _start(self, child: _ChildState) -> None:
-        child.spec.log_path.parent.mkdir(parents=True, exist_ok=True)
-        child.log_handle = child.spec.log_path.open("ab")
+        restrict_private_tree(child.spec.log_path.parent)
+        child.log_handle = open_private_binary_append(child.spec.log_path)
         child.process = subprocess.Popen(  # nosec B603 - fixed argv, no shell
             child.spec.argv,
             stdout=child.log_handle,
@@ -138,7 +148,7 @@ class Supervisor:
             cwd=str(child.spec.cwd) if child.spec.cwd else None,
         )
         child.started_at = time.monotonic()
-        LOGGER.info("Запущен %s (pid %s), лог: %s", child.spec.name, child.process.pid, child.spec.log_path)
+        LOGGER.info("Запущен %s (pid %s)", child.spec.name, child.process.pid)
 
     def _on_exit(self, child: _ChildState, code: int) -> None:
         lived = time.monotonic() - child.started_at
@@ -156,11 +166,10 @@ class Supervisor:
         if child.rapid_crashes >= self._max_rapid_crashes:
             child.failed = True
             LOGGER.error(
-                "%s упал %d раз подряд (код %s) — больше не перезапускаю. Смотри лог: %s",
+                "%s упал %d раз подряд (код %s) — больше не перезапускаю",
                 child.spec.name,
                 child.rapid_crashes,
                 code,
-                child.spec.log_path,
             )
             return
         child.backoff = min(self._backoff_max, child.backoff * 2 if child.backoff else self._backoff_initial)

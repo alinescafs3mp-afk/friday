@@ -30,6 +30,8 @@ from friday.admin_api._deps import (
     asyncio,
     purge_knowledge,
 )
+from friday.api.kg import _entity_audit_fingerprint, _public_container_card
+from friday.id_provenance import mark_verified_id
 from friday.mentions import mention_spans
 from friday.storage.models import EntityType
 
@@ -151,8 +153,15 @@ async def list_all_containers(request: Request, user_id: str | None = None) -> d
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.containers.read", target)
-    items = _services(request).kg.list_containers(target)
-    return {"user_id": target, "items": items, "count": len(items)}
+    raw_items = await asyncio.to_thread(_services(request).kg.list_containers, target)
+    items = [_public_container_card(item) for item in raw_items]
+    return {
+        "user_id": target,
+        "items": items,
+        "count": len(items),
+        "matched_at_least": int(getattr(raw_items, "matched_at_least", len(raw_items))),
+        "truncated": bool(getattr(raw_items, "truncated", False)),
+    }
 
 
 @router.post("/containers")
@@ -171,8 +180,15 @@ async def create_container_admin(request: Request) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit(request, "admin.container.create", "entity", container.get("id"), after=container)
-    return {"container": container}
+    public_container = _public_container_card(container)
+    _audit(
+        request,
+        "admin.container.create",
+        "entity",
+        container.get("id"),
+        after=_entity_audit_fingerprint(container),
+    )
+    return {"container": public_container}
 
 
 @router.get("/knowledge/timeline")
@@ -942,7 +958,7 @@ async def purge_knowledge_endpoint(knowledge_id: str, request: Request, user_id:
         request,
         "admin.knowledge.purge",
         "knowledge_object",
-        knowledge_id,
+        mark_verified_id(knowledge_id),
         before=_knowledge_fingerprint(before),
         after=report,
     )

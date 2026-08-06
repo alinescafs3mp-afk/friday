@@ -35,6 +35,8 @@ from friday.organs import (
     resolve_chat_id,
 )
 from friday.permissions import CapabilityDefinition
+from friday.storage._graph import _bounded_visible_timeline_event_rows
+from friday.storage._knowledge import _bounded_recent_knowledge_title_rows
 from friday.storage.models import InboxStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -49,7 +51,13 @@ REFLECTION_CAPABILITY = CapabilityDefinition(
 )
 
 
-def build_reflection(storage, user_id: str, settings=None) -> dict[str, Any]:
+def build_reflection(
+    storage,
+    user_id: str,
+    settings=None,
+    *,
+    person_id: str | None = None,
+) -> dict[str, Any]:
     """Deterministic snapshot of a tenant's knowledge state (no model needed).
 
     ``settings`` нужны ровно для одного: назвать «сегодня» тем днём, который
@@ -69,13 +77,15 @@ def build_reflection(storage, user_id: str, settings=None) -> dict[str, Any]:
     top_tags = storage.list_knowledge_tags(user_id, limit=6)
 
     today = local_now(settings).date() if settings is not None else datetime.now().astimezone().date()
-    upcoming = storage.list_events_in_range(
+    upcoming = _bounded_visible_timeline_event_rows(
+        storage,
         user_id,
+        person_id or user_id,
         start=today.isoformat(),
         end=(today + timedelta(days=7)).isoformat(),
         limit=20,
     )
-    recent = storage.list_knowledge_objects(user_id, limit=5)
+    recent = _bounded_recent_knowledge_title_rows(storage, user_id, limit=5)
 
     return {
         "knowledge_total": knowledge_total,
@@ -88,9 +98,18 @@ def build_reflection(storage, user_id: str, settings=None) -> dict[str, Any]:
             "conflicts": conflicts,
             "aging_candidates": aging,
         },
-        "top_tags": [{"tag": t["tag"], "count": t["count"]} for t in top_tags],
-        "upcoming_events": [{"name": e.get("name"), "occurred_at": e.get("occurred_at")} for e in upcoming],
-        "recent_titles": [str(k.get("title") or "Без названия") for k in recent],
+        "top_tags": [
+            {"tag": str(t.get("tag") or "")[:120], "count": max(0, int(t.get("count") or 0))}
+            for t in top_tags[:6]
+        ],
+        "upcoming_events": [
+            {
+                "name": str(e.get("name") or "")[:240],
+                "occurred_at": str(e.get("occurred_at") or "")[:64],
+            }
+            for e in upcoming[:20]
+        ],
+        "recent_titles": [str(k.get("title") or "Без названия")[:240] for k in recent[:5]],
     }
 
 
@@ -149,8 +168,8 @@ async def _synthesize_narrative(llm, digest: dict[str, Any]) -> str:
     ]
     try:
         response = await llm.chat(messages, temperature=0.4, priority="background", max_tokens=220)
-    except Exception:
-        LOGGER.warning("Reflection narrative synthesis failed", exc_info=True)
+    except Exception as exc:
+        LOGGER.warning("Reflection narrative synthesis failed (%s)", type(exc).__name__)
         return ""
     content = response.get("content") if isinstance(response, dict) else ""
     return str(content or "").strip()[:1000]
@@ -182,7 +201,12 @@ async def reflection_digest(ctx: ServiceContext) -> None:
         # участников сразу. Уходит только владельцу.
         if not is_service_recipient(settings, chat_id):
             continue
-        digest = build_reflection(ctx.storage, archive_tenant(settings, user_id), settings)
+        digest = build_reflection(
+            ctx.storage,
+            archive_tenant(settings, user_id),
+            settings,
+            person_id=user_id,
+        )
         # An almost-empty base has nothing to reflect on; do not ping it.
         if digest["knowledge_total"] < settings.reflection_min_knowledge:
             continue
@@ -206,7 +230,12 @@ def _router() -> APIRouter:
     async def get_reflection(request: Request, synthesize: bool = Query(False)) -> dict[str, Any]:
         actor = _require(request, "reflection.read")
         state = request.app.state
-        digest = build_reflection(state.storage, actor.user_id, state.settings)
+        digest = build_reflection(
+            state.storage,
+            actor.user_id,
+            state.settings,
+            person_id=actor.own_id,
+        )
         # The narrative is opt-in: a plain GET stays fast and never blocks on the
         # model unless the caller explicitly asks for synthesis.
         narrative = await _synthesize_narrative(state.llm, digest) if synthesize else ""

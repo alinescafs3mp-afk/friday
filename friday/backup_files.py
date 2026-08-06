@@ -19,10 +19,16 @@ import hashlib
 import logging
 import os
 import re
-import shutil
 import time
 from pathlib import Path
 from typing import Any
+
+from friday.private_fs import (
+    copy_private_file,
+    ensure_private_directory,
+    restrict_private_file,
+    restrict_private_tree,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,15 +72,19 @@ def backup_files_incremental(
     started = time.monotonic()
     total = copied = pending = failed = repaired = corrupt_sources = 0
     copied_bytes = 0
-    target_dir.mkdir(parents=True, exist_ok=True)
+    restrict_private_tree(target_dir)
     for source in sorted(files_dir.rglob("*")):
-        if not source.is_file():
+        if source.is_symlink() or not source.is_file():
             continue
         total += 1
         relative = source.relative_to(files_dir)
         destination = target_dir / relative
         expected = _digest_from_name(source.name)
         try:
+            ensure_private_directory(destination.parent)
+            if destination.is_symlink():
+                raise ValueError("backup destination cannot be a symlink")
+            restrict_private_file(destination)
             source_size = source.stat().st_size
             if destination.is_file() and destination.stat().st_size == source_size:
                 # Совпадение размера — не совпадение содержимого. Замерено: один
@@ -86,24 +96,23 @@ def backup_files_incremental(
                 # Проверка бесплатна: имя файла И ЕСТЬ sha256 его содержимого.
                 if expected is None or _sha256_file(destination) == expected:
                     continue
-                LOGGER.warning("Копия %s испорчена — перезаписываю из оригинала", relative)
+                LOGGER.warning("Копия файла испорчена — перезаписываю из оригинала")
                 repaired += 1
             # Испорченный ОРИГИНАЛ поверх годной копии не кладём: иначе зеркало
             # аккуратно увозит порчу и подтверждает её целостность.
             if expected is not None and _sha256_file(source) != expected:
                 corrupt_sources += 1
-                LOGGER.error("Оригинал %s не сходится со своим sha256 — копия не тронута", relative)
+                LOGGER.error("Оригинал файла не сходится со своим sha256 — копия не тронута")
                 continue
-        except OSError:
+        except (OSError, ValueError):
             failed += 1
             continue
         if time.monotonic() - started > budget_sec:
             pending += 1
             continue
         try:
-            destination.parent.mkdir(parents=True, exist_ok=True)
             staged = destination.with_name(destination.name + ".part")
-            shutil.copy2(source, staged)
+            copy_private_file(source, staged)
             if staged.stat().st_size != source_size:
                 staged.unlink(missing_ok=True)
                 failed += 1
@@ -113,13 +122,15 @@ def backup_files_incremental(
             if expected is not None and _sha256_file(staged) != expected:
                 staged.unlink(missing_ok=True)
                 failed += 1
-                LOGGER.error("Копия %s не сошлась по sha256 сразу после записи", relative)
+                LOGGER.error("Копия файла не сошлась по sha256 сразу после записи")
                 continue
             os.replace(staged, destination)
+            restrict_private_file(destination)
             copied += 1
             copied_bytes += source_size
-        except OSError:
-            LOGGER.warning("Не удалось скопировать %s в бэкап файлов", relative, exc_info=True)
+        except (OSError, ValueError) as exc:
+            staged.unlink(missing_ok=True)
+            LOGGER.warning("Не удалось скопировать файл в бэкап (%s)", type(exc).__name__)
             failed += 1
     result = {
         "enabled": True,

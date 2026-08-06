@@ -11,6 +11,7 @@ mixin split makes possible.
 from __future__ import annotations
 
 from friday.config import FridaySettings
+from friday.private_fs import restrict_private_tree
 from friday.storage._accounts import AccountsMixin
 from friday.storage._approvals import ApprovalsMixin
 from friday.storage._base import (
@@ -114,7 +115,17 @@ class FridayStorage(
 
 
 def init_storage(settings: FridaySettings) -> FridayStorage:
-    settings.state_dir.mkdir(parents=True, exist_ok=True)
-    settings.files_dir.mkdir(parents=True, exist_ok=True)
-    settings.backups_dir.mkdir(parents=True, exist_ok=True)
+    # Repair legacy nested material before any service can read or publish it.
+    # The roots alone are not sufficient: copied installations and old umask-022
+    # runs leave notes, originals, exports and rotated logs themselves at 0644.
+    for path in (
+        settings.state_dir,
+        settings.files_dir,
+        settings.backups_dir,
+        settings.exports_dir,
+        settings.memory_vault_dir,
+        settings.log_dir,
+        settings.cache_dir,
+    ):
+        restrict_private_tree(path)
     return FridayStorage(settings)

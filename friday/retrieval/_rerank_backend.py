@@ -289,9 +289,8 @@ class RerankBackend:
                 if response.status_code == 413 and len(trimmed) > 1:
                     detail = " ".join(response.text.split())[:200]
                     LOGGER.warning(
-                        "rerank request too large for %d documents (service said: %s); splitting",
+                        "rerank request too large for %d documents; splitting",
                         len(trimmed),
-                        detail,
                     )
                     # Предел запоминается, если служба его назвала: следующий поиск
                     # пойдёт сразу партиями и лишнего обращения не сделает.
@@ -314,15 +313,14 @@ class RerankBackend:
                         for marker in ("context length", "too long", "maximum context", "input length")
                     ):
                         LOGGER.warning(
-                            "rerank request over the context limit for %d documents (service said: %s); splitting",
+                            "rerank request over the context limit for %d documents; splitting",
                             len(trimmed),
-                            detail[:200],
                         )
                         return await self._halve(query, trimmed, _deadline)
                 response.raise_for_status()
                 body = response.json()
         except Exception as exc:  # noqa: BLE001
-            LOGGER.info("rerank backend unavailable: %s", exc)
+            LOGGER.info("rerank backend unavailable (%s)", type(exc).__name__)
             return None
 
         results = body.get("results") if isinstance(body, dict) else None

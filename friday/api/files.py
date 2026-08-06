@@ -10,9 +10,17 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
-from friday.api.deps import _audit, _json_load, _require, _safe_owned_file
+from friday.api.deps import _audit, _json_load, _require
+from friday.file_delivery import (
+    AuthorizedFileReadError,
+    FileRecordUnavailable,
+    attachment_content_disposition,
+    read_authorized_file,
+)
+from friday.storage._privacy import _not_private_raw_dependency
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -53,10 +61,11 @@ async def list_files(
 ) -> dict[str, Any]:
     actor = _require(request, "files.read")
     rows = request.app.state.storage.execute(
-        """SELECT id, source_ref, metadata_json, received_at, deleted_at
-           FROM raw_objects
-           WHERE user_id=? AND content_type='file' AND deleted_at IS NULL
-           ORDER BY received_at DESC LIMIT ?""",
+        f"""SELECT r.id, r.source_ref, r.metadata_json, r.received_at, r.deleted_at
+           FROM raw_objects r
+           WHERE r.user_id=? AND r.content_type='file' AND r.deleted_at IS NULL
+             AND {_not_private_raw_dependency("r")}
+           ORDER BY r.received_at DESC LIMIT ?""",  # nosec B608
         (actor.user_id, limit),
     ).fetchall()
     items = []
@@ -71,17 +80,26 @@ async def list_files(
 async def download_file(raw_id: str, request: Request):
     actor = _require(request, "files.read")
     state = request.app.state
-    raw = state.storage.get_raw_object(raw_id, actor.user_id)
-    if not raw or raw.get("content_type") != "file" or raw.get("deleted_at"):
-        raise HTTPException(status_code=404, detail="Файл не найден")
-    metadata = _json_load(raw.get("metadata_json"), {})
-    path = _safe_owned_file(state.settings.files_dir, str(metadata.get("stored_path") or ""))
+    try:
+        stored = await run_in_threadpool(
+            read_authorized_file,
+            state.storage,
+            state.settings.files_dir,
+            raw_id,
+            actor.user_id,
+        )
+    except (FileRecordUnavailable, AuthorizedFileReadError):
+        raise HTTPException(status_code=404, detail="Файл не найден") from None
     # File bytes leaving the system are always audited.
     _audit(
         request,
         "file.download",
         "raw_object",
         raw_id,
-        after={"filename": str(metadata.get("filename") or "")},
+        after={"filename": stored.filename},
     )
-    return FileResponse(path, filename=str(metadata.get("filename") or path.name))
+    return Response(
+        content=stored.content,
+        media_type=stored.mime_type,
+        headers={"Content-Disposition": attachment_content_disposition(stored.filename)},
+    )

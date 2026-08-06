@@ -327,6 +327,6 @@ async def direct_answers(query: str, client: httpx.AsyncClient) -> list[dict[str
             weather = await _weather(client, place, query)
             if weather:
                 answers.append(weather)
-    except Exception:  # noqa: BLE001 — прямой источник не должен мешать обычному поиску
-        LOGGER.warning("Прямой источник данных не ответил", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — прямой источник не должен мешать обычному поиску
+        LOGGER.warning("Прямой источник данных не ответил (%s)", type(exc).__name__)
     return [answer.as_source() for answer in answers]

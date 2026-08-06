@@ -17,6 +17,10 @@ from friday.storage._base import (
     utc_now,
 )
 from friday.storage._knowledge import _fts_terms
+from friday.storage._privacy import (
+    _not_private_knowledge_dependency,
+    _not_private_raw_dependency,
+)
 
 
 class ConversationsMixin(StorageShared):
@@ -565,11 +569,14 @@ class ConversationsMixin(StorageShared):
                 }
             )
         for row in self.execute(
-            """SELECT k.id, k.title, k.content_type, k.created_at, k.summary, r.source, r.source_ref
-               FROM knowledge_objects k LEFT JOIN raw_objects r ON r.id = k.raw_object_id
+            f"""SELECT k.id, k.title, k.content_type, k.created_at, k.summary, r.source, r.source_ref
+               FROM knowledge_objects k
+               JOIN raw_objects r ON r.id = k.raw_object_id AND r.user_id=k.user_id
+                    AND {_not_private_raw_dependency("r")}
                WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
                  AND k.created_at >= ? AND k.created_at <= ?
-               ORDER BY k.created_at ASC LIMIT ?""",
+               ORDER BY k.created_at ASC LIMIT ?""",  # nosec B608
             (user_id, since, until, fetch_window),
         ):
             events.append(
@@ -627,8 +634,12 @@ class ConversationsMixin(StorageShared):
             (person_id or user_id, since, until),
         ).fetchone()["c"]
         documents = self.execute(
-            """SELECT COUNT(*) AS c FROM knowledge_objects
-               WHERE user_id=? AND deleted_at IS NULL AND created_at >= ? AND created_at <= ?""",
+            f"""SELECT COUNT(*) AS c FROM knowledge_objects k
+               JOIN raw_objects r ON r.id=k.raw_object_id AND r.user_id=k.user_id
+                    AND {_not_private_raw_dependency("r")}
+               WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
+                 AND k.created_at >= ? AND k.created_at <= ?""",  # nosec B608
             (user_id, since, until),
         ).fetchone()["c"]
         return {

@@ -13,6 +13,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, cast
 
+from friday.private_fs import ensure_private_directory, restrict_private_descriptor
+
 _OWNED_LEASES: set[tuple[str, str]] = set()
 _OWNED_LEASES_LOCK = threading.Lock()
 
@@ -167,7 +169,7 @@ class ProcessLease:
         with self._mutex:
             if self._descriptor is not None:
                 return
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            ensure_private_directory(self.path.parent)
             anchor = self._acquire_linux_anchor()
             if self.path.is_symlink():
                 if anchor is not None:
@@ -183,6 +185,10 @@ class ProcessLease:
                     anchor.close()
                 raise
             try:
+                # ``mode`` only applies when O_CREAT wins.  Repair an existing
+                # pre-policy lease through the already no-follow descriptor
+                # before metadata containing host/pid information is rewritten.
+                restrict_private_descriptor(descriptor)
                 self._lock_descriptor(descriptor)
                 metadata = (
                     json.dumps(

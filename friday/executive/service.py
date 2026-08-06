@@ -339,11 +339,7 @@ class ExecutiveService:
 
             chat_id = resolve_chat_id(self.storage, person)
             if not chat_id:
-                LOGGER.info(
-                    "mission-notify: у %r нет чата — миссия %s останется незамеченной",
-                    person,
-                    mission_id,
-                )
+                LOGGER.info("mission-notify: нет чата — миссия останется незамеченной")
                 return
             if not may_push_to(self.settings, self.storage, person, chat_id):
                 return
@@ -359,8 +355,8 @@ class ExecutiveService:
                 kind="mission",
                 dedup_key=f"mission:{mission_id}",
             )
-        except Exception:  # noqa: BLE001 — недоставленное уведомление не отменяет миссию
-            LOGGER.warning("Could not queue a mission notification", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — недоставленное уведомление не отменяет миссию
+            LOGGER.warning("Could not queue a mission notification (%s)", type(exc).__name__)
 
     def _person_behind(self, created_by: str, user_id: str) -> str:
         """Кому писать о ждущей миссии. `created_by` — не всегда человек.
@@ -523,8 +519,8 @@ class ExecutiveService:
             try:
                 if await self._advance_mission(mission):
                     ran += 1
-            except Exception:
-                LOGGER.exception("Mission tick failed for %s", mission.get("id"))
+            except Exception as exc:
+                LOGGER.error("Mission tick failed (%s)", type(exc).__name__)
         return {"ran": ran, "active": len(active)}
 
     def _reconcile_uncertain(self, mission: dict[str, Any]) -> int:
@@ -552,11 +548,11 @@ class ExecutiveService:
                 continue
             try:
                 happened, detail = verifier(self.storage, mission["user_id"], arguments)
-            except Exception:  # noqa: BLE001 — сверка не должна ронять тик
-                LOGGER.exception("Reconciliation failed for mission task %s", task["id"])
+            except Exception as exc:  # noqa: BLE001 — сверка не должна ронять тик
+                LOGGER.error("Reconciliation failed for mission task (%s)", type(exc).__name__)
                 continue
             if happened:
-                LOGGER.info("Reconciled mission task %s: the effect did happen", task["id"])
+                LOGGER.info("Reconciled mission task: the effect did happen")
                 self.storage.update_mission_task_fields(
                     task["id"],
                     mission["user_id"],
@@ -566,7 +562,7 @@ class ExecutiveService:
                     completed_at=utc_now(),
                 )
             else:
-                LOGGER.info("Reconciled mission task %s: the effect did not happen", task["id"])
+                LOGGER.info("Reconciled mission task: the effect did not happen")
                 self.storage.update_mission_task_fields(
                     task["id"],
                     mission["user_id"],
@@ -626,8 +622,8 @@ class ExecutiveService:
                 requested_by="executive",
                 mission_id=mission["id"],
             )
-        except Exception:  # noqa: BLE001 — не сумели предложить откат, но шаг уже помечен
-            LOGGER.exception("Could not offer compensation for mission task %s", task["id"])
+        except Exception as exc:  # noqa: BLE001 — не сумели предложить откат, но шаг уже помечен
+            LOGGER.error("Could not offer compensation for mission task (%s)", type(exc).__name__)
 
     @staticmethod
     def _budget_verdict(mission: dict[str, Any]) -> str:
@@ -698,10 +694,7 @@ class ExecutiveService:
                 # side effects require reconciliation, not automatic replay».
                 # Слепой повтор здесь означал бы второе письмо, второе слияние,
                 # второй перевод — то, что откатить уже нельзя.
-                LOGGER.warning(
-                    "Mission step with a side effect was interrupted; marking uncertain: %s",
-                    task["id"],
-                )
+                LOGGER.warning("Mission step with a side effect was interrupted; marking uncertain")
                 self.storage.update_mission_task_fields(
                     task["id"],
                     mission["user_id"],
@@ -711,11 +704,7 @@ class ExecutiveService:
                 self._offer_compensation(mission, task)
                 reclaimed += 1
                 continue
-            LOGGER.warning(
-                "Mission task stuck in running since %s — returning it to pending: %s",
-                started or "unknown",
-                task["id"],
-            )
+            LOGGER.warning("Mission task stuck in running — returning it to pending")
             self.storage.update_mission_task_fields(
                 task["id"], mission["user_id"], status=TaskStatus.PENDING.value, started_at=""
             )
@@ -731,7 +720,7 @@ class ExecutiveService:
             # ЗДЕСЬ, перед выбором шага, а не внутри инструмента: иначе миссия,
             # у которой кончилось время, всё равно сделает ещё один шаг — и
             # именно он может оказаться с побочным эффектом.
-            LOGGER.warning("Mission %s stopped: %s", mission_id, exhausted)
+            LOGGER.warning("Mission stopped by its enforced budget")
             self.storage.update_mission_fields(
                 mission_id,
                 user_id,
@@ -829,7 +818,7 @@ class ExecutiveService:
         except MissionStepUnavailable as exc:
             # Named separately from a crash so the operator can tell "the model was
             # down" from "the step is broken" without opening the logs.
-            LOGGER.warning("Mission task could not run: %s (%s)", task_id, exc)
+            LOGGER.warning("Mission task could not run (%s)", type(exc).__name__)
             self.storage.add_mission_spend(
                 mission["id"], user_id, seconds=time.monotonic() - began, retries=1
             )
@@ -841,8 +830,8 @@ class ExecutiveService:
                 completed_at=utc_now(),
             )
             return
-        except Exception:
-            LOGGER.exception("Mission task execution failed: %s", task_id)
+        except Exception as exc:
+            LOGGER.error("Mission task execution failed (%s)", type(exc).__name__)
             self.storage.add_mission_spend(
                 mission["id"], user_id, seconds=time.monotonic() - began, retries=1
             )
@@ -871,7 +860,7 @@ class ExecutiveService:
             # `_finalize` can act on.
             previous_error = str(task.get("error") or "")
             if previous_error.startswith(_INTERRUPTED_MARKER):
-                LOGGER.warning("Mission task interrupted twice, failing it: %s", task_id)
+                LOGGER.warning("Mission task interrupted twice, failing it")
                 with suppress(Exception):
                     self.storage.update_mission_task_fields(
                         task_id,
@@ -881,7 +870,7 @@ class ExecutiveService:
                         completed_at=utc_now(),
                     )
                 raise
-            LOGGER.warning("Mission task interrupted, returning it to pending: %s", task_id)
+            LOGGER.warning("Mission task interrupted, returning it to pending")
             with suppress(Exception):
                 self.storage.update_mission_task_fields(
                     task_id,
@@ -900,11 +889,7 @@ class ExecutiveService:
         # to mean stop; the work that was already done is simply dropped.
         current = self.storage.get_mission(mission["id"], user_id)
         if current and current["status"] in {item.value for item in MISSION_TERMINAL_STATUSES}:
-            LOGGER.info(
-                "Mission %s ended while step %s was running; discarding its result",
-                mission["id"],
-                task_id,
-            )
+            LOGGER.info("Mission ended while a step was running; discarding its result")
             return
 
         inbox_id: str | None = None
@@ -959,12 +944,12 @@ class ExecutiveService:
             # Поэтому здесь ищется то, что уже записано, и возвращается ОНО. Если
             # не нашлось — значит конфликт не про наш ключ, и тогда честнее вернуть
             # пустоту, чем выдумать идентификатор.
-            LOGGER.warning("Mission task inbox candidate conflicted for %s", source_ref)
+            LOGGER.warning("Mission task inbox candidate conflicted")
             existing = self.storage.find_raw_by_source_ref(mission["user_id"], "knowledge_work", source_ref)
             if existing:
                 waiting = self.storage.find_inbox_by_raw(str(existing["id"]), mission["user_id"])
                 if waiting:
-                    LOGGER.info("Mission task %s already delivered its result to the inbox", source_ref)
+                    LOGGER.info("Mission task already delivered its result to the inbox")
                     return str(waiting.get("id") or "") or None
             return None
         inbox_id = result.get("inbox_id")
@@ -1031,8 +1016,8 @@ class ExecutiveService:
                 break
             try:
                 result = await self.llm.chat(messages, tools=tools, priority="background")
-            except Exception:
-                LOGGER.exception("Mission tool loop LLM call failed")
+            except Exception as exc:
+                LOGGER.error("Mission tool loop LLM call failed (%s)", type(exc).__name__)
                 break
             calls, assistant_content, turn = self._classify(result)
             if turn.kind == "answer":
@@ -1057,7 +1042,7 @@ class ExecutiveService:
                     # предусмотренного выхода (Inbox, один раз, руками
                     # исполнителя). Спека v3 §5: модель предлагает, служба
                     # авторизует и исполняет.
-                    LOGGER.warning("mission step proposed a tool outside GATHER_TOOLS: %s", call.name)
+                    LOGGER.warning("mission step proposed a tool outside GATHER_TOOLS")
                     messages.append(
                         {
                             "role": "tool",
@@ -1130,7 +1115,7 @@ class ExecutiveService:
             if final_turn.kind == "answer" and final_turn.text:
                 return final_turn.text.strip(), tools_used
         except Exception as exc:
-            LOGGER.exception("Mission final synthesis failed")
+            LOGGER.error("Mission final synthesis failed (%s)", type(exc).__name__)
             raise MissionStepUnavailable("final synthesis failed") from exc
         # Reached when the model answered but produced nothing usable. Still a
         # failure of the step, not a result: returning prose here is what made a
@@ -1266,8 +1251,8 @@ class ExecutiveService:
                     after_json=after,
                 )
             )
-        except Exception:
-            LOGGER.exception("Failed to record mission audit entry")
+        except Exception as exc:
+            LOGGER.error("Failed to record mission audit entry (%s)", type(exc).__name__)
 
 
 def _load_int_list(value: object) -> list[int]:

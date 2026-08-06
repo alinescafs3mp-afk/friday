@@ -94,7 +94,7 @@ def live_admin(settings, tmp_path):
 
 
 def test_the_activity_screen_works_in_a_browser(live_admin):
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import expect, sync_playwright
 
     problems: list[str] = []
     with sync_playwright() as play:
@@ -114,7 +114,12 @@ def test_the_activity_screen_works_in_a_browser(live_admin):
         nav = page.locator("#nav button", has_text="Активность")
         assert nav.count() == 1, "the Активность entry is not in the sidebar"
         nav.click()
-        page.wait_for_timeout(900)
+        # The activity request includes four explicitly requested analyses.  A
+        # fixed sub-second sleep raced that real request under a saturated gate
+        # and inspected the intermediate «Загрузка…» card.  Wait for the product
+        # state itself; this still fails if the endpoint or renderer never lands.
+        expect(page.locator("#activityName")).to_be_visible(timeout=5_000)
+        expect(page.locator("#app")).to_contain_text("Поступлений", timeout=5_000)
         assert page.locator("#pageTitle").inner_text() == "Активность"
 
         # `.stat .label` is uppercased by CSS, so compare case-insensitively.
@@ -126,7 +131,7 @@ def test_the_activity_screen_works_in_a_browser(live_admin):
         # The name box: an inflected Cyrillic spelling has to reach the account.
         page.fill("#activityName", "Ивану")
         page.dispatch_event("#activityName", "change")
-        page.wait_for_timeout(900)
+        expect(page.locator("#app")).to_contain_text("Иван", timeout=5_000)
         body = page.locator("#app").inner_text()
         if "Иван" not in body:
             problems.append("«Ивану» did not resolve to the account")
@@ -148,7 +153,7 @@ def test_the_activity_screen_works_in_a_browser(live_admin):
             page.locator("#modal .dialog-head button").click()
 
         page.locator("#app button", has_text="7 дней").first.click()
-        page.wait_for_timeout(800)
+        expect(page.locator("#app")).to_contain_text("Поступлений", timeout=5_000)
         if "поступлений" not in page.locator("#app").inner_text().casefold():
             problems.append("the period filter broke the screen")
 

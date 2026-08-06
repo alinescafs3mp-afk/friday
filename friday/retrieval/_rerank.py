@@ -159,7 +159,7 @@ async def rerank(
             tools=[],
         )
     except Exception as exc:  # noqa: BLE001
-        LOGGER.info("rerank skipped: %s", exc)
+        LOGGER.info("rerank skipped (%s)", type(exc).__name__)
         return None
 
     order = parse_order(str(response.get("content") or ""), len(items))

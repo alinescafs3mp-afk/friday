@@ -100,6 +100,76 @@ def test_an_ordinary_error_does_not_trigger_backoff(settings, monkeypatch):
     assert backend.cooling_down is False
 
 
+def test_embedding_failure_log_does_not_echo_exception_or_input(
+    settings,
+    monkeypatch,
+    caplog,
+):
+    secret = "SYNTHETIC_EMBEDDING_EXCEPTION_SENTINEL_" + "e" * 5_000
+    backend, _ = _backend(settings, monkeypatch, raises=ValueError(secret))
+
+    with caplog.at_level("WARNING", logger="friday.retrieval"):
+        assert asyncio.run(backend.embed([secret])) is None
+
+    assert caplog.records
+    assert all(secret not in record.getMessage() for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_embedding_length_refusal_log_does_not_echo_backend_response(
+    settings,
+    monkeypatch,
+    caplog,
+):
+    import dataclasses
+
+    secret = "SYNTHETIC_EMBEDDING_RESPONSE_SENTINEL_" + "r" * 5_000
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://embeddings.invalid/v1",
+        embeddings_model="test-model",
+    )
+    calls = 0
+
+    class _Response:
+        headers: dict[str, str] = {}
+
+        def __init__(self, inputs: list[str]) -> None:
+            nonlocal calls
+            calls += 1
+            self.status_code = 400 if calls == 1 else 200
+            self.text = (
+                f'{{"error":{{"message":"an input exceeds the 8192-token limit; echo={secret}"}}}}'
+                if calls == 1
+                else ""
+            )
+            self._inputs = inputs
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict:
+            return {"data": [{"embedding": [0.1, 0.2]} for _ in self._inputs]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None: ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None: ...
+
+        async def post(self, *args, **kwargs):
+            return _Response(list(kwargs["json"]["input"]))
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    with caplog.at_level("WARNING", logger="friday.retrieval"):
+        assert asyncio.run(EmbeddingBackend(tuned).embed([secret])) is not None
+
+    assert calls == 2
+    assert all(secret not in record.getMessage() for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)
+
+
 def test_the_pause_grows_while_refusals_continue(settings, monkeypatch):
     backend, _ = _backend(settings, monkeypatch, status=503)
     waits = []

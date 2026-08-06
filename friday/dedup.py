@@ -651,8 +651,7 @@ def detect_near_duplicates(
         at_entry = storage.count_user_vectors(user_id, model, before=entry_watermark)
         if state.swept_below is not None and at_entry > state.swept_below:
             LOGGER.info(
-                "Near-duplicate scan for %s found %d row(s) below the watermark; reopening backfill",
-                user_id,
+                "Near-duplicate scan found %d row(s) below the watermark; reopening backfill",
                 at_entry - state.swept_below,
             )
             state = replace(state, backfill=None, backfill_done=False, swept_below=None)
@@ -668,8 +667,7 @@ def detect_near_duplicates(
         # Distinguishable from "nothing to do": a run that burned its whole budget and
         # advanced nothing is a stall, not a quiet success.
         LOGGER.warning(
-            "Near-duplicate scan for %s made no progress within its budget (%d object(s) pending)",
-            user_id,
+            "Near-duplicate scan made no progress within its budget (%d object(s) pending)",
             pending,
         )
     if threshold is None:

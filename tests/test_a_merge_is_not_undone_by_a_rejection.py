@@ -31,8 +31,8 @@ from friday.storage.models import (
 )
 
 
-def _entity(storage, name: str) -> Entity:
-    made = Entity(id=new_id("ent"), user_id="alice", name=name, entity_type=EntityType.PERSON)
+def _entity(storage, name: str, entity_type: EntityType = EntityType.PERSON) -> Entity:
+    made = Entity(id=new_id("ent"), user_id="alice", name=name, entity_type=entity_type)
     storage.create_entity(made)
     return made
 
@@ -96,7 +96,10 @@ def test_a_rejected_pair_can_still_be_merged_later(storage) -> None:
 def test_a_merge_carries_the_event_time_to_the_target(storage) -> None:
     """Мутация: убрать перенос — дата события снова остаётся на мёртвом узле."""
     storage.ensure_user("alice")
-    target, source = _entity(storage, "Совещание"), _entity(storage, "Совещание по поверке")
+    target, source = (
+        _entity(storage, "Совещание", EntityType.EVENT),
+        _entity(storage, "Совещание по поверке", EntityType.EVENT),
+    )
     storage.set_entity_time(source.id, "alice", "2026-08-12")
 
     merged = storage.merge_entities("alice", source.id, target.id)
@@ -119,7 +122,10 @@ def test_the_targets_own_time_wins(storage) -> None:
     подтверждённую дату на дату дубликата хуже, чем потерять дату дубликата.
     """
     storage.ensure_user("alice")
-    target, source = _entity(storage, "Совещание"), _entity(storage, "Совещание (копия)")
+    target, source = (
+        _entity(storage, "Совещание", EntityType.EVENT),
+        _entity(storage, "Совещание (копия)", EntityType.EVENT),
+    )
     storage.set_entity_time(target.id, "alice", "2026-08-12")
     storage.set_entity_time(source.id, "alice", "2026-09-30")
 
@@ -137,7 +143,10 @@ def test_the_transfer_is_recorded_for_the_undo(storage) -> None:
     import json
 
     storage.ensure_user("alice")
-    target, source = _entity(storage, "Приёмка"), _entity(storage, "Приёмка работ")
+    target, source = (
+        _entity(storage, "Приёмка", EntityType.EVENT),
+        _entity(storage, "Приёмка работ", EntityType.EVENT),
+    )
     storage.set_entity_time(source.id, "alice", "2026-08-20")
 
     merged = storage.merge_entities("alice", source.id, target.id)

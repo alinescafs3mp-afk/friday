@@ -154,13 +154,22 @@ async def test_graph_evolution_is_useful_but_review_only(settings, storage):
 def test_feedback_state_replaces_rating_and_updates_usage_attribution(storage):
     ko = _store_knowledge(storage, "alice", "Atlas uses PostgreSQL.", title="Atlas stack")
     context = {"knowledge_object_ids": [ko["id"]], "interaction_mode": "knowledge_work"}
+    conversation = storage.create_conversation("alice", "feedback target")
+    message = storage.store_message(
+        conversation["id"],
+        "alice",
+        "assistant",
+        "Atlas answer",
+        metadata={"knowledge_object_ids": [ko["id"]]},
+    )
+    message_id = str(message["id"])
 
     storage.store_feedback(
         FeedbackItem(
             id=new_id("feedback"),
             user_id="alice",
             target_type="answer",
-            target_id="msg-1",
+            target_id=message_id,
             feedback_type=FeedbackType.ANSWER_USEFULNESS,
             score=1.0,
             context_json=context,
@@ -175,7 +184,7 @@ def test_feedback_state_replaces_rating_and_updates_usage_attribution(storage):
             id=new_id("feedback"),
             user_id="alice",
             target_type="answer",
-            target_id="msg-1",
+            target_id=message_id,
             feedback_type=FeedbackType.ANSWER_USEFULNESS,
             score=-1.0,
             context_json=context,
@@ -184,12 +193,12 @@ def test_feedback_state_replaces_rating_and_updates_usage_attribution(storage):
     state = storage.get_feedback_state(
         "alice",
         target_type="answer",
-        target_id="msg-1",
+        target_id=message_id,
         feedback_type=FeedbackType.ANSWER_USEFULNESS.value,
     )
     assert len(state) == 1
     assert state[0]["score"] == -1.0
-    assert len(storage.get_feedback_for_target("alice", "answer", "msg-1")) == 2
+    assert len(storage.get_feedback_for_target("alice", "answer", message_id)) == 2
     usage = storage.get_knowledge_usage("alice", [ko["id"]])[ko["id"]]
     assert usage["positive_feedback_count"] == 0
     assert usage["negative_feedback_count"] == 1
@@ -202,12 +211,23 @@ async def test_repeated_rejections_only_downgrade_future_automatic_promotion(set
     baseline = pipeline.assess_text(sample)
     assert baseline.action == "promote"
     for index in range(3):
+        raw_id = f"raw-rejected-{index}"
+        storage.store_raw_object(
+            RawObject(
+                id=raw_id,
+                user_id="alice",
+                source="test",
+                source_ref=f"feedback-calibration-{index}",
+                raw_content=f"rejected calibration sample {index}",
+                content_type="text",
+            )
+        )
         storage.store_feedback(
             FeedbackItem(
                 id=new_id("feedback"),
                 user_id="alice",
                 target_type="classification",
-                target_id=f"raw-rejected-{index}",
+                target_id=raw_id,
                 feedback_type=FeedbackType.CLASSIFICATION,
                 score=-1.0,
                 context_json={
@@ -275,7 +295,7 @@ def test_conversation_modes_and_lifecycle_candidates_are_persistent_and_safe(sto
     # каждого, кто меняет схему, назвать номер вслух. Забытый номер стоил
     # 2026-08-04 пятиминутной поломки живого маршрута: столбец добавили, а
     # миграция без нового номера не запускается.
-    assert SCHEMA_VERSION == 30
+    assert SCHEMA_VERSION == 32
     conversation = storage.create_conversation("alice", "Research", mode="research")
     assert conversation["mode"] == "research"
     storage.set_channel_conversation(
@@ -389,15 +409,49 @@ async def test_bounded_local_vision_creates_advisory_inbox_item(settings, storag
     assert all(float(item["confidence"]) <= 0.79 for item in suggestions["entities"])
 
 
+@pytest.mark.asyncio
+async def test_vision_exception_text_is_not_persisted_or_returned(settings, storage):
+    private = "VISION-EXCEPTION-SENTINEL-51ec2a"
+
+    class FailingVisionLLM:
+        enabled = True
+        model = "synthetic-vision"
+
+        async def chat(self, _messages, **_kwargs):
+            raise RuntimeError(f"private model detail {private}")
+
+    image = Image.new("RGB", (64, 64), "white")
+    data = BytesIO()
+    image.save(data, format="PNG")
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), FailingVisionLLM())
+    result = await pipeline.ingest_file(
+        "alice",
+        None,
+        data.getvalue(),
+        filename="synthetic-private-error.png",
+        mime_type="image/png",
+        source_ref="vision:synthetic-private-error",
+    )
+
+    encoded_result = json.dumps(result, ensure_ascii=False)
+    assert private not in encoded_result
+    vision = result["extraction"]["vision"]
+    assert vision["error"] == "vision_request_failed:RuntimeError"
+    raw = storage.get_raw_object(result["raw_object_id"], "alice")
+    assert private not in json.dumps(raw, ensure_ascii=False)
+
+
 def test_current_feedback_stats_replace_superseded_signal(storage):
     storage.ensure_user("alice")
+    conversation = storage.create_conversation("alice", "feedback stats target")
+    message = storage.store_message(conversation["id"], "alice", "assistant", "answer")
     for score in (1.0, -1.0):
         storage.store_feedback(
             FeedbackItem(
                 id=new_id("fb"),
                 user_id="alice",
                 target_type="answer",
-                target_id="answer-1",
+                target_id=str(message["id"]),
                 feedback_type=FeedbackType.ANSWER_USEFULNESS,
                 score=score,
             )

@@ -1,3 +1,173 @@
+## 0.154.0 — 2026-08-06
+
+### Relation history получает честную миграцию 31 → 32
+
+Первый развёрнутый вариант schema 31 уже хранил append-only revisions и immutable
+completeness floor, но ещё не имел durable `observed_at`, защиты singleton context
+и guards от `INSERT/UPDATE OR REPLACE`. Усиленный контракт нельзя выпускать под тем
+же marker: current-schema validator справедливо принял бы старое штатное DDL за
+tampering. Поэтому schema 32 принимает только точный SHA-256 fingerprint известного
+предшественника, до любого DDL проверяет floor, context, timestamps, batch/event
+порядок и bidirectional current↔latest lineage, а затем в одном `BEGIN IMMEDIATE`
+заменяет только проверенные triggers/context. `relation_revisions`, `event_seq`,
+floor и snapshots не переписываются; новый `observed_at` равен максимуму всей
+существующей relation/identity time authority. Перед публикацией marker 32 полный
+v32-контракт доказывается повторно, поэтому любой сбой возвращает старую schema 31
+целиком. Миграционная цепочка теперь содержит отдельные полностью синтетические
+fixtures 31 и 32; из проверенной ранней копии для fixture 31 читается только DDL,
+ни одна пользовательская строка не переносится.
+
+Тот же fail-closed контракт теперь включает полную conflict surface SQLite:
+точную форму `uq_active_relation`, implicit UNIQUE/PK indexes и отсутствие любых
+дополнительных UNIQUE на `relations`, revisions, floor/meta и context. Иначе
+подложенный индекс меняет семантику `INSERT OR REPLACE`: при выключенных
+`recursive_triggers` он способен вытеснить другую authoritative строку мимо
+DELETE-guard. Неизвестные имена и выражения в startup-ошибку не копируются —
+публикуется только число лишних indexes. Проверка идёт до DDL и покрыта отдельными
+no-mutation/mutation-proof тестами для schema 31 и 32.
+
+### Личное напоминание больше не становится общим знанием
+
+Shared archive получил отдельную person-scoped privacy authority
+`private_entity_owners`. Напоминание, точное расписание и marker создаются одной
+транзакцией; legacy provenance мигрируется fail-closed через merge lineage. Все
+generic graph/retrieval/model/organ/API/admin readers и mutations исключают не
+только саму сущность, но и её транзитивные зависимости: current Raw/Knowledge
+Objects, Inbox, entity cards, packed history, links/relations/candidates/
+resolutions/merges, feedback/eval/usage, notifications и diagnostics. Копии ID,
+current и authenticated historical имён/алиасов ищутся в bounded decoded JSON и
+тексте после Unicode NFC → casefold → NFC. Legacy alias containers разворачиваются
+рекурсивно в жёстком byte/node budget; malformed/oversized current или history
+material сам становится quarantine seed, а не доказательством public.
+
+Транзитивное A→B→C замыкание не пересчитывается на каждой строке выдачи. Sparse
+entity cache/work хранит только quarantined IDs, а отдельная ID-only authority —
+тройки `(kind, object_id, user_id)` видимых Raw/Knowledge/Inbox и bounded helper
+для скрытых Knowledge IDs. Оба singleton state становятся valid лишь при точном
+равенстве своих cache/work; authority не создаёт дополнительных копий identity
+или content text — inspection идёт из канонических source rows через
+connection-local TEMP views. Persistent-схема остаётся
+UDF-free: guards над entity/owner/reminder-time/version и
+Raw/Knowledge/link/Inbox атомарно инвалидируют нужную authority даже для внешнего
+raw SQLite writer. Managed TEMP AFTER triggers обновляют один ID для обычного
+insert/non-flipping update, а при распространении privacy выполняют точный общий
+rebuild в той же transaction; внешний writer остаётся invalid до проверенного
+heal новым соединением. Per-connection SQLite authorizer запрещает caller-у прямой
+DML над обоими cache/work/state, protected DDL и `writable_schema`, разрешая
+derivative writes только code-owned triggers; startup дополнительно требует обе
+пары `cache == live`. Поэтому rollback и параллельный WAL-reader не видят
+половинчатую privacy-классификацию, а offline `ALTER TABLE` не зависит от
+отсутствующего application UDF.
+
+Отклонённый recursive view на каждом reader занимал 14–37 секунд. У финальной
+authority worst-case стенд 4 500 сущностей / 1 500 Knowledge Objects измерил
+`7.648 s` для commit, поздно расширяющего длинное dependency closure, и `22.080 s`
+для cold reopen с полным rebuild/validation. После него person-timeline и точный
+count читают готовый cache за `35.7 ms` median (`11.9 ms` при 1 500 сущностях), не
+строя fixed point на каждого человека. Отдельный realistic sparse-стенд 4 500
+entities / 1 500 Raw+KO+Inbox / 15 private seeds после ID-authority дал: Raw point
+`464.6 → 0.074 ms`, Raw search20 `>11.3 s → 151 ms`, Inbox list/count
+`>4.3 s → 0.96/0.41 ms`, graph overview `396 → 5.2 ms`; cold exact rebuild занял
+`1.52–1.57 s`, обычный полный ingest — `27 ms`, пакет 100 — `0.996 s`. Ни один
+горячий Raw/KO/Inbox plan не материализует identity view и не вызывает identity
+UDF; две authority-копии добавили около `464 KiB`. Честным P1 остаётся только
+редкий pathological closure write/cold start: ослаблять fail-closed ради этой
+задержки нельзя.
+
+Person export теперь снимает одну SQLite snapshot и строит отдельный fixed point от
+всех запрещённых direct-private seeds, исключая только точное непротиворечивое
+сочетание marker/time/source экспортирующего человека. Поэтому зависимости,
+возникшие только из его напоминания, остаются в его архиве, а foreign, ambiguous,
+malformed и транзитивно производный от них material исключается вместе с history.
+Download повторно проверяет владельца и отдаёт private byte snapshot вместо
+отложенного чтения изменяемого пути. Runtime/backups/exports/vault directories
+закрыты `0700`, SQLite/WAL/SHM/bridge/manifests/data — `0600` уже до первого
+открытия при обычном `umask 022`. Существующие автономные backup/export остаются
+под retention владельца и не переписываются скрыто.
+
+### Приватные данные не становятся диагностикой
+
+Application-логи теперь content-free по единому проверяемому контракту: только
+фиксированный event, числовые счётчики, enum, класс ошибки и hostname. Query/body,
+ответы backend, URL с path/query, имена файлов, ID, `str(exception)`, traceback и
+произвольный `extra` запрещены AST-contract и синтетическими canary-тестами. Ошибки
+web/document/vision и durable Telegram retry/dead-letter возвращают стабильный код
+с классом сбоя вместо чужого текста исключения.
+Произвольные SQLite marker/trigger/index names также не отражаются в startup
+exception: malformed `schema_version` получает фиксированный диагноз, неизвестные
+schema objects — только content-free count.
+
+Append-only `audit_log` получил fail-closed sanitizer непосредственно на storage
+boundary. Он покрывает не только JSON, но и audit/actor/action/type/target/IP/request
+ID/created-at: точные enum, существующий actor, generated ID только с in-process
+marker либо доказанным существованием и IP только с provenance наблюдаемого ASGI
+peer. Равные по форме caller-строки не становятся forensic evidence. Private
+labels, request ID, unproven IP/ID и fingerprints текста/query/code/URL получают
+домен-разделённые HMAC refs через локальный 256-bit key, а не перебираемый plain
+SHA-256; filename/path остаются формой без имени, произвольная metadata —
+ограниченной структурой. Прямой storage-вызов не обходит правило.
+Миграция `audit_payload_privacy=v3` старых v1/v2 строк работает атомарно с
+`secure_delete`, снимает и возвращает точные append-only triggers, физически очищает
+WAL через `wal_checkpoint(TRUNCATE)` и не ставит v3 marker при crash/busy. Автономные
+старые backup остаются предметом retention: при restore они очищаются на startup,
+но исходный backup на месте не переписывается скрыто.
+
+### Append-only transaction-time отношений и честный `known_at`
+
+Схема SQLite **30 → 31** оставляет `relations` быстрой current projection и
+добавляет каноническую `relation_revisions`: полный typed snapshot, tombstone,
+operation, revision/event order, UTC `recorded_at`, transaction `batch_id` и
+quality provenance. DB triggers фиксируют INSERT, содержательный UPDATE и DELETE,
+включая прямой однострочный SQL, закрывают конфликтующий
+`INSERT/UPDATE OR REPLACE` и запрещают переписывать/удалять/вытеснять history. Одна внешняя
+storage-транзакция даёт candidate/merge/unmerge общий timestamp и batch; rollback
+откатывает projection и revisions вместе, а вложенный блок имеет собственный
+SAVEPOINT без разрыва общего batch. Если системные часы после NTP, ручной правки
+или восстановления питания идут назад, managed context и fallback прямого SQL
+ставят новый `recorded_at` строго после последней relation/identity границы и floor.
+Равное время допустимо только событиям одного outer batch, где порядок однозначно
+разрешает `event_seq`; иначе уже выданный timestamp-снимок изменился бы задним числом.
+Даже пустая принятая граница между event tail и wall time теперь сначала атомарно
+записывается в persistent `relation_revision_context.observed_at`. Managed writes и
+три direct-relation fallback после clock rewind строго позже этого logical clock;
+watermark переживает reopen, не уменьшается и защищён от DELETE/REPLACE. Поэтому
+historical read осознанно является маленькой локальной записью.
+
+Миграция не сочиняет прошлое из `created_at`: она один раз атомарно сохраняет
+неизменяемый `relation_history_complete_from` и текущий migration baseline.
+`known_at` принимает только offset-aware RFC3339, нормализует UTC и fail-closed
+отклоняет будущее, границу до floor и снимок, пересекающий последующий
+identity/topology change сущности: merge/unmerge, soft-delete/undelete либо смену
+canonical/merged target. `as_of` остаётся valid-time («когда было верно»), `known_at` —
+transaction-time («что уже было известно»); latest revision выбирается до
+valid-time фильтра. Имена сущностей остаются текущими и явно маркируются
+`identity_basis=current_names`: исторические names/topology/link history эта
+версия не обещает.
+
+Schema-31 predecessor и current schema 32 проверяются до idempotent DDL под тем же
+`BEGIN IMMEDIATE`, что и миграция. Наличие history artifacts при
+отсутствующем/старом marker, несовпадение точного table/trigger/UNIQUE-index
+контракта и нарушение current↔latest lineage отклоняются без «самолечения» и без
+сдвига floor. Сам floor обязан быть каноническим RFC3339, его immutable provenance
+stamp — совпадать со значением, migration baseline — ссылаться ровно на эту границу,
+а только migration baseline — лежать ровно на floor: captured revision обязана
+быть позже, не убывать в глобальном `event_seq`, не повторять границу другого batch
+и не опережать durable `observed_at`.
+
+Один `known_at` проходит storage/KG, каждый graph hop, `HybridSearcher`, query
+repair, Agent Runtime/prompt и tools `memory_search`/`entity_lookup`, а также
+`/api/search`, публичные KG и Admin graph endpoints. Payload и durable assistant
+metadata возвращают эффективный `known_at`, floor, `history_complete`,
+`identity_basis` и `temporal_basis=bitemporal`; ошибочный snapshot не превращается
+в текущий graphless-ответ. Явный `known_at` исключает сегодняшние implicit
+`co_occurs_in`.
+
+Tenant export включает только его `relation_revisions`, а verified backup хранит
+историю и floor вместе с БД. Hard purge Knowledge Object не стирает отдельно
+подтверждённую relation history/evidence; отдельной capability её удаления пока
+нет. Ranking-веса не менялись: bi-temporal ranking из `OPEN.md §1.8` остаётся
+заблокирован gold set.
+
 ## 0.153.0 — 2026-08-05
 
 ### Timeline событий видит valid-time границы отношений

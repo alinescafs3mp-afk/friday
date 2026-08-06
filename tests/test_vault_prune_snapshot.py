@@ -19,7 +19,7 @@ import pytest
 
 from friday import workers as workers_module
 from friday.memory import MemoryVault
-from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 from friday.workers import WorkersManager
 
 
@@ -114,3 +114,59 @@ async def test_a_deleted_object_still_loses_its_note(settings, storage, tmp_path
     remaining = [path.name for path in _user_notes(tmp_path)]
     assert len(remaining) == 1, remaining
     assert keep[-8:] in remaining[0] or "Живая" in remaining[0]
+
+
+@pytest.mark.asyncio
+async def test_quarantine_after_start_snapshot_removes_plaintext_note(
+    settings,
+    storage,
+    tmp_path,
+    monkeypatch,
+):
+    """A stale initial live set cannot retain a KO that became private mid-sync."""
+
+    user_id = "alice"
+    sentinel = "PRIVATE VAULT RACE SENTINEL"
+    storage.ensure_user(user_id)
+    knowledge_id = _make_ko(storage, user_id, sentinel, importance=0.5)
+    hidden = storage.create_entity(
+        Entity(
+            id="ent-vault-race-private",
+            user_id=user_id,
+            name="Private vault dependency",
+            entity_type=EntityType.EVENT,
+        )
+    )
+    storage.link_knowledge_entity(user_id, knowledge_id, hidden.id, status="accepted")
+
+    vault = MemoryVault(tmp_path / "vault")
+    manager = WorkersManager(settings, storage, None, None)
+    manager.memory_vault = vault
+    await manager._vault_sync(user_id)  # noqa: SLF001
+    notes = _user_notes(tmp_path)
+    assert len(notes) == 1 and sentinel in notes[0].read_text(encoding="utf-8")
+
+    real_list_live = storage.list_live_knowledge_ids
+    snapshots = {"count": 0}
+
+    def quarantine_after_first_snapshot(*args, **kwargs):
+        live = real_list_live(*args, **kwargs)
+        snapshots["count"] += 1
+        if snapshots["count"] == 1:
+            with storage.transaction() as conn:
+                conn.execute(
+                    """INSERT INTO private_entity_owners(
+                           entity_id, person_id, privacy_kind, created_at
+                       ) VALUES(?, ?, 'reminder', ?)""",
+                    (hidden.id, "bob", "2026-08-05T00:00:00Z"),
+                )
+        return live
+
+    monkeypatch.setattr(storage, "list_live_knowledge_ids", quarantine_after_first_snapshot)
+    await manager._vault_sync(user_id)  # noqa: SLF001
+
+    assert snapshots["count"] == 2
+    assert _user_notes(tmp_path) == []
+    assert sentinel not in "\n".join(
+        path.read_text(encoding="utf-8") for path in (tmp_path / "vault").rglob("*.md")
+    )

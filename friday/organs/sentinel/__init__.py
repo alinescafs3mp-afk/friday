@@ -108,8 +108,8 @@ def _may_see_diagnostics(ctx: ServiceContext, user_id: str) -> bool:
     try:
         actor = auth.actor_for_user(user_id, source="sentinel")
         return bool(auth.authorize(actor, _DIAGNOSTICS_CAPABILITY).allowed)
-    except Exception:  # an unknown preset or a missing capability means "no"
-        LOGGER.debug("sentinel: cannot resolve diagnostics access for %s", user_id, exc_info=True)
+    except Exception as exc:  # an unknown preset or a missing capability means "no"
+        LOGGER.debug("sentinel: cannot resolve diagnostics access (%s)", type(exc).__name__)
         return False
 
 
@@ -149,9 +149,9 @@ async def scan_health(ctx: ServiceContext) -> None:
             check_llm_port=bool(settings.sentinel_check_llm),
             check_secrets=True,
         )
-    except Exception:
+    except Exception as exc:
         # Self-monitoring must never crash the worker loop it is meant to watch.
-        LOGGER.exception("sentinel: diagnostics collection failed")
+        LOGGER.error("sentinel: diagnostics collection failed (%s)", type(exc).__name__)
         return
     alerts = [
         action for action in report.get("actions", []) if str(action.get("severity")) in _ALERT_SEVERITIES

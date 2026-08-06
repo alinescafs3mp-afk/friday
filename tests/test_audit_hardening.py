@@ -103,16 +103,16 @@ def test_audit_log_is_append_only_at_database_level(storage):
         AuditEntry(
             id=new_id("audit"),
             user_id="alice",
-            action="test.action",
-            target_type="t",
-            target_id="x",
+            action="monitor.create",
+            target_type="monitor",
+            target_id=new_id("mon"),
         )
     )
     with pytest.raises(sqlite3.DatabaseError, match="append-only"):
         storage.execute("UPDATE audit_log SET action='forged' WHERE id=?", (entry.id,))
     with pytest.raises(sqlite3.DatabaseError, match="append-only"):
         storage.execute("DELETE FROM audit_log WHERE id=?", (entry.id,))
-    assert _actions(storage) == ["test.action"]
+    assert _actions(storage) == ["monitor.create"]
 
 
 def test_downloads_and_audit_reads_are_audited(settings):

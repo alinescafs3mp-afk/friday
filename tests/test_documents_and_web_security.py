@@ -5,7 +5,7 @@ import zipfile
 
 import pytest
 
-from friday.documents import DocumentExtractor
+from friday.documents import ArchiveLimitError, DocumentExtractor
 from friday.web_surfer import UnsafeURLError, validate_public_url
 
 
@@ -32,11 +32,42 @@ def test_archive_limits_and_safe_preview():
         "too-many.zip",
     )
     assert too_many.success is False
-    assert "entry count" in too_many.error.casefold()
+    assert too_many.error == "archive_limit_exceeded"
 
     oversized = extractor.extract(_zip({"large.txt": b"x" * 5000}), "large.zip")
     assert oversized.success is False
-    assert "size" in oversized.error.casefold() or "ratio" in oversized.error.casefold()
+    assert oversized.error == "archive_limit_exceeded"
+
+
+def test_parser_exceptions_cannot_become_durable_extraction_text(monkeypatch):
+    private = "DOCUMENT-EXCEPTION-SENTINEL-6c81fa"
+    extractor = DocumentExtractor()
+
+    def parser_failure(*_args, **_kwargs):
+        raise RuntimeError(f"private parser detail {private}")
+
+    monkeypatch.setattr(extractor, "_extract_pdf", parser_failure)
+    generic = extractor.extract(b"%PDF synthetic", "synthetic.pdf", "application/pdf")
+    assert generic.error == "document_extract_failed:RuntimeError"
+    assert private not in generic.error
+
+    def archive_failure(*_args, **_kwargs):
+        raise ArchiveLimitError(f"private member {private}")
+
+    monkeypatch.setattr(extractor, "_extract_archive", archive_failure)
+    archive = extractor.extract(b"PK synthetic", "synthetic.zip", "application/zip")
+    assert archive.error == "archive_limit_exceeded"
+    assert private not in archive.error
+
+    from friday.documents import _ole
+
+    def ole_failure(_content):
+        raise _ole.OleError(f"private stream {private}")
+
+    monkeypatch.setattr(_ole, "extract_doc_text", ole_failure)
+    legacy = extractor.extract(b"synthetic", "synthetic.doc", "application/msword")
+    assert legacy.error == "unsupported_legacy_doc"
+    assert private not in legacy.error
 
 
 def _office_zip_with_a_corrupted_image() -> bytes:

@@ -14,6 +14,7 @@ from friday.storage._base import (
     StorageShared,
     utc_now,
 )
+from friday.storage._privacy import _not_private_knowledge_dependency
 
 
 class VectorsMixin(StorageShared):
@@ -70,9 +71,10 @@ class VectorsMixin(StorageShared):
                 "FROM knowledge_embeddings e "
                 "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? "
                 "AND e.knowledge_object_id IN ("
-                "  SELECT id FROM knowledge_objects"
-                "  WHERE user_id = ? AND deleted_at IS NULL"
-                "  ORDER BY created_at DESC LIMIT ?"
+                "  SELECT window_k.id FROM knowledge_objects window_k"
+                "  WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                f" AND {_not_private_knowledge_dependency('window_k')}"  # nosec B608
+                "  ORDER BY window_k.created_at DESC LIMIT ?"
                 ")"
             )
             params.extend([user_id, int(limit)])
@@ -81,7 +83,8 @@ class VectorsMixin(StorageShared):
                 "SELECT e.knowledge_object_id AS id, e.vector AS vector "
                 "FROM knowledge_embeddings e "
                 "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
-                "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL"
+                "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL "
+                f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             )
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
@@ -106,7 +109,12 @@ class VectorsMixin(StorageShared):
         ``max_updated_at`` excludes the run's own second, whose rows are not
         necessarily all written yet.
         """
-        clauses = ["e.user_id = ?", "e.model = ?", "k.deleted_at IS NULL"]
+        clauses = [
+            "e.user_id = ?",
+            "e.model = ?",
+            "k.deleted_at IS NULL",
+            _not_private_knowledge_dependency("k"),
+        ]
         params: list[Any] = [user_id, model]
         if after is not None:
             clauses.append("(e.updated_at, e.knowledge_object_id) > (?, ?)")
@@ -131,7 +139,12 @@ class VectorsMixin(StorageShared):
 
     def count_user_vectors(self, user_id: str, model: str, *, before: tuple[str, str] | None = None) -> int:
         """Corpus size, or how many rows are still strictly below a backfill cursor."""
-        clauses = ["e.user_id = ?", "e.model = ?", "k.deleted_at IS NULL"]
+        clauses = [
+            "e.user_id = ?",
+            "e.model = ?",
+            "k.deleted_at IS NULL",
+            _not_private_knowledge_dependency("k"),
+        ]
         params: list[Any] = [user_id, model]
         if before is not None:
             clauses.append("(e.updated_at, e.knowledge_object_id) < (?, ?)")
@@ -169,7 +182,9 @@ class VectorsMixin(StorageShared):
                 "FROM knowledge_chunk_embeddings c "
                 "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
                 "AND k.version = c.source_version "
-                f"WHERE c.user_id = ? AND c.model = ? AND c.knowledge_object_id IN ({placeholders})",
+                f"WHERE c.user_id = ? AND c.model = ? "  # nosec B608
+                f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
+                f"AND c.knowledge_object_id IN ({placeholders})",  # nosec B608
                 (user_id, model, *batch),
             ).fetchall()
             for row in rows:

@@ -43,6 +43,7 @@ from friday.ingestion._base import (
     transcribe_bytes,
     unicodedata,
 )
+from friday.private_fs import ensure_private_directory, restrict_private_file
 
 
 class FilesMixin(PipelineShared):
@@ -168,10 +169,10 @@ class FilesMixin(PipelineShared):
             )
             parsed = _parse_model_response(response, what="Vision extraction")
         except Exception as exc:
-            LOGGER.info("Local vision extraction failed for %s: %s", filename, exc)
+            LOGGER.info("Local vision extraction failed (%s)", type(exc).__name__)
             return {
                 "success": False,
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": f"vision_request_failed:{type(exc).__name__}",
                 "confidence": 0.0,
                 "assets": list(asset_catalog.values()),
                 "text": "",
@@ -294,8 +295,7 @@ class FilesMixin(PipelineShared):
                 declared = 0.0
             if declared > max_sec:
                 LOGGER.info(
-                    "whisper: skipping %s — duration %.0fs exceeds limit %.0fs",
-                    filename or mime_type,
+                    "whisper: skipping audio — duration %.0fs exceeds limit %.0fs",
                     declared,
                     max_sec,
                 )
@@ -318,24 +318,21 @@ class FilesMixin(PipelineShared):
                 compute_type=self.settings.whisper_compute_type,
                 download_root=self.settings.whisper_download_root or None,
             )
-        except WhisperUnavailable as exc:
-            LOGGER.warning("whisper: unavailable (%s); leaving audio for review", exc)
+        except WhisperUnavailable:
+            LOGGER.warning("whisper: unavailable; leaving audio for review")
             return None
-        except Exception:  # noqa: BLE001 - transcription must never break ingestion
-            LOGGER.exception("whisper: transcription failed for %s", filename or mime_type)
+        except Exception as exc:  # noqa: BLE001 - transcription must never break ingestion
+            LOGGER.error("whisper: transcription failed (%s)", type(exc).__name__)
             return None
         if transcript.is_empty:
             LOGGER.info(
-                "whisper: empty transcript for %s (%.1fs) — treated as un-extractable",
-                filename or mime_type,
+                "whisper: empty transcript (%.1fs) — treated as un-extractable",
                 transcript.duration,
             )
             return None
         LOGGER.info(
-            "whisper: transcribed %s — %d chars, lang=%s, conf=%.2f, %.1fs",
-            filename or mime_type,
+            "whisper: transcribed audio — %d chars, conf=%.2f, %.1fs",
             len(transcript.text),
-            transcript.language,
             transcript.confidence,
             transcript.duration,
         )
@@ -451,10 +448,7 @@ class FilesMixin(PipelineShared):
         if text_digest:
             same_document = self.storage.find_file_by_extracted_text(user_id, text_digest)
             if same_document:
-                LOGGER.info(
-                    "Тот же текст уже принят под другим файлом (%s); повторяю прежний исход",
-                    str(same_document.get("source_ref") or "")[:80],
-                )
+                LOGGER.info("Тот же текст уже принят; повторяю прежний исход")
                 self._store_file(user_id, file_content, digest, filename)
                 return self._replay_file_source(user_id, same_document)
         media_label = media_kind or "File"
@@ -842,8 +836,11 @@ class FilesMixin(PipelineShared):
                         ).fetchone()
                         if referenced is None:
                             target_path.unlink(missing_ok=True)
-                except Exception:
-                    LOGGER.exception("Could not reconcile file after failed ingestion transaction")
+                except Exception as exc:
+                    LOGGER.error(
+                        "Could not reconcile file after failed ingestion transaction (%s)",
+                        type(exc).__name__,
+                    )
             raise
         finally:
             if staged_path is not None:
@@ -926,7 +923,8 @@ class FilesMixin(PipelineShared):
 
     def _file_target(self, user_id: str, digest: str, filename: str) -> Path:
         user_dir = self.settings.files_dir / self._safe_component(user_id) / digest[:2]
-        user_dir.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(user_dir.parent)
+        ensure_private_directory(user_dir)
         # Keep the user-facing filename in metadata, not in the physical path.
         # A digest-only name avoids Windows MAX_PATH failures and makes unsafe
         # or extremely long original names irrelevant to filesystem safety.
@@ -951,7 +949,10 @@ class FilesMixin(PipelineShared):
         filename: str,
     ) -> tuple[Path, Path | None]:
         target = self._file_target(user_id, digest, filename)
+        if target.is_symlink():
+            raise ValueError("stored file target cannot be a symlink")
         if target.is_file() and hmac.compare_digest(self._file_sha256(target), digest):
+            restrict_private_file(target)
             return target, None
         descriptor, temporary_name = tempfile.mkstemp(prefix=f".{digest}.", suffix=".tmp", dir=target.parent)
         temporary = Path(temporary_name)
@@ -969,9 +970,11 @@ class FilesMixin(PipelineShared):
         if staged is None:
             return target
         if target.is_file() and hmac.compare_digest(self._file_sha256(target), digest):
+            restrict_private_file(target)
             staged.unlink(missing_ok=True)
             return target
         os.replace(staged, target)
+        restrict_private_file(target)
         return target
 
     def _store_file(self, user_id: str, content: bytes, digest: str, filename: str) -> Path:

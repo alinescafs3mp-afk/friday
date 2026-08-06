@@ -50,9 +50,14 @@ def test_reminder_states_belong_to_the_person() -> None:
 
 def test_upcoming_reminders_are_filtered_by_author() -> None:
     """Событие под общим арендатором ещё не значит «моё напоминание»."""
-    source = _handlers_source()
-    assert 'startswith("reminder:")' in source, "чужие просьбы снова попадают в мои планы"
-    assert 'len("reminder:")' in source
+    from friday.storage._graph import _bounded_visible_timeline_event_rows
+
+    source = inspect.getsource(_bounded_visible_timeline_event_rows)
+    # Фильтр переехал из HTTP-обработчика в общий timeline reader: source один
+    # недостаточен, durable owner marker обязан назвать того же человека.
+    assert "private_entity_owners" in source, "чужие просьбы снова попадают в мои планы"
+    assert "private_owner.person_id=?" in source
+    assert "reminder_source" in source
 
 
 def test_the_app_still_builds(settings) -> None:

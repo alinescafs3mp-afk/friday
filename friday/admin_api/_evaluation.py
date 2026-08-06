@@ -23,6 +23,7 @@ from friday.admin_api._deps import (
     _services,
     _target_user,
 )
+from friday.storage._privacy import _not_private_knowledge_dependency
 
 router = APIRouter()
 
@@ -42,12 +43,17 @@ async def knowledge_quality_dashboard(
     if not state.storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     usage = state.storage.execute(
-        """SELECT COUNT(*) AS tracked,
+        f"""SELECT COUNT(*) AS tracked,
                   COALESCE(SUM(retrieval_count), 0) AS retrievals,
                   COALESCE(SUM(answer_count), 0) AS answers,
                   COALESCE(SUM(positive_feedback_count), 0) AS positive,
                   COALESCE(SUM(negative_feedback_count), 0) AS negative
-           FROM knowledge_usage WHERE user_id=?""",
+           FROM knowledge_usage u
+           JOIN knowledge_objects k
+             ON k.id=u.knowledge_object_id AND k.user_id=u.user_id
+            AND k.deleted_at IS NULL
+            AND {_not_private_knowledge_dependency("k")}
+           WHERE u.user_id=?""",  # nosec B608
         (user_id,),
     ).fetchone()
 

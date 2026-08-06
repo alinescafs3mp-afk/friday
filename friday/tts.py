@@ -113,7 +113,7 @@ def _load_voice(voice: str, download_root: str):
         except Exception as exc:  # noqa: BLE001 - surface any load failure uniformly
             raise TTSUnavailable(f"could not load Piper voice {voice!r}: {exc}") from exc
         _MODEL_CACHE[key] = engine
-        logger.info("tts: loaded voice=%s", voice)
+        logger.info("tts: configured voice loaded")
         return engine
 
 

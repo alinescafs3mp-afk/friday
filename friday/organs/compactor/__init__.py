@@ -426,8 +426,8 @@ class CompactorOrgan(Organ):
                     # отсеивает `chain_for` — см. разбор в её докстроке.
                     patterns=chain_for(storage, principal, day, incidents),
                 )
-            except Exception:  # noqa: BLE001 — оборванная сводка не роняет запрос
-                LOGGER.exception("compactor: сутки %s не свелись", day)
+            except Exception as exc:  # noqa: BLE001 — оборванная сводка не роняет запрос
+                LOGGER.error("compactor: сутки не свелись (%s)", type(exc).__name__)
                 storage.abandon_day_compact(compact_id)
                 raise HTTPException(status_code=500, detail="Сводка не собралась") from None
             made = storage.get_day_compact(principal, day) or {}
@@ -491,8 +491,8 @@ async def compact_pending_days(ctx: ServiceContext) -> dict[str, Any]:
                     patterns=chain_for(storage, principal, day, incidents),
                 )
                 made += 1
-            except Exception:  # noqa: BLE001 — оборванная сводка не роняет орган
-                LOGGER.exception("compactor: сутки %s не свелись", day)
+            except Exception as exc:  # noqa: BLE001 — оборванная сводка не роняет орган
+                LOGGER.error("compactor: сутки не свелись (%s)", type(exc).__name__)
                 storage.abandon_day_compact(compact_id)
     return {"compacts_made": made}
 

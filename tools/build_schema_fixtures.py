@@ -14,6 +14,7 @@ repository, so its structure is lifted from a real backup — schema only, never
 Nothing here contains personal data: every row is written by this script.
 
     python tools/build_schema_fixtures.py --schema-13-from ~/.jericho/data/backups/old.sqlite3
+    python tools/build_schema_fixtures.py --schema-31-from /path/to/verified-schema-31.sqlite3
 """
 
 from __future__ import annotations
@@ -117,6 +118,40 @@ for index in range(3):
             received_at=now,
         )
     )
+if SCHEMA_VERSION >= 31:
+    # Schema 31's defining authoritative data is relation history. Seed one
+    # completely synthetic lineage so its committed fixture proves both the
+    # current projection and captured revision survive reopen. Older historical
+    # worktrees never import model shapes they did not ship.
+    from friday.storage.models import Entity, EntityType, Relation, RelationType
+
+    source = Entity(
+        id="entity-fixture-source",
+        user_id={SEED_USER!r},
+        name="Fixture Person",
+        entity_type=EntityType.PERSON,
+    )
+    target = Entity(
+        id="entity-fixture-target",
+        user_id={SEED_USER!r},
+        name="Fixture Project",
+        entity_type=EntityType.PROJECT,
+    )
+    storage.create_entity(source)
+    storage.create_entity(target)
+    storage.create_relation(
+        Relation(
+            id="relation-fixture-history",
+            user_id={SEED_USER!r},
+            source_entity_id=source.id,
+            target_entity_id=target.id,
+            relation_type=RelationType.WORKS_ON,
+            weight=0.75,
+            metadata_json={{"evidence": "synthetic fixture"}},
+            created_at=now,
+            valid_from="2026-01-01",
+        )
+    )
 storage.kv_set("fixture:marker", f"schema-{{SCHEMA_VERSION}}")
 print(SCHEMA_VERSION)
 storage.close()
@@ -202,6 +237,65 @@ def build_from_backup(version: int, backup: Path, workspace: Path) -> Path:
         # repository, so guessing its shape is how a fixture ends up testing a schema
         # that never existed.
         _insert(db, "users", {"id": SEED_USER, "display_name": "Fixture Owner"})
+        if version == 31:
+            # Schema 31 existed on deployed WIP installations before its source
+            # checkpoint was committed. Lift only sqlite_master DDL above, then
+            # build a wholly synthetic authoritative lineage: no row from the
+            # operator's backup is ever selected or copied.
+            floor = "2025-12-31T23:59:59.999999Z"
+            recorded_at = "2026-01-01T00:00:00.000000Z"
+            _insert(
+                db,
+                "schema_meta",
+                {
+                    "key": "relation_history_complete_from",
+                    "value": floor,
+                    "updated_at": floor,
+                },
+            )
+            db.execute(
+                """INSERT INTO relation_revision_context(singleton, batch_id, recorded_at)
+                   VALUES(1, 'relation_batch_fixture', ?)""",
+                (recorded_at,),
+            )
+            _insert(
+                db,
+                "entities",
+                {
+                    "id": "entity-fixture-source",
+                    "user_id": SEED_USER,
+                    "name": "Fixture Person",
+                    "normalized_name": "fixture person",
+                    "entity_type": "person",
+                },
+            )
+            _insert(
+                db,
+                "entities",
+                {
+                    "id": "entity-fixture-target",
+                    "user_id": SEED_USER,
+                    "name": "Fixture Project",
+                    "normalized_name": "fixture project",
+                    "entity_type": "project",
+                },
+            )
+            _insert(
+                db,
+                "relations",
+                {
+                    "id": "relation-fixture-history",
+                    "user_id": SEED_USER,
+                    "source_entity_id": "entity-fixture-source",
+                    "target_entity_id": "entity-fixture-target",
+                    "relation_type": "works_on",
+                    "weight": 0.75,
+                    "metadata_json": '{"evidence":"synthetic fixture"}',
+                    "created_at": recorded_at,
+                    "valid_from": "2026-01-01",
+                },
+            )
+            db.execute("UPDATE relation_revision_context SET batch_id='', recorded_at='' WHERE singleton=1")
         for index in range(3):
             _insert(
                 db,
@@ -249,6 +343,11 @@ def main() -> int:
         help="A real schema-13 backup to lift the DDL from (structure only, no rows)",
     )
     parser.add_argument(
+        "--schema-31-from",
+        type=Path,
+        help="A verified schema-31 backup to lift deployed WIP DDL from (structure only, no rows)",
+    )
+    parser.add_argument(
         "--current-only",
         action="store_true",
         help="Build only the fixture for the schema this working tree produces",
@@ -269,6 +368,11 @@ def main() -> int:
         if args.schema_13_from:
             path = build_from_backup(13, args.schema_13_from.expanduser(), workspace)
             print(f"  schema 13  {path.name}  {path.stat().st_size:>8,} bytes  (DDL from a real backup)")
+        if args.schema_31_from:
+            path = build_from_backup(31, args.schema_31_from.expanduser(), workspace)
+            print(
+                f"  schema 31  {path.name}  {path.stat().st_size:>8,} bytes  (deployed DDL, synthetic rows)"
+            )
     return 0
 
 

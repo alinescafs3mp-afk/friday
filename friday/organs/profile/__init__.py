@@ -83,8 +83,8 @@ async def _synthesize_portrait(llm, profile: dict[str, Any]) -> str:
     ]
     try:
         response = await llm.chat(messages, temperature=0.4, priority="background", max_tokens=220)
-    except Exception:
-        LOGGER.warning("Profile portrait synthesis failed", exc_info=True)
+    except Exception as exc:
+        LOGGER.warning("Profile portrait synthesis failed (%s)", type(exc).__name__)
         return ""
     content = response.get("content") if isinstance(response, dict) else ""
     return str(content or "").strip()[:1000]

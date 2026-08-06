@@ -27,7 +27,6 @@ from friday.telegram_bridge._base import (
     RuntimeLeaseError,
     TelegramConfig,
     _proxy_password,
-    _redact_userinfo,
     asyncio,
     httpx,
     install_secret_redaction,
@@ -133,9 +132,7 @@ class TransportMixin(BridgeShared):
                 LOGGER.info(
                     "Telegram bridge started at offset %d%s",
                     self._offset,
-                    f" via proxy {_redact_userinfo(self.config.telegram_proxy)}"
-                    if self.config.telegram_proxy
-                    else "",
+                    " via configured proxy" if self.config.telegram_proxy else "",
                 )
                 await self._register_commands(telegram)
                 # Inbound polling and outbound push run concurrently; a crash in
@@ -171,7 +168,7 @@ class TransportMixin(BridgeShared):
         return ""
 
     def _log_loop_failure(self, loop_name: str, error: BaseException) -> None:
-        """Трейсбек — ОДИН на эпизод недоступности, а не на каждую попытку.
+        """Зафиксировать сбой без содержимого exception и traceback.
 
         Замерено на живом журнале: 6.43 МБ файла, из них 6.39 МБ (99.5%) — сцепленные
         трейсбеки httpx по ~5 КБ каждый, 1368 штук у опроса и 70 у отправки. Причина
@@ -185,12 +182,11 @@ class TransportMixin(BridgeShared):
         суток (6.42%), самый длинный обрыв — 49 минут 27 секунд. Ротация журналов
         работает, но крутила почти исключительно этот шум.
 
-        Первая неудача эпизода печатается со стеком: он нужен, чтобы понять, ЧТО
-        сломалось. Дальнейшие — одной строкой с именем исключения: они говорят только
-        «всё ещё не работает», и это уже сказано.
+        Даже первый traceback может содержать URL Telegram, query или текст
+        ответа. Для диагностики остаются имя цикла и класс исключения.
         """
         if self._loop_failing.get(loop_name) is not True:
-            LOGGER.exception("Telegram bridge %s loop failed", loop_name)
+            LOGGER.error("Telegram bridge %s loop failed: %s", loop_name, type(error).__name__)
         else:
             LOGGER.warning("Telegram bridge %s loop still failing: %s", loop_name, type(error).__name__)
 
@@ -239,8 +235,8 @@ class TransportMixin(BridgeShared):
                 signer,
                 signer,
             )
-        except Exception:
-            LOGGER.debug("Could not journal bridge %s transition", loop_name, exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("Could not journal bridge %s transition (%s)", loop_name, type(exc).__name__)
 
     async def _register_commands(self, telegram: httpx.AsyncClient) -> None:
         """Register the command menu once so Telegram shows '/' autocomplete.
@@ -252,8 +248,8 @@ class TransportMixin(BridgeShared):
         try:
             response = await telegram.post(f"{self._api_url}/setMyCommands", json=payload)
             response.raise_for_status()
-        except Exception:
-            LOGGER.warning("Telegram setMyCommands failed (non-fatal)", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning("Telegram setMyCommands failed (non-fatal, %s)", type(exc).__name__)
 
     async def _poll_loop(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:
         backoff = 1.0
@@ -345,8 +341,8 @@ class TransportMixin(BridgeShared):
             )
             answer.raise_for_status()
             self._backend_down_warned_at = now
-        except Exception:  # noqa: BLE001 - тревога не должна ронять цикл
-            LOGGER.warning("Could not warn the owner about the backend outage", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - тревога не должна ронять цикл
+            LOGGER.warning("Could not warn the owner about the backend outage (%s)", type(exc).__name__)
 
     async def _notify_backend_recovered(self, telegram: httpx.AsyncClient) -> None:
         """Одно сообщение о восстановлении — тревога без отбоя учит игнорировать тревоги."""
@@ -452,8 +448,8 @@ class TransportMixin(BridgeShared):
             try:
                 await self._send_message(telegram, chat_id, body, reply_markup=markup)
                 sent.append(notif_id)
-            except Exception:
-                LOGGER.warning("Outbound notification delivery failed", exc_info=True)
+            except Exception as exc:
+                LOGGER.warning("Outbound notification delivery failed (%s)", type(exc).__name__)
                 failed.append(notif_id)
             # Gentle per-chat pacing to stay within Telegram send limits.
             await asyncio.sleep(0.05)
@@ -506,9 +502,9 @@ class TransportMixin(BridgeShared):
         # Loud, because the consequence is user-visible: these messages were
         # delivered and will be delivered again.
         LOGGER.error(
-            "Outbound ack failed after retries: %d delivered notifications will be re-sent",
+            "Outbound ack failed after retries: %d delivered notifications will be re-sent (%s)",
             len(sent),
-            exc_info=last_error,
+            type(last_error).__name__,
         )
 
     async def stop(self) -> None:
@@ -566,10 +562,10 @@ class TransportMixin(BridgeShared):
                     await self._process_update(telegram, backend, update, cached_response=cached)
                     self._inbox.remove(update_id)
                 except PermanentUpdateError as exc:
-                    LOGGER.warning("Quarantining invalid Telegram update %s: %s", update_id, exc)
+                    LOGGER.warning("Quarantining invalid Telegram update (%s)", type(exc).__name__)
                     self._inbox.mark_dead_letter(
                         update_id,
-                        self._redact(f"{type(exc).__name__}: {exc}"),
+                        type(exc).__name__,
                     )
                     # MediaTooLargeError already told the user; others left them in
                     # silence — a rejected message must never just vanish.
@@ -578,13 +574,13 @@ class TransportMixin(BridgeShared):
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    LOGGER.warning("Telegram update %s deferred: %s", update_id, exc)
+                    LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
                     dead_lettered = self._inbox.mark_failure(
                         update_id,
-                        self._redact(f"{type(exc).__name__}: {exc}"),
+                        type(exc).__name__,
                     )
                     if dead_lettered:
-                        LOGGER.error("Telegram update %s exhausted its retry budget", update_id)
+                        LOGGER.error("Telegram update exhausted its retry budget")
                         await self._notify_dead_letter(telegram, update, permanent=False)
                     else:
                         # Do not retry this row again if enough work in other chats
@@ -676,8 +672,8 @@ class TransportMixin(BridgeShared):
             )
         try:
             await self._send_message(telegram, chat_id, text)
-        except Exception:
-            LOGGER.warning("dead-letter notice to chat %s failed", chat_id, exc_info=True)
+        except Exception as exc:
+            LOGGER.warning("dead-letter notice failed (%s)", type(exc).__name__)
 
     async def _backend_json(
         self,
@@ -800,8 +796,8 @@ class TransportMixin(BridgeShared):
                 await asyncio.sleep(4.0)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            LOGGER.debug("Telegram typing indicator failed", exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("Telegram typing indicator failed (%s)", type(exc).__name__)
 
     async def _send_message(
         self,
@@ -831,10 +827,7 @@ class TransportMixin(BridgeShared):
                 # последовательность — незакрытый тег на границе куска, экзотика
                 # из ответа модели — не должна стоить человеку СООБЩЕНИЯ: именно
                 # «ничего не приходит» владелец и разбирал сегодня.
-                LOGGER.warning(
-                    "Telegram rejected formatted message (%s); resending as plain text",
-                    response.text[:200],
-                )
+                LOGGER.warning("Telegram rejected formatted message; resending as plain text")
                 payload.pop("parse_mode", None)
                 payload["text"] = chunk
                 response = await client.post(f"{self._api_url}/sendMessage", json=payload)

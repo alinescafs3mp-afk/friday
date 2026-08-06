@@ -8,8 +8,24 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 from __future__ import annotations
 
 import re
-from datetime import date
+import secrets
+import unicodedata
+import zlib
+from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
 
+from friday.audit_privacy import (
+    decode_audit_privacy_key,
+    sanitize_audit_action,
+    sanitize_audit_actor,
+    sanitize_audit_created_at,
+    sanitize_audit_id,
+    sanitize_audit_ip,
+    sanitize_audit_payload,
+    sanitize_audit_request_id,
+    sanitize_audit_target,
+)
+from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.storage._base import (
     CORE_INDEX_SCHEMA,
     CORE_TABLE_SCHEMA,
@@ -26,6 +42,7 @@ from friday.storage._base import (
     StorageShared,
     UnsupportedSchemaVersionError,
     _snapshot,
+    audit_generated_id_exists,
     contextmanager,
     hashlib,
     json,
@@ -37,9 +54,1808 @@ from friday.storage._base import (
     time,
     utc_now,
 )
+from friday.storage._privacy import (
+    PRIVATE_DERIVATIVE_CACHE_REBUILD_SQL,
+    PRIVATE_MATERIAL_CACHE_REBUILD_SQL,
+    PRIVATE_MATERIAL_PERSISTENT_SCHEMA,
+    PRIVATE_MATERIAL_RUNTIME_SCHEMA,
+)
+from friday.storage.models import RelationHistorySnapshotError, normalize_known_at
 
 _ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
+# Tests and clock adapters replace ``datetime`` to control wall time. Timestamp
+# parsing must remain the real stdlib implementation under that substitution.
+_TIMESTAMP_DATETIME = datetime
+
+
+def _unicode_casefold(value: Any) -> str | None:
+    """Canonical Unicode casefold used by privacy-sensitive SQL comparisons."""
+
+    if value is None:
+        return None
+    # Canonically equivalent text can arrive precomposed (NFC) from the UI and
+    # decomposed (NFD) from files/bridges.  Plain ``casefold`` preserves that
+    # distinction, which let a copied private name evade every SQL dependency
+    # scan.  Normalise both before and after folding so the UDF has one stable
+    # representation even for folds which themselves introduce combining code
+    # points.
+    return unicodedata.normalize(
+        "NFC",
+        unicodedata.normalize("NFC", str(value)).casefold(),
+    )
+
+
+def _private_identity_match(value: Any, identity: Any) -> int:
+    """Match one canonical identity as a token, never as an alnum prefix.
+
+    The old substring comparison made ``дело 1`` quarantine ``дело 10``.  A
+    copied name/alias still matches case-insensitively and across NFC/NFD, but an
+    adjacent Unicode letter, number or underscore keeps a longer token distinct.
+    Entity ids continue to use their deliberately conservative substring checks.
+    """
+
+    folded_value = _unicode_casefold(value) or ""
+    folded_identity = _unicode_casefold(identity) or ""
+    if not folded_identity:
+        return 0
+
+    def continues_token(character: str) -> bool:
+        return character == "_" or character.isalnum()
+
+    offset = 0
+    while True:
+        start = folded_value.find(folded_identity, offset)
+        if start < 0:
+            return 0
+        end = start + len(folded_identity)
+        left_ok = (
+            not continues_token(folded_identity[0])
+            or start == 0
+            or not continues_token(folded_value[start - 1])
+        )
+        right_ok = (
+            not continues_token(folded_identity[-1])
+            or end == len(folded_value)
+            or not continues_token(folded_value[end])
+        )
+        if left_ok and right_ok:
+            return 1
+        offset = start + 1
+
+
+_RELATION_HISTORY_TRIGGER_TABLES_V31 = {
+    # Full current-projection capture.
+    "relations_revision_ai": "relations",
+    "relations_revision_au": "relations",
+    "relations_revision_bd": "relations",
+    # Relation ID and tenant identity cannot move between lineages.
+    "relations_revision_identity_immutable": "relations",
+    # Existing evidence and its completeness promise are append-only.
+    "relation_revisions_append_only_update": "relation_revisions",
+    "relation_revisions_append_only_delete": "relation_revisions",
+    "relation_revisions_append_only_replace": "relation_revisions",
+    "relation_history_floor_immutable_update": "schema_meta",
+    "relation_history_floor_immutable_delete": "schema_meta",
+    "relation_history_floor_immutable_insert": "schema_meta",
+}
+_RELATION_HISTORY_TRIGGER_TABLES = {
+    **_RELATION_HISTORY_TRIGGER_TABLES_V31,
+    # Schema 32: SQLite REPLACE conflict-deletes bypass DELETE capture when
+    # recursive_triggers is disabled (the default), and the observed boundary
+    # is an append-only promise in its own right.
+    "relations_revision_insert_guard": "relations",
+    "relations_revision_update_conflict_guard": "relations",
+    "relation_revision_context_monotonic_update": "relation_revision_context",
+    "relation_revision_context_immutable_delete": "relation_revision_context",
+    "relation_revision_context_singleton_insert": "relation_revision_context",
+}
+_RELATION_HISTORY_OWNED_TABLES = {
+    "relation_revision_context",
+    "relation_revisions",
+}
+_RELATION_HISTORY_SCHEMA_V31_TABLES = _RELATION_HISTORY_OWNED_TABLES | {"relations"}
+# Exact sqlite_master.sql digests produced by the deployed schema-31 build.
+# They are intentionally code constants rather than a permissive shape check:
+# only that known predecessor may cross the 31→32 boundary. A missing/altered
+# capture guard still fails before any idempotent DDL can conceal lost history.
+_RELATION_HISTORY_SCHEMA_V31_SHA256 = {
+    "relations": "0996aff8ddf8910ebd8c25142601091d8b877b1bb9e7f99be095381dd70485e7",
+    "relation_revision_context": "80a1c5834ee4fa98420a56ff4d5cbda4a50cb85cc2fcb4162ed35d9cad0eeb1d",
+    "relation_revisions": "6812d27ef68f5d8a2a7f27a56b695468daf0c409088a1f2bbd8eaae9049e0b81",
+    "relations_revision_ai": "d91db1e4fe288ce8d46f3eeca4d9f104d2b38438011ab31c93de4c1d703cc416",
+    "relations_revision_au": "5cc9a16fc99f986f1041997c556676e0d7b3d0f7890698082bea3f15d421a3e3",
+    "relations_revision_bd": "7da0a75a53cd2a59446d59ef4a81d2bf3d8d99cc5392b57d7a71d937806630f6",
+    "relations_revision_identity_immutable": "16a9ed76dfb2ddc4492c8df37686a2deb13da000933add19cb8653f5842cee26",
+    "relation_revisions_append_only_update": "dc612388aacf54f8c75bea9e4014db805ea9af4712bb83f614e2e33dac24ccd8",
+    "relation_revisions_append_only_delete": "2dcb37864e178eabb7bf0cc61630fc5ae0d5d8dc171f1e8f1ea2f10e4251cf3c",
+    "relation_revisions_append_only_replace": "4502b0011b936143863c1938f38e281b79bc8a6a648e4b9993482cde5f40c6e8",
+    "relation_history_floor_immutable_update": "d2674de317c99dcf40045d4a0a9b6e09b5caef7292aee8b080e0eefcedc21d13",
+    "relation_history_floor_immutable_delete": "2be6ca1d13d394e9f01ef5c6f224f22d597ec638dda98b81307b50b5b0ed0545",
+    "relation_history_floor_immutable_insert": "80c9c54a0300f5070812fb2d5574d3921646f369e686d986c92223d0daf5fa3c",
+}
+# `relations` predates the history layer. Historical schema 13–26 databases
+# reached its current columns through ALTER TABLE, while schema 27+ created the
+# canonical table directly; sqlite_master therefore has two legitimate byte
+# shapes. Every synthetic historical fixture reaches exactly one of these two.
+_RELATION_PROJECTION_SCHEMA_SHA256 = frozenset(
+    {
+        "0996aff8ddf8910ebd8c25142601091d8b877b1bb9e7f99be095381dd70485e7",
+        "ae3c02812bc65f1e2db6dce5d814840e353ddd2f42e73c43eb2a27794c8bb37e",
+    }
+)
+# Every UNIQUE index on a table protected by relation-history guards affects
+# SQLite's conflict set. An unrecognised index can make INSERT OR REPLACE evict a
+# different authoritative row while recursive DELETE triggers are disabled.
+_RELATION_HISTORY_UNIQUE_INDEX_TABLES = frozenset(_RELATION_HISTORY_TRIGGER_TABLES.values())
+_PRIVATE_MATERIAL_CACHE_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_cache_ai",
+        "privacy_material_cache_au",
+        "privacy_material_cache_ad",
+    }
+)
+_PRIVATE_MATERIAL_CACHE_STATE_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_cache_state_bi",
+        "privacy_material_cache_state_bu",
+    }
+)
+_PRIVATE_MATERIAL_WORK_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_work_ai",
+        "privacy_material_work_au",
+        "privacy_material_work_ad",
+    }
+)
+_PRIVATE_MATERIAL_DERIVATIVE_CACHE_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_derivative_cache_ai",
+        "privacy_material_derivative_cache_au",
+        "privacy_material_derivative_cache_ad",
+    }
+)
+_PRIVATE_MATERIAL_DERIVATIVE_WORK_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_derivative_work_ai",
+        "privacy_material_derivative_work_au",
+        "privacy_material_derivative_work_ad",
+    }
+)
+_PRIVATE_MATERIAL_DERIVATIVE_STATE_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_derivative_state_bi",
+        "privacy_material_derivative_state_bu",
+    }
+)
+_PRIVATE_MATERIAL_WRITER_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_entities_ai",
+        "privacy_material_entities_ai_restore",
+        "privacy_material_entities_au",
+        "privacy_material_entities_au_restore",
+        "privacy_material_entities_ad",
+        "privacy_material_owners_ai",
+        "privacy_material_owners_au",
+        "privacy_material_owners_ad",
+        "privacy_material_time_ai",
+        "privacy_material_time_au",
+        "privacy_material_time_ad",
+        "privacy_material_versions_ai",
+        "privacy_material_versions_ai_restore",
+        "privacy_material_versions_au",
+        "privacy_material_versions_au_restore",
+        "privacy_material_versions_ad",
+    }
+)
+_PRIVATE_MATERIAL_LEGACY_WRITER_TRIGGER_NAMES = frozenset(
+    name for name in _PRIVATE_MATERIAL_WRITER_TRIGGER_NAMES if not name.endswith("_restore")
+)
+_PRIVATE_MATERIAL_INVALIDATOR_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_entities_bi_invalidate",
+        "privacy_material_entities_bu_invalidate",
+        "privacy_material_entities_bd_invalidate",
+        "privacy_material_owners_bi_invalidate",
+        "privacy_material_owners_bu_invalidate",
+        "privacy_material_owners_bd_invalidate",
+        "privacy_material_time_bi_invalidate",
+        "privacy_material_time_bu_invalidate",
+        "privacy_material_time_bd_invalidate",
+        "privacy_material_versions_bi_invalidate",
+        "privacy_material_versions_bu_invalidate",
+        "privacy_material_versions_bd_invalidate",
+    }
+)
+_PRIVATE_MATERIAL_DERIVATIVE_INVALIDATOR_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_raw_bi_invalidate",
+        "privacy_material_raw_bu_invalidate",
+        "privacy_material_raw_bd_invalidate",
+        "privacy_material_knowledge_bi_invalidate",
+        "privacy_material_knowledge_bu_invalidate",
+        "privacy_material_knowledge_bd_invalidate",
+        "privacy_material_links_bi_invalidate",
+        "privacy_material_links_bu_invalidate",
+        "privacy_material_links_bd_invalidate",
+        "privacy_material_inbox_bi_invalidate",
+        "privacy_material_inbox_bu_invalidate",
+        "privacy_material_inbox_bd_invalidate",
+    }
+)
+_PRIVATE_MATERIAL_DERIVATIVE_REFRESH_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_derivative_refresh_ai",
+        "privacy_material_raw_ai_refresh",
+        "privacy_material_raw_au_refresh",
+        "privacy_material_raw_ad_refresh",
+        "privacy_material_knowledge_ai_refresh",
+        "privacy_material_knowledge_au_refresh",
+        "privacy_material_knowledge_ad_refresh",
+        "privacy_material_links_ai_refresh",
+        "privacy_material_links_au_refresh",
+        "privacy_material_links_ad_refresh",
+        "privacy_material_inbox_ai_refresh",
+        "privacy_material_inbox_au_refresh",
+        "privacy_material_inbox_ad_refresh",
+    }
+)
+_PRIVATE_MATERIAL_LEGACY_CACHE_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_cache_bi",
+        "privacy_material_cache_bu",
+        "privacy_material_cache_bd",
+    }
+)
+_PRIVATE_MATERIAL_ENTITY_GUARD_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_entities_private_bu",
+        "privacy_material_entities_private_bd",
+        "privacy_material_versions_private_bu",
+        "privacy_material_versions_private_bd",
+    }
+)
+_PRIVATE_MATERIAL_LEGACY_ENTITY_GUARD_TRIGGER_NAMES = frozenset(
+    {
+        "privacy_material_owners_private_bu",
+        "privacy_material_owners_private_bd",
+        "privacy_material_time_private_bu",
+        "privacy_material_time_private_bd",
+    }
+)
+
+_AUDIT_PRIVACY_MARKER_KEY = "audit_payload_privacy"
+_AUDIT_PRIVACY_MARKER_VALUE = "v3"
+_AUDIT_PRIVACY_PENDING_VALUE = "pending_wal_truncate:v3"
+_AUDIT_PRIVACY_V1_VALUES = frozenset({"v1", "v2", "pending_wal_truncate", "pending_wal_truncate:v2"})
+_AUDIT_PRIVACY_HMAC_KEY = "audit_privacy_hmac_key"
+_IDEMPOTENCY_PRIVACY_MARKER_KEY = "idempotency_response_privacy"
+_IDEMPOTENCY_PRIVACY_MARKER_VALUE = "v1"
+_IDEMPOTENCY_PRIVACY_PENDING_VALUE = "pending_wal_truncate:v1"
+_AUDIT_APPEND_ONLY_TRIGGERS = frozenset(
+    {
+        "audit_log_no_delete",
+        "audit_log_no_update",
+        "audit_log_privacy_pending_no_insert",
+    }
+)
+
+_PRIVATE_MIGRATION_SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024
+_PACKED_KNOWLEDGE_SNAPSHOT_MAGIC = b"zKOV1"
+_PRIVATE_IDENTITY_INPUT_MAX_BYTES = 1_048_576
+_PRIVATE_IDENTITY_EXPANDED_MAX_BYTES = 8 * 1_048_576
+_PRIVATE_IDENTITY_MAX_NODES = 200_000
+_PRIVATE_IDENTITY_QUOTED_FRAGMENT_RE = re.compile(r'"((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\'')
+_PRIVATE_IDENTITY_FRAGMENT_SPLIT_RE = re.compile(r"[{}\[\],:\s\"']+")
+
+
+def _private_identity_tokens_json(name_value: Any, aliases_value: Any) -> str:
+    """Expand bounded current/history identity into scalar JSON tokens.
+
+    Old imports contain aliases nested in objects and, occasionally, JSON encoded
+    a second time inside a string.  SQLite's one-pass ``json_tree`` sees only the
+    wrapper in the latter case.  Decode recursively under hard byte/node budgets;
+    exceeding either raises and therefore fails the privacy query closed instead
+    of returning an incomplete token set.
+    """
+
+    def text_value(value: Any) -> str:
+        result = value.decode("utf-8") if isinstance(value, bytes) else str(value or "")
+        if len(result.encode("utf-8")) > _PRIVATE_IDENTITY_INPUT_MAX_BYTES:
+            raise ValueError("private identity input exceeds inspection budget")
+        return result
+
+    tokens: set[str] = set()
+    pending: list[Any] = []
+    expanded_bytes = 0
+    visited = 0
+
+    def queue_malformed_fragments(value: str) -> None:
+        fragments: set[str] = set()
+        for match in _PRIVATE_IDENTITY_QUOTED_FRAGMENT_RE.finditer(value):
+            fragment = match.group(1) if match.group(1) is not None else match.group(2)
+            if fragment:
+                fragments.add(fragment)
+        fragments.update(
+            fragment for fragment in _PRIVATE_IDENTITY_FRAGMENT_SPLIT_RE.split(value) if fragment
+        )
+        for fragment in fragments:
+            if fragment == value:
+                continue
+            try:
+                decoded = json.loads(f'"{fragment}"')
+            except (TypeError, ValueError, RecursionError):
+                decoded = fragment
+            if isinstance(decoded, str) and decoded and decoded != value:
+                pending.append(decoded)
+
+    def add_text(value: str) -> None:
+        nonlocal expanded_bytes
+        encoded_size = len(value.encode("utf-8"))
+        if encoded_size > _PRIVATE_IDENTITY_INPUT_MAX_BYTES:
+            raise ValueError("private identity token exceeds inspection budget")
+        if value and value not in tokens:
+            expanded_bytes += encoded_size
+            if expanded_bytes > _PRIVATE_IDENTITY_EXPANDED_MAX_BYTES:
+                raise ValueError("private identity expansion exceeds inspection budget")
+            tokens.add(value)
+        candidate = value.lstrip()
+        if not candidate.startswith(("{", "[", '"')):
+            return
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError, RecursionError):
+            queue_malformed_fragments(value)
+            return
+        if isinstance(decoded, (dict, list, str)) and decoded != value:
+            pending.append(decoded)
+
+    name = text_value(name_value)
+    add_text(name)
+    aliases = text_value(aliases_value)
+    try:
+        decoded_aliases = json.loads(aliases)
+    except (TypeError, ValueError, RecursionError):
+        add_text(aliases)
+    else:
+        pending.append(decoded_aliases)
+
+    while pending:
+        visited += 1
+        if visited > _PRIVATE_IDENTITY_MAX_NODES:
+            raise ValueError("private identity expansion exceeds node budget")
+        item = pending.pop()
+        if isinstance(item, dict):
+            for key, value in item.items():
+                add_text(str(key))
+                pending.append(value)
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str):
+            add_text(item)
+
+    return json.dumps(sorted(tokens), ensure_ascii=False, separators=(",", ":"))
+
+
+def _bounded_knowledge_version_snapshot(value: Any) -> dict[str, Any] | None:
+    """Inspect legacy KOV provenance without accepting a decompression bomb."""
+
+    try:
+        if isinstance(value, bytes):
+            if len(value) > _PRIVATE_MIGRATION_SNAPSHOT_MAX_BYTES:
+                return None
+            if value.startswith(_PACKED_KNOWLEDGE_SNAPSHOT_MAGIC):
+                decompressor = zlib.decompressobj()
+                raw = decompressor.decompress(
+                    value[len(_PACKED_KNOWLEDGE_SNAPSHOT_MAGIC) :],
+                    _PRIVATE_MIGRATION_SNAPSHOT_MAX_BYTES + 1,
+                )
+                if (
+                    len(raw) > _PRIVATE_MIGRATION_SNAPSHOT_MAX_BYTES
+                    or decompressor.unconsumed_tail
+                    or not decompressor.eof
+                ):
+                    return None
+                text = raw.decode("utf-8")
+            else:
+                text = value.decode("utf-8")
+        else:
+            text = str(value or "")
+    except (UnicodeError, ValueError, OSError, zlib.error):
+        return None
+    if not text or len(text) > _PRIVATE_MIGRATION_SNAPSHOT_MAX_BYTES:
+        return None
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def _snapshot_private_token_matches(
+    snapshot: dict[str, Any],
+    token_owners: dict[str, set[str]],
+    entity_id_tokens: set[str],
+) -> set[str] | None:
+    """Return candidate entity ids copied anywhere into a bounded snapshot.
+
+    ``None`` means the nested shape exceeded the inspection budget and every
+    candidate in that tenant must remain quarantined.
+    """
+
+    matches: set[str] = set()
+    pending: list[Any] = [snapshot]
+    visited = 0
+    while pending:
+        visited += 1
+        if visited > 1_000_000:
+            return None
+        value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str):
+            for token, entity_ids in token_owners.items():
+                if token and (
+                    (token in entity_id_tokens and token in value)
+                    or (token not in entity_id_tokens and _private_identity_match(value, token))
+                ):
+                    matches.update(entity_ids)
+            candidate = value.lstrip()
+            if candidate.startswith(("{", "[", '"')):
+                try:
+                    decoded = json.loads(value)
+                except (TypeError, ValueError, RecursionError):
+                    return None
+                if isinstance(decoded, (dict, list, str)) and decoded != value:
+                    pending.append(decoded)
+    return matches
+
+
+def _merge_transfer_reminder_owner(value: Any) -> tuple[bool, str]:
+    """Find reminder provenance in one bounded merge transfer, JSON-spacing agnostic."""
+
+    try:
+        if isinstance(value, bytes):
+            raw = value
+            text = value.decode("utf-8")
+        else:
+            text = str(value or "")
+            raw = text.encode("utf-8")
+    except UnicodeError:
+        return (isinstance(value, bytes) and b"reminder:" in value), ""
+    if len(raw) > 1_048_576:
+        return ("reminder:" in text), ""
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError, RecursionError):
+        return ("reminder:" in text), ""
+    if not isinstance(decoded, dict):
+        return ("reminder:" in text), ""
+
+    owners: set[str] = set()
+    ambiguous = False
+    pending: list[Any] = [decoded]
+    visited = 0
+    while pending:
+        visited += 1
+        if visited > 100_000:
+            return ("reminder:" in text), ""
+        item = pending.pop()
+        if isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str) and "reminder:" in item:
+            if item.startswith("reminder:") and item.count("reminder:") == 1:
+                owner = item[len("reminder:") :]
+                if owner:
+                    owners.add(owner)
+                else:
+                    ambiguous = True
+            else:
+                ambiguous = True
+    if not owners and not ambiguous:
+        return False, ""
+    return True, next(iter(owners)) if len(owners) == 1 and not ambiguous else ""
+
+
+def _private_material_table_columns(
+    conn: sqlite3.Connection,
+    table: str,
+) -> list[tuple[str, str, int, int]]:
+    """Return the fixed shape fields needed for owned derivative tables."""
+
+    return [
+        (str(row["name"]), str(row["type"]).upper(), int(row["notnull"]), int(row["pk"]))
+        for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()  # nosec B608
+    ]
+
+
+def _validate_private_material_cache_tables(
+    conn: sqlite3.Connection,
+    *,
+    allow_legacy_foreign_keys: bool = False,
+) -> None:
+    """Reject counterfeit owned tables which ``IF NOT EXISTS`` would conceal."""
+
+    tables = {
+        str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "private_entity_material_cache" in tables:
+        if _private_material_table_columns(conn, "private_entity_material_cache") != [
+            ("entity_id", "TEXT", 0, 1)
+        ]:
+            raise sqlite3.DatabaseError("Private material cache table shape is invalid")
+        foreign_keys = conn.execute('PRAGMA foreign_key_list("private_entity_material_cache")').fetchall()
+        legacy_foreign_key = len(foreign_keys) == 1 and (
+            str(foreign_keys[0]["table"]),
+            str(foreign_keys[0]["from"]),
+            str(foreign_keys[0]["to"]),
+            str(foreign_keys[0]["on_delete"]).upper(),
+        ) == ("entities", "entity_id", "id", "CASCADE")
+        if foreign_keys and not (allow_legacy_foreign_keys and legacy_foreign_key):
+            raise sqlite3.DatabaseError("Private material cache foreign key is invalid")
+    if "private_entity_material_work" in tables:
+        if _private_material_table_columns(conn, "private_entity_material_work") != [
+            ("entity_id", "TEXT", 0, 1)
+        ]:
+            raise sqlite3.DatabaseError("Private material work table shape is invalid")
+        work_foreign_keys = conn.execute('PRAGMA foreign_key_list("private_entity_material_work")').fetchall()
+        legacy_work_foreign_key = len(work_foreign_keys) == 1 and (
+            str(work_foreign_keys[0]["table"]),
+            str(work_foreign_keys[0]["from"]),
+            str(work_foreign_keys[0]["to"]),
+            str(work_foreign_keys[0]["on_delete"]).upper(),
+        ) == ("entities", "entity_id", "id", "CASCADE")
+        if work_foreign_keys and not (allow_legacy_foreign_keys and legacy_work_foreign_key):
+            raise sqlite3.DatabaseError("Private material work foreign key is invalid")
+    if "private_entity_material_cache_state" in tables:
+        state_columns = _private_material_table_columns(conn, "private_entity_material_cache_state")
+        canonical_state = [
+            ("singleton", "INTEGER", 0, 1),
+            ("valid", "INTEGER", 1, 0),
+            ("prior_valid", "INTEGER", 1, 0),
+        ]
+        legacy_state = canonical_state[:2]
+        if state_columns != canonical_state and not (
+            allow_legacy_foreign_keys and state_columns == legacy_state
+        ):
+            raise sqlite3.DatabaseError("Private material cache state table shape is invalid")
+    derivative_shape = [
+        ("material_kind", "TEXT", 1, 1),
+        ("object_id", "TEXT", 1, 2),
+        ("user_id", "TEXT", 1, 3),
+    ]
+    for table in (
+        "private_entity_material_derivative_cache",
+        "private_entity_material_derivative_work",
+    ):
+        if table not in tables:
+            continue
+        if _private_material_table_columns(conn, table) != derivative_shape:
+            raise sqlite3.DatabaseError(f"Private derivative table shape is invalid: {table}")
+        if conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall():  # nosec B608
+            raise sqlite3.DatabaseError(f"Private derivative table foreign key is invalid: {table}")
+    if "private_entity_material_derivative_state" in tables and _private_material_table_columns(
+        conn,
+        "private_entity_material_derivative_state",
+    ) != [
+        ("singleton", "INTEGER", 0, 1),
+        ("valid", "INTEGER", 1, 0),
+        ("prior_valid", "INTEGER", 1, 0),
+    ]:
+        raise sqlite3.DatabaseError("Private derivative state table shape is invalid")
+
+
+def _private_material_unexpected_triggers(
+    conn: sqlite3.Connection,
+    *,
+    allow_legacy: bool,
+) -> list[str]:
+    allowed = (
+        _PRIVATE_MATERIAL_CACHE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_CACHE_STATE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_WORK_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_CACHE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_WORK_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_STATE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_INVALIDATOR_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_INVALIDATOR_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_ENTITY_GUARD_TRIGGER_NAMES
+    )
+    if allow_legacy:
+        allowed |= (
+            _PRIVATE_MATERIAL_LEGACY_CACHE_TRIGGER_NAMES
+            | _PRIVATE_MATERIAL_LEGACY_WRITER_TRIGGER_NAMES
+            | _PRIVATE_MATERIAL_LEGACY_ENTITY_GUARD_TRIGGER_NAMES
+        )
+    return [
+        str(row["name"])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger' AND name LIKE 'privacy_material_%'
+                 ORDER BY name"""
+        ).fetchall()
+        if str(row["name"]) not in allowed
+    ]
+
+
+def _validate_private_material_cache_pre_schema(conn: sqlite3.Connection) -> None:
+    """Validate persistent cache artifacts before canonical DDL can hide them."""
+
+    _validate_private_material_cache_tables(conn, allow_legacy_foreign_keys=True)
+    if unexpected := _private_material_unexpected_triggers(conn, allow_legacy=True):
+        raise sqlite3.DatabaseError(
+            "Private material cache has unexpected persistent triggers: " + ", ".join(unexpected)
+        )
+
+
+def _drop_private_material_runtime_triggers(conn: sqlite3.Connection) -> None:
+    """Remove only validated, code-owned guards before the legacy owner move."""
+
+    trigger_names = (
+        _PRIVATE_MATERIAL_CACHE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_CACHE_STATE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_WORK_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_CACHE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_WORK_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_STATE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_LEGACY_WRITER_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_INVALIDATOR_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_INVALIDATOR_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_ENTITY_GUARD_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_LEGACY_ENTITY_GUARD_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_LEGACY_CACHE_TRIGGER_NAMES
+    )
+    for trigger_name in sorted(trigger_names):
+        conn.execute(
+            f'DROP TRIGGER IF EXISTS main."{trigger_name}"'  # nosec B608 - fixed allowlist
+        )
+
+
+def _install_private_material_authorizer(conn: sqlite3.Connection) -> None:
+    """Deny direct mutation of the privacy authority after startup.
+
+    SQLite identifies the trigger which caused an authorised nested write.  That
+    gives the staging/cache design the distinction SQL tables alone cannot make:
+    runtime graph triggers may atomically rebuild it, while a caller cannot edit
+    cache, work and validity rows in concert and forge a self-consistent leak.
+    """
+
+    cache_tables = {
+        "private_entity_material_cache",
+        "private_entity_material_work",
+    }
+    state_table = "private_entity_material_cache_state"
+    allowed_state_sources = (
+        _PRIVATE_MATERIAL_WRITER_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_INVALIDATOR_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_CACHE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_WORK_TRIGGER_NAMES
+    )
+    derivative_tables = {
+        "private_entity_material_derivative_cache",
+        "private_entity_material_derivative_work",
+    }
+    derivative_state_table = "private_entity_material_derivative_state"
+    derivative_writer_sources = (
+        _PRIVATE_MATERIAL_WRITER_TRIGGER_NAMES | _PRIVATE_MATERIAL_DERIVATIVE_REFRESH_TRIGGER_NAMES
+    )
+    derivative_state_sources = (
+        derivative_writer_sources
+        | _PRIVATE_MATERIAL_DERIVATIVE_INVALIDATOR_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_CACHE_TRIGGER_NAMES
+        | _PRIVATE_MATERIAL_DERIVATIVE_WORK_TRIGGER_NAMES
+    )
+    ddl_actions = {
+        sqlite3.SQLITE_ALTER_TABLE,
+        sqlite3.SQLITE_CREATE_INDEX,
+        sqlite3.SQLITE_CREATE_TABLE,
+        sqlite3.SQLITE_CREATE_TRIGGER,
+        sqlite3.SQLITE_CREATE_VIEW,
+        sqlite3.SQLITE_DROP_INDEX,
+        sqlite3.SQLITE_DROP_TABLE,
+        sqlite3.SQLITE_DROP_TRIGGER,
+        sqlite3.SQLITE_DROP_VIEW,
+    }
+    dml_actions = {sqlite3.SQLITE_DELETE, sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE}
+
+    def authorize(
+        action: int,
+        first: str | None,
+        second: str | None,
+        _database: str | None,
+        source: str | None,
+    ) -> int:
+        first_name = str(first or "")
+        second_name = str(second or "")
+        source_name = str(source or "")
+        if action in dml_actions and first_name in cache_tables:
+            return (
+                sqlite3.SQLITE_OK
+                if source_name in _PRIVATE_MATERIAL_WRITER_TRIGGER_NAMES
+                else sqlite3.SQLITE_DENY
+            )
+        if action in dml_actions and first_name == state_table:
+            return sqlite3.SQLITE_OK if source_name in allowed_state_sources else sqlite3.SQLITE_DENY
+        if action in dml_actions and first_name in derivative_tables:
+            return sqlite3.SQLITE_OK if source_name in derivative_writer_sources else sqlite3.SQLITE_DENY
+        if action in dml_actions and first_name == derivative_state_table:
+            return sqlite3.SQLITE_OK if source_name in derivative_state_sources else sqlite3.SQLITE_DENY
+        if action in ddl_actions:
+            protected = (first_name, second_name)
+            if any(
+                name.startswith(("private_entity_material_", "privacy_material_"))
+                or name
+                in {
+                    "public_raw_material",
+                    "public_knowledge_dependencies",
+                    "public_inbox_dependencies",
+                }
+                for name in protected
+            ):
+                return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_PRAGMA and first_name.casefold() == "writable_schema":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    conn.set_authorizer(authorize)
+
+
+def _validate_private_material_cache(conn: sqlite3.Connection) -> None:
+    """Fail startup unless the rebuilt cache exactly matches its live source."""
+
+    _validate_private_material_cache_tables(conn)
+    if unexpected := _private_material_unexpected_triggers(conn, allow_legacy=False):
+        raise sqlite3.DatabaseError(
+            "Private material cache has unexpected persistent triggers: " + ", ".join(unexpected)
+        )
+    cache_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger' AND tbl_name='private_entity_material_cache'"""
+        ).fetchall()
+    }
+    state_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger' AND tbl_name='private_entity_material_cache_state'"""
+        ).fetchall()
+    }
+    if cache_triggers != _PRIVATE_MATERIAL_CACHE_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private material cache guards are incomplete")
+    if state_triggers != _PRIVATE_MATERIAL_CACHE_STATE_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private material cache state guards are incomplete")
+    work_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger' AND tbl_name='private_entity_material_work'"""
+        ).fetchall()
+    }
+    if work_triggers != _PRIVATE_MATERIAL_WORK_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private material work guards are incomplete")
+    derivative_cache_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger'
+                   AND tbl_name='private_entity_material_derivative_cache'"""
+        ).fetchall()
+    }
+    if derivative_cache_triggers != _PRIVATE_MATERIAL_DERIVATIVE_CACHE_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private derivative cache guards are incomplete")
+    derivative_work_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger'
+                   AND tbl_name='private_entity_material_derivative_work'"""
+        ).fetchall()
+    }
+    if derivative_work_triggers != _PRIVATE_MATERIAL_DERIVATIVE_WORK_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private derivative work guards are incomplete")
+    derivative_state_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger'
+                   AND tbl_name='private_entity_material_derivative_state'"""
+        ).fetchall()
+    }
+    if derivative_state_triggers != _PRIVATE_MATERIAL_DERIVATIVE_STATE_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private derivative state guards are incomplete")
+    invalidators = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger' AND name LIKE 'privacy_material_%_invalidate'"""
+        ).fetchall()
+    }
+    if invalidators != (
+        _PRIVATE_MATERIAL_INVALIDATOR_TRIGGER_NAMES | _PRIVATE_MATERIAL_DERIVATIVE_INVALIDATOR_TRIGGER_NAMES
+    ):
+        raise sqlite3.DatabaseError("Private material persistent invalidators are incomplete")
+    entity_guards = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='trigger' AND name LIKE 'privacy_material_%_private_b%'"""
+        ).fetchall()
+    }
+    if entity_guards != _PRIVATE_MATERIAL_ENTITY_GUARD_TRIGGER_NAMES:
+        raise sqlite3.DatabaseError("Private material immutable guards are incomplete")
+    runtime_triggers = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_temp_master
+                 WHERE type='trigger' AND name LIKE 'privacy_material_%'"""
+        ).fetchall()
+    }
+    if runtime_triggers != (
+        _PRIVATE_MATERIAL_WRITER_TRIGGER_NAMES | _PRIVATE_MATERIAL_DERIVATIVE_REFRESH_TRIGGER_NAMES
+    ):
+        raise sqlite3.DatabaseError("Private material runtime rebuild guards are incomplete")
+    runtime_views = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_temp_master
+                 WHERE type='view' AND name IN (
+                    'private_entity_material_states',
+                    'private_entity_identity_tokens',
+                    'private_entity_material_live',
+                    'private_entity_material_cached_closure',
+                    'private_entity_material_closure',
+                    'private_entity_material_derivative_live',
+                    'public_raw_material',
+                    'public_knowledge_dependencies',
+                    'public_inbox_dependencies'
+                 )"""
+        ).fetchall()
+    }
+    if runtime_views != {
+        "private_entity_material_states",
+        "private_entity_identity_tokens",
+        "private_entity_material_live",
+        "private_entity_material_cached_closure",
+        "private_entity_material_closure",
+        "private_entity_material_derivative_live",
+        "public_raw_material",
+        "public_knowledge_dependencies",
+        "public_inbox_dependencies",
+    }:
+        raise sqlite3.DatabaseError("Private material runtime views are incomplete")
+    refresh_tables = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_temp_master
+                 WHERE type='table'
+                   AND name IN (
+                       'private_entity_material_derivative_refresh',
+                       'private_entity_material_derivative_decision'
+                   )"""
+        ).fetchall()
+    }
+    if refresh_tables != {
+        "private_entity_material_derivative_refresh",
+        "private_entity_material_derivative_decision",
+    }:
+        raise sqlite3.DatabaseError("Private derivative refresh control is incomplete")
+    udf_schema = conn.execute(
+        """SELECT name FROM sqlite_master
+             WHERE sql IS NOT NULL
+               AND (
+                    name LIKE 'privacy_material_%'
+                    OR name LIKE 'private_entity_material_%'
+                    OR name IN (
+                        'public_raw_material',
+                        'public_knowledge_dependencies',
+                        'public_inbox_dependencies'
+                    )
+               )
+               AND instr(lower(sql), 'jericho_')>0
+             LIMIT 1"""
+    ).fetchone()
+    if udf_schema is not None:
+        raise sqlite3.DatabaseError("Private material persistent schema depends on runtime UDFs")
+    state = conn.execute("SELECT singleton, valid FROM private_entity_material_cache_state").fetchall()
+    if len(state) != 1 or tuple(state[0]) != (1, 1):
+        raise sqlite3.DatabaseError("Private material cache is not in a valid state")
+    derivative_state = conn.execute(
+        "SELECT singleton, valid FROM private_entity_material_derivative_state"
+    ).fetchall()
+    if len(derivative_state) != 1 or tuple(derivative_state[0]) != (1, 1):
+        raise sqlite3.DatabaseError("Private derivative cache is not in a valid state")
+    duplicate = conn.execute(
+        """SELECT COUNT(*)<>COUNT(DISTINCT entity_id)
+             FROM private_entity_material_cache"""
+    ).fetchone()
+    if duplicate is None or bool(duplicate[0]):
+        raise sqlite3.DatabaseError("Private material cache contains duplicate ids")
+    work_duplicate = conn.execute(
+        """SELECT COUNT(*)<>COUNT(DISTINCT entity_id)
+             FROM private_entity_material_work"""
+    ).fetchone()
+    if work_duplicate is None or bool(work_duplicate[0]):
+        raise sqlite3.DatabaseError("Private material work table contains duplicate ids")
+    for derivative_table in (
+        "private_entity_material_derivative_cache",
+        "private_entity_material_derivative_work",
+    ):
+        derivative_duplicate = conn.execute(
+            f"""SELECT EXISTS (
+                    SELECT 1 FROM {derivative_table}
+                     GROUP BY material_kind, object_id, user_id
+                    HAVING COUNT(*)>1
+                )"""  # nosec B608 - fixed allowlist
+        ).fetchone()
+        if derivative_duplicate is None or bool(derivative_duplicate[0]):
+            raise sqlite3.DatabaseError("Private derivative authority contains duplicate ids")
+
+    mismatch = conn.execute(
+        """SELECT 1 FROM (
+               SELECT live.id AS entity_id
+                 FROM private_entity_material_live live
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM private_entity_material_cache cached
+                     WHERE cached.entity_id=live.id
+                )
+               UNION ALL
+               SELECT cached.entity_id
+                 FROM private_entity_material_cache cached
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM private_entity_material_live live
+                     WHERE live.id=cached.entity_id
+                )
+           ) cache_difference
+           LIMIT 1"""
+    ).fetchone()
+    if mismatch is not None:
+        raise sqlite3.DatabaseError("Private material cache rebuild did not match the live privacy closure")
+    derivative_mismatch = conn.execute(
+        """SELECT 1 FROM (
+               SELECT live.material_kind, live.object_id, live.user_id
+                 FROM private_entity_material_derivative_live live
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM private_entity_material_derivative_cache cached
+                     WHERE cached.material_kind=live.material_kind
+                       AND cached.object_id=live.object_id
+                       AND cached.user_id=live.user_id
+                )
+               UNION ALL
+               SELECT cached.material_kind, cached.object_id, cached.user_id
+                 FROM private_entity_material_derivative_cache cached
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM private_entity_material_derivative_live live
+                     WHERE live.material_kind=cached.material_kind
+                       AND live.object_id=cached.object_id
+                       AND live.user_id=cached.user_id
+                )
+           ) derivative_difference
+           LIMIT 1"""
+    ).fetchone()
+    if derivative_mismatch is not None:
+        raise sqlite3.DatabaseError("Private derivative cache rebuild did not match live dependencies")
+
+
+def _refresh_private_derivative_authority(conn: sqlite3.Connection) -> bool:
+    """Publish an exact derivative allowlist when MAIN says it is dirty."""
+
+    state = conn.execute(
+        "SELECT valid FROM main.private_entity_material_derivative_state WHERE singleton=1"
+    ).fetchone()
+    if state is None:
+        raise sqlite3.DatabaseError("Private derivative authority state is missing")
+    if int(state[0]) == 1:
+        return False
+    conn.execute("INSERT INTO temp.private_entity_material_derivative_refresh(requested) VALUES(1)")
+    healed = conn.execute(
+        "SELECT valid FROM main.private_entity_material_derivative_state WHERE singleton=1"
+    ).fetchone()
+    if healed is None or int(healed[0]) != 1:
+        raise sqlite3.DatabaseError("Private derivative authority rebuild did not publish")
+    return True
+
+
+def _invalidate_legacy_idempotency_responses(conn: sqlite3.Connection) -> bool:
+    """Securely drop pre-privacy HTTP response copies, once.
+
+    Complete idempotency rows are a retry cache, not authoritative user data.
+    Their response bodies predate reminder isolation and cannot be attributed
+    retroactively, so parsing them would turn a convenience cache into another
+    disclosure oracle.  Pending leases contain only ``{}`` and remain intact.
+    """
+
+    marker = conn.execute(
+        "SELECT value FROM schema_meta WHERE key=?",
+        (_IDEMPOTENCY_PRIVACY_MARKER_KEY,),
+    ).fetchone()
+    marker_value = str(marker[0]) if marker is not None else ""
+    if marker_value == _IDEMPOTENCY_PRIVACY_MARKER_VALUE:
+        return False
+    if marker_value and marker_value != _IDEMPOTENCY_PRIVACY_PENDING_VALUE:
+        raise RuntimeError("Unknown idempotency privacy migration marker")
+
+    conn.execute("PRAGMA secure_delete=ON")
+    secure_delete = conn.execute("PRAGMA secure_delete").fetchone()
+    if secure_delete is None or int(secure_delete[0]) != 1:
+        raise RuntimeError("SQLite secure_delete is unavailable for idempotency privacy migration")
+    conn.execute("DELETE FROM request_idempotency WHERE state='complete'")
+    conn.execute(
+        """INSERT INTO schema_meta(key, value, updated_at) VALUES(?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (
+            _IDEMPOTENCY_PRIVACY_MARKER_KEY,
+            _IDEMPOTENCY_PRIVACY_PENDING_VALUE,
+            utc_now(),
+        ),
+    )
+    return True
+
+
+def _migrate_private_reminder_entities(conn: sqlite3.Connection) -> dict[str, int]:
+    """Move only unambiguous legacy reminders from a shared tenant to their person.
+
+    The reminder text never leaves SQLite and is never selected here.  Rows with
+    graph/content dependencies stay in place: every generic graph reader hides
+    them, while rewriting their ownership would make those dependencies lie.
+    """
+
+    # A short-lived WIP build installed this trigger.  It erased the very
+    # convenience pointer needed to recognise a dependent KO/Inbox as private.
+    # Retire it before marker backfill can fire it on a reopened database.
+    conn.execute("DROP TRIGGER IF EXISTS private_entity_owner_clear_public_pointers")
+
+    now = utc_now()
+    conn.execute(
+        """INSERT OR IGNORE INTO private_entity_owners(
+               entity_id, person_id, privacy_kind, created_at)
+           SELECT t.entity_id, substr(t.source, length('reminder:') + 1), 'reminder', ?
+             FROM entity_time t
+            WHERE t.source LIKE 'reminder:%'""",
+        (now,),
+    )
+    # Pre-isolation merges may have deleted the source time row after folding its
+    # private name into the target aliases.  Parse bounded JSON rather than
+    # matching one serializer's whitespace: ``"source" : "reminder:bob"`` is
+    # the same provenance as the compact form.  Ambiguous reminder-bearing
+    # transfers still receive an owner marker with an empty person, which hides
+    # both endpoints from every generic reader without guessing ownership.
+    merge_histories = conn.execute(
+        """SELECT source_entity_id, target_entity_id, transfer_json
+             FROM entity_merge_history"""
+    ).fetchall()
+    for history in merge_histories:
+        is_private, person_id = _merge_transfer_reminder_owner(history["transfer_json"])
+        if not is_private:
+            continue
+        for entity_id in (history["source_entity_id"], history["target_entity_id"]):
+            conn.execute(
+                """INSERT OR IGNORE INTO private_entity_owners(
+                       entity_id, person_id, privacy_kind, created_at)
+                   SELECT id, ?, 'reminder', ? FROM entities WHERE id=?""",
+                (person_id, now, str(entity_id)),
+            )
+    conn.execute(
+        """WITH RECURSIVE private_chain(entity_id, person_id) AS (
+               SELECT entity_id, person_id FROM private_entity_owners
+               UNION
+               SELECT e.merged_into_id, private_chain.person_id
+                 FROM private_chain
+                 JOIN entities e ON e.id=private_chain.entity_id
+                WHERE e.merged_into_id IS NOT NULL AND e.merged_into_id<>''
+           )
+           INSERT OR IGNORE INTO private_entity_owners(
+               entity_id, person_id, privacy_kind, created_at)
+           SELECT e.id, private_chain.person_id, 'reminder', ?
+             FROM private_chain JOIN entities e ON e.id=private_chain.entity_id""",
+        (now,),
+    )
+
+    candidates = conn.execute(
+        """SELECT e.id AS entity_id, e.user_id AS old_user_id, e.name AS entity_name,
+                  substr(t.source, length('reminder:') + 1) AS person_id
+             FROM entity_time t
+             JOIN entities e ON e.id=t.entity_id AND e.user_id=t.user_id
+            WHERE t.source LIKE 'reminder:%'
+              AND length(t.source)>length('reminder:')
+              AND e.entity_type='event' AND e.deleted_at IS NULL
+              AND e.canonical=1 AND e.merged_into_id IS NULL
+            ORDER BY e.id"""
+    ).fetchall()
+    report = {"matched": len(candidates), "migrated": 0, "ambiguous": 0}
+    candidate_user_ids = {str(row["old_user_id"]) for row in candidates}
+    candidate_tokens_by_user: dict[str, dict[str, set[str]]] = {}
+    for candidate in candidates:
+        candidate_user = str(candidate["old_user_id"])
+        candidate_id = str(candidate["entity_id"])
+        tokens = candidate_tokens_by_user.setdefault(candidate_user, {})
+        for token in (candidate_id, str(candidate["entity_name"] or "")):
+            if token:
+                tokens.setdefault(token, set()).add(candidate_id)
+    historical_knowledge_entity_refs: set[tuple[str, str]] = set()
+    unreadable_knowledge_history_users: set[str] = set()
+    if candidate_user_ids:
+        user_placeholders = ",".join("?" for _ in candidate_user_ids)
+        version_rows = conn.execute(
+            f"""SELECT user_id, snapshot_json FROM knowledge_object_versions
+                 WHERE user_id IN ({user_placeholders})""",  # nosec B608 - generated placeholders only
+            tuple(sorted(candidate_user_ids)),
+        ).fetchall()
+        for version_row in version_rows:
+            version_user = str(version_row["user_id"] or "")
+            snapshot = _bounded_knowledge_version_snapshot(version_row["snapshot_json"])
+            if snapshot is None or str(snapshot.get("user_id") or "") != version_user:
+                unreadable_knowledge_history_users.add(version_user)
+                continue
+            entity_ref = snapshot.get("entity_id")
+            if entity_ref not in (None, "") and not isinstance(entity_ref, str):
+                unreadable_knowledge_history_users.add(version_user)
+                continue
+            matches = _snapshot_private_token_matches(
+                snapshot,
+                candidate_tokens_by_user.get(version_user, {}),
+                {
+                    str(candidate["entity_id"])
+                    for candidate in candidates
+                    if str(candidate["old_user_id"]) == version_user
+                },
+            )
+            if matches is None:
+                unreadable_knowledge_history_users.add(version_user)
+                continue
+            historical_knowledge_entity_refs.update((version_user, entity_id) for entity_id in matches)
+
+    dependency_queries = (
+        "SELECT 1 FROM knowledge_objects WHERE entity_id=? LIMIT 1",
+        "SELECT 1 FROM inbox WHERE suggested_entity_id=? LIMIT 1",
+        "SELECT 1 FROM knowledge_entity_links WHERE entity_id=? LIMIT 1",
+        "SELECT 1 FROM relations WHERE source_entity_id=? OR target_entity_id=? LIMIT 1",
+        "SELECT 1 FROM relation_revisions WHERE source_entity_id=? OR target_entity_id=? LIMIT 1",
+        "SELECT 1 FROM relation_candidates WHERE source_entity_id=? OR target_entity_id=? LIMIT 1",
+        "SELECT 1 FROM entity_resolution_candidates WHERE entity_a_id=? OR entity_b_id=? LIMIT 1",
+        "SELECT 1 FROM entity_merge_history WHERE source_entity_id=? OR target_entity_id=? LIMIT 1",
+        "SELECT 1 FROM entities WHERE merged_into_id=? LIMIT 1",
+        "SELECT 1 FROM feedback WHERE target_id=? LIMIT 1",
+        "SELECT 1 FROM feedback_state WHERE target_id=? LIMIT 1",
+        # Suggestions/notes are full model-produced copies.  A pre-isolation
+        # Inbox row may carry only the reminder id/name inside JSON while its
+        # typed suggested_entity_id is empty.  Moving the entity would make that
+        # private reference foreign and invisible to ordinary tenant joins.
+        """SELECT 1 FROM entities private_entity
+             WHERE private_entity.id=? AND EXISTS (
+               SELECT 1 FROM inbox i WHERE i.user_id=private_entity.user_id AND (
+                 instr(COALESCE(i.suggested_tags_json,''), private_entity.id)>0
+                 OR instr(COALESCE(i.suggestions_json,''), private_entity.id)>0
+                 OR instr(COALESCE(i.classification_notes,''), private_entity.id)>0
+                 OR (
+                   private_entity.name<>'' AND (
+                     jericho_private_identity_match(
+                         COALESCE(i.suggested_tags_json,''), private_entity.name)=1
+                     OR jericho_private_identity_match(
+                         COALESCE(i.suggestions_json,''), private_entity.name)=1
+                     OR jericho_private_identity_match(
+                         COALESCE(i.classification_notes,''), private_entity.name)=1
+                   )
+                 )
+               )
+             ) LIMIT 1""",
+    )
+    for candidate in candidates:
+        entity_id = str(candidate["entity_id"])
+        old_user_id = str(candidate["old_user_id"])
+        person_id = str(candidate["person_id"])
+        if person_id == old_user_id:
+            continue
+        if (
+            not person_id
+            or conn.execute("SELECT 1 FROM users WHERE id=? LIMIT 1", (person_id,)).fetchone() is None
+        ):
+            report["ambiguous"] += 1
+            continue
+
+        ambiguous = (
+            old_user_id in unreadable_knowledge_history_users
+            or (
+                old_user_id,
+                entity_id,
+            )
+            in historical_knowledge_entity_refs
+        )
+        for query in dependency_queries:
+            parameter_count = query.count("?")
+            if conn.execute(query, (entity_id,) * parameter_count).fetchone() is not None:
+                ambiguous = True
+                break
+        if ambiguous:
+            report["ambiguous"] += 1
+            continue
+
+        version_state = conn.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE
+                            WHEN user_id=? AND json_valid(snapshot_json)
+                            THEN CASE
+                                   WHEN json_type(snapshot_json)='object'
+                                    AND json_extract(snapshot_json,'$.id')=?
+                                    AND json_extract(snapshot_json,'$.user_id')=?
+                                   THEN 0 ELSE 1 END
+                            ELSE 1 END) AS invalid
+                 FROM entity_versions WHERE entity_id=?""",
+            (old_user_id, entity_id, old_user_id, entity_id),
+        ).fetchone()
+        if version_state is None or int(version_state["invalid"] or 0):
+            report["ambiguous"] += 1
+            continue
+
+        version_total = int(version_state["total"] or 0)
+        updated_versions = conn.execute(
+            """UPDATE entity_versions
+                  SET user_id=?, snapshot_json=json_set(snapshot_json,'$.user_id',?)
+                WHERE entity_id=? AND user_id=?""",
+            (person_id, person_id, entity_id, old_user_id),
+        ).rowcount
+        updated_time = conn.execute(
+            """UPDATE entity_time SET user_id=?
+                WHERE entity_id=? AND user_id=? AND source=?""",
+            (person_id, entity_id, old_user_id, f"reminder:{person_id}"),
+        ).rowcount
+        updated_entity = conn.execute(
+            """UPDATE entities SET user_id=?
+                WHERE id=? AND user_id=? AND entity_type='event'
+                  AND deleted_at IS NULL AND canonical=1 AND merged_into_id IS NULL""",
+            (person_id, entity_id, old_user_id),
+        ).rowcount
+        if updated_versions != version_total or updated_time != 1 or updated_entity != 1:
+            raise sqlite3.IntegrityError("Private reminder migration lost its atomic precondition")
+        report["migrated"] += 1
+
+    return report
+
+
+@lru_cache(maxsize=1)
+def _canonical_relation_history_schema_sql() -> tuple[dict[str, str], dict[str, str]]:
+    """Build owned-table and trigger contracts with this process's SQLite parser.
+
+    ``sqlite_master.sql`` omits ``IF NOT EXISTS`` and normalises some DDL syntax.
+    Compiling the synthetic empty core schema avoids a hand-maintained second
+    copy of the security-critical DDL while still comparing the installed
+    database with the exact definitions shipped by this build.
+    """
+
+    canonical = sqlite3.connect(":memory:")
+    try:
+        canonical.executescript(CORE_TABLE_SCHEMA)
+        canonical.executescript(CORE_INDEX_SCHEMA)
+        table_definitions = {
+            str(row[0]): str(row[1] or "")
+            for row in canonical.execute("SELECT name, sql FROM sqlite_master WHERE type='table'").fetchall()
+            if str(row[0]) in _RELATION_HISTORY_OWNED_TABLES
+        }
+        trigger_definitions = {
+            str(row[0]): str(row[1] or "")
+            for row in canonical.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+            if str(row[0]) in _RELATION_HISTORY_TRIGGER_TABLES
+        }
+    finally:
+        canonical.close()
+    missing = sorted(
+        (_RELATION_HISTORY_OWNED_TABLES - table_definitions.keys())
+        | (set(_RELATION_HISTORY_TRIGGER_TABLES) - trigger_definitions.keys())
+    )
+    if missing:
+        raise RuntimeError(f"Core schema omits required relation-history DDL: {', '.join(missing)}")
+    return table_definitions, trigger_definitions
+
+
+def _relation_history_unique_index_contract(
+    conn: sqlite3.Connection,
+) -> dict[str, tuple[Any, ...]]:
+    """Describe only conflict-producing indexes on guarded authority tables."""
+
+    contract: dict[str, tuple[Any, ...]] = {}
+    for table in sorted(_RELATION_HISTORY_UNIQUE_INDEX_TABLES):
+        indexes = conn.execute(
+            """SELECT name, origin, partial
+                 FROM pragma_index_list(?)
+                WHERE "unique"=1
+                ORDER BY name""",
+            (table,),
+        ).fetchall()
+        for index in indexes:
+            name = str(index[0])
+            definition = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+                (name,),
+            ).fetchone()
+            columns = tuple(
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT seqno, cid, name, desc, coll, key
+                         FROM pragma_index_xinfo(?)
+                        ORDER BY seqno""",
+                    (name,),
+                ).fetchall()
+            )
+            contract[name] = (
+                table,
+                str(index[1]),
+                int(index[2]),
+                str((definition[0] if definition else "") or ""),
+                columns,
+            )
+    return contract
+
+
+@lru_cache(maxsize=1)
+def _canonical_relation_history_unique_index_contract() -> dict[str, tuple[Any, ...]]:
+    canonical = sqlite3.connect(":memory:")
+    try:
+        canonical.executescript(CORE_TABLE_SCHEMA)
+        canonical.executescript(CORE_INDEX_SCHEMA)
+        contract = _relation_history_unique_index_contract(canonical)
+    finally:
+        canonical.close()
+    if "uq_active_relation" not in contract:
+        raise RuntimeError("Core schema omits the active relation uniqueness contract")
+    return contract
+
+
+def _upgrade_relation_history_31_to_32(conn: sqlite3.Connection) -> None:
+    """Replace only the exact deployed v31 guards, preserving all evidence.
+
+    The caller has already validated the complete v31 schema and lineage under
+    ``BEGIN IMMEDIATE``. DDL remains in that same transaction: rollback restores
+    the old table and triggers byte-for-byte if any v32 proof fails.
+    """
+
+    allowed_context_references = {
+        "relations_revision_ai",
+        "relations_revision_au",
+        "relations_revision_bd",
+    }
+    unexpected_references = [
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE sql IS NOT NULL
+                   AND name<>'relation_revision_context'
+                   AND instr(lower(sql), 'relation_revision_context')>0"""
+        ).fetchall()
+        if str(row[0]) not in allowed_context_references
+    ]
+    if unexpected_references:
+        raise UnsupportedSchemaVersionError(
+            "Schema 31 relation context has unexpected dependencies; restore a verified backup"
+        )
+
+    observed_at: str | None = None
+    for row in conn.execute(
+        """SELECT value AS boundary FROM schema_meta
+             WHERE key='relation_history_complete_from'
+           UNION ALL
+           SELECT recorded_at FROM relation_revisions
+           UNION ALL
+           SELECT created_at FROM entity_versions
+           UNION ALL
+           SELECT created_at FROM entity_merge_history
+           UNION ALL
+           SELECT undone_at FROM entity_merge_history WHERE undone_at IS NOT NULL"""
+    ):
+        raw_boundary = str(row[0] or "")
+        try:
+            boundary = normalize_known_at(raw_boundary, reject_future=False)
+        except ValueError as exc:
+            raise UnsupportedSchemaVersionError(
+                "Schema 31 temporal authority is unreadable; restore a verified backup"
+            ) from exc
+        if observed_at is None or boundary > observed_at:
+            observed_at = boundary
+    if observed_at is None:
+        raise UnsupportedSchemaVersionError(
+            "Schema 31 relation history has no completeness boundary; restore a verified backup"
+        )
+
+    for trigger in sorted(_RELATION_HISTORY_TRIGGER_TABLES_V31):
+        conn.execute(f'DROP TRIGGER "{trigger}"')  # nosec B608 - fixed allowlist
+    conn.execute("DROP TABLE relation_revision_context")
+
+    canonical_tables, canonical_triggers = _canonical_relation_history_schema_sql()
+    conn.execute(canonical_tables["relation_revision_context"])
+    conn.execute(
+        """INSERT INTO relation_revision_context(
+               singleton, batch_id, recorded_at, observed_at
+           ) VALUES(1, '', '', ?)""",
+        (observed_at,),
+    )
+    for trigger in sorted(_RELATION_HISTORY_TRIGGER_TABLES):
+        conn.execute(canonical_triggers[trigger])
+
+
+@lru_cache(maxsize=1)
+def _canonical_audit_trigger_sql() -> dict[str, str]:
+    """Compile the append-only and pending-migration guards from shipped DDL."""
+
+    canonical = sqlite3.connect(":memory:")
+    try:
+        canonical.executescript(CORE_TABLE_SCHEMA)
+        definitions = {
+            str(row[0]): str(row[1] or "")
+            for row in canonical.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+            if str(row[0]) in _AUDIT_APPEND_ONLY_TRIGGERS
+        }
+    finally:
+        canonical.close()
+    missing = _AUDIT_APPEND_ONLY_TRIGGERS - definitions.keys()
+    if missing:
+        raise RuntimeError(f"Core schema omits required audit DDL: {', '.join(sorted(missing))}")
+    return definitions
+
+
+def _validate_audit_append_only_guards(conn: sqlite3.Connection) -> None:
+    canonical = _canonical_audit_trigger_sql()
+    installed = {
+        str(row[0]): str(row[1] or "")
+        for row in conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND name IN (?, ?, ?)",
+            tuple(sorted(_AUDIT_APPEND_ONLY_TRIGGERS)),
+        ).fetchall()
+    }
+    if installed != canonical:
+        raise RuntimeError("Audit append-only guards are missing or altered")
+
+
+def _legacy_audit_payload(
+    raw: Any,
+    *,
+    key: bytes,
+    user_exists: Any,
+    id_exists: Any,
+) -> dict[str, Any] | None:
+    """Parse an old audit JSON cell without ever returning its original text."""
+
+    if raw is None:
+        return None
+    text = str(raw)
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return {"private_chars": len(text), "private_fields_count": 1}
+    if isinstance(parsed, dict):
+        return sanitize_audit_payload(
+            parsed,
+            key=key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+    if isinstance(parsed, str):
+        return sanitize_audit_payload(
+            {"content": parsed},
+            key=key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+    if isinstance(parsed, list):
+        return {"private_items_count": len(parsed)}
+    return {"private_fields_count": 1}
+
+
+def _sanitize_legacy_audit_log(conn: sqlite3.Connection) -> bool:
+    """One-time local redaction of rows written before the complete sink guard.
+
+    Audit is normally append-only.  Privacy is the one legitimate reason to
+    rewrite historical rows: marker v2 still accepted unproven IPs/generated-ID
+    shapes and plain content digests.  V3 replaces those with provenance-checked
+    evidence and keyed references.
+    The trigger removal, complete row projection, trigger recreation and pending
+    marker share the surrounding schema transaction, so a crash exposes either
+    the old guarded table or the fully redacted guarded table, never an unguarded
+    midpoint.
+    """
+
+    marker = conn.execute(
+        "SELECT value FROM schema_meta WHERE key=?", (_AUDIT_PRIVACY_MARKER_KEY,)
+    ).fetchone()
+    marker_value = str(marker[0]) if marker is not None else ""
+    key_row = conn.execute("SELECT value FROM schema_meta WHERE key=?", (_AUDIT_PRIVACY_HMAC_KEY,)).fetchone()
+    if marker_value in {_AUDIT_PRIVACY_MARKER_VALUE, _AUDIT_PRIVACY_PENDING_VALUE}:
+        decode_audit_privacy_key(key_row[0] if key_row is not None else None)
+        _validate_audit_append_only_guards(conn)
+        return marker_value == _AUDIT_PRIVACY_PENDING_VALUE
+    if marker_value and marker_value not in _AUDIT_PRIVACY_V1_VALUES | {_AUDIT_PRIVACY_PENDING_VALUE}:
+        raise RuntimeError("Unknown audit privacy migration marker")
+
+    if key_row is None:
+        key_text = secrets.token_hex(32)
+        conn.execute(
+            "INSERT INTO schema_meta(key, value, updated_at) VALUES(?, ?, ?)",
+            (_AUDIT_PRIVACY_HMAC_KEY, key_text, utc_now()),
+        )
+        privacy_key = decode_audit_privacy_key(key_text)
+    else:
+        privacy_key = decode_audit_privacy_key(key_row[0])
+
+    def user_exists(candidate: str) -> bool:
+        return conn.execute("SELECT 1 FROM users WHERE id=? LIMIT 1", (candidate,)).fetchone() is not None
+
+    def id_exists(candidate: str, prefixes: frozenset[str]) -> bool:
+        return audit_generated_id_exists(conn.execute, candidate, prefixes)
+
+    # UPDATE alone is only a logical deletion: SQLite may leave the old record in
+    # freed cell bytes.  secure_delete makes the rewrite overwrite those bytes;
+    # the pre-rewrite WAL is truncated after this transaction commits below.
+    conn.execute("PRAGMA secure_delete=ON")
+    secure_delete = conn.execute("PRAGMA secure_delete").fetchone()
+    if secure_delete is None or int(secure_delete[0]) != 1:
+        raise RuntimeError("SQLite secure_delete is unavailable for audit privacy migration")
+
+    trigger_sql = _canonical_audit_trigger_sql()
+    for trigger in sorted(_AUDIT_APPEND_ONLY_TRIGGERS):
+        conn.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')  # nosec B608 - fixed allowlist
+
+    rows = conn.execute("SELECT * FROM audit_log").fetchall()
+    for row in rows:
+        safe_before = _legacy_audit_payload(
+            row["before_json"],
+            key=privacy_key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+        safe_after = _legacy_audit_payload(
+            row["after_json"],
+            key=privacy_key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+        safe_target_type, safe_target_id = sanitize_audit_target(
+            row["target_type"],
+            row["target_id"],
+            key=privacy_key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+        safe_id = sanitize_audit_id(row["id"], key=privacy_key, id_exists=id_exists)
+        conn.execute(
+            """UPDATE audit_log
+                  SET id=?, user_id=?, action=?, target_type=?, target_id=?,
+                      before_json=?, after_json=?, ip_address=?, request_id=?, created_at=?
+                WHERE id=?""",
+            (
+                safe_id,
+                sanitize_audit_actor(row["user_id"], user_exists=user_exists),
+                sanitize_audit_action(row["action"]),
+                safe_target_type,
+                safe_target_id,
+                (
+                    json.dumps(safe_before, ensure_ascii=False, sort_keys=True)
+                    if safe_before is not None
+                    else None
+                ),
+                (
+                    json.dumps(safe_after, ensure_ascii=False, sort_keys=True)
+                    if safe_after is not None
+                    else None
+                ),
+                sanitize_audit_ip(row["ip_address"], key=privacy_key),
+                sanitize_audit_request_id(row["request_id"], key=privacy_key),
+                sanitize_audit_created_at(
+                    row["created_at"],
+                    fallback="1970-01-01T00:00:00+00:00",
+                ),
+                row["id"],
+            ),
+        )
+
+    for trigger in sorted(_AUDIT_APPEND_ONLY_TRIGGERS):
+        conn.execute(trigger_sql[trigger])
+    _validate_audit_append_only_guards(conn)
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES(?, ?, ?)",
+        (_AUDIT_PRIVACY_MARKER_KEY, _AUDIT_PRIVACY_PENDING_VALUE, utc_now()),
+    )
+    return True
+
+
+def _relation_history_artifacts_present(conn: sqlite3.Connection, *, schema_meta_preexisting: bool) -> bool:
+    """Recognise schema-31 authority before any idempotent DDL can rewrite it."""
+
+    for kind, name in conn.execute(
+        "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'trigger')"
+    ).fetchall():
+        if str(kind) == "table" and str(name) in {
+            "relation_revisions",
+            "relation_revision_context",
+        }:
+            return True
+        if str(kind) == "trigger" and str(name) in _RELATION_HISTORY_TRIGGER_TABLES:
+            return True
+    return bool(
+        schema_meta_preexisting
+        and conn.execute("SELECT 1 FROM schema_meta WHERE key='relation_history_complete_from'").fetchone()
+    )
+
+
+def _relation_history_lineage_problems(conn: sqlite3.Connection) -> list[str]:
+    """Audit both sides and the state machine of relation history.
+
+    Diagnostics intentionally identify only the broken invariant.  Relation IDs
+    and tenant IDs are private archive data and must not escape into startup logs
+    or exception telemetry.
+    """
+
+    snapshot_match = """history.user_id IS current.user_id
+                     AND history.source_entity_id IS current.source_entity_id
+                     AND history.target_entity_id IS current.target_entity_id
+                     AND history.relation_type IS current.relation_type
+                     AND history.weight IS current.weight
+                     AND history.metadata_json IS current.metadata_json
+                     AND history.created_at IS current.created_at
+                     AND history.deleted_at IS current.deleted_at
+                     AND history.valid_from IS current.valid_from
+                     AND history.valid_to IS current.valid_to
+                     AND history.invalidated_at IS current.invalidated_at
+                     AND history.superseded_by IS current.superseded_by"""
+    latest = """WITH latest_keys AS (
+                     SELECT relation_id, MAX(revision) AS revision
+                     FROM relation_revisions
+                     GROUP BY relation_id
+                 ), latest_history AS (
+                     SELECT history.*
+                     FROM relation_revisions AS history
+                     JOIN latest_keys AS key
+                       ON key.relation_id=history.relation_id
+                      AND key.revision=history.revision
+                 )"""
+    problems: list[str] = []
+
+    current_mismatch = conn.execute(
+        f"""{latest}
+            SELECT 1
+            FROM relations AS current
+            LEFT JOIN latest_history AS history ON history.relation_id=current.id
+            WHERE history.relation_id IS NULL
+               OR history.present<>1
+               OR NOT ({snapshot_match})
+            LIMIT 1"""  # nosec B608 - fixed internal invariant fragment
+    ).fetchone()
+    if current_mismatch is not None:
+        problems.append("current relation projection has incomplete lineage")
+
+    present_mismatch = conn.execute(
+        f"""{latest}
+            SELECT 1
+            FROM latest_history AS history
+            LEFT JOIN relations AS current ON current.id=history.relation_id
+            WHERE history.present=1
+              AND (current.id IS NULL OR NOT ({snapshot_match}))
+            LIMIT 1"""  # nosec B608 - fixed internal invariant fragment
+    ).fetchone()
+    if present_mismatch is not None:
+        problems.append("latest present relation history is absent from current projection")
+
+    tombstone_with_current = conn.execute(
+        f"""{latest}
+            SELECT 1
+            FROM latest_history AS history
+            JOIN relations AS current ON current.id=history.relation_id
+            WHERE history.present=0
+            LIMIT 1"""  # nosec B608 - fixed internal invariant fragment
+    ).fetchone()
+    if tombstone_with_current is not None:
+        problems.append("latest relation tombstone still has a current projection")
+
+    audit = conn.execute(
+        """WITH ordered AS (
+               SELECT relation_id, revision, event_seq, present, operation, user_id,
+                      ROW_NUMBER() OVER (
+                          PARTITION BY relation_id ORDER BY revision
+                      ) AS expected_revision,
+                      LAG(event_seq) OVER (
+                          PARTITION BY relation_id ORDER BY revision
+                      ) AS previous_event_seq,
+                      LAG(present) OVER (
+                          PARTITION BY relation_id ORDER BY revision
+                      ) AS previous_present,
+                      LAG(user_id) OVER (
+                          PARTITION BY relation_id ORDER BY revision
+                      ) AS previous_user_id
+               FROM relation_revisions
+           )
+           SELECT
+               MAX(CASE
+                   WHEN revision<>expected_revision
+                     OR (previous_event_seq IS NOT NULL AND event_seq<=previous_event_seq)
+                   THEN 1 ELSE 0 END) AS broken_sequence,
+               MAX(CASE
+                   WHEN previous_user_id IS NOT NULL AND user_id IS NOT previous_user_id
+                   THEN 1 ELSE 0 END) AS broken_owner,
+               MAX(CASE
+                   WHEN expected_revision=1
+                     AND (present<>1 OR operation NOT IN ('insert', 'migration_baseline'))
+                   THEN 1
+                   WHEN expected_revision>1 AND operation='migration_baseline'
+                   THEN 1
+                   WHEN expected_revision>1 AND operation='insert'
+                     AND (present<>1 OR previous_present<>0)
+                   THEN 1
+                   WHEN expected_revision>1 AND operation='update'
+                     AND (present<>1 OR previous_present<>1)
+                   THEN 1
+                   WHEN expected_revision>1 AND operation='delete'
+                     AND (present<>0 OR previous_present<>1)
+                   THEN 1
+                   ELSE 0 END) AS broken_state
+           FROM ordered"""
+    ).fetchone()
+    if audit is not None:
+        if bool(audit["broken_sequence"]):
+            problems.append("relation revision sequence has gaps or reordered events")
+        if bool(audit["broken_owner"]):
+            problems.append("relation history owner continuity is broken")
+        if bool(audit["broken_state"]):
+            problems.append("relation revision presence sequence is inconsistent")
+
+    timestamp_invalid = False
+    for row in conn.execute("SELECT DISTINCT recorded_at FROM relation_revisions").fetchall():
+        raw_timestamp = str(row[0] or "")
+        try:
+            canonical_timestamp = normalize_known_at(raw_timestamp, reject_future=False)
+        except ValueError:
+            timestamp_invalid = True
+            break
+        if raw_timestamp != canonical_timestamp:
+            timestamp_invalid = True
+            break
+    if timestamp_invalid:
+        problems.append("relation history contains a non-canonical recorded_at")
+    else:
+        decreasing_timestamp = conn.execute(
+            """WITH ordered AS (
+                   SELECT recorded_at,
+                          LAG(recorded_at) OVER (ORDER BY event_seq) AS previous_recorded_at
+                     FROM relation_revisions
+               )
+               SELECT 1 FROM ordered
+                WHERE previous_recorded_at IS NOT NULL
+                  AND recorded_at < previous_recorded_at
+                LIMIT 1"""
+        ).fetchone()
+        if decreasing_timestamp is not None:
+            problems.append("relation history recorded_at decreases across event order")
+        reused_boundary = conn.execute(
+            """WITH ordered AS (
+                   SELECT recorded_at, batch_id,
+                          LAG(recorded_at) OVER (ORDER BY event_seq) AS previous_recorded_at,
+                          LAG(batch_id) OVER (ORDER BY event_seq) AS previous_batch_id
+                     FROM relation_revisions
+               )
+               SELECT 1 FROM ordered
+                WHERE recorded_at=previous_recorded_at
+                  AND batch_id IS NOT previous_batch_id
+                LIMIT 1"""
+        ).fetchone()
+        if reused_boundary is not None:
+            problems.append("relation history reuses a transaction boundary across batches")
+
+    inconsistent_batch = conn.execute(
+        """SELECT 1 FROM relation_revisions
+           GROUP BY batch_id
+          HAVING batch_id='' OR COUNT(DISTINCT recorded_at)<>1
+           LIMIT 1"""
+    ).fetchone()
+    if inconsistent_batch is not None:
+        problems.append("relation history batch has inconsistent transaction time")
+    return problems
 
 
 def iso_date(value: Any) -> str | None:
@@ -158,7 +1974,7 @@ class CoreMixin(StorageShared):
                 delay = min(delay * 1.8, 0.5)
 
     def _open_once(self) -> sqlite3.Connection:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite(self._db_path)
         # check_same_thread=False so close() can shut every thread's connection
         # down from the shutdown/restore thread; cross-thread *use* is prevented
         # structurally (the conn property only ever hands back the caller thread's
@@ -174,6 +1990,10 @@ class CoreMixin(StorageShared):
             # every connection must set them or FK enforcement silently disappears.
             conn.execute("PRAGMA busy_timeout=10000")
             conn.execute("PRAGMA journal_mode=WAL")
+            # Existing sidecars may predate the owner-only policy.  A new WAL/SHM
+            # inherits the pre-secured main database mode; this second pass also
+            # tightens legacy sidecars before normal application reads begin.
+            restrict_sqlite_files(self._db_path)
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=NORMAL")
             # SQLite's lower()/NOCASE only fold ASCII; tags and entity names are
@@ -183,7 +2003,19 @@ class CoreMixin(StorageShared):
             conn.create_function(
                 "jericho_casefold",
                 1,
-                lambda value: str(value).casefold() if value is not None else None,
+                _unicode_casefold,
+                deterministic=True,
+            )
+            conn.create_function(
+                "jericho_private_identity_tokens",
+                2,
+                _private_identity_tokens_json,
+                deterministic=True,
+            )
+            conn.create_function(
+                "jericho_private_identity_match",
+                2,
+                _private_identity_match,
                 deterministic=True,
             )
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
@@ -201,6 +2033,36 @@ class CoreMixin(StorageShared):
             # Schema creation/migration/FTS is applied exactly once, by the first
             # connection; later connections open against the already-migrated file.
             self._ensure_schema(conn)
+            # UDF-backed views/rebuild triggers are connection-local by design:
+            # persistent SQLite schema must remain reparsable by offline tools.
+            # Every thread owns a distinct connection and therefore installs its
+            # own TEMP privacy runtime before any application query can run.
+            self._execute_statements(conn, PRIVATE_MATERIAL_RUNTIME_SCHEMA)
+            # A raw/out-of-process writer owns only persistent invalidators.  A
+            # later connection must heal under a database write lock *after* its
+            # Unicode TEMP runtime exists and before any reader can observe it.
+            # Recheck after BEGIN IMMEDIATE: another opener may have repaired the
+            # same global state while this connection waited for the lock.
+            conn.execute("BEGIN IMMEDIATE")
+            repaired = False
+            material_state = conn.execute(
+                "SELECT valid FROM main.private_entity_material_cache_state WHERE singleton=1"
+            ).fetchone()
+            derivative_state = conn.execute(
+                "SELECT valid FROM main.private_entity_material_derivative_state WHERE singleton=1"
+            ).fetchone()
+            if material_state is None or derivative_state is None:
+                raise sqlite3.DatabaseError("Private material authority state is missing")
+            if int(material_state[0]) != 1:
+                self._execute_statements(conn, PRIVATE_MATERIAL_CACHE_REBUILD_SQL)
+                repaired = True
+            elif int(derivative_state[0]) != 1:
+                self._execute_statements(conn, PRIVATE_DERIVATIVE_CACHE_REBUILD_SQL)
+                repaired = True
+            if repaired:
+                _validate_private_material_cache(conn)
+            conn.commit()
+            _install_private_material_authorizer(conn)
             # The core migration transiently lowers busy_timeout (a PRAGMA embedded
             # in CORE_SCHEMA); restore the uniform value on the migrating connection.
             conn.execute("PRAGMA busy_timeout=10000")
@@ -228,60 +2090,6 @@ class CoreMixin(StorageShared):
             self._schema_ready = True
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
-        # Fail closed before executing any DDL. Opening a database produced by a
-        # newer Friday build must never rewrite its schema marker or attempt a
-        # best-effort downgrade. A malformed explicit marker is treated the same
-        # way; databases without a marker remain valid pre-release migrations.
-        schema_meta_preexisting = (
-            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'").fetchone()
-            is not None
-        )
-        previous_schema_version: str | None = None
-        # Separate from the schema marker ON PURPOSE. The core migration commits
-        # first, then the FTS phase runs and commits second — and `executescript`
-        # makes the FTS DDL durable on its own. A process that died in that window
-        # left a database whose schema marker was current and whose FTS tables
-        # existed but were EMPTY, and the next open saw "marker current, tables
-        # present" and skipped the rebuild forever: every pre-crash document became
-        # unfindable by search, silently and permanently.
-        #
-        # This marker is written only after the FTS phase itself commits, so the
-        # crash window reopens as "index not built by this version" and heals.
-        fts_build_marker: str | None = None
-        if schema_meta_preexisting:
-            row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-            previous_schema_version = str(row[0]).strip() if row else None
-            marker_row = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
-            fts_build_marker = str(marker_row[0]).strip() if marker_row else None
-            if previous_schema_version:
-                try:
-                    parsed_version = int(previous_schema_version)
-                except ValueError as exc:
-                    raise UnsupportedSchemaVersionError(
-                        f"Invalid database schema version: {previous_schema_version!r}"
-                    ) from exc
-                if parsed_version < 0 or parsed_version > SCHEMA_VERSION:
-                    raise UnsupportedSchemaVersionError(
-                        f"Database schema version {parsed_version} is not supported by "
-                        f"this Friday build (maximum {SCHEMA_VERSION})"
-                    )
-
-        fts_preexisting = (
-            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'").fetchone()
-            is not None
-        )
-        # Probed BEFORE the FTS DDL runs, like the line above. Asking afterwards
-        # always answers "yes" — the table has just been created — and the rebuild
-        # that populates an external-content index over pre-existing rows is then
-        # skipped, leaving an index that reports rows and matches nothing.
-        raw_fts_preexisting = (
-            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_fts'").fetchone()
-            is not None
-        )
-        messages_fts_preexisting = (
-            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'").fetchone()
-            is not None
-        )
         # Create/recognize tables first, then add legacy columns, and only then
         # create indexes that reference those columns. Keep this core migration in
         # one explicit transaction: sqlite3's executescript() commits an existing
@@ -293,21 +2101,152 @@ class CoreMixin(StorageShared):
         # row on every start for nothing. The marker is only written after the whole
         # migration transaction commits, so version == SCHEMA_VERSION already proves
         # the backfill ran; an absent or lower marker still runs it.
-        already_current = previous_schema_version is not None and (
-            previous_schema_version.strip() == str(SCHEMA_VERSION)
-        )
         try:
             conn.execute("BEGIN IMMEDIATE")
+            # Read every migration decision only AFTER acquiring the cross-process
+            # write lock. Another worker may have completed schema 30 -> 31 while
+            # this connection was waiting; a stale pre-lock marker would mistake
+            # its legitimate new artifacts for corruption.
+            schema_meta_preexisting = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+                ).fetchone()
+                is not None
+            )
+            previous_schema_version: str | None = None
+            parsed_version: int | None = None
+            # Separate from the schema marker ON PURPOSE. The core migration
+            # commits first, then the FTS phase runs and commits second. This
+            # marker is written only after that phase commits, so a crash between
+            # them reopens as "index not built by this version" and heals.
+            fts_build_marker: str | None = None
+            if schema_meta_preexisting:
+                row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+                previous_schema_version = str(row[0]).strip() if row else None
+                marker_row = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
+                fts_build_marker = str(marker_row[0]).strip() if marker_row else None
+                # Fail closed before executing any DDL. A newer or malformed
+                # marker must never become a best-effort downgrade.
+                if previous_schema_version:
+                    try:
+                        parsed_version = int(previous_schema_version)
+                    except ValueError as exc:
+                        raise UnsupportedSchemaVersionError("Invalid database schema version marker") from exc
+                    if parsed_version < 0 or parsed_version > SCHEMA_VERSION:
+                        raise UnsupportedSchemaVersionError(
+                            f"Database schema version {parsed_version} is not supported by "
+                            f"this Friday build (maximum {SCHEMA_VERSION})"
+                        )
+
+            # Probe under the same lock and before this connection creates FTS
+            # DDL. Asking afterwards always answers "yes" and can skip the rebuild
+            # of an external-content index that started empty.
+            fts_preexisting = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'"
+                ).fetchone()
+                is not None
+            )
+            raw_fts_preexisting = (
+                conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_fts'").fetchone()
+                is not None
+            )
+            messages_fts_preexisting = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+                ).fetchone()
+                is not None
+            )
+            already_current = previous_schema_version is not None and (
+                previous_schema_version.strip() == str(SCHEMA_VERSION)
+            )
+            # A missing/stale marker must not turn an already-authoritative
+            # schema-31 database back into a legacy migration candidate. Doing
+            # so would recreate schema_meta, move its immutable completeness
+            # floor and let IF NOT EXISTS conceal counterfeit capture triggers.
+            if (parsed_version is None or parsed_version < 31) and _relation_history_artifacts_present(
+                conn,
+                schema_meta_preexisting=schema_meta_preexisting,
+            ):
+                raise UnsupportedSchemaVersionError(
+                    "Database schema marker predates installed relation-history artifacts; "
+                    "restore a verified backup"
+                )
+            # A schema-31 marker plus its immutable floor is a promise that the
+            # whole capture/protection mechanism and its evidence still exist.
+            # Validate it under the migration write lock and BEFORE idempotent DDL
+            # can conceal what was missing or race a concurrent relation write.
+            if parsed_version is not None and parsed_version >= 31:
+                self._validate_relation_history_schema(conn, parsed_version)
+                if parsed_version == 31:
+                    _upgrade_relation_history_31_to_32(conn)
+                    self._validate_relation_history_schema(conn, SCHEMA_VERSION)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
                 self._retire_outdated_indexes(conn)
+            _validate_private_material_cache_pre_schema(conn)
+            # Current-schema databases can still contain a pre-owner reminder
+            # imported by an older build.  Its tenant move updates entity history
+            # and identity; persisted privacy guards from the previous run would
+            # correctly reject that at runtime but must not brick this audited
+            # startup migration.  Validate the allowlist first, remove only our
+            # known triggers, migrate under the schema write lock, then recreate
+            # and exactly rebuild every guard/cache below before commit.
+            _drop_private_material_runtime_triggers(conn)
+            _migrate_private_reminder_entities(conn)
+            # One dynamic fixed-point authority for direct reminder entities and
+            # every bounded entity that copies their identity.  Public readers
+            # reference this view instead of embedding an O(E²) recursive CTE in
+            # each nested dependency predicate.
+            self._execute_statements(conn, PRIVATE_MATERIAL_PERSISTENT_SCHEMA)
+            self._execute_statements(conn, PRIVATE_MATERIAL_RUNTIME_SCHEMA)
+            self._execute_statements(conn, PRIVATE_MATERIAL_CACHE_REBUILD_SQL)
+            _validate_private_material_cache(conn)
+            # Pre-release audit tables can predate ``request_id``.  The legacy
+            # migration above adds that column; sanitising before it therefore
+            # fails startup exactly on the databases this path exists to heal.
+            # Keep the scrub in the same uncommitted migration transaction, but
+            # only after the table has its current shape.
+            audit_privacy_pending = _sanitize_legacy_audit_log(conn)
+            idempotency_privacy_pending = _invalidate_legacy_idempotency_responses(conn)
             self._execute_statements(conn, CORE_INDEX_SCHEMA)
+            if not already_current:
+                # The marker is a durable proof, not an optimistic target. Run
+                # the current contract again after every legacy/privacy step so
+                # no later migration can damage history between the dedicated
+                # 31→32 upgrade and publication of schema_version=32.
+                self._validate_relation_history_schema(conn, SCHEMA_VERSION)
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('schema_version', ?, ?)",
                 (str(SCHEMA_VERSION), utc_now()),
             )
             conn.commit()
+            if audit_privacy_pending or idempotency_privacy_pending:
+                # A committed pre-redaction/cache-invalidation WAL frame can
+                # still be a byte-for-byte copy of personal content.  TRUNCATE
+                # must succeed before either durable completion marker is
+                # written; a busy reader therefore stops startup and leaves its
+                # pending marker for a safe retry.
+                checkpoint = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if checkpoint is None or int(checkpoint[0]) != 0:
+                    raise sqlite3.OperationalError("Privacy migration WAL checkpoint is busy")
+                conn.execute("BEGIN IMMEDIATE")
+                if audit_privacy_pending:
+                    conn.execute(
+                        "UPDATE schema_meta SET value=?, updated_at=? WHERE key=?",
+                        (_AUDIT_PRIVACY_MARKER_VALUE, utc_now(), _AUDIT_PRIVACY_MARKER_KEY),
+                    )
+                if idempotency_privacy_pending:
+                    conn.execute(
+                        "UPDATE schema_meta SET value=?, updated_at=? WHERE key=?",
+                        (
+                            _IDEMPOTENCY_PRIVACY_MARKER_VALUE,
+                            utc_now(),
+                            _IDEMPOTENCY_PRIVACY_MARKER_KEY,
+                        ),
+                    )
+                conn.commit()
         except BaseException:
             if conn.in_transaction:
                 conn.rollback()
@@ -361,7 +2300,10 @@ class CoreMixin(StorageShared):
             try:
                 conn.executescript(FTS_VOCAB_SCHEMA)
             except sqlite3.OperationalError as exc:
-                LOGGER.info("fts5vocab is unavailable; spelling repair disabled: %s", exc)
+                LOGGER.info(
+                    "fts5vocab is unavailable; spelling repair disabled (%s)",
+                    type(exc).__name__,
+                )
             # Last, and inside the same commit as the rebuilds it certifies.
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('fts_build', ?, ?)",
@@ -371,8 +2313,224 @@ class CoreMixin(StorageShared):
             if self._is_sqlite_busy(exc):
                 raise
             self._fts_available = False
-            LOGGER.warning("SQLite FTS5 is unavailable; using LIKE search: %s", exc)
+            LOGGER.warning("SQLite FTS5 is unavailable; using LIKE search (%s)", type(exc).__name__)
         conn.commit()
+
+    @staticmethod
+    def _validate_relation_history_schema(conn: sqlite3.Connection, schema_version: int) -> None:
+        """Reject a broken authoritative relation-history contract before DDL.
+
+        ``CREATE ... IF NOT EXISTS`` is safe for derivative indexes, but not for
+        capture or immutability triggers: recreating one cannot recover revisions
+        lost while it was absent. A current schema marker therefore turns every
+        item below into a required invariant, never an automatic repair target.
+        """
+
+        required_tables = {
+            "relations",
+            "relation_revisions",
+            "relation_revision_context",
+        }
+        installed_table_sql = {
+            str(row[0]): str(row[1] or "")
+            for row in conn.execute("SELECT name, sql FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        installed_tables = set(installed_table_sql)
+        missing_tables = sorted(required_tables - installed_tables)
+
+        installed_triggers = {
+            str(row[0]): (str(row[1]), str(row[2] or ""))
+            for row in conn.execute(
+                "SELECT name, tbl_name, sql FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+        }
+        trigger_tables = (
+            _RELATION_HISTORY_TRIGGER_TABLES_V31 if schema_version == 31 else _RELATION_HISTORY_TRIGGER_TABLES
+        )
+        missing_triggers = sorted(
+            name
+            for name, table in trigger_tables.items()
+            if name not in installed_triggers or installed_triggers[name][0] != table
+        )
+        protected_trigger_tables = set(_RELATION_HISTORY_TRIGGER_TABLES.values())
+        unexpected_triggers = sorted(
+            name
+            for name, (table, sql) in installed_triggers.items()
+            if name not in trigger_tables
+            and (
+                table in protected_trigger_tables
+                or "relation_history_complete_from" in sql.casefold()
+                or re.search(
+                    r"\b(?:relations|relation_revisions|relation_revision_context)\b",
+                    sql,
+                    flags=re.IGNORECASE,
+                )
+                is not None
+            )
+        )
+        canonical_unique_indexes = _canonical_relation_history_unique_index_contract()
+        installed_unique_indexes = _relation_history_unique_index_contract(conn)
+        missing_unique_indexes = sorted(canonical_unique_indexes.keys() - installed_unique_indexes.keys())
+        altered_unique_indexes = sorted(
+            name
+            for name in canonical_unique_indexes.keys() & installed_unique_indexes.keys()
+            if installed_unique_indexes[name] != canonical_unique_indexes[name]
+        )
+        unexpected_unique_index_count = len(installed_unique_indexes.keys() - canonical_unique_indexes.keys())
+        if schema_version == 31:
+            altered_tables = sorted(
+                name
+                for name in _RELATION_HISTORY_SCHEMA_V31_TABLES
+                if name in installed_table_sql
+                and hashlib.sha256(installed_table_sql[name].encode("utf-8")).hexdigest()
+                != _RELATION_HISTORY_SCHEMA_V31_SHA256[name]
+            )
+            altered_triggers = sorted(
+                name
+                for name, table in trigger_tables.items()
+                if name in installed_triggers
+                and installed_triggers[name][0] == table
+                and hashlib.sha256(installed_triggers[name][1].encode("utf-8")).hexdigest()
+                != _RELATION_HISTORY_SCHEMA_V31_SHA256[name]
+            )
+        else:
+            canonical_tables, canonical_triggers = _canonical_relation_history_schema_sql()
+            altered_table_names = {
+                name
+                for name in _RELATION_HISTORY_OWNED_TABLES
+                if name in installed_table_sql and installed_table_sql[name] != canonical_tables[name]
+            }
+            if (
+                "relations" in installed_table_sql
+                and hashlib.sha256(installed_table_sql["relations"].encode("utf-8")).hexdigest()
+                not in _RELATION_PROJECTION_SCHEMA_SHA256
+            ):
+                altered_table_names.add("relations")
+            altered_tables = sorted(altered_table_names)
+            altered_triggers = sorted(
+                name
+                for name, table in trigger_tables.items()
+                if name in installed_triggers
+                and installed_triggers[name][0] == table
+                and installed_triggers[name][1] != canonical_triggers[name]
+            )
+
+        problems: list[str] = []
+        if missing_tables:
+            problems.append(f"missing tables: {', '.join(missing_tables)}")
+        if altered_tables:
+            problems.append(f"altered tables: {', '.join(altered_tables)}")
+        if missing_triggers:
+            problems.append(f"missing triggers: {', '.join(missing_triggers)}")
+        if unexpected_triggers:
+            # Names outside the shipped allowlist are attacker-controlled schema
+            # text. Do not copy them into startup errors or telemetry.
+            problems.append(f"unexpected triggers: {len(unexpected_triggers)}")
+        if altered_triggers:
+            problems.append(f"altered triggers: {', '.join(altered_triggers)}")
+        if missing_unique_indexes:
+            problems.append(f"missing unique indexes: {', '.join(missing_unique_indexes)}")
+        if altered_unique_indexes:
+            problems.append(f"altered unique indexes: {', '.join(altered_unique_indexes)}")
+        if unexpected_unique_index_count:
+            # Unknown index names and expressions are attacker-controlled schema
+            # text. The count proves the conflict surface changed without
+            # copying either value into startup errors or telemetry.
+            problems.append(f"unexpected unique indexes: {unexpected_unique_index_count}")
+
+        # Do not query a counterfeit shape. Missing constraints are safe to read,
+        # but a same-name table may also omit/retype columns and turn diagnostics
+        # into an unrelated sqlite OperationalError.
+        if problems:
+            detail = "; ".join(problems)
+            raise UnsupportedSchemaVersionError(
+                f"Schema {schema_version} relation history is incomplete ({detail}); "
+                "restore a verified backup"
+            )
+
+        floor_row = conn.execute(
+            "SELECT value, updated_at FROM schema_meta WHERE key='relation_history_complete_from'"
+        ).fetchone()
+        floor = str(floor_row[0] if floor_row else "")
+        canonical_floor = ""
+        if not floor.strip():
+            problems.append("missing relation_history_complete_from floor")
+        else:
+            try:
+                canonical_floor = normalize_known_at(floor, reject_future=False)
+            except ValueError:
+                problems.append("invalid relation_history_complete_from floor")
+            else:
+                if floor != canonical_floor:
+                    problems.append("non-canonical relation_history_complete_from floor")
+                elif str(floor_row[1] or "") != floor:
+                    problems.append("relation_history_complete_from floor provenance is inconsistent")
+
+        observed_at = ""
+        if "relation_revision_context" in installed_tables:
+            context_columns = (
+                "singleton, batch_id, recorded_at"
+                if schema_version == 31
+                else "singleton, batch_id, recorded_at, observed_at"
+            )
+            context_rows = conn.execute(
+                f"SELECT {context_columns} FROM relation_revision_context"  # nosec B608 - fixed by schema version
+            ).fetchall()
+            if len(context_rows) != 1 or tuple(context_rows[0][:3]) != (1, "", ""):
+                problems.append("missing or dirty relation revision context singleton")
+            elif schema_version >= 32:
+                raw_observed_at = str(context_rows[0]["observed_at"] or "")
+                try:
+                    observed_at = normalize_known_at(raw_observed_at, reject_future=False)
+                except ValueError:
+                    problems.append("invalid relation history observed boundary")
+                else:
+                    if raw_observed_at != observed_at:
+                        problems.append("non-canonical relation history observed boundary")
+                    elif canonical_floor and observed_at < canonical_floor:
+                        problems.append("relation history observed boundary precedes its floor")
+
+        if {"relations", "relation_revisions"}.issubset(installed_tables):
+            if canonical_floor:
+                baseline_mismatch = conn.execute(
+                    """SELECT 1 FROM relation_revisions
+                       WHERE (operation='migration_baseline')
+                             IS NOT (history_quality='migration_baseline')
+                          OR (operation='migration_baseline' AND (
+                                 recorded_at IS NOT ?
+                              OR batch_id IS NOT 'migration:v31'
+                              OR revision<>1
+                              OR present<>1
+                          ))
+                       LIMIT 1""",
+                    (canonical_floor,),
+                ).fetchone()
+                if baseline_mismatch is not None:
+                    problems.append("migration baseline does not match relation history floor")
+                violates_floor = conn.execute(
+                    """SELECT 1 FROM relation_revisions
+                        WHERE recorded_at < ?
+                           OR (recorded_at = ? AND operation IS NOT 'migration_baseline')
+                        LIMIT 1""",
+                    (canonical_floor, canonical_floor),
+                ).fetchone()
+                if violates_floor is not None:
+                    problems.append("relation history violates its completeness floor")
+                if observed_at:
+                    later_than_observed = conn.execute(
+                        "SELECT 1 FROM relation_revisions WHERE recorded_at>? LIMIT 1",
+                        (observed_at,),
+                    ).fetchone()
+                    if later_than_observed is not None:
+                        problems.append("relation history exceeds its observed boundary")
+            problems.extend(_relation_history_lineage_problems(conn))
+
+        if problems:
+            detail = "; ".join(problems)
+            raise UnsupportedSchemaVersionError(
+                f"Schema {schema_version} relation history is incomplete ({detail}); "
+                "restore a verified backup"
+            )
 
     @staticmethod
     def _execute_statements(conn: sqlite3.Connection, script: str) -> None:
@@ -619,6 +2777,82 @@ class CoreMixin(StorageShared):
 
         now = utc_now()
 
+        # Схема 31 начинает честную transaction-time историю только с момента
+        # миграции. Притвориться, что нынешние endpoints/valid_to существовали в
+        # старом `created_at`, нельзя: прежние merge и invalidation уже необратимо
+        # переписали current projection. Поэтому один immutable floor и baseline
+        # получают ОДИН настоящий микросекундный timestamp внутри той же schema
+        # transaction. Повтор после rollback либо reopen ничего не дублирует.
+        relation_history_floor = datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        stored_floor = conn.execute(
+            "SELECT value FROM schema_meta WHERE key='relation_history_complete_from'"
+        ).fetchone()
+        if stored_floor is None:
+            conn.execute(
+                """INSERT INTO schema_meta(key, value, updated_at)
+                   VALUES('relation_history_complete_from', ?, ?)""",
+                (relation_history_floor, relation_history_floor),
+            )
+            stored_floor = conn.execute(
+                "SELECT value FROM schema_meta WHERE key='relation_history_complete_from'"
+            ).fetchone()
+        if stored_floor is None:
+            raise sqlite3.IntegrityError("relation history completeness floor was not stored")
+        relation_history_floor = str(stored_floor[0])
+
+        # Legacy identity history was written with the then-current wall clock.
+        # A machine-clock correction can leave its newest value after this
+        # migration's wall time, so seed the durable logical clock from every
+        # historical authority rather than moving it backwards to the floor.
+        relation_history_observed_at = relation_history_floor
+        for query in (
+            "SELECT DISTINCT created_at FROM entity_versions",
+            "SELECT DISTINCT created_at FROM entity_merge_history",
+            "SELECT DISTINCT undone_at FROM entity_merge_history WHERE undone_at IS NOT NULL",
+        ):
+            for authority_row in conn.execute(query):
+                raw_authority = str(authority_row[0] or "")
+                if not raw_authority:
+                    continue
+                try:
+                    authority = normalize_known_at(raw_authority, reject_future=False)
+                except ValueError as exc:
+                    raise sqlite3.IntegrityError(
+                        "legacy entity transaction history has an unreadable timestamp"
+                    ) from exc
+                if authority > relation_history_observed_at:
+                    relation_history_observed_at = authority
+        context_row = conn.execute(
+            "SELECT singleton FROM relation_revision_context WHERE singleton=1"
+        ).fetchone()
+        if context_row is None:
+            conn.execute(
+                """INSERT INTO relation_revision_context(
+                       singleton, batch_id, recorded_at, observed_at
+                   ) VALUES(1, '', '', ?)""",
+                (relation_history_observed_at,),
+            )
+        conn.execute(
+            """INSERT INTO relation_revisions(
+                   relation_id, revision, present, operation, recorded_at, batch_id,
+                   history_quality, user_id, source_entity_id, target_entity_id,
+                   relation_type, weight, metadata_json, created_at, deleted_at,
+                   valid_from, valid_to, invalidated_at, superseded_by
+               )
+               SELECT r.id, 1, 1, 'migration_baseline', ?, 'migration:v31',
+                      'migration_baseline', r.user_id, r.source_entity_id,
+                      r.target_entity_id, r.relation_type, r.weight, r.metadata_json,
+                      r.created_at, r.deleted_at, r.valid_from, r.valid_to,
+                      r.invalidated_at, r.superseded_by
+               FROM relations AS r
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM relation_revisions AS history
+                   WHERE history.relation_id=r.id
+               )
+               ORDER BY r.id""",
+            (relation_history_floor,),
+        )
+
         # Register every tenant already referenced by legacy data. This makes
         # old knowledge immediately visible to workers and the Admin UI.
         tenant_tables = (
@@ -816,7 +3050,10 @@ class CoreMixin(StorageShared):
         if "knowledge_object_versions" in table_names:
             version_columns = self._table_columns(conn, "knowledge_object_versions")
             rows = conn.execute(
-                """SELECT v.*, k.user_id AS owner_user_id
+                """SELECT v.*, k.user_id AS owner_user_id,
+                          k.raw_object_id AS owner_raw_object_id,
+                          k.entity_id AS owner_entity_id,
+                          k.superseded_by_id AS owner_superseded_by_id
                    FROM knowledge_object_versions v
                    JOIN knowledge_objects k ON k.id=v.knowledge_object_id
                    WHERE v.user_id='' OR v.user_id IS NULL
@@ -825,6 +3062,9 @@ class CoreMixin(StorageShared):
             for row in rows:
                 values = dict(row)
                 owner = str(values.pop("owner_user_id") or "")
+                raw_object_id = str(values.pop("owner_raw_object_id") or "")
+                entity_id = values.pop("owner_entity_id")
+                superseded_by_id = values.pop("owner_superseded_by_id")
                 snapshot: dict[str, Any] = {
                     key: values.get(key)
                     for key in (
@@ -839,7 +3079,21 @@ class CoreMixin(StorageShared):
                     )
                     if key in version_columns
                 }
-                snapshot["user_id"] = owner
+                # Current readers authenticate every historical body against the
+                # live object's immutable identity and structural dependencies.
+                # Old per-field history did not carry those keys, so add the
+                # owner-side values while converting it instead of producing a
+                # snapshot that is immediately (and correctly) rejected as
+                # unauthenticated history.
+                snapshot.update(
+                    {
+                        "id": str(values.get("knowledge_object_id") or ""),
+                        "user_id": owner,
+                        "raw_object_id": raw_object_id,
+                        "entity_id": entity_id,
+                        "superseded_by_id": superseded_by_id,
+                    }
+                )
                 conn.execute(
                     "UPDATE knowledge_object_versions SET user_id=?, snapshot_json=? WHERE id=?",
                     (owner, _snapshot(snapshot), row["id"]),
@@ -976,7 +3230,9 @@ class CoreMixin(StorageShared):
         return self.conn.execute(sql, params or ())
 
     def commit(self) -> None:
-        self.conn.commit()
+        conn = self.conn
+        _refresh_private_derivative_authority(conn)
+        conn.commit()
 
     def optimize(self) -> None:
         # PRAGMA optimize runs ANALYZE, which writes sqlite_stat*, so it is a writer
@@ -985,6 +3241,86 @@ class CoreMixin(StorageShared):
         # locked") and close() cannot drain it before shutting the connection down.
         with self._write_lock:
             self.conn.execute("PRAGMA optimize")
+
+    def _observe_relation_history_boundary(self, boundary: str) -> None:
+        """Persist one historical-read promise before publishing its snapshot.
+
+        A cutoff can legally sit after the latest event but before wall time. If
+        CLOCK_REALTIME later moves backwards, strict-after-event timestamps alone
+        would let a new commit appear inside that already returned cutoff.  The
+        singleton observed boundary is therefore a durable logical clock shared
+        by readers, managed writers and direct-relation fallback triggers.
+        """
+
+        try:
+            canonical_boundary = normalize_known_at(boundary, reject_future=False)
+        except ValueError as exc:
+            raise RelationHistorySnapshotError("relation history observed boundary is unreadable") from exc
+        if boundary != canonical_boundary:
+            raise RelationHistorySnapshotError("relation history observed boundary is non-canonical")
+
+        conn = self.conn
+        fast_row = conn.execute(
+            """SELECT batch_id, recorded_at, observed_at
+                 FROM relation_revision_context WHERE singleton=1"""
+        ).fetchone()
+        if fast_row is None:
+            raise RelationHistorySnapshotError("relation history observed boundary is missing")
+        raw_observed = str(fast_row["observed_at"] or "")
+        try:
+            current_observed = normalize_known_at(raw_observed, reject_future=False)
+        except ValueError as exc:
+            raise RelationHistorySnapshotError("relation history observed boundary is unreadable") from exc
+        if raw_observed != current_observed:
+            raise RelationHistorySnapshotError("relation history observed boundary is non-canonical")
+        if conn.in_transaction:
+            # The value visible on this connection may itself be an uncommitted
+            # managed-clock advance. Returning before the caller's outer COMMIT
+            # would publish a promise that an eventual ROLLBACK can erase.
+            raise RelationHistorySnapshotError(
+                "relation history boundary cannot be observed inside an active transaction"
+            )
+        if current_observed >= canonical_boundary:
+            return
+
+        with self._write_lock:
+            conn = self.conn
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                context = conn.execute(
+                    """SELECT batch_id, recorded_at, observed_at
+                         FROM relation_revision_context WHERE singleton=1"""
+                ).fetchone()
+                if context is None:
+                    raise RelationHistorySnapshotError("relation history observed boundary is missing")
+                if str(context["batch_id"] or "") or str(context["recorded_at"] or ""):
+                    raise RelationHistorySnapshotError(
+                        "relation history revision context is unexpectedly active"
+                    )
+                raw_observed = str(context["observed_at"] or "")
+                try:
+                    current_observed = normalize_known_at(raw_observed, reject_future=False)
+                except ValueError as exc:
+                    raise RelationHistorySnapshotError(
+                        "relation history observed boundary is unreadable"
+                    ) from exc
+                if raw_observed != current_observed:
+                    raise RelationHistorySnapshotError("relation history observed boundary is non-canonical")
+                if canonical_boundary > current_observed:
+                    cursor = conn.execute(
+                        """UPDATE relation_revision_context SET observed_at=?
+                             WHERE singleton=1 AND observed_at<?""",
+                        (canonical_boundary, canonical_boundary),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RelationHistorySnapshotError(
+                            "relation history observed boundary was not persisted"
+                        )
+                conn.commit()
+            except BaseException:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -999,8 +3335,123 @@ class CoreMixin(StorageShared):
             nested = conn.in_transaction
             if not nested:
                 conn.execute("BEGIN IMMEDIATE")
+            context = conn.execute(
+                """SELECT recorded_at, observed_at
+                     FROM relation_revision_context WHERE singleton=1"""
+            ).fetchone()
+            # Обычно nested=True означает второй FridayStorage.transaction() и
+            # контекст уже принадлежит внешнему блоку. Но legacy/test code иногда
+            # сначала делает прямой execute(), открывая неявную sqlite transaction,
+            # и лишь затем входит сюда. Такой блок тоже обязан получить точный
+            # relation batch; отличаем его по ПУСТОМУ context, а не по одному лишь
+            # sqlite `in_transaction`.
+            owns_context = not nested or context is None or not str(context["recorded_at"] or "")
+            # `nested=True` has two different meanings. A non-empty relation
+            # context means a real nested Friday transaction: it deliberately
+            # shares the outer batch and lets the outer block own rollback. An
+            # EMPTY context means a caller first opened an implicit sqlite
+            # transaction through execute(). We do not own that transaction, but
+            # we must still be able to roll back precisely the managed unit on an
+            # exception; otherwise its relation row and revisions can be committed
+            # later by an unrelated storage.commit().
+            # Every nested managed unit gets its own rollback boundary.  A real
+            # nested Friday transaction still shares the outer relation context,
+            # but an exception caught by the outer block must remove only the
+            # inner current/history writes instead of poisoning the outer unit.
+            savepoint = new_id("friday_managed") if nested else ""
+            if savepoint:
+                conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - generated [a-z0-9_] identifier
             try:
+                if owns_context:
+                    # Все relation mutations одного outer unit становятся видны одним
+                    # transaction-time срезом. event_seq разрешает несколько версий
+                    # одной строки внутри batch, не разрывая merge/unmerge посередине.
+                    wall_timestamp = (
+                        datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+                    )
+                    authority = conn.execute(
+                        """SELECT
+                               (SELECT recorded_at FROM relation_revisions
+                                 ORDER BY event_seq DESC LIMIT 1) AS latest_relation_recorded_at,
+                               (SELECT created_at FROM entity_versions
+                                 ORDER BY created_at DESC, rowid DESC
+                                 LIMIT 1) AS latest_entity_version_at,
+                               (SELECT created_at FROM entity_merge_history
+                                 ORDER BY created_at DESC, rowid DESC
+                                 LIMIT 1) AS latest_merge_created_at,
+                               (SELECT undone_at FROM entity_merge_history
+                                 WHERE undone_at IS NOT NULL
+                                 ORDER BY undone_at DESC, rowid DESC
+                                 LIMIT 1) AS latest_merge_undone_at,
+                               (SELECT value FROM schema_meta
+                                 WHERE key='relation_history_complete_from') AS history_floor,
+                               (SELECT observed_at FROM relation_revision_context
+                                 WHERE singleton=1) AS observed_at"""
+                    ).fetchone()
+                    authority_boundaries: list[str] = []
+                    for raw_boundary, require_canonical in (
+                        (
+                            authority["latest_relation_recorded_at"] if authority else None,
+                            True,
+                        ),
+                        (authority["latest_entity_version_at"] if authority else None, False),
+                        (authority["latest_merge_created_at"] if authority else None, False),
+                        (authority["latest_merge_undone_at"] if authority else None, False),
+                        (authority["history_floor"] if authority else None, True),
+                        (authority["observed_at"] if authority else None, True),
+                    ):
+                        if not raw_boundary:
+                            continue
+                        raw_text = str(raw_boundary)
+                        try:
+                            canonical = normalize_known_at(raw_text, reject_future=False)
+                        except ValueError as exc:
+                            raise RuntimeError("relation transaction-time authority is unreadable") from exc
+                        if require_canonical and raw_text != canonical:
+                            raise RuntimeError("relation transaction-time authority is non-canonical")
+                        authority_boundaries.append(canonical)
+                    # CLOCK_REALTIME may move backwards after NTP/manual correction
+                    # or a power recovery. A timestamp-only public cutoff cannot
+                    # distinguish two committed batches at the same instant, so a
+                    # later graph/history transaction must be STRICTLY after every
+                    # prior relation or identity event. Events inside this one outer
+                    # transaction still share the resulting timestamp and batch.
+                    history_tail = max(authority_boundaries)
+                    if wall_timestamp > history_tail:
+                        recorded_at = wall_timestamp
+                    else:
+                        recorded_at = (
+                            (
+                                _TIMESTAMP_DATETIME.fromisoformat(history_tail.replace("Z", "+00:00"))
+                                + timedelta(microseconds=1)
+                            )
+                            .isoformat(timespec="microseconds")
+                            .replace("+00:00", "Z")
+                        )
+                    cursor = conn.execute(
+                        """UPDATE relation_revision_context
+                           SET batch_id=?, recorded_at=?, observed_at=?
+                           WHERE singleton=1""",
+                        (new_id("relation_batch"), recorded_at, recorded_at),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("relation revision transaction context is missing")
                 yield conn
+                if not nested:
+                    # Persistent BEFORE invalidators are global and rollback-safe.
+                    # Common ingest triggers update one authority row immediately;
+                    # any conservative/batched dirty path is rebuilt exactly once
+                    # at the outer publication boundary.
+                    _refresh_private_derivative_authority(conn)
+                if owns_context:
+                    # Очистка входит в ТОТ ЖЕ commit. При rollback возвращается
+                    # прежний пустой context вместе с current row и revisions.
+                    conn.execute(
+                        """UPDATE relation_revision_context
+                           SET batch_id='', recorded_at='' WHERE singleton=1"""
+                    )
+                if savepoint:
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
                 if not nested:
                     conn.commit()
             except BaseException:
@@ -1012,4 +3463,16 @@ class CoreMixin(StorageShared):
                 # it: an interrupted unit of work became a durable partial write.
                 if not nested:
                     conn.rollback()
+                elif savepoint:
+                    # Keep the caller's prelude and outer implicit transaction,
+                    # but remove every current/history/context write made by this
+                    # managed unit. RELEASE closes the savepoint after ROLLBACK TO;
+                    # neither statement commits the caller's outer transaction.
+                    with suppress(sqlite3.Error):
+                        conn.execute(
+                            f"ROLLBACK TO SAVEPOINT {savepoint}"  # nosec B608 - generated identifier
+                        )
+                        conn.execute(
+                            f"RELEASE SAVEPOINT {savepoint}"  # nosec B608 - generated identifier
+                        )
                 raise

@@ -162,7 +162,7 @@ async def test_a_known_limit_is_respected_without_asking_again() -> None:
 
 
 @pytest.mark.anyio
-async def test_the_refusal_teaches_the_limit_for_next_time(monkeypatch) -> None:
+async def test_the_refusal_teaches_the_limit_for_next_time(monkeypatch, caplog) -> None:
     """Мутация: не разбирать предел из отказа — тест краснеет.
 
     Отказ приходил и раньше, но запомнить его было некуда: стена оставалась на
@@ -170,9 +170,11 @@ async def test_the_refusal_teaches_the_limit_for_next_time(monkeypatch) -> None:
     """
     from friday.retrieval import _rerank_backend as module
 
+    secret = "SYNTHETIC_RERANK_RESPONSE_SENTINEL_" + "r" * 5_000
+
     class _Response:
         status_code = 413
-        text = '{"error":{"message":"At most 32 documents are accepted."}}'
+        text = f'{{"error":{{"message":"At most 32 documents are accepted; echo={secret}."}}}}'
 
     class _Client:
         def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003, ARG002
@@ -197,7 +199,38 @@ async def test_the_refusal_teaches_the_limit_for_next_time(monkeypatch) -> None:
 
     backend._in_batches = fake_batches  # type: ignore[method-assign]
 
-    await backend.scores("q", ["текст"] * 40)
+    with caplog.at_level("WARNING", logger="friday.retrieval._rerank_backend"):
+        await backend.scores("q", ["текст"] * 40)
 
     assert backend._max_documents == 32, "предел, названный службой, снова не запомнен"
     assert seen == [32], "вход поделён пополам вместо партий объявленного размера"
+    assert all(secret not in record.getMessage() for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_rerank_failure_log_does_not_echo_exception_or_query(monkeypatch, caplog) -> None:
+    from friday.retrieval import _rerank_backend as module
+
+    secret = "SYNTHETIC_RERANK_EXCEPTION_SENTINEL_" + "q" * 5_000
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:  # noqa: ANN002
+            return None
+
+        async def post(self, url, json=None):  # noqa: ANN001, ARG002
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", _Client)
+    with caplog.at_level("INFO", logger="friday.retrieval._rerank_backend"):
+        assert await RerankBackend(_Settings()).scores(secret, [secret]) is None
+
+    assert caplog.records
+    assert all(secret not in record.getMessage() for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)

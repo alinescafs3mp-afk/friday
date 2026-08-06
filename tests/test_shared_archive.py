@@ -173,6 +173,7 @@ def test_the_trail_still_says_who_acted(shared, storage):
     from friday.web_surfer import WebSurfer
 
     storage.ensure_user("kolya", preset_key="user")
+    storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
     auth = AuthorizationService(storage, shared_tenant=LEGACY_OWNER_USER_ID)
     graph = KnowledgeGraph(storage)
     kernel = ExecutionKernel(auth, shared)

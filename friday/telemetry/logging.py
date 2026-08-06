@@ -37,6 +37,54 @@ _KNOWN_TOKEN = re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{12,})")
 # when the process doing the logging has no idea what the token is.
 _TELEGRAM_BOT_TOKEN = re.compile(r"(?i)(/bot)(\d{5,}:[A-Za-z0-9_-]{20,})")
 
+# Route families are source-owned labels.  Merely accepting a syntactically neat
+# segment is not enough: a client controls 404 paths and could otherwise make an
+# arbitrary word appear in the durable access log.
+_ACCESS_API_FAMILIES = frozenset(
+    {
+        "admin",
+        "approvals",
+        "assistant",
+        "chat",
+        "chronicle",
+        "compacts",
+        "conversations",
+        "docs",
+        "events",
+        "feedback",
+        "files",
+        "health",
+        "import",
+        "inbox",
+        "ingest",
+        "kg",
+        "knowledge",
+        "me",
+        "missions",
+        "notifications",
+        "openapi.json",
+        "profile",
+        "reflection",
+        "research",
+        "search",
+    }
+)
+_ACCESS_ROOT_FAMILIES = frozenset({"admin", "api", "health"})
+_ACCESS_METHODS = frozenset({"CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE"})
+_SAFE_EXCEPTION_KINDS = frozenset(
+    {
+        "AssertionError",
+        "ConnectionError",
+        "Exception",
+        "LookupError",
+        "OSError",
+        "RuntimeError",
+        "TimeoutError",
+        "TypeError",
+        "ValueError",
+    }
+)
+
 
 def redact_text(value: Any) -> str:
     """Redact common credential forms without trying to infer arbitrary data."""
@@ -103,21 +151,70 @@ def install_secret_redaction(secrets: Iterable[str] = ()) -> None:
 
 
 class AccessLogQueryStripper(logging.Filter):
-    """Strip query strings from uvicorn access-log records.
+    """Project Uvicorn access records to method, route family and status.
 
     Search queries and browse filters travel as URL parameters
-    (``/api/search?q=…``), so the raw request line is personal data. The
-    secret redactor cannot recognise free-form queries — the whole query
-    string is dropped instead, keeping method/path/status observability.
+    (``/api/search?q=…``), while path segments carry entity, conversation,
+    file and account identifiers.  Client addresses are identifiers too.  The
+    secret redactor cannot recognise any of those, so keep only the first two
+    API route segments (one elsewhere), query presence, method and status.
     """
+
+    @staticmethod
+    def _project_path(value: object) -> str:
+        full_path = str(value)
+        path, separator, _query = full_path.partition("?")
+        segments = [segment for segment in path.split("/") if segment]
+        if segments[:1] == ["api"]:
+            family = segments[1] if len(segments) > 1 else None
+            safe = family if family in _ACCESS_API_FAMILIES else "<unknown>"
+            path = f"/api/{safe}"
+            if len(segments) > 2:
+                path += "/[...]"
+        elif segments:
+            family = segments[0]
+            safe = family if family in _ACCESS_ROOT_FAMILIES else "<unknown>"
+            path = f"/{safe}"
+            if len(segments) > 1:
+                path += "/[...]"
+        else:
+            path = "/"
+        return f"{path}?[stripped]" if separator else path
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         # uvicorn.access args: (client_addr, method, full_path, http_version, status)
         if isinstance(args, tuple) and len(args) == 5:
-            path = str(args[2])
-            if "?" in path:
-                record.args = (*args[:2], f"{path.split('?', 1)[0]}?[stripped]", *args[3:])
+            proposed_method = str(args[1]).upper()
+            method = proposed_method if proposed_method in _ACCESS_METHODS else "<unknown-method>"
+            record.args = ("<client>", method, self._project_path(args[2]), *args[3:])
+        return True
+
+
+class ExternalExceptionStripper(logging.Filter):
+    """Drop exception messages and tracebacks emitted by framework loggers.
+
+    Uvicorn logs an unhandled ASGI exception with ``exc_info``.  HTTP/client and
+    parser exceptions may embed request URLs, submitted text or local paths, none
+    of which a credential regex can recognise.  Keep only the exception class as
+    operational signal and replace the framework message with a fixed event.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info or record.stack_info:
+            kind = "Exception"
+            exc_info = record.exc_info
+            if isinstance(exc_info, tuple) and exc_info and isinstance(exc_info[0], type):
+                kind = exc_info[0].__name__
+            elif isinstance(exc_info, BaseException):
+                kind = type(exc_info).__name__
+            if kind not in _SAFE_EXCEPTION_KINDS:
+                kind = "Exception"
+            record.msg = "ASGI application failed (%s)"
+            record.args = (kind,)
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
         return True
 
 
@@ -129,16 +226,27 @@ def install_access_log_privacy() -> None:
         logger.addFilter(AccessLogQueryStripper())
 
 
+def install_external_exception_privacy() -> None:
+    """Prevent Uvicorn from persisting arbitrary exception text or traceback."""
+
+    logger = logging.getLogger("uvicorn.error")
+    if not any(isinstance(item, ExternalExceptionStripper) for item in logger.filters):
+        logger.addFilter(ExternalExceptionStripper())
+
+
 def configure_secure_logging(level: str = "INFO", secrets: Iterable[str] = ()) -> None:
     install_secret_redaction(secrets)
+    install_external_exception_privacy()
     logging.getLogger().setLevel(getattr(logging, str(level).upper(), logging.INFO))
 
 
 __all__ = [
     "AccessLogQueryStripper",
+    "ExternalExceptionStripper",
     "SecretRedactingFormatter",
     "configure_secure_logging",
     "install_access_log_privacy",
+    "install_external_exception_privacy",
     "install_secret_redaction",
     "redact_text",
     "secrets_from_environment",

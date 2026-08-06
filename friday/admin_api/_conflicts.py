@@ -17,7 +17,6 @@ from friday.admin_api._deps import (
     ResolutionStatus,
     _audit,
     _audit_cross_tenant_read,
-    _json_value,
     _protect_owner_target,
     _request_json,
     _require,
@@ -26,6 +25,17 @@ from friday.admin_api._deps import (
     asyncio,
     functools,
 )
+from friday.api.kg import (
+    _conflict_audit_fingerprint,
+    _merge_audit_fingerprint,
+    _public_conflict_card,
+    _public_conflict_result,
+    _public_duplicate_scan_report,
+    _public_merge_history_card,
+    _public_merge_result,
+)
+from friday.storage._graph import _bounded_merge_history_rows, _count_merge_history
+from friday.storage._knowledge import _bounded_knowledge_conflict_rows
 from friday.workers._blocking import run_blocking
 
 router = APIRouter()
@@ -42,25 +52,34 @@ async def list_conflicts(
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.conflicts.read", user_id)
     storage = _services(request).storage
-    try:
-        items = storage.list_knowledge_conflicts(
+    bounded_limit = max(1, min(int(limit), 500))
+    bounded_offset = max(0, int(offset))
+
+    def _collect() -> tuple[list[dict[str, Any]], int]:
+        rows = _bounded_knowledge_conflict_rows(
+            storage,
             user_id,
             status=status or None,
-            limit=limit,
-            offset=offset,
+            limit=bounded_limit + 1,
+            offset=bounded_offset,
         )
         total = storage.count_knowledge_conflicts(user_id, status=status or None)
+        return rows, total
+
+    try:
+        rows, total = await run_blocking(_collect)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    for item in items:
-        item["evidence"] = _json_value(item.get("evidence_json"), {})
+    items = [_public_conflict_card(item) for item in rows[:bounded_limit]]
     return {
         "user_id": user_id,
         "items": items,
         "count": len(items),
         "total": total,
-        "limit": limit,
-        "offset": offset,
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+        "matched_at_least": total,
+        "truncated": bounded_offset + len(items) < total,
     }
 
 
@@ -87,7 +106,8 @@ async def bulk_review_conflicts(request: Request) -> dict[str, Any]:
     skipped: list[dict[str, str]] = []
     for conflict_id in unique_ids:
         try:
-            result = _services(request).kg.review_conflict(
+            result = await run_blocking(
+                _services(request).kg.review_conflict,
                 user_id,
                 conflict_id,
                 status,
@@ -100,13 +120,14 @@ async def bulk_review_conflicts(request: Request) -> dict[str, Any]:
         if not result:
             skipped.append({"id": conflict_id, "reason": "not_found"})
             continue
-        changed.append(result)
+        public_result = _public_conflict_result(result)
+        changed.append(public_result)
         _audit(
             request,
             f"admin.knowledge_conflict.{status}",
             "knowledge_conflict",
             conflict_id,
-            after=result,
+            after=_conflict_audit_fingerprint(result),
         )
     return {
         "user_id": user_id,
@@ -125,7 +146,8 @@ async def review_conflict(conflict_id: str, request: Request) -> dict[str, Any]:
     _protect_owner_target(request, user_id)
     status = str(body.get("status") or "").casefold()
     try:
-        result = _services(request).kg.review_conflict(
+        result = await run_blocking(
+            _services(request).kg.review_conflict,
             user_id,
             conflict_id,
             status,
@@ -136,8 +158,14 @@ async def review_conflict(conflict_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Конфликт знаний не найден")
-    _audit(request, f"admin.knowledge_conflict.{status}", "knowledge_conflict", conflict_id, after=result)
-    return {"item": result}
+    _audit(
+        request,
+        f"admin.knowledge_conflict.{status}",
+        "knowledge_conflict",
+        conflict_id,
+        after=_conflict_audit_fingerprint(result),
+    )
+    return {"item": _public_conflict_result(result)}
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
@@ -150,7 +178,8 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
     if not winner_id:
         raise HTTPException(status_code=400, detail="Нужен winner_id")
     try:
-        result = _services(request).kg.resolve_conflict(
+        result = await run_blocking(
+            _services(request).kg.resolve_conflict,
             user_id,
             conflict_id,
             winner_id,
@@ -161,8 +190,14 @@ async def resolve_conflict(conflict_id: str, request: Request) -> dict[str, Any]
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Конфликт знаний не найден")
-    _audit(request, "admin.knowledge_conflict.resolve", "knowledge_conflict", conflict_id, after=result)
-    return {"item": result}
+    _audit(
+        request,
+        "admin.knowledge_conflict.resolve",
+        "knowledge_conflict",
+        conflict_id,
+        after=_conflict_audit_fingerprint(result),
+    )
+    return {"item": _public_conflict_result(result)}
 
 
 @router.get("/resolutions")
@@ -201,28 +236,22 @@ async def list_resolutions(
     bounded_offset = max(0, int(offset))
 
     def _collect() -> dict[str, Any]:
-        items = state.storage.list_resolution_candidates(
-            user_id, status_enum, limit=bounded_limit, offset=bounded_offset
+        items = state.kg.resolver.get_resolutions(
+            user_id,
+            status_enum,
+            limit=bounded_limit,
+            offset=bounded_offset,
         )
-        enriched: list[dict[str, Any]] = []
-        for item in items:
-            item["evidence"] = _json_value(item.get("evidence_json"), {})
-            left = state.storage.get_entity(item["entity_a_id"], user_id)
-            right = state.storage.get_entity(item["entity_b_id"], user_id)
-            if not left or not right:
-                continue
-            for entity in (left, right):
-                entity["aliases"] = _json_value(entity.get("aliases_json"), [])
-                entity["knowledge_count"] = state.storage.count_entity_knowledge(user_id, entity["id"])
-                entity["relation_count"] = state.storage.count_entity_relations(entity["id"], user_id)
-            enriched.append({**item, "entity_a": left, "entity_b": right})
+        total = state.storage.count_resolution_candidates(user_id, status_enum)
         return {
             "user_id": user_id,
-            "items": enriched,
-            "count": len(enriched),
-            "total": state.storage.count_resolution_candidates(user_id, status_enum),
+            "items": items,
+            "count": len(items),
+            "total": total,
             "limit": bounded_limit,
             "offset": bounded_offset,
+            "matched_at_least": int(getattr(items, "matched_at_least", len(items))),
+            "truncated": bounded_offset + len(items) < total,
         }
 
     return await run_blocking(_collect)
@@ -270,8 +299,9 @@ async def detect_resolutions(request: Request) -> dict[str, Any]:
     report = await asyncio.to_thread(
         functools.partial(_services(request).kg.resolver.sweep_duplicates, user_id, min_confidence=0.55)
     )
-    _audit(request, "admin.entity_resolution.detect", "user", user_id, after=report)
-    return {"user_id": user_id, **report}
+    public_report = _public_duplicate_scan_report(report)
+    _audit(request, "admin.entity_resolution.detect", "user", user_id, after=public_report)
+    return {"user_id": user_id, **public_report}
 
 
 @router.post("/resolutions/{candidate_id}/accept")
@@ -281,7 +311,8 @@ async def accept_resolution(candidate_id: str, request: Request) -> dict[str, An
     user_id = str(body.get("user_id") or "")
     _protect_owner_target(request, user_id)
     try:
-        merged = _services(request).kg.resolver.accept_resolution(
+        merged = await run_blocking(
+            _services(request).kg.resolver.accept_resolution,
             candidate_id,
             user_id,
             target_entity_id=body.get("target_entity_id"),
@@ -289,8 +320,14 @@ async def accept_resolution(candidate_id: str, request: Request) -> dict[str, An
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit(request, "admin.entity.merge", "resolution", candidate_id, after=merged)
-    return {"entity": merged}
+    _audit(
+        request,
+        "admin.entity.merge",
+        "resolution",
+        candidate_id,
+        after=_merge_audit_fingerprint(merged),
+    )
+    return {"entity": _public_merge_result(merged)}
 
 
 @router.post("/resolutions/{candidate_id}/reject")
@@ -314,12 +351,24 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
 async def list_admin_merges(request: Request, user_id: str, limit: int = 50) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.merges.read", user_id)
-    items = _services(request).storage.list_merge_history(user_id, limit=max(1, min(int(limit), 200)))
-    for item in items:
-        item["undoable"] = bool(
-            item.get("transfer_json") and item["transfer_json"] not in ("{}", "")
-        ) and not item.get("undone_at")
-    return {"user_id": user_id, "items": items, "count": len(items)}
+    storage = _services(request).storage
+    bounded = max(1, min(int(limit), 200))
+    rows = await run_blocking(
+        _bounded_merge_history_rows,
+        storage,
+        user_id,
+        limit=bounded + 1,
+    )
+    total = await run_blocking(_count_merge_history, storage, user_id)
+    items = [_public_merge_history_card(row) for row in rows[:bounded]]
+    return {
+        "user_id": user_id,
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "matched_at_least": total,
+        "truncated": total > len(items),
+    }
 
 
 @router.post("/merges/{merge_id}/undo")
@@ -331,12 +380,19 @@ async def undo_admin_merge(merge_id: str, request: Request) -> dict[str, Any]:
     if not _services(request).storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     try:
-        result = _services(request).kg.resolver.unmerge(
+        result = await run_blocking(
+            _services(request).kg.resolver.unmerge,
             user_id,
             merge_id,
             undone_by=request.state.actor.user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit(request, "admin.entity.unmerge", "merge", merge_id, after=result)
-    return {"result": result}
+    _audit(
+        request,
+        "admin.entity.unmerge",
+        "merge",
+        merge_id,
+        after=_merge_audit_fingerprint(result),
+    )
+    return {"result": _public_merge_result(result)}

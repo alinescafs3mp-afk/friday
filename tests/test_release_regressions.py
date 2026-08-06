@@ -491,7 +491,7 @@ def test_tar_entry_limit_is_enforced_during_streaming_iteration():
     extractor = DocumentExtractor(max_archive_entries=3, max_input_bytes=1024 * 1024)
     result = extractor.extract(_tar({f"{index}.txt": b"x" for index in range(4)}), "many.tar")
     assert result.success is False
-    assert "entry count" in result.error.casefold()
+    assert result.error == "archive_limit_exceeded"
 
 
 def test_office_zip_rejects_suspicious_expansion_before_library_parser():
@@ -501,7 +501,7 @@ def test_office_zip_rejects_suspicious_expansion_before_library_parser():
     extractor = DocumentExtractor(max_input_bytes=4 * 1024 * 1024)
     result = extractor.extract(buffer.getvalue(), "bomb.docx")
     assert result.success is False
-    assert "ratio" in result.error.casefold()
+    assert result.error == "archive_limit_exceeded"
 
 
 def test_core_schema_migration_rolls_back_as_one_transaction(settings, tmp_path: Path):

@@ -31,6 +31,7 @@ def test_a_hostile_id_is_replaced_not_reflected(settings):
         "id with spaces",
         "line\r\nInjected: header",  # header splitting
         "<script>alert(1)</script>",
+        "0123456789abcdef01234567",  # reserved for IDs issued by this server
         "",
     ]
     with TestClient(create_app(settings)) as client:

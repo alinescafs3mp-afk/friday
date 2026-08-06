@@ -7,6 +7,9 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
+
 from friday.storage._base import (
     Any,
     InboxItem,
@@ -25,6 +28,101 @@ from friday.storage._base import (
     validate_user_id,
 )
 from friday.storage._knowledge import _fts_terms
+from friday.storage._privacy import (
+    _not_private_inbox_dependency,
+    _not_private_knowledge_dependency,
+    _not_private_raw_dependency,
+)
+
+
+def _bounded_public_inbox_card(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Structural Inbox card without reviewer identity or advisory text."""
+
+    data = dict(item)
+
+    def identifier_field(
+        name: str,
+        prefixes: tuple[str, ...],
+        *,
+        nullable: bool = False,
+    ) -> str | None:
+        value = data.get(name)
+        if value is None and nullable:
+            return None
+        if not isinstance(value, str) or not value.startswith(prefixes) or len(value) > 160:
+            return None if nullable else ""
+        if any(not char.isascii() or not (char.isalnum() or char in "_-.:") for char in value):
+            return None if nullable else ""
+        return value
+
+    def timestamp_field(name: str, *, nullable: bool = False) -> str | None:
+        value = data.get(name)
+        if value is None and nullable:
+            return None
+        if not isinstance(value, str) or len(value) > 64:
+            return None if nullable else ""
+        if any(char not in "0123456789T:+-.Z " for char in value):
+            return None if nullable else ""
+        return value
+
+    def score_field(name: str) -> float | None:
+        value = data.get(name)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        numeric = float(value)
+        return max(0.0, min(numeric, 1.0)) if math.isfinite(numeric) else None
+
+    status_value = data.get("status")
+    action_value = data.get("suggested_action")
+    card: dict[str, Any] = {
+        "id": identifier_field("id", ("inb", "inbox")),
+        "raw_object_id": identifier_field("raw_object_id", ("raw",)),
+        "knowledge_object_id": identifier_field("knowledge_object_id", ("ko",), nullable=True),
+        "status": (
+            status_value
+            if isinstance(status_value, str) and status_value in {status.value for status in InboxStatus}
+            else ""
+        ),
+        "suggested_entity_id": identifier_field("suggested_entity_id", ("ent",), nullable=True),
+        "suggested_action": (
+            action_value
+            if isinstance(action_value, str)
+            and action_value
+            in {
+                "archived",
+                "classified",
+                "ignored",
+                "keep_transient",
+                "legacy_review",
+                "none",
+                "pending",
+                "promote",
+                "review",
+                "review_links",
+            }
+            else "review"
+        ),
+        "promotion_score": score_field("promotion_score"),
+        "quality_score": score_field("quality_score"),
+        "created_at": timestamp_field("created_at"),
+        "reviewed_at": timestamp_field("reviewed_at", nullable=True),
+    }
+
+    suggestions = data.get("suggestions_json")
+    notes = data.get("classification_notes")
+    tags = data.get("suggested_tags_json")
+    suggestions_text = suggestions if isinstance(suggestions, str) else ""
+    notes_text = notes if isinstance(notes, str) else ""
+    tags_text = tags if isinstance(tags, str) else ""
+    card["advisory"] = {
+        "suggestions_present": suggestions_text not in {"", "{}", "null"},
+        "suggestions_bytes": min(len(suggestions_text.encode("utf-8", errors="replace")), 1_000_000_000),
+        "suggested_tags_present": tags_text not in {"", "[]", "null"},
+        "suggested_tags_bytes": min(len(tags_text.encode("utf-8", errors="replace")), 1_000_000_000),
+        "notes_present": bool(notes_text),
+        "notes_chars": min(len(notes_text), 1_000_000_000),
+    }
+    return card
 
 
 class IntakeMixin(StorageShared):
@@ -49,7 +147,10 @@ class IntakeMixin(StorageShared):
         if not source_ref:
             return None
         row = self.execute(
-            "SELECT * FROM raw_objects WHERE user_id=? AND source=? AND source_ref=? AND deleted_at IS NULL",
+            f"""SELECT r.* FROM raw_objects r
+                 WHERE r.user_id=? AND r.source=? AND r.source_ref=?
+                   AND r.deleted_at IS NULL
+                   AND {_not_private_raw_dependency("r")}""",  # nosec B608
             (user_id, source, source_ref),
         ).fetchone()
         return dict(row) if row else None
@@ -71,8 +172,11 @@ class IntakeMixin(StorageShared):
         if not content_hash:
             return None
         row = self.execute(
-            "SELECT * FROM raw_objects WHERE user_id=? AND content_type='file' AND content_hash=? "
-            "AND deleted_at IS NULL ORDER BY received_at ASC, id ASC LIMIT 1",
+            f"""SELECT r.* FROM raw_objects r
+                 WHERE r.user_id=? AND r.content_type='file' AND r.content_hash=?
+                   AND r.deleted_at IS NULL
+                   AND {_not_private_raw_dependency("r")}
+                 ORDER BY r.received_at ASC, r.id ASC LIMIT 1""",  # nosec B608
             (user_id, content_hash),
         ).fetchone()
         return dict(row) if row else None
@@ -120,13 +224,15 @@ class IntakeMixin(StorageShared):
         if not content_hash:
             return None
         row = self.execute(
-            """SELECT r.* FROM raw_objects r
+            f"""SELECT r.* FROM raw_objects r
                JOIN inbox i ON i.raw_object_id = r.id AND i.user_id = r.user_id
                WHERE r.user_id=? AND r.source=? AND r.content_hash=?
                  AND COALESCE(json_extract(r.metadata_json,'$.candidate_type'),'')=?
                  AND COALESCE(json_extract(r.metadata_json,'$.requested_by'),'')=?
                  AND r.received_at > ?
                  AND r.deleted_at IS NULL AND i.status='pending'
+                 AND {_not_private_raw_dependency("r")}
+                 AND {_not_private_inbox_dependency("i")}
                ORDER BY r.received_at ASC, r.id ASC LIMIT 1""",
             (user_id, source, content_hash, candidate_type, str(requested_by or ""), since),
         ).fetchone()
@@ -155,9 +261,12 @@ class IntakeMixin(StorageShared):
         if not text_hash:
             return None
         row = self.execute(
-            "SELECT * FROM raw_objects WHERE user_id=? AND content_type='file' "
-            "AND json_extract(metadata_json,'$.text_sha256')=? AND deleted_at IS NULL "
-            "ORDER BY received_at ASC, id ASC LIMIT 1",
+            f"""SELECT r.* FROM raw_objects r
+                 WHERE r.user_id=? AND r.content_type='file'
+                   AND json_extract(r.metadata_json,'$.text_sha256')=?
+                   AND r.deleted_at IS NULL
+                   AND {_not_private_raw_dependency("r")}
+                 ORDER BY r.received_at ASC, r.id ASC LIMIT 1""",  # nosec B608
             (user_id, text_hash),
         ).fetchone()
         return dict(row) if row else None
@@ -175,6 +284,13 @@ class IntakeMixin(StorageShared):
                        :content_type, :metadata_json, :content_hash, :version, :received_at, :created_at, :deleted_at)""",
                     obj.to_row(),
                 )
+                visible = conn.execute(
+                    f"""SELECT 1 FROM raw_objects r WHERE r.id=? AND r.user_id=?
+                          AND {_not_private_raw_dependency("r")}""",  # nosec B608
+                    (obj.id, obj.user_id),
+                ).fetchone()
+                if visible is None:
+                    raise ValueError("Raw object fields reference private graph material")
             return obj
         except sqlite3.IntegrityError:
             existing = self.find_raw_by_source_ref(obj.user_id, obj.source, obj.source_ref)
@@ -277,23 +393,26 @@ class IntakeMixin(StorageShared):
         match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
         try:
             rows = self.execute(
-                """SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
                           snippet(raw_fts, 0, '', '', '…', 24) AS excerpt,
                           (SELECT i2.status FROM inbox i2 WHERE i2.raw_object_id=r.id
+                            AND {_not_private_inbox_dependency("i2")}
                             ORDER BY i2.reviewed_at DESC, i2.created_at DESC LIMIT 1) AS inbox_status,
                           (SELECT k.id FROM knowledge_objects k
                             WHERE k.raw_object_id=r.id AND k.deleted_at IS NULL
+                              AND {_not_private_knowledge_dependency("k")}
                             ORDER BY k.version DESC LIMIT 1) AS knowledge_object_id
                    FROM raw_fts
                    JOIN raw_objects r ON r.rowid=raw_fts.rowid
                    WHERE r.user_id=? AND r.deleted_at IS NULL
+                     AND {_not_private_raw_dependency("r")}
                      AND NOT EXISTS (
                          SELECT 1 FROM inbox i
                           WHERE i.raw_object_id=r.id AND i.status='ignored'
                      )
                      AND raw_fts MATCH ?
                    ORDER BY bm25(raw_fts) ASC, r.received_at DESC
-                   LIMIT ?""",
+                   LIMIT ?""",  # nosec B608
                 (user_id, match_query, max(1, min(limit, 100))),
             ).fetchall()
         except sqlite3.OperationalError:
@@ -302,10 +421,16 @@ class IntakeMixin(StorageShared):
 
     def get_raw_object(self, raw_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         if user_id is None:
-            row = self.execute("SELECT * FROM raw_objects WHERE id=?", (raw_id,)).fetchone()
+            row = self.execute(
+                f"""SELECT r.* FROM raw_objects r WHERE r.id=?
+                      AND {_not_private_raw_dependency("r")}""",  # nosec B608
+                (raw_id,),
+            ).fetchone()
         else:
             row = self.execute(
-                "SELECT * FROM raw_objects WHERE id=? AND user_id=?", (raw_id, user_id)
+                f"""SELECT r.* FROM raw_objects r WHERE r.id=? AND r.user_id=?
+                      AND {_not_private_raw_dependency("r")}""",  # nosec B608
+                (raw_id, user_id),
             ).fetchone()
         return dict(row) if row else None
 
@@ -329,20 +454,27 @@ class IntakeMixin(StorageShared):
         return item
 
     def get_inbox_item(self, inbox_id: str, user_id: str) -> dict[str, Any] | None:
-        row = self.execute("SELECT * FROM inbox WHERE id=? AND user_id=?", (inbox_id, user_id)).fetchone()
+        row = self.execute(
+            f"""SELECT i.* FROM inbox i WHERE i.id=? AND i.user_id=?
+                  AND {_not_private_inbox_dependency("i")}""",  # nosec B608
+            (inbox_id, user_id),
+        ).fetchone()
         return dict(row) if row else None
 
     def get_inbox_by_raw(self, raw_object_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
-            "SELECT * FROM inbox WHERE raw_object_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
+            f"""SELECT i.* FROM inbox i WHERE i.raw_object_id=? AND i.user_id=?
+                  AND {_not_private_inbox_dependency("i")}
+                 ORDER BY i.created_at DESC LIMIT 1""",  # nosec B608
             (raw_object_id, user_id),
         ).fetchone()
         return dict(row) if row else None
 
     def find_inbox_by_raw(self, raw_object_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
-            """SELECT * FROM inbox WHERE raw_object_id=? AND user_id=?
-               ORDER BY created_at DESC LIMIT 1""",
+            f"""SELECT i.* FROM inbox i WHERE i.raw_object_id=? AND i.user_id=?
+                  AND {_not_private_inbox_dependency("i")}
+                 ORDER BY i.created_at DESC LIMIT 1""",  # nosec B608
             (raw_object_id, user_id),
         ).fetchone()
         return dict(row) if row else None
@@ -351,11 +483,17 @@ class IntakeMixin(StorageShared):
         """The same two branches as the listing, so the total answers the same question."""
         if status:
             row = self.execute(
-                "SELECT COUNT(*) AS count FROM inbox WHERE user_id=? AND status=?",
+                f"""SELECT COUNT(*) AS count FROM inbox i
+                     WHERE i.user_id=? AND i.status=?
+                       AND {_not_private_inbox_dependency("i")}""",  # nosec B608
                 (user_id, enum_value(status)),
             ).fetchone()
         else:
-            row = self.execute("SELECT COUNT(*) AS count FROM inbox WHERE user_id=?", (user_id,)).fetchone()
+            row = self.execute(
+                f"""SELECT COUNT(*) AS count FROM inbox i WHERE i.user_id=?
+                      AND {_not_private_inbox_dependency("i")}""",  # nosec B608
+                (user_id,),
+            ).fetchone()
         return int(row["count"] if row else 0)
 
     def list_inbox(
@@ -372,13 +510,16 @@ class IntakeMixin(StorageShared):
         # unique tail, paging over such a batch duplicates and drops rows.
         if status:
             rows = self.execute(
-                """SELECT * FROM inbox WHERE user_id=? AND status=?
-                   ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?""",
+                f"""SELECT i.* FROM inbox i WHERE i.user_id=? AND i.status=?
+                     AND {_not_private_inbox_dependency("i")}
+                   ORDER BY i.created_at DESC, i.rowid DESC LIMIT ? OFFSET ?""",  # nosec B608
                 (user_id, enum_value(status), max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
         else:
             rows = self.execute(
-                "SELECT * FROM inbox WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                f"""SELECT i.* FROM inbox i WHERE i.user_id=?
+                     AND {_not_private_inbox_dependency("i")}
+                   ORDER BY i.created_at DESC, i.rowid DESC LIMIT ? OFFSET ?""",  # nosec B608
                 (user_id, max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -434,12 +575,14 @@ class IntakeMixin(StorageShared):
             raise ValueError(f"Unknown grouping axis: {by!r}")
         validate_user_id(user_id)
         rows = self.execute(
-            """SELECT i.id, i.suggested_action, i.quality_score, r.source, r.content_type,
+            f"""SELECT i.id, i.suggested_action, i.quality_score, r.source, r.content_type,
                       json_extract(r.metadata_json, '$.import_source_path') AS import_path
                FROM inbox i
                JOIN raw_objects r ON r.id = i.raw_object_id AND r.user_id = i.user_id
                WHERE i.user_id = ? AND i.status = 'pending'
-               ORDER BY i.created_at ASC, i.rowid ASC""",
+                 AND {_not_private_inbox_dependency("i")}
+                 AND {_not_private_raw_dependency("r")}
+               ORDER BY i.created_at ASC, i.rowid ASC""",  # nosec B608
             (user_id,),
         ).fetchall()
 
@@ -518,7 +661,11 @@ class IntakeMixin(StorageShared):
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        clauses = ["i.user_id=?"]
+        clauses = [
+            "i.user_id=?",
+            _not_private_inbox_dependency("i"),
+            _not_private_raw_dependency("r"),
+        ]
         params: list[Any] = [user_id]
         if status:
             clauses.append("i.status=?")
@@ -534,6 +681,7 @@ class IntakeMixin(StorageShared):
                 JOIN raw_objects r ON r.id=i.raw_object_id AND r.user_id=i.user_id
                 LEFT JOIN knowledge_objects k
                   ON k.id=i.knowledge_object_id AND k.user_id=i.user_id
+                 AND {_not_private_knowledge_dependency("k")}
                 WHERE {" AND ".join(clauses)}
                 ORDER BY CASE i.status WHEN 'pending' THEN 0 ELSE 1 END,
                          i.promotion_score DESC, i.created_at DESC

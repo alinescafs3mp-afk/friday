@@ -24,6 +24,7 @@ from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.retrieval._dense_cache import DenseVectorCache, matrix_scores
 from friday.retrieval._repair import _MIN_MEANINGFUL_TERM, Repair, repair_query
 from friday.retrieval._rerank_backend import CONFIDENT_MIN_DEFAULT
+from friday.storage._privacy import _not_private_entity_material_dependency
 
 try:  # optional acceleration (jericho[vectors]); pure-Python fallback below
     import numpy as _np
@@ -49,6 +50,8 @@ _PUBLIC_GRAPH_NODE_CAP = 12
 _PUBLIC_GRAPH_RELATION_CAP = 20
 _PUBLIC_GRAPH_PATH_CAP = 10
 _PUBLIC_GRAPH_PATH_STEP_CAP = 4
+_PUBLIC_GRAPH_CANDIDATE_CAP = 500
+_PUBLIC_GRAPH_EVIDENCE_CAP = 12
 _PUBLIC_GRAPH_COUNT_CAP = 1_000_000_000
 _PUBLIC_GRAPH_ENDPOINT_FIELDS = frozenset({"id", "name", "entity_type"})
 
@@ -82,9 +85,6 @@ _PUBLIC_GRAPH_RELATION_FIELDS = frozenset(
         "created_at",
         "updated_at",
         "invalidated_at",
-        "invalidated_reason",
-        "superseded_by",
-        "reviewed_by",
         "knowledge_object_id",
         "evidence_knowledge_object_id",
     }
@@ -113,8 +113,6 @@ _PUBLIC_GRAPH_STEP_FIELDS = frozenset(
         "created_at",
         "updated_at",
         "invalidated_at",
-        "invalidated_reason",
-        "superseded_by",
     }
 )
 _PUBLIC_GRAPH_PROVENANCE_FIELDS = frozenset(
@@ -123,8 +121,7 @@ _PUBLIC_GRAPH_PROVENANCE_FIELDS = frozenset(
         "origin",
         "knowledge_object_id",
         "candidate_id",
-        "reviewed_by",
-        "created_by",
+        "reviewed",
         "source",
         "confidence",
         "status",
@@ -149,6 +146,44 @@ def _bounded_graph_count(value: Any, *, minimum: int = 0) -> int:
     except (OverflowError, TypeError, ValueError):
         return minimum
     return max(minimum, min(max(0, parsed), _PUBLIC_GRAPH_COUNT_CAP))
+
+
+def _bounded_graph_unit_score(value: Any) -> float:
+    """Return one finite graph confidence without propagating NaN/Infinity."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        return 0.0
+    return round(max(0.0, min(1.0, parsed)), 6)
+
+
+def _public_graph_candidate_evidence(raw: Any) -> tuple[list[dict[str, Any]], int, bool]:
+    """Bound traversal evidence before it is attached to search documents."""
+
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return [], 0, False
+    matched = _bounded_graph_count(len(raw))
+    projected: list[dict[str, Any]] = []
+    for item in raw[:_PUBLIC_GRAPH_EVIDENCE_CAP]:
+        if not isinstance(item, Mapping):
+            continue
+        evidence: dict[str, Any] = {}
+        for key, limit in (
+            ("entity_id", 160),
+            ("entity_name", 240),
+            ("path_id", 160),
+        ):
+            value = _bounded_graph_text(item.get(key), limit=limit)
+            if value:
+                evidence[key] = value
+        for key in ("link_confidence", "entity_score"):
+            if key in item:
+                evidence[key] = _bounded_graph_unit_score(item.get(key))
+        if evidence:
+            projected.append(evidence)
+    return projected, matched, matched > len(projected)
 
 
 def _project_graph_fields(value: Any, allowed: frozenset[str]) -> dict[str, Any]:
@@ -285,6 +320,7 @@ def _public_graph_context(
     *,
     query: str,
     as_of: str,
+    known_at: str = "",
     expanded: bool,
     fallback_nodes: Sequence[Any] = (),
 ) -> dict[str, Any]:
@@ -338,7 +374,12 @@ def _public_graph_context(
         minimum=len(raw_paths),
     )
 
-    temporal_basis = _bounded_graph_text(context.get("temporal_basis") or "valid_time", limit=32)
+    # The searcher's normalized boundary is authoritative. Trusting a traversal
+    # payload here could publish ``known_at`` beside ``valid_time`` and leave two
+    # mutually exclusive descriptions of the same ranking snapshot.
+    temporal_basis = "bitemporal" if known_at else "valid_time"
+    known_at_floor = _bounded_graph_text(context.get("known_at_floor"), limit=40)
+    identity_basis = "current_names" if context.get("identity_basis") == "current_names" else ""
     return {
         # The effective query can differ from the user's raw text after the
         # deterministic keyboard-layout/typo repair above.  Keep the query that
@@ -346,6 +387,10 @@ def _public_graph_context(
         "query": _bounded_graph_text(query, limit=700),
         "expanded": bool(expanded),
         "as_of": as_of,
+        "known_at": known_at,
+        "known_at_floor": known_at_floor,
+        "history_complete": context.get("history_complete") is True,
+        "identity_basis": identity_basis,
         "temporal_basis": temporal_basis,
         "roots": roots,
         "nodes": nodes,
@@ -375,6 +420,83 @@ def _normalize_search_as_of(value: str) -> str:
         return normalize_event_date(cleaned)[0]
     except ValueError as exc:
         raise ValueError(f"Некорректная дата as_of: {cleaned!r}") from exc
+
+
+def _normalize_search_known_at(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    # Transaction-time is shared with storage rather than the calendar-date
+    # parser above: a reproducible database snapshot requires a clock time and
+    # an explicit UTC offset, not merely a day in the user's locale.
+    from friday.storage.models import normalize_known_at
+
+    try:
+        return normalize_known_at(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"Некорректный timestamp known_at: {cleaned!r}") from exc
+
+
+def _validated_temporal_graph_echo(
+    raw: Any,
+    *,
+    as_of: str,
+    known_at: str,
+    history_status: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Accept only the exact temporal snapshot the search asked KG to build."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("graph traversal did not return a temporal snapshot")
+    expected_strings = {
+        "as_of": as_of,
+        "known_at": known_at,
+        "temporal_basis": "bitemporal" if known_at else "valid_time",
+    }
+    if known_at:
+        expected_strings.update(
+            {
+                "known_at_floor": str(history_status.get("known_at_floor") or ""),
+                "identity_basis": "current_names",
+            }
+        )
+    for field, expected in expected_strings.items():
+        value = raw.get(field)
+        if not isinstance(value, str) or value != expected:
+            raise ValueError(f"graph traversal changed the requested {field} boundary")
+    if known_at and raw.get("history_complete") is not True:
+        raise ValueError("graph traversal returned an incomplete relation-history snapshot")
+    return dict(raw)
+
+
+def _validated_relation_history_status(raw: Any, *, known_at: str) -> dict[str, Any]:
+    """Require storage's complete, normalized transaction-time attestation."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("relation-history status is missing")
+    if not isinstance(raw.get("known_at"), str) or raw["known_at"] != known_at:
+        raise ValueError("storage changed the normalized known_at boundary")
+    floor = raw.get("known_at_floor")
+    if not isinstance(floor, str) or not floor:
+        raise ValueError("relation-history completeness floor is missing")
+    from friday.storage.models import normalize_known_at
+
+    try:
+        normalized_floor = normalize_known_at(floor, reject_future=False)
+    except ValueError as exc:
+        raise ValueError("relation-history completeness floor is invalid") from exc
+    if normalized_floor != floor or floor > known_at:
+        raise ValueError("relation-history completeness floor is inconsistent")
+    if raw.get("history_complete") is not True:
+        raise ValueError("relation-history snapshot is incomplete")
+    if raw.get("identity_basis") != "current_names":
+        raise ValueError("relation-history identity basis is unsupported")
+    return {
+        "known_at": known_at,
+        "known_at_floor": floor,
+        "history_complete": True,
+        "identity_basis": "current_names",
+    }
 
 
 def tokens_of(text: str, *, fold_yo: bool = True) -> list[str]:
@@ -1595,14 +1717,12 @@ class EmbeddingBackend:
                             self._clear_cooldown()
                         return first + second
                     if not _shortened:
-                        # Сообщение сервиса — В ЖУРНАЛ. Пределов у него несколько, и
-                        # запись «слишком длинно» не говорит, какой именно сработал:
-                        # разбираться приходится пробами вместо чтения. Тело ответа
-                        # короткое и содержит только числа предела.
+                        # Ответ внешнего backend не журналируется: некоторые
+                        # реализации эхом возвращают часть submitted input вместе
+                        # с пределом, то есть личный текст владельца.
                         LOGGER.warning(
-                            "embeddings input too long (%d chars, service said: %s); retrying at half length",
+                            "embeddings input too long (%d chars); retrying at half length",
                             len(texts[0]),
-                            " ".join(response.text.split())[:200],
                         )
                         return await self.embed(
                             [text[: max(1, len(text) // 2)] for text in texts],
@@ -1627,10 +1747,11 @@ class EmbeddingBackend:
             self._enter_cooldown()
             LOGGER.warning("embeddings backend timed out; treating as overload")
             return None
-        except Exception:
+        except Exception as exc:
             # Chunking multiplies how often this path runs (more inputs, bigger
             # requests), so the failure must stop being completely silent.
-            LOGGER.warning("embeddings backend request failed", exc_info=True)
+            # Exception text/tracebacks from HTTP clients can retain request bodies.
+            LOGGER.warning("embeddings backend request failed (%s)", type(exc).__name__)
             return None
         # Лестницу отступления обнуляет только УСПЕХ ЦЕЛОЙ операции. Половина внутри
         # деления этого не делает: одна операция стала давать оба исхода сразу, и
@@ -1809,8 +1930,10 @@ class HybridSearcher:
         except Exception:
             # A repair is a courtesy. If anything about it fails — an old database
             # without the vocabulary view, say — the original question still gets
-            # searched for.
-            LOGGER.debug("Query repair failed for %r", clean_query, exc_info=True)
+            # searched for. Neither the question nor the traceback may enter a
+            # log: both the exception message and its locals can contain the full
+            # personal query.
+            LOGGER.debug("Query repair unavailable; continuing with the original input")
             return None
 
     async def search(
@@ -1835,6 +1958,7 @@ class HybridSearcher:
         since: str | None = None,
         until: str | None = None,
         as_of: str = "",
+        known_at: str = "",
         record_usage: bool | None = None,
     ) -> dict[str, Any]:
         # Deferred: `friday.workers` (the package, not just `_blocking`) imports
@@ -1849,6 +1973,47 @@ class HybridSearcher:
         # swallowing it would turn an invalid historical question into a current,
         # graphless HTTP 200.
         normalized_as_of = _normalize_search_as_of(as_of)
+        requested_known_at = _normalize_search_known_at(known_at)
+        # Validate the history floor and mutable identity topology before every
+        # candidate read.  Doing this only inside graph expansion would let an
+        # empty query, an empty date window, or graph_expansion=False silently
+        # accept a snapshot the storage explicitly cannot reconstruct.
+        if requested_known_at:
+            history_status = _validated_relation_history_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=requested_known_at,
+                ),
+                known_at=requested_known_at,
+            )
+        else:
+            # No transaction-time boundary means the long-standing current
+            # projection path.  It must stay independent from schema-31 history
+            # and its completeness floor: a current search neither needs nor
+            # promises reconstruction of an earlier database state.
+            history_status = {
+                "known_at": "",
+                "known_at_floor": "",
+                "history_complete": True,
+                "identity_basis": "current_names",
+            }
+        normalized_known_at = str(history_status.get("known_at") or "")
+
+        def confirm_history_snapshot() -> None:
+            """Catch an identity change committed while this search was reading."""
+
+            if not normalized_known_at:
+                return
+            confirmed = _validated_relation_history_status(
+                self.storage.relation_history_status(
+                    user_id,
+                    known_at=normalized_known_at,
+                ),
+                known_at=normalized_known_at,
+            )
+            if confirmed != history_status:
+                raise ValueError("relation-history status changed during search")
+
         # Ширина отбора кандидатов считается от ГЛУБИНЫ ОТБОРА, а не от размера
         # страницы. Раньше и то и другое росло от `limit`, и пул для переранжирования
         # усыхал вместе со страницей: Telegram просит восемь — FTS приносил сорок
@@ -1860,13 +2025,25 @@ class HybridSearcher:
         depth = max(limit, self._rerank_top) if self._reranker is not None else limit
         clean_query = " ".join((query or "").split()).strip()
         if not clean_query:
+            confirm_history_snapshot()
             return {
                 "query": query,
                 "results": [],
                 "count": 0,
                 "entity_matches": [],
                 "as_of": normalized_as_of,
-                "graph_context": _public_graph_context({}, query="", as_of=normalized_as_of, expanded=False),
+                "known_at": normalized_known_at,
+                "known_at_floor": str(history_status.get("known_at_floor") or ""),
+                "history_complete": history_status.get("history_complete") is True,
+                "identity_basis": str(history_status.get("identity_basis") or ""),
+                "temporal_basis": "bitemporal" if normalized_known_at else "valid_time",
+                "graph_context": _public_graph_context(
+                    history_status,
+                    query="",
+                    as_of=normalized_as_of,
+                    known_at=normalized_known_at,
+                    expanded=False,
+                ),
             }
 
         # ЖЁСТКИЙ предфильтр по периоду — ДО отбора кандидатов, а не после.
@@ -1881,14 +2058,24 @@ class HybridSearcher:
         # шире, чем имеет смысл фильтровать»; пустое множество — «в периоде пусто».
         window_ids = self.storage.knowledge_ids_in_window(user_id, since=since, until=until)
         if window_ids is not None and not window_ids:
+            confirm_history_snapshot()
             return {
                 "query": clean_query,
                 "results": [],
                 "count": 0,
                 "entity_matches": [],
                 "as_of": normalized_as_of,
+                "known_at": normalized_known_at,
+                "known_at_floor": str(history_status.get("known_at_floor") or ""),
+                "history_complete": history_status.get("history_complete") is True,
+                "identity_basis": str(history_status.get("identity_basis") or ""),
+                "temporal_basis": "bitemporal" if normalized_known_at else "valid_time",
                 "graph_context": _public_graph_context(
-                    {}, query=clean_query, as_of=normalized_as_of, expanded=False
+                    history_status,
+                    query=clean_query,
+                    as_of=normalized_as_of,
+                    known_at=normalized_known_at,
+                    expanded=False,
                 ),
                 # Сказано вслух: пусто ИМЕННО из-за периода, а не потому, что в архиве
                 # нет ничего по теме. Совет «загляните в Inbox» здесь был бы неверен.
@@ -1990,6 +2177,7 @@ class HybridSearcher:
             "nodes": [],
             "relations": [],
             "knowledge_candidates": [],
+            **history_status,
         }
         graph_scores: dict[str, float] = {}
         # Documents vouched for by an entity the QUERY named, as opposed to one
@@ -1997,6 +2185,7 @@ class HybridSearcher:
         # — see the gate below.
         graph_query_matched: set[str] = set()
         graph_evidence: dict[str, list[dict[str, Any]]] = {}
+        graph_evidence_counts: dict[str, tuple[int, bool]] = {}
         graph_expanded = False
         graph_depth = self._graph_max_depth if is_relational_query(clean_query) else 1
         graph_evidence_threshold = 0.12 if graph_depth >= 2 else 0.20
@@ -2034,10 +2223,36 @@ class HybridSearcher:
                 # valid-time boundary at every hop.
                 if normalized_as_of:
                     graph_kwargs["as_of"] = normalized_as_of
-                graph_context = kg.context_for_query(user_id, clean_query, **graph_kwargs)
+                if normalized_known_at:
+                    graph_kwargs["known_at"] = normalized_known_at
+                raw_traversed = kg.context_for_query(user_id, clean_query, **graph_kwargs)
+                if normalized_as_of or normalized_known_at:
+                    traversed = _validated_temporal_graph_echo(
+                        raw_traversed,
+                        as_of=normalized_as_of,
+                        known_at=normalized_known_at,
+                        history_status=history_status,
+                    )
+                else:
+                    traversed = dict(raw_traversed) if isinstance(raw_traversed, Mapping) else {}
+                graph_context = {
+                    **traversed,
+                    # The searcher's preflight is authoritative for the public
+                    # boundary even when a legacy graph double omits metadata.
+                    **history_status,
+                }
                 graph_expanded = True
-                for candidate in graph_context.get("knowledge_candidates", []):
-                    document_id = str(candidate.get("knowledge_object_id") or "")
+                raw_graph_candidates = graph_context.get("knowledge_candidates")
+                graph_candidates = (
+                    raw_graph_candidates[:_PUBLIC_GRAPH_CANDIDATE_CAP]
+                    if isinstance(raw_graph_candidates, Sequence)
+                    and not isinstance(raw_graph_candidates, (str, bytes))
+                    else ()
+                )
+                for candidate in graph_candidates:
+                    if not isinstance(candidate, Mapping):
+                        continue
+                    document_id = _bounded_graph_text(candidate.get("knowledge_object_id"), limit=160)
                     if not document_id:
                         continue
                     if window_ids is not None and document_id not in window_ids:
@@ -2053,14 +2268,43 @@ class HybridSearcher:
                     candidate_map[document_id] = item
                     if candidate.get("query_matched"):
                         graph_query_matched.add(document_id)
-                    graph_scores[document_id] = max(
-                        graph_scores.get(document_id, 0.0),
-                        float(candidate.get("score", 0.0)),
-                    )
-                    graph_evidence[document_id] = list(candidate.get("evidence") or [])
+                    candidate_score = _bounded_graph_unit_score(candidate.get("score"))
+                    previous_score = graph_scores.get(document_id, -1.0)
+                    graph_scores[document_id] = max(previous_score, candidate_score)
+                    if candidate_score >= previous_score:
+                        evidence, evidence_matched, evidence_truncated = _public_graph_candidate_evidence(
+                            candidate.get("evidence")
+                        )
+                        graph_evidence[document_id] = evidence
+                        graph_evidence_counts[document_id] = (
+                            evidence_matched,
+                            evidence_truncated,
+                        )
+            except ValueError:
+                # Temporal refusal is part of the requested snapshot contract,
+                # not an optional graph outage.  In particular pre-floor and
+                # merge-crossing snapshots must never degrade to today's graph.
+                if normalized_as_of or normalized_known_at:
+                    raise
+                graph_context = {
+                    "nodes": [],
+                    "relations": [],
+                    "knowledge_candidates": [],
+                    **history_status,
+                }
             except Exception:
-                # Search must remain available even if graph enrichment encounters bad legacy data.
-                graph_context = {"nodes": [], "relations": [], "knowledge_candidates": []}
+                # Any explicit temporal request is one indivisible snapshot.
+                # A driver/runtime/corrupt-data failure is just as incapable of
+                # proving that snapshot as a typed date refusal; only the legacy
+                # current path may degrade to graphless retrieval.
+                if normalized_as_of or normalized_known_at:
+                    raise
+                graph_context = {
+                    "nodes": [],
+                    "relations": [],
+                    "knowledge_candidates": [],
+                    **history_status,
+                }
 
         # Re-rank after graph expansion so newly discovered records receive lexical evidence too.
         candidates = list(candidate_map.values())
@@ -2366,8 +2610,15 @@ class HybridSearcher:
             item["_graph_score"] = round(graph_score, 6)
             item["_feedback_score"] = round(feedback.get(document_id, 0.0), 6)
             item["_score_components"] = components[document_id]
-            if graph_evidence.get(document_id):
-                item["_graph_evidence"] = graph_evidence[document_id]
+            if document_id in graph_evidence_counts:
+                evidence_matched, evidence_truncated = graph_evidence_counts.get(
+                    document_id,
+                    (len(graph_evidence[document_id]), False),
+                )
+                if graph_evidence[document_id] or evidence_matched:
+                    item["_graph_evidence"] = graph_evidence[document_id]
+                    item["_graph_evidence_matched_at_least"] = evidence_matched
+                    item["_graph_evidence_truncated"] = evidence_truncated
             entities = entity_links.get(document_id, [])
             if entities:
                 item["_entities"] = entities
@@ -2484,10 +2735,16 @@ class HybridSearcher:
                 entity_matches = kg.search_entities(user_id, clean_query, limit=5)
         else:
             entity_matches = []
+        # Relation history and current entity identity are read through multiple
+        # SQL statements.  A merge/unmerge committed after the preflight would
+        # invalidate that mixture; the same status check after the final read
+        # turns the race into an explicit refusal instead of a torn snapshot.
+        confirm_history_snapshot()
         public_graph_context = _public_graph_context(
             graph_context,
             query=clean_query,
             as_of=normalized_as_of,
+            known_at=normalized_known_at,
             expanded=graph_expanded,
             fallback_nodes=entity_matches,
         )
@@ -2563,6 +2820,11 @@ class HybridSearcher:
             "matched_at_least": matched_before_page,
             "entity_matches": public_entity_matches,
             "as_of": normalized_as_of,
+            "known_at": normalized_known_at,
+            "known_at_floor": str(history_status.get("known_at_floor") or ""),
+            "history_complete": history_status.get("history_complete") is True,
+            "identity_basis": str(history_status.get("identity_basis") or ""),
+            "temporal_basis": "bitemporal" if normalized_known_at else "valid_time",
             "graph_context": public_graph_context,
             "strategy": strategy,
         }
@@ -2751,11 +3013,14 @@ class HybridSearcher:
                 continue
             placeholders = ",".join("?" for _ in chunk)
             # The only interpolated fragment is a bounded sequence of ``?`` placeholders.
-            query = f"""SELECT l.knowledge_object_id, l.entity_id, l.confidence,
-                           e.name, e.entity_type
+            query = f"""SELECT l.knowledge_object_id,
+                           substr(l.entity_id,1,160) AS entity_id, l.confidence,
+                           substr(e.name,1,240) AS name,
+                           substr(e.entity_type,1,80) AS entity_type
                     FROM knowledge_entity_links l
                     JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
                     WHERE l.user_id=? AND l.status='accepted' AND e.deleted_at IS NULL
+                      AND {_not_private_entity_material_dependency("e")}
                       AND l.knowledge_object_id IN ({placeholders})
                     ORDER BY l.confidence DESC, e.name COLLATE NOCASE"""  # nosec B608
             rows = self.storage.execute(query, (user_id, *chunk)).fetchall()

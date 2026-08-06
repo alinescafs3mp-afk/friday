@@ -34,6 +34,7 @@ from friday.organs import (
     resolve_chat_id,
 )
 from friday.permissions import CapabilityDefinition
+from friday.storage._graph import _bounded_visible_timeline_event_rows
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +63,15 @@ def _years_ago(iso: str, now: datetime) -> str:
     return f"{delta} года назад" if 2 <= delta <= 4 else f"{delta} лет назад"
 
 
-def build_window(storage, kg, user_id: str, *, days: int, settings=None) -> dict[str, Any]:
+def build_window(
+    storage,
+    kg,
+    user_id: str,
+    *,
+    days: int,
+    settings=None,
+    person_id: str | None = None,
+) -> dict[str, Any]:
     """Episodic view of the recent past: knowledge captured + events in ``days``.
 
     ``settings`` задают пояс: границы окна событий — календарные даты, и по UTC
@@ -71,8 +80,10 @@ def build_window(storage, kg, user_id: str, *, days: int, settings=None) -> dict
     now = local_now(settings) if settings is not None else datetime.now().astimezone()
     since = (now - timedelta(days=max(1, days))).isoformat()
     recent = storage.list_recent_knowledge(user_id, since_iso=since, limit=50)
-    events = storage.list_events_in_range(
+    events = _bounded_visible_timeline_event_rows(
+        storage,
         user_id,
+        person_id or user_id,
         start=(now.date() - timedelta(days=max(1, days))).isoformat(),
         end=now.date().isoformat(),
         limit=50,
@@ -80,10 +91,20 @@ def build_window(storage, kg, user_id: str, *, days: int, settings=None) -> dict
     return {
         "days": days,
         "recent_knowledge": [
-            {"title": k.get("title"), "kind": k.get("knowledge_kind"), "created_at": k.get("created_at")}
-            for k in recent
+            {
+                "title": str(k.get("title") or "")[:240],
+                "kind": str(k.get("knowledge_kind") or "")[:80],
+                "created_at": str(k.get("created_at") or "")[:64],
+            }
+            for k in recent[:50]
         ],
-        "events": [{"name": e.get("name"), "occurred_at": e.get("occurred_at")} for e in events],
+        "events": [
+            {
+                "name": str(e.get("name") or "")[:240],
+                "occurred_at": str(e.get("occurred_at") or "")[:64],
+            }
+            for e in events[:50]
+        ],
     }
 
 
@@ -101,8 +122,8 @@ def build_on_this_day(storage, user_id: str, now: datetime) -> list[dict[str, An
     )
     return [
         {
-            "title": m.get("title") or "Без названия",
-            "created_at": m.get("created_at"),
+            "title": str(m.get("title") or "Без названия")[:240],
+            "created_at": str(m.get("created_at") or "")[:64],
             "ago": _years_ago(str(m.get("created_at") or ""), now),
         }
         for m in memories
@@ -164,7 +185,14 @@ def _router() -> APIRouter:
     async def get_chronicle(request: Request, days: int = Query(7, ge=1, le=365)) -> dict[str, Any]:
         actor = _require(request, "chronicle.read")
         state = request.app.state
-        window = build_window(state.storage, state.kg, actor.user_id, days=days, settings=state.settings)
+        window = build_window(
+            state.storage,
+            state.kg,
+            actor.user_id,
+            days=days,
+            settings=state.settings,
+            person_id=actor.own_id,
+        )
         # «В этот день» — про календарь человека: по UTC после 21:00 МСК хроника
         # показывала бы воспоминания завтрашнего числа.
         on_this_day = build_on_this_day(state.storage, actor.user_id, local_now(state.settings))

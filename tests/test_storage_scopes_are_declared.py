@@ -9,6 +9,11 @@
                 личные указания и поправки, лимиты;
     credential — способ входа: отзыв токена, события сессии. НЕ автор.
 
+Feedback добавляет четвёртый, честно смешанный домен: его `user_id` — раздел
+субъекта. Для ответа это principal человека, для классификации входящего —
+tenant корпуса. Угадать один из них по имени метода невозможно, поэтому эта
+поверхность перечислена отдельно, а не ложно названа личной или общей.
+
 Класс дефекта подтверждён трижды за одни сутки 2026-08-03:
 
     заявка на подтверждение опасного действия была видна и решаема ЛЮБЫМ
@@ -78,6 +83,23 @@ PERSON_SCOPED = {
     "list_api_tokens",
 }
 
+#: Feedback хранится в разделе субъекта, который зависит от `target_type`.
+#:
+#: - ответ (`answer`) оценивает конкретный человек: `actor.own_id`;
+#: - классификация (`classification`) обучает общий корпус: `actor.user_id`.
+#:
+#: Поэтому `user_id` здесь нельзя безусловно заменить ни на principal, ни на
+#: tenant. `store_feedback` несёт тот же домен внутри `FeedbackItem.user_id` и
+#: не попадает в этот signature-based перечень.
+FEEDBACK_PARTITION_SCOPED = {
+    "_feedback_state_filter",
+    "count_feedback_state",
+    "get_current_feedback_stats",
+    "get_feedback_for_target",
+    "get_feedback_state",
+    "get_feedback_stats",
+}
+
 #: Заявки: `user_id` — АРЕНДАТОР, человек называется отдельным параметром.
 #:
 #: Здесь двойной контракт, и прежняя редакция перечня врала о нём. Заявка
@@ -113,7 +135,11 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 #: решение, принятое явно.
 # 237 → 239: обе relation-timeline операции принимают tenant общего графа;
 # личность человека к этой ленте не относится.
-EXPECTED_USER_ID_METHODS = 239
+# 239 → 240: relation_history_status проверяет completeness общего tenant-графа;
+# это не личная переписка и не credential identity.
+# 240 → 241: count_feedback_state — новый reader feedback-раздела; для answer
+# разделом служит person, для classification — tenant.
+EXPECTED_USER_ID_METHODS = 241
 
 
 def _methods_taking_user_id() -> set[str]:
@@ -136,9 +162,21 @@ def _methods_taking_user_id() -> set[str]:
 def test_every_personal_method_still_exists() -> None:
     """Перечень описывает настоящую поверхность, а не воспоминание о ней."""
     surface = _methods_taking_user_id()
-    missing = sorted((PERSON_SCOPED | APPROVAL_TENANT_WITH_A_SEPARATE_PERSON) - surface)
+    declared = PERSON_SCOPED | FEEDBACK_PARTITION_SCOPED | APPROVAL_TENANT_WITH_A_SEPARATE_PERSON
+    missing = sorted(declared - surface)
 
-    assert not missing, f"в перечне личных методов есть несуществующие: {missing}"
+    assert not missing, f"в перечнях scope-методов есть несуществующие: {missing}"
+
+
+def test_feedback_partition_is_not_mislabeled_as_person_or_tenant() -> None:
+    """Смешанный feedback-домен должен остаться отдельным и проверяемым."""
+
+    assert FEEDBACK_PARTITION_SCOPED.isdisjoint(PERSON_SCOPED)
+    assert FEEDBACK_PARTITION_SCOPED.isdisjoint(APPROVAL_TENANT_WITH_A_SEPARATE_PERSON)
+    for name in sorted(FEEDBACK_PARTITION_SCOPED):
+        signature = inspect.signature(getattr(FridayStorage, name))
+        assert "user_id" in signature.parameters
+        assert "target_type" in signature.parameters
 
 
 def test_an_approval_names_its_person_in_a_separate_parameter() -> None:
@@ -186,7 +224,10 @@ def test_the_personal_surface_is_not_empty() -> None:
     `PERSON_SCOPED` в свой набор не потому, что перестали быть личными, а потому
     что личность у них называется отдельным параметром.
     """
-    assert len(PERSON_SCOPED) + len(APPROVAL_TENANT_WITH_A_SEPARATE_PERSON) >= 25
+    assert (
+        len(PERSON_SCOPED) + len(FEEDBACK_PARTITION_SCOPED) + len(APPROVAL_TENANT_WITH_A_SEPARATE_PERSON)
+        >= 30
+    )
 
 
 def test_it_does_not_pretend_to_prove_call_sites() -> None:

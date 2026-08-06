@@ -264,8 +264,8 @@ class WorkerSupervisor:
             return
         try:  # no loop running (unit tests call `_publish` directly)
             self._state_sink(task.name, current)
-        except Exception:
-            LOGGER.debug("Could not persist worker state for %s", task.name, exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("Could not persist worker state for %s (%s)", task.name, type(exc).__name__)
 
     async def _drain_state_sink(self) -> None:
         assert self._sink_queue is not None
@@ -274,8 +274,8 @@ class WorkerSupervisor:
             try:
                 if self._state_sink is not None:
                     await asyncio.to_thread(self._state_sink, name, state)
-            except Exception:
-                LOGGER.debug("Could not persist worker state for %s", name, exc_info=True)
+            except Exception as exc:
+                LOGGER.debug("Could not persist worker state for %s (%s)", name, type(exc).__name__)
             finally:
                 self._sink_queue.task_done()
 
@@ -442,7 +442,7 @@ class WorkerSupervisor:
             except Exception as exc:
                 elapsed = time.monotonic() - started
                 failures = int(previous.get("consecutive_failures") or 0) + 1
-                LOGGER.exception("Worker %s failed", task.name)
+                LOGGER.error("Worker %s failed (%s)", task.name, type(exc).__name__)
                 self._publish(
                     task,
                     status="error",
@@ -492,7 +492,27 @@ def _sync_vault_page(vault: Any, storage: Any, objects: Sequence[dict[str, Any]]
             # `prune_orphans`, so an exception here used to freeze every later
             # object AND leave deleted notes on disk in plaintext indefinitely —
             # the exact thing pruning exists to prevent.
-            LOGGER.warning("vault sync skipped one object", extra={"knowledge_object_id": item.get("id")})
+            LOGGER.warning("vault sync skipped one object")
+
+
+def _prune_vault_against_final_snapshot(
+    vault: Any,
+    storage: Any,
+    user_id: str,
+    live_at_start: set[str],
+) -> int:
+    """Prune against objects public at both ends of the render sweep.
+
+    The start snapshot protects live notes from pagination reorder.  It cannot,
+    by itself, authorize retention: a KO can be deleted or become private while
+    pages are rendered.  Re-read the privacy-filtered ids immediately before the
+    filesystem operation and intersect the two snapshots.  Keeping the final
+    read and prune in one blocking call also removes an event-loop suspension
+    where stale plaintext previously remained trivially reproducible.
+    """
+
+    live_at_end = storage.list_live_knowledge_ids(user_id)
+    return vault.prune_orphans(user_id, live_at_start.intersection(live_at_end))
 
 
 class WorkersManager:
@@ -710,9 +730,9 @@ class WorkersManager:
                     "consecutive_failures": state.get("consecutive_failures"),
                 },
             )
-        except Exception:
+        except Exception as exc:
             # Journalling must never take down the worker it is observing.
-            LOGGER.debug("Could not record worker transition for %s", name, exc_info=True)
+            LOGGER.debug("Could not record worker transition for %s (%s)", name, type(exc).__name__)
 
     async def _mission_runner_tick(self) -> None:
         # Advance a bounded number of ready mission tasks; the executive keeps
@@ -758,9 +778,9 @@ class WorkersManager:
                 await operation(user_id)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 failures += 1
-                LOGGER.exception("Worker operation failed for tenant %s", user_id)
+                LOGGER.error("Worker tenant operation failed (%s)", type(exc).__name__)
             await asyncio.sleep(0)
         if failures:
             raise WorkerBatchError(f"{failures} tenant operation(s) failed")
@@ -798,8 +818,7 @@ class WorkersManager:
         report = await run_blocking(self.storage.backfill_entity_mentions, user_id)
         if report.get("linked"):
             LOGGER.info(
-                "entity mentions backfilled for %s: %d links over %d documents",
-                user_id,
+                "entity mentions backfilled: %d links over %d documents",
                 int(report["linked"]),
                 int(report.get("scanned") or 0),
             )
@@ -823,11 +842,10 @@ class WorkersManager:
             user_id,
         )
         if result.get("detected"):
-            LOGGER.info("Near-duplicate scan for tenant %s: %d proposal(s)", user_id, result["detected"])
+            LOGGER.info("Near-duplicate scan: %d proposal(s)", result["detected"])
         if result.get("incomplete"):
             LOGGER.info(
-                "Near-duplicate scan for tenant %s paused with %d object(s) pending; resumes next tick",
-                user_id,
+                "Near-duplicate scan paused with %d object(s) pending; resumes next tick",
                 int(result.get("pending") or 0),
             )
 
@@ -843,11 +861,10 @@ class WorkersManager:
         """
         report = await run_blocking(self.kg.resolver.sweep_duplicates, user_id, min_confidence=0.60)
         if report.get("suggested"):
-            LOGGER.info("Suggested %d potential entity merges for tenant %s", report["suggested"], user_id)
+            LOGGER.info("Suggested %d potential entity merges", report["suggested"])
         if report.get("partial"):
             LOGGER.info(
-                "Entity duplicate sweep for tenant %s is %d/%d keys in; continuing next tick",
-                user_id,
+                "Entity duplicate sweep is %d/%d keys in; continuing next tick",
                 report.get("keys_examined", 0),
                 report.get("keys_total", 0),
             )
@@ -891,9 +908,8 @@ class WorkersManager:
         )
         if candidates:
             LOGGER.info(
-                "Quality review found %d conservative candidates for tenant %s",
+                "Quality review found %d conservative candidates",
                 len(candidates),
-                user_id,
             )
 
     async def _inbox_model_advice_all(self) -> None:
@@ -964,9 +980,7 @@ class WorkersManager:
                 if _is_endpoint_failure(error):
                     consecutive_failures += 1
                     LOGGER.warning(
-                        "Inbox model advice: model endpoint failed for tenant %s item %s (%s)",
-                        user_id,
-                        item.get("id"),
+                        "Inbox model advice: model endpoint failed (%s)",
                         type(error).__name__,
                     )
                 else:
@@ -974,10 +988,8 @@ class WorkersManager:
                     # неудачу запоминаем на самом объекте.
                     consecutive_failures = 0
                     LOGGER.warning(
-                        "Inbox model advice: item %s of tenant %s could not be advised (%s)",
-                        item.get("id"),
-                        user_id,
-                        error,
+                        "Inbox model advice: item could not be advised (%s)",
+                        type(error).__name__,
                     )
                     await run_blocking(self._remember_advice_failure, user_id, item)
                 if consecutive_failures >= _ADVICE_ENDPOINT_DOWN_AFTER:
@@ -988,10 +1000,9 @@ class WorkersManager:
                     # and an eight-minute timeout while the endpoint was down. Stopping
                     # also stops hammering something that is already struggling.
                     LOGGER.warning(
-                        "Inbox model advice stopped after %d consecutive failures for tenant %s; "
+                        "Inbox model advice stopped after %d consecutive failures; "
                         "treating the model endpoint as unavailable",
                         consecutive_failures,
-                        user_id,
                     )
                     break
                 continue
@@ -1002,7 +1013,7 @@ class WorkersManager:
             if processed >= 2:
                 break
         if processed:
-            LOGGER.info("Added local-model advice to %d Inbox items for tenant %s", processed, user_id)
+            LOGGER.info("Added local-model advice to %d Inbox items", processed)
         if failures:
             raise WorkerBatchError(f"{failures} Inbox advice item(s) failed")
 
@@ -1038,9 +1049,8 @@ class WorkersManager:
         )
         if candidates:
             LOGGER.info(
-                "Lifecycle review proposed %d candidates for tenant %s; no changes applied",
+                "Lifecycle review proposed %d candidates; no changes applied",
                 len(candidates),
-                user_id,
             )
 
     async def _vault_sync_all(self) -> None:
@@ -1060,10 +1070,15 @@ class WorkersManager:
         # the commonest write there is and this loop runs every five minutes, so
         # the two overlap by construction.
         #
-        # Taken early, the snapshot can only be stale in the harmless direction: an
-        # object created during the loop is absent from the set, has no note yet
-        # either, and is rendered on the next cycle.
-        live: set[str] = await run_blocking(self.storage.list_live_knowledge_ids, user_id)
+        # This is only the first half of the retention decision.  A final snapshot
+        # below removes ids deleted/quarantined during rendering.  Their
+        # intersection is deliberately conservative for new objects: a note first
+        # seen mid-sweep may be pruned and rendered again on the next cycle, but a
+        # stale private note is never kept merely because it was public at start.
+        live_at_start: set[str] = await run_blocking(
+            self.storage.list_live_knowledge_ids,
+            user_id,
+        )
         while True:
             objects = await run_blocking(
                 self.storage.list_knowledge_objects, user_id, limit=_VAULT_PAGE, offset=offset
@@ -1086,7 +1101,13 @@ class WorkersManager:
         # alone, so a soft-deleted or IGNORED object kept a plaintext copy of its full
         # content on disk forever — while the user was told it was deleted and search
         # agreed with them.
-        removed = await run_blocking(self.memory_vault.prune_orphans, user_id, live)
+        removed = await run_blocking(
+            _prune_vault_against_final_snapshot,
+            self.memory_vault,
+            self.storage,
+            user_id,
+            live_at_start,
+        )
         if removed:
             LOGGER.info("Vault sync removed %d note(s) for objects that are no longer live", removed)
 
@@ -1104,7 +1125,7 @@ class WorkersManager:
         result = await run_blocking(self.storage.create_backup, label="scheduled")
         await run_blocking(self.storage.kv_set, "workers:last_backup_at", now.isoformat(timespec="seconds"))
         await run_blocking(self.storage.kv_set, "workers:last_backup", json.dumps(result, ensure_ascii=False))
-        LOGGER.info("Scheduled database backup created: %s", result.get("database"))
+        LOGGER.info("Scheduled database backup created")
         # Every backup, not just failures: "when did this last actually run" is the
         # question asked after something has already gone wrong, and by then the log
         # that would have answered it has usually rotated.
@@ -1497,8 +1518,8 @@ class WorkersManager:
             row = plan["row"]
             if plan["cached"] and str(row["id"]) in marked_now:
                 LOGGER.info(
-                    "embeddings index skipped %s: marked for recomputation while its batch was in flight",
-                    row["id"],
+                    "embeddings index skipped one object: marked for recomputation while its batch "
+                    "was in flight"
                 )
                 continue
             resolved: dict[int, bytes] = dict(plan["cached"])
@@ -1522,8 +1543,7 @@ class WorkersManager:
                     # on every tick, so this object could never converge: drop its
                     # stored vectors and let the next tick re-embed it in full.
                     LOGGER.warning(
-                        "embeddings dimension changed for %s (%s -> %s); re-embedding it",
-                        row["id"],
+                        "embeddings dimension changed (%s -> %s); re-embedding one object",
                         sorted(cached_dims),
                         sorted(dims),
                     )
@@ -1627,17 +1647,16 @@ class WorkersManager:
             owner = str(approval.get("user_id") or "")
             try:
                 happened, detail = verifier(self.storage, owner, payload)
-            except Exception:  # noqa: BLE001 — сверка не должна ронять гигиену
-                LOGGER.exception("Approval reconciliation failed for %s", approval.get("id"))
+            except Exception as exc:  # noqa: BLE001 — сверка не должна ронять гигиену
+                LOGGER.error("Approval reconciliation failed (%s)", type(exc).__name__)
                 continue
             if self.storage.settle_uncertain_approval(
                 str(approval.get("id") or ""), owner, happened=happened, detail=detail
             ):
                 settled += 1
                 LOGGER.info(
-                    "Approval %s reconciled by observation: the effect %s happen",
-                    approval.get("id"),
-                    "did" if happened else "did NOT",
+                    "Approval reconciled by observation: effect_happened=%s",
+                    "yes" if happened else "no",
                 )
         return settled
 
@@ -1670,8 +1689,8 @@ class WorkersManager:
                 return
             report = self.storage.relativize_stored_paths(str(self.settings.files_dir))
             self.storage.kv_set(self._PATHS_RELATIVE_KEY, json.dumps(report, ensure_ascii=False))
-        except Exception:  # noqa: BLE001 - починка полезная, но не обязательная для старта
-            LOGGER.warning("stored path relativization skipped", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - починка полезная, но не обязательная для старта
+            LOGGER.warning("stored path relativization skipped (%s)", type(exc).__name__)
             return
         if report.get("changed"):
             LOGGER.info(

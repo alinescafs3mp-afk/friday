@@ -7,6 +7,17 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+from friday.audit_privacy import (
+    decode_audit_privacy_key,
+    sanitize_audit_action,
+    sanitize_audit_actor,
+    sanitize_audit_created_at,
+    sanitize_audit_id,
+    sanitize_audit_ip,
+    sanitize_audit_payload,
+    sanitize_audit_request_id,
+    sanitize_audit_target,
+)
 from friday.storage._base import (
     MAX_API_TOKEN_TTL_SECONDS,
     UTC,
@@ -14,6 +25,7 @@ from friday.storage._base import (
     AuditEntry,
     StorageShared,
     _json_load,
+    audit_generated_id_exists,
     datetime,
     json,
     new_id,
@@ -491,13 +503,56 @@ class AccountsMixin(StorageShared):
         return {row["security_id"]: row["effect"] for row in rows}
 
     def log_audit(self, entry: AuditEntry) -> AuditEntry:
+        row = entry.to_row()
+        key_row = self.execute("SELECT value FROM schema_meta WHERE key='audit_privacy_hmac_key'").fetchone()
+        privacy_key = decode_audit_privacy_key(key_row[0] if key_row is not None else None)
+
+        def user_exists(candidate: str) -> bool:
+            return self.execute("SELECT 1 FROM users WHERE id=? LIMIT 1", (candidate,)).fetchone() is not None
+
+        def id_exists(candidate: str, prefixes: frozenset[str]) -> bool:
+            return audit_generated_id_exists(self.execute, candidate, prefixes)
+
+        safe_before = sanitize_audit_payload(
+            entry.before_json,
+            key=privacy_key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+        safe_after = sanitize_audit_payload(
+            entry.after_json,
+            key=privacy_key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+        safe_target_type, safe_target_id = sanitize_audit_target(
+            entry.target_type,
+            entry.target_id,
+            key=privacy_key,
+            user_exists=user_exists,
+            id_exists=id_exists,
+        )
+        row["id"] = sanitize_audit_id(entry.id, key=privacy_key, id_exists=id_exists)
+        row["user_id"] = sanitize_audit_actor(entry.user_id, user_exists=user_exists)
+        row["action"] = sanitize_audit_action(entry.action)
+        row["target_type"] = safe_target_type
+        row["target_id"] = safe_target_id
+        row["ip_address"] = sanitize_audit_ip(entry.ip_address, key=privacy_key)
+        row["request_id"] = sanitize_audit_request_id(entry.request_id, key=privacy_key)
+        row["created_at"] = sanitize_audit_created_at(entry.created_at, fallback=utc_now())
+        row["before_json"] = (
+            json.dumps(safe_before, ensure_ascii=False, sort_keys=True) if safe_before is not None else None
+        )
+        row["after_json"] = (
+            json.dumps(safe_after, ensure_ascii=False, sort_keys=True) if safe_after is not None else None
+        )
         with self.transaction() as conn:
             conn.execute(
                 """INSERT INTO audit_log(id, user_id, action, target_type, target_id,
                    before_json, after_json, ip_address, request_id, created_at)
                    VALUES(:id, :user_id, :action, :target_type, :target_id,
                    :before_json, :after_json, :ip_address, :request_id, :created_at)""",
-                entry.to_row(),
+                row,
             )
         return entry
 

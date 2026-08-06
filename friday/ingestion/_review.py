@@ -29,6 +29,24 @@ from friday.ingestion._base import (
 )
 
 
+def _candidate_for_inbox(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Keep graph-candidate evidence structural inside Inbox JSON.
+
+    Storage cards expose ``evidence_json`` as serialized JSON for their own
+    public surface.  Putting that card verbatim into ``suggestions_json`` makes
+    it JSON encoded inside JSON.  The Inbox privacy boundary intentionally
+    rejects opaque nested encodings, because it cannot prove that a stringified
+    object contains no quarantined material.  Decode only this schema-owned
+    field before embedding the card; malformed legacy evidence becomes an empty
+    object rather than making a newly-created Inbox row unreadable.
+    """
+
+    embedded = dict(candidate)
+    if "evidence_json" in embedded:
+        embedded["evidence_json"] = _json_dict(embedded.get("evidence_json"))
+    return embedded
+
+
 class ReviewMixin(PipelineShared):
     def list_inbox(self, user_id: str, status: InboxStatus | None = None) -> list[dict[str, Any]]:
         return self.storage.list_inbox_detailed(user_id, status)
@@ -534,8 +552,12 @@ class ReviewMixin(PipelineShared):
         suggestions = enrichment.to_suggestions()
         suggestions["graph_links"] = graph_links
         suggestions["unresolved_entities"] = unresolved
-        suggestions["relation_candidates"] = relation_candidates
-        suggestions["conflict_candidates"] = conflict_candidates
+        suggestions["relation_candidates"] = [
+            _candidate_for_inbox(candidate) for candidate in relation_candidates
+        ]
+        suggestions["conflict_candidates"] = [
+            _candidate_for_inbox(candidate) for candidate in conflict_candidates
+        ]
         inbox = InboxItem(
             id=new_id("inbox"),
             user_id=raw.user_id,
@@ -586,8 +608,8 @@ class ReviewMixin(PipelineShared):
             self.knowledge_graph.record_event_time_from_text(
                 user_id, str(event_links[0]["entity_id"]), content
             )
-        except Exception:
-            LOGGER.debug("event time extraction failed", exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("event time extraction failed (%s)", type(exc).__name__)
 
     def _link_entities(
         self,

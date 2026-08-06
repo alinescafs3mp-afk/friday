@@ -18,12 +18,19 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import subprocess  # nosec B404 - fixed openssl argv, no shell
 import tempfile
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+
+from friday.private_fs import (
+    copy_private_file,
+    ensure_private_directory,
+    prepare_private_file,
+    restrict_private_file,
+    restrict_private_tree,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,12 +67,15 @@ def _run_openssl(args: list[str]) -> None:
 def encrypt_file(source: Path, destination: Path, key_file: Path) -> None:
     if not key_file.is_file():
         raise BackupMirrorError(f"Файл ключа шифрования не найден: {key_file}")
+    prepare_private_file(destination)
     _run_openssl([*_OPENSSL_ARGS, "-in", str(source), "-out", str(destination), "-pass", f"file:{key_file}"])
+    restrict_private_file(destination)
 
 
 def decrypt_file(source: Path, destination: Path, key_file: Path) -> None:
     if not key_file.is_file():
         raise BackupMirrorError(f"Файл ключа шифрования не найден: {key_file}")
+    prepare_private_file(destination)
     _run_openssl(
         [
             *_OPENSSL_ARGS,
@@ -78,6 +88,7 @@ def decrypt_file(source: Path, destination: Path, key_file: Path) -> None:
             f"file:{key_file}",
         ]
     )
+    restrict_private_file(destination)
 
 
 def _verify_encrypted_copy(encrypted: Path, key_file: Path, expected_sha256: str) -> None:
@@ -97,9 +108,9 @@ def _publish_manifest(source: Path, target: Path) -> None:
     """Copy a manifest into place atomically, so a torn write is never visible."""
     tmp = target.with_name(target.name + ".tmp")
     try:
-        shutil.copy2(source, tmp)
-        tmp.chmod(0o600)
+        copy_private_file(source, tmp)
         os.replace(tmp, target)
+        restrict_private_file(target)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -116,7 +127,7 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         # disk — and then reports a successful mirror. "A copy on the same disk is
         # not a backup" is this module's whole premise, and that is precisely what
         # it produced, quietly, for as long as the disk stayed unplugged.
-        LOGGER.error("Каталог зеркала не смонтирован или отсутствует: %s", mirror_dir)
+        LOGGER.error("Каталог зеркала не смонтирован или отсутствует")
         return {
             "enabled": True,
             "mirror_dir": str(mirror_dir),
@@ -126,14 +137,13 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
             "repaired": 0,
             "failed": 0,
         }
+    restrict_private_tree(mirror_dir)
+    ensure_private_directory(settings.backups_dir)
     same_device = False
     with suppress(OSError):
         same_device = mirror_dir.stat().st_dev == settings.backups_dir.stat().st_dev
     if same_device:
-        LOGGER.warning(
-            "Зеркало %s лежит на том же устройстве, что и бэкапы — это не offsite-копия",
-            mirror_dir,
-        )
+        LOGGER.warning("Зеркало лежит на том же устройстве, что и бэкапы — это не offsite-копия")
 
     copied = skipped = failed = repaired = 0
     leftovers: list[str] = []
@@ -148,8 +158,19 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         source = settings.backups_dir / database
         if not database or not expected_sha or not source.is_file():
             continue
+        if source.is_symlink() or manifest_path.is_symlink():
+            failed += 1
+            continue
+        restrict_private_file(source)
+        restrict_private_file(manifest_path)
         target = mirror_dir / (f"{database}.enc" if key_file else database)
         mirrored_manifest = mirror_dir / manifest_path.name
+        try:
+            restrict_private_file(target)
+            restrict_private_file(mirrored_manifest)
+        except ValueError:
+            failed += 1
+            continue
         # Turning encryption ON does not remove what was mirrored before it. The
         # target's NAME depends on the key, so the .enc copy lands BESIDE the old
         # plaintext one rather than replacing it — and nothing ever deletes it: this
@@ -161,7 +182,7 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
         # run would report it once and never again.
         if key_file is not None and (mirror_dir / database).exists():
             leftovers.append(database)
-            LOGGER.warning("В зеркале осталась НЕзашифрованная копия %s — удалите её вручную", database)
+            LOGGER.warning("В зеркале осталась НЕзашифрованная копия — удалите её вручную")
         # A database and its manifest are ONE unit. Skipping on the database alone
         # meant that an interruption between `os.replace` and the manifest copy left
         # a manifest-less database as the durable state — and every later run saw
@@ -176,10 +197,10 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
             try:
                 _publish_manifest(manifest_path, mirrored_manifest)
                 repaired += 1
-                LOGGER.info("Восстановлен манифест зеркальной копии %s", database)
-            except Exception:
+                LOGGER.info("Восстановлен манифест зеркальной копии")
+            except Exception as exc:
                 failed += 1
-                LOGGER.warning("Не удалось восстановить манифест для %s", database, exc_info=True)
+                LOGGER.warning("Не удалось восстановить манифест (%s)", type(exc).__name__)
             continue
         tmp = target.with_name(target.name + ".tmp")
         try:
@@ -187,7 +208,7 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
                 encrypt_file(source, tmp, key_file)
                 _verify_encrypted_copy(tmp, key_file, expected_sha)
             else:
-                shutil.copy2(source, tmp)
+                copy_private_file(source, tmp)
                 if _sha256(tmp) != expected_sha:
                     raise BackupMirrorError("Копия не совпала с манифестом (sha256)")
             # Manifest FIRST. A manifest without its database is the harmless
@@ -196,12 +217,12 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
             # is unrestorable and, before this, permanently skipped.
             _publish_manifest(manifest_path, mirrored_manifest)
             os.replace(tmp, target)
-            target.chmod(0o600)
+            restrict_private_file(target)
             copied += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
             tmp.unlink(missing_ok=True)
-            LOGGER.warning("Не удалось отзеркалировать бэкап %s", database, exc_info=True)
+            LOGGER.warning("Не удалось отзеркалировать бэкап (%s)", type(exc).__name__)
     report = {
         "enabled": True,
         "mirror_dir": str(mirror_dir),
@@ -218,11 +239,10 @@ def mirror_backups(settings: Any) -> dict[str, Any]:
     }
     if copied or failed:
         LOGGER.info(
-            "Зеркалирование бэкапов: скопировано %d, пропущено %d, ошибок %d (%s)",
+            "Зеркалирование бэкапов: скопировано %d, пропущено %d, ошибок %d",
             copied,
             skipped,
             failed,
-            mirror_dir,
         )
     return report
 
@@ -244,6 +264,7 @@ def mirror_files_tree(settings: Any, *, budget_sec: float = 300.0) -> dict[str, 
     if not source_root.is_dir():
         # Файловый бэкап ещё не создавался — зеркалить нечего, и это не ошибка.
         return {"enabled": True, "state": "no_files_backup_yet", "copied": 0, "failed": 0, "complete": True}
+    restrict_private_tree(source_root)
     if not mirror_dir.is_dir():
         # Ту же ловушку уже ловили у баз: mkdir на неподключённом диске создаёт
         # каталог В ТОЧКЕ МОНТИРОВАНИЯ и рапортует успешное зеркало. Не создавать.
@@ -255,18 +276,26 @@ def mirror_files_tree(settings: Any, *, budget_sec: float = 300.0) -> dict[str, 
             "failed": 0,
             "complete": False,
         }
+    restrict_private_tree(mirror_dir)
     key_file: Path | None = settings.backup_encryption_key_file
     target_root = mirror_dir / "files"
+    ensure_private_directory(target_root)
     import time
 
     started = time.monotonic()
     total = copied = skipped = failed = pending = 0
     for source in sorted(source_root.rglob("*")):
-        if not source.is_file():
+        if source.is_symlink() or not source.is_file():
             continue
         total += 1
         relative = source.relative_to(source_root)
         target = target_root / (relative.parent / f"{relative.name}.enc" if key_file else relative)
+        try:
+            ensure_private_directory(target.parent)
+            restrict_private_file(target)
+        except (OSError, ValueError):
+            failed += 1
+            continue
         if target.is_file():
             skipped += 1
             continue
@@ -275,23 +304,20 @@ def mirror_files_tree(settings: Any, *, budget_sec: float = 300.0) -> dict[str, 
             continue
         tmp = target.with_name(target.name + ".part")
         try:
-            # Подкаталоги ВНУТРИ живого mirror_dir создавать безопасно: сама точка
-            # монтирования уже проверена выше.
-            target.parent.mkdir(parents=True, exist_ok=True)
             if key_file is not None:
                 encrypt_file(source, tmp, key_file)
                 _verify_encrypted_copy(tmp, key_file, _sha256(source))
             else:
-                shutil.copy2(source, tmp)
+                copy_private_file(source, tmp)
                 if _sha256(tmp) != _sha256(source):
                     raise BackupMirrorError(f"копия {relative} не совпала с оригиналом")
             os.replace(tmp, target)
-            target.chmod(0o600)
+            restrict_private_file(target)
             copied += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
             tmp.unlink(missing_ok=True)
-            LOGGER.warning("Не удалось отзеркалировать файл %s", relative, exc_info=True)
+            LOGGER.warning("Не удалось отзеркалировать файл (%s)", type(exc).__name__)
     report = {
         "enabled": True,
         "mirror_dir": str(mirror_dir),
@@ -305,11 +331,10 @@ def mirror_files_tree(settings: Any, *, budget_sec: float = 300.0) -> dict[str, 
     }
     if copied or failed or pending:
         LOGGER.info(
-            "Зеркалирование файлов: скопировано %d, пропущено %d, отложено %d, ошибок %d (%s)",
+            "Зеркалирование файлов: скопировано %d, пропущено %d, отложено %d, ошибок %d",
             copied,
             skipped,
             pending,
             failed,
-            mirror_dir,
         )
     return report

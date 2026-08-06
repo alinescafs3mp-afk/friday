@@ -448,8 +448,7 @@ def _compare_and_store(storage: Any, user_id: str, report: dict[str, Any]) -> di
                 }
                 if regression["regressed"]:
                     LOGGER.warning(
-                        "Retrieval quality regressed for %s: recall@%d %.3f -> %.3f (Δ%.3f)",
-                        user_id,
+                        "Retrieval quality regressed: recall@%d %.3f -> %.3f (Δ%.3f)",
                         report["k"],
                         prev_recall,
                         report["recall_at_k"],

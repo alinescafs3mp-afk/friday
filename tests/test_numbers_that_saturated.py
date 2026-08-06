@@ -247,6 +247,27 @@ def test_the_lifecycle_count_does_not_go_through_a_page():
 def _feedback(storage, user_id: str, target: str, *, kind: str, score: float) -> None:
     from friday.storage.models import FeedbackItem, FeedbackType
 
+    if (
+        kind == "classification"
+        and storage.execute(
+            "SELECT 1 FROM raw_objects WHERE id=? AND user_id=?",
+            (target, user_id),
+        ).fetchone()
+        is None
+    ):
+        storage.store_raw_object(
+            RawObject(
+                id=target,
+                user_id=user_id,
+                source="test",
+                source_ref=f"feedback:{target}",
+                raw_content=f"classification feedback target {target}",
+                content_type="text",
+            )
+        )
+    if kind != "classification":
+        conversation = storage.create_conversation(user_id, f"feedback {target}")
+        target = str(storage.store_message(conversation["id"], user_id, "assistant", target)["id"])
     storage.store_feedback(
         FeedbackItem(
             id=new_id("fb"),

@@ -122,7 +122,9 @@ Inbox item связывает Raw Object и, при наличии, Knowledge Ob
 ### Knowledge Graph
 
 - `entities` — canonical entity, aliases, type, description, metadata;
-- `relations` — направленная типизированная связь; `weight` — ранговый сигнал (кламп 0.1–1.0), а provenance живёт в `metadata_json`: обязательный `origin` (`api` + `created_by` для ручных рёбер, `container` для PART_OF-иерархий, `review` + `reviewed_by` + исходная `confidence` для принятых кандидатов);
+- `relations` — направленная типизированная связь и быстрая mutable current projection; `weight` — ранговый сигнал (кламп 0.1–1.0), а provenance живёт в `metadata_json`: обязательный `origin` (`api` + `created_by` для ручных рёбер, `container` для PART_OF-иерархий, `review` + `reviewed_by` + исходная `confidence` для принятых кандидатов);
+- `relation_revisions` — каноническая append-only transaction-time история полных typed snapshots отношений: `present`-tombstone, operation, revision, глобальный `event_seq`, UTC `recorded_at`, transaction `batch_id` и `history_quality`; capture/guard triggers охватывают INSERT, содержательный UPDATE, DELETE и конфликтующий `OR REPLACE`, а отдельные triggers запрещают UPDATE/DELETE/replace истории;
+- `relation_revision_context` — singleton transaction context и durable logical clock `observed_at`: максимальная уже выданная историческая граница либо более поздний graph/identity commit; значение канонично, сохраняется между restart и никогда не уменьшается;
 - `knowledge_entity_links` — связь Knowledge Object и сущности с confidence/evidence/status;
 - `entity_resolution_candidates` — reviewable предложение объединения;
 - `entity_merge_history` — история принятого merge;
@@ -137,10 +139,60 @@ Inbox item связывает Raw Object и, при наличии, Knowledge Ob
 применяется один общий `limit`; `total` и `truncated` считают весь период, а не
 страницу. В положение строки входят только valid-time поля. `created_at` и
 `invalidated_at` возвращаются отдельно как transaction evidence, но не заменяют
-неизвестную границу; relation metadata наружу не выходит. Invalidated relation
-остаётся частью истории, soft-deleted relation исключается. Имена концов и
-merge-topology пока берутся из текущего графа — историческая identity projection
-требует отдельной transaction-time истории.
+неизвестную valid-time границу; relation metadata наружу не выходит. Invalidated
+relation остаётся частью истории, soft-deleted relation исключается.
+
+`as_of` и `known_at` отвечают на разные вопросы. Первый фильтрует valid-time
+выбранной версии (`valid_from <= as_of < valid_to`), второй выбирает последнюю
+revision, уже записанную к offset-aware RFC3339 transaction-time. Без `as_of`
+исторический снимок показывает связи, которые тогда считались действующими, а не
+связи на календарную дату `known_at`. Все relation mutations внутри внешней
+`FridayStorage.transaction()` получают один UTC timestamp и `batch_id`, поэтому
+candidate accept, merge и unmerge наблюдаются целиком до или после границы;
+rollback откатывает projection и revisions вместе. Прямой SQL также ловится
+trigger fallback. И managed context, и fallback учитывают системное время,
+последние relation/identity события, completeness floor и durable `observed_at`:
+откат wall clock не делает более позднюю транзакцию видимой в уже выданном snapshot.
+Явный допустимый `known_at` сначала атомарно поднимает `observed_at`, и только потом
+читает mutable projections; поэтому historical read — маленькая локальная запись,
+а не чистый SELECT. Новый outer batch
+получает строго большую границу; равное время делят только атомарные события одного
+batch, где порядок детерминирован `event_seq`.
+
+Fallback гарантирует capture одной relation-строки, а не transaction semantics
+произвольного multi-row SQL: у SQLite нет statement-level trigger, способного
+выдать строковым triggers общий batch и очистить его после statement. Все product
+bulk mutations поэтому обязаны идти через `FridayStorage.transaction()`; прямой
+multi-row DML — неподдерживаемый repair-path, а не скрытый API.
+
+Схема 31 не выдаёт нынешнюю projection за старую историю: миграция атомарно
+записывает неизменяемый `relation_history_complete_from` и baseline с
+`history_quality=migration_baseline`. `known_at` раньше floor отклоняется
+fail-closed. Revisions восстанавливают historical endpoint IDs и link state, но
+не исторические имена или entity topology. Поэтому снимок, после которого случился
+merge/unmerge, soft-delete/undelete либо смена canonical/merged target, отклоняется;
+name-only edit допустим, а ответ честно маркируется `identity_basis=current_names`.
+
+Schema-32 authority проверяется до любого idempotent DDL и после получения
+межпроцессного `BEGIN IMMEDIATE`: marker/floor, bidirectional current↔latest lineage,
+точные `sqlite_master.sql` двух owned tables, допустимой historical/canonical формы
+projection `relations`, всех 15 capture/protection triggers и полной UNIQUE-index
+conflict surface четырёх guarded tables. Exact `uq_active_relation` и штатные
+implicit indexes обязательны; любой дополнительный UNIQUE отклоняется по счётчику
+без публикации его недоверенного имени или выражения.
+Развёрнутая ранняя schema 31 является отдельным известным predecessor-контрактом:
+startup принимает только точные fingerprints её трёх tables и десяти guards,
+проверяет всю semantic lineage, затем атомарно заменяет context/guards и повторно
+доказывает уже v32 перед сменой marker. Revisions, `event_seq`, snapshots и floor
+при этом не переписываются; `observed_at` засевается максимумом существующей
+relation/identity time authority. Так одноимённая пустышка, гибридный DDL,
+потерянный marker и конкурентный первый старт не могут ни скрыть gap, ни сдвинуть
+completeness floor. Floor обязан быть каноническим RFC3339 и совпадать со своим
+immutable `updated_at`; baseline — иметь тот же `recorded_at`, фиксированные
+migration batch/quality, revision 1 и `present=1`; только baseline может лежать
+ровно на floor, captured revision обязана быть позже, а вся линия дополнительно
+проверяется на неубывание времени по `event_seq`, запрет одинаковой границы у
+разных batch и отсутствие evidence позже `observed_at`.
 
 ## 6. Entity extraction и resolution
 
@@ -329,7 +381,7 @@ Worker и scan не применяют действия автоматическ
 
 Аутентификация HTTP тоже уважает ролевую модель: помимо owner-токена (`FRIDAY_API_TOKEN`) можно выпускать scoped-токены (`api_tokens`, SHA-256), каждый из которых аутентифицирует как привязанный аккаунт с его preset/capabilities. Loopback-bypass остаётся owner для локальной машины.
 
-SQLite работает с foreign keys, WAL и busy timeout; инициализация/migration и сложные изменения используют атомарные транзакции (`BEGIN IMMEDIATE` там, где нужно сериализовать writers). Неизвестная будущая schema отклоняется без mutation. Workers изолируют сбой одного tenant/item от остальных. Backup использует SQLite online backup API, отдельный integrity check и строгий SHA-256 manifest. Копия на том же диске — не бэкап: каждая верифицированная копия зеркалируется наружу (`FRIDAY_BACKUP_MIRROR_DIR`, `friday/backup_mirror.py`) с повторной sha256-проверкой; при заданном ключе (`FRIDAY_BACKUP_ENCRYPTION_KEY_FILE`) зеркальная копия AES-256-шифруется системным `openssl` и проверяется decrypt-and-compare (локальная копия остаётся открытой для быстрого restore).
+SQLite работает с foreign keys, WAL и busy timeout; инициализация/migration и сложные изменения используют атомарные транзакции (`BEGIN IMMEDIATE` там, где нужно сериализовать writers). Неизвестная будущая schema отклоняется без mutation. Workers изолируют сбой одного tenant/item от остальных. Backup использует SQLite online backup API, отдельный integrity check и строгий SHA-256 manifest; поскольку `relation_revisions` и immutable completeness floor находятся в той же БД, verified backup сохраняет их вместе с current projection. Tenant export отдельно включает только relation revisions этого tenant. Копия на том же диске — не бэкап: каждая верифицированная копия зеркалируется наружу (`FRIDAY_BACKUP_MIRROR_DIR`, `friday/backup_mirror.py`) с повторной sha256-проверкой; при заданном ключе (`FRIDAY_BACKUP_ENCRYPTION_KEY_FILE`) зеркальная копия AES-256-шифруется системным `openssl` и проверяется decrypt-and-compare (локальная копия остаётся открытой для быстрого restore).
 
 ## 12. Развитие без ломки границ
 
@@ -357,7 +409,11 @@ SQLite работает с foreign keys, WAL и busy timeout; инициализ
 
 **Исходящий канал уведомлений** — то, что сделало проактивность возможной (раньше мост только отвечал на входящее). Backend/органы кладут сообщение в durable-очередь `outbound_notifications` (`storage.enqueue_notification`, дедуп по `(user_id, dedup_key)`); мост — единственный держатель бот-токена — тянет её подписанными `GET /api/notifications/pending` + `POST /api/notifications/ack` (гейт `source=="telegram-bridge"`) и доставляет через `sendMessage`. Backend никогда не обращается к Telegram сам и не пишет в основную БД со стороны моста. Deny-by-default проверяется дважды: allowlist при enqueue (backend) и перед отправкой (мост), потому что бот-токен технически достаёт любой чат.
 
-**Орган `reminders`.** Worker сканирует `entity_time` (§11) на события в окне `FRIDAY_REMINDERS_LEAD_DAYS`, резолвит Telegram-чат из метаданных пользователя, уважает allowlist и тихие часы, кладёт одно дедуплицированное напоминание на событие.
+**Орган `reminders`.** Worker сканирует `entity_time` (§11) на события в окне `FRIDAY_REMINDERS_LEAD_DAYS`, резолвит Telegram-чат из метаданных пользователя, уважает allowlist и тихие часы, кладёт одно дедуплицированное напоминание на событие. В shared archive событие одновременно получает durable `private_entity_owners` marker конкретного человека: `entity_time.source` хранит расписание, но не заменяет privacy authority. Generic graph/retrieval/model/organs/admin paths используют единое fail-closed замыкание зависимостей и не видят ни напоминание, ни копию его ID, current или authenticated historical имени/алиаса. Legacy alias containers разворачиваются рекурсивно в bounded byte/node budget, а comparison после NFC → casefold → NFC закрывает иной регистр и NFD. Invalid current/history material сам становится seed карантина.
+
+Recursive closure материализует только entity IDs: `private_entity_material_work` — staging, `private_entity_material_cache` — опубликованное множество. Второй cache/work хранит только `(material_kind, object_id, user_id)` для видимых Raw/Knowledge/Inbox и sparse `knowledge_hidden`, чтобы горячие readers делали PK lookup, а Inbox rebuild не сканировал все Knowledge для каждой строки. У обеих пар свой singleton state, valid только при точном равенстве; authority не копирует identity/content, inspection идёт из canonical rows через connection-local TEMP. Persistent UDF-free guards инвалидируют entity authority при entity/owner/reminder-time/version write и derivative authority при Raw/Knowledge/link/Inbox write даже из raw SQLite. Managed TEMP AFTER triggers обычную вставку или non-flipping update исправляют по одному ID; смена privacy-класса запускает общий ordered rebuild Raw → Knowledge/hidden → Inbox в той же transaction. Внешний writer оставляет state invalid до exact heal новым соединением. Все generic material views требуют оба valid state. Per-connection authorizer разрешает derivative DML только code-owned triggers, запрещает caller-у прямой DML над cache/work/state, owned DDL и `writable_schema`; startup сверяет обе пары с live authority. Persistent schema поэтому можно менять обычным SQLite без application UDF.
+
+Только person-scoped reminder path допускает точного владельца при совпавших marker/time/source, валидных current/history states и отсутствии зависимости от другой cached identity. Он использует готовый ID-cache (`35.7 ms` median на synthetic 4 500-chain), а не строит fixed point на каждого читателя; public carriers собственного reminder остаются консервативно скрыты. Person export не вычитает собственный ID из global cache: в одной SQLite snapshot он строит fresh fixed point от всех запрещённых direct-private seeds, исключив только точную authority экспортирующего человека. Поэтому dependencies только от его напоминания сохраняются, а foreign/ambiguous/malformed closure исключается. На sparse synthetic 4 500 entities / 1 500 Raw+KO+Inbox / 15 private новая object-ID authority дала Raw point `0.074 ms`, search20 `151 ms`, Inbox list/count `0.96/0.41 ms` и cold exact rebuild `1.52–1.57 s`; обычный ingest — `27 ms`, без identity UDF в горячих планах. Startup под `BEGIN IMMEDIATE` сначала валидирует cache artifacts и allowlist persistent guards, выполняет reminder backfill/owner move, ставит connection-local runtime authority, rebuild и exact validation; authorizer устанавливается до первого application query.
 
 **Орган `reflection`** — рефлексия и синтез, полный референс (все три точки расширения). Детерминированный недельный дайджест: объекты знаний по lifecycle, «ждёт вашего решения» (входящие/связи/противоречия/устаревающие), живые темы, ближайшие события. При доступной локальной модели добавляет 2–3 предложения синтеза над темами (best-effort). Contribuтит capability `reflection.read` и on-demand `GET /api/reflection`. Тихие часы обобщены (`FRIDAY_QUIET_HOURS_*`) — свойство всех проактивных органов; `ServiceContext` получил `llm`.
 
@@ -555,11 +611,11 @@ SQLite работает с foreign keys, WAL и busy timeout; инициализ
 
 **Решение — отдельный параметр, не общее выключение графа.** `HybridSearcher.search(..., graph_expansion=True)`: при `False` расширение по связям и implicit `co_occurs_in` не строится, но `kg` по-прежнему используется для `entity_matches` в ответе (сущности, упомянутые запросом, для контекста агента). Замер трёх рук на одном коде показал, что вторая и третья строки таблицы выше совпадают кейс в кейс — упомянутые сущности достаются бесплатно, отключать их незачем.
 
-`_prepare_context` теперь вычисляет `graph_expansion` через единый `is_relational_query`: обычный запрос получает `False`, а распознанный запрос об отношениях — `True`. `/api/search` принимает необязательный `as_of`; `memory_search` передаёт и `kg`, и нормализованный `as_of`, включая расширение для явно исторического запроса. Неверная дата отклоняется до best-effort графовой ветки и не превращается молча в текущий graphless-ответ; default параметра поиска не менялся.
+`_prepare_context` теперь вычисляет `graph_expansion` через единый `is_relational_query`: обычный запрос получает `False`, а распознанный запрос об отношениях — `True`. `/api/search` принимает необязательные `as_of` и `known_at`; `memory_search` передаёт их вместе с `kg`, включая расширение для явно исторического запроса. Неверная дата, timestamp до completeness floor или snapshot через более поздний identity/topology change сущности отклоняются до best-effort графовой ветки и не превращаются молча в текущий graphless-ответ; default без `known_at` не менялся.
 
-**Один снимок от ranking до ответа.** `HybridSearcher` возвращает ограниченный `graph_context`, который участвовал в ранжировании, с фактически использованным запросом (включая keyboard/query repair), `as_of` и `temporal_basis=valid_time`. `_prepare_context` переиспользует этот снимок без второго traversal; отдельный обход сохранён только как совместимый fallback для legacy/test searcher, который вообще не вернул новый ключ. Тот же контракт проходит через `memory_search`, где снимок дополнительно ограничен шестью путями и 3200 символами.
+**Один снимок от ranking до ответа.** `HybridSearcher` возвращает ограниченный `graph_context`, который участвовал в ранжировании, с фактически использованным запросом (включая keyboard/query repair), `as_of`, нормализованным `known_at`, `known_at_floor`, `history_complete`, `identity_basis` и `temporal_basis` (`valid_time` либо `bitemporal`). `_prepare_context` переиспользует этот снимок без второго traversal; отдельный обход сохранён только как совместимый fallback для legacy/test searcher, который вообще не вернул новый ключ. Тот же контракт проходит через Agent Runtime/prompt и инструменты `memory_search`/`entity_lookup`; durable assistant metadata хранит эффективную transaction-time границу. `/api/search`, публичные KG и Admin graph endpoints возвращают те же provenance-поля и не проглатывают отказ снимка. В tool payload снимок дополнительно ограничен шестью путями и 3200 символами.
 
-`as_of` фильтрует КАЖДЫЙ explicit hop по valid-time; нынешние implicit `co_occurs_in` в исторический снимок не входят. Публичная проекция ограничена 10 стабильно отсортированными путями глубиной до 4, а каждый путь несёт согласованные score/path ID, ordered entity IDs, собственные безопасные подписи узлов и ordered edges с отдельными canonical endpoints и направлением обхода, временем и allowlisted provenance. Повреждённый, оборванный или более длинный путь отвергается целиком, а не чинится усечением. В prompt входит не более 6 целых путей. Путь получает `grounded=true` только когда доверенная provenance каждого его ребра ссылается на Knowledge Object, уже присутствующий в том же контексте как `[K#]`; ручное или неполное доказательство остаётся незаземлённым, отдельные `[G#]` не вводятся.
+`as_of` фильтрует КАЖДЫЙ explicit hop по valid-time, а один нормализованный `known_at` выбирает revision для КАЖДОГО hop; явный `known_at`, как и historical `as_of`, исключает нынешние implicit `co_occurs_in`. Публичная проекция ограничена 10 стабильно отсортированными путями глубиной до 4, а каждый путь несёт согласованные score/path ID, ordered entity IDs, собственные безопасные подписи узлов и ordered edges с отдельными canonical endpoints и направлением обхода, временем и allowlisted provenance. Повреждённый, оборванный или более длинный путь отвергается целиком, а не чинится усечением. В prompt входит не более 6 целых путей. Путь получает `grounded=true` только когда доверенная provenance каждого его ребра ссылается на Knowledge Object, уже присутствующий в том же контексте как `[K#]`; ручное или неполное доказательство остаётся незаземлённым, отдельные `[G#]` не вводятся. Transaction-time выбирает данные, но не меняет ranking-веса: bi-temporal ranking остаётся заблокирован gold set.
 
 **Реляционный канал измерен отдельно.** На 12 заранее размеченных кейсах трёх классов рука `graph_expansion=true` дала 12 попаданий против 10, без потерь и без graph/reranker failures: `net_gain=2`, ровно объявленный порог. Оба выигрыша пришлись на класс сотрудничества, который прежний regex не распознавал; классификатор расширен только этой измеренной формой. Цена существенная: p50 выросла примерно с 2.48 до 4.35 с, поэтому глобальное включение по-прежнему запрещено.
 

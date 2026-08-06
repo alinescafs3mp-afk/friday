@@ -9,7 +9,7 @@
 одно: кто вправе назвать чужой арендатор этим параметром. Отсюда три правила,
 которые здесь и закреплены: гейт на ВЕРХНЕМ праве (метаданного уровня у этого
 инструмента не бывает — любой результат есть содержимое), запись в аудит на
-ЦЕЛЕВОЙ аккаунт вместе с самим вопросом, и честный отказ вместо пустоты.
+ЦЕЛЕВОЙ аккаунт с необратимым отпечатком вопроса, и честный отказ вместо пустоты.
 """
 
 from __future__ import annotations
@@ -128,7 +128,7 @@ async def test_the_tool_is_invisible_without_the_capability(kernel):
 
 
 @pytest.mark.asyncio
-async def test_reading_someone_is_recorded_against_them_with_the_question(kernel):
+async def test_reading_someone_is_recorded_against_them_with_a_question_fingerprint(kernel):
     runtime, auth, storage = kernel
     boss = auth.actor_for_user("boss", source="test")
 
@@ -145,7 +145,12 @@ async def test_reading_someone_is_recorded_against_them_with_the_question(kernel
     entry = rows[0]
     assert entry["target_id"] == "usr_ivan", "запись не на том, кого читали"
     after = entry.get("after") if isinstance(entry.get("after"), dict) else json.loads(entry["after_json"])
-    assert "поставк" in str(after.get("query")).casefold(), "в журнале нет самого вопроса"
+    query = "срыв сроков поставки"
+    assert query not in str(entry.get("after_json") or ""), "в append-only журнале остался вопрос"
+    assert after.get("query_chars") == len(query)
+    assert str(after.get("query_ref")).startswith("fpref_")
+    assert after.get("query_ref") != hashlib.sha256(query.encode("utf-8")).hexdigest()
+    assert "query_sha256" not in after
 
 
 @pytest.mark.asyncio

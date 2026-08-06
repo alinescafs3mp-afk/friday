@@ -62,9 +62,15 @@ def _audit_rows(storage, tool: str) -> list[dict]:
     # произвольной, и тест падал через раз. Ошибка была в приборе: код пишет
     # «начал» первым, `rowid` это и показывает.
     rows = storage.execute(
-        "SELECT action, after_json FROM audit_log WHERE target_id=? ORDER BY rowid",
-        (tool,),
+        """SELECT action, target_id, after_json
+             FROM audit_log
+            WHERE action='tool.invoke' AND target_type='tool'
+            ORDER BY rowid""",
     ).fetchall()
+    # Synthetic tool names are deliberately outside the production allowlist:
+    # the content-free boundary must keep them linkable without persisting the
+    # caller-controlled label itself.
+    assert rows and all(str(row["target_id"]).startswith("tool:ref:") for row in rows), tool
     out = []
     for row in rows:
         payload = json.loads(str(row["after_json"] or "{}"))

@@ -150,7 +150,15 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 #: списке не появилось — очищать нечего.
 # 342 → 344: relation valid-time boundaries have their own bounded list and exact
 # count; the unified KG timeline must not infer a total from the returned page.
-EXPECTED_MEMBER_COUNT = 344
+# 344 → 345: relation_history_status validates the immutable completeness floor
+# and mutable-identity boundary once for a transaction-time graph snapshot.
+# 345 → 346: _validate_relation_history_schema fail-closes a schema-31 marker
+# before idempotent DDL can conceal missing capture/protection mechanisms.
+# 346 → 347: _observe_relation_history_boundary persists a historical read as
+# a logical-clock promise before any mutable graph projection is returned.
+# 347 → 348: count_feedback_state counts the same privacy-filtered personal
+# feedback rows as get_feedback_state without turning a bounded page into a total.
+EXPECTED_MEMBER_COUNT = 348
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -168,8 +176,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_is_sqlite_busy": "(exc: 'sqlite3.OperationalError') -> 'bool'",
     "_ko_snapshot": "(obj: 'KnowledgeObject | dict[str, Any]') -> 'dict[str, Any]'",
     "_migrate_legacy_schema": "(self, conn: 'sqlite3.Connection') -> 'None'",
+    "_observe_relation_history_boundary": "(self, boundary: 'str') -> 'None'",
     "_retire_outdated_indexes": "(self, conn: 'sqlite3.Connection') -> 'None'",
     "_migrate_schema": "(self, conn: 'sqlite3.Connection') -> 'None'",
+    "_validate_relation_history_schema": "(conn: 'sqlite3.Connection', schema_version: 'int') -> 'None'",
     "_open": "(self) -> 'sqlite3.Connection'",
     "_open_once": "(self) -> 'sqlite3.Connection'",
     "_raw_from_row": "(self, row: 'sqlite3.Row | dict[str, Any]') -> 'RawObject'",
@@ -198,6 +208,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_entities_by_type": "(self, user_id: 'str', *, include_merged: 'bool' = False) -> 'dict[str, int]'",
     "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
+    "count_feedback_state": "(self, user_id: 'str', *, target_type: 'str | None' = None, target_id: 'str | None' = None, feedback_type: 'str | None' = None, negative_only: 'bool' = False) -> 'int'",
     "count_knowledge_objects": "(self, user_id: 'str') -> 'int'",
     "count_missions": "(self, user_id: 'str', *, statuses: 'Sequence[str] | None' = None) -> 'int'",
     "count_recent_audit": "(self, action: 'str', since: 'str', *, limit: 'int | None' = None) -> 'int'",
@@ -228,8 +239,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "files_without_an_author": "(self) -> 'int'",
     "find_api_token": "(self, token_sha256: 'str') -> 'dict[str, Any] | None'",
     "find_duplicate_candidates": "(self, user_id: 'str', *, min_confidence: 'float' = 0.5) -> 'list[EntityResolutionCandidate]'",
-    "find_entities_by_normalized_names": "(self, user_id: 'str', names: 'Sequence[str]', *, include_aliases: 'bool' = True) -> 'list[dict[str, Any]]'",
-    "find_entity_by_alias": "(self, user_id: 'str', alias: 'str') -> 'list[dict[str, Any]]'",
+    "find_entities_by_normalized_names": "(self, user_id: 'str', names: 'Sequence[str]', *, include_aliases: 'bool' = True, limit: 'int' = 800) -> 'list[dict[str, Any]]'",
+    "find_entity_by_alias": "(self, user_id: 'str', alias: 'str', *, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "find_entity_by_name": "(self, user_id: 'str', name: 'str') -> 'dict[str, Any] | None'",
     "iter_entities": "(self, user_id: 'str', entity_type: 'EntityType | None' = None, *, page_size: 'int' = 1000, include_merged: 'bool' = False) -> 'Iterator[dict[str, Any]]'",
     "find_inbox_by_raw": "(self, raw_object_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
@@ -245,12 +256,14 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_current_feedback_stats": "(self, user_id: 'str', target_type: 'str | None' = None) -> 'dict[str, Any]'",
     "get_custom_preset": "(self, preset_key: 'str') -> 'dict[str, Any] | None'",
     "get_entity": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'dict[str, Any] | None'",
-    "get_entity_graph": "(self, user_id: 'str', entity_id: 'str', depth: 'int' = 2, *, as_of: 'str' = '', entity_types: 'Sequence[str]' = (), relation_types: 'Sequence[str]' = (), min_weight: 'float' = 0.0, min_confidence: 'float' = 0.0) -> 'dict[str, Any]'",
+    "get_entity_graph": "(self, user_id: 'str', entity_id: 'str', depth: 'int' = 2, *, as_of: 'str' = '', entity_types: 'Sequence[str]' = (), relation_types: 'Sequence[str]' = (), min_weight: 'float' = 0.0, min_confidence: 'float' = 0.0, known_at: 'str' = '') -> 'dict[str, Any]'",
     "get_entity_knowledge": "(self, user_id: 'str', entity_id: 'str', *, limit: 'int' = 50) -> 'list[dict[str, Any]]'",
     "get_entity_relations": (
         "(self, entity_id: 'str', user_id: 'str | None' = None, *, "
-        "include_invalidated: 'bool' = False, as_of: 'str' = '') -> 'list[dict[str, Any]]'"
+        "include_invalidated: 'bool' = False, as_of: 'str' = '', known_at: 'str' = '') -> 'list[dict[str, Any]]'"
     ),
+    "graph_overview": "(self, user_id: 'str', *, limit: 'int' = 120, entity_types: 'Sequence[str] | None' = None, relation_types: 'Sequence[str] | None' = None, only_relations: 'bool' = False, min_weight: 'int' = 1, min_confidence: 'float' = 0.0, as_of: 'str' = '', known_at: 'str' = '', search: 'str' = '', hide_isolates: 'bool' = False) -> 'dict[str, Any]'",
+    "relation_history_status": "(self, user_id: 'str', known_at: 'str' = '') -> 'dict[str, Any]'",
     "get_entity_time": "(self, entity_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "get_feedback_for_target": "(self, user_id: 'str', target_type: 'str', target_id: 'str') -> 'list[dict[str, Any]]'",
     "get_feedback_state": "(self, user_id: 'str', *, target_type: 'str | None' = None, target_id: 'str | None' = None, feedback_type: 'str | None' = None, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
@@ -384,13 +397,16 @@ EXPECTED_SIGNATURES: dict[str, str] = {
 }
 
 
-def _plan(storage, sql: str, params: tuple) -> list[str]:
-    return [str(row["detail"]) for row in storage.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()]
+def _plan(storage, sql: str, params: tuple) -> list[tuple[int, str]]:
+    return [
+        (int(row["parent"]), str(row["detail"]))
+        for row in storage.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
+    ]
 
 
-def _index_names(plan: list[str]) -> set[str]:
+def _index_names(plan: list[tuple[int, str]]) -> set[str]:
     """Every index the plan actually names, so a prefix cannot pass for the whole."""
-    return set(re.findall(r"USING (?:COVERING )?INDEX (\w+)", " ".join(plan)))
+    return set(re.findall(r"USING (?:COVERING )?INDEX (\w+)", " ".join(row[1] for row in plan)))
 
 
 def _captured_sql(storage, call) -> tuple[str, tuple]:
@@ -463,11 +479,17 @@ def test_the_hot_read_paths_are_index_ordered(storage):
     # for a query nobody runs when `id DESC` was added to the ORDER BY.
     sql, params = _captured_sql(storage, lambda: storage.list_knowledge_objects("owner", limit=400))
     pool = _plan(storage, sql, params)
-    assert not [line for line in pool if "TEMP B-TREE" in line], pool
+    # Privacy predicates contain bounded DISTINCT identity-token subqueries. Their
+    # local de-duplication is intentionally a temp b-tree and says nothing about
+    # whether the outer tenant page was sorted.  This regression protects the
+    # expensive top-level ORDER BY only.
+    assert not [
+        detail for parent, detail in pool if parent == 0 and "TEMP B-TREE" in detail and "ORDER BY" in detail
+    ], pool
     # Exact name, not a substring: `idx_knowledge_user_importance` is a prefix of
     # every index that could replace it, so `in line` passes vacuously on the very
     # change this assertion exists to notice.
-    assert _index_names(pool) == {"idx_knowledge_pool_order"}, pool
+    assert "idx_knowledge_pool_order" in _index_names(pool), pool
 
     vectors = _plan(
         storage,
@@ -477,8 +499,12 @@ def test_the_hot_read_paths_are_index_ordered(storage):
         "  ORDER BY created_at DESC LIMIT ?)",
         ("owner", "m", 4, "owner", 100),
     )
-    assert not [line for line in vectors if "TEMP B-TREE" in line], vectors
-    assert any("idx_knowledge_user_created" in line for line in vectors), vectors
+    assert not [
+        detail
+        for parent, detail in vectors
+        if parent == 0 and "TEMP B-TREE" in detail and "ORDER BY" in detail
+    ], vectors
+    assert any("idx_knowledge_user_created" in detail for _, detail in vectors), vectors
 
 
 def test_the_capped_vector_window_still_returns_the_newest_object(storage):

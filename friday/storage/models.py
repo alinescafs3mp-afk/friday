@@ -8,11 +8,14 @@ and avoids hidden cross-tenant queries.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, TypeVar
+
+from friday.id_provenance import mark_generated_id
 
 
 def utc_now() -> str:
@@ -20,9 +23,43 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+class RelationHistorySnapshotError(ValueError):
+    """A requested relation snapshot cannot be reconstructed honestly."""
+
+
+_RFC3339_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+
+
+def normalize_known_at(value: str, *, reject_future: bool = True) -> str:
+    """Normalize an offset-aware RFC3339 transaction boundary to sortable UTC.
+
+    Transaction-time is deliberately stricter than the document-date helpers:
+    a date without an offset does not identify one reproducible database state.
+    Fixed microseconds also make the text representation safe for SQLite lexical
+    comparisons, regardless of the offset or fractional precision supplied by a
+    caller.
+    """
+
+    if not isinstance(value, str):
+        raise ValueError("known_at must be an offset-aware RFC3339 timestamp")
+    text = value.strip()
+    if not _RFC3339_TIMESTAMP_RE.fullmatch(text):
+        raise ValueError("known_at must be an offset-aware RFC3339 timestamp")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("known_at must be an offset-aware RFC3339 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("known_at must include a UTC offset")
+    normalized = parsed.astimezone(UTC)
+    if reject_future and normalized > datetime.now(UTC):
+        raise ValueError("known_at cannot be in the future")
+    return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
 def new_id(prefix: str) -> str:
     """Create a compact opaque identifier with a human-readable type prefix."""
-    return f"{prefix}_{uuid.uuid4().hex[:16]}"
+    return mark_generated_id(f"{prefix}_{uuid.uuid4().hex[:16]}")
 
 
 class LifecycleStage(str, Enum):

@@ -103,6 +103,46 @@ def test_future_schema_is_rejected_without_modifying_database(settings, tmp_path
         verify.close()
 
 
+def test_malformed_schema_marker_is_rejected_without_disclosure_or_mutation(settings, tmp_path: Path):
+    database = tmp_path / "malformed-schema-marker.sqlite3"
+    private_marker = "private-marker\nforged-startup-log-line"
+    with sqlite3.connect(database) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE schema_meta(
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE synthetic_sentinel(value TEXT NOT NULL);
+            INSERT INTO synthetic_sentinel VALUES('unchanged');
+            """
+        )
+        conn.execute(
+            "INSERT INTO schema_meta VALUES('schema_version', ?, 'synthetic')",
+            (private_marker,),
+        )
+
+    instance = FridayStorage(replace(settings, database_path=database))
+    try:
+        with pytest.raises(
+            UnsupportedSchemaVersionError,
+            match="Invalid database schema version marker",
+        ) as caught:
+            _ = instance.conn
+        assert private_marker not in str(caught.value)
+        assert "forged-startup-log-line" not in str(caught.value)
+    finally:
+        instance.close(final=True)
+
+    with sqlite3.connect(database) as verify:
+        assert (
+            verify.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
+            == private_marker
+        )
+        assert verify.execute("SELECT value FROM synthetic_sentinel").fetchone()[0] == "unchanged"
+
+
 @pytest.mark.asyncio
 async def test_concurrent_chat_retry_is_claimed_before_side_effects(settings):
     from friday.server import create_app

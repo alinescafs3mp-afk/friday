@@ -22,6 +22,7 @@ import gzip
 import os
 import shutil
 import sqlite3
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,6 +34,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "schemas"
 FIXTURE_USER = "fixture-owner"
 # Rows every fixture carries, seeded by the builder.
 FIXTURE_RAW_IDS = {f"raw-fixture-{index}" for index in range(3)}
+FIXTURE_RELATION_ID = "relation-fixture-history"
 
 
 def _fixture_versions() -> list[int]:
@@ -56,6 +58,36 @@ def test_the_fixture_set_covers_every_schema_back_to_the_oldest_backup() -> None
         "Add a fixture for the new version — see tools/build_schema_fixtures.py."
     )
     assert versions == list(range(min(versions), max(versions) + 1)), f"gap in {versions}"
+
+
+def test_schema_31_fixture_carries_current_relation_and_captured_history(tmp_path) -> None:
+    """The fixture must exercise schema 31's authoritative feature, not just DDL."""
+
+    database = _unpack(31, tmp_path)
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as fixture:
+        current = fixture.execute(
+            "SELECT user_id, source_entity_id, target_entity_id FROM relations WHERE id=?",
+            (FIXTURE_RELATION_ID,),
+        ).fetchone()
+        revision = fixture.execute(
+            """SELECT user_id, source_entity_id, target_entity_id, revision, present,
+                      operation, history_quality, batch_id
+               FROM relation_revisions WHERE relation_id=?""",
+            (FIXTURE_RELATION_ID,),
+        ).fetchone()
+
+    assert current == (FIXTURE_USER, "entity-fixture-source", "entity-fixture-target")
+    assert revision is not None
+    assert revision[:-1] == (
+        FIXTURE_USER,
+        "entity-fixture-source",
+        "entity-fixture-target",
+        1,
+        1,
+        "insert",
+        "captured",
+    )
+    assert str(revision[-1]).startswith("relation_batch_")
 
 
 @pytest.mark.parametrize("version", _fixture_versions())
@@ -92,6 +124,68 @@ def test_a_database_at_this_schema_migrates_forward_and_keeps_its_data(version, 
         assert storage.kv_get("fixture:marker") == f"schema-{version}"
     finally:
         storage.close()
+
+
+def test_concurrent_schema_open_refreshes_marker_after_acquiring_write_lock(
+    settings, tmp_path, monkeypatch
+) -> None:
+    """A waiter must see the migration committed while it waited for BEGIN."""
+
+    database = _unpack(30, tmp_path)
+    real_connect = sqlite3.connect
+    reader_at_begin = threading.Event()
+    writer_finished = threading.Event()
+    reader_errors: list[BaseException] = []
+
+    class DelayedBeginConnection(sqlite3.Connection):
+        _delayed = False
+
+        def execute(self, sql, parameters=(), /):
+            if str(sql).strip().upper() == "BEGIN IMMEDIATE" and not self._delayed:
+                self._delayed = True
+                reader_at_begin.set()
+                if not writer_finished.wait(timeout=10):
+                    raise AssertionError("concurrent schema writer did not finish")
+            return super().execute(sql, parameters)
+
+    def controlled_connect(database_arg, *args, **kwargs):
+        if str(database_arg) == str(database) and threading.current_thread().name == "schema-stale-reader":
+            kwargs = {**kwargs, "factory": DelayedBeginConnection}
+        return real_connect(database_arg, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", controlled_connect)
+
+    def open_waiting_reader() -> None:
+        reader = FridayStorage(replace(settings, database_path=database))
+        try:
+            reader.execute("SELECT 1").fetchone()
+        except BaseException as exc:  # reported in the asserting test thread
+            reader_errors.append(exc)
+        finally:
+            reader.close()
+
+    waiting_thread = threading.Thread(
+        target=open_waiting_reader,
+        name="schema-stale-reader",
+        daemon=True,
+    )
+    waiting_thread.start()
+    assert reader_at_begin.wait(timeout=10), "reader never reached the migration lock"
+
+    writer = FridayStorage(replace(settings, database_path=database))
+    try:
+        assert writer.execute("SELECT 1").fetchone() is not None
+    finally:
+        writer.close()
+        writer_finished.set()
+        waiting_thread.join(timeout=10)
+
+    assert not waiting_thread.is_alive()
+    assert reader_errors == []
+    with real_connect(f"file:{database}?mode=ro", uri=True) as probe:
+        assert probe.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() == (
+            str(SCHEMA_VERSION),
+        )
 
 
 @pytest.mark.parametrize("version", _fixture_versions())
@@ -323,21 +417,15 @@ def test_a_new_column_needs_a_new_schema_number(settings, tmp_path):
     """
     from friday.storage._base import SCHEMA_VERSION
 
-    database = tmp_path / "aged.sqlite3"
-    made = FridayStorage(replace(settings, database_path=database))
-    try:
-        made.ensure_user("owner")
-    finally:
-        made.close()
+    # Start from the database the previous build actually produced. Artificially
+    # relabelling a current schema is no longer equivalent: schema 31 contains an
+    # authoritative history whose own marker/floor must fail closed if rewound.
+    database = _unpack(SCHEMA_VERSION - 1, tmp_path)
 
     # Состаривание: отметка младше, столбец снят — как на базе, собранной прошлой
     # версией кода.
     aged = sqlite3.connect(database)
     try:
-        aged.execute(
-            "UPDATE schema_meta SET value=? WHERE key='schema_version'",
-            (str(SCHEMA_VERSION - 1),),
-        )
         aged.execute("ALTER TABLE monitors DROP COLUMN created_by")
         aged.commit()
     finally:
@@ -357,37 +445,43 @@ def test_a_new_column_needs_a_new_schema_number(settings, tmp_path):
 def test_schema_29_rebuilds_the_active_relation_index(settings, tmp_path):
     """`IF NOT EXISTS` cannot update a partial index whose WHERE clause changed."""
     from friday.knowledge_graph import KnowledgeGraph
-    from friday.storage.models import EntityType, RelationType
+    from friday.storage.models import RelationType
 
-    database = tmp_path / "schema-29-relation-index.sqlite3"
-    made = FridayStorage(replace(settings, database_path=database))
-    try:
-        graph = KnowledgeGraph(made)
-        person = graph.create_entity("alice", "Иван Иванов", EntityType.PERSON)
-        unit = graph.create_entity("alice", "Проект Альфа", EntityType.PROJECT)
-        first = graph.create_relation(
-            "alice",
-            str(person["id"]),
-            str(unit["id"]),
-            RelationType.MEMBER_OF,
-            valid_from="2020-01-01",
+    # Use the real synthetic schema-29 fixture. Rewinding a schema-31 database to
+    # marker 29 would correctly be rejected because its append-only revisions and
+    # immutable floor cannot honestly be made legacy again.
+    database = _unpack(29, tmp_path)
+    source_id = "entity-schema29-source"
+    target_id = "entity-schema29-target"
+    first_id = "relation-schema29-finished"
+    with sqlite3.connect(database) as aged:
+        now = "2026-01-01T00:00:00Z"
+        aged.executemany(
+            """INSERT INTO entities(
+                   id, user_id, name, normalized_name, entity_type,
+                   created_at, updated_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (source_id, FIXTURE_USER, "Fixture Person", "fixture person", "person", now, now),
+                (target_id, FIXTURE_USER, "Fixture Project", "fixture project", "project", now, now),
+            ],
         )
-        graph.invalidate_relation("alice", first.id, valid_to="2023-01-01")
-    finally:
-        made.close()
-
-    aged = sqlite3.connect(database)
-    try:
-        aged.execute("DROP INDEX uq_active_relation")
         aged.execute(
-            """CREATE UNIQUE INDEX uq_active_relation
-               ON relations(user_id, source_entity_id, target_entity_id, relation_type)
-               WHERE deleted_at IS NULL"""
+            """INSERT INTO relations(
+                   id, user_id, source_entity_id, target_entity_id, relation_type,
+                   created_at, valid_from, valid_to
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                first_id,
+                FIXTURE_USER,
+                source_id,
+                target_id,
+                RelationType.MEMBER_OF.value,
+                now,
+                "2020-01-01",
+                "2023-01-01",
+            ),
         )
-        aged.execute("UPDATE schema_meta SET value='29' WHERE key='schema_version'")
-        aged.commit()
-    finally:
-        aged.close()
 
     reopened = FridayStorage(replace(settings, database_path=database))
     try:
@@ -398,12 +492,12 @@ def test_schema_29_rebuilds_the_active_relation_index(settings, tmp_path):
         )
         assert "valid_to IS NULL" in sql
         second = KnowledgeGraph(reopened).create_relation(
-            "alice",
-            str(person["id"]),
-            str(unit["id"]),
+            FIXTURE_USER,
+            source_id,
+            target_id,
             RelationType.MEMBER_OF,
             valid_from="2024-01-01",
         )
-        assert second.id != first.id
+        assert second.id != first_id
     finally:
         reopened.close()

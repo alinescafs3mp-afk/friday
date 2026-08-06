@@ -7,6 +7,8 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter
 
 from friday.admin_api._deps import (
@@ -23,6 +25,7 @@ from friday.admin_api._deps import (
     _safe_runtime_file,
     _services,
 )
+from friday.storage._base import _safe_filename
 from friday.workers._blocking import run_blocking
 
 router = APIRouter()
@@ -149,6 +152,13 @@ async def create_export(request: Request) -> dict[str, Any]:
 @router.get("/exports/{filename}/download")
 async def download_export(filename: str, request: Request):
     _require(request, "admin.export")
+    actor = request.state.actor
+    owner_hash = hashlib.sha256(actor.own_id.encode("utf-8", errors="replace")).hexdigest()[:12]
+    owner_prefix = f"jericho-export-{_safe_filename(actor.own_id)}--{owner_hash}-"
+    if not actor.is_owner and not Path(filename).name.startswith(owner_prefix):
+        # Creation enforces the target boundary, and download must enforce it
+        # again: knowing another export's filename is not authorization to take it.
+        raise HTTPException(status_code=403, detail="Можно скачать только собственную выгрузку")
     path = _safe_runtime_file(
         _services(request).settings.exports_dir,
         str(_services(request).settings.exports_dir / Path(filename).name),

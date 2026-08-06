@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from friday.api.deps import _audit, _request_json, _require
+from friday.storage._intake import _bounded_public_inbox_card
 from friday.storage.models import InboxStatus
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
@@ -35,7 +36,8 @@ async def list_inbox(
         limit=limit,
         offset=offset,
     )
-    return {"items": items, "count": len(items)}
+    public_items = [_bounded_public_inbox_card(item) for item in items]
+    return {"items": public_items, "count": len(public_items)}
 
 
 @router.post("/{inbox_id}/classify", tags=["inbox"])
@@ -57,5 +59,6 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     )
     if not item:
         raise HTTPException(status_code=404, detail="Элемент входящих не найден")
-    _audit(request, "inbox.classify", "inbox", inbox_id, after=item)
-    return {"item": item}
+    public_item = _bounded_public_inbox_card(item)
+    _audit(request, "inbox.classify", "inbox", inbox_id, after=public_item)
+    return {"item": public_item}

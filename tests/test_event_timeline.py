@@ -22,7 +22,8 @@ from friday.knowledge_graph import (
 )
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.server import create_app
-from friday.storage.models import EntityType, RelationType, utc_now
+from friday.storage._graph import _bounded_visible_timeline_event_rows, _count_visible_timeline_events
+from friday.storage.models import Entity, EntityType, Relation, RelationType, utc_now
 
 # --- pure date helpers ----------------------------------------------------
 
@@ -76,7 +77,13 @@ def test_timeline_keeps_event_rows_ordered_bounded_and_compatible(storage):
     graph.set_event_time("alice", review["id"], "2024-09-01")
     graph.set_event_time("alice", launch["id"], "2024-06-12")
     # A non-event with a time row must never surface on the timeline.
-    storage.set_entity_time(person["id"], "alice", "2024-07-01")
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO entity_time(
+                   entity_id, user_id, occurred_at, occurred_end, precision, source, updated_at)
+               VALUES(?, ?, ?, NULL, 'day', 'corrupt-test-row', ?)""",
+            (person["id"], "alice", "2024-07-01", utc_now()),
+        )
 
     full = graph.timeline("alice")
     assert [item["name"] for item in full] == ["Launch", "Review"]
@@ -84,6 +91,124 @@ def test_timeline_keeps_event_rows_ordered_bounded_and_compatible(storage):
 
     windowed = graph.timeline("alice", start="2024-08-01", end="2024-12-31")
     assert [item["name"] for item in windowed] == ["Review"]
+
+
+def test_post_migration_source_only_reminder_rows_fail_closed_without_an_owner_marker(storage):
+    storage.ensure_user("shared")
+    storage.ensure_user("alice")
+    event = Entity(
+        id="ent-source-only-reminder",
+        user_id="shared",
+        name="PRIVATE SOURCE ONLY REMINDER SENTINEL",
+        entity_type=EntityType.EVENT,
+    )
+    storage.create_entity(event)
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO entity_time(
+                   entity_id, user_id, occurred_at, occurred_end, precision, source, updated_at)
+               VALUES(?, ?, '2026-08-05', NULL, 'day', 'reminder:alice', ?)""",
+            (event.id, "shared", utc_now()),
+        )
+
+    assert _bounded_visible_timeline_event_rows(storage, "shared", "alice") == []
+    assert _count_visible_timeline_events(storage, "shared", "alice") == 0
+    assert storage.list_events_in_range("shared") == []
+    assert storage.count_events_in_range("shared") == 0
+
+
+def test_person_timeline_closes_foreign_private_carriers_and_keeps_exact_own_reminder(storage):
+    for user_id in ("shared", "alice", "bob"):
+        storage.ensure_user(user_id)
+
+    bob_alias = "BOB-PRIVATE-TIMELINE-ALIAS-7f21"
+    bob_private = Entity(
+        id="ent-bob-private-timeline",
+        user_id="bob",
+        name="Bob private timeline authority",
+        entity_type=EntityType.EVENT,
+        aliases_json=[bob_alias],
+    )
+    direct_carrier = Entity(
+        id="ent-shared-direct-private-carrier",
+        user_id="shared",
+        name="Shared direct timeline carrier",
+        entity_type=EntityType.EVENT,
+        description=f"Copied foreign identity: {bob_alias}",
+    )
+    transitive_carrier = Entity(
+        id="ent-shared-transitive-private-carrier",
+        user_id="shared",
+        name="Shared transitive timeline carrier",
+        entity_type=EntityType.EVENT,
+        description=f"Copied carrier identity: {direct_carrier.name}",
+    )
+    public_event = Entity(
+        id="ent-shared-public-timeline",
+        user_id="shared",
+        name="Shared public timeline event",
+        entity_type=EntityType.EVENT,
+    )
+    alice_private = Entity(
+        id="ent-alice-private-timeline",
+        user_id="alice",
+        name="Alice exact private timeline reminder",
+        entity_type=EntityType.EVENT,
+    )
+    alice_legacy_private = Entity(
+        id="ent-shared-alice-private-timeline",
+        user_id="shared",
+        name="Alice exact legacy private timeline reminder",
+        entity_type=EntityType.EVENT,
+    )
+    for entity in (
+        bob_private,
+        direct_carrier,
+        transitive_carrier,
+        public_event,
+        alice_private,
+        alice_legacy_private,
+    ):
+        storage.create_entity(entity)
+
+    with storage.transaction() as conn:
+        for entity, occurred_at, source in (
+            (bob_private, "2026-08-01", "reminder:bob"),
+            (direct_carrier, "2026-08-02", "document:test"),
+            (transitive_carrier, "2026-08-03", "document:test"),
+            (public_event, "2026-08-04", "document:test"),
+            (alice_private, "2026-08-05", "reminder:alice"),
+            (alice_legacy_private, "2026-08-06", "reminder:alice"),
+        ):
+            conn.execute(
+                """INSERT INTO entity_time(
+                       entity_id, user_id, occurred_at, occurred_end, precision, source, updated_at)
+                   VALUES(?, ?, ?, NULL, 'day', ?, ?)""",
+                (entity.id, entity.user_id, occurred_at, source, utc_now()),
+            )
+        conn.executemany(
+            """INSERT INTO private_entity_owners(
+                   entity_id, person_id, privacy_kind, created_at)
+               VALUES(?, ?, 'reminder', ?)""",
+            (
+                (bob_private.id, "bob", utc_now()),
+                (alice_private.id, "alice", utc_now()),
+                (alice_legacy_private.id, "alice", utc_now()),
+            ),
+        )
+
+    visible = _bounded_visible_timeline_event_rows(storage, "shared", "alice")
+    assert [row["entity_id"] for row in visible] == [
+        public_event.id,
+        alice_private.id,
+        alice_legacy_private.id,
+    ]
+    assert _count_visible_timeline_events(storage, "shared", "alice") == 3
+
+    assert [row["entity_id"] for row in storage.list_events_in_range("shared")] == [public_event.id]
+    assert storage.count_events_in_range("shared") == 1
+    assert [row["entity_id"] for row in storage.list_events_in_range("alice")] == [alice_private.id]
+    assert storage.count_events_in_range("alice") == 1
 
 
 def test_timeline_page_unifies_events_and_relation_changes_under_one_limit(storage):
@@ -190,6 +315,53 @@ def test_relation_timeline_is_stable_tenant_scoped_and_keeps_only_real_boundarie
         (unknown_start.id, "ended")
     ]
     assert all(item["source"]["name"] != "Чужой источник" for item in first["items"])
+
+
+def test_superseded_relation_id_is_hidden_if_the_replacement_becomes_private(storage):
+    graph = KnowledgeGraph(storage)
+    source = graph.create_entity("alice", "Публичный источник", EntityType.PERSON)
+    old_target = graph.create_entity("alice", "Публичная старая цель", EntityType.ORGANIZATION)
+    private_target = graph.create_entity(
+        "alice",
+        "PRIVATE REPLACEMENT TARGET SENTINEL",
+        EntityType.EVENT,
+    )
+    original = graph.create_relation(
+        "alice",
+        source["id"],
+        old_target["id"],
+        RelationType.MANAGES,
+        valid_from="2024-01-01",
+    )
+    replacement = Relation(
+        id="rel-private-replacement-sentinel",
+        user_id="alice",
+        source_entity_id=source["id"],
+        target_entity_id=private_target["id"],
+        relation_type=RelationType.MANAGES,
+        valid_from="2024-02-01",
+    )
+    storage.create_relation(replacement)
+    graph.invalidate_relation(
+        "alice",
+        original.id,
+        valid_to="2024-02-01",
+        superseded_by=replacement.id,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO private_entity_owners(entity_id, person_id, privacy_kind, created_at)
+               VALUES(?, ?, 'reminder', ?)""",
+            (private_target["id"], "person-alice", utc_now()),
+        )
+
+    relations = graph.get_entity_relations(source["id"], "alice", as_of="2024-01-15")
+    assert [item["id"] for item in relations] == [original.id]
+    assert relations[0]["superseded_by"] is None
+    page = graph.timeline_page("alice", start="2024-01-01", end="2024-02-01", limit=20)
+    encoded = json.dumps(page, ensure_ascii=False)
+    assert replacement.id not in encoded
+    assert "PRIVATE REPLACEMENT TARGET SENTINEL" not in encoded
 
 
 def test_timeline_ties_have_one_explicit_stable_cross_kind_order(storage):

@@ -120,8 +120,8 @@ async def scan_monitors(ctx: ServiceContext) -> None:
             fresh, checkpoint, candidates = await run_blocking(
                 _scan_one, storage, user_id, query, cursor, searcher
             )
-        except Exception:  # noqa: BLE001 - один сломанный монитор не валит проход
-            LOGGER.warning("monitor %s failed to read knowledge", monitor.get("id"), exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - один сломанный монитор не валит проход
+            LOGGER.warning("monitor failed to read knowledge (%s)", type(exc).__name__)
             continue
         del fresh
         chat_id = await run_blocking(_deliverable_chat, storage, monitor, user_id)
@@ -129,7 +129,7 @@ async def scan_monitors(ctx: ServiceContext) -> None:
             # Доставить некуда — курсор НЕ двигаем: иначе совпадение считалось бы
             # показанным и терялось навсегда. Монитор просто ждёт, пока чат
             # появится, и тогда сообщит про накопившееся.
-            LOGGER.warning("monitor %s has matches but nowhere to deliver", monitor.get("id"))
+            LOGGER.warning("monitor has matches but nowhere to deliver")
             continue
         if candidates and chat_id:
             body = _format_match(query, candidates, len(candidates))

@@ -48,6 +48,7 @@ from friday.api.ingest import router as ingest_router
 from friday.api.kg import router as kg_router
 from friday.api.knowledge import router as knowledge_router
 from friday.api.notifications import router as notifications_router
+from friday.audit_privacy import server_audit_ip, server_audit_request_id
 from friday.config import (
     FridaySettings,
     ensure_runtime_dirs,
@@ -59,6 +60,7 @@ from friday.execution_kernel import ExecutionKernel
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
+from friday.http_errors import relation_history_http_detail
 from friday.ingestion import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
@@ -82,7 +84,9 @@ from friday.storage import init_storage, normalize_conversation_mode
 from friday.storage.models import (
     AuditEntry,
     FeedbackType,
+    RelationHistorySnapshotError,
     new_id,
+    normalize_known_at,
 )
 from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
@@ -94,6 +98,7 @@ _REALM_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 # What a client-proposed correlation id may look like: long enough for a UUID or
 # a trace id, plain enough that it cannot smuggle a header or a log line.
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_SERVER_REQUEST_ID_RE = re.compile(r"[0-9a-f]{24}")
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -546,7 +551,7 @@ def _audit_boundary_refusal(
                     "method": request.method,
                     "path": request.url.path,
                 },
-                ip_address=getattr(request.state, "client_ip", ""),
+                ip_address=getattr(request.state, "audit_ip", ""),
                 request_id=getattr(request.state, "request_id", ""),
             )
         )
@@ -683,11 +688,7 @@ async def _authenticate(request: Request) -> ActorContext:
         else:
             preset_for_new_account = "guest"
         if forced_preset and not state.auth_service.preset_exists(forced_preset):
-            LOGGER.error(
-                "FRIDAY_NEW_ACCOUNT_PRESET=%r — такого пресета нет; учётка заведена как %r",
-                forced_preset,
-                preset_for_new_account,
-            )
+            LOGGER.error("FRIDAY_NEW_ACCOUNT_PRESET не существует; применён безопасный fallback")
         # `chat_id` is not bookkeeping: it is where every proactive organ delivers.
         # Recording the chat the user last wrote in meant one message sent in an
         # allowlisted GROUP redirected the weekly digest, reminders and "on this day"
@@ -900,7 +901,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             reranker = None
             if rerank_backend.enabled and settings.rerank_top > 0:
                 reranker = functools.partial(rerank_with_backend, rerank_backend)
-                LOGGER.info("reranking enabled: model %s, top %d", settings.rerank_model, settings.rerank_top)
+                LOGGER.info("reranking enabled: top %d", settings.rerank_top)
             searcher = HybridSearcher(
                 storage,
                 embeddings,
@@ -975,7 +976,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
             await workers.start()
-            LOGGER.info("Friday API started on %s:%s", settings.api_host, settings.api_port)
+            LOGGER.info("Friday API started on configured interface, port %d", settings.api_port)
             try:
                 yield
             finally:
@@ -1058,8 +1059,22 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # than rejected — correlation is a convenience, not a reason to fail a
         # legitimate request.
         proposed = str(request.headers.get("x-request-id") or "")
-        request.state.request_id = proposed if _REQUEST_ID_RE.fullmatch(proposed) else secrets.token_hex(12)
+        # The 24-lowercase-hex namespace belongs exclusively to IDs issued by
+        # this server.  Audit storage preserves that exact shape so a response
+        # can be joined to its forensic record; accepting a client value in the
+        # same namespace would let the caller forge that correlation.  Other
+        # bounded client IDs remain useful for response-level tracing and are
+        # converted to keyed references at the audit boundary.
+        request.state.request_id = (
+            proposed
+            if _REQUEST_ID_RE.fullmatch(proposed) and not _SERVER_REQUEST_ID_RE.fullmatch(proposed)
+            else server_audit_request_id(secrets.token_hex(12))
+        )
         request.state.client_ip = _client_ip(request, settings)
+        # The effective client can come from a trusted proxy header and remains
+        # useful for throttling.  Durable forensic evidence is narrower: only
+        # the peer the ASGI server itself observed receives a provenance marker.
+        request.state.audit_ip = server_audit_ip(request.client.host if request.client else "")
         # `/health` — публичный синоним `/api/health`. Не удобство: маршрута с таким
         # именем не было, а проверка подлинности идёт РАНЬШЕ маршрутизации, поэтому
         # обращение к нему возвращало 401 и писалось в журнал как отказ
@@ -1488,24 +1503,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         actor = _require(request, "chat.use")
         storage = request.app.state.storage
         settings = request.app.state.settings
+        from friday.storage._graph import _bounded_visible_timeline_event_rows
+
         today = local_now(settings).date()
         lead_days = max(0, int(getattr(settings, "reminders_lead_days", 1)))
-        events = storage.list_events_in_range(
+        events = _bounded_visible_timeline_event_rows(
+            storage,
             actor.user_id,
+            actor.own_id,
             start=today.isoformat(),
             end=(today + timedelta(days=lead_days)).isoformat(),
             limit=limit,
         )
-        # События лежат под арендатором (в общем архиве — под общим), но
-        # напоминание принадлежит тому, кто его поставил. Тот же признак, по
-        # которому рассылает орган: без него в «что мне предстоит» попадали бы
-        # чужие просьбы.
-        events = [
-            event
-            for event in events
-            if not str(event.get("source") or "").startswith("reminder:")
-            or str(event.get("source") or "")[len("reminder:") :] == actor.own_id
-        ]
         keys = [f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}" for event in events]
         # «Снято» — решение ЧЕЛОВЕКА о своём напоминании, а не свойство архива.
         states = storage.reminder_states(actor.own_id, keys)
@@ -1548,10 +1557,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         ok = storage.dismiss_notification(actor.own_id, notification_id)
         if not ok:
             settings = request.app.state.settings
+            from friday.storage._graph import _bounded_visible_timeline_event_rows
+
             today = local_now(settings).date()
             lead_days = max(0, int(getattr(settings, "reminders_lead_days", 1)))
-            for event in storage.list_events_in_range(
+            for event in _bounded_visible_timeline_event_rows(
+                storage,
                 actor.user_id,
+                actor.own_id,
                 start=today.isoformat(),
                 end=(today + timedelta(days=lead_days)).isoformat(),
                 limit=100,
@@ -2183,6 +2196,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         limit: int = Query(20, ge=1, le=100),
         explain: bool = Query(False),
         as_of: str = Query("", max_length=32),
+        known_at: str = Query("", max_length=64),
     ) -> dict[str, Any]:
         """Search one's own knowledge. `explain=true` adds the ranking trace.
 
@@ -2200,14 +2214,44 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 normalized_as_of = normalize_event_date(as_of)[0]
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="Некорректная дата as_of") from exc
-        return await request.app.state.hybrid_searcher.search(
-            actor.user_id,
-            q,
-            limit=limit,
-            kg=request.app.state.kg,
-            explain=explain,
-            as_of=normalized_as_of,
-        )
+        normalized_known_at = ""
+        if known_at.strip():
+            try:
+                normalized_known_at = normalize_known_at(known_at)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Некорректная граница known_at",
+                ) from exc
+            try:
+                # Syntax alone is insufficient: storage owns the immutable
+                # migration floor and merge/unmerge identity boundary. Check
+                # both before the searcher can read even one candidate.
+                await run_blocking(
+                    request.app.state.storage.relation_history_status,
+                    actor.user_id,
+                    known_at=normalized_known_at,
+                )
+            except RelationHistorySnapshotError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=relation_history_http_detail(exc),
+                ) from exc
+        try:
+            return await request.app.state.hybrid_searcher.search(
+                actor.user_id,
+                q,
+                limit=limit,
+                kg=request.app.state.kg,
+                explain=explain,
+                as_of=normalized_as_of,
+                known_at=normalized_known_at,
+            )
+        except RelationHistorySnapshotError as exc:
+            # A merge/unmerge may commit after the route preflight while the
+            # searcher is reading candidates. Its final storage postflight is an
+            # expected fail-closed snapshot refusal, not an internal HTTP 500.
+            raise HTTPException(status_code=400, detail=relation_history_http_detail(exc)) from exc
 
     application.include_router(missions_router)
     application.include_router(missions_admin_router)
@@ -2249,18 +2293,23 @@ app = create_app()
 def run_server() -> None:
     import uvicorn
 
-    from friday.telemetry.logging import install_access_log_privacy
+    from friday.telemetry.logging import install_access_log_privacy, install_external_exception_privacy
 
     # Access-log lines must not carry query strings (search queries and browse
     # filters are personal data); the filter keeps method/path/status intact.
     install_access_log_privacy()
+    install_external_exception_privacy()
     runtime_settings = load_settings()
     problems = validate_settings(runtime_settings, production=not runtime_settings.is_loopback_bind)
     errors = [item for item in problems if not item.startswith("warning:")]
-    for problem in problems:
-        LOGGER.warning("Configuration: %s", problem)
+    if problems:
+        LOGGER.warning(
+            "Configuration validation found %d problem(s), including %d fatal",
+            len(problems),
+            len(errors),
+        )
     if errors:
-        raise SystemExit("Invalid Friday configuration: " + "; ".join(errors))
+        raise SystemExit(f"Invalid Friday configuration ({len(errors)} problem(s))")
     uvicorn.run(
         "friday.server:app",
         host=runtime_settings.api_host,

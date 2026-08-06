@@ -92,7 +92,7 @@ async def list_all_inbox(
     for item in items:
         item["suggested_tags"] = _json_value(item.get("suggested_tags_json"), [])
         item["suggestions"] = _json_value(item.get("suggestions_json"), {})
-        raw = state.storage.get_raw_object(item["raw_object_id"], target)
+        raw = state.storage.get_raw_object(str(item.get("raw_object_id") or ""), target)
         if raw:
             item["raw_object"] = {
                 "id": raw["id"],
@@ -104,7 +104,9 @@ async def list_all_inbox(
                 "metadata": _json_value(raw.get("metadata_json"), {}),
             }
         if item.get("knowledge_object_id"):
-            item["knowledge_object"] = state.storage.get_knowledge_object(item["knowledge_object_id"], target)
+            knowledge = state.storage.get_knowledge_object(str(item["knowledge_object_id"]), target)
+            if knowledge:
+                item["knowledge_object"] = knowledge
     return {
         "user_id": target,
         "items": items,

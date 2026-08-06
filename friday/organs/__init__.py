@@ -248,8 +248,8 @@ def local_now(settings: FridaySettings) -> datetime:
     if zone_name:
         try:
             return datetime.now(ZoneInfo(zone_name))
-        except Exception:  # noqa: BLE001 — кривое имя пояса не должно ронять орган
-            LOGGER.warning("Unknown timezone %r, falling back to system zone", zone_name)
+        except Exception as exc:  # noqa: BLE001 — кривое имя пояса не должно ронять орган
+            LOGGER.warning("Unknown timezone; falling back to system zone (%s)", type(exc).__name__)
     return datetime.now().astimezone()
 
 

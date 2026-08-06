@@ -1,9 +1,9 @@
-"""Обрыв связи пишется один раз со стеком, а не на каждой попытке.
+"""Обрыв связи сохраняет сигнал, но не содержимое exception.
 
 Замерено на живом журнале моста: 6.43 МБ файла, из них 6.39 МБ (99.5%) —
 сцепленные трейсбеки httpx по ~5 КБ, 1368 у опроса и 70 у отправки. Причина одна:
-`LOGGER.exception` стоял внутри цикла, у которого уже есть экспоненциальный откат,
-то есть печатался на КАЖДОЙ попытке переподключения.
+Имя цикла и класс ошибки остаются; traceback и `str(error)` запрещены:
+httpx часто включает в них полный URL Telegram с token или текст ответа.
 
 Под этим шумом похоронено то, что стоит знать: переходы «сломалось/починилось»
 пишутся в `runtime_events` отдельно — 300 падений опроса против 299 восстановлений,
@@ -31,15 +31,20 @@ def _bridge(tmp_path) -> TelegramBridge:
     )
 
 
-def test_the_first_failure_carries_a_traceback_and_the_rest_do_not(tmp_path, caplog):
+def test_bridge_failures_keep_type_but_never_message_or_traceback(tmp_path, caplog):
     bridge = _bridge(tmp_path)
-    error = httpx.ConnectError("сеть недоступна")
+    sentinel = "SYNTHETIC_PRIVATE_BRIDGE_EXCEPTION_" + "x" * 5_000
+    error = httpx.ConnectError(sentinel)
 
     with caplog.at_level(logging.WARNING, logger="friday.telegram_bridge"):
         bridge._log_loop_failure("poll", error)  # noqa: SLF001
         first = list(caplog.records)
         assert len(first) == 1
-        assert first[0].exc_info is not None, "первая неудача обязана нести стек"
+        assert first[0].levelno == logging.ERROR
+        assert first[0].exc_info is None
+        assert "poll" in first[0].getMessage()
+        assert "ConnectError" in first[0].getMessage()
+        assert sentinel not in first[0].getMessage()
 
         # Эпизод продолжается: мост уже знает, что цикл сломан.
         bridge._loop_failing["poll"] = True  # noqa: SLF001
@@ -48,14 +53,12 @@ def test_the_first_failure_carries_a_traceback_and_the_rest_do_not(tmp_path, cap
             bridge._log_loop_failure("poll", error)  # noqa: SLF001
 
     assert len(caplog.records) == 20
-    assert all(record.exc_info is None for record in caplog.records), (
-        "повторные попытки печатают стек — ровно то, что раздуло журнал до 99.5% шума"
-    )
+    assert all(record.exc_info is None for record in caplog.records)
+    assert all(sentinel not in record.getMessage() for record in caplog.records)
     assert "ConnectError" in caplog.records[0].getMessage(), "имя исключения должно остаться"
 
 
-def test_a_new_episode_gets_its_traceback_again(tmp_path, caplog):
-    """Иначе вторая, другая поломка осталась бы без объяснения."""
+def test_a_new_episode_gets_a_fresh_error_signal_without_traceback(tmp_path, caplog):
     bridge = _bridge(tmp_path)
     with caplog.at_level(logging.WARNING, logger="friday.telegram_bridge"):
         bridge._log_loop_failure("poll", httpx.ConnectError("первый обрыв"))  # noqa: SLF001
@@ -67,11 +70,13 @@ def test_a_new_episode_gets_its_traceback_again(tmp_path, caplog):
         bridge._log_loop_failure("poll", httpx.ReadTimeout("новый обрыв"))  # noqa: SLF001
 
     assert len(caplog.records) == 1
-    assert caplog.records[0].exc_info is not None
+    assert caplog.records[0].levelno == logging.ERROR
+    assert caplog.records[0].exc_info is None
+    assert "ReadTimeout" in caplog.records[0].getMessage()
+    assert "новый обрыв" not in caplog.records[0].getMessage()
 
 
 def test_the_two_loops_are_counted_apart(tmp_path, caplog):
-    """Сломанная отправка не должна лишить опрос его стека, и наоборот."""
     bridge = _bridge(tmp_path)
     with caplog.at_level(logging.WARNING, logger="friday.telegram_bridge"):
         bridge._log_loop_failure("poll", httpx.ConnectError("опрос"))  # noqa: SLF001
@@ -79,4 +84,6 @@ def test_the_two_loops_are_counted_apart(tmp_path, caplog):
         caplog.clear()
         bridge._log_loop_failure("outbound", httpx.ConnectError("отправка"))  # noqa: SLF001
 
-    assert caplog.records[0].exc_info is not None
+    assert caplog.records[0].levelno == logging.ERROR
+    assert caplog.records[0].exc_info is None
+    assert "outbound" in caplog.records[0].getMessage()

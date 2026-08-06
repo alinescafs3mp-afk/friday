@@ -69,11 +69,14 @@ async def test_a_forbidden_page_is_refused_with_a_reason(settings) -> None:
 async def test_the_refusal_reaches_the_caller_as_a_result_not_a_crash(settings) -> None:
     surfer = _surfer(settings, "User-agent: *\nDisallow: /\n")
 
-    result = await surfer.fetch("https://site.example/anything")
+    result = await surfer.fetch("https://site.example/anything?private_token=never-copy")
 
     assert result.text == ""
     assert result.error, "отказ пришёл молча — это читается как «страница пустая»"
-    assert result.url == "https://site.example/anything"
+    # Ошибка проходит через модель, API и durable evidence. Для диагностики
+    # достаточно сайта; путь и query могут содержать личный запрос или токен.
+    assert result.url == "site.example"
+    assert "private_token" not in repr(result)
 
 
 @pytest.mark.anyio

@@ -8,6 +8,8 @@ through the ordinary ingestion pipeline (Raw Object → Inbox → KO after revie
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -83,6 +85,40 @@ def test_ingest_url_creates_review_gated_raw_object(settings):
         replay = client.post("/api/ingest/url", json={"url": "https://example.com/article"}, headers=owner)
         assert replay.status_code == 200
         assert replay.json()["raw_object_id"] == raw_id
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_ingest_url_audit_keeps_an_opaque_host_ref_but_not_the_private_url(settings):
+    private = "URL-AUDIT-SENTINEL-37ad91"
+    url = f"https://user:{private}@example.test/private/{private}?token={private}"
+    result = FetchResult(
+        url=url,
+        title="Синтетическая страница",
+        text="Синтетический открытый материал. " * 8,
+        text_length=256,
+        status_code=200,
+    )
+    app, client, _ = _client_with_surfer(settings, result)
+    try:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        response = client.post("/api/ingest/url", json={"url": url}, headers=owner)
+        assert response.status_code == 200, response.text
+
+        rows = [
+            row
+            for row in app.state.storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=20)
+            if row["action"] == "knowledge.ingest_url"
+        ]
+        assert len(rows) == 1
+        encoded = str(rows[0]["after_json"] or "")
+        assert private not in encoded
+        assert "/private/" not in encoded and "token=" not in encoded and "user:" not in encoded
+        after = json.loads(encoded)
+        assert str(after["url_host_ref"]).startswith("hostref_")
+        assert after["url_chars"] == len(url)
+        assert str(after["url_ref"]).startswith("fpref_")
+        assert "url_sha256" not in after
     finally:
         client.__exit__(None, None, None)
 

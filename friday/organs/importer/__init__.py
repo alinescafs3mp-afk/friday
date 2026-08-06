@@ -395,9 +395,9 @@ def _router() -> APIRouter:
             except IdempotencyConflictError:
                 conflicts += 1
                 continue
-            except Exception:
+            except Exception as exc:
                 failed += 1
-                LOGGER.warning("Import item failed (%s)", source_ref, exc_info=True)
+                LOGGER.warning("Import item failed (%s)", type(exc).__name__)
                 continue
             if result.get("idempotent_replay"):
                 existing += 1
@@ -421,7 +421,7 @@ def _router() -> APIRouter:
                 target_type="import",
                 target_id=str(file.filename or kind_label),
                 after_json=summary,
-                ip_address=getattr(request.state, "client_ip", ""),
+                ip_address=getattr(request.state, "audit_ip", ""),
                 request_id=getattr(request.state, "request_id", ""),
             )
         )

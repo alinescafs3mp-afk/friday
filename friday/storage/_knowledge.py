@@ -7,9 +7,12 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import unicodedata
+import zlib
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from typing import cast
 
 from friday.storage._base import (
     _SEARCH_TEXT_LEN_SQL,
@@ -36,6 +39,13 @@ from friday.storage._base import (
     timedelta,
     unpack_snapshot,
     utc_now,
+)
+from friday.storage._privacy import (
+    _not_private_entity_material_dependency,
+    _not_private_knowledge_dependency,
+    _not_private_knowledge_structure_dependency,
+    _not_private_raw_dependency,
+    _not_private_relation_dependency,
 )
 
 # FTS MATCH accepts a bounded number of terms, and a natural-language question is
@@ -71,6 +81,374 @@ _MAX_DUPLICATE_PAIRS = 200_000
 # Evidence strength of the key that introduced a pair, strongest first. Used only
 # to decide what the ceiling drops.
 _KEY_RANK = {"variant": 0, "token": 1, "acronym": 2, "short": 3, "bigram": 4}
+_ENTITY_CARD_TITLE_MAX_CHARS = 240
+_ENTITY_CARD_SUMMARY_MAX_CHARS = 500
+_ENTITY_CARD_TAGS_MAX_BYTES = 8_192
+_ENTITY_CARD_METADATA_MAX_BYTES = 8_192
+_ENTITY_SUMMARY_TAG_MAX_CHARS = 120
+_ENTITY_SUMMARY_TAG_LIMIT = 100
+_KNOWLEDGE_CONFLICT_PAGE_MAX = 501
+_KNOWLEDGE_CONFLICT_EVIDENCE_MAX_BYTES = 8_192
+_PUBLIC_ENTITY_LINK_PAGE_MAX = 500
+_PUBLIC_KNOWLEDGE_VERSION_SNAPSHOT_MAX_BYTES = 1_048_576
+_PUBLIC_KNOWLEDGE_VERSION_NESTED_DEPTH = 8
+_PUBLIC_KNOWLEDGE_VERSION_TEXT_BUDGET = 4 * 1_048_576
+
+_PUBLIC_ENTITY_LINK_COLUMNS = """substr(l.id,1,160) AS id,
+                   substr(l.knowledge_object_id,1,160) AS knowledge_object_id,
+                   substr(l.entity_id,1,160) AS entity_id,
+                   substr(l.status,1,40) AS status,
+                   l.confidence,
+                   substr(l.created_at,1,64) AS created_at,
+                   substr(COALESCE(l.reviewed_at,''),1,64) AS reviewed_at,
+                   substr(e.name,1,240) AS entity_name,
+                   substr(e.entity_type,1,80) AS entity_type,
+                   substr(k.title,1,240) AS knowledge_title,
+                   substr(k.lifecycle_stage,1,80) AS knowledge_lifecycle,
+                   CASE WHEN COALESCE(l.evidence_json,'') NOT IN ('', '{}', '[]', 'null')
+                        THEN 1 ELSE 0 END AS evidence_present,
+                   MIN(length(CAST(COALESCE(l.evidence_json,'') AS BLOB)),1000000000)
+                       AS evidence_bytes"""
+
+
+def _safe_tags_json_expression(alias: str = "k") -> str:
+    """A bounded JSON array expression safe to hand to ``json_each``."""
+
+    return (
+        f"CASE WHEN length(CAST(COALESCE({alias}.tags_json,'') AS BLOB))"
+        f"<={_ENTITY_CARD_TAGS_MAX_BYTES} THEN CASE WHEN json_valid({alias}.tags_json) "
+        f"THEN CASE WHEN json_type({alias}.tags_json)='array' "
+        f"THEN {alias}.tags_json ELSE '[]' END ELSE '[]' END ELSE '[]' END"
+    )
+
+
+def _snapshot_contains_private_entity_material(
+    storage: StorageShared,
+    snapshot: Mapping[str, Any],
+) -> bool:
+    """Inspect decoded and JSON-in-string history without returning private tokens.
+
+    Legacy snapshots contain canonical JSON columns as strings, sometimes encoded
+    more than once.  Walking only the outer object leaves ``"metadata_json":
+    "{\\"name\\":\\"\\u0418...\\"}"`` opaque.  Each nested decode consumes the
+    already-bounded outer text; depth and aggregate text budgets make pathological
+    nesting fail closed.
+    """
+
+    texts: list[str] = []
+    seen_nested: set[str] = set()
+    used = 0
+
+    def walk(value: Any, depth: int) -> bool:
+        nonlocal used
+        if isinstance(value, Mapping):
+            return any(walk(str(key), depth) or walk(item, depth) for key, item in value.items())
+        if isinstance(value, list):
+            return any(walk(item, depth) for item in value)
+        if not isinstance(value, str):
+            return False
+        used += len(value)
+        if used > _PUBLIC_KNOWLEDGE_VERSION_TEXT_BUDGET:
+            return True
+        texts.append(value)
+        stripped = value.lstrip()
+        if not stripped or stripped[0] not in {"{", "[", '"'} or value in seen_nested:
+            return False
+        if depth >= _PUBLIC_KNOWLEDGE_VERSION_NESTED_DEPTH:
+            return True
+        try:
+            nested = json.loads(value)
+        except (TypeError, ValueError):
+            # A JSON-shaped legacy payload which no longer decodes cannot be
+            # proven independent from private material.  History is a public
+            # projection, so corruption must fail closed rather than reopening
+            # an opaque copy of a quarantined fact.
+            return True
+        seen_nested.add(value)
+        return walk(nested, depth + 1)
+
+    if walk(snapshot, 0):
+        return True
+    haystack = "\0".join(texts)
+    folded_haystack = unicodedata.normalize(
+        "NFC",
+        unicodedata.normalize("NFC", haystack).casefold(),
+    )
+    rows = storage.execute("SELECT id, name FROM private_entity_material_closure")
+    for row in rows:
+        entity_id = str(row["id"] or "")
+        entity_name = str(row["name"] or "")
+        folded_name = unicodedata.normalize(
+            "NFC",
+            unicodedata.normalize("NFC", entity_name).casefold(),
+        )
+        if (entity_id and entity_id in haystack) or (folded_name and folded_name in folded_haystack):
+            return True
+    return False
+
+
+def _public_knowledge_version_snapshot(
+    storage: StorageShared,
+    raw_snapshot: Any,
+    *,
+    user_id: str,
+    knowledge_object: Mapping[str, Any],
+) -> str | None:
+    """Return a readable snapshot only when all structural dependencies stay public."""
+
+    try:
+        snapshot_text = unpack_snapshot(raw_snapshot)
+    except (TypeError, ValueError, UnicodeError, zlib.error):
+        return None
+    if not isinstance(snapshot_text, str):
+        return None
+    if len(snapshot_text.encode("utf-8", errors="replace")) > _PUBLIC_KNOWLEDGE_VERSION_SNAPSHOT_MAX_BYTES:
+        return None
+    try:
+        snapshot = json.loads(snapshot_text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    identity = (
+        ("id", str(knowledge_object.get("id") or "")),
+        ("user_id", user_id),
+        ("raw_object_id", str(knowledge_object.get("raw_object_id") or "")),
+    )
+    if any(str(snapshot.get(key) or "") != expected for key, expected in identity):
+        return None
+    # Historical bodies are copies too. Structural ids alone miss an older body
+    # (or nested JSON string) containing a now-private reminder name.
+    if _snapshot_contains_private_entity_material(storage, snapshot):
+        return None
+    entity_id = str(snapshot.get("entity_id") or "")
+    if entity_id:
+        visible_entity = storage.execute(
+            f"""SELECT 1 FROM entities e WHERE e.id=? AND e.user_id=?
+                  AND {_not_private_entity_material_dependency("e")} LIMIT 1""",  # nosec B608
+            (entity_id, user_id),
+        ).fetchone()
+        if visible_entity is None:
+            return None
+    superseded_by = str(snapshot.get("superseded_by_id") or "")
+    if superseded_by:
+        visible_successor = storage.execute(
+            f"""SELECT 1 FROM knowledge_objects successor
+                 WHERE successor.id=? AND successor.user_id=?
+                   AND {_not_private_knowledge_dependency("successor")} LIMIT 1""",  # nosec B608
+            (superseded_by, user_id),
+        ).fetchone()
+        if visible_successor is None:
+            return None
+    return snapshot_text
+
+
+def _bounded_recent_knowledge_title_rows(
+    storage: StorageShared,
+    user_id: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Small title-only projection for reflection; never materialize document bodies."""
+
+    rows = storage.execute(
+        f"""SELECT substr(k.id,1,160) AS id, substr(k.title,1,240) AS title,
+                  substr(k.knowledge_kind,1,80) AS knowledge_kind,
+                  substr(k.created_at,1,64) AS created_at
+             FROM knowledge_objects k
+            WHERE k.user_id=? AND k.deleted_at IS NULL
+              AND {_not_private_knowledge_dependency("k")}
+            ORDER BY k.importance DESC, k.updated_at DESC, k.id DESC LIMIT ?""",  # nosec B608
+        (user_id, max(1, min(int(limit), 50))),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _bounded_public_knowledge_entity_links(
+    storage: StorageShared,
+    user_id: str,
+    knowledge_object_id: str,
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Public lineage links without reviewer identity or extractor evidence."""
+
+    rows = storage.execute(
+        f"""SELECT {_PUBLIC_ENTITY_LINK_COLUMNS}
+              FROM knowledge_entity_links l
+              JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                   AND {_not_private_entity_material_dependency("e")}
+              JOIN knowledge_objects k
+                ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
+                   AND {_not_private_knowledge_dependency("k")}
+             WHERE l.user_id=? AND l.knowledge_object_id=?
+             ORDER BY CASE l.status
+                        WHEN 'suggested' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END,
+                      l.confidence DESC, l.created_at DESC, l.id
+             LIMIT ?""",  # nosec B608
+        (
+            user_id,
+            knowledge_object_id,
+            max(1, min(int(limit), _PUBLIC_ENTITY_LINK_PAGE_MAX)),
+        ),
+    ).fetchall()
+    return [_public_knowledge_entity_link_card(row) for row in rows]
+
+
+def _public_knowledge_entity_link_card(row: Mapping[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    card = {
+        key: data[key]
+        for key in (
+            "id",
+            "knowledge_object_id",
+            "entity_id",
+            "status",
+            "confidence",
+            "created_at",
+            "reviewed_at",
+            "entity_name",
+            "entity_type",
+            "knowledge_title",
+            "knowledge_lifecycle",
+        )
+        if key in data
+    }
+    raw_confidence = data.get("confidence")
+    card["confidence"] = (
+        max(0.0, min(float(raw_confidence), 1.0))
+        if isinstance(raw_confidence, (int, float))
+        and not isinstance(raw_confidence, bool)
+        and math.isfinite(float(raw_confidence))
+        else 0.0
+    )
+    card["evidence"] = {
+        "present": bool(data.get("evidence_present")),
+        "bytes": max(0, min(int(data.get("evidence_bytes") or 0), 1_000_000_000)),
+    }
+    return card
+
+
+def _bounded_public_knowledge_entity_link_by_id(
+    storage: StorageShared,
+    user_id: str,
+    link_id: str,
+) -> dict[str, Any] | None:
+    row = storage.execute(
+        f"""SELECT {_PUBLIC_ENTITY_LINK_COLUMNS}
+              FROM knowledge_entity_links l
+              JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                   AND {_not_private_entity_material_dependency("e")}
+              JOIN knowledge_objects k
+                ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
+                   AND {_not_private_knowledge_dependency("k")}
+             WHERE l.user_id=? AND l.id=? LIMIT 1""",  # nosec B608
+        (user_id, link_id),
+    ).fetchone()
+    return _public_knowledge_entity_link_card(row) if row else None
+
+
+def _bounded_knowledge_conflict_rows(
+    storage: StorageShared,
+    user_id: str,
+    *,
+    status: str | None = "suggested",
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Conflict review cards with structural, never verbatim, evidence."""
+
+    clauses = ["c.user_id=?"]
+    params: list[Any] = [user_id]
+    if status:
+        if status not in {"suggested", "confirmed", "dismissed", "resolved"}:
+            raise ValueError("Invalid conflict status")
+        clauses.append("c.status=?")
+        params.append(status)
+    bounded = max(1, min(int(limit), _KNOWLEDGE_CONFLICT_PAGE_MAX))
+    params.extend((bounded, max(0, int(offset))))
+    rows = storage.execute(
+        f"""SELECT substr(c.id, 1, 160) AS id,
+                   substr(c.knowledge_a_id, 1, 160) AS knowledge_a_id,
+                   substr(c.knowledge_b_id, 1, 160) AS knowledge_b_id,
+                   substr(c.conflict_type, 1, 80) AS conflict_type,
+                   c.confidence,
+                   substr(c.status, 1, 40) AS status,
+                   substr(c.created_at, 1, 64) AS created_at,
+                   substr(COALESCE(c.reviewed_at, ''), 1, 64) AS reviewed_at,
+                   substr(a.title, 1, 240) AS knowledge_a_title,
+                   substr(a.summary, 1, 500) AS knowledge_a_summary,
+                   substr(a.lifecycle_stage, 1, 80) AS knowledge_a_stage,
+                   substr(COALESCE(a.superseded_by_id, ''), 1, 160)
+                       AS knowledge_a_superseded_by,
+                   substr(b.title, 1, 240) AS knowledge_b_title,
+                   substr(b.summary, 1, 500) AS knowledge_b_summary,
+                   substr(b.lifecycle_stage, 1, 80) AS knowledge_b_stage,
+                   substr(COALESCE(b.superseded_by_id, ''), 1, 160)
+                       AS knowledge_b_superseded_by,
+                   CASE WHEN COALESCE(c.evidence_json, '') NOT IN ('', '{{}}', '[]', 'null')
+                        THEN 1 ELSE 0 END AS evidence_present,
+                   MIN(length(CAST(COALESCE(c.evidence_json, '') AS BLOB)), 1000000000)
+                       AS evidence_bytes,
+                   MIN(length(COALESCE(c.resolution_note, '')), 1000000000)
+                       AS resolution_note_chars
+              FROM knowledge_conflicts c
+              JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
+                   AND a.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("a")}
+              JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
+                   AND b.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("b")}
+             WHERE {" AND ".join(clauses)}
+             ORDER BY c.confidence DESC, c.created_at DESC, c.id
+             LIMIT ? OFFSET ?""",  # nosec B608
+        tuple(params),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _bounded_knowledge_conflict_by_id(
+    storage: StorageShared,
+    user_id: str,
+    conflict_id: str,
+) -> dict[str, Any] | None:
+    """One tenant-scoped conflict card for decision preconditions."""
+
+    row = storage.execute(
+        f"""SELECT substr(c.id, 1, 160) AS id,
+                  substr(c.knowledge_a_id, 1, 160) AS knowledge_a_id,
+                  substr(c.knowledge_b_id, 1, 160) AS knowledge_b_id,
+                  substr(c.conflict_type, 1, 80) AS conflict_type,
+                  c.confidence, substr(c.status, 1, 40) AS status,
+                  substr(c.created_at, 1, 64) AS created_at,
+                  substr(COALESCE(c.reviewed_at, ''), 1, 64) AS reviewed_at,
+                  substr(a.title, 1, 240) AS knowledge_a_title,
+                  substr(a.summary, 1, 500) AS knowledge_a_summary,
+                  substr(a.lifecycle_stage, 1, 80) AS knowledge_a_stage,
+                  substr(COALESCE(a.superseded_by_id, ''), 1, 160)
+                      AS knowledge_a_superseded_by,
+                  substr(b.title, 1, 240) AS knowledge_b_title,
+                  substr(b.summary, 1, 500) AS knowledge_b_summary,
+                  substr(b.lifecycle_stage, 1, 80) AS knowledge_b_stage,
+                  substr(COALESCE(b.superseded_by_id, ''), 1, 160)
+                      AS knowledge_b_superseded_by,
+                  CASE WHEN COALESCE(c.evidence_json, '') NOT IN ('', '{{}}', '[]', 'null')
+                       THEN 1 ELSE 0 END AS evidence_present,
+                  MIN(length(CAST(COALESCE(c.evidence_json, '') AS BLOB)), 1000000000)
+                      AS evidence_bytes,
+                  MIN(length(COALESCE(c.resolution_note, '')), 1000000000)
+                      AS resolution_note_chars
+             FROM knowledge_conflicts c
+             JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
+                  AND a.deleted_at IS NULL
+                  AND {_not_private_knowledge_dependency("a")}
+             JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
+                  AND b.deleted_at IS NULL
+                  AND {_not_private_knowledge_dependency("b")}
+            WHERE c.user_id=? AND c.id=? LIMIT 1""",  # nosec B608
+        (user_id, conflict_id),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def _ratio_ceiling(left: str, right: str, left_counts: Counter[str], right_counts: Counter[str]) -> float:
@@ -362,9 +740,10 @@ class KnowledgeMixin(StorageShared):
         # promotion-race loser's orphan, or an ignored KO) are excluded so callers
         # never adopt a hidden object as the canonical one.
         row = self.execute(
-            "SELECT * FROM knowledge_objects "
-            "WHERE raw_object_id=? AND user_id=? AND deleted_at IS NULL "
-            "ORDER BY version DESC LIMIT 1",
+            "SELECT k.* FROM knowledge_objects k "
+            "WHERE k.raw_object_id=? AND k.user_id=? AND k.deleted_at IS NULL "
+            f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
+            "ORDER BY k.version DESC LIMIT 1",
             (raw_id, user_id),
         ).fetchone()
         return dict(row) if row else None
@@ -426,6 +805,13 @@ class KnowledgeMixin(StorageShared):
                    :superseded_by_id, :created_at, :updated_at, :deleted_at)""",
                 row,
             )
+            visible = conn.execute(
+                f"""SELECT 1 FROM knowledge_objects k WHERE k.id=? AND k.user_id=?
+                      AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (obj.id, obj.user_id),
+            ).fetchone()
+            if visible is None:
+                raise ValueError("Knowledge object fields reference private graph material")
             self._store_ko_version(conn, row)
         return obj
 
@@ -435,8 +821,14 @@ class KnowledgeMixin(StorageShared):
         # and the loser's UPDATE vanish — along with its snapshot, since
         # `_store_ko_version` is INSERT OR IGNORE on (object, version).
         with self.transaction() as conn:
-            existing = self.get_knowledge_object(obj.id, obj.user_id)
-            if not existing:
+            existing_row = conn.execute(
+                f"""SELECT k.* FROM knowledge_objects k
+                     WHERE k.id=? AND k.user_id=?
+                       AND {_not_private_knowledge_structure_dependency("k")}""",  # nosec B608
+                (obj.id, obj.user_id),
+            ).fetchone()
+            existing = dict(existing_row) if existing_row else None
+            if existing is None:
                 raise ValueError("Knowledge object not found for user")
             obj.version = max(int(existing.get("version", 1)) + 1, int(obj.version))
             obj.updated_at = utc_now()
@@ -451,6 +843,13 @@ class KnowledgeMixin(StorageShared):
                    WHERE id=:id AND user_id=:user_id""",
                 row,
             )
+            visible = conn.execute(
+                f"""SELECT 1 FROM knowledge_objects k WHERE k.id=? AND k.user_id=?
+                      AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (obj.id, obj.user_id),
+            ).fetchone()
+            if visible is None:
+                raise ValueError("Knowledge object fields reference private graph material")
             self._store_ko_version(conn, row)
         return obj
 
@@ -478,6 +877,7 @@ class KnowledgeMixin(StorageShared):
         """
         clauses = [
             "k.deleted_at IS NULL",
+            _not_private_knowledge_dependency("k"),
             "json_extract(k.metadata_json,'$.document_date') IS NULL",
             "r.content_type='file'",
             "json_extract(r.metadata_json,'$.stored_path') IS NOT NULL",
@@ -514,7 +914,11 @@ class KnowledgeMixin(StorageShared):
         маленькая по умолчанию. Обход всего корпуса с `SELECT k.*` однажды стоил
         45 МБ на пятьдесят строк; тут выбираются три поля из нужных, а не звёздочка.
         """
-        clauses = ["deleted_at IS NULL", "rowid > ?"]
+        clauses = [
+            "k.deleted_at IS NULL",
+            "k.rowid > ?",
+            _not_private_knowledge_dependency("k"),
+        ]
         params: list[Any] = [max(0, int(after_rowid))]
         if user_id:
             clauses.append("user_id=?")
@@ -530,11 +934,11 @@ class KnowledgeMixin(StorageShared):
             #
             # Оба поля короткие, тело документа рядом на порядки больше — цена
             # страницы не меняется.
-            "SELECT rowid AS rowid, id AS id, user_id AS user_id, title AS title, "
-            "summary AS summary, knowledge_kind AS knowledge_kind, "
-            "tags_json AS tags_json, content AS content "
-            f"FROM knowledge_objects WHERE {' AND '.join(clauses)} "  # nosec B608 - фиксированные условия
-            "ORDER BY rowid LIMIT ?",
+            "SELECT k.rowid AS rowid, k.id AS id, k.user_id AS user_id, k.title AS title, "
+            "k.summary AS summary, k.knowledge_kind AS knowledge_kind, "
+            "k.tags_json AS tags_json, k.content AS content "
+            f"FROM knowledge_objects k WHERE {' AND '.join(clauses)} "  # nosec B608 - fixed clauses
+            "ORDER BY k.rowid LIMIT ?",
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -581,9 +985,10 @@ class KnowledgeMixin(StorageShared):
         """
         with self.transaction() as conn:
             cursor = conn.execute(
-                "UPDATE knowledge_objects SET metadata_json="
+                f"UPDATE knowledge_objects AS k SET metadata_json="
                 "json_set(COALESCE(metadata_json,'{}'), '$.document_date', ?) "
-                "WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                f"WHERE id=? AND user_id=? AND deleted_at IS NULL "
+                f"AND {_not_private_knowledge_dependency('k')}",  # nosec B608
                 (document_date, ko_id, user_id),
             )
         return bool(cursor.rowcount)
@@ -604,9 +1009,15 @@ class KnowledgeMixin(StorageShared):
         ``transaction()`` is reentrant on the same thread, so the nested
         ``update_knowledge_object`` below does not deadlock.
         """
-        with self.transaction():
-            current = self.get_knowledge_object(ko_id, user_id)
-            if not current:
+        with self.transaction() as conn:
+            current_row = conn.execute(
+                f"""SELECT k.* FROM knowledge_objects k
+                     WHERE k.id=? AND k.user_id=?
+                       AND {_not_private_knowledge_structure_dependency("k")}""",  # nosec B608
+                (ko_id, user_id),
+            ).fetchone()
+            current = dict(current_row) if current_row else None
+            if current is None:
                 return None
             tags = fields.get("tags_json", _json_load(current.get("tags_json"), []))
             metadata = fields.get("metadata_json", _json_load(current.get("metadata_json"), {}))
@@ -615,16 +1026,20 @@ class KnowledgeMixin(StorageShared):
                 user_id=current["user_id"],
                 raw_object_id=current["raw_object_id"],
                 entity_id=fields.get("entity_id", current.get("entity_id")),
-                content=fields.get("content", current.get("content", "")),
-                content_type=fields.get("content_type", current.get("content_type", "")),
-                title=fields.get("title", current.get("title", "")),
-                summary=fields.get("summary", current.get("summary", "")),
+                content=cast(str, fields.get("content", current.get("content", ""))),
+                content_type=cast(str, fields.get("content_type", current.get("content_type", ""))),
+                title=cast(str, fields.get("title", current.get("title", ""))),
+                summary=cast(str, fields.get("summary", current.get("summary", ""))),
                 tags_json=tags if isinstance(tags, list) else _json_load(tags, []),
                 metadata_json=metadata if isinstance(metadata, dict) else _json_load(metadata, {}),
                 knowledge_kind=str(fields.get("knowledge_kind", current.get("knowledge_kind", "note"))),
-                importance=float(fields.get("importance", current.get("importance", 0.5))),
-                quality_score=float(fields.get("quality_score", current.get("quality_score", 0.5))),
-                promotion_score=float(fields.get("promotion_score", current.get("promotion_score", 0.5))),
+                importance=float(cast(Any, fields.get("importance", current.get("importance", 0.5)))),
+                quality_score=float(
+                    cast(Any, fields.get("quality_score", current.get("quality_score", 0.5)))
+                ),
+                promotion_score=float(
+                    cast(Any, fields.get("promotion_score", current.get("promotion_score", 0.5)))
+                ),
                 lifecycle_stage=_valid_lifecycle_stage(
                     fields.get("lifecycle_stage", current.get("lifecycle_stage", "active"))
                 ),
@@ -639,15 +1054,24 @@ class KnowledgeMixin(StorageShared):
 
     def get_knowledge_object(self, ko_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         if user_id is None:
-            row = self.execute("SELECT * FROM knowledge_objects WHERE id=?", (ko_id,)).fetchone()
+            row = self.execute(
+                f"""SELECT k.* FROM knowledge_objects k WHERE k.id=?
+                      AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (ko_id,),
+            ).fetchone()
         else:
             row = self.execute(
-                "SELECT * FROM knowledge_objects WHERE id=? AND user_id=?",
+                f"""SELECT k.* FROM knowledge_objects k
+                     WHERE k.id=? AND k.user_id=?
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
                 (ko_id, user_id),
             ).fetchone()
         return dict(row) if row else None
 
     def list_knowledge_versions(self, ko_id: str, user_id: str) -> list[dict[str, Any]]:
+        knowledge_object = self.get_knowledge_object(ko_id, user_id)
+        if knowledge_object is None:
+            return []
         rows = self.execute(
             """SELECT * FROM knowledge_object_versions
                WHERE knowledge_object_id=? AND user_id=? ORDER BY version DESC""",
@@ -659,7 +1083,15 @@ class KnowledgeMixin(StorageShared):
             # Снимок распаковывается в ЕДИНСТВЕННОМ читателе таблицы: restore,
             # diff, admin API и его экран видят прежний текст независимо от
             # того, сжат ли хвост версии на диске.
-            item["snapshot_json"] = unpack_snapshot(item.get("snapshot_json"))
+            snapshot = _public_knowledge_version_snapshot(
+                self,
+                item.get("snapshot_json"),
+                user_id=user_id,
+                knowledge_object=knowledge_object,
+            )
+            if snapshot is None:
+                continue
+            item["snapshot_json"] = snapshot
             versions.append(item)
         return versions
 
@@ -758,7 +1190,9 @@ class KnowledgeMixin(StorageShared):
 
     def count_knowledge_objects(self, user_id: str) -> int:
         row = self.execute(
-            "SELECT COUNT(*) AS count FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL",
+            f"""SELECT COUNT(*) AS count FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
             (user_id,),
         ).fetchone()
         return int(row["count"] if row else 0)
@@ -817,7 +1251,9 @@ class KnowledgeMixin(StorageShared):
         whole even on a large corpus.
         """
         rows = self.execute(
-            "SELECT id FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL",
+            f"""SELECT k.id FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
             (user_id,),
         ).fetchall()
         return {str(row["id"]) for row in rows}
@@ -842,7 +1278,9 @@ class KnowledgeMixin(StorageShared):
         page is worse than no total: it makes «Вперёд» wrong in both directions.
         """
         params: list[Any] = [user_id]
-        where = "user_id=? AND deleted_at IS NULL"
+        where = "user_id=? AND deleted_at IS NULL AND " + _not_private_knowledge_dependency(
+            "knowledge_objects"
+        )
         if lifecycle_stage:
             where += " AND lifecycle_stage=?"
             params.append(lifecycle_stage)
@@ -921,6 +1359,9 @@ class KnowledgeMixin(StorageShared):
             # Browse-by-entity/container: only reviewer-accepted links count.
             where += (
                 " AND EXISTS (SELECT 1 FROM knowledge_entity_links l"
+                " JOIN entities requested_entity"
+                " ON requested_entity.id=l.entity_id AND requested_entity.user_id=l.user_id"
+                f" AND {_not_private_entity_material_dependency('requested_entity')}"  # nosec B608
                 " WHERE l.knowledge_object_id = knowledge_objects.id"
                 " AND l.entity_id=? AND l.user_id=? AND l.status='accepted')"
             )
@@ -1029,13 +1470,14 @@ class KnowledgeMixin(StorageShared):
         честно называется оценкой в интерфейсе.
         """
         rows = self.execute(
-            """SELECT k.id AS id, k.title AS title, k.updated_at AS updated_at,
+            f"""SELECT k.id AS id, k.title AS title, k.updated_at AS updated_at,
                       CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER)
                         AS suggested,
                       (SELECT COUNT(*) FROM knowledge_entity_links l
                         WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id) AS decided
                FROM knowledge_objects k
                WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
                  AND CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER) >
                      (SELECT COUNT(*) FROM knowledge_entity_links l
                        WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)
@@ -1043,15 +1485,16 @@ class KnowledgeMixin(StorageShared):
                         (SELECT COUNT(*) FROM knowledge_entity_links l
                           WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)) DESC,
                         k.rowid DESC
-               LIMIT ? OFFSET ?""",
+               LIMIT ? OFFSET ?""",  # nosec B608
             (user_id, max(1, min(int(limit), 500)), max(0, offset)),
         ).fetchall()
         total = self.execute(
-            """SELECT COUNT(*) AS count FROM knowledge_objects k
+            f"""SELECT COUNT(*) AS count FROM knowledge_objects k
                WHERE k.user_id=? AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
                  AND CAST(COALESCE(json_extract(k.metadata_json,'$.entity_suggestion_count'), 0) AS INTEGER) >
                      (SELECT COUNT(*) FROM knowledge_entity_links l
-                       WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)""",
+                       WHERE l.user_id=k.user_id AND l.knowledge_object_id=k.id)""",  # nosec B608
             (user_id,),
         ).fetchone()
         items = [
@@ -1072,10 +1515,14 @@ class KnowledgeMixin(StorageShared):
         просит 25 и печатала их под заголовком «Теги вашей базы знаний», а тегов
         двести. Человек читает список как полный.
         """
+        safe_tags = _safe_tags_json_expression("k")
         row = self.execute(
-            "SELECT COUNT(DISTINCT jericho_casefold(json_each.value)) AS total"
-            " FROM knowledge_objects, json_each(knowledge_objects.tags_json)"
-            " WHERE knowledge_objects.user_id=? AND knowledge_objects.deleted_at IS NULL",
+            f"""SELECT COUNT(DISTINCT jericho_casefold(
+                       substr(CAST(je.value AS TEXT),1,{_ENTITY_SUMMARY_TAG_MAX_CHARS}))) AS total
+                 FROM knowledge_objects k JOIN json_each({safe_tags}) je
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   AND je.type='text' AND trim(CAST(je.value AS TEXT))<>''""",  # nosec B608
             (user_id,),
         ).fetchone()
         return int(row["total"]) if row else 0
@@ -1091,12 +1538,17 @@ class KnowledgeMixin(StorageShared):
         сужают выбор и вытесняют с экрана то, что сужает. Порог применяется только к
         заметному корпусу — см. константы выше.
         """
+        safe_tags = _safe_tags_json_expression("k")
         rows = self.execute(
-            "SELECT json_each.value AS tag, COUNT(*) AS count"
-            " FROM knowledge_objects, json_each(knowledge_objects.tags_json)"
-            " WHERE knowledge_objects.user_id=? AND knowledge_objects.deleted_at IS NULL"
-            " GROUP BY jericho_casefold(json_each.value)"
-            " ORDER BY count DESC, jericho_casefold(json_each.value) ASC LIMIT ?",
+            f"""SELECT substr(CAST(je.value AS TEXT),1,{_ENTITY_SUMMARY_TAG_MAX_CHARS}) AS tag,
+                       COUNT(*) AS count
+                 FROM knowledge_objects k JOIN json_each({safe_tags}) je
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   AND je.type='text' AND trim(CAST(je.value AS TEXT))<>''
+                 GROUP BY jericho_casefold(
+                     substr(CAST(je.value AS TEXT),1,{_ENTITY_SUMMARY_TAG_MAX_CHARS}))
+                 ORDER BY count DESC, jericho_casefold(tag) ASC LIMIT ?""",  # nosec B608
             # С запасом: часть строк отсеется как шум, и без запаса страница вышла бы
             # короче запрошенной ровно на число отсеянных.
             (user_id, max(1, min(int(limit), 1000)) * 4),
@@ -1114,15 +1566,17 @@ class KnowledgeMixin(StorageShared):
             return []
         placeholders = ",".join("?" for _ in types)
         rows = self.execute(
-            "SELECT e.*, ("
+            "SELECT e.id, substr(e.name, 1, 240) AS name, e.entity_type, ("
             " SELECT COUNT(*) FROM knowledge_entity_links l"
             " JOIN knowledge_objects k ON k.id = l.knowledge_object_id"
             " WHERE l.entity_id = e.id AND l.user_id = e.user_id"
             " AND l.status='accepted' AND k.deleted_at IS NULL"
+            f" AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             ") AS knowledge_count"
             f" FROM entities e WHERE e.user_id=? AND e.entity_type IN ({placeholders})"  # nosec B608
             " AND e.deleted_at IS NULL AND e.canonical=1"
-            " ORDER BY lower(e.name) ASC",
+            f" AND {_not_private_entity_material_dependency('e')}"  # nosec B608
+            " ORDER BY knowledge_count DESC, lower(e.name) ASC, e.id LIMIT 1000",
             (user_id, *types),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -1140,7 +1594,12 @@ class KnowledgeMixin(StorageShared):
         the user keeps attaching material to. Only accepted links and non-deleted
         knowledge count.
         """
-        clauses = ["e.user_id=?", "e.deleted_at IS NULL", "e.canonical=1"]
+        clauses = [
+            "e.user_id=?",
+            "e.deleted_at IS NULL",
+            "e.canonical=1",
+            _not_private_entity_material_dependency("e"),
+        ]
         params: list[Any] = [user_id]
         if types:
             placeholders = ",".join("?" for _ in types)
@@ -1148,13 +1607,15 @@ class KnowledgeMixin(StorageShared):
             params.extend(types)
         params.append(max(1, min(int(limit), 100)))
         rows = self.execute(
-            "SELECT e.id AS id, e.name AS name, e.entity_type AS entity_type,"
+            "SELECT substr(e.id,1,160) AS id, substr(e.name,1,240) AS name, "
+            "substr(e.entity_type,1,80) AS entity_type,"
             " COUNT(l.id) AS knowledge_count"
             " FROM entities e"
             " JOIN knowledge_entity_links l"
             "   ON l.entity_id = e.id AND l.user_id = e.user_id AND l.status='accepted'"
             " JOIN knowledge_objects k"
             "   ON k.id = l.knowledge_object_id AND k.deleted_at IS NULL"
+            f"  AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             f" WHERE {' AND '.join(clauses)}"  # nosec B608
             " GROUP BY e.id ORDER BY knowledge_count DESC, lower(e.name) ASC LIMIT ?",
             tuple(params),
@@ -1164,9 +1625,12 @@ class KnowledgeMixin(StorageShared):
     def list_recent_knowledge(self, user_id: str, *, since_iso: str, limit: int = 10) -> list[dict[str, Any]]:
         """Knowledge created at or after ``since_iso`` — the "what happened lately" window."""
         rows = self.execute(
-            "SELECT id, title, knowledge_kind, created_at FROM knowledge_objects"
-            " WHERE user_id=? AND deleted_at IS NULL AND created_at >= ?"
-            " ORDER BY created_at DESC LIMIT ?",
+            f"""SELECT substr(k.id,1,160) AS id, substr(k.title,1,240) AS title,
+                      substr(k.knowledge_kind,1,80) AS knowledge_kind,
+                      substr(k.created_at,1,64) AS created_at FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL AND k.created_at >= ?
+                   AND {_not_private_knowledge_dependency("k")}
+                 ORDER BY k.created_at DESC LIMIT ?""",  # nosec B608
             (user_id, since_iso, max(1, min(int(limit), 200))),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -1208,7 +1672,12 @@ class KnowledgeMixin(StorageShared):
         `_knowledge_filter`.
         """
         expression = "jericho_iso_date(json_extract(metadata_json,'$.document_date'))"
-        clauses = ["user_id=?", "deleted_at IS NULL", f"{expression} IS NOT NULL"]
+        clauses = [
+            "user_id=?",
+            "deleted_at IS NULL",
+            _not_private_knowledge_dependency("knowledge_objects"),
+            f"{expression} IS NOT NULL",
+        ]
         params: list[Any] = [user_id]
         if since:
             clauses.append(f"{expression} >= ?")
@@ -1255,7 +1724,12 @@ class KnowledgeMixin(StorageShared):
         """
         width = {"year": 4, "month": 7, "day": 10}.get(str(granularity), 4)
         expression = "jericho_iso_date(json_extract(metadata_json,'$.document_date'))"
-        clauses = ["user_id=?", "deleted_at IS NULL", f"{expression} IS NOT NULL"]
+        clauses = [
+            "user_id=?",
+            "deleted_at IS NULL",
+            _not_private_knowledge_dependency("knowledge_objects"),
+            f"{expression} IS NOT NULL",
+        ]
         params: list[Any] = [user_id]
         if since:
             clauses.append(f"{expression} >= ?")
@@ -1279,9 +1753,11 @@ class KnowledgeMixin(StorageShared):
         обязан назвать их число сам, иначе читается как полный охват.
         """
         row = self.execute(
-            "SELECT COUNT(*) AS count FROM knowledge_objects "
-            "WHERE user_id=? AND deleted_at IS NULL AND "
-            "jericho_iso_date(json_extract(metadata_json,'$.document_date')) IS NULL",
+            f"""SELECT COUNT(*) AS count FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   AND jericho_iso_date(
+                       json_extract(k.metadata_json,'$.document_date')) IS NULL""",  # nosec B608
             (user_id,),
         ).fetchone()
         return int(row["count"]) if row else 0
@@ -1293,8 +1769,9 @@ class KnowledgeMixin(StorageShared):
         ровно 200 «за 30 дней» всякому, кто перешагнул этот рубеж.
         """
         row = self.execute(
-            "SELECT COUNT(*) AS count FROM knowledge_objects"
-            " WHERE user_id=? AND deleted_at IS NULL AND created_at >= ?",
+            f"""SELECT COUNT(*) AS count FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL AND k.created_at >= ?
+                   AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
             (user_id, since_iso),
         ).fetchone()
         return int(row["count"] if row else 0)
@@ -1333,8 +1810,10 @@ class KnowledgeMixin(StorageShared):
             " k.id AS ko_id, k.title AS title, k.knowledge_kind AS knowledge_kind"
             " FROM raw_objects AS r"
             " LEFT JOIN knowledge_objects AS k"
-            "   ON k.raw_object_id = r.id AND k.deleted_at IS NULL"
+            "   ON k.raw_object_id = r.id AND k.user_id=r.user_id AND k.deleted_at IS NULL"
+            f"  AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             " WHERE r.user_id=? AND r.deleted_at IS NULL AND r.content_type='file'"
+            f"   AND {_not_private_raw_dependency('r')}"  # nosec B608
             f"   AND date(datetime(r.received_at, ?)) IN ({placeholders})"  # nosec B608 - только плейсхолдеры
             " ORDER BY r.received_at ASC LIMIT ?",
             (user_id, shift, *wanted, max(1, min(int(limit), 2000))),
@@ -1378,9 +1857,10 @@ class KnowledgeMixin(StorageShared):
         shift = f"{int(utc_offset_minutes):+d} minutes"
         placeholders = ",".join("?" for _ in wanted)
         row = self.execute(
-            "SELECT COUNT(*) AS count FROM raw_objects"
-            " WHERE user_id=? AND deleted_at IS NULL AND content_type='file'"
-            f"   AND date(datetime(received_at, ?)) IN ({placeholders})",  # nosec B608 - только плейсхолдеры
+            "SELECT COUNT(*) AS count FROM raw_objects r"
+            " WHERE r.user_id=? AND r.deleted_at IS NULL AND r.content_type='file'"
+            f"   AND {_not_private_raw_dependency('r')}"  # nosec B608
+            f"   AND date(datetime(r.received_at, ?)) IN ({placeholders})",  # nosec B608 - placeholders
             (user_id, shift, *wanted),
         ).fetchone()
         return int(row["count"]) if row else 0
@@ -1415,11 +1895,14 @@ class KnowledgeMixin(StorageShared):
         # проходила границу «строго прошлое» (её UTC-метка меньше местной даты) и
         # показывалась как собственная годовщина в день создания.
         rows = self.execute(
-            "SELECT id, title, knowledge_kind, created_at FROM knowledge_objects"
-            " WHERE user_id=? AND deleted_at IS NULL"
-            " AND strftime('%m-%d', datetime(created_at, ?)) = ?"
-            " AND date(datetime(created_at, ?)) < ?"
-            " ORDER BY created_at DESC LIMIT ?",
+            f"""SELECT substr(k.id,1,160) AS id, substr(k.title,1,240) AS title,
+                      substr(k.knowledge_kind,1,80) AS knowledge_kind,
+                      substr(k.created_at,1,64) AS created_at FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   AND strftime('%m-%d', datetime(k.created_at, ?)) = ?
+                   AND date(datetime(k.created_at, ?)) < ?
+                 ORDER BY k.created_at DESC LIMIT ?""",  # nosec B608
             (user_id, shift, month_day, shift, before_iso, max(1, min(int(limit), 200))),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -1542,11 +2025,13 @@ class KnowledgeMixin(StorageShared):
             match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
             try:
                 rows = self.execute(
-                    """SELECT k.*, bm25(knowledge_fts, 1.0, 2.0, 1.5, 0.5) AS _rank
+                    f"""SELECT k.*, bm25(knowledge_fts, 1.0, 2.0, 1.5, 0.5) AS _rank
                        FROM knowledge_fts
                        JOIN knowledge_objects k ON k.rowid=knowledge_fts.rowid
-                       WHERE k.user_id=? AND k.deleted_at IS NULL AND knowledge_fts MATCH ?
-                       ORDER BY _rank ASC, k.importance DESC LIMIT ?""",
+                       WHERE k.user_id=? AND k.deleted_at IS NULL
+                         AND {_not_private_knowledge_dependency("k")}
+                         AND knowledge_fts MATCH ?
+                       ORDER BY _rank ASC, k.importance DESC LIMIT ?""",  # nosec B608
                     (user_id, match_query, max(1, min(limit, 200))),
                 ).fetchall()
             except sqlite3.OperationalError:
@@ -1555,11 +2040,12 @@ class KnowledgeMixin(StorageShared):
             escaped = text.replace("%", r"\%").replace("_", r"\_")
             like = f"%{escaped}%"
             rows = self.execute(
-                """SELECT * FROM knowledge_objects
-                   WHERE user_id=? AND deleted_at IS NULL
-                     AND (title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'
-                          OR content LIKE ? ESCAPE '\\' OR tags_json LIKE ? ESCAPE '\\')
-                   ORDER BY importance DESC, updated_at DESC LIMIT ?""",
+                f"""SELECT k.* FROM knowledge_objects k
+                   WHERE k.user_id=? AND k.deleted_at IS NULL
+                     AND {_not_private_knowledge_dependency("k")}
+                     AND (k.title LIKE ? ESCAPE '\\' OR k.summary LIKE ? ESCAPE '\\'
+                          OR k.content LIKE ? ESCAPE '\\' OR k.tags_json LIKE ? ESCAPE '\\')
+                   ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
                 (user_id, like, like, like, like, max(1, min(limit, 200))),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -1625,6 +2111,21 @@ class KnowledgeMixin(StorageShared):
         now = utc_now()
         link_id = new_id("kel")
         with self.transaction() as conn:
+            visible_ko = conn.execute(
+                f"""SELECT k.entity_id FROM knowledge_objects k
+                     WHERE k.id=? AND k.user_id=? AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (knowledge_object_id, user_id),
+            ).fetchone()
+            visible_entity = conn.execute(
+                f"""SELECT 1 FROM entities e
+                     WHERE e.id=? AND e.user_id=? AND e.deleted_at IS NULL
+                       AND e.canonical=1 AND e.merged_into_id IS NULL
+                       AND {_not_private_entity_material_dependency("e")}""",  # nosec B608
+                (entity_id, user_id),
+            ).fetchone()
+            if visible_ko is None or visible_entity is None:
+                raise ValueError("Knowledge object and entity must belong to the same user")
             conn.execute(
                 """INSERT INTO knowledge_entity_links(id, user_id, knowledge_object_id, entity_id,
                    status, confidence, evidence_json, created_at, reviewed_at, reviewed_by)
@@ -1647,17 +2148,17 @@ class KnowledgeMixin(StorageShared):
                 ),
             )
             # Keep legacy primary link synchronized for older clients.
-            if status == "accepted" and not ko.get("entity_id"):
+            if status == "accepted" and not visible_ko["entity_id"]:
                 conn.execute(
                     "UPDATE knowledge_objects SET entity_id=?, updated_at=? WHERE id=? AND user_id=?",
                     (entity_id, now, knowledge_object_id, user_id),
                 )
         row = self.execute(
-            """SELECT * FROM knowledge_entity_links
+            """SELECT id FROM knowledge_entity_links
                WHERE user_id=? AND knowledge_object_id=? AND entity_id=?""",
             (user_id, knowledge_object_id, entity_id),
         ).fetchone()
-        return dict(row) if row else {}
+        return _bounded_public_knowledge_entity_link_by_id(self, user_id, str(row["id"])) or {} if row else {}
 
     def list_knowledge_entity_links_for(self, knowledge_ids: Sequence[str]) -> dict[str, list[str]]:
         """Accepted entity NAMES per Knowledge Object, in one query for the batch.
@@ -1675,8 +2176,13 @@ class KnowledgeMixin(StorageShared):
             placeholders = ",".join("?" for _ in batch)
             rows = self.execute(
                 "SELECT l.knowledge_object_id AS ko, e.name AS name "  # nosec B608
-                "FROM knowledge_entity_links l JOIN entities e ON e.id=l.entity_id "
-                f"WHERE l.status='accepted' AND e.deleted_at IS NULL AND l.knowledge_object_id IN ({placeholders}) "
+                "FROM knowledge_entity_links l JOIN entities e "
+                "ON e.id=l.entity_id AND e.user_id=l.user_id "
+                "JOIN knowledge_objects k ON k.id=l.knowledge_object_id "
+                f"WHERE l.status='accepted' AND e.deleted_at IS NULL "  # nosec B608
+                f"AND {_not_private_entity_material_dependency('e')} "  # nosec B608
+                f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
+                f"AND l.knowledge_object_id IN ({placeholders}) "  # nosec B608
                 "ORDER BY e.name COLLATE NOCASE",
                 tuple(batch),
             ).fetchall()
@@ -1711,7 +2217,9 @@ class KnowledgeMixin(StorageShared):
                 FROM knowledge_entity_links l
                 JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
                 JOIN knowledge_objects k ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
-                WHERE {" AND ".join(clauses)}
+                WHERE {_not_private_entity_material_dependency("e")}
+                  AND {_not_private_knowledge_dependency("k")}
+                  AND {" AND ".join(clauses)}
                 ORDER BY CASE l.status WHEN 'suggested' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END,
                          l.confidence DESC, l.created_at DESC LIMIT ?"""  # nosec B608
         rows = self.execute(query, tuple(params)).fetchall()
@@ -1735,17 +2243,23 @@ class KnowledgeMixin(StorageShared):
         одной: на 941 сущности обход был бы тысячей запросов ради одной строки.
         """
         row = self.execute(
-            """SELECT
+            f"""SELECT
                  COUNT(*) AS entities,
                  SUM(CASE WHEN NOT EXISTS (
                        SELECT 1 FROM knowledge_entity_links o
                        JOIN knowledge_objects k2 ON k2.id=o.knowledge_object_id
                        WHERE o.user_id=l.user_id AND o.entity_id=l.entity_id
                          AND o.status='accepted' AND k2.deleted_at IS NULL
+                         AND {_not_private_knowledge_dependency("k2")}
                          AND o.knowledge_object_id<>l.knowledge_object_id
                      ) THEN 1 ELSE 0 END) AS only_source
                FROM knowledge_entity_links l
-               WHERE l.user_id=? AND l.knowledge_object_id=? AND l.status='accepted'""",
+               JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+               JOIN knowledge_objects k
+                 ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
+                AND {_not_private_knowledge_dependency("k")}
+               WHERE l.user_id=? AND l.knowledge_object_id=? AND l.status='accepted'
+                 AND {_not_private_entity_material_dependency("e")}""",  # nosec B608
             (user_id, knowledge_object_id),
         ).fetchone()
         return {
@@ -1764,7 +2278,10 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(
             "SELECT l.status AS status, COUNT(*) AS count FROM knowledge_entity_links l"
             " JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id"
+            " JOIN knowledge_objects k ON k.id=l.knowledge_object_id AND k.user_id=l.user_id"
             " WHERE l.user_id=? AND l.knowledge_object_id=? AND e.deleted_at IS NULL"
+            f" AND {_not_private_entity_material_dependency('e')}"  # nosec B608
+            f" AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             " GROUP BY l.status",
             (user_id, knowledge_object_id),
         ).fetchall()
@@ -1785,20 +2302,43 @@ class KnowledgeMixin(StorageShared):
 
         if status not in {"suggested", "accepted", "rejected"}:
             raise ValueError("status must be suggested, accepted, or rejected")
-        link = self.execute(
-            "SELECT * FROM knowledge_entity_links WHERE id=? AND user_id=?",
-            (link_id, user_id),
-        ).fetchone()
-        if not link:
-            return None
         now = utc_now()
         with self.transaction() as conn:
-            conn.execute(
-                """UPDATE knowledge_entity_links
-                   SET status=?, reviewed_at=?, reviewed_by=?
-                   WHERE id=? AND user_id=?""",
+            link = conn.execute(
+                f"""SELECT l.id, l.entity_id, l.knowledge_object_id
+                       FROM knowledge_entity_links l
+                       JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                            AND {_not_private_entity_material_dependency("e")}
+                       JOIN knowledge_objects k
+                         ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
+                        AND k.deleted_at IS NULL
+                        AND {_not_private_knowledge_dependency("k")}
+                      WHERE l.id=? AND l.user_id=?""",  # nosec B608
+                (link_id, user_id),
+            ).fetchone()
+            if not link:
+                return None
+            changed = conn.execute(
+                f"""UPDATE knowledge_entity_links
+                       SET status=?, reviewed_at=?, reviewed_by=?
+                     WHERE id=? AND user_id=?
+                       AND EXISTS (
+                           SELECT 1 FROM entities e
+                            WHERE e.id=knowledge_entity_links.entity_id
+                              AND e.user_id=knowledge_entity_links.user_id
+                              AND {_not_private_entity_material_dependency("e")}
+                       )
+                       AND EXISTS (
+                           SELECT 1 FROM knowledge_objects k
+                            WHERE k.id=knowledge_entity_links.knowledge_object_id
+                              AND k.user_id=knowledge_entity_links.user_id
+                              AND k.deleted_at IS NULL
+                              AND {_not_private_knowledge_dependency("k")}
+                       )""",  # nosec B608
                 (status, now, reviewed_by, link_id, user_id),
             )
+            if changed.rowcount != 1:
+                return None
             if status == "accepted":
                 conn.execute(
                     """UPDATE knowledge_objects SET entity_id=COALESCE(entity_id, ?), updated_at=?
@@ -1813,9 +2353,11 @@ class KnowledgeMixin(StorageShared):
                 ).fetchone()
                 if current and current["entity_id"] == link["entity_id"]:
                     fallback = conn.execute(
-                        """SELECT entity_id FROM knowledge_entity_links
-                           WHERE user_id=? AND knowledge_object_id=? AND status='accepted'
-                             AND id<>? ORDER BY confidence DESC, created_at ASC LIMIT 1""",
+                        f"""SELECT l.entity_id FROM knowledge_entity_links l
+                           JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                           WHERE l.user_id=? AND l.knowledge_object_id=? AND l.status='accepted'
+                             AND l.id<>? AND {_not_private_entity_material_dependency("e")}
+                           ORDER BY l.confidence DESC, l.created_at ASC LIMIT 1""",  # nosec B608
                         (user_id, link["knowledge_object_id"], link_id),
                     ).fetchone()
                     conn.execute(
@@ -1828,15 +2370,7 @@ class KnowledgeMixin(StorageShared):
                             user_id,
                         ),
                     )
-        row = self.execute(
-            """SELECT l.*, e.name AS entity_name, e.entity_type, k.title AS knowledge_title
-               FROM knowledge_entity_links l
-               JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
-               JOIN knowledge_objects k ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
-               WHERE l.id=? AND l.user_id=?""",
-            (link_id, user_id),
-        ).fetchone()
-        return dict(row) if row else None
+        return _bounded_public_knowledge_entity_link_by_id(self, user_id, link_id)
 
     def count_entity_knowledge(self, user_id: str, entity_id: str) -> int:
         """How many accepted, live Knowledge Objects an entity carries.
@@ -1845,9 +2379,13 @@ class KnowledgeMixin(StorageShared):
         full rows — bodies, summaries, tags — and calling ``len()`` on the list.
         """
         row = self.execute(
-            """SELECT COUNT(*) AS count FROM knowledge_entity_links l
+            f"""SELECT COUNT(*) AS count FROM knowledge_entity_links l
                JOIN knowledge_objects k ON k.id=l.knowledge_object_id
-               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL""",
+               JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                    AND {_not_private_entity_material_dependency("e")}
+               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
+                 AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
             (user_id, entity_id),
         ).fetchone()
         return int(row["count"] if row else 0)
@@ -1864,18 +2402,24 @@ class KnowledgeMixin(StorageShared):
         thrown away.
         """
         rows = self.execute(
-            """SELECT k.id, k.importance, k.quality_score, l.confidence AS _link_confidence
+            f"""SELECT k.id, k.importance, k.quality_score, l.confidence AS _link_confidence
                FROM knowledge_entity_links l
                JOIN knowledge_objects k ON k.id=l.knowledge_object_id
-               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
-               ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",
+               JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                    AND {_not_private_entity_material_dependency("e")}
+               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
+                 AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
+               ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
             (user_id, entity_id, max(1, min(limit, 1000))),
         ).fetchall()
         if not rows:
             rows = self.execute(
-                """SELECT id, importance, quality_score, 1.0 AS _link_confidence
-                   FROM knowledge_objects WHERE user_id=? AND entity_id=?
-                   AND deleted_at IS NULL ORDER BY importance DESC, updated_at DESC LIMIT ?""",
+                f"""SELECT k.id, k.importance, k.quality_score, 1.0 AS _link_confidence
+                   FROM knowledge_objects k WHERE k.user_id=? AND k.entity_id=?
+                   AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
                 (user_id, entity_id, max(1, min(limit, 1000))),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -1908,6 +2452,7 @@ class KnowledgeMixin(StorageShared):
                 " FROM knowledge_entity_links l"
                 " JOIN knowledge_objects k ON k.id=l.knowledge_object_id"
                 " WHERE l.user_id=? AND l.status='accepted' AND k.deleted_at IS NULL"
+                f" AND {_not_private_knowledge_dependency('k')}"
                 f" AND l.entity_id IN ({placeholders})"
                 ") SELECT _entity_id, id, importance, quality_score, _link_confidence"
                 " FROM ranked WHERE _rank<=? ORDER BY _entity_id, _rank",
@@ -1928,8 +2473,9 @@ class KnowledgeMixin(StorageShared):
                 " 1.0 AS _link_confidence,"
                 " ROW_NUMBER() OVER (PARTITION BY entity_id"
                 " ORDER BY importance DESC, updated_at DESC) AS _rank"
-                " FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL"
-                f" AND entity_id IN ({fallback_placeholders})"
+                " FROM knowledge_objects k WHERE k.user_id=? AND k.deleted_at IS NULL"
+                f" AND {_not_private_knowledge_dependency('k')}"
+                f" AND k.entity_id IN ({fallback_placeholders})"
                 ") SELECT _entity_id, id, importance, quality_score, _link_confidence"
                 " FROM ranked WHERE _rank<=? ORDER BY _entity_id, _rank",
                 (user_id, *fallback_ids, per_entity_limit),
@@ -1942,17 +2488,23 @@ class KnowledgeMixin(StorageShared):
 
     def get_entity_knowledge(self, user_id: str, entity_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.execute(
-            """SELECT k.*, l.confidence AS _link_confidence, l.evidence_json AS _link_evidence_json
+            f"""SELECT k.*, l.confidence AS _link_confidence, l.evidence_json AS _link_evidence_json
                FROM knowledge_entity_links l
                JOIN knowledge_objects k ON k.id=l.knowledge_object_id
-               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
-               ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",
+               JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                    AND {_not_private_entity_material_dependency("e")}
+               WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
+                 AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
+               ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
             (user_id, entity_id, max(1, min(limit, 1000))),
         ).fetchall()
         if not rows:
             rows = self.execute(
-                """SELECT * FROM knowledge_objects WHERE user_id=? AND entity_id=?
-                   AND deleted_at IS NULL ORDER BY importance DESC, updated_at DESC LIMIT ?""",
+                f"""SELECT k.* FROM knowledge_objects k WHERE k.user_id=? AND k.entity_id=?
+                   AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
                 (user_id, entity_id, max(1, min(limit, 1000))),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -1964,9 +2516,22 @@ class KnowledgeMixin(StorageShared):
     # пометка о производности. Замерено: так было у 34% сущностей корпуса.
     # Из метаданных карточке нужна ровно одна вещь — собственная дата документа.
     _ENTITY_CARD_COLUMNS = (
-        "k.id, k.title, k.summary, k.tags_json, k.importance, "
-        "json_extract(k.metadata_json,'$.document_date') AS document_date, "
-        "k.quality_score, k.lifecycle_stage, k.knowledge_kind, k.created_at, k.updated_at"
+        "substr(k.id, 1, 160) AS id, "
+        f"substr(k.title, 1, {_ENTITY_CARD_TITLE_MAX_CHARS}) AS title, "
+        f"substr(k.summary, 1, {_ENTITY_CARD_SUMMARY_MAX_CHARS}) AS summary, "
+        f"CASE WHEN length(CAST(COALESCE(k.tags_json, '') AS BLOB))<={_ENTITY_CARD_TAGS_MAX_BYTES} "
+        "THEN CASE WHEN json_valid(k.tags_json) "
+        "THEN CASE WHEN json_type(k.tags_json)='array' THEN k.tags_json ELSE '[]' END "
+        "ELSE '[]' END ELSE '[]' END AS tags_json, "
+        "k.importance, "
+        f"CASE WHEN length(CAST(COALESCE(k.metadata_json,'') AS BLOB))"
+        f"<={_ENTITY_CARD_METADATA_MAX_BYTES} THEN CASE WHEN json_valid(k.metadata_json) "
+        "THEN CASE WHEN json_type(k.metadata_json,'$.document_date')='text' "
+        "THEN substr(json_extract(k.metadata_json,'$.document_date'),1,64) ELSE '' END "
+        "ELSE '' END ELSE '' END AS document_date, "
+        "k.quality_score, substr(k.lifecycle_stage,1,80) AS lifecycle_stage, "
+        "substr(k.knowledge_kind,1,80) AS knowledge_kind, "
+        "substr(k.created_at,1,64) AS created_at, substr(k.updated_at,1,64) AS updated_at"
     )
 
     def get_entity_knowledge_cards(
@@ -1985,7 +2550,10 @@ class KnowledgeMixin(StorageShared):
             f"""SELECT {self._ENTITY_CARD_COLUMNS}, l.confidence AS _link_confidence
                FROM knowledge_entity_links l
                JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                    AND {_not_private_entity_material_dependency("e")}
                WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
                ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
             (user_id, entity_id, max(1, min(limit, 1000))),
         ).fetchall()
@@ -1994,6 +2562,7 @@ class KnowledgeMixin(StorageShared):
                 f"""SELECT {self._ENTITY_CARD_COLUMNS}, 1.0 AS _link_confidence
                    FROM knowledge_objects k
                    WHERE k.user_id=? AND k.entity_id=? AND k.deleted_at IS NULL
+                     AND {_not_private_knowledge_dependency("k")}
                    ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
                 (user_id, entity_id, max(1, min(limit, 1000))),
             ).fetchall()
@@ -2003,38 +2572,84 @@ class KnowledgeMixin(StorageShared):
     # link predicate first, the same legacy `knowledge_objects.entity_id` fallback
     # second. Kept as literal SQL rather than derived from a shared string so a
     # future edit to one cannot silently change what the other counts.
-    _ENTITY_SUMMARY_LINKED = """
+    _ENTITY_SUMMARY_LINKED = f"""
+        WITH scoped AS (
+            SELECT CASE
+                     WHEN length(CAST(COALESCE(k.metadata_json,'') AS BLOB))
+                            <={_ENTITY_CARD_METADATA_MAX_BYTES}
+                     THEN CASE WHEN json_valid(k.metadata_json)
+                               THEN CASE
+                                      WHEN json_type(k.metadata_json,'$.document_date')='text'
+                                      THEN substr(json_extract(k.metadata_json,'$.document_date'),1,64)
+                                      ELSE '' END
+                               ELSE '' END
+                     ELSE '' END AS document_date
+             FROM knowledge_entity_links l
+              JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+             WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
+               AND k.deleted_at IS NULL
+               AND {_not_private_knowledge_dependency("k")}
+        )
         SELECT COUNT(*) AS total,
-               SUM(CASE WHEN COALESCE(json_extract(k.metadata_json,'$.document_date'),'')=''
-                        THEN 1 ELSE 0 END) AS undated,
-               MIN(NULLIF(json_extract(k.metadata_json,'$.document_date'),'')) AS earliest,
-               MAX(NULLIF(json_extract(k.metadata_json,'$.document_date'),'')) AS latest
+               SUM(CASE WHEN document_date='' THEN 1 ELSE 0 END) AS undated,
+               MIN(NULLIF(document_date,'')) AS earliest,
+               MAX(NULLIF(document_date,'')) AS latest
+          FROM scoped
+    """
+    _ENTITY_SUMMARY_LINKED_TAGS = f"""
+        SELECT DISTINCT substr(CAST(je.value AS TEXT),1,{_ENTITY_SUMMARY_TAG_MAX_CHARS}) AS tag
         FROM knowledge_entity_links l
         JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+        JOIN json_each(
+            CASE WHEN length(CAST(COALESCE(k.tags_json,'') AS BLOB))<={_ENTITY_CARD_TAGS_MAX_BYTES}
+                 THEN CASE WHEN json_valid(k.tags_json)
+                           THEN CASE WHEN json_type(k.tags_json)='array'
+                                     THEN k.tags_json ELSE '[]' END
+                           ELSE '[]' END
+                 ELSE '[]' END
+        ) je
         WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
+          AND {_not_private_knowledge_dependency("k")}
+          AND je.type='text' AND trim(CAST(je.value AS TEXT))<>''
+        ORDER BY tag COLLATE NOCASE, tag LIMIT ?
     """
-    _ENTITY_SUMMARY_LINKED_TAGS = """
-        SELECT DISTINCT je.value AS tag
-        FROM knowledge_entity_links l
-        JOIN knowledge_objects k ON k.id=l.knowledge_object_id
-        JOIN json_each(k.tags_json) je
-        WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
-          AND json_valid(k.tags_json)
-    """
-    _ENTITY_SUMMARY_DIRECT = """
+    _ENTITY_SUMMARY_DIRECT = f"""
+        WITH scoped AS (
+            SELECT CASE
+                     WHEN length(CAST(COALESCE(metadata_json,'') AS BLOB))
+                            <={_ENTITY_CARD_METADATA_MAX_BYTES}
+                     THEN CASE WHEN json_valid(metadata_json)
+                               THEN CASE
+                                      WHEN json_type(metadata_json,'$.document_date')='text'
+                                      THEN substr(json_extract(metadata_json,'$.document_date'),1,64)
+                                      ELSE '' END
+                               ELSE '' END
+                     ELSE '' END AS document_date
+              FROM knowledge_objects k
+             WHERE k.user_id=? AND k.entity_id=? AND k.deleted_at IS NULL
+               AND {_not_private_knowledge_dependency("k")}
+        )
         SELECT COUNT(*) AS total,
-               SUM(CASE WHEN COALESCE(json_extract(metadata_json,'$.document_date'),'')=''
-                        THEN 1 ELSE 0 END) AS undated,
-               MIN(NULLIF(json_extract(metadata_json,'$.document_date'),'')) AS earliest,
-               MAX(NULLIF(json_extract(metadata_json,'$.document_date'),'')) AS latest
-        FROM knowledge_objects
-        WHERE user_id=? AND entity_id=? AND deleted_at IS NULL
+               SUM(CASE WHEN document_date='' THEN 1 ELSE 0 END) AS undated,
+               MIN(NULLIF(document_date,'')) AS earliest,
+               MAX(NULLIF(document_date,'')) AS latest
+          FROM scoped
     """
-    _ENTITY_SUMMARY_DIRECT_TAGS = """
-        SELECT DISTINCT je.value AS tag
+    _ENTITY_SUMMARY_DIRECT_TAGS = f"""
+        SELECT DISTINCT substr(CAST(je.value AS TEXT),1,{_ENTITY_SUMMARY_TAG_MAX_CHARS}) AS tag
         FROM knowledge_objects k
-        JOIN json_each(k.tags_json) je
-        WHERE k.user_id=? AND k.entity_id=? AND k.deleted_at IS NULL AND json_valid(k.tags_json)
+        JOIN json_each(
+            CASE WHEN length(CAST(COALESCE(k.tags_json,'') AS BLOB))<={_ENTITY_CARD_TAGS_MAX_BYTES}
+                 THEN CASE WHEN json_valid(k.tags_json)
+                           THEN CASE WHEN json_type(k.tags_json)='array'
+                                     THEN k.tags_json ELSE '[]' END
+                           ELSE '[]' END
+                 ELSE '[]' END
+        ) je
+        WHERE k.user_id=? AND k.entity_id=? AND k.deleted_at IS NULL
+          AND {_not_private_knowledge_dependency("k")}
+          AND je.type='text' AND trim(CAST(je.value AS TEXT))<>''
+        ORDER BY tag COLLATE NOCASE, tag LIMIT ?
     """
 
     def entity_knowledge_summary(self, user_id: str, entity_id: str) -> dict[str, Any]:
@@ -2059,13 +2674,26 @@ class KnowledgeMixin(StorageShared):
             tags_sql = self._ENTITY_SUMMARY_DIRECT_TAGS
         total = int(row["total"] or 0) if row else 0
         if not total:
-            return {"tags": [], "document_date_range": None, "documents_without_own_date": 0, "total": 0}
-        tags = sorted({str(item["tag"]) for item in self.execute(tags_sql, (user_id, entity_id))})
+            return {
+                "tags": [],
+                "tags_matched_at_least": 0,
+                "tags_truncated": False,
+                "document_date_range": None,
+                "documents_without_own_date": 0,
+                "total": 0,
+            }
+        tag_rows = self.execute(
+            tags_sql,
+            (user_id, entity_id, _ENTITY_SUMMARY_TAG_LIMIT + 1),
+        ).fetchall()
+        tags = [str(item["tag"]) for item in tag_rows[:_ENTITY_SUMMARY_TAG_LIMIT]]
         earliest, latest = row["earliest"], row["latest"]
         return {
             "tags": tags,
+            "tags_matched_at_least": len(tag_rows),
+            "tags_truncated": len(tag_rows) > len(tags),
             "document_date_range": (
-                {"earliest": str(earliest), "latest": str(latest)} if earliest and latest else None
+                {"earliest": str(earliest)[:64], "latest": str(latest)[:64]} if earliest and latest else None
             ),
             "documents_without_own_date": int(row["undated"] or 0),
             "total": total,
@@ -2103,7 +2731,18 @@ class KnowledgeMixin(StorageShared):
         normalized_type = str(conflict_type or "potential_contradiction")[:80]
         conflict_id = new_id("conf")
         now = utc_now()
+        serialized_evidence = json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True)
+        if len(serialized_evidence.encode("utf-8")) > _KNOWLEDGE_CONFLICT_EVIDENCE_MAX_BYTES:
+            raise ValueError("Conflict evidence is too large")
         with self.transaction() as conn:
+            visible = conn.execute(
+                f"""SELECT COUNT(DISTINCT k.id) AS count FROM knowledge_objects k
+                     WHERE k.user_id=? AND k.id IN (?, ?) AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (user_id, knowledge_a_id, knowledge_b_id),
+            ).fetchone()
+            if visible is None or int(visible["count"] or 0) != 2:
+                raise ValueError("Both knowledge objects must belong to the same user")
             conn.execute(
                 """INSERT INTO knowledge_conflicts(
                        id, user_id, knowledge_a_id, knowledge_b_id, pair_key,
@@ -2123,7 +2762,7 @@ class KnowledgeMixin(StorageShared):
                     pair_key,
                     normalized_type,
                     parsed_confidence,
-                    json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True),
+                    serialized_evidence,
                     now,
                 ),
             )
@@ -2141,16 +2780,35 @@ class KnowledgeMixin(StorageShared):
     # добавленные стадия и «кем погашен» попали в одну, а тест на совпадение форм
     # написан ровно потому, что расхождение здесь незаметно — строка выглядит целой,
     # просто в ней нет пары полей.
-    _CONFLICT_COLUMNS = """c.*, a.title AS knowledge_a_title, a.summary AS knowledge_a_summary,
-                       a.lifecycle_stage AS knowledge_a_stage,
-                       a.superseded_by_id AS knowledge_a_superseded_by,
-                       b.title AS knowledge_b_title, b.summary AS knowledge_b_summary,
-                       b.lifecycle_stage AS knowledge_b_stage,
-                       b.superseded_by_id AS knowledge_b_superseded_by"""
+    _CONFLICT_COLUMNS = f"""c.id, c.user_id, c.knowledge_a_id, c.knowledge_b_id,
+                       substr(c.pair_key,1,360) AS pair_key,
+                       substr(c.conflict_type,1,80) AS conflict_type,
+                       c.confidence,
+                       CASE WHEN length(CAST(COALESCE(c.evidence_json,'') AS BLOB))
+                                          <={_KNOWLEDGE_CONFLICT_EVIDENCE_MAX_BYTES}
+                                  AND json_valid(c.evidence_json)
+                                  AND json_type(c.evidence_json)='object'
+                            THEN c.evidence_json ELSE '{{}}' END AS evidence_json,
+                       substr(c.status,1,40) AS status,
+                       substr(c.created_at,1,64) AS created_at,
+                       substr(COALESCE(c.reviewed_at,''),1,64) AS reviewed_at,
+                       substr(COALESCE(c.resolution_note,''),1,2000) AS resolution_note,
+                       substr(a.title,1,240) AS knowledge_a_title,
+                       substr(a.summary,1,500) AS knowledge_a_summary,
+                       substr(a.lifecycle_stage,1,80) AS knowledge_a_stage,
+                       substr(COALESCE(a.superseded_by_id,''),1,160)
+                           AS knowledge_a_superseded_by,
+                       substr(b.title,1,240) AS knowledge_b_title,
+                       substr(b.summary,1,500) AS knowledge_b_summary,
+                       substr(b.lifecycle_stage,1,80) AS knowledge_b_stage,
+                       substr(COALESCE(b.superseded_by_id,''),1,160)
+                           AS knowledge_b_superseded_by"""
     _CONFLICT_PROJECTION = f"""SELECT {_CONFLICT_COLUMNS}
                 FROM knowledge_conflicts c
                 JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
-                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id"""
+                     AND {_not_private_knowledge_dependency("a")}
+                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
+                     AND {_not_private_knowledge_dependency("b")}"""
 
     def get_knowledge_conflict_by_pair(
         self, user_id: str, pair_key: str, conflict_type: str
@@ -2172,9 +2830,13 @@ class KnowledgeMixin(StorageShared):
 
     # Both joins are FILTERS: INNER, and matching `user_id` on each side drops a
     # conflict whose object is gone or belongs elsewhere. The count uses the same FROM.
-    _CONFLICT_FROM = """FROM knowledge_conflicts c
+    _CONFLICT_FROM = f"""FROM knowledge_conflicts c
                 JOIN knowledge_objects a ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
-                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id"""
+                    AND a.deleted_at IS NULL
+                    AND {_not_private_knowledge_dependency("a")}
+                JOIN knowledge_objects b ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
+                    AND b.deleted_at IS NULL
+                    AND {_not_private_knowledge_dependency("b")}"""
 
     @staticmethod
     def _conflict_filter(user_id: str, status: str | None) -> tuple[list[str], list[Any]]:
@@ -2249,7 +2911,16 @@ class KnowledgeMixin(StorageShared):
             raise ValueError("Invalid conflict review status")
         with self.transaction() as conn:
             row = conn.execute(
-                "SELECT status FROM knowledge_conflicts WHERE id=? AND user_id=?",
+                f"""SELECT c.status FROM knowledge_conflicts c
+                     JOIN knowledge_objects a
+                       ON a.id=c.knowledge_a_id AND a.user_id=c.user_id
+                      AND a.deleted_at IS NULL
+                      AND {_not_private_knowledge_dependency("a")}
+                     JOIN knowledge_objects b
+                       ON b.id=c.knowledge_b_id AND b.user_id=c.user_id
+                      AND b.deleted_at IS NULL
+                      AND {_not_private_knowledge_dependency("b")}
+                    WHERE c.id=? AND c.user_id=?""",  # nosec B608
                 (conflict_id, user_id),
             ).fetchone()
             if row is None:
@@ -2271,6 +2942,26 @@ class KnowledgeMixin(StorageShared):
         return self.get_knowledge_conflict(user_id, conflict_id)
 
     def resolve_conflict(
+        self,
+        user_id: str,
+        conflict_id: str,
+        winner_id: str,
+        *,
+        reviewed_by: str,
+        resolution_note: str = "",
+    ) -> dict[str, Any] | None:
+        """Resolve one conflict atomically against its current privacy boundary."""
+
+        with self.transaction():
+            return self._resolve_conflict_in_transaction(
+                user_id,
+                conflict_id,
+                winner_id,
+                reviewed_by=reviewed_by,
+                resolution_note=resolution_note,
+            )
+
+    def _resolve_conflict_in_transaction(
         self,
         user_id: str,
         conflict_id: str,
@@ -2389,24 +3080,52 @@ class KnowledgeMixin(StorageShared):
         entities = [
             dict(row)
             for row in self.execute(
-                """SELECT id, name, entity_type, aliases_json, metadata_json
-                   FROM entities
-                   WHERE user_id=? AND deleted_at IS NULL AND canonical=1
-                   ORDER BY name COLLATE NOCASE, id""",
+                f"""SELECT substr(e.id,1,160) AS id,
+                           substr(e.name,1,240) AS name,
+                           substr(e.entity_type,1,80) AS entity_type,
+                           CASE WHEN length(CAST(COALESCE(e.aliases_json,'') AS BLOB))
+                                          <={_ENTITY_CARD_TAGS_MAX_BYTES}
+                                     AND json_valid(e.aliases_json)
+                                     AND json_type(e.aliases_json)='array'
+                                THEN e.aliases_json ELSE '[]' END AS aliases_json,
+                           CASE WHEN length(CAST(COALESCE(e.metadata_json,'') AS BLOB))
+                                          <={_ENTITY_CARD_METADATA_MAX_BYTES}
+                                     AND json_valid(e.metadata_json)
+                                     AND json_type(e.metadata_json)='object'
+                                THEN e.metadata_json ELSE '{{}}' END AS metadata_json
+                   FROM entities e
+                   WHERE e.user_id=? AND e.deleted_at IS NULL AND e.canonical=1
+                     AND {_not_private_entity_material_dependency("e")}
+                   ORDER BY e.name COLLATE NOCASE, e.id""",  # nosec B608
                 (user_id,),
             )
         ]
         knowledge_by_entity: dict[str, set[str]] = {}
         for row in self.execute(
-            """SELECT entity_id, knowledge_object_id FROM knowledge_entity_links
-               WHERE user_id=? AND status='accepted'""",
+            f"""SELECT substr(l.entity_id,1,160) AS entity_id,
+                       substr(l.knowledge_object_id,1,160) AS knowledge_object_id
+                  FROM knowledge_entity_links l
+                  JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+                       AND {_not_private_entity_material_dependency("e")}
+                  JOIN knowledge_objects k
+                    ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
+                   AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                 WHERE l.user_id=? AND l.status='accepted'""",  # nosec B608
             (user_id,),
         ).fetchall():
             knowledge_by_entity.setdefault(str(row["entity_id"]), set()).add(str(row["knowledge_object_id"]))
         neighbours_by_entity: dict[str, set[str]] = {}
         for row in self.execute(
-            """SELECT source_entity_id, target_entity_id FROM relations
-               WHERE user_id=? AND deleted_at IS NULL""",
+            f"""SELECT substr(r.source_entity_id,1,160) AS source_entity_id,
+                       substr(r.target_entity_id,1,160) AS target_entity_id
+                  FROM relations r
+                  JOIN entities s ON s.id=r.source_entity_id AND s.user_id=r.user_id
+                       AND {_not_private_entity_material_dependency("s")}
+                  JOIN entities t ON t.id=r.target_entity_id AND t.user_id=r.user_id
+                       AND {_not_private_entity_material_dependency("t")}
+                 WHERE r.user_id=? AND r.deleted_at IS NULL
+                   AND {_not_private_relation_dependency("r")}""",  # nosec B608
             (user_id,),
         ).fetchall():
             source = str(row["source_entity_id"])
@@ -2548,10 +3267,9 @@ class KnowledgeMixin(StorageShared):
             # cheapest evidence (two adjacent characters) is what gets dropped, and
             # the fact that anything was dropped is a warning.
             LOGGER.warning(
-                "duplicate detection stopped at %d candidate pairs for tenant %s — "
+                "duplicate detection stopped at %d candidate pairs — "
                 "the proposal list is PARTIAL; weakest evidence was dropped first",
                 len(ordered),
-                user_id,
             )
 
         for left_index, right_index in ordered:
@@ -2754,6 +3472,17 @@ class KnowledgeMixin(StorageShared):
                         "acronym_match": acronym_match,
                         "shared_knowledge": round(shared_knowledge, 4),
                         "shared_graph_neighbours": round(shared_neighbours, 4),
+                        # Complete scoring inputs, not only the derived scalar.
+                        # A later quarantine can therefore invalidate this exact
+                        # proposal before it authorizes a merge.
+                        "knowledge_object_ids": sorted(
+                            knowledge_by_entity.get(str(left["id"]), set())
+                            | knowledge_by_entity.get(str(right["id"]), set())
+                        ),
+                        "graph_neighbour_entity_ids": sorted(
+                            neighbours_by_entity.get(str(left["id"]), set())
+                            | neighbours_by_entity.get(str(right["id"]), set())
+                        ),
                         "identifier_safe": not (left_data["identifier"] or right_data["identifier"]),
                     },
                 )
@@ -2814,9 +3543,10 @@ class KnowledgeMixin(StorageShared):
             cursor = 0
 
         rows = self.execute(
-            """SELECT rowid AS position, id, content FROM knowledge_objects
-               WHERE user_id=? AND deleted_at IS NULL AND rowid > ?
-               ORDER BY rowid LIMIT ?""",
+            f"""SELECT k.rowid AS position, k.id, k.content FROM knowledge_objects k
+               WHERE k.user_id=? AND k.deleted_at IS NULL AND k.rowid > ?
+                 AND {_not_private_knowledge_dependency("k")}
+               ORDER BY k.rowid LIMIT ?""",  # nosec B608
             (user_id, cursor, max(1, min(int(max_documents), 2000))),
         ).fetchall()
         if not rows:
@@ -2968,7 +3698,9 @@ class KnowledgeMixin(StorageShared):
         with self.transaction() as conn:
             for knowledge_id in unique_ids[:500]:
                 exists = conn.execute(
-                    "SELECT 1 FROM knowledge_objects WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                    f"""SELECT 1 FROM knowledge_objects k
+                         WHERE k.id=? AND k.user_id=? AND k.deleted_at IS NULL
+                           AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
                     (knowledge_id, user_id),
                 ).fetchone()
                 if not exists:
@@ -3006,8 +3738,12 @@ class KnowledgeMixin(StorageShared):
                 continue
             placeholders = ",".join("?" for _ in chunk)
             # The only interpolated fragment is a bounded sequence of ``?`` placeholders.
-            query = f"""SELECT * FROM knowledge_usage
-                    WHERE user_id=? AND knowledge_object_id IN ({placeholders})"""  # nosec B608
+            query = f"""SELECT u.* FROM knowledge_usage u
+                    JOIN knowledge_objects k
+                      ON k.id=u.knowledge_object_id AND k.user_id=u.user_id
+                     AND k.deleted_at IS NULL
+                     AND {_not_private_knowledge_dependency("k")}
+                    WHERE u.user_id=? AND u.knowledge_object_id IN ({placeholders})"""  # nosec B608
             rows = self.execute(query, (user_id, *chunk)).fetchall()
             output.update({str(row["knowledge_object_id"]): dict(row) for row in rows})
         return output
@@ -3061,6 +3797,9 @@ class KnowledgeMixin(StorageShared):
         """Условие «вектор отсутствует, чужой или устарел» — одно на выборку и счёт."""
         return (
             """k.deleted_at IS NULL
+                 AND """
+            + _not_private_knowledge_dependency("k")
+            + """
                  AND (e.knowledge_object_id IS NULL
                       OR e.model != ?
                       OR e.source_version != k.version
@@ -3110,14 +3849,17 @@ class KnowledgeMixin(StorageShared):
             "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
             "FROM knowledge_chunk_embeddings c "
             "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
-            "WHERE c.user_id = ? AND c.model = ? AND c.dim = ? AND k.deleted_at IS NULL"
+            "WHERE c.user_id = ? AND c.model = ? AND c.dim = ? AND k.deleted_at IS NULL "
+            f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
         )
         params: list[Any] = [user_id, model, int(dim)]
         if object_limit is not None and object_limit > 0:
             query += (
                 " AND c.knowledge_object_id IN ("
-                "SELECT id FROM knowledge_objects WHERE user_id = ? AND deleted_at IS NULL "
-                "ORDER BY created_at DESC LIMIT ?)"
+                "SELECT window_k.id FROM knowledge_objects window_k "
+                "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
+                "ORDER BY window_k.created_at DESC LIMIT ?)"
             )
             params.extend([user_id, int(object_limit)])
         query += " ORDER BY k.created_at DESC, c.knowledge_object_id, c.chunk_index"
@@ -3136,7 +3878,7 @@ class KnowledgeMixin(StorageShared):
     # Вердикту тело не нужно вовсе: он читает оценки, счётчики использования,
     # `content_type` и `metadata_json`. Интерфейс показывает `summary || content`
     # обрезанными до 160 символов — им и отдаём срез, а не весь документ.
-    _LIFECYCLE_SQL = """SELECT k.id, k.user_id, k.title, k.knowledge_kind, k.content_type,
+    _LIFECYCLE_SQL = f"""SELECT k.id, k.user_id, k.title, k.knowledge_kind, k.content_type,
                       k.metadata_json, k.importance, k.quality_score, k.promotion_score,
                       k.lifecycle_stage, k.created_at, k.updated_at,
                       substr(k.summary, 1, 400) AS summary,
@@ -3148,6 +3890,7 @@ class KnowledgeMixin(StorageShared):
                LEFT JOIN knowledge_usage u
                  ON u.user_id=k.user_id AND u.knowledge_object_id=k.id
                WHERE k.user_id=? AND k.lifecycle_stage='active' AND k.deleted_at IS NULL
+                 AND {_not_private_knowledge_dependency("k")}
                  AND datetime(k.updated_at) < datetime('now', ?)
                ORDER BY k.importance ASC, k.updated_at ASC, k.id ASC LIMIT ? OFFSET ?"""
 
@@ -3279,12 +4022,13 @@ class KnowledgeMixin(StorageShared):
         skipped: list[dict[str, str]] = []
         for ko_id in list(dict.fromkeys(str(item) for item in ids))[:1000]:
             row = self.execute(
-                """SELECT k.*, u.positive_feedback_count, u.negative_feedback_count,
+                f"""SELECT k.*, u.positive_feedback_count, u.negative_feedback_count,
                           u.last_retrieved_at, u.last_used_at
                    FROM knowledge_objects k
                    LEFT JOIN knowledge_usage u
                      ON u.user_id=k.user_id AND u.knowledge_object_id=k.id
-                   WHERE k.id=? AND k.user_id=?""",
+                   WHERE k.id=? AND k.user_id=?
+                     AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
                 (ko_id, user_id),
             ).fetchone()
             if row is None:
@@ -3309,8 +4053,9 @@ class KnowledgeMixin(StorageShared):
 
     def get_lifecycle_stats(self, user_id: str) -> dict[str, int]:
         rows = self.execute(
-            """SELECT lifecycle_stage, COUNT(*) AS count FROM knowledge_objects
-               WHERE user_id=? GROUP BY lifecycle_stage""",
+            f"""SELECT k.lifecycle_stage, COUNT(*) AS count FROM knowledge_objects k
+                 WHERE k.user_id=? AND {_not_private_knowledge_dependency("k")}
+                 GROUP BY k.lifecycle_stage""",  # nosec B608
             (user_id,),
         ).fetchall()
         result = {stage.value: 0 for stage in LifecycleStage}

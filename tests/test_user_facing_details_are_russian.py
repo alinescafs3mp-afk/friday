@@ -26,7 +26,10 @@ CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 # 43: срез 2026-07-31 при закрытии #54 — все динамические detail= в admin_api/api.
 # 49: три graph/as_of маршрута 2026-08-05 передают русскую ошибку единого
 # календарного валидатора; иначе API вернул бы 500 на пользовательскую дату.
-EXPECTED_DYNAMIC_DETAIL_SITES = 49
+# 51: пять known_at graph routes используют один allowlisted переводчик
+# RelationHistorySnapshotError. Он не отдаёт произвольный str(exc): наружу могут
+# выйти только русская категория и каноническая completeness boundary.
+EXPECTED_DYNAMIC_DETAIL_SITES = 51
 
 
 def _detail_sites() -> list[tuple[pathlib.Path, int, str, ast.AST]]:

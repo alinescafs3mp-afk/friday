@@ -17,6 +17,7 @@ from typing import Any
 
 from friday import __version__
 from friday.config import env as config_env
+from friday.private_fs import open_private_text_write
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -339,6 +340,7 @@ def _search_source(args: argparse.Namespace) -> int:
     settings = load_settings()
     ensure_runtime_dirs(settings)
     storage = init_storage(settings)
+
     try:
         user_id = args.user or LEGACY_OWNER_USER_ID
         items = storage.search_raw_objects(user_id, args.query, limit=args.limit)
@@ -1359,7 +1361,7 @@ def _retag_documents(args: argparse.Namespace) -> int:
             storage.close()
             return 2
     report_path = getattr(args, "report", None)
-    report_file = open(report_path, "w", encoding="utf-8") if report_path else None  # noqa: SIM115
+    report_file = open_private_text_write(Path(report_path)) if report_path else None
 
     seen = kinds_set = stale_removed = changed = asked = 0
     by_kind: dict[str, int] = {}
@@ -1558,6 +1560,7 @@ def _data_source(args: argparse.Namespace) -> int:
     settings = load_settings()
     ensure_runtime_dirs(settings)
     storage = init_storage(settings)
+
     action = str(getattr(args, "action", "list"))
     try:
         if action == "list":
@@ -1740,6 +1743,7 @@ def _backfill_relation_dates(args: argparse.Namespace) -> int:
         warn_if_service_holds_the_database(storage, action="проставлять даты связям")
 
     seen = dated = no_source = no_date = 0
+    updates: list[tuple[str, str, str]] = []
     try:
         rows = storage.execute(
             "SELECT id, user_id, metadata_json FROM relations "
@@ -1770,13 +1774,23 @@ def _backfill_relation_dates(args: argparse.Namespace) -> int:
                 continue
             dated += 1
             if apply_changes:
-                storage.execute(
-                    "UPDATE relations SET valid_from=? WHERE id=? AND user_id=?",
-                    (on_paper, str(row["id"]), str(row["user_id"])),
-                )
+                updates.append((on_paper, str(row["id"]), str(row["user_id"])))
         if apply_changes:
-            storage.commit()
-            storage.record_event("graph.relation_dates_backfilled", {"seen": seen, "dated": dated})
+            # One CLI invocation is one transaction-time fact. Per-row execute()
+            # used the trigger fallback, giving every row a different external
+            # timestamp and allowing an interrupted pass to commit a prefix later.
+            # The outer transaction makes every update share one precise batch and
+            # rolls current rows, revisions and the operational event back together.
+            with storage.transaction() as conn:
+                for on_paper, relation_id, user_id in updates:
+                    conn.execute(
+                        "UPDATE relations SET valid_from=? WHERE id=? AND user_id=?",
+                        (on_paper, relation_id, user_id),
+                    )
+                storage.record_event(
+                    "graph.relation_dates_backfilled",
+                    {"seen": seen, "dated": dated},
+                )
     finally:
         storage.close()
 
@@ -1824,7 +1838,7 @@ def _review_relation_candidates(args: argparse.Namespace) -> int:
     if apply_changes:
         warn_if_service_holds_the_database(storage, action="решать судьбу кандидатов")
     report_path = getattr(args, "report", None)
-    report_file = open(report_path, "w", encoding="utf-8") if report_path else None  # noqa: SIM115
+    report_file = open_private_text_write(Path(report_path)) if report_path else None
 
     def note(candidate: dict[str, Any], judged: dict[str, Any]) -> None:
         if report_file is None:
@@ -1930,14 +1944,20 @@ def _resolve_exact_duplicates(args: argparse.Namespace) -> int:
     apply_changes = bool(getattr(args, "apply", False))
     exact = versions = different = 0
     closed = 0
+    exact_rows: list[dict[str, Any]] = []
     try:
         rows = storage.execute(
             """SELECT h.id, h.user_id, h.knowledge_a_id a, h.knowledge_b_id b,
-                      ka.title ta, kb.title tb, ka.content ca, kb.content cb,
-                      ka.created_at da, kb.created_at db
+                      ka.title ta, kb.title tb, ka.content ca, kb.content cb
                FROM knowledge_conflicts h
-               JOIN knowledge_objects ka ON ka.id=h.knowledge_a_id
-               JOIN knowledge_objects kb ON kb.id=h.knowledge_b_id
+               JOIN knowledge_objects ka
+                 ON ka.id=h.knowledge_a_id AND ka.user_id=h.user_id
+               JOIN public_knowledge_dependencies public_a
+                 ON public_a.id=ka.id AND public_a.user_id=ka.user_id
+               JOIN knowledge_objects kb
+                 ON kb.id=h.knowledge_b_id AND kb.user_id=h.user_id
+               JOIN public_knowledge_dependencies public_b
+                 ON public_b.id=kb.id AND public_b.user_id=kb.user_id
                WHERE h.status='suggested' AND h.conflict_type='near_duplicate'"""
         ).fetchall()
         for row in rows:
@@ -1949,56 +1969,132 @@ def _resolve_exact_duplicates(args: argparse.Namespace) -> int:
                     different += 1
                 continue
             exact += 1
-            if not apply_changes:
-                continue
-            # Более ранняя ЖИВАЯ запись — победитель. Проигравшая становится
-            # `deprecated` штатным путём разрешения конфликта, а не удаляется:
-            # у неё остаётся собственный провенанс, и откат возможен.
-            #
-            # Живая — потому что копии образуют КЛАСТЕРЫ. Найдено на живом
-            # архиве: пять копий одного документа дают десять пар, и запись,
-            # проигравшая в первой паре, во второй оказывается «более ранней».
-            # Разрешение такой пары справедливо отвергается хранилищем («winner
-            # is already deprecated»), и проход падал на 55-й паре из 56.
-            owner = str(item["user_id"])
-            sides = sorted(
-                ((str(item["da"]), str(item["a"])), (str(item["db"]), str(item["b"]))),
-            )
-            alive = [
-                ko_id
-                for _when, ko_id in sides
-                if str((storage.get_knowledge_object(ko_id, owner) or {}).get("lifecycle_stage") or "")
-                != "deprecated"
-            ]
-            if not alive:
-                # Обе стороны уже погашены другими парами кластера — решать
-                # нечего, но и висеть в очереди пара не должна.
-                #
-                # Найдено на живом архиве, уже ПОСЛЕ первой правки: пропуск через
-                # `continue` оставлял такую пару в статусе `suggested` навсегда.
-                # Проход печатал «точных копий: 1» и закрывал ноль — вечный
-                # хвост, который человек всё равно не смог бы разобрать: обе
-                # записи погашены, выбирать не из чего.
-                if storage.review_knowledge_conflict(
-                    owner,
-                    str(item["id"]),
-                    "dismissed",
-                    reviewed_by="exact_duplicate_pass",
-                    resolution_note="обе записи уже погашены как копии в этом же кластере",
-                ):
-                    closed += 1
-                continue
-            try:
-                if storage.resolve_conflict(
-                    owner,
-                    str(item["id"]),
-                    alive[0],
-                    reviewed_by="exact_duplicate_pass",
-                    resolution_note="точная копия: извлечённый текст совпал знак в знак",
-                ):
-                    closed += 1
-            except Exception as error:  # noqa: BLE001 — одна пара не должна рвать проход
-                print(f"  {item['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+            exact_rows.append(item)
+
+        if apply_changes and exact_rows:
+            # Разрешаем не ПАРЫ по очереди, а компоненты точных копий. Три копии
+            # дают три пары; попарный проход успевал сделать c1 -> c2, затем c2
+            # -> c0. Такой промежуточный supersession скрывается fail-closed
+            # границей, и уже разрешённый конфликт нельзя даже прочитать. В одной
+            # компоненте все новые проигравшие сразу указывают на единственного
+            # самого раннего живого победителя: цепочек нет при любом порядке пар.
+            parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+            def root(node: tuple[str, str]) -> tuple[str, str]:
+                parent.setdefault(node, node)
+                while parent[node] != node:
+                    parent[node] = parent[parent[node]]
+                    node = parent[node]
+                return node
+
+            for item in exact_rows:
+                owner = str(item["user_id"])
+                left = (owner, str(item["a"]))
+                right = (owner, str(item["b"]))
+                left_root = root(left)
+                right_root = root(right)
+                if left_root != right_root:
+                    parent[right_root] = left_root
+
+            components: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for item in exact_rows:
+                key = root((str(item["user_id"]), str(item["a"])))
+                components.setdefault(key, []).append(item)
+
+            from friday.storage.models import utc_now
+
+            for component in components.values():
+                owner = str(component[0]["user_id"])
+                node_ids = {str(item[side]) for item in component for side in ("a", "b")}
+                current = {
+                    ko_id: record
+                    for ko_id in node_ids
+                    if (record := storage.get_knowledge_object(ko_id, owner)) is not None
+                }
+                # Generic readers may deliberately hide quarantined material. A
+                # maintenance pass must never turn that absence into permission to
+                # rewrite it, even though the local classification query has already
+                # compared the rows in-process.
+                if len(current) != len(node_ids) or any(row.get("deleted_at") for row in current.values()):
+                    continue
+                living = [
+                    ko_id
+                    for ko_id, row in current.items()
+                    if str(row.get("lifecycle_stage") or "") != "deprecated"
+                ]
+                try:
+                    component_closed = 0
+                    with storage.transaction():
+                        if living:
+                            winner_id = min(
+                                living,
+                                key=lambda ko_id: (
+                                    str(current[ko_id].get("created_at") or ""),
+                                    ko_id,
+                                ),
+                            )
+                            for loser_id in living:
+                                if loser_id == winner_id:
+                                    continue
+                                loser = current[loser_id]
+                                raw_metadata = loser.get("metadata_json")
+                                try:
+                                    metadata = (
+                                        json.loads(raw_metadata)
+                                        if isinstance(raw_metadata, str)
+                                        else dict(raw_metadata or {})
+                                    )
+                                except (TypeError, ValueError, json.JSONDecodeError):
+                                    metadata = {}
+                                if not isinstance(metadata, dict):
+                                    metadata = {}
+                                grounding = next(
+                                    item for item in component if loser_id in {str(item["a"]), str(item["b"])}
+                                )
+                                metadata["deprecated_by_conflict"] = {
+                                    "conflict_id": str(grounding["id"]),
+                                    "superseded_by": winner_id,
+                                    "at": utc_now(),
+                                }
+                                if (
+                                    storage.update_knowledge_fields(
+                                        loser_id,
+                                        owner,
+                                        lifecycle_stage="deprecated",
+                                        superseded_by_id=winner_id,
+                                        metadata_json=metadata,
+                                    )
+                                    is None
+                                ):
+                                    raise ValueError("exact-copy loser is no longer writable")
+                            status = "resolved"
+                            note = "точные копии сведены к самой ранней живой записи кластера"
+                        else:
+                            # Обе стороны уже погашены другими решениями. Ничего
+                            # не перепривязываем и не отменяем; лишь снимаем вечный
+                            # хвост очереди, в котором человеку выбирать уже не из
+                            # чего.
+                            status = "dismissed"
+                            note = "все записи кластера уже были погашены раньше"
+                        for item in component:
+                            if (
+                                storage.review_knowledge_conflict(
+                                    owner,
+                                    str(item["id"]),
+                                    status,
+                                    reviewed_by="exact_duplicate_pass",
+                                    resolution_note=note,
+                                )
+                                is None
+                            ):
+                                raise ValueError("exact-copy conflict is no longer reviewable")
+                            component_closed += 1
+                    closed += component_closed
+                except Exception as error:  # noqa: BLE001 — одна компонента не должна рвать проход
+                    print(
+                        f"  кластер точных копий: {type(error).__name__}",
+                        file=sys.stderr,
+                    )
         if apply_changes and closed:
             storage.record_event(
                 "knowledge.exact_duplicates_resolved",
@@ -2736,7 +2832,7 @@ def main() -> None:
     try:
         code = int(args.handler(args) or 0)
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
-        logging.getLogger(__name__).error("%s", exc)
+        logging.getLogger(__name__).error("CLI command failed (%s)", type(exc).__name__)
         code = 2
     raise SystemExit(code)
 

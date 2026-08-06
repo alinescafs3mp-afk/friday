@@ -581,10 +581,10 @@ class CallbacksMixin(BridgeShared):
                 clear_markup = True
             else:
                 raise PermanentUpdateError("Unknown callback action")
-        except PermanentUpdateError as exc:
+        except PermanentUpdateError:
             await self._answer_callback(telegram, callback_id, "Действие уже недоступно", alert=True)
             clear_markup = True
-            LOGGER.info("Telegram callback rejected: %s", exc)
+            LOGGER.info("Telegram callback rejected")
         finally:
             # A transport/backend outage is retryable. Keep the buttons visible
             # until the action succeeds or is known to be permanently invalid.
@@ -637,9 +637,9 @@ class CallbacksMixin(BridgeShared):
                 },
             )
             response.raise_for_status()
-        except Exception:
+        except Exception as exc:
             # Косметика: действие уже выполнено, перерисовка не стоит ретрая.
-            LOGGER.debug("Could not edit Telegram inline keyboard", exc_info=True)
+            LOGGER.debug("Could not edit Telegram inline keyboard (%s)", type(exc).__name__)
 
     @staticmethod
     def _citation_open_buttons(citations: Any) -> list[dict[str, str]]:
@@ -774,8 +774,8 @@ class CallbacksMixin(BridgeShared):
             return
         try:
             await self._send_voice(telegram, chat_id, audio_bytes)
-        except Exception:
-            LOGGER.warning("tts: sendVoice failed", exc_info=True)
+        except Exception as exc:
+            LOGGER.warning("tts: sendVoice failed (%s)", type(exc).__name__)
             return
         if voice.get("truncated"):
             # Ответ не поместился в клип целиком. Молчать об этом нельзя: рядом
@@ -826,8 +826,8 @@ class CallbacksMixin(BridgeShared):
                     payload,
                     mime_type=str(item.get("mime_type") or "application/octet-stream"),
                 )
-            except Exception:
-                LOGGER.warning("make_file: sendDocument не удался", exc_info=True)
+            except Exception as exc:
+                LOGGER.warning("make_file: sendDocument не удался (%s)", type(exc).__name__)
                 with suppress(Exception):
                     await self._send_message(
                         telegram,
@@ -863,8 +863,8 @@ class CallbacksMixin(BridgeShared):
                 json={"callback_query_id": callback_id, "text": text[:200], "show_alert": alert},
             )
             response.raise_for_status()
-        except Exception:
-            LOGGER.info("Could not answer Telegram callback query %s", callback_id, exc_info=True)
+        except Exception as exc:
+            LOGGER.info("Could not answer Telegram callback query (%s)", type(exc).__name__)
 
     async def _clear_inline_markup(
         self,
@@ -880,5 +880,5 @@ class CallbacksMixin(BridgeShared):
                 json={"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
             )
             response.raise_for_status()
-        except Exception:
-            LOGGER.debug("Could not clear Telegram inline keyboard", exc_info=True)
+        except Exception as exc:
+            LOGGER.debug("Could not clear Telegram inline keyboard (%s)", type(exc).__name__)

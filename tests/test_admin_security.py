@@ -146,7 +146,7 @@ def test_auth_failure_is_audited_without_leaking_the_secret(settings):
     from friday.server import create_app
 
     app = create_app(settings)
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 9000)) as client:
         rejected = client.get(
             "/api/admin/overview",
             headers={"Authorization": "Bearer wrong-token-9f8e7d6c5b4a"},
@@ -160,6 +160,6 @@ def test_auth_failure_is_audited_without_leaking_the_secret(settings):
         assert row is not None
         assert row["target_id"] == "invalid_credentials"
         assert row["user_id"] == "anonymous"
-        assert row["ip_address"]  # the IP is the key forensic datum
+        assert row["ip_address"] == "127.0.0.1"  # the IP is the key forensic datum
         # The attempted secret is never persisted.
         assert "wrong-token" not in (row["after_json"] or "")

@@ -374,7 +374,7 @@ def test_chunk_settings_default_and_off_switch(settings):
 # --- storage contract -----------------------------------------------------
 
 
-def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path):
+def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path, simulate_legacy_schema):
     database = tmp_path / "legacy-chunks.sqlite3"
     seed = FridayStorage(replace(settings, database_path=database))
     note = _make_ko(seed, "alice", "Мой пёс Рекс", title="Пёс", summary="Про пса")
@@ -397,7 +397,7 @@ def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path
     raw = sqlite3.connect(database)
     raw.execute("DROP TABLE knowledge_chunk_embeddings")
     raw.execute("ALTER TABLE knowledge_embeddings DROP COLUMN chunk_scheme")
-    raw.execute("UPDATE schema_meta SET value='15' WHERE key='schema_version'")
+    simulate_legacy_schema(raw, 15)
     raw.commit()
     raw.close()
 
@@ -416,7 +416,7 @@ def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path
         # назвать номер вслух. Забытый номер стоил 2026-08-04 поломки живого
         # маршрута — столбец добавили, а миграция без нового номера не
         # запускается вовсе.
-        assert version == SCHEMA_VERSION == 30
+        assert version == SCHEMA_VERSION == 32
         # The pre-existing vector survived and reads as "never chunked".
         row = migrated.execute(
             "SELECT chunk_scheme FROM knowledge_embeddings WHERE knowledge_object_id=?", (note["id"],)

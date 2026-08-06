@@ -18,6 +18,7 @@ import json
 import secrets
 from dataclasses import replace
 
+import httpx
 import pytest
 
 # --- зеркало бэкапов ------------------------------------------------------
@@ -364,7 +365,9 @@ async def test_web_search_fingerprint_reaches_the_audit_row(settings, storage):
     assert entries, "web_search left no audit row"
     after = json.loads(entries[0]["after_json"])
     assert after["reason"] == "ok"
-    assert after["query_sha256"] == hashlib.sha256(b"canary-query-xyz").hexdigest()
+    assert str(after["query_ref"]).startswith("fpref_")
+    assert after["query_ref"] != hashlib.sha256(b"canary-query-xyz").hexdigest()
+    assert "query_sha256" not in after
     assert after["max_results"] == 3
     assert "canary-query-xyz" not in entries[0]["after_json"]
 
@@ -397,7 +400,9 @@ async def test_a_refused_run_is_fingerprinted_too(settings, storage):
     assert entries, "the refusal was not recorded at all"
     after = json.loads(entries[0]["after_json"])
     assert after["reason"] == "disabled"
-    assert after["code_sha256"] == hashlib.sha256(b"print(1)").hexdigest()
+    assert str(after["code_ref"]).startswith("fpref_")
+    assert after["code_ref"] != hashlib.sha256(b"print(1)").hexdigest()
+    assert "code_sha256" not in after
 
 
 # --- общий бюджет на загрузку страницы ------------------------------------
@@ -434,3 +439,39 @@ async def test_a_drip_feeding_server_cannot_hold_a_connection(settings):
     assert result.error == "Timeout", (
         f"a blank error would be reported as «empty content» by /api/ingest/url: {result.error!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_exception_cannot_return_its_private_url(settings):
+    """httpx includes the request URL in ``str(exc)``; tool payloads must not."""
+
+    from friday.web_surfer import UnsafeURLError, WebSurfer
+
+    private = "FETCH-ERROR-SENTINEL-94bd31"
+    url = f"https://example.test/private/{private}?token={private}"
+    surfer = WebSurfer(replace(settings, web_allow_private_networks=True))
+
+    async def raises_httpx(requested):
+        request = httpx.Request("GET", requested)
+        raise httpx.ConnectError(f"private failure {private} at {requested}", request=request)
+
+    try:
+        surfer._request_bytes = raises_httpx  # noqa: SLF001
+        failed = await surfer.fetch(url)
+
+        async def raises_unsafe(_requested):
+            raise UnsafeURLError(f"private validation {private} at {url}")
+
+        # The robots result is cached from the first attempt, so this exception is
+        # raised by the actual page request rather than swallowed as robots failure.
+        surfer._request_bytes = raises_unsafe  # noqa: SLF001
+        blocked = await surfer.fetch(url)
+    finally:
+        await surfer.close()
+
+    for result in (failed, blocked):
+        encoded = json.dumps(result.to_dict(), ensure_ascii=False)
+        assert private not in encoded
+        assert "/private/" not in encoded and "token=" not in encoded
+    assert failed.error == "fetch_failed:ConnectError"
+    assert blocked.error == "blocked_url"

@@ -23,6 +23,7 @@ from friday.organs import (
     may_push_to,
     resolve_chat_id,
 )
+from friday.storage._graph import _bounded_visible_timeline_event_rows
 
 LOGGER = logging.getLogger(__name__)
 
@@ -84,7 +85,13 @@ async def scan_reminders(ctx: ServiceContext) -> None:
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
         tenant = archive_tenant(settings, user_id)
-        for event in ctx.storage.list_events_in_range(tenant, start=start, end=end):
+        for event in _bounded_visible_timeline_event_rows(
+            ctx.storage,
+            tenant,
+            user_id,
+            start=start,
+            end=end,
+        ):
             if not _belongs_to(event, person=user_id, tenant=tenant):
                 continue
             dedup_key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"

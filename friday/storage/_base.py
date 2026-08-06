@@ -32,6 +32,7 @@ from typing import Any
 
 from friday.config import FridaySettings
 from friday.morphology import stem_to_fixpoint as fold_russian_word
+from friday.private_fs import ensure_private_directory
 from friday.storage.models import (
     AuditEntry,
     Entity,
@@ -54,6 +55,62 @@ from friday.storage.models import (
     utc_now,
 )
 
+_AUDIT_GENERATED_ID_LOCATIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    "apr": (("action_approvals", "id"),),
+    "audit": (("audit_log", "id"),),
+    "cmp": (("day_compacts", "id"),),
+    "conf": (("knowledge_conflicts", "id"),),
+    "conv": (("conversations", "id"),),
+    "ent": (("entities", "id"),),
+    "entv": (("entity_versions", "id"),),
+    "er": (("entity_resolution_candidates", "id"),),
+    "eval": (("eval_cases", "id"),),
+    "evt": (("runtime_events", "id"),),
+    "fb": (("feedback", "id"),),
+    "feedback": (("feedback", "id"),),
+    "inbox": (("inbox", "id"),),
+    "kel": (("knowledge_entity_links", "id"),),
+    "ko": (("knowledge_objects", "id"),),
+    "kov": (("knowledge_object_versions", "id"),),
+    "merge": (("entity_merge_history", "id"),),
+    "mis": (("missions", "id"),),
+    "mon": (("monitors", "id"),),
+    "msg": (("messages", "id"),),
+    "msn": (("missions", "id"),),
+    "mtask": (("mission_tasks", "id"),),
+    "notif": (("outbound_notifications", "id"),),
+    "raw": (("raw_objects", "id"),),
+    "rel": (("relations", "id"),),
+    "relation_batch": (("relation_revisions", "batch_id"),),
+    "relc": (("relation_candidates", "id"),),
+    "tok": (("api_tokens", "id"),),
+}
+
+
+def audit_generated_id_exists(
+    execute: Callable[[str, tuple[Any, ...]], Any],
+    candidate: str,
+    prefixes: frozenset[str],
+) -> bool:
+    """Prove that a serialized generated ID already belongs to this database."""
+
+    prefix = candidate.rsplit("_", 1)[0]
+    if prefix not in prefixes:
+        return False
+    for table, column in _AUDIT_GENERATED_ID_LOCATIONS.get(prefix, ()):
+        # Table/column names come only from the closed constant above.
+        try:
+            row = execute(
+                f'SELECT 1 FROM "{table}" WHERE "{column}"=? LIMIT 1',  # nosec B608
+                (candidate,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            continue
+        if row is not None:
+            return True
+    return False
+
+
 # Named for the package, not this module: `__name__` here is "friday.storage._base", and
 # the split must not rename the logger operators already read in the logs.
 LOGGER = logging.getLogger("friday.storage")
@@ -67,7 +124,12 @@ LOGGER = logging.getLogger("friday.storage")
 # 30 — `uq_active_relation` теперь уникален только для ДЕЙСТВУЮЩЕГО интервала.
 # Завершённая связь остаётся историей и не должна запрещать новый период той же
 # пары/типа. Старый индекс пересоздаётся в `_retire_outdated_indexes`.
-SCHEMA_VERSION = 30
+# 31 — append-only transaction-time история relations. Mutable `relations`
+# остаётся быстрой текущей проекцией, а триггеры фиксируют каждое её состояние.
+# 32 — monotonic observed boundary и REPLACE/conflict guards для этой истории.
+# Это отдельный upgrade: выпущенную schema 31 нельзя молча чинить под тем же
+# marker, иначе current-schema fail-closed validator примет миграцию за tampering.
+SCHEMA_VERSION = 32
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно
@@ -395,6 +457,52 @@ CREATE TABLE IF NOT EXISTS relations (
     CHECK(source_entity_id <> target_entity_id)
 );
 
+-- Один контекст на соединение с БД в каждый момент. Внешняя transaction() ставит
+-- сюда общий timestamp/batch до relation DML и очищает перед тем же COMMIT. Пустой
+-- контекст оставляет триггерам честный fallback для одиночного внешнего SQL.
+-- observed_at — durable logical clock: уже выданный known_at и любой следующий
+-- graph/identity commit становятся нижней границей для всех будущих записей.
+CREATE TABLE IF NOT EXISTS relation_revision_context (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    batch_id TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL DEFAULT '',
+    observed_at TEXT NOT NULL,
+    CHECK(
+        (batch_id = '' AND recorded_at = '')
+        OR (batch_id <> '' AND recorded_at <> '')
+    ),
+    CHECK(observed_at <> '')
+);
+
+-- Каноническая append-only transaction-time история. Foreign keys здесь
+-- намеренно нет: DELETE текущей проекции или endpoint не имеет права стирать либо
+-- инвалидировать доказательство того, что система раньше считала правдой.
+CREATE TABLE IF NOT EXISTS relation_revisions (
+    event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    relation_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    present INTEGER NOT NULL CHECK(present IN (0, 1)),
+    operation TEXT NOT NULL
+        CHECK(operation IN ('insert', 'update', 'delete', 'migration_baseline')),
+    recorded_at TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    history_quality TEXT NOT NULL
+        CHECK(history_quality IN ('captured', 'migration_baseline')),
+    user_id TEXT NOT NULL,
+    source_entity_id TEXT NOT NULL,
+    target_entity_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    weight REAL NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,
+    invalidated_at TEXT,
+    superseded_by TEXT,
+    UNIQUE(relation_id, revision)
+);
+
 CREATE TABLE IF NOT EXISTS entity_resolution_candidates (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
@@ -529,6 +637,20 @@ BEGIN
     SELECT RAISE(ABORT, 'audit_log is append-only');
 END;
 
+-- Redacting a legacy audit trail is a two-phase privacy migration: the rows are
+-- rewritten first, then the old WAL is physically truncated.  While that
+-- checkpoint is pending, even an old process must not append a row that the
+-- retry path could accidentally certify as v3 without projecting it.
+CREATE TRIGGER IF NOT EXISTS audit_log_privacy_pending_no_insert
+BEFORE INSERT ON audit_log
+WHEN EXISTS (
+    SELECT 1 FROM schema_meta
+     WHERE key='audit_payload_privacy' AND value='pending_wal_truncate:v3'
+)
+BEGIN
+    SELECT RAISE(ABORT, 'audit privacy migration is pending');
+END;
+
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
@@ -659,6 +781,16 @@ CREATE TABLE IF NOT EXISTS entity_time (
     precision TEXT NOT NULL DEFAULT 'day',
     source TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
+);
+
+-- Durable classification for person-owned graph rows.  `entity_time.source`
+-- remains the scheduling provenance, but it can be replaced or lost when old
+-- event rows are merged; privacy classification must survive both operations.
+CREATE TABLE IF NOT EXISTS private_entity_owners (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+    person_id TEXT NOT NULL DEFAULT '',
+    privacy_kind TEXT NOT NULL CHECK(privacy_kind IN ('reminder')),
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS api_tokens (
@@ -931,6 +1063,9 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_pool_order
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_created
     ON knowledge_objects(user_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_raw ON knowledge_objects(raw_object_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_superseded_by
+    ON knowledge_objects(superseded_by_id)
+    WHERE superseded_by_id IS NOT NULL;
 -- Запасной путь `get_entity_knowledge` ищет объекты по прямой колонке `entity_id`,
 -- когда у сущности нет принятых связей. Индекса на неё не было, поэтому запрос
 -- сканировал ВСЕ объекты арендатора, вытаскивая `content` каждого. Замерено на
@@ -952,6 +1087,9 @@ CREATE INDEX IF NOT EXISTS idx_inbox_user_status ON inbox(user_id, status, creat
 -- Source search resolves each FTS hit to its inbox verdict; without this it is a
 -- scan of the whole inbox per hit.
 CREATE INDEX IF NOT EXISTS idx_inbox_raw_status ON inbox(raw_object_id, status);
+CREATE INDEX IF NOT EXISTS idx_inbox_knowledge
+    ON inbox(knowledge_object_id)
+    WHERE knowledge_object_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_inbox_user_action
     ON inbox(user_id, suggested_action, promotion_score DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entities_user_type ON entities(user_id, entity_type, normalized_name);
@@ -959,9 +1097,427 @@ CREATE INDEX IF NOT EXISTS idx_links_entity ON knowledge_entity_links(user_id, e
 CREATE INDEX IF NOT EXISTS idx_links_knowledge ON knowledge_entity_links(user_id, knowledge_object_id, status);
 CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(user_id, source_entity_id);
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(user_id, target_entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_versions_recorded_at
+    ON entity_versions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entity_merge_history_created_at
+    ON entity_merge_history(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entity_merge_history_undone_at
+    ON entity_merge_history(undone_at DESC)
+    WHERE undone_at IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_active_relation
     ON relations(user_id, source_entity_id, target_entity_id, relation_type)
     WHERE deleted_at IS NULL AND valid_to IS NULL;
+CREATE INDEX IF NOT EXISTS idx_relation_revisions_user_time
+    ON relation_revisions(user_id, recorded_at, relation_id, event_seq);
+CREATE INDEX IF NOT EXISTS idx_relation_revisions_source_time
+    ON relation_revisions(user_id, source_entity_id, recorded_at, relation_id, event_seq);
+CREATE INDEX IF NOT EXISTS idx_relation_revisions_target_time
+    ON relation_revisions(user_id, target_entity_id, recorded_at, relation_id, event_seq);
+
+-- INSERT текущей проекции становится первой captured-версией. `strftime` —
+-- fallback только для прямого SQL вне FridayStorage.transaction(); штатный путь
+-- берёт единый микросекундный timestamp и batch из singleton context. SQLite
+-- печатает миллисекунды, поэтому fallback сдвигает прошлую graph/history границу
+-- минимум на 1 ms: простой MAX с равенством изменил бы уже выданный known_at.
+CREATE TRIGGER IF NOT EXISTS relations_revision_ai
+AFTER INSERT ON relations
+BEGIN
+    INSERT INTO relation_revisions(
+        relation_id, revision, present, operation, recorded_at, batch_id,
+        history_quality, user_id, source_entity_id, target_entity_id,
+        relation_type, weight, metadata_json, created_at, deleted_at,
+        valid_from, valid_to, invalidated_at, superseded_by
+    ) VALUES(
+        NEW.id,
+        COALESCE((SELECT MAX(revision) + 1 FROM relation_revisions
+                  WHERE relation_id=NEW.id), 1),
+        1,
+        'insert',
+        COALESCE(
+            NULLIF((SELECT recorded_at FROM relation_revision_context WHERE singleton=1), ''),
+            MAX(
+                strftime('%Y-%m-%dT%H:%M:%f000Z', 'now'),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', recorded_at, '+0.001 seconds')
+                            FROM relation_revisions
+                           ORDER BY event_seq DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', created_at, '+0.001 seconds')
+                            FROM entity_versions
+                           ORDER BY created_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', created_at, '+0.001 seconds')
+                            FROM entity_merge_history
+                           ORDER BY created_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', undone_at, '+0.001 seconds')
+                            FROM entity_merge_history
+                           WHERE undone_at IS NOT NULL
+                           ORDER BY undone_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', observed_at, '+0.001 seconds')
+                            FROM relation_revision_context
+                           WHERE singleton=1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', value, '+0.001 seconds')
+                            FROM schema_meta
+                           WHERE key='relation_history_complete_from'), '')
+            )
+        ),
+        COALESCE(
+            NULLIF((SELECT batch_id FROM relation_revision_context WHERE singleton=1), ''),
+            'external:' || lower(hex(randomblob(16)))
+        ),
+        'captured',
+        NEW.user_id, NEW.source_entity_id, NEW.target_entity_id,
+        NEW.relation_type, NEW.weight, NEW.metadata_json, NEW.created_at,
+        NEW.deleted_at, NEW.valid_from, NEW.valid_to, NEW.invalidated_at,
+        NEW.superseded_by
+    );
+    UPDATE relation_revision_context
+       SET observed_at=(SELECT recorded_at FROM relation_revisions
+                         WHERE event_seq=last_insert_rowid())
+     WHERE singleton=1
+       AND observed_at < (SELECT recorded_at FROM relation_revisions
+                           WHERE event_seq=last_insert_rowid());
+END;
+
+-- ID и tenant-владелец — идентичность append-only линии, а не редактируемое
+-- содержимое. UPDATE id оставил бы OLD-линию present=1 без tombstone; UPDATE
+-- user_id переписал бы владение всей прошлой связи сегодняшним tenant. Endpoints
+-- здесь намеренно НЕ запрещены: merge/unmerge меняет их и capture хранит версии.
+CREATE TRIGGER IF NOT EXISTS relations_revision_identity_immutable
+BEFORE UPDATE OF id, user_id ON relations
+WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id
+BEGIN
+    SELECT RAISE(ABORT, 'relation id and user_id are immutable');
+END;
+
+-- REPLACE is not an UPDATE followed by our ordinary DELETE/INSERT capture.
+-- With recursive_triggers=OFF (SQLite's default), its conflict deletion does not
+-- run relations_revision_bd at all.  Refuse every INSERT that could displace a
+-- current row, and keep a resurrected relation on its original tenant lineage.
+-- A genuine unmerge remains legal: after a captured DELETE the current row is
+-- absent, the latest revision is a tombstone, and the owner is unchanged.
+CREATE TRIGGER IF NOT EXISTS relations_revision_insert_guard
+BEFORE INSERT ON relations
+BEGIN
+    -- unmerge_entities uses INSERT OR IGNORE to restore the exact snapshot that
+    -- a captured merge DELETE tombstoned.  If a later active row now owns that
+    -- unique tuple, preserve OR IGNORE semantics without opening a REPLACE hole:
+    -- RAISE(IGNORE) also turns a malicious OR REPLACE into a harmless no-op.
+    SELECT RAISE(IGNORE)
+    WHERE EXISTS (
+        SELECT 1
+        FROM relation_revisions AS tombstone
+        WHERE tombstone.relation_id=NEW.id
+          AND tombstone.revision=(
+              SELECT MAX(latest.revision)
+              FROM relation_revisions AS latest
+              WHERE latest.relation_id=NEW.id
+          )
+          AND tombstone.present=0
+          AND tombstone.user_id IS NEW.user_id
+          AND tombstone.source_entity_id IS NEW.source_entity_id
+          AND tombstone.target_entity_id IS NEW.target_entity_id
+          AND tombstone.relation_type IS NEW.relation_type
+          AND tombstone.weight IS NEW.weight
+          AND tombstone.metadata_json IS NEW.metadata_json
+          AND tombstone.created_at IS NEW.created_at
+          AND tombstone.deleted_at IS NEW.deleted_at
+          AND tombstone.valid_from IS NEW.valid_from
+          AND tombstone.valid_to IS NEW.valid_to
+          AND tombstone.invalidated_at IS NEW.invalidated_at
+          AND tombstone.superseded_by IS NEW.superseded_by
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM relations AS current
+        WHERE NEW.deleted_at IS NULL
+          AND NEW.valid_to IS NULL
+          AND current.deleted_at IS NULL
+          AND current.valid_to IS NULL
+          AND current.user_id IS NEW.user_id
+          AND current.source_entity_id IS NEW.source_entity_id
+          AND current.target_entity_id IS NEW.target_entity_id
+          AND current.relation_type IS NEW.relation_type
+    );
+
+    SELECT RAISE(ABORT, 'relation insert would replace current state or move identity')
+    WHERE EXISTS (
+        SELECT 1 FROM relations AS current WHERE current.id=NEW.id
+     )
+      OR EXISTS (
+        SELECT 1
+        FROM relations AS current
+        WHERE NEW.deleted_at IS NULL
+          AND NEW.valid_to IS NULL
+          AND current.deleted_at IS NULL
+          AND current.valid_to IS NULL
+          AND current.user_id IS NEW.user_id
+          AND current.source_entity_id IS NEW.source_entity_id
+          AND current.target_entity_id IS NEW.target_entity_id
+          AND current.relation_type IS NEW.relation_type
+     )
+      OR EXISTS (
+        SELECT 1
+        FROM relation_revisions AS history
+        WHERE history.relation_id=NEW.id
+          AND history.user_id IS NOT NEW.user_id
+     )
+      OR COALESCE((
+        SELECT latest.present
+        FROM relation_revisions AS latest
+        WHERE latest.relation_id=NEW.id
+        ORDER BY latest.revision DESC
+        LIMIT 1
+     ), 0)=1;
+END;
+
+-- UPDATE OR REPLACE can likewise delete the other row of the active partial
+-- unique key without firing its DELETE capture trigger.  Check the would-be
+-- projection before SQLite resolves the uniqueness conflict.
+CREATE TRIGGER IF NOT EXISTS relations_revision_update_conflict_guard
+BEFORE UPDATE OF user_id, source_entity_id, target_entity_id,
+                 relation_type, deleted_at, valid_to ON relations
+WHEN NEW.deleted_at IS NULL
+ AND NEW.valid_to IS NULL
+ AND EXISTS (
+     SELECT 1
+     FROM relations AS current
+     WHERE current.id IS NOT OLD.id
+       AND current.deleted_at IS NULL
+       AND current.valid_to IS NULL
+       AND current.user_id IS NEW.user_id
+       AND current.source_entity_id IS NEW.source_entity_id
+       AND current.target_entity_id IS NEW.target_entity_id
+       AND current.relation_type IS NEW.relation_type
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'relation update would replace an active relation');
+END;
+
+-- No-op UPDATE не создаёт вымышленной версии. Перечень намеренно охватывает
+-- КАЖДОЕ поле current projection: прямой SQL и будущий mutation path не могут
+-- обойти историю только потому, что их ещё не знал Python-код.
+CREATE TRIGGER IF NOT EXISTS relations_revision_au
+AFTER UPDATE ON relations
+WHEN OLD.id IS NOT NEW.id
+  OR OLD.user_id IS NOT NEW.user_id
+  OR OLD.source_entity_id IS NOT NEW.source_entity_id
+  OR OLD.target_entity_id IS NOT NEW.target_entity_id
+  OR OLD.relation_type IS NOT NEW.relation_type
+  OR OLD.weight IS NOT NEW.weight
+  OR OLD.metadata_json IS NOT NEW.metadata_json
+  OR OLD.created_at IS NOT NEW.created_at
+  OR OLD.deleted_at IS NOT NEW.deleted_at
+  OR OLD.valid_from IS NOT NEW.valid_from
+  OR OLD.valid_to IS NOT NEW.valid_to
+  OR OLD.invalidated_at IS NOT NEW.invalidated_at
+  OR OLD.superseded_by IS NOT NEW.superseded_by
+BEGIN
+    INSERT INTO relation_revisions(
+        relation_id, revision, present, operation, recorded_at, batch_id,
+        history_quality, user_id, source_entity_id, target_entity_id,
+        relation_type, weight, metadata_json, created_at, deleted_at,
+        valid_from, valid_to, invalidated_at, superseded_by
+    ) VALUES(
+        NEW.id,
+        COALESCE((SELECT MAX(revision) + 1 FROM relation_revisions
+                  WHERE relation_id=NEW.id), 1),
+        1,
+        'update',
+        COALESCE(
+            NULLIF((SELECT recorded_at FROM relation_revision_context WHERE singleton=1), ''),
+            MAX(
+                strftime('%Y-%m-%dT%H:%M:%f000Z', 'now'),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', recorded_at, '+0.001 seconds')
+                            FROM relation_revisions
+                           ORDER BY event_seq DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', created_at, '+0.001 seconds')
+                            FROM entity_versions
+                           ORDER BY created_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', created_at, '+0.001 seconds')
+                            FROM entity_merge_history
+                           ORDER BY created_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', undone_at, '+0.001 seconds')
+                            FROM entity_merge_history
+                           WHERE undone_at IS NOT NULL
+                           ORDER BY undone_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', observed_at, '+0.001 seconds')
+                            FROM relation_revision_context
+                           WHERE singleton=1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', value, '+0.001 seconds')
+                            FROM schema_meta
+                           WHERE key='relation_history_complete_from'), '')
+            )
+        ),
+        COALESCE(
+            NULLIF((SELECT batch_id FROM relation_revision_context WHERE singleton=1), ''),
+            'external:' || lower(hex(randomblob(16)))
+        ),
+        'captured',
+        NEW.user_id, NEW.source_entity_id, NEW.target_entity_id,
+        NEW.relation_type, NEW.weight, NEW.metadata_json, NEW.created_at,
+        NEW.deleted_at, NEW.valid_from, NEW.valid_to, NEW.invalidated_at,
+        NEW.superseded_by
+    );
+    UPDATE relation_revision_context
+       SET observed_at=(SELECT recorded_at FROM relation_revisions
+                         WHERE event_seq=last_insert_rowid())
+     WHERE singleton=1
+       AND observed_at < (SELECT recorded_at FROM relation_revisions
+                           WHERE event_seq=last_insert_rowid());
+END;
+
+-- DELETE оставляет полный OLD snapshot как present=0 tombstone. BEFORE нужен,
+-- чтобы снимок гарантированно существовал до исчезновения current projection.
+CREATE TRIGGER IF NOT EXISTS relations_revision_bd
+BEFORE DELETE ON relations
+BEGIN
+    INSERT INTO relation_revisions(
+        relation_id, revision, present, operation, recorded_at, batch_id,
+        history_quality, user_id, source_entity_id, target_entity_id,
+        relation_type, weight, metadata_json, created_at, deleted_at,
+        valid_from, valid_to, invalidated_at, superseded_by
+    ) VALUES(
+        OLD.id,
+        COALESCE((SELECT MAX(revision) + 1 FROM relation_revisions
+                  WHERE relation_id=OLD.id), 1),
+        0,
+        'delete',
+        COALESCE(
+            NULLIF((SELECT recorded_at FROM relation_revision_context WHERE singleton=1), ''),
+            MAX(
+                strftime('%Y-%m-%dT%H:%M:%f000Z', 'now'),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', recorded_at, '+0.001 seconds')
+                            FROM relation_revisions
+                           ORDER BY event_seq DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', created_at, '+0.001 seconds')
+                            FROM entity_versions
+                           ORDER BY created_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', created_at, '+0.001 seconds')
+                            FROM entity_merge_history
+                           ORDER BY created_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', undone_at, '+0.001 seconds')
+                            FROM entity_merge_history
+                           WHERE undone_at IS NOT NULL
+                           ORDER BY undone_at DESC, rowid DESC LIMIT 1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', observed_at, '+0.001 seconds')
+                            FROM relation_revision_context
+                           WHERE singleton=1), ''),
+                COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%f000Z', value, '+0.001 seconds')
+                            FROM schema_meta
+                           WHERE key='relation_history_complete_from'), '')
+            )
+        ),
+        COALESCE(
+            NULLIF((SELECT batch_id FROM relation_revision_context WHERE singleton=1), ''),
+            'external:' || lower(hex(randomblob(16)))
+        ),
+        'captured',
+        OLD.user_id, OLD.source_entity_id, OLD.target_entity_id,
+        OLD.relation_type, OLD.weight, OLD.metadata_json, OLD.created_at,
+        OLD.deleted_at, OLD.valid_from, OLD.valid_to, OLD.invalidated_at,
+        OLD.superseded_by
+    );
+    UPDATE relation_revision_context
+       SET observed_at=(SELECT recorded_at FROM relation_revisions
+                         WHERE event_seq=last_insert_rowid())
+     WHERE singleton=1
+       AND observed_at < (SELECT recorded_at FROM relation_revisions
+                           WHERE event_seq=last_insert_rowid());
+END;
+
+CREATE TRIGGER IF NOT EXISTS relation_revisions_append_only_update
+BEFORE UPDATE ON relation_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'relation revision history is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS relation_revisions_append_only_delete
+BEFORE DELETE ON relation_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'relation revision history is append-only');
+END;
+
+-- SQLite REPLACE технически является INSERT с последующим вытеснением строки и
+-- при выключенном recursive_triggers способен обойти обычный DELETE guard. Явно
+-- запрещаем конфликтующую вставку; новая уникальная revision от capture trigger
+-- по-прежнему разрешена.
+CREATE TRIGGER IF NOT EXISTS relation_revisions_append_only_replace
+BEFORE INSERT ON relation_revisions
+WHEN EXISTS (
+        SELECT 1 FROM relation_revisions WHERE event_seq=NEW.event_seq
+     )
+  OR EXISTS (
+        SELECT 1 FROM relation_revisions
+        WHERE relation_id=NEW.relation_id AND revision=NEW.revision
+     )
+BEGIN
+    SELECT RAISE(ABORT, 'relation revision history is append-only');
+END;
+
+-- observed_at — не кэш, а уже выданное читателю обещание. Оно может только
+-- расти: отдельный historical read двигает его в пустом context, а managed
+-- transaction атомарно ставит новый batch и тот же самый logical-clock instant.
+CREATE TRIGGER IF NOT EXISTS relation_revision_context_monotonic_update
+BEFORE UPDATE ON relation_revision_context
+WHEN NEW.singleton IS NOT OLD.singleton
+  OR NEW.observed_at < OLD.observed_at
+  OR (
+       NEW.observed_at IS NOT OLD.observed_at
+       AND NOT (
+           (OLD.batch_id='' AND OLD.recorded_at=''
+            AND NEW.batch_id='' AND NEW.recorded_at='')
+           OR (NEW.batch_id<>'' AND NEW.recorded_at=NEW.observed_at
+               AND NEW.observed_at>OLD.observed_at)
+       )
+  )
+BEGIN
+    SELECT RAISE(ABORT, 'relation history observed boundary is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS relation_revision_context_immutable_delete
+BEFORE DELETE ON relation_revision_context
+BEGIN
+    SELECT RAISE(ABORT, 'relation history observed boundary is immutable');
+END;
+
+-- Закрывает INSERT OR REPLACE при recursive_triggers=OFF. Первая строка
+-- создаётся только миграцией до установки trigger; второй singleton не бывает.
+CREATE TRIGGER IF NOT EXISTS relation_revision_context_singleton_insert
+BEFORE INSERT ON relation_revision_context
+WHEN EXISTS (SELECT 1 FROM relation_revision_context)
+BEGIN
+    SELECT RAISE(ABORT, 'relation history observed boundary is immutable');
+END;
+
+-- Исторический floor — обещание полноты, а не подвижная настройка. Разрешена
+-- только первая INSERT миграцией; последующая правка или удаление fail-closed.
+CREATE TRIGGER IF NOT EXISTS relation_history_floor_immutable_update
+BEFORE UPDATE ON schema_meta
+WHEN (OLD.key='relation_history_complete_from'
+      AND (NEW.key IS NOT OLD.key OR NEW.value IS NOT OLD.value
+           OR NEW.updated_at IS NOT OLD.updated_at))
+  OR (OLD.key IS NOT 'relation_history_complete_from'
+      AND NEW.key='relation_history_complete_from')
+BEGIN
+    SELECT RAISE(ABORT, 'relation history completeness floor is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS relation_history_floor_immutable_delete
+BEFORE DELETE ON schema_meta
+WHEN OLD.key='relation_history_complete_from'
+BEGIN
+    SELECT RAISE(ABORT, 'relation history completeness floor is immutable');
+END;
+
+-- То же закрывает INSERT OR REPLACE: SQLite не обещает вызвать DELETE trigger
+-- вытесняемой строки без recursive_triggers, но BEFORE INSERT вызывается всегда.
+CREATE TRIGGER IF NOT EXISTS relation_history_floor_immutable_insert
+BEFORE INSERT ON schema_meta
+WHEN NEW.key='relation_history_complete_from'
+ AND EXISTS (
+     SELECT 1 FROM schema_meta WHERE key='relation_history_complete_from'
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'relation history completeness floor is immutable');
+END;
 CREATE INDEX IF NOT EXISTS idx_resolution_status
     ON entity_resolution_candidates(user_id, status, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_target ON feedback(user_id, target_type, target_id);
@@ -1247,12 +1803,12 @@ def _chmod_private(path: Path) -> None:
     """Best-effort owner-only permissions; Windows ACLs remain operator-managed."""
     try:
         path.chmod(0o600)
-    except OSError:
-        LOGGER.warning("Could not restrict permissions on %s", path)
+    except OSError as exc:
+        LOGGER.warning("Could not restrict private file permissions (%s)", type(exc).__name__)
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(path.parent)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary = Path(temporary_name)
     try:
@@ -1276,7 +1832,7 @@ def _stage_private_copy(source: Path, destination: Path) -> Path:
     symlink and keeps the temporary file owner-only where the platform permits.
     """
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(destination.parent)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{destination.name}.restore-",
         suffix=".tmp",
@@ -1331,7 +1887,7 @@ def _write_recovery_bundle(
     hashes and an ``unverified`` manifest that normal restore discovery ignores.
     """
 
-    settings.backups_dir.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(settings.backups_dir)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     base = settings.backups_dir / f"recovery-{timestamp}-{_safe_filename(label)}"
     destination = base
@@ -1396,6 +1952,7 @@ class StorageShared:
     settings: FridaySettings
     execute: Callable[..., sqlite3.Cursor]
     transaction: Callable[..., Any]
+    _observe_relation_history_boundary: Callable[[str], None]
     close: Callable[..., None]
     conn: Any
     ensure_user: Callable[..., dict[str, Any]]
@@ -1410,6 +1967,8 @@ class StorageShared:
     count_entities: Callable[..., int]
     find_entities_by_normalized_names: Callable[..., list[dict[str, Any]]]
     get_knowledge_object: Callable[..., dict[str, Any] | None]
+    get_feedback_stats: Callable[..., dict[str, Any]]
+    count_feedback_state: Callable[..., int]
     list_eval_cases: Callable[..., list[dict[str, Any]]]
     eval_case_health: Callable[..., dict[str, Any]]
     _db_path: Path

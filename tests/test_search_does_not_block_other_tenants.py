@@ -56,7 +56,7 @@ async def test_lexical_rank_does_not_block_the_event_loop(settings, storage, mon
 
     Mutation: revert either `await run_blocking(self._lexical_rank, ...)`
     call site back to a direct `self._lexical_rank(...)` call — this test
-    must go red (one gap around 0.3s instead of every gap staying small).
+    must go red because the recorded worker id becomes the event-loop thread.
     """
     from friday.storage.models import KnowledgeObject, RawObject, new_id
 
@@ -85,8 +85,11 @@ async def test_lexical_rank_does_not_block_the_event_loop(settings, storage, mon
     searcher = HybridSearcher(storage)
 
     real_lexical_rank = searcher._lexical_rank
+    event_loop_thread = threading.get_ident()
+    lexical_threads: list[int] = []
 
     def _slow_lexical_rank(*args, **kwargs):
+        lexical_threads.append(threading.get_ident())
         time.sleep(0.3)
         return real_lexical_rank(*args, **kwargs)
 
@@ -124,9 +127,16 @@ async def test_lexical_rank_does_not_block_the_event_loop(settings, storage, mon
     assert len(tick_times) >= 5, f"only {len(tick_times)} ticks recorded — test setup is broken"
     gaps = [b - a for a, b in zip(tick_times, tick_times[1:], strict=False)]
     max_gap = max(gaps)
-    assert max_gap < 0.15, (
-        f"largest gap between ticker steps was {max_gap:.3f}s (expected ~0.01s) — "
-        "the event loop was blocked for a stretch, not freed for other coroutines"
+    assert lexical_threads and all(worker != event_loop_thread for worker in lexical_threads), (
+        "lexical ranking ran on the event-loop thread instead of run_blocking: "
+        f"loop={event_loop_thread}, workers={lexical_threads}"
+    )
+    # On the 24-worker canonical gate the OS may deschedule this whole pytest
+    # process while other workers consume every CPU. That is host contention,
+    # not an asyncio block; the thread-id assertion above distinguishes them.
+    assert max_gap < 0.75, (
+        f"largest gap between ticker steps was {max_gap:.3f}s — "
+        "even the offloaded path made no useful progress for too long"
     )
 
 

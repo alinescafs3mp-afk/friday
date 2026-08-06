@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from friday.diagnostics import collect_diagnostics
+from friday.id_provenance import mark_verified_id
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.purge import purge_knowledge
 from friday.storage import MAX_API_TOKEN_TTL_SECONDS, validate_user_id
@@ -144,7 +145,7 @@ def _audit(
             target_id=target_id,
             before_json=before,
             after_json=after,
-            ip_address=getattr(request.state, "client_ip", ""),
+            ip_address=getattr(request.state, "audit_ip", ""),
             request_id=getattr(request.state, "request_id", ""),
         )
     )
@@ -291,16 +292,15 @@ def _knowledge_fingerprint(item: dict[str, Any] | None) -> dict[str, Any] | None
     DELETE triggers `RAISE(ABORT)` — so whatever a route writes here is permanent
     beyond the reach of any later fix, purge or redaction. That makes the body of
     a personal note the last thing that belongs in it. What an investigation
-    needs is which object, how big it was, and what it was called; what it does
-    not need is the note itself.
+    needs is which object and how big it was; a title or account name is itself
+    low-entropy personal content and does not belong in an immutable table.
     """
     if not item:
         return None
     content = str(item.get("content") or "")
     return {
-        "id": item.get("id"),
-        "user_id": item.get("user_id"),
-        "title": str(item.get("title") or "")[:120],
+        "id": mark_verified_id(item.get("id")),
+        "title_chars": len(str(item.get("title") or "")),
         "knowledge_kind": item.get("knowledge_kind"),
         "lifecycle_stage": item.get("lifecycle_stage"),
         "version": item.get("version"),
