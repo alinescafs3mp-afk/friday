@@ -1,8 +1,8 @@
 """Review policy honours the prompt's "Inbox before canonical" invariant.
 
-By default (`assessed`) a promote-class assessment creates a canonical Knowledge
-Object immediately. With `unless_explicit`, heuristic auto-promotion of substantial
-material is instead queued as a pending Inbox suggestion — but explicit saves
+By default (`unless_explicit`), heuristic auto-promotion of substantial material
+is queued as a pending Inbox suggestion. Explicit `assessed` compatibility mode
+still creates a canonical Knowledge Object immediately, while explicit saves
 (/note, "запомни", force_knowledge) still promote directly, since the user already
 decided. These tests pin both behaviours and the idempotent replay path.
 
@@ -27,6 +27,10 @@ def _strict(settings):
     return dataclasses.replace(settings, ingestion_review_policy="unless_explicit")
 
 
+def _assessed(settings):
+    return dataclasses.replace(settings, ingestion_review_policy="assessed")
+
+
 @pytest.mark.asyncio
 async def test_strict_review_downgrades_auto_promotion_to_inbox(settings, storage):
     pipeline = IngestionPipeline(_strict(settings), storage, KnowledgeGraph(storage))
@@ -44,32 +48,32 @@ async def test_strict_review_downgrades_auto_promotion_to_inbox(settings, storag
 
 
 @pytest.mark.asyncio
-async def test_strict_review_still_honours_explicit_saves(settings, storage):
+@pytest.mark.parametrize(
+    ("content", "force_knowledge"),
+    [
+        ("Запомни: синтетический проект Alpha использует PostgreSQL 16.", False),
+        ("Синтетическая инфраструктурная заметка о кластере Beta.", True),
+    ],
+    ids=("explicit-remember", "force-knowledge-note"),
+)
+async def test_strict_review_still_honours_explicit_saves(settings, storage, content, force_knowledge):
     pipeline = IngestionPipeline(_strict(settings), storage, KnowledgeGraph(storage))
 
-    explicit = await pipeline.ingest_text(
+    result = await pipeline.ingest_text(
         "alice",
-        "Можешь запомнить, что проект Alpha использует PostgreSQL 16?",
-        source_ref="strict-explicit:1",
+        content,
+        source_ref=f"strict-explicit:{int(force_knowledge)}",
+        force_knowledge=force_knowledge,
     )
-    assert explicit["action"] == "promote"
-    assert explicit["promoted"] is True
+    assert result["action"] == "promote"
+    assert result["promoted"] is True
 
-    note = await pipeline.ingest_text(
-        "alice",
-        "Инфраструктурная заметка про кластер Beta.",
-        source_ref="strict-note:1",
-        force_knowledge=True,
-    )
-    assert note["action"] == "promote"
-    assert note["promoted"] is True
-
-    assert storage.count_knowledge_objects("alice") == 2
+    assert storage.count_knowledge_objects("alice") == 1
 
 
 @pytest.mark.asyncio
-async def test_default_mode_auto_promotes_without_review(settings, storage):
-    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+async def test_assessed_compatibility_mode_auto_promotes_without_review(settings, storage):
+    pipeline = IngestionPipeline(_assessed(settings), storage, KnowledgeGraph(storage))
     result = await pipeline.ingest_text("alice", _AUTO_PROMOTE_FACT, source_ref="default-fact:1")
     assert result["action"] == "promote"
     assert result["promoted"] is True

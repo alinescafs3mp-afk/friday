@@ -379,6 +379,32 @@ async def test_location_message_becomes_a_text_note(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_note_command_marks_the_turn_as_an_explicit_save(tmp_path):
+    """`/note` survives the safe review default by sending force_knowledge."""
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient({"/api/chat": {"message": "Готово"}})
+    update = {
+        "update_id": 203,
+        "message": {
+            "message_id": 8,
+            "chat": {"id": 5001},
+            "from": {"id": 1001},
+            "text": "/note синтетическая заметка о тестовом кластере",
+        },
+    }
+    try:
+        await bridge._process_update(telegram, backend, update, cached_response=None)
+        chat_calls = [call for call in backend.calls if call["path"] == "/api/chat"]
+        assert len(chat_calls) == 1
+        body = chat_calls[0]["body"]
+        assert body["message"] == "синтетическая заметка о тестовом кластере"
+        assert body["force_knowledge"] is True
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_unsupported_sticker_gets_a_reply_not_silent_drop(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()

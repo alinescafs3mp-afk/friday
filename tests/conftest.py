@@ -58,6 +58,10 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FRIDAY_EMBEDDINGS_ENABLED", "0")
     monkeypatch.setenv("FRIDAY_WORKERS_ENABLED", "0")
     monkeypatch.setenv("FRIDAY_CODE_EXECUTION_ENABLED", "0")
+    # Большинство тестов закрепляет прежнее автопродвижение, а не
+    # новое privacy-умолчание. Называем режим совместимости явно, чтобы смена
+    # production-умолчания не переписала молча тысячи несвязанных сценариев.
+    monkeypatch.setenv("FRIDAY_INGESTION_REVIEW_POLICY", "assessed")
     # Темп индексации существует, чтобы не насыщать ЧУЖОЙ сервис эмбеддингов. В
     # тестах бэкенд подставной и отвечает мгновенно, насыщать нечего — а под
     # нагрузкой полного прогона тик изредка переваливал за порог работы, назначал

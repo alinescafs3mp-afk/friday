@@ -29,7 +29,7 @@ from friday.agent_runtime._office_attachments import (
     trusted_office_attachment,
     validate_runtime_office_index,
 )
-from friday.agent_runtime.llm import LLMRouter, _strip_tool_call_markup
+from friday.agent_runtime.llm import CLASSIFIER_MAX_TOKENS, LLMRouter, _strip_tool_call_markup
 from friday.agent_runtime.tool_protocol import (
     ToolTurn,
     classify_tool_turn,
@@ -5833,6 +5833,7 @@ class AgentRuntime:
                     {"role": "user", "content": message[:600]},
                 ],
                 tools=[],
+                max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Standing-rule check failed (%s)", type(exc).__name__)
@@ -5904,6 +5905,7 @@ class AgentRuntime:
                 tools=[],
                 temperature=0.0,
                 priority="foreground",
+                max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — разбор остатка не должен ронять ход
             LOGGER.warning("remainder: разбор не удался (%s)", type(exc).__name__)
@@ -6311,6 +6313,7 @@ class AgentRuntime:
                 tools=[],
                 temperature=0.0,
                 priority="foreground",
+                max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — разбор не должен ронять ход
             LOGGER.warning("reminder-prefetch: разбор не удался (%s)", type(exc).__name__)
@@ -6965,6 +6968,7 @@ class AgentRuntime:
                     {"role": "user", "content": message[:400]},
                 ],
                 tools=[],
+                max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Intent check failed (%s)", type(exc).__name__)
@@ -7246,6 +7250,7 @@ class AgentRuntime:
                     },
                 ],
                 tools=[],
+                max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Small-talk check failed (%s)", type(exc).__name__)
@@ -7499,6 +7504,7 @@ class AgentRuntime:
                     {"role": "user", "content": message[:600]},
                 ],
                 tools=[],
+                max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Web intent check failed (%s)", type(exc).__name__)

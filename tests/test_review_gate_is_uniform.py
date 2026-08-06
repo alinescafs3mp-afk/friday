@@ -19,13 +19,18 @@ docx». Замер на стенде: 342 документа из 344 стали
 from __future__ import annotations
 
 import ast
+import base64
 import dataclasses
+import json
 import pathlib
+import time
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
 from friday.config import REVIEW_POLICIES
+from friday.security import sign_bridge_request
 from friday.server import create_app
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -51,6 +56,31 @@ def _me(client, headers) -> str:
     return client.get("/api/admin/users", headers=headers).json()["items"][0]["id"]
 
 
+def _telegram_post(client, settings, payload: dict) -> object:
+    path = "/api/chat"
+    body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    timestamp = int(time.time())
+    nonce = uuid.uuid4().hex
+    headers = {
+        "Content-Type": "application/json",
+        "X-Friday-Timestamp": str(timestamp),
+        "X-Friday-User": "5001",
+        "X-Friday-Chat": "5001",
+        "X-Friday-Nonce": nonce,
+        "X-Friday-Signature": sign_bridge_request(
+            settings.telegram_bridge_secret,
+            timestamp=timestamp,
+            method="POST",
+            path=path,
+            external_user_id="5001",
+            chat_id="5001",
+            nonce=nonce,
+            body=body,
+        ),
+    }
+    return client.post(path, content=body, headers=headers)
+
+
 # --- матрица: точка входа × политика ---------------------------------------
 
 
@@ -70,8 +100,8 @@ def test_pasted_text_follows_the_policy(settings, policy):
 
 
 @pytest.mark.parametrize("policy", REVIEW_POLICIES)
-def test_an_uploaded_file_follows_the_same_policy(settings, policy):
-    """Тот самый случай. Файл — явное ДЕЙСТВИЕ, но не высказывание о содержимом.
+def test_telegram_attachment_and_direct_upload_follow_the_same_policy(settings, policy):
+    """Обе дороги файла обязаны дать один и тот же ответ политики.
 
     Файл обязан нести извлекаемый текст: без него ветка `not
     extraction_succeeded` отправит его в Inbox при любой политике, и тест
@@ -80,18 +110,49 @@ def test_an_uploaded_file_follows_the_same_policy(settings, policy):
     app = _client(settings, policy)
     with TestClient(app) as client:
         headers = _owner(settings)
-        user_id = _me(client, headers)
-        response = client.post(
+
+        async def capture_chat(user_id: str, *args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+            conversation = app.state.storage.create_conversation(user_id, "synthetic review policy")
+            return {"conversation_id": conversation["id"], "content": "ok"}
+
+        app.state.agent.chat = capture_chat
+        direct = client.post(
             "/api/files",
-            files={"file": ("заметка.txt", FACT.encode("utf-8"), "text/plain")},
+            files={"file": ("direct-policy.txt", FACT.encode("utf-8"), "text/plain")},
             headers=headers,
         )
-        assert response.status_code == 200, response.text
+        assert direct.status_code == 200, direct.text
 
-        promoted = _knowledge_count(app, user_id) > 0
-        assert promoted is (policy == "assessed"), (
-            f"политика {policy}: загруженный файл {'продвинулся' if promoted else 'ушёл в Inbox'}"
+        telegram = _telegram_post(
+            client,
+            settings,
+            {
+                "message": "Что написано в синтетическом файле?",
+                "source_ref": "telegram-review-policy:1",
+                "telegram_message_id": 1,
+                "telegram_user": {"id": 5001},
+                "document": {
+                    "filename": "telegram-policy.txt",
+                    "mime_type": "text/plain",
+                    "content_base64": base64.b64encode(FACT.encode("utf-8")).decode("ascii"),
+                },
+            },
         )
+        assert telegram.status_code == 200, telegram.text
+
+        direct_result = direct.json()
+        telegram_result = telegram.json()["file_ingestion"]
+        expected_promotion = policy == "assessed"
+        assert direct_result["promoted"] is expected_promotion
+        assert telegram_result["promoted"] is expected_promotion
+        assert direct_result["queued_for_review"] is telegram_result["queued_for_review"]
+        if not expected_promotion:
+            assert direct_result["queued_for_review"] is True
+
+        total_knowledge = app.state.storage.execute(
+            "SELECT COUNT(*) FROM knowledge_objects WHERE deleted_at IS NULL"
+        ).fetchone()[0]
+        assert total_knowledge == (2 if expected_promotion else 0)
 
 
 @pytest.mark.parametrize("policy", REVIEW_POLICIES)
@@ -142,7 +203,19 @@ def test_an_unknown_policy_is_refused_by_name(monkeypatch):
 
     monkeypatch.setenv("FRIDAY_INGESTION_REVIEW_POLICY", "строго")
     with pytest.raises(ValueError, match="Unknown FRIDAY_INGESTION_REVIEW_POLICY"):
-        _choice_env("FRIDAY_INGESTION_REVIEW_POLICY", "assessed", REVIEW_POLICIES)
+        _choice_env("FRIDAY_INGESTION_REVIEW_POLICY", "unless_explicit", REVIEW_POLICIES)
+
+
+def test_clean_environment_defaults_to_review_unless_explicit(tmp_path, monkeypatch):
+    """Новая установка не должна канонизировать материал без человека."""
+    from friday.config import load_settings
+
+    monkeypatch.setenv("FRIDAY_ENV_FILE", str(tmp_path / "missing.env"))
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "clean-home"))
+    monkeypatch.delenv("FRIDAY_INGESTION_REVIEW_POLICY", raising=False)
+    monkeypatch.delenv("JERICHO_INGESTION_REVIEW_POLICY", raising=False)
+
+    assert load_settings().ingestion_review_policy == "unless_explicit"
 
 
 # --- структурный переучёт --------------------------------------------------

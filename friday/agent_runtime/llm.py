@@ -22,9 +22,36 @@ CHARS_PER_TOKEN = 4
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0
 RETRY_MAX_DELAY = 30.0
+#: Short semantic classifiers return a label or one bounded JSON object, not a
+#: user-facing answer.  Letting them inherit the normal 2048-token answer budget
+#: turns one malformed verdict into a full generation and, with non-streaming
+#: HTTP, into a caller that sees no bytes until the global read timeout.  The
+#: verifier deliberately keeps its own larger explicit budget; this ceiling is
+#: only for classifier call sites.
+CLASSIFIER_MAX_TOKENS = 256
 _CONTEXT_SAFETY_TOKENS = 256
 _TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 _TRUNCATION_MARKER = "\n… [контекст сокращён Friday] …\n"
+
+
+async def _await_http_request(request: Any) -> httpx.Response:
+    """Await one HTTP request and drain its cancellation before returning.
+
+    Cancelling the caller already propagates into ``httpx``.  Keeping the
+    request in an explicit task adds the other half of the contract: cancellation
+    is awaited to completion before the surrounding ``AsyncClient`` closes, so
+    no local request coroutine survives the failed chat call.  A remote server
+    may still ignore a disconnected client; only that server can guarantee its
+    own generation is aborted.
+    """
+
+    request_task = asyncio.create_task(request)
+    try:
+        return await request_task
+    except asyncio.CancelledError:
+        request_task.cancel()
+        await asyncio.gather(request_task, return_exceptions=True)
+        raise
 
 
 def _system_first(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -494,7 +521,9 @@ class LLMRouter:
                 async with httpx.AsyncClient(
                     timeout=timeout, trust_env=False, headers=self._auth_headers()
                 ) as client:
-                    response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+                    response = await _await_http_request(
+                        client.post(f"{self.base_url}/chat/completions", json=payload)
+                    )
                     if (
                         response.status_code == 400
                         and payload.get("tools")
@@ -522,7 +551,9 @@ class LLMRouter:
                             for key, value in payload.items()
                             if key not in {"tools", "tool_choice"}
                         }
-                        response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+                        response = await _await_http_request(
+                            client.post(f"{self.base_url}/chat/completions", json=payload)
+                        )
                     response.raise_for_status()
                     data = response.json()
                 choices = data.get("choices") if isinstance(data, dict) else None

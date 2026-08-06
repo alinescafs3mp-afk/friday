@@ -252,12 +252,13 @@ class RuntimeProfile:
 
 # Кто попадает в Inbox до того, как стать каноническим знанием.
 #
-# `assessed`       — решает классификатор: что он счёл достойным продвижения, то и
-#                    продвигается. Так система вела себя всегда.
 # `unless_explicit` — прямое продвижение остаётся только у явного намерения
 #                    (`/note`, «запомни», `force_knowledge`); всё остальное ждёт
-#                    решения человека. Загрузка файла — явное ДЕЙСТВИЕ, но не
-#                    высказывание о содержимом, поэтому файлы сюда тоже попадают.
+#                    решения человека. Это безопасное поведение по умолчанию. Загрузка
+#                    файла — явное ДЕЙСТВИЕ, но не высказывание о содержимом,
+#                    поэтому файлы сюда тоже попадают.
+# `assessed`        — явный режим совместимости: решает классификатор, и его `promote`
+#                    сразу становится каноническим знанием.
 # `always`         — не продвигается ничто, включая явные сохранения.
 #
 # `force_review` у отдельного вызова — пол, а не альтернатива: политика может
@@ -870,7 +871,9 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         tts_download_root=env("FRIDAY_TTS_DOWNLOAD_ROOT", ""),
         purge_retention_days=_int_env("FRIDAY_PURGE_RETENTION_DAYS", 30, minimum=0),
         backup_keep=_int_env("FRIDAY_BACKUP_KEEP", 14, minimum=0),
-        ingestion_review_policy=_choice_env("FRIDAY_INGESTION_REVIEW_POLICY", "assessed", REVIEW_POLICIES),
+        ingestion_review_policy=_choice_env(
+            "FRIDAY_INGESTION_REVIEW_POLICY", "unless_explicit", REVIEW_POLICIES
+        ),
         graph_max_depth=_int_env("FRIDAY_GRAPH_MAX_DEPTH", 2, minimum=1),
         retrieval_pool_max=_int_env("FRIDAY_RETRIEVAL_POOL_MAX", 400, minimum=10),
         # 0.35 перемерено на честном индексе — см. `_DENSE_EVIDENCE_MIN_DEFAULT` в

@@ -168,11 +168,12 @@ FRIDAY_BACKUP_MIRROR_DIR=
 # `jericho backup-keygen`; keep a copy of the key SEPARATE from the mirror.
 FRIDAY_BACKUP_ENCRYPTION_KEY_FILE=
 # Что попадает в Inbox, прежде чем стать каноническим знанием:
-#   assessed        — решает классификатор (как было всегда)
-#   unless_explicit — прямо продвигается только явное сохранение (/note, «запомни»),
-#                     всё остальное, включая загруженные файлы, ждёт человека
+#   unless_explicit — безопасное умолчание: прямо продвигается только явное
+#                     сохранение (/note, «запомни»); всё остальное, включая файлы,
+#                     ждёт человека
+#   assessed        — явный режим совместимости: `promote` канонизируется сразу
 #   always          — не продвигается ничто
-FRIDAY_INGESTION_REVIEW_POLICY=assessed
+FRIDAY_INGESTION_REVIEW_POLICY=unless_explicit
 # Max graph-traversal depth for relational queries (hard safety ceiling 4).
 FRIDAY_GRAPH_MAX_DEPTH=2
 
