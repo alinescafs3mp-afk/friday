@@ -511,7 +511,14 @@ class OversightMixin(StorageShared):
             result["volume"] = volume
 
         if "change" in wanted:
-            result["change"] = self._change(user_id, since, until, top=top, include_content=include_content)
+            result["change"] = self._change(
+                user_id,
+                since,
+                until,
+                top=top,
+                include_content=include_content,
+                uploaded_by=uploaded_by,
+            )
 
         return result
 
@@ -523,6 +530,7 @@ class OversightMixin(StorageShared):
         *,
         top: int,
         include_content: bool = True,
+        uploaded_by: str = "",
     ) -> dict[str, Any]:
         """Это окно против предыдущего такой же длины — одним запросом, не вычитанием.
 
@@ -539,15 +547,20 @@ class OversightMixin(StorageShared):
         # ISO stamps compare as strings, so an open end is the string that sorts
         # after every timestamp this schema can hold.
         end = until or "9999"
+        where, params = self._arrival_window(
+            user_id,
+            previous_since,
+            end,
+            alias="r",
+            uploaded_by=uploaded_by or None,
+        )
 
         totals = self.execute(
             f"""SELECT SUM(CASE WHEN r.received_at >= ? THEN 1 ELSE 0 END) AS now,
                       SUM(CASE WHEN r.received_at < ? THEN 1 ELSE 0 END) AS before
                FROM raw_objects r
-               WHERE r.user_id=? AND r.deleted_at IS NULL
-                 AND {_not_private_raw_dependency("r")}
-                 AND r.received_at >= ? AND r.received_at <= ?""",  # nosec B608
-            (since, since, user_id, previous_since, end),
+               WHERE {where}""",  # nosec B608
+            (since, since, *params),
         ).fetchone()
 
         topics = (
@@ -561,11 +574,9 @@ class OversightMixin(StorageShared):
                    JOIN inbox i ON i.raw_object_id=r.id AND i.user_id=r.user_id
                         AND {_not_private_inbox_dependency("i")}
                    JOIN json_each(i.suggested_tags_json) AS tag
-                   WHERE r.user_id=? AND r.deleted_at IS NULL
-                     AND {_not_private_raw_dependency("r")}
-                     AND r.received_at >= ? AND r.received_at <= ? AND tag.value <> ''
+                   WHERE {where} AND tag.value <> ''
                    GROUP BY topic ORDER BY (now - before) DESC, topic ASC""",  # nosec B608
-                    (since, since, user_id, previous_since, end),
+                    (since, since, *params),
                 ).fetchall()
             ]
             if include_content

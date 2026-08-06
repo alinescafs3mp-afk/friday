@@ -25,18 +25,25 @@ import hashlib
 
 import pytest
 
-from friday.storage.models import RawObject, new_id
+from friday.storage.models import InboxItem, RawObject, new_id
 
 TENANT = "tenant"
 IVAN = "person-ivan"
 PETR = "person-petr"
 
 
-def _arrival(storage, *, uploaded_by: str | None, text: str) -> None:
+def _arrival(
+    storage,
+    *,
+    uploaded_by: str | None,
+    text: str,
+    received_at: str | None = None,
+    tags: tuple[str, ...] = (),
+) -> None:
     metadata: dict = {"filename": f"{text}.pdf"}
     if uploaded_by is not None:
         metadata["uploaded_by"] = uploaded_by
-    storage.store_raw_object(
+    raw = storage.store_raw_object(
         RawObject(
             id=new_id("raw"),
             user_id=TENANT,
@@ -46,8 +53,19 @@ def _arrival(storage, *, uploaded_by: str | None, text: str) -> None:
             content_type="file",
             content_hash=hashlib.sha256(text.encode()).hexdigest(),
             metadata_json=metadata,
+            **({"received_at": received_at, "created_at": received_at} if received_at else {}),
         )
     )
+    if tags:
+        storage.store_inbox_item(
+            InboxItem(
+                id=new_id("inbox"),
+                user_id=TENANT,
+                raw_object_id=raw.id,
+                suggested_tags_json=list(tags),
+                **({"created_at": received_at} if received_at else {}),
+            )
+        )
 
 
 @pytest.fixture
@@ -93,6 +111,85 @@ def test_the_analysis_counts_the_same_set(archive):
 
     volume = analysis.get("volume") or {}
     assert int(volume.get("arrivals") or volume.get("count") or 0) == 2, analysis
+
+
+@pytest.mark.parametrize("include_content", [True, False])
+def test_change_compares_only_the_requested_authors_arrivals(storage, include_content):
+    """The two-period branch must keep the same author scope as every other slice.
+
+    Mutation: remove ``uploaded_by`` from the call to ``_change``.  Both arrival
+    counts become 3 and, in the full-content case, Petr's and the unattributed
+    topics enter Ivan's report.
+    """
+    storage.ensure_user(TENANT, preset_key="owner")
+    storage.ensure_user(IVAN, preset_key="user")
+    storage.ensure_user(PETR, preset_key="user")
+    _arrival(
+        storage,
+        uploaded_by=IVAN,
+        text="ivan-before",
+        received_at="2026-01-01T12:00:00+00:00",
+        tags=("ivan-old",),
+    )
+    _arrival(
+        storage,
+        uploaded_by=IVAN,
+        text="ivan-now",
+        received_at="2026-01-02T12:00:00+00:00",
+        tags=("ivan-new",),
+    )
+    _arrival(
+        storage,
+        uploaded_by=PETR,
+        text="petr-before",
+        received_at="2026-01-01T13:00:00+00:00",
+        tags=("petr-old",),
+    )
+    _arrival(
+        storage,
+        uploaded_by=PETR,
+        text="petr-now",
+        received_at="2026-01-02T13:00:00+00:00",
+        tags=("petr-new",),
+    )
+    _arrival(
+        storage,
+        uploaded_by=None,
+        text="unknown-before",
+        received_at="2026-01-01T14:00:00+00:00",
+        tags=("unknown-old",),
+    )
+    _arrival(
+        storage,
+        uploaded_by=None,
+        text="unknown-now",
+        received_at="2026-01-02T14:00:00+00:00",
+        tags=("unknown-new",),
+    )
+    storage.commit()
+
+    analysis = storage.user_activity_analysis(
+        TENANT,
+        uploaded_by=IVAN,
+        analyses=["change"],
+        since="2026-01-02T00:00:00+00:00",
+        until="2026-01-03T00:00:00+00:00",
+        include_content=include_content,
+    )
+    change = analysis["change"]
+
+    assert change["arrivals_before"] == 1
+    assert change["arrivals_now"] == 1
+    if include_content:
+        assert {row["topic"] for row in change["topics"]} == {"ivan-old", "ivan-new"}
+        assert change["topics_compared"] == 2
+        assert change["new_topics"] == ["ivan-new"]
+        assert change["dropped_topics"] == ["ivan-old"]
+    else:
+        assert change["topics"] == []
+        assert change["topics_compared"] == 0
+        assert change["new_topics"] == []
+        assert change["dropped_topics"] == []
 
 
 def test_material_without_an_author_is_counted_apart(archive):
