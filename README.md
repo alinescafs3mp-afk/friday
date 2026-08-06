@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.156.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
+Текущая версия: **0.157.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -125,6 +125,33 @@ jericho server
 Admin UI: `http://127.0.0.1:8000/admin/`. Нажмите **API-ключ** и вставьте значение `FRIDAY_API_TOKEN` из `.env.local`.
 
 Без LLM ingestion, граф, поиск, права, Admin UI и резервирование работают; ответы агента переходят в честный локальный fallback.
+
+### Native TLS для Admin UI и Telegram bridge
+
+Если API доступен не только через loopback, задайте абсолютные пути к паре
+сертификата и ключа. Сертификат обязан содержать SAN для каждого реального адреса
+браузера, а также `localhost`/`127.0.0.1` (или `::1` для IPv6 wildcard): системный
+bridge и diagnostics обращаются к wildcard-bind через проверяемый loopback URL.
+
+```dotenv
+FRIDAY_API_HOST=0.0.0.0
+FRIDAY_SSL_CERTFILE=/absolute/path/server.crt
+FRIDAY_SSL_KEYFILE=/absolute/path/server.key
+FRIDAY_BACKEND_CA_FILE=/absolute/path/ca-or-self-signed-server.crt
+FRIDAY_CORS_ORIGINS=https://127.0.0.1:8000,https://localhost:8000,https://LAN-NAME-OR-IP:8000
+```
+
+`FRIDAY_BACKEND_CA_FILE` — только публичный CA/certificate, не private key.
+Оставленный пустым `FRIDAY_BACKEND_URL` автоматически становится
+`https://127.0.0.1:8000` при native TLS. Не используйте `verify=False`, `curl -k`
+или браузерное исключение как рабочую схему: импортируйте публичный CA в trust
+store клиента. Полная systemd-процедура и rollback находятся в
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+Эти native TLS variables относятся к direct/systemd запуску. Base Compose
+намеренно игнорирует их, держит backend↔bridge HTTP только в private Docker
+network и требует отдельный TLS reverse proxy для внешнего доступа; private key
+не передаётся Telegram-контейнеру.
 
 ## Полный запуск через Docker Compose
 

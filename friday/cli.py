@@ -182,7 +182,14 @@ FRIDAY_API_TOKEN={api_token}
 FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK=1
 # Failed authentication attempts allowed per client IP per minute before 429.
 FRIDAY_API_AUTH_FAILURE_LIMIT_PER_MINUTE=10
-FRIDAY_CORS_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
+# Native TLS: set the public certificate and private key together. Local clients
+# add only the public CA/certificate to their trust store; never point this at the key.
+FRIDAY_SSL_CERTFILE=
+FRIDAY_SSL_KEYFILE=
+FRIDAY_BACKEND_CA_FILE=
+# Empty derives localhost origins from the active HTTP/HTTPS scheme and API port.
+# Add the exact browser-facing HTTPS origin here when exposing the Admin UI on LAN.
+FRIDAY_CORS_ORIGINS=
 
 FRIDAY_TELEGRAM_BRIDGE_SECRET={bridge_secret}
 FRIDAY_TELEGRAM_BOT_TOKEN=
@@ -2300,6 +2307,19 @@ def _revoke_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def _telegram_backend_url(settings: Any) -> str:
+    """Private backend URL whose default follows the server's native TLS mode."""
+
+    # This compares configured bind literals; it does not open a listener. A
+    # wildcard bind is reachable from the sibling bridge through loopback.
+    host = settings.local_api_client_host
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    scheme = "https" if settings.api_tls_enabled else "http"
+    configured = config_env("FRIDAY_BACKEND_URL", "").strip()
+    return (configured or f"{scheme}://{host}:{settings.api_port}").rstrip("/")
+
+
 def _run_telegram_bridge() -> int:
     from friday.config import ensure_runtime_dirs, load_settings, validate_settings
     from friday.telegram_bridge import TelegramBridge, TelegramConfig
@@ -2314,18 +2334,13 @@ def _run_telegram_bridge() -> int:
     if fatal:
         raise ValueError("Invalid Friday configuration: " + "; ".join(fatal))
     token = config_env("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
-    # This compares configured bind literals; it does not open a listener.
-    host = (
-        "127.0.0.1"  # nosec B104
-        if settings.api_host in {"0.0.0.0", "::", "localhost"}  # nosec B104
-        else settings.api_host
-    )
     config = TelegramConfig(
         bot_token=token,
-        backend_url=config_env(
-            "FRIDAY_BACKEND_URL",
-            f"http://{host}:{settings.api_port}",
-        ).rstrip("/"),
+        backend_url=_telegram_backend_url(settings),
+        # Native TLS can trust the exact public certificate automatically.  A
+        # separately issued CA overrides it; neither path ever exposes the key.
+        backend_ca_file=settings.backend_ca_file
+        or (settings.ssl_certfile if settings.api_tls_enabled else ""),
         bridge_secret=settings.telegram_bridge_secret,
         allowed_chat_ids=settings.telegram_effective_allowed_chat_ids,
         inbox_db_path=str(settings.state_dir / "telegram-inbox.sqlite3"),

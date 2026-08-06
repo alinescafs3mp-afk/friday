@@ -9,6 +9,7 @@ import math
 import os
 import socket
 import sqlite3
+import ssl
 import time
 import urllib.request
 from contextlib import suppress
@@ -1016,7 +1017,7 @@ def _live_backend_diagnostics_url(
         return None
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
-    scheme = "https" if settings.ssl_certfile and settings.ssl_keyfile else "http"
+    scheme = "https" if settings.api_tls_enabled else "http"
     flag = "true" if check_llm_port else "false"
     return f"{scheme}://{host}:{settings.api_port}/api/admin/diagnostics?check_llm={flag}"
 
@@ -1041,10 +1042,21 @@ def _fetch_live_backend_diagnostics(
             headers=headers,
             method="GET",
         )
-        opener = urllib.request.build_opener(
+        handlers: list[Any] = [
             urllib.request.ProxyHandler({}),
             _NoLiveDiagnosticsRedirects(),
-        )
+        ]
+        if url.startswith("https://"):
+            # The diagnostics request carries the owner bearer token, so a
+            # self-signed backend must be authenticated explicitly rather than
+            # retried insecurely.  Keep hostname verification on and add only
+            # the public CA/certificate, never the server key.
+            context = ssl.create_default_context()
+            ca_file = settings.backend_ca_file or settings.ssl_certfile
+            if ca_file:
+                context.load_verify_locations(cafile=ca_file)
+            handlers.append(urllib.request.HTTPSHandler(context=context))
+        opener = urllib.request.build_opener(*handlers)
         with opener.open(request, timeout=15.0) as response:  # noqa: S310 - proven host-local API
             if int(getattr(response, "status", 0) or 0) != 200:
                 return None

@@ -113,6 +113,71 @@ docker compose logs --tail 200 telegram
 
 Проворот — **copy-truncate**, а не переименование: ребёнок держит унаследованный дескриптор на тот же inode, и после `rename` он продолжил бы писать в уведённый файл, а живой лог остался бы пустым до перезапуска. Дескриптор открыт с `O_APPEND`, поэтому усечение не оставляет дыры. Плата — несколько строк, попавших в окно между копированием и усечением; это ровно тот компромисс, что и у `logrotate copytruncate`.
 
+### Native TLS под systemd --user
+
+Native TLS переключает единственный uvicorn port целиком. Поэтому backend и bridge
+обновляются как один контур, но с проверяемым checkpoint между рестартами. До
+изменения `.env.local` сертификат должен иметь SAN как минимум для
+`127.0.0.1`/`localhost` (либо `::1` для IPv6 bind) и для каждого имени либо IP,
+который набирает браузер.
+Проверяйте именно SAN, не только `CN`:
+
+```bash
+openssl x509 -in /absolute/path/server.crt -noout -subject -issuer -dates -ext subjectAltName
+openssl x509 -in /absolute/path/server.crt -noout -checkip 127.0.0.1
+openssl x509 -in /absolute/path/server.crt -noout -checkhost localhost
+openssl x509 -in /absolute/path/server.crt -noout -checkhost LAN-NAME
+openssl x509 -in /absolute/path/server.crt -noout -checkip LAN-IP
+```
+
+Private key должен принадлежать runtime-user и иметь режим `0600`; cert/CA —
+публичные данные, но каталог TLS всё равно держите private. Cert/CA не должны быть
+тем же файлом, symlink или hardlink, что key: validator отклоняет такой alias без
+чтения содержимого. Затем задайте в том env-файле, который указан в
+`ExecStart --env-file`:
+
+```dotenv
+FRIDAY_API_HOST=0.0.0.0
+FRIDAY_SSL_CERTFILE=/absolute/path/server.crt
+FRIDAY_SSL_KEYFILE=/absolute/path/server.key
+FRIDAY_BACKEND_CA_FILE=/absolute/path/ca-or-self-signed-server.crt
+FRIDAY_CORS_ORIGINS=https://127.0.0.1:8000,https://localhost:8000,https://LAN-NAME-OR-IP:8000
+```
+
+Для same-host systemd не задавайте `FRIDAY_BACKEND_URL`: при TLS bridge сам
+выбирает `https://127.0.0.1:<port>`. Если override нужен, он обязан быть HTTPS и
+его hostname обязан входить в SAN. `FRIDAY_BACKEND_CA_FILE` указывает только на
+public CA/certificate — никогда на key.
+
+Установленные CLI units обычно называются `jericho-backend.service` и
+`jericho-bridge.service`; у переименованной существующей установки это могут быть
+`friday-backend.service` и `friday-bridge.service`. Сначала переключите backend и
+докажите HTTPS health через CA, только затем перезапустите bridge:
+
+```bash
+systemctl --user restart jericho-backend.service
+curl --fail --silent --show-error --cacert /absolute/path/ca-or-self-signed-server.crt \
+  https://127.0.0.1:8000/api/health
+systemctl --user restart jericho-bridge.service
+systemctl --user is-active jericho-backend.service jericho-bridge.service
+FRIDAY_ENV_FILE=/absolute/path/.env.local jericho doctor
+```
+
+Не применяйте `curl -k`, `verify=False` или постоянное browser exception: такой
+тест доказывает шифрование, но не identity сервера. Импортируйте публичный CA в
+trust store устройства и проверьте Admin UI по каждому реальному LAN origin.
+
+Rollback до рабочего HTTP выполняется тем же порядком: очистите одновременно
+`FRIDAY_SSL_CERTFILE`, `FRIDAY_SSL_KEYFILE`, `FRIDAY_BACKEND_CA_FILE`, верните
+`http://` origins, перезапустите backend, проверьте `/api/health`, затем
+перезапустите bridge. Не оставляйте половину TLS-пары — validator её отклоняет.
+
+Base Compose намеренно не включает native TLS: backend и bridge общаются по HTTP
+только внутри private Docker network, а общая среда принудительно очищает server
+cert/key/CA paths. Это не даёт Telegram-контейнеру прочитать private key. Для
+внешнего HTTPS публикуйте backend только через отдельный TLS reverse proxy; не
+кладите server key в общий `/runtime/data` и не пробрасывайте его в bridge.
+
 ## 5. API health
 
 Неаутентифицированный endpoint:

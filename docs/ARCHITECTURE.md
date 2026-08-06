@@ -24,6 +24,33 @@ DuckDuckGo HTML и Wikipedia отказываются от такого запр
 
 Основные данные, права, история, граф, review state и очереди хранятся локально. Local-model output считается недоверенным предложением, а не источником фактов или административным решением.
 
+### Внутренний TLS-контур
+
+Native TLS — единое состояние backend-а, а не настройка только uvicorn. При полной
+паре `FRIDAY_SSL_CERTFILE`/`FRIDAY_SSL_KEYFILE` сервер, выведенные loopback CORS
+origins, Telegram bridge и live diagnostics используют HTTPS. Оба локальных
+клиента сохраняют hostname verification: bridge начинает со стандартного public
+root bundle httpx/certifi, diagnostics — с OS default roots, затем каждый при
+необходимости добавляет только публичный `FRIDAY_BACKEND_CA_FILE`. Если
+отдельный CA не задан, клиент того же native TLS процесса доверяет публичному
+server certificate. Private key читает только uvicorn.
+
+```text
+browser/LAN ───── HTTPS + bearer ──→ uvicorn backend
+Telegram bridge ─ HTTPS + HMAC ────→ uvicorn backend
+live diagnostics ─ HTTPS + bearer ─→ uvicorn backend
+Telegram bridge ─ HTTPS ───────────→ Telegram API
+```
+
+При IPv4 wildcard bind systemd bridge выбирает `https://127.0.0.1:<port>`, при
+IPv6 wildcard — `https://[::1]:<port>`; соответствующий IP SAN обязателен. Base
+Compose намеренно оставляет backend↔bridge на HTTP внутри private Docker network и
+обнуляет server TLS paths в общей среде, чтобы Telegram-контейнер никогда не видел
+private key. Внешний HTTPS для Compose завершается reverse proxy. Явный
+`FRIDAY_BACKEND_URL` оставлен для такой и другой нестандартной топологии, но
+CA/hostname contract остаётся тем же. Telegram proxy никогда не наследуется
+backend-клиентом.
+
 ## 2. Модули
 
 | Модуль | Ответственность |

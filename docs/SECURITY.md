@@ -123,6 +123,21 @@ WAL/SHM, bridge DB, manifests и data files — `0600`, включая моме�
 - Admin UI обслуживается backend-ом и защищается строгой Content Security Policy **без `unsafe-inline`** (`script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` и запретом framing. UI разделён на внешние `app.js`/`app.css`; обработчики событий — только делегированные (`data-call` с JSON-payload в явный реестр действий), поэтому XSS в отрендеренном контенте не может исполнить скрипт даже при ошибке экранирования.
 - Беспарольный loopback-доступ (`FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK=0`) защищён от браузерных атак: `Host` обязан быть loopback-именем (`localhost`/`127.0.0.1`/`::1` — блокирует DNS rebinding), а мутирующие методы дополнительно проходят `Origin`/`Sec-Fetch-Site`-проверку (разрешены loopback-origins и `FRIDAY_CORS_ORIGINS`). Cross-site страница не может выполнить мутацию от имени владельца через его браузер. Non-browser клиенты (curl, CLI) этих заголовков не шлют и работают как раньше; bearer-токены и HMAC моста guard не затрагивает — это не-CSRF-абельные пути с явными креденшалами.
 - Wildcard CORS запрещён конфигурационным validator-ом.
+- Native TLS включается только полной парой `FRIDAY_SSL_CERTFILE`/
+  `FRIDAY_SSL_KEYFILE`. Telegram bridge и live diagnostics при этом сами
+  переходят на HTTPS, добавляют публичный `FRIDAY_BACKEND_CA_FILE` к проверяемым
+  default roots клиента (httpx/certifi у bridge, OS defaults у diagnostics) и
+  сохраняют hostname verification. `verify=False` и
+  эквивалентный retry после ошибки сертификата отсутствуют.
+- Server certificate должен иметь SAN для каждого browser-facing имени/IP и для
+  loopback-адреса внутреннего systemd-клиента (`127.0.0.1` при IPv4 wildcard,
+  `::1` при IPv6 wildcard). Самоподписанный сертификат безопасен только после явного
+  импорта его публичной части в trust store клиента; «продолжить несмотря на
+  предупреждение» не устанавливает надёжную identity boundary.
+- Public cert/CA и private key обязаны быть разными файлами. Validator сравнивает
+  inode, а не только строки пути, и отклоняет symlink/hardlink alias ключа как
+  `FRIDAY_SSL_CERTFILE` или `FRIDAY_BACKEND_CA_FILE`; локальные клиенты никогда не
+  получают key под видом trust anchor.
 - `FRIDAY_TRUST_PROXY_HEADERS=0` по умолчанию. При включении задайте `FRIDAY_TRUSTED_PROXY_NETWORKS`: forwarded headers учитываются только от непосредственного TCP peer из этого списка, а цепочка разбирается справа налево. Сам заголовок не может выдать удалённого клиента за loopback.
 - При публикации наружу используйте TLS, дополнительную authentication layer и firewall allowlist.
 - Не выставляйте vLLM port в публичную сеть.
@@ -133,7 +148,8 @@ WAL/SHM, bridge DB, manifests и data files — `0600`, включая моме�
 Рекомендуемая схема:
 
 ```text
-Internet → VPN / mTLS / SSO reverse proxy → 127.0.0.1:8000
+LAN → native TLS + exact CORS → backend
+Internet → VPN / mTLS / SSO reverse proxy → loopback backend
 Docker private network → vLLM:8001
 ```
 
@@ -289,6 +305,10 @@ installation-local 256-bit HMAC key. Обычный SHA для коротког�
 - [ ] `FRIDAY_TRUST_PROXY_HEADERS=0`, если нет доверенного proxy.
 - [ ] При доверенных proxy перечислены только непосредственные hop-ы в `FRIDAY_TRUSTED_PROXY_NETWORKS`.
 - [ ] CORS содержит только реальные origin.
+- [ ] Для non-loopback bind включён native TLS либо отдельный TLS reverse proxy.
+- [ ] SAN сертификата покрывает browser-facing адрес и внутренний hostname/IP
+      bridge; публичный CA/cert установлен как trust anchor без private key.
+- [ ] HTTPS health/identity проверены без `-k`/`verify=False`.
 - [ ] `FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS=0`.
 - [ ] `FRIDAY_CODE_EXECUTION_ENABLED=0`.
 - [ ] Backend bind только loopback/VPN/private interface.

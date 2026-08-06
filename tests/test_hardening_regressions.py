@@ -1363,6 +1363,68 @@ def test_tls_pair_is_validated_as_a_pair(settings, tmp_path):
     key.write_text("key")
     valid = dataclasses.replace(settings, ssl_certfile=str(cert), ssl_keyfile=str(key))
     assert not [item for item in validate_settings(valid) if "SSL" in item]
+    assert valid.api_tls_enabled is True
+    assert valid.frontend_origin == "https://127.0.0.1:8000"
+    assert valid.public_dict()["api"]["tls"] is True
+
+    combined = dataclasses.replace(valid, ssl_certfile=str(key))
+    assert any("must be different files" in item for item in validate_settings(combined))
+
+    hardlink_ca = tmp_path / "hardlink-ca.pem"
+    hardlink_ca.hardlink_to(key)
+    aliases = [hardlink_ca]
+    symlink_ca = tmp_path / "symlink-ca.pem"
+    try:
+        symlink_ca.symlink_to(key)
+    except OSError:
+        # Windows may deny symlink creation to an unprivileged test process; the
+        # samefile hardlink case still proves inode identity on that platform.
+        pass
+    else:
+        aliases.append(symlink_ca)
+    for alias in aliases:
+        aliased = dataclasses.replace(valid, backend_ca_file=str(alias))
+        assert any("must not point to FRIDAY_SSL_KEYFILE" in item for item in validate_settings(aliased))
+
+
+def test_tls_defaults_switch_loopback_cors_and_bridge_ca_validation_to_https(settings, tmp_path, monkeypatch):
+    """An operator enabling native TLS must not inherit HTTP browser origins.
+
+    The local client CA is public material, but a typo in its path would make the
+    bridge and live diagnostics fail only after the backend had already switched
+    its only port to HTTPS.  Catch that during configuration validation.
+    """
+    import dataclasses
+
+    from friday.config import load_settings, validate_settings
+
+    cert = tmp_path / "server.crt"
+    key = tmp_path / "server.key"
+    ca = tmp_path / "backend-ca.crt"
+    cert.write_text("certificate")
+    key.write_text("key")
+    ca.write_text("ca")
+    monkeypatch.setenv("FRIDAY_SSL_CERTFILE", str(cert))
+    monkeypatch.setenv("FRIDAY_SSL_KEYFILE", str(key))
+    monkeypatch.setenv("FRIDAY_BACKEND_CA_FILE", str(ca))
+    monkeypatch.setenv("FRIDAY_API_PORT", "8443")
+    monkeypatch.delenv("FRIDAY_CORS_ORIGINS", raising=False)
+    monkeypatch.delenv("JERICHO_CORS_ORIGINS", raising=False)
+
+    secure = load_settings()
+
+    assert secure.cors_origins == [
+        "https://127.0.0.1:8443",
+        "https://localhost:8443",
+        "https://[::1]:8443",
+    ]
+    assert secure.frontend_origin == "https://127.0.0.1:8443"
+    assert not [item for item in validate_settings(secure) if "TLS" in item or "CA_FILE" in item]
+
+    missing_ca = dataclasses.replace(secure, backend_ca_file=str(tmp_path / "missing-ca.crt"))
+    assert any(
+        "FRIDAY_BACKEND_CA_FILE points to a missing file" in item for item in validate_settings(missing_ca)
+    )
 
 
 def test_a_bare_http_bind_beyond_loopback_is_a_warning_not_an_error(settings):

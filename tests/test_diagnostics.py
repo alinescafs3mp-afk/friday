@@ -174,10 +174,25 @@ def test_live_diagnostics_bearer_target_must_be_proven_host_local(settings):
         replace(settings, api_host="0.0.0.0"),
         check_llm_port=False,
     ).startswith("http://127.0.0.1:")
+    secure = replace(
+        settings,
+        api_host="0.0.0.0",
+        ssl_certfile="/public/server.crt",
+        ssl_keyfile="/private/server.key",
+    )
+    assert diagnostics._live_backend_diagnostics_url(  # noqa: SLF001
+        secure,
+        check_llm_port=False,
+    ).startswith("https://127.0.0.1:")
+    assert diagnostics._live_backend_diagnostics_url(  # noqa: SLF001
+        replace(secure, api_host="::"),
+        check_llm_port=False,
+    ).startswith("https://[::1]:")
 
 
 def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings, monkeypatch):
     import json
+    import ssl
     import urllib.request
 
     import friday.diagnostics as diagnostics
@@ -195,6 +210,13 @@ def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings
         }
     ).encode()
     handlers: list[object] = []
+    loaded_ca_files: list[str] = []
+
+    class SSLContext:
+        def load_verify_locations(self, *, cafile: str) -> None:
+            loaded_ca_files.append(cafile)
+
+    context = SSLContext()
 
     class Response:
         status = 200
@@ -209,8 +231,9 @@ def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings
             return payload
 
     class Opener:
-        def open(self, _request, *, timeout: float):
+        def open(self, request, *, timeout: float):
             assert timeout > 0
+            assert request.full_url.startswith("https://127.0.0.1:")
             return Response()
 
     def build_opener(*items):
@@ -218,6 +241,7 @@ def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings
         return Opener()
 
     monkeypatch.setattr(urllib.request, "build_opener", build_opener)
+    monkeypatch.setattr(ssl, "create_default_context", lambda: context)
     # The serving process changed after its response.  A structurally valid old
     # response must not be accepted as evidence about the replacement backend.
     monkeypatch.setattr(
@@ -226,8 +250,15 @@ def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings
         lambda *_a, **_k: {"active": True, "state": "active", "pid": expected_pid + 1},
     )
 
-    result = diagnostics._fetch_live_backend_diagnostics(  # noqa: SLF001
+    secure = replace(
         settings,
+        api_host="0.0.0.0",
+        ssl_certfile="/public/server.crt",
+        ssl_keyfile="/private/server.key",
+        backend_ca_file="/public/backend-ca.crt",
+    )
+    result = diagnostics._fetch_live_backend_diagnostics(  # noqa: SLF001
+        secure,
         {"active": True, "state": "active", "pid": expected_pid},
         check_llm_port=False,
     )
@@ -236,6 +267,8 @@ def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings
     proxy = next(item for item in handlers if isinstance(item, urllib.request.ProxyHandler))
     assert proxy.proxies == {}
     assert any(isinstance(item, diagnostics._NoLiveDiagnosticsRedirects) for item in handlers)  # noqa: SLF001
+    assert any(isinstance(item, urllib.request.HTTPSHandler) for item in handlers)
+    assert loaded_ca_files == ["/public/backend-ca.crt"]
 
 
 def test_admin_overview_and_diagnostics_never_run_sqlite_work_on_the_event_loop():

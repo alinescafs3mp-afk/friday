@@ -44,6 +44,12 @@ CONTAINER_OWNED = {
     "FRIDAY_WHISPER_DOWNLOAD_ROOT",
     "FRIDAY_ENV_FILE",
     "FRIDAY_API_HOST",
+    # Base Compose terminates external TLS at a separate proxy. These must stay
+    # empty in BOTH services: otherwise env_file can hand a host-only key path to
+    # the backend and, worse, expose that same private path to Telegram.
+    "FRIDAY_SSL_CERTFILE",
+    "FRIDAY_SSL_KEYFILE",
+    "FRIDAY_BACKEND_CA_FILE",
 }
 
 CONTAINERISED_SERVICES = ("backend", "telegram")
@@ -92,3 +98,20 @@ def test_documented_settings_are_ones_something_actually_reads():
     """A key in the template that nothing reads is a promise the product breaks."""
     unread = sorted(_documented_keys() - _keys_read_by_code() - _keys_used_by_compose())
     assert not unread, f".env.example documents settings nothing reads: {unread}"
+
+
+def test_base_compose_keeps_tls_keys_out_of_the_shared_backend_bridge_environment():
+    """Native TLS needs a backend-only key mount; base Compose promises no such leak."""
+    for service in CONTAINERISED_SERVICES:
+        environment = COMPOSE["services"][service]["environment"]
+        assert environment["FRIDAY_SSL_CERTFILE"] == ""
+        assert environment["FRIDAY_SSL_KEYFILE"] == ""
+        assert environment["FRIDAY_BACKEND_CA_FILE"] == ""
+        volumes = COMPOSE["services"][service].get("volumes", [])
+        assert not any("tls" in str(volume).casefold() for volume in volumes)
+
+    telegram_environment = COMPOSE["services"]["telegram"]["environment"]
+    assert telegram_environment["FRIDAY_BACKEND_URL"].startswith("http://backend:")
+    healthcheck = " ".join(COMPOSE["services"]["backend"]["healthcheck"]["test"])
+    assert "http://127.0.0.1:" in healthcheck
+    assert "https://" not in healthcheck

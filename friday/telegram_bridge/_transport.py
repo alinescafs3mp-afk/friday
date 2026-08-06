@@ -144,6 +144,12 @@ class TransportMixin(BridgeShared):
             raise
         self._running = True
         timeout = httpx.Timeout(POLL_TIMEOUT + 10.0, connect=15.0)
+        # Start from httpx's standard public root bundle with environment overrides disabled,
+        # then add the operator's private CA when this backend uses a self-signed or
+        # locally issued certificate.  Hostname verification remains mandatory.
+        backend_ssl_context = httpx.create_ssl_context(verify=True, trust_env=False)
+        if self.config.backend_ca_file:
+            backend_ssl_context.load_verify_locations(cafile=self.config.backend_ca_file)
         try:
             async with (
                 # Only Telegram goes through the proxy. `trust_env` stays off on both
@@ -158,6 +164,7 @@ class TransportMixin(BridgeShared):
                 httpx.AsyncClient(
                     timeout=httpx.Timeout(self.config.backend_timeout_sec, connect=15.0),
                     trust_env=False,
+                    verify=backend_ssl_context,
                 ) as backend,
             ):
                 LOGGER.info(

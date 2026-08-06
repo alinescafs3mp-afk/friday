@@ -410,6 +410,70 @@ def test_proxy_applies_to_telegram_only(monkeypatch, tmp_path) -> None:
     )
 
 
+def test_private_ca_is_loaded_for_backend_only_without_disabling_verification(monkeypatch, tmp_path) -> None:
+    """A local CA authenticates Friday, not api.telegram.org, and verify stays on."""
+    import contextlib
+
+    import httpx
+
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
+
+    ca = tmp_path / "backend-ca.crt"
+    ca.write_text("test CA", encoding="utf-8")
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.loaded: list[str] = []
+
+        def load_verify_locations(self, *, cafile: str) -> None:
+            self.loaded.append(cafile)
+
+    context = FakeContext()
+    context_calls: list[dict[str, object]] = []
+
+    def create_ssl_context(**kwargs):
+        context_calls.append(kwargs)
+        return context
+
+    seen: list[dict[str, object]] = []
+    real_init = httpx.AsyncClient.__init__
+
+    def spy(self, *args, **kwargs):
+        seen.append(dict(kwargs))
+        forwarded = dict(kwargs)
+        if forwarded.get("verify") is context:
+            # Let the real client construct itself while retaining the exact
+            # production argument above for the assertion.
+            forwarded["verify"] = True
+        return real_init(self, *args, **forwarded)
+
+    monkeypatch.setattr(httpx, "create_ssl_context", create_ssl_context)
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy)
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="1:aaa",
+            inbox_db_path=str(tmp_path / "telegram-inbox.sqlite3"),
+            backend_url="https://localhost:8000",
+            backend_ca_file=str(ca),
+            bridge_secret="x" * 32,
+            allowed_chat_ids=[1],
+        )
+    )
+
+    async def boom(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bridge, "_register_commands", boom)
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(bridge.run())
+
+    assert context_calls == [{"verify": True, "trust_env": False}]
+    assert context.loaded == [str(ca)]
+    assert "verify" not in seen[0], "Telegram must retain its normal independent trust store"
+    assert seen[1]["verify"] is context
+    assert seen[1]["trust_env"] is False
+
+
 def test_proxy_credentials_are_kept_out_of_the_log() -> None:
     from friday.telegram_bridge._base import _proxy_password, _redact_userinfo
 
@@ -462,6 +526,77 @@ def test_socks_proxy_is_refused_with_a_usable_message() -> None:
     )
     with pytest.raises(ValueError, match="http://"):
         config.validate()
+
+
+def test_backend_ca_requires_https_and_an_existing_public_file(tmp_path) -> None:
+    from friday.telegram_bridge import TelegramConfig
+
+    common = {
+        "bot_token": "1:aaa",
+        "inbox_db_path": str(tmp_path / "telegram-inbox.sqlite3"),
+        "bridge_secret": "x" * 32,
+        "allowed_chat_ids": [1],
+    }
+    missing = tmp_path / "missing-ca.crt"
+    with pytest.raises(ValueError, match="requires an HTTPS"):
+        TelegramConfig(
+            **common,
+            backend_url="http://localhost:8000",
+            backend_ca_file=str(missing),
+        ).validate()
+    with pytest.raises(ValueError, match="missing file"):
+        TelegramConfig(
+            **common,
+            backend_url="https://localhost:8000",
+            backend_ca_file=str(missing),
+        ).validate()
+
+    ca = tmp_path / "backend-ca.crt"
+    ca.write_text("public certificate", encoding="utf-8")
+    TelegramConfig(
+        **common,
+        backend_url="https://localhost:8000",
+        backend_ca_file=str(ca),
+    ).validate()
+
+
+def test_backend_url_accepts_a_bracketed_ipv6_origin(tmp_path) -> None:
+    from friday.telegram_bridge import TelegramConfig
+
+    TelegramConfig(
+        bot_token="1:aaa",
+        inbox_db_path=str(tmp_path / "telegram-inbox.sqlite3"),
+        backend_url="https://[::1]:8000/",
+        bridge_secret="x" * 32,
+        allowed_chat_ids=[1],
+    ).validate()
+
+
+@pytest.mark.parametrize(
+    "backend_url",
+    [
+        "https://127.0.0.1:8000@public-host.example",
+        "https://user@localhost:8000",
+        "https://localhost:8000/api",
+        "https://localhost:8000?next=public",
+        "https://localhost:8000#fragment",
+        "https://localhost:99999",
+        "https://[::1",
+        "https://local host:8000",
+        "localhost:8000",
+    ],
+)
+def test_backend_url_rejects_credentials_smuggling_and_non_origin_forms(tmp_path, backend_url) -> None:
+    from friday.telegram_bridge import TelegramConfig
+
+    with pytest.raises(ValueError, match=r"absolute HTTP\(S\) origin"):
+        TelegramConfig(
+            bot_token="1:aaa",
+            inbox_db_path=str(tmp_path / "telegram-inbox.sqlite3"),
+            backend_url=backend_url,
+            bridge_secret="x" * 32,
+            allowed_chat_ids=[1],
+        ).validate()
 
 
 # --- command arguments and message chunking -------------------------------

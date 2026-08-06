@@ -1,3 +1,25 @@
+## 0.157.0 — 2026-08-06
+
+### Native TLS больше не разрывает внутренний контур
+
+Пара `FRIDAY_SSL_CERTFILE`/`FRIDAY_SSL_KEYFILE` теперь переключает не только
+uvicorn, но и выведенные локальные URL/CORS и backend-клиент Telegram bridge на
+HTTPS. Bridge и live diagnostics используют отдельный публичный
+`FRIDAY_BACKEND_CA_FILE` (для native TLS без отдельного CA — сам server cert),
+сохраняют hostname verification: bridge начинает со стандартного public root
+bundle httpx, diagnostics — с OS default roots, затем каждый добавляет явный CA.
+Режима `verify=False` нет. Telegram API остаётся на независимом стандартном trust store,
+а proxy по-прежнему применяется только к Telegram, не к подписанным запросам в
+личный backend. Cert/CA не может быть тем же inode (включая symlink/hardlink), что
+private key: trust-контур отклоняет такой alias до запуска клиента.
+
+Base Compose явно оставляет backend↔bridge на HTTP внутри private Docker network
+и обнуляет server TLS paths в общей среде: Telegram-контейнер не получает private
+key; внешний HTTPS там остаётся задачей reverse proxy. Пустой CORS выводит
+loopback origins из фактических scheme/port, а шаблоны конфигурации явно разделяют
+публичный cert/CA и закрытый key. Добавлена пошаговая systemd-процедура включения с
+проверкой SAN, доверия, health и моста без небезопасного `-k`.
+
 ## 0.156.0 — 2026-08-06
 
 ### Полный состав Office-документа теперь принадлежит коду

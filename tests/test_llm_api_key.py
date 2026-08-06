@@ -171,4 +171,10 @@ def test_init_env_template_includes_api_key_vars(tmp_path, monkeypatch):
     assert "FRIDAY_EMBEDDINGS_API_KEY=" in text
     # The token vars ship empty (local unauthenticated default).
     assert "FRIDAY_LLM_API_KEY=\n" in text
+    assert "FRIDAY_SSL_CERTFILE=\n" in text
+    assert "FRIDAY_SSL_KEYFILE=\n" in text
+    assert "FRIDAY_BACKEND_CA_FILE=\n" in text
+    # Empty is intentional: load_settings derives matching HTTP/HTTPS loopback
+    # origins from the active TLS pair and port.
+    assert "FRIDAY_CORS_ORIGINS=\n" in text
     os.environ.pop("FRIDAY_HOME", None)

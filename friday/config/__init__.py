@@ -470,6 +470,10 @@ class FridaySettings:
     # ходят через интернет открытым текстом.
     ssl_certfile: str
     ssl_keyfile: str
+    # Additional public CA/certificate trusted by local clients of this backend
+    # (Telegram bridge and live diagnostics).  This is deliberately separate from
+    # the server key pair: a client never needs, and must never receive, the key.
+    backend_ca_file: str
     api_require_token_on_loopback: bool
     api_user_rate_limit_per_minute: int
     api_auth_failure_limit_per_minute: int
@@ -615,6 +619,20 @@ class FridaySettings:
         return self.api_host in {"127.0.0.1", "localhost", "::1"}
 
     @property
+    def api_tls_enabled(self) -> bool:
+        return bool(self.ssl_certfile and self.ssl_keyfile)
+
+    @property
+    def local_api_client_host(self) -> str:
+        """Loopback destination matching the address family of a wildcard bind."""
+
+        if self.api_host == "0.0.0.0":  # nosec B104 - destination, not a bind
+            return "127.0.0.1"
+        if self.api_host == "::":  # nosec B104 - destination, not a bind
+            return "::1"
+        return self.api_host
+
+    @property
     def telegram_effective_allowed_chat_ids(self) -> list[int]:
         # Owner chats are always allowed; the union is the deny-by-default gate.
         # An empty result means no chat is allowed (a configured bridge must set
@@ -624,8 +642,11 @@ class FridaySettings:
     @property
     def frontend_origin(self) -> str:
         # This only derives a browser origin from bind literals; no socket is opened here.
-        host = "127.0.0.1" if self.api_host in {"0.0.0.0", "::"} else self.api_host  # nosec B104
-        return f"http://{host}:{self.api_port}"
+        host = self.local_api_client_host
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        scheme = "https" if self.api_tls_enabled else "http"
+        return f"{scheme}://{host}:{self.api_port}"
 
     def public_dict(self) -> dict[str, object]:
         return {
@@ -675,7 +696,7 @@ class FridaySettings:
                 "backup_encryption_configured": self.backup_encryption_key_file is not None,
             },
             "graph": {"max_depth": self.graph_max_depth},
-            "api": {"host": self.api_host, "port": self.api_port},
+            "api": {"host": self.api_host, "port": self.api_port, "tls": self.api_tls_enabled},
             "autonomy": {
                 "enabled": self.autonomy_enabled,
                 "operator_full_autonomy": self.operator_full_autonomy,
@@ -734,9 +755,17 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
     state_dir = Path(env("FRIDAY_STATE_DIR", data_dir / "state")).expanduser().resolve()
     llm_base_url = env("FRIDAY_LLM_BASE_URL", "http://127.0.0.1:8001/v1").rstrip("/")
 
+    ssl_certfile = env("FRIDAY_SSL_CERTFILE", "").strip()
+    ssl_keyfile = env("FRIDAY_SSL_KEYFILE", "").strip()
+    api_port = _int_env("FRIDAY_API_PORT", 8000, minimum=1)
     cors_origins = _list_env("FRIDAY_CORS_ORIGINS")
     if not cors_origins:
-        cors_origins = ["http://127.0.0.1:8000", "http://localhost:8000"]
+        api_scheme = "https" if ssl_certfile and ssl_keyfile else "http"
+        cors_origins = [
+            f"{api_scheme}://127.0.0.1:{api_port}",
+            f"{api_scheme}://localhost:{api_port}",
+            f"{api_scheme}://[::1]:{api_port}",
+        ]
 
     return FridaySettings(
         home=home,
@@ -877,9 +906,10 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # пакет retrieval, поэтому расхождение стережёт тест.
         rerank_confident_min=_float_env("FRIDAY_RERANK_CONFIDENT_MIN", 0.10, minimum=0.0),
         api_host=env("FRIDAY_API_HOST", "127.0.0.1"),
-        ssl_certfile=env("FRIDAY_SSL_CERTFILE", "").strip(),
-        ssl_keyfile=env("FRIDAY_SSL_KEYFILE", "").strip(),
-        api_port=_int_env("FRIDAY_API_PORT", 8000, minimum=1),
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
+        backend_ca_file=env("FRIDAY_BACKEND_CA_FILE", "").strip(),
+        api_port=api_port,
         api_token=env("FRIDAY_API_TOKEN", ""),
         api_require_token_on_loopback=_bool_env("FRIDAY_API_REQUIRE_TOKEN_ON_LOOPBACK", True),
         api_user_rate_limit_per_minute=_int_env("FRIDAY_API_USER_RATE_LIMIT_PER_MINUTE", 240, minimum=1),
@@ -1023,6 +1053,21 @@ def ensure_runtime_dirs(settings: FridaySettings) -> list[Path]:
     return paths
 
 
+def _same_file(left: Path, right: Path) -> bool:
+    """Identity comparison that catches aliases without reading either file."""
+
+    try:
+        return left.samefile(right)
+    except (OSError, ValueError):
+        # Missing/inaccessible paths are reported by the caller.  Resolved
+        # equality still catches two lexical spellings when samefile is not
+        # available on the platform or filesystem.
+        try:
+            return left.resolve(strict=False) == right.resolve(strict=False)
+        except (OSError, RuntimeError):
+            return False
+
+
 def validate_settings(settings: FridaySettings, *, production: bool = False) -> list[str]:
     """Return actionable configuration problems; raise only at the caller's boundary."""
     errors: list[str] = []
@@ -1132,12 +1177,19 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             "FRIDAY_SSL_CERTFILE and FRIDAY_SSL_KEYFILE must be set together — half a TLS pair cannot serve"
         )
     elif settings.ssl_certfile:
+        cert_path = Path(settings.ssl_certfile)
+        key_path = Path(settings.ssl_keyfile)
         for label, candidate in (
             ("FRIDAY_SSL_CERTFILE", settings.ssl_certfile),
             ("FRIDAY_SSL_KEYFILE", settings.ssl_keyfile),
         ):
             if not Path(candidate).is_file():
                 errors.append(f"{label} points to a missing file: {candidate}")
+        if cert_path.is_file() and key_path.is_file() and _same_file(cert_path, key_path):
+            errors.append(
+                "FRIDAY_SSL_CERTFILE and FRIDAY_SSL_KEYFILE must be different files; "
+                "local clients may trust the public certificate but must never read the private key"
+            )
     elif not settings.is_loopback_bind and not settings.trust_proxy_headers:
         # A warning, not an error: the live deployment binds 0.0.0.0 behind NAT
         # today, and an error here would refuse to start it. But the fact stands —
@@ -1153,6 +1205,16 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             "FRIDAY_SSL_CERTFILE и FRIDAY_SSL_KEYFILE (хватит самоподписанной пары) "
             "или поставьте перед ним TLS-прокси"
         )
+    if settings.backend_ca_file and not Path(settings.backend_ca_file).is_file():
+        errors.append(f"FRIDAY_BACKEND_CA_FILE points to a missing file: {settings.backend_ca_file}")
+    elif settings.backend_ca_file and settings.ssl_keyfile:
+        ca_path = Path(settings.backend_ca_file)
+        key_path = Path(settings.ssl_keyfile)
+        if ca_path.is_file() and key_path.is_file() and _same_file(ca_path, key_path):
+            errors.append(
+                "FRIDAY_BACKEND_CA_FILE must not point to FRIDAY_SSL_KEYFILE; "
+                "bridge and diagnostics may read only public trust material"
+            )
     if settings.rerank_top > 0 and not (settings.rerank_base_url.strip() and settings.rerank_model.strip()):
         # Same contradiction class as embeddings-without-model: `RerankBackend.enabled`
         # requires both, so this knob combination turns reranking AND the confidence

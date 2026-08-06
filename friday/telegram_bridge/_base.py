@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -96,6 +96,9 @@ class TelegramConfig:
     # updates and lets a second bridge long-poll the same bot at the same time.
     inbox_db_path: str
     backend_url: str = "http://127.0.0.1:8000"
+    # Public CA/certificate used only to authenticate the private Friday backend.
+    # Telegram itself keeps httpx's independent standard public certifi roots.
+    backend_ca_file: str = ""
     bridge_secret: str = ""
     allowed_chat_ids: list[int] = field(default_factory=list)
     max_document_bytes: int = 50 * 1024 * 1024
@@ -111,8 +114,32 @@ class TelegramConfig:
             raise ValueError("A valid Telegram bot token is required")
         if len(self.bridge_secret) < 32:
             raise ValueError("Telegram bridge secret must contain at least 32 characters")
-        if not self.backend_url.startswith(("http://", "https://")):
-            raise ValueError("backend_url must use HTTP or HTTPS")
+        backend_scheme = ""
+        try:
+            parsed_backend = urlsplit(self.backend_url)
+            backend_scheme = parsed_backend.scheme
+            backend_hostname = parsed_backend.hostname or ""
+            _ = parsed_backend.port
+            valid_backend_url = bool(
+                parsed_backend.scheme in {"http", "https"}
+                and backend_hostname
+                and not any(character.isspace() or ord(character) < 32 for character in backend_hostname)
+                and not parsed_backend.username
+                and not parsed_backend.password
+                and parsed_backend.path in {"", "/"}
+                and not parsed_backend.query
+                and not parsed_backend.fragment
+            )
+        except ValueError:
+            valid_backend_url = False
+        if not valid_backend_url:
+            raise ValueError(
+                "backend_url must be an absolute HTTP(S) origin without credentials, path, query, or fragment"
+            )
+        if self.backend_ca_file and backend_scheme != "https":
+            raise ValueError("backend_ca_file requires an HTTPS backend_url")
+        if self.backend_ca_file and not Path(self.backend_ca_file).is_file():
+            raise ValueError(f"backend_ca_file points to a missing file: {self.backend_ca_file}")
         if not self.inbox_db_path or not Path(self.inbox_db_path).is_absolute():
             # Fail closed before `_UpdateInbox` gets a chance to create the file:
             # a queue whose location depends on the cwd is not durable.

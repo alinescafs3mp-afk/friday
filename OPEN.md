@@ -74,11 +74,18 @@ Object; мутация `own_id -> user_id` красит соответствую
 27 июля и ни разу не задан, хотя Telegram — единственная дорога наполнения.
 Механизм для любого ответа уже есть — `ingestion_review_policy`.
 
-### 1.3. TLS готов, но не включён (с 31 июля)
+### 1.3. TLS готов к включению, но live cutover ещё не выполнен (с 31 июля)
 
-Сертификат лежит (`~/.jericho/tls/`), переменных в `.env.local` нет. Причина
-отсрочки была «перед демо не ломать единственный канал» — демо прошло.
-Включение требует правки моста или reverse-proxy, то есть это не одна строка.
+Кодовый блокер снят в 0.157.0: systemd bridge и diagnostics умеют проверяемый
+HTTPS через public CA/certificate, внутренний URL и CORS следуют native TLS-паре,
+insecure fallback отсутствует. Base Compose намеренно остаётся private-network
+HTTP за отдельным TLS reverse proxy. Live `.env.local` и сервисы ещё не менялись.
+Существующий сертификат не покрывает текущий VM IP и возможный browser-facing
+host-forward address; перед включением его надо перевыпустить с ними,
+`127.0.0.1`, `localhost`, локальным hostname и стабильным локальным DNS-именем в
+SAN, затем пройти
+поэтапный systemd cutover из `docs/OPERATIONS.md`. Закрыть пункт только после
+HTTPS health, Admin UI и реального Telegram round-trip без `-k`/`verify=False`.
 
 ### 1.4. Offsite-зеркало бэкапов и файлов: сделано, выключено
 

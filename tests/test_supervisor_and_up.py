@@ -189,6 +189,32 @@ def test_settings_bound_the_child_logs_by_default(settings):
     assert settings.log_backups == 3
 
 
+def test_telegram_backend_default_url_follows_native_tls(settings, monkeypatch):
+    import dataclasses
+
+    from friday.cli import _telegram_backend_url
+
+    monkeypatch.delenv("FRIDAY_BACKEND_URL", raising=False)
+    monkeypatch.delenv("JERICHO_BACKEND_URL", raising=False)
+    exposed = dataclasses.replace(settings, api_host="0.0.0.0")
+    assert _telegram_backend_url(exposed) == "http://127.0.0.1:8000"
+
+    secure = dataclasses.replace(exposed, ssl_certfile="/public.crt", ssl_keyfile="/private.key")
+    assert _telegram_backend_url(secure) == "https://127.0.0.1:8000"
+
+    ipv6 = dataclasses.replace(secure, api_host="::")
+    assert _telegram_backend_url(ipv6) == "https://[::1]:8000"
+    assert ipv6.frontend_origin == "https://[::1]:8000"
+
+    named = dataclasses.replace(secure, api_host="localhost")
+    assert _telegram_backend_url(named) == "https://localhost:8000"
+    assert named.frontend_origin == "https://localhost:8000"
+
+    # An explicit URL remains authoritative for a reverse proxy or container DNS.
+    monkeypatch.setenv("FRIDAY_BACKEND_URL", "https://backend.internal:9443/")
+    assert _telegram_backend_url(secure) == "https://backend.internal:9443"
+
+
 def test_install_services_writes_units(tmp_path, settings):
     from friday.cli import _install_services
 
