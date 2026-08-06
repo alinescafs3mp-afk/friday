@@ -31,6 +31,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from friday import __version__
 from friday.admin_api import router as admin_router
 from friday.agent_runtime import AgentRuntime, asks_for_the_web
+from friday.agent_runtime._office_attachments import (
+    OFFICE_STRUCTURE_KEY,
+    bounded_raw_file_metadata,
+    trusted_office_attachment,
+    validate_runtime_office_index,
+)
 from friday.agent_runtime.llm import LLMRouter
 from friday.api.conversations import router as conversations_router
 from friday.api.deps import (
@@ -69,6 +75,10 @@ from friday.ingestion import (
 )
 from friday.knowledge_graph import KnowledgeGraph, normalize_event_date
 from friday.memory import MemoryVault
+from friday.office_attestation import (
+    OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
+    verify_office_structure_attestation,
+)
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
@@ -299,6 +309,7 @@ def _current_turn_file_attachment(
     filename: str,
     file_ingestion: dict[str, Any],
     raw: dict[str, Any] | None,
+    storage: Any | None = None,
 ) -> dict[str, Any]:
     """Project a just-uploaded Raw Object into one ephemeral prompt attachment.
 
@@ -322,8 +333,7 @@ def _current_turn_file_attachment(
     }
     extraction_value = file_ingestion.get("extraction")
     extraction = extraction_value if isinstance(extraction_value, dict) else {}
-    raw_metadata = _json_load((raw or {}).get("metadata_json"), {})
-    raw_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    raw_metadata = bounded_raw_file_metadata((raw or {}).get("metadata_json"))
     try:
         extracted_chars = max(0, int(extraction.get("chars") or 0))
     except (TypeError, ValueError):
@@ -344,6 +354,20 @@ def _current_turn_file_attachment(
         )
     )
     text = raw_text if extracted_chars or replay_has_text else ""
+    stored_office_index = raw_metadata.get(OFFICE_STRUCTURE_KEY)
+    office_index = (
+        validate_runtime_office_index(stored_office_index, raw_text)
+        if text.strip()
+        and storage is not None
+        and isinstance(stored_office_index, dict)
+        and verify_office_structure_attestation(
+            storage,
+            stored_office_index,
+            (raw or {}).get("content_hash"),
+            raw_metadata.get(OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY),
+        )
+        else None
+    )
     advisory_only = bool(
         raw_metadata.get("vision_review_required")
         or raw_metadata.get("transcription")
@@ -365,11 +389,17 @@ def _current_turn_file_attachment(
     if text.strip():
         attachment.update(
             {
-                "transient_text": text[:_CURRENT_TURN_ATTACHMENT_CHARS],
+                # Valid Office spans are resolved once later under a shared
+                # whole-record budget.  Keep the exact string only in this
+                # private in-memory descriptor until then; legacy files retain
+                # their historical prefix projection.
+                "transient_text": (
+                    text if office_index is not None else text[:_CURRENT_TURN_ATTACHMENT_CHARS]
+                ),
                 "extraction_success": True,
                 "extraction_error": "",
                 "text_truncated": bool(extraction.get("text_truncated") or raw_metadata.get("text_truncated"))
-                or len(text) > _CURRENT_TURN_ATTACHMENT_CHARS,
+                or (office_index is None and len(text) > _CURRENT_TURN_ATTACHMENT_CHARS),
                 # OCR and speech recognition are useful same-turn context, but
                 # model-generated text is not source truth for verified=True or
                 # a repair pass. The prompt receives an explicit caveat below.
@@ -401,6 +431,9 @@ def _current_turn_file_attachment(
             "parse_total_pages": nonnegative_metric("parse_total_pages"),
         }
     )
+    if office_index is not None:
+        attachment[OFFICE_STRUCTURE_KEY] = office_index
+        return trusted_office_attachment(attachment)
     return attachment
 
 
@@ -1995,29 +2028,50 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         filename=filename,
                         mime_type=mime_type,
                     )
-                    attachments.append(
-                        {
-                            "filename": transient_file["filename"],
-                            "transient": True,
-                            "transient_text": transient_file["text_preview"],
-                            "extraction_success": transient_file["extraction_success"],
-                            # Всё, что осмотр УЖЕ выяснил про полноту разбора.
-                            # Признаки вычислялись и отбрасывались здесь же, в
-                            # четырёх ключах из десяти: модель получала огрызок
-                            # документа и не знала, что он огрызок, — и отвечала
-                            # по нему как по целому. Материал при этом не
-                            # сохраняется, значит переспросить по нему потом
-                            # нечего: другого случая сказать правду не будет.
-                            "extraction_error": transient_file["extraction_error"],
-                            "text_truncated": transient_file["text_truncated"],
-                            "parse_deadline_reached": transient_file["parse_deadline_reached"],
-                            "parse_pages_read": transient_file["parse_pages_read"],
-                            "parse_pages_truncated": transient_file["parse_pages_truncated"],
-                            "parse_total_pages": transient_file["parse_total_pages"],
-                        }
+                    private_office_text = str(
+                        transient_file.get("_office_source_text") or transient_file.get("text_preview") or ""
                     )
+                    transient_office_index = validate_runtime_office_index(
+                        transient_file.get(OFFICE_STRUCTURE_KEY),
+                        private_office_text,
+                    )
+                    transient_attachment = {
+                        "filename": transient_file["filename"],
+                        "transient": True,
+                        "transient_text": (
+                            private_office_text
+                            if transient_office_index is not None
+                            else transient_file["text_preview"]
+                        ),
+                        "extraction_success": transient_file["extraction_success"],
+                        # Всё, что осмотр УЖЕ выяснил про полноту разбора.
+                        # Признаки вычислялись и отбрасывались здесь же, в
+                        # четырёх ключах из десяти: модель получала огрызок
+                        # документа и не знала, что он огрызок, — и отвечала
+                        # по нему как по целому. Материал при этом не
+                        # сохраняется, значит переспросить по нему потом
+                        # нечего: другого случая сказать правду не будет.
+                        "extraction_error": transient_file["extraction_error"],
+                        "text_truncated": transient_file["text_truncated"],
+                        "parse_deadline_reached": transient_file["parse_deadline_reached"],
+                        "parse_pages_read": transient_file["parse_pages_read"],
+                        "parse_pages_truncated": transient_file["parse_pages_truncated"],
+                        "parse_total_pages": transient_file["parse_total_pages"],
+                        "verification_eligible": bool(transient_file["extraction_success"]),
+                    }
+                    if transient_office_index is not None:
+                        transient_attachment[OFFICE_STRUCTURE_KEY] = transient_office_index
+                        transient_attachment = trusted_office_attachment(transient_attachment)
+                    attachments.append(transient_attachment)
                     file_ingestion = {
-                        key: value for key, value in transient_file.items() if key != "text_preview"
+                        key: value
+                        for key, value in transient_file.items()
+                        if key
+                        not in {
+                            "text_preview",
+                            "_office_source_text",
+                            OFFICE_STRUCTURE_KEY,
+                        }
                     }
                     file_ingestion.update(
                         {
@@ -2074,6 +2128,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             filename=filename,
                             file_ingestion=file_ingestion,
                             raw=current_turn_raw,
+                            storage=state.storage,
                         )
                     )
                 # Голосовое сообщение — обычно ВОПРОС, произнесённый вслух.

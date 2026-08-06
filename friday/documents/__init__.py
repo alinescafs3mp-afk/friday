@@ -30,6 +30,12 @@ from typing import Any, Protocol
 
 from bs4 import BeautifulSoup
 
+from friday.documents._office_structure import (
+    build_docx_text_and_structure,
+    build_xlsx_text_and_structure,
+    validate_office_structure_index,
+)
+
 LOGGER = logging.getLogger(__name__)
 _TEXT_EXTENSIONS = {
     ".txt",
@@ -160,6 +166,10 @@ class DocumentResult:
     metadata: dict[str, Any] = field(default_factory=dict)
     success: bool = True
     error: str = ""
+    # Last on purpose: older parser doubles and callers construct this class
+    # positionally as ``text, metadata, success, error``.  The structure is an
+    # optional, content-free companion to the immutable legacy text contract.
+    office_structure_index: dict[str, Any] | None = None
 
     def to_dict(self, *, preview_chars: int = 2_000) -> dict[str, Any]:
         return {
@@ -367,7 +377,18 @@ class DocumentExtractor:
             )
             if own_date:
                 metadata["document_date"] = own_date
-        return DocumentResult(text, metadata, result.success, result.error)
+        office_structure_index = (
+            validate_office_structure_index(result.office_structure_index, text)
+            if result.office_structure_index is not None
+            else None
+        )
+        return DocumentResult(
+            text,
+            metadata,
+            result.success,
+            result.error,
+            office_structure_index,
+        )
 
     def extract_visual_assets(
         self,
@@ -733,24 +754,11 @@ class DocumentExtractor:
             from docx import Document
 
             document = Document(io.BytesIO(content))
-            parts: list[str] = []
-            used = 0
-            extraction_truncated = False
-            for paragraph in document.paragraphs:
-                used, clipped = self._append_bounded(parts, paragraph.text.strip(), used)
-                if clipped:
-                    extraction_truncated = True
-                    break
-            for table in document.tables:
-                if extraction_truncated:
-                    break
-                for row in table.rows:
-                    values = [cell.text.strip() for cell in row.cells]
-                    if any(values):
-                        used, clipped = self._append_bounded(parts, " | ".join(values), used)
-                        if clipped:
-                            extraction_truncated = True
-                            break
+            text, office_structure_index, extraction_truncated = build_docx_text_and_structure(
+                document,
+                max_text_chars=self.max_text_chars,
+                content=content,
+            )
             metadata: dict[str, Any] = {
                 "format": "docx",
                 "paragraphs": len(document.paragraphs),
@@ -758,9 +766,11 @@ class DocumentExtractor:
             }
             if extraction_truncated:
                 metadata["extraction_truncated"] = True
+                metadata["text_truncated"] = True
             return DocumentResult(
-                "\n".join(parts),
+                text,
                 metadata,
+                office_structure_index=office_structure_index,
             )
         except ImportError:
             return self._extract_xml_zip_text(content, "word/document.xml", "docx")
@@ -793,32 +803,28 @@ class DocumentExtractor:
         except ImportError:
             return DocumentResult("", {"format": "xlsx"}, False, "openpyxl is not installed")
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        parts: list[str] = []
-        used = 0
-        row_count = 0
-        extraction_truncated = False
+        # Formula expressions are not source text and never enter the index.  A
+        # second read-only view exists solely to distinguish a genuinely empty
+        # cell from a formula whose cached result is absent.  Failure of this
+        # auxiliary view makes coverage incomplete; it must not change legacy
+        # extraction success or text.
+        try:
+            formula_workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=False)
+        except Exception:  # noqa: BLE001 - fail closed in coverage, preserve old parser result
+            formula_workbook = None
         sheet_count = len(workbook.sheetnames)
         try:
-            for sheet in workbook.worksheets:
-                used, clipped = self._append_bounded(parts, f"--- Sheet: {sheet.title} ---", used)
-                if clipped:
-                    extraction_truncated = True
-                    break
-                for row in sheet.iter_rows(values_only=True):
-                    if row_count >= _MAX_TABULAR_ROWS:
-                        extraction_truncated = True
-                        break
-                    row_count += 1
-                    values = [str(value) if value is not None else "" for value in row]
-                    if any(values):
-                        used, clipped = self._append_bounded(parts, " | ".join(values), used)
-                        if clipped:
-                            extraction_truncated = True
-                            break
-                if extraction_truncated:
-                    break
+            text, office_structure_index, extraction_truncated, row_count = build_xlsx_text_and_structure(
+                workbook,
+                formula_workbook,
+                content=content,
+                max_text_chars=self.max_text_chars,
+                max_rows=_MAX_TABULAR_ROWS,
+            )
         finally:
             workbook.close()
+            if formula_workbook is not None:
+                formula_workbook.close()
         metadata: dict[str, Any] = {
             "format": "xlsx",
             "sheets": sheet_count,
@@ -826,9 +832,11 @@ class DocumentExtractor:
         }
         if extraction_truncated:
             metadata["extraction_truncated"] = True
+            metadata["text_truncated"] = True
         return DocumentResult(
-            "\n".join(parts),
+            text,
             metadata,
+            office_structure_index=office_structure_index,
         )
 
     def _extract_pptx(self, content: bytes) -> DocumentResult:

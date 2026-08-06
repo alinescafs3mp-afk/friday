@@ -159,6 +159,28 @@ Research synthesis также является недоверенным output. 
 
 Ход с приватным вложением или данными о человеке закрывает outbound hard boundary, а не полагается на уговор модели: `web_search`, `web_fetch`, `web_research`, внешний `data_query` и не являющийся OS-песочницей `code_run` удаляются из schemas; web-prefetch отключён; даже hallucinated/native call с таким именем отклоняется до kernel. После первого file-grounded хода private-lineage переносится каждым assistant message до нового conversation: файл сам по себе не становится ambient context, но outbound и account-wide обучение standing rules/corrections остаются закрыты, чтобы пересказ приватного ответа не попал в глобальную память. Synthesis, verifier и единственный repair используют один bounded projection без повторной обрезки attachment chunks. Vision/OCR/transcript видимы только как advisory и не становятся verification evidence. Неполный parser/context/advisory projection не может подтвердить count/all/exhaustiveness ни в исходном ответе, ни после repair: финальный статус принудительно `unknown`. Сырые замечания verifier доступны лишь немедленному repair; durable metadata, API, Telegram, TTS и idempotency получают только allowlisted issue code. Данные repair передаются user-role недоверенным JSON, а system-role остаётся статическим.
 
+Для native DOCX/XLSX эта граница усилена content-free `OfficeStructureIndex v1`.
+Его schema закрыта allowlist-ом, размер ограничен 48 КиБ, а каждый span и reference
+повторно связывается с exact UTF-8 hash текущего Raw text. Durable индекс не содержит
+cell/paragraph literals и хранится только у Raw Object; caller metadata не может его
+подменить, Knowledge/Inbox/API его не получают. Installation-local HMAC связывает
+canonical индекс с SHA-256 байтов именно этого Raw-файла; current/restored/replay
+проверяют оба значения из tenant-scoped строки перед выдачей process-private trust
+marker. No-save получает такой marker только напрямую от parser path, не переживает
+текущий вызов и не попадает в idempotency. Координированное уменьшение record set,
+candidate list и declared count отвергается повторным code-owned выводом и подписью;
+подписанный индекс другого файла не принимается даже при одинаковом flat text.
+Это authenticity boundary для API/caller metadata и повреждения без штатного key
+path, не шифрование базы: installation key живёт в защищённой SQLite вместе с
+данными, поэтому полностью привилегированный читатель БД вне threat model может
+прочитать ключ и пересчитать подпись. Его останавливают права ОС и защита storage,
+а не этот HMAC.
+Formula без cache, неиндексируемые OOXML parts/containers, nested/merged ambiguity и
+любой budget снимают completeness. Valid Office, который не помещается в canonical
+whole-record JSON, никогда не откатывается к legacy raw wrapper. Exact count/list
+не вызывает модель; ложный исчерпывающий model output на другом пути отбрасывается
+вместе с подготовленными file, voice и Knowledge attribution carriers.
+
 `user_model` остаётся только фоновым ориентиром и не лицензирует факты о человеке. Для person-intent без Knowledge Object, допустимого person-tool, attachment или graph evidence свободный модельный текст отбрасывается до verifier/persistence; одновременно очищаются подготовленные моделью file, voice и Knowledge attribution carriers. Структура отвечает, что подтверждённых данных недостаточно. Это fail-closed граница против досье, сгенерированного из весов модели при нулевой retrieval confidence.
 
 ## 7. Web surfer и SSRF

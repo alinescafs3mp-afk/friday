@@ -11,11 +11,12 @@ contract.
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from collections.abc import Mapping
 from typing import Any
+
+from friday.raw_metadata import bounded_raw_file_metadata
 
 _INGESTION_ACTIONS = frozenset({"promote", "review", "transient", "unknown"})
 _INGESTION_CATEGORIES = frozenset(
@@ -165,16 +166,8 @@ def _resource_is_owned(
             return False
     if not isinstance(raw, Mapping) or raw.get("user_id") != user_id:
         return False
-    metadata_value = raw.get("metadata_json")
-    if isinstance(metadata_value, Mapping):
-        metadata = metadata_value
-    elif isinstance(metadata_value, str) and len(metadata_value) <= 65_536:
-        try:
-            decoded = json.loads(metadata_value)
-        except (json.JSONDecodeError, RecursionError):
-            return False
-        metadata = decoded if isinstance(decoded, Mapping) else {}
-    else:
+    metadata = bounded_raw_file_metadata(raw.get("metadata_json"))
+    if not metadata:
         return False
     return metadata.get("uploaded_by") == owner_id
 

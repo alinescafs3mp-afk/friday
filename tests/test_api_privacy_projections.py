@@ -14,6 +14,7 @@ from friday.api.projections import (
     public_ingestion_receipt,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
 from friday.server import create_app
 from friday.storage.models import InboxItem, KnowledgeObject, RawObject, new_id
 from friday.telegram_bridge._callbacks import CallbacksMixin
@@ -133,6 +134,62 @@ def test_ingestion_receipts_are_allowlists_even_for_adversarial_internal_results
     assert "raw_object_id" not in malformed
     assert "raw_object_id" not in foreign
     assert "raw_object_id" not in wrong_person
+
+
+def test_shared_owner_projection_accepts_full_bounded_metadata_without_exposing_office_index() -> None:
+    raw_id = "raw_0123456789abcdef"
+    sentinel = "SYNTHETIC-OFFICE-INDEX-PRIVATE-9c22b1"
+
+    class _LargeMetadataStorage(_SyntheticAuthorityStorage):
+        def __init__(self, metadata_json: str) -> None:
+            super().__init__(user_id="shared-tenant", raw_id=raw_id)
+            self.metadata_json = metadata_json
+
+        def get_raw_object(self, candidate: str, tenant: str):
+            row = super().get_raw_object(candidate, tenant)
+            if row is not None:
+                row["metadata_json"] = self.metadata_json
+            return row
+
+    metadata = json.dumps(
+        {
+            "uploaded_by": "alice",
+            "office_structure_v1": {"private_sentinel": sentinel},
+            "office_structure_attestation_v1": "a" * 64,
+            "padding": "X" * 70_000,
+        },
+        separators=(",", ":"),
+    )
+    assert 65_536 < len(metadata.encode("utf-8")) < RAW_FILE_METADATA_MAX_BYTES
+    projected = public_ingestion_receipt(
+        {
+            "raw_object_id": raw_id,
+            "office_structure_v1": {"private_sentinel": sentinel},
+            "office_structure_attestation_v1": "a" * 64,
+        },
+        include_resource_id=True,
+        storage=_LargeMetadataStorage(metadata),
+        resource_user_id="shared-tenant",
+        resource_owner_id="alice",
+    )
+    assert projected["raw_object_id"] == raw_id
+    encoded = json.dumps(projected, ensure_ascii=False)
+    assert sentinel not in encoded
+    assert "office_structure_v1" not in encoded
+    assert "office_structure_attestation_v1" not in encoded
+
+    oversized = json.dumps(
+        {"uploaded_by": "alice", "padding": "X" * RAW_FILE_METADATA_MAX_BYTES},
+        separators=(",", ":"),
+    )
+    refused = public_ingestion_receipt(
+        {"raw_object_id": raw_id},
+        include_resource_id=True,
+        storage=_LargeMetadataStorage(oversized),
+        resource_user_id="shared-tenant",
+        resource_owner_id="alice",
+    )
+    assert "raw_object_id" not in refused
 
 
 def test_file_list_projection_keeps_download_handle_but_not_private_provenance() -> None:

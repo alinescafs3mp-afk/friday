@@ -77,6 +77,31 @@ Telegram-медиа (voice/audio/video/video_note/animation) скачивает�
 
 Извлечённый текст текущего файла доступен только точному uploader при действующем `files.read`. Persisted follow-up восстанавливает не более трёх файлов и 24 000 знаков только по явной ссылке либо deictic-продолжению сразу после attachment-grounded ответа; закрытый класс продолжений включает повторный подсчёт/перечисление и проверку «это всё?». Новый attachment-bearing ход целиком заменяет прежний active set. На каждом ходе заново проверяются tenant, точный `uploaded_by` и capability, а regenerate привязан к immutable source message ID, не к совпадению подписи. Message metadata хранит только структурные counts и ограниченные opaque Raw IDs; API не возвращает эти IDs или excerpts. В общем архиве source/content/text dedup также разделён по точному uploader, поэтому безопасный conversational pointer никогда не заимствуется у другого участника. После использования файла разговор получает sticky private-lineage: до начала нового conversation внешние инструменты и перенос правил/поправок в account-wide память запрещены, даже когда сам файл на очередном ходе уже не восстанавливается.
 
+Native DOCX/XLSX дополнительно несёт `OfficeStructureIndex v1`, не меняя ни одного
+байта `DocumentResult.text`. Индекс связан с exact UTF-8 SHA-256 этого текста и
+содержит только bounded IDs, spans, ordinals, closed roles и coverage counts/reasons;
+literal values восстанавливаются из Raw content после строгой повторной валидации.
+Durable индекс подписан installation-local HMAC одновременно по canonical index и
+SHA-256 исходных байтов из tenant-scoped Raw row; current, restored и replay не
+получают process-private trust marker, пока эта подпись не проверена. У no-save
+подписи нет: parser-built объект помечается не сериализуемым через JSON Python-типом
+и существует только внутри текущего вызова.
+DOCX source order может поэтому отличаться от исторического paragraphs-first
+порядка spans, не меняя corpus. Authoritative `person_rows` появляется только при
+однозначной шапке и непрерывной области записей; candidate inventory имеет ровно
+одну ячейку declared person-column на row и не проходит общий graph cap.
+
+В runtime все валидные Office-вложения сводятся в один canonical
+`FRIDAY_ATTACHMENT_DATA` user-data JSON. Бюджет принимает целый paragraph/row либо
+не принимает его вовсе; totals, emitted counts, authority, completeness и omission
+reasons остаются видимы. Exact count/list рендерится кодом в source order, минуя
+модель, verifier и repair. Любая неполнота даёт deterministic UNKNOWN, а
+исчерпывающий model-only ответ на составном ходе удаляется до persistence вместе с
+производными carriers. В durable storage индекс существует только у Raw Object;
+no-save source/index остаются эфемерными. Text-dedup Office требует равенства двух
+полных валидных индексов, поэтому одинаковый flat text с иной layout не переиспользует
+структурную authority первого файла.
+
 Review-действия вынесены прямо в Telegram: `/inbox` разбирает входящие предложения, `/merges` показывает кандидатов на объединение дубликатов сущностей с inline-кнопками accept/reject. Обе команды вызывают user-scoped, capability-gated и аудируемые эндпоинты (`inbox.review`, `kg.merge`); слияния остаются исключительно ручными.
 
 ### Веб-страница

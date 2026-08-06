@@ -1,3 +1,38 @@
+## 0.156.0 — 2026-08-06
+
+### Полный состав Office-документа теперь принадлежит коду
+
+DOCX/XLSX получают bounded content-free `OfficeStructureIndex v1`, связанный с
+точным UTF-8 SHA-256 неизменённого legacy-текста. Индекс хранит только closed
+enums, IDs, counts и spans: ни имя человека, ни значение ячейки, ни пользовательское
+название стиля не дублируются в metadata. DOCX сохраняет настоящий порядок
+paragraph/table отдельно от прежнего paragraphs-first corpus text; XLSX индексирует
+sheet/row/cell и отдельно проверяет formula cache и merged ranges. Однозначная
+person-column создаёт authoritative record set и ровно один row-scoped candidate
+на запись без graph caps. Строгий validator повторно выводит полный набор из bound
+text, а durable индекс дополнительно получает installation-local HMAC по canonical
+структуре и SHA-256 байтов конкретного Raw-файла. Поэтому согласованная подмена
+16→15 и перенос подписанного индекса на другой Office-файл не проходят.
+
+Неизвестное не маскируется под ноль или полноту. Text/row/index/prompt budget,
+formula без cached result, merged ambiguity, nested table, header/footer, text box,
+tracked changes/content controls и видимый текст в omitted Office parts снимают
+`complete`; prompt принимает только целые records и публикует emitted/total и
+closed omission reasons. Synthesis, verifier и единственный repair используют один
+канонический `FRIDAY_ATTACHMENT_DATA` JSON-блок. Exact count/list в текущем ходе,
+follow-up и regenerate формируется кодом без model call; исчерпывающий fake model
+output на compound path отбрасывается вместе с file/voice/attribution carriers.
+
+Индекс хранится только рядом с Raw Object, не копируется в Knowledge/Inbox/API и
+не принимает caller override. Current/follow-up/regenerate проверяют HMAC против
+tenant-scoped Raw `content_hash`; no-save full source и структура отмечаются
+process-private типом, живут только в текущем stack frame и не попадают в
+idempotency cache. Office text-dedup теперь
+требует два полных, валидных и полностью равных индекса: одинаковый плоский текст
+с другой раскладкой, а также любой неполный structural projection, создаёт отдельный
+Raw Object. `DocumentResult.text`, extracted-text hash, FTS, embeddings и ranking
+существующего corpus не меняются.
+
 ## 0.155.0 — 2026-08-06
 
 ### Файл отвечает в том же ходе и не теряется в продолжении

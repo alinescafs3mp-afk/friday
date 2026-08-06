@@ -1641,15 +1641,12 @@
 
 ## 35. OfficeStructureIndex v1: точный состав Office-документа принадлежит коду
 
-- **Статус: OPEN, только дизайн.** Немедленное восстановление persisted-вложения в
-  продолжении разговора и attachment-aware verifier реализуются отдельно в текущем
-  цикле. Eligible native evidence получает bounded verifier и при failed допускает
-  один repair. Если для count/all-запроса неполны context, parser coverage или
-  verification eligibility, результат принудительно UNKNOWN и repair не запускается.
-  Ceiling повторяется по финальному тексту после repair и узнаёт answer-only
-  exhaustiveness (`N позиций`, `только`, `полный состав`, `и всё`); immediate
-  follow-up про повторный подсчёт/перечисление rehydrate точный persisted source.
-  Это не создаёт структурный инвентарь Office и не закрывает предложение.
+- **Статус: ПРИНЯТО 2026-08-06.** Немедленное восстановление persisted-вложения и
+  attachment-aware verifier были continuity-предпосылкой этого цикла. Теперь их
+  дополняет сам структурный инвентарь: exact count/list не просит verifier доказать
+  модельный пересказ, а формируется кодом; incomplete coverage даёт UNKNOWN.
+  Ceiling по финальному model output остаётся вторым рубежом для составного хода и
+  узнаёт answer-only exhaustiveness (`N позиций`, `только`, `полный состав`, `и всё`).
 - **Полностью synthetic воспроизведение:** DOCX-таблица и XLSX-лист с одинаковыми
   16 строками извлеклись без потери: оба результата содержали 16 из 16 стабильных
   маркеров, и после штатной сборки/подгонки prompt все 16 остались видимы. Значит
@@ -1692,13 +1689,15 @@
   сумма допустима только по явно совместимым наборам.
 - **Детерминированные entity candidates — отдельный prompt inventory, не граф.** Если
   заголовок однозначно объявляет person-column, каждая непустая data-cell этой
-  колонки становится row-scoped literal candidate независимо от формы имени. Для
-  свободного текста regex запускается внутри одного paragraph/cell и не имеет права
-  склеивать соседние строки. Candidate содержит ordinal ID, type, record/cell/span
-  evidence и basis, но не получает права автоматически создать или принять graph
-  entity. Нынешние review/noise caps переиспользовать нельзя: на отдельном synthetic
-  16-row варианте детектор увидел 16 двухсловных person candidates, а общий
-  per-method cap оставил 8 — разумно для review UI, неприемлемо для слова «все».
+  колонки становится row-scoped literal candidate независимо от формы имени.
+  Candidate содержит ordinal ID, type, record/cell/span evidence и basis, но не
+  получает права автоматически создать или принять graph entity. Свободный текст
+  v1 намеренно не превращает в candidates: regex-кандидаты внутри одного
+  paragraph/cell остаются возможным неавторитетным расширением следующей версии,
+  поскольку без объявленной record-колонки они не доказывают исчерпывающий состав.
+  Нынешние review/noise caps переиспользовать нельзя: на отдельном synthetic 16-row
+  варианте детектор увидел 16 двухсловных person candidates, а общий per-method cap
+  оставил 8 — разумно для review UI, неприемлемо для слова «все».
 - **Prompt contract:** Office-вложение передаётся как один
   `FRIDAY_ATTACHMENT_DATA` JSON user-data block, а не как сырой текст внутри
   XML-подобной рамки. Renderer расходует бюджет только целыми records/blocks и
@@ -1741,7 +1740,22 @@
   пятнадцатью IDs, duplicate ID или неизвестным ID не должен попасть человеку.
   Добавление row labels в `text` обязано покрасить digest-invariance; копирование
   literal values в metadata — privacy regression; `complete=true` после любого
-  declared omission — coverage regression.
+  declared omission — coverage regression. Durable mutation проверяется вместе с
+  installation-local HMAC по canonical index и SHA-256 байтов исходного Raw-файла:
+  подпись нельзя перенести между двумя Office binaries с одинаковым flat text.
+- **Результат:** `OfficeStructureIndex v1` реализован отдельным bounded companion
+  при byte-identical legacy text. Строгая schema/hash/span/reference validation
+  повторно выводит роли, record sets и candidates из bound text; согласованное
+  удаление строки вместе с ID/count/candidate не принимается. DOCX true source
+  order, split runs, merged ambiguity, tracked changes/content controls и omitted
+  parts; XLSX sheets/rows/cells, formulas и merges покрыты synthetic mutation tests.
+  Persisted index получает content-free HMAC attestation, связанную с binary
+  `content_hash`; transient no-save authority остаётся process-private.
+  Runtime использует один whole-record `FRIDAY_ATTACHMENT_DATA` для synthesis,
+  verifier и repair, а exact count/list current/restored/replay формируется кодом.
+  Fake 15/16 и answer-only exhaustiveness удаляются до persistence вместе с
+  derivative carriers. Raw-only/no-save/idempotency privacy и complete-only Office
+  text dedup проверены отдельно; backfill прежних Raw Objects намеренно не делался.
 
 ## 36. Живой backend сам диагностирует свою SQLite
 

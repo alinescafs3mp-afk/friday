@@ -267,6 +267,19 @@ Backend и bridge должны использовать одинаковый `FR
 
 Это не авария: visual output advisory-only. Проверьте asset/page evidence и цитируемые фрагменты в Inbox. Незаземлённый high-confidence ответ автоматически понижается, а сложный скан требует ручной correction.
 
+### Office отвечает, что точный состав неизвестен
+
+Это fail-closed результат, а не повод включать менее строгий model prompt. Exact
+count/list доступен только native DOCX/XLSX с полным `OfficeStructureIndex v1` и
+целым structured prompt. Формула без cached value, неоднозначная/merged шапка,
+nested table, header/footer, скрытый legacy-parser-ом OOXML text или любой
+text/row/index/prompt budget снимает полноту. То же происходит при отсутствующей или
+неверной local attestation индекса: она связана с SHA-256 байтов конкретного Raw и
+не переносится между файлами. Старые Raw Objects автоматически не
+backfill-ятся: повторно пришлите исходный файл, если нужен новый code-owned
+inventory. Не копируйте живое содержимое документа в диагностические команды или
+внешние model probes; для воспроизведения используйте synthetic файл.
+
 ### Backup не проходит проверку
 
 Не используйте его для restore. Сверьте пару `.sqlite3 + .manifest.json`, исключите частичную синхронизацию носителя и создайте новую копию из исправной БД.

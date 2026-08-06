@@ -215,6 +215,37 @@ byte-identical, infrastructure failures `0`. Durable latch теперь закр
 3. Перезапустить `friday-backend.service` и `friday-bridge.service`, проверить их
    через безопасный локальный API/lease boundary, затем synthetic latency LLM,
    embeddings и reranker. Никогда не возвращаться к внешнему SQLite-open живого WAL.
-4. После релиза продолжить OPEN с `OfficeStructureIndex v1`; отдельно остаётся
-   внешний шаг владельца — перевыпустить удалённый локально cloud web-search
-   credential у провайдера.
+4. `OfficeStructureIndex v1` закрыт следующим checkpoint 0.156.0; не возвращаться
+   к sealed temporal holdout. Отдельно остаётся внешний шаг владельца —
+   перевыпустить удалённый локально cloud web-search credential у провайдера.
+
+## 10. Checkpoint 2026-08-06: OfficeStructureIndex v1 готов к релизу 0.156.0
+
+**ПРИВАТНОСТЬ ГЛАВНЕЕ ЛЮБОЙ ФУНКЦИИ.** `start.txt` не читать и не добавлять.
+Живые file/chat literals не печатать в probes, отчёты, commit или внешние сервисы;
+для проверки использовать только synthetic документы. Push по правилу проекта —
+прямо в `main` после полного canonical gate.
+
+Proposal 35 реализован без изменения `DocumentResult.text` и corpus semantics.
+Content-free Raw-only индекс связан с exact UTF-8 SHA-256 и хранит bounded spans,
+IDs, roles, totals/reasons. DOCX true source order, XLSX row/cell inventory,
+authoritative person record sets и row-scoped candidates валидируются повторным
+code-owned выводом из bound text. Неиндексируемые OOXML области, formula без cache,
+merged ambiguity и любой budget снимают completeness.
+
+Persisted canonical index подписан installation-local HMAC вместе с SHA-256 байтов
+конкретного Raw-файла. Current/restored/replay сверяют tenant-scoped `content_hash`,
+а не caller metadata; no-save доверяется только через process-private marker.
+
+Runtime передаёт Office одним whole-record `FRIDAY_ATTACHMENT_DATA` JSON-блоком.
+Exact current/restored/replay count/list минует модель, verifier и repair; fake
+15/16 и answer-only exhaustive claim удаляются вместе с file/voice/attribution
+carriers. No-save source/index не переживают stack frame и не попадают в API,
+storage или idempotency. Office text-dedup разрешён только двум полным, валидным и
+равным индексам; старые Raw Objects автоматически не backfill-ятся.
+
+На момент checkpoint зелёные focused parser/storage/runtime/API/adversarial tests и
+static gate; до commit обязательны независимый read-only audit и полный
+`.venv/bin/python tools/quality_gate.py`. После push перезапустить backend/bridge,
+проверить safe local health и synthetic LLM/embeddings/reranker. Затем продолжить
+OPEN с TLS; provider credential rotation остаётся внешним действием владельца.

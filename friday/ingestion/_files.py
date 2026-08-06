@@ -7,6 +7,9 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from friday.documents._office_structure import validate_office_structure_index
 from friday.ingestion._base import (
     LOGGER,
     Any,
@@ -43,7 +46,29 @@ from friday.ingestion._base import (
     transcribe_bytes,
     unicodedata,
 )
+from friday.office_attestation import (
+    OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
+    sign_office_structure_index,
+    verify_office_structure_attestation,
+)
 from friday.private_fs import ensure_private_directory, restrict_private_file
+
+_OFFICE_STRUCTURE_METADATA_KEY = "office_structure_v1"
+_OFFICE_STRUCTURE_ATTESTATION_KEY = OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY
+_OFFICE_SOURCE_TEXT_KEY = "_office_source_text"
+_STRUCTURED_OFFICE_SUFFIXES = frozenset({".docx", ".xlsx"})
+_STRUCTURED_OFFICE_MIME_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+)
+
+
+def _validated_office_structure(value: Any, text: str) -> dict[str, Any] | None:
+    """Validate only mappings; absent parser/legacy metadata is ordinary None."""
+
+    return validate_office_structure_index(value, text) if isinstance(value, Mapping) else None
 
 
 class FilesMixin(PipelineShared):
@@ -485,6 +510,15 @@ class FilesMixin(PipelineShared):
             )
             if transcription and transcription.get("text"):
                 text_content = str(transcription["text"])[: self.settings.max_extracted_text_chars]
+        # The structure is a closed, content-free projection over the *exact*
+        # extracted text.  Validation happens only after every possible text
+        # replacement/clipping above: a native Office index must not be attached
+        # to OCR, a transcript, or another final body merely because they came
+        # from the same file.
+        office_structure = _validated_office_structure(
+            getattr(extraction, "office_structure_index", None),
+            text_content,
+        )
         # Тот же ДОКУМЕНТ, пришедший другим файлом, — это повтор, а не новая
         # запись. Проверка стоит здесь, а не рядом с проверкой по байтам выше:
         # текст известен только после извлечения, и раньше сравнивать нечего.
@@ -507,9 +541,65 @@ class FilesMixin(PipelineShared):
                 scope_uploaded_by=uploader_scoped,
             )
             if same_document:
-                LOGGER.info("Тот же текст уже принят; повторяю прежний исход")
-                self._store_file(user_id, file_content, digest, filename)
-                return self._replay_file_source(user_id, same_document)
+                # Flat-text equivalence is not structural equivalence.  Two
+                # native Office files can render the same legacy text while
+                # differing in paragraph/table order, merged cells or record
+                # boundaries.  Reusing the first Raw Object in that case would
+                # also reuse its exact-count inventory for a different file.
+                #
+                # Non-Office formats intentionally retain the established
+                # text-dedup contract.  For DOCX/XLSX both sides must instead
+                # carry the same independently validated content-free index.
+                suffix = Path(filename).suffix.casefold()
+                existing_metadata = _json_dict(same_document.get("metadata_json"))
+                existing_structure = _validated_office_structure(
+                    existing_metadata.get(_OFFICE_STRUCTURE_METADATA_KEY),
+                    str(same_document.get("raw_content") or ""),
+                )
+                if existing_structure is not None and not verify_office_structure_attestation(
+                    self.storage,
+                    existing_structure,
+                    same_document.get("content_hash"),
+                    existing_metadata.get(_OFFICE_STRUCTURE_ATTESTATION_KEY),
+                ):
+                    existing_structure = None
+                existing_suffix = Path(str(existing_metadata.get("filename") or "")).suffix.casefold()
+                existing_mime_type = (
+                    str(existing_metadata.get("mime_type") or "").split(";", 1)[0].strip().casefold()
+                )
+                structurally_equivalent = True
+                # Extension, declared media type, and the parser result are
+                # independent signals on *both* sides.  Telegram occasionally
+                # supplies a generic or missing filename, while API clients
+                # occasionally omit the MIME type.  If any signal identifies
+                # either input as structured Office, flat-text dedup must fail
+                # closed; otherwise upload order (PDF then DOCX versus DOCX
+                # then PDF) would change whether two sources are merged.
+                structured_office = bool(
+                    office_structure is not None
+                    or suffix in _STRUCTURED_OFFICE_SUFFIXES
+                    or mime_type.casefold() in _STRUCTURED_OFFICE_MIME_TYPES
+                    or existing_structure is not None
+                    or existing_suffix in _STRUCTURED_OFFICE_SUFFIXES
+                    or existing_mime_type in _STRUCTURED_OFFICE_MIME_TYPES
+                )
+                if structured_office:
+                    structurally_equivalent = bool(
+                        office_structure is not None
+                        and existing_structure is not None
+                        # A valid incomplete projection proves only that the
+                        # retained prefix is equal.  Layout may still differ in
+                        # an omitted tail (`index_budget`, unsupported body
+                        # content, etc.), so it cannot authorize reuse of the
+                        # first file's exact inventory.
+                        and office_structure.get("complete") is True
+                        and existing_structure.get("complete") is True
+                        and office_structure == existing_structure
+                    )
+                if structurally_equivalent:
+                    LOGGER.info("Тот же текст уже принят; повторяю прежний исход")
+                    self._store_file(user_id, file_content, digest, filename)
+                    return self._replay_file_source(user_id, same_document)
         media_label = media_kind or "File"
         raw_content = (
             text_content or f"[{media_label}: {filename}; type={mime_type}; size={len(file_content)}]"
@@ -699,6 +789,23 @@ class FilesMixin(PipelineShared):
             file_metadata["parse_total_pages"] = int((extraction.metadata or {}).get("total_pages") or 0)
         if media_kind:
             file_metadata["media_kind"] = media_kind
+        # Caller metadata is provenance, not a route into code-owned parser
+        # state.  Remove the reserved key unconditionally, then append the
+        # independently validated structure last.  An invalid/missing parser
+        # result therefore means "no index", never "trust the caller's index".
+        raw_metadata = {
+            **file_metadata,
+            "promotion_assessment": assessment.to_dict(),
+            **supplied_metadata,
+        }
+        raw_metadata.pop(_OFFICE_STRUCTURE_METADATA_KEY, None)
+        raw_metadata.pop(_OFFICE_STRUCTURE_ATTESTATION_KEY, None)
+        raw_metadata.pop(_OFFICE_SOURCE_TEXT_KEY, None)
+        if office_structure is not None:
+            office_attestation = sign_office_structure_index(self.storage, office_structure, digest)
+            if office_attestation is not None:
+                raw_metadata[_OFFICE_STRUCTURE_METADATA_KEY] = office_structure
+                raw_metadata[_OFFICE_STRUCTURE_ATTESTATION_KEY] = office_attestation
         raw = RawObject(
             id=new_id("raw"),
             user_id=user_id,
@@ -707,11 +814,7 @@ class FilesMixin(PipelineShared):
             raw_content=raw_content,
             content_type="file",
             content_hash=digest,
-            metadata_json={
-                **file_metadata,
-                "promotion_assessment": assessment.to_dict(),
-                **(metadata or {}),
-            },
+            metadata_json=raw_metadata,
         )
         # Ни литерала «document», ни первой части mime-типа. Оба приписывались
         # КАЖДОМУ файлу без анализа содержимого, и на архиве владельца дали по 1524
@@ -943,7 +1046,7 @@ class FilesMixin(PipelineShared):
             self._doc_extractor.extract, file_content, safe_filename, safe_mime_type
         )
         limit = max(1_000, min(int(preview_chars), 48_000))
-        return {
+        transient = {
             "filename": safe_filename,
             "mime_type": safe_mime_type,
             "sha256": hashlib.sha256(file_content).hexdigest(),
@@ -953,11 +1056,14 @@ class FilesMixin(PipelineShared):
             "extraction_success": bool(extraction.success),
             "extraction_error": extraction.error if not extraction.success else "",
             "text_preview": extraction.text[:limit],
-            "text_truncated": len(extraction.text) > limit,
-            # Две РАЗНЫЕ обрезки, и путать их нельзя: `text_truncated` — это предпросмотр
-            # короче полного текста, а здесь оборвался сам разбор, и полного текста
-            # не существует ни у кого. Читателю, который увидит только первое,
-            # частичный документ покажется целым.
+            # One prompt-level truth covers either loss: the transient preview
+            # may be shorter than the extractor result, or the extractor itself
+            # may already have stopped at its text budget.  In both cases the
+            # model must not make a whole-document claim from the visible text.
+            "text_truncated": len(extraction.text) > limit
+            or bool((extraction.metadata or {}).get("text_truncated")),
+            # Deadline/page ceilings remain distinct because their metrics let
+            # the prompt explain how much of the document was actually read.
             "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),
             "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
             # Третья обрезка, отличная от обеих предыдущих: том толще потолка
@@ -966,6 +1072,21 @@ class FilesMixin(PipelineShared):
             "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
             "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
         }
+        office_structure = _validated_office_structure(
+            getattr(extraction, "office_structure_index", None),
+            extraction.text,
+        )
+        if office_structure is not None:
+            # The caller may pass this only to the in-memory attachment for the
+            # current response.  The full bounded source accompanies it because
+            # spans beyond the ordinary 24k preview cannot be reconstructed from
+            # that preview.  Both private keys are consumed by the server before
+            # it builds the API/idempotency receipt; no-save never calls
+            # store_raw_object, and the durable caller-metadata road strips the
+            # reserved index key above.
+            transient[_OFFICE_STRUCTURE_METADATA_KEY] = office_structure
+            transient[_OFFICE_SOURCE_TEXT_KEY] = extraction.text
+        return transient
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:

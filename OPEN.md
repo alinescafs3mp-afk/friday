@@ -102,7 +102,11 @@ Object; мутация `own_id -> user_id` красит соответствую
 человека: 192 связи, по которым арбитр разошёлся сам с собой или воздержался, и
 75 конфликтов, где различающего признака нет.
 
-Пути к конфликтам из Telegram по-прежнему нет — это отдельная дыра.
+~~Пути к конфликтам из Telegram нет~~ — **ЗАКРЫТО ранее в 0.155.0, отмечено
+2026-08-06.** `/conflicts` показывает bounded очередь с triage-hint и
+capability-gated кнопками «оставить 1 / оставить 2 / не конфликт»; повторно
+решённая строка не появляется. Synthetic bridge/API tests закрепляют listing,
+решение, tenant boundary и снятие старой inline-разметки.
 
 ### 1.6. Помощники простаивают четвёртые сутки
 
@@ -164,9 +168,10 @@ quarantine остаётся монотонным на обычных mutation pa
 
 Четыре лишние локальные копии одного действующего cloud web-search credential
 удалены безвозвратно 2026-08-06; active configuration и runtime data не тронуты,
-повторный прежний exact-value scan в проверенной части находок не показал (его
-file/size coverage gap закрывается тем же релизом). Локальное удаление не отзывает уже
-скомпрометированное значение: владелец должен перевыпустить/отозвать его в кабинете
+повторный exact-value scan не показал находок в прочитанных small-first 256 МиБ.
+Покрытие честно неполно: после 4 505 файлов byte budget исчерпан, 60 крупных файлов
+проверены не полностью; scanner не выдаёт это за `clean`. Локальное удаление не
+отзывает уже скомпрометированное значение: владелец должен перевыпустить/отозвать его в кабинете
 провайдера и затем штатно обновить единственный protected env-файл. Значение, прежние
 пути и содержимое файлов в репозиторий/отчёт не записываются. Этот внешний шаг не
 блокирует code release, но privacy-инцидент нельзя считать полностью закрытым до
@@ -456,7 +461,7 @@ DDL; verified backups есть с обеих сторон миграции. Эт
 * **Сортировка чанкового отбора** отложена «до живой модели». Модель есть неделю.
 * **Пять находок веера 2026-07-28** остались непроверенными, выдача потеряна.
 
-### 6.1. OfficeStructureIndex v1 и code-owned полный список — OPEN
+### 6.1. OfficeStructureIndex v1 и code-owned полный список — ЗАКРЫТО 2026-08-06
 
 Полностью synthetic DOCX/XLSX с 16 строками проходят нынешний extractor и prompt
 как 16 из 16, но дальше таблица становится плоским текстом без row IDs,
@@ -465,20 +470,29 @@ authoritative record count и проверяемого множества отв
 в 8 после graph-oriented per-method cap, который нельзя использовать для слова
 «все».
 
-Немедленные continuity для persisted-вложения и attachment-aware verifier
-реализованы отдельно. Eligible native evidence получает bounded verifier и при
-failed допускает один repair; если для count/all-запроса неполны context, parser
-coverage или verification eligibility, результат принудительно UNKNOWN и repair
-не запускается. Тот же deterministic ceiling повторяется после repair и узнаёт
-exhaustiveness в самом ответе (`N позиций`, `только`, `полный состав`, `и всё`),
-даже если исходный вопрос не содержал слова «все». Immediate follow-up про повторный
-подсчёт/перечисление восстанавливает точный persisted source, а не отвечает по
-предыдущему частичному пересказу. Это не создаёт `OfficeStructureIndex` и не закрывает пункт.
-Остаётся Proposal 35: отдельный content-free span/index при
-byte-identical `raw_content`, ordered paragraphs/runs/tables/sheets/rows/cells,
-row-scoped candidates без graph caps, явные coverage totals/reasons и code-owned
-count/list с exact ID-set validation. Пока индекс не реализован, неизвестные,
-непоместившиеся или неразбираемые области Office нельзя называть полным документом.
+Немедленные continuity для persisted-вложения и attachment-aware verifier теперь
+дополнены самим `OfficeStructureIndex v1`. `DocumentResult.text` и legacy corpus
+остались byte-identical; отдельный Raw-only индекс связан с exact UTF-8 SHA-256 и
+хранит только closed enums, IDs, counts и spans, без литералов документа. DOCX
+восстанавливает настоящий порядок paragraph/table, XLSX — sheet/row/cell; однозначная
+person-column создаёт authoritative record set и ровно один row-scoped candidate на
+каждую запись без graph caps. Согласованная мутация 16→15 повторно выводится кодом из
+bound text и отвергается строгим validator; durable canonical index дополнительно
+подписан installation-local HMAC вместе с SHA-256 байтов конкретного Raw-файла, так
+что перенос подписи на другой Office-файл не даёт authority.
+
+Synthesis, verifier и repair получают ровно один канонический
+`FRIDAY_ATTACHMENT_DATA` JSON-блок, куда входят только целые records. Exact
+count/list и immediate/restored follow-up обходят модель; ordinary model output,
+который сам объявляет ложное число или полный состав, отбрасывается вместе с
+file/voice/attribution carriers. Непоместившийся prompt, index/text/row budget,
+formula без cached result, merged ambiguity, nested table, header/footer, text box,
+tracked change, content control или omitted footnote/endnote/comment снимают
+полноту и дают deterministic UNKNOWN. Индекс живёт только в Raw metadata; no-save
+full source остаётся в одном stack frame и отсутствует в API/idempotency/storage.
+Text-dedup двух Office-файлов разрешён лишь при двух полных, валидных и полностью
+равных индексах, поэтому одинаковый плоский текст с иной раскладкой не заимствует
+чужой инвентарь.
 
 ---
 
@@ -533,7 +547,8 @@ count/list с exact ID-set validation. Пока индекс не реализо
   continuation rehydrate исходный файл, sticky private-lineage блокирует outbound
   и глобальное обучение, verifier/repair видят один 24k slice до последнего знака,
   а answer-only exhaustiveness получает UNKNOWN и до, и после repair. Независимый
-  adversarial review: 124 focused PASS. Сам OfficeStructureIndex остаётся OPEN в §6.1.
+  adversarial review: 124 focused PASS. Структурный Office-инвентарь, который был
+  отдельным продолжением этой дороги, закрыт позднее в §6.1.
 
 Проверено на HEAD и вычеркнуто из прежних списков: разбор очереди связей,
 вид документа как факт, отбор тегов (служебные слова, имена, корпусная частота,
