@@ -243,6 +243,6 @@ def test_the_arbiter_sends_conversations_to_the_person_kind() -> None:
     # ответа нет, и правило не записывалось вовсе. После разведения — 11 из 11
     # на правилах при целом наборе про переписку.
     assert "сколько раз я просил" not in human.casefold(), "упрёк снова заявлен как вопрос о переписке"
-    rules = source[source.index('"правило — ') :][:2200]
+    rules = source[source.index('"правило — ') : source.index('"поправка — ')]
     assert "ВОПРОСОМ или упрёком" in rules
     assert "ПОВТОРЯЮЩИМСЯ поведением" in rules

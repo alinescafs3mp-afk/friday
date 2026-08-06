@@ -1529,7 +1529,7 @@ async def test_private_attachment_lineage_never_enters_global_learning(
         private_context_lineage=True,
     )
 
-    assert context.outward_verdict == (verdict, "synthetic proposal")
+    assert context.outward_verdict is None
     assert learned == []
     user = storage.get_user("alice")
     metadata = json.loads(str((user or {}).get("metadata_json") or "{}"))

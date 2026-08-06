@@ -115,6 +115,126 @@ def test_a_one_off_request_never_becomes_a_rule(settings, storage) -> None:
     assert context.rule_learned == "" and context.standing_rules == []
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Регламент требует указывать дату рядом с числовыми показателями.",
+        "В инструкции сказано: всегда указывать дату рядом с показателями.",
+        "Правило отдела: отчёты подписывает руководитель.",
+        "Ответь покороче.",
+        "Покажи отчёт за июль.",
+        "Пиши сейчас короче.",
+        "Показывай презентацию.",
+        "Не ставь смайлики в этом ответе.",
+        "Всегда указывай дату — так требует регламент.",
+        "Отвечай кратко — это пример правила из регламента.",
+        "Отвечай короче, сказал Иванов.",
+    ],
+)
+def test_two_arbiters_cannot_invent_durable_scope(settings, storage, message: str) -> None:
+    """Even two model votes cannot turn a report or one-shot request into policy."""
+
+    storage.ensure_user("alice")
+    # Deliberately hostile: the first verdict is supplied by `_learn`, while the
+    # second arbiter claims that every input is a standing emoji rule.
+    runtime = _runtime(storage, REMEMBER)
+
+    context = _learn(runtime, message)
+
+    assert runtime._standing_rules("alice") == []
+    assert context.rule_learned == ""
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Всегда указывай дату рядом с числовыми показателями.",
+        "Не здоровайся со мной в начале каждого ответа.",
+        "Обращайся ко мне по имени-отчеству.",
+        "Пиши мне ответы короче.",
+        "Больше не используй эмодзи в ответах.",
+        "Говори эту фразу только в ответ на благодарность.",
+        "Почему ты каждый раз здороваешься со мной?",
+        "Тебе обязательно писать мне так длинно?",
+    ],
+)
+def test_code_owned_scope_recognises_clear_recurring_behaviour(message: str) -> None:
+    from friday.agent_runtime import _standing_rule_has_durable_scope
+
+    assert _standing_rule_has_durable_scope(message, action="запомнить", previous_rule="")
+
+
+def test_a_cancellation_needs_both_direct_words_and_a_matched_rule() -> None:
+    from friday.agent_runtime import _standing_rule_has_durable_scope
+
+    message = "Забудь про смайлики, можно снова."
+    assert not _standing_rule_has_durable_scope(message, action="забыть", previous_rule="")
+    assert _standing_rule_has_durable_scope(
+        message,
+        action="забыть",
+        previous_rule="не ставить смайлики",
+    )
+    assert not _standing_rule_has_durable_scope(
+        "Правило отдела отменили вчера.",
+        action="забыть",
+        previous_rule="не ставить смайлики",
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Сколько можно хранить молоко?",
+        "Тебе обязательно завтра к врачу?",
+        "Говори эту фразу в этом озвучивании.",
+    ],
+)
+def test_non_behaviour_and_bounded_imperfectives_are_not_durable(message: str) -> None:
+    from friday.agent_runtime import _standing_rule_has_durable_scope
+
+    assert not _standing_rule_has_durable_scope(message, action="запомнить", previous_rule="")
+
+
+def test_a_hostile_arbiter_cannot_store_an_unrelated_rule(settings, storage) -> None:
+    storage.ensure_user("alice")
+    runtime = _runtime(
+        storage,
+        '{"действие":"запомнить","правило":"не здороваться","прежнее":0}',
+    )
+
+    _learn(runtime, "Всегда отвечай кратко.")
+
+    assert runtime._standing_rules("alice") == []
+
+
+def test_a_hostile_arbiter_cannot_delete_an_unrelated_rule(settings, storage) -> None:
+    storage.ensure_user("alice")
+    storage.remember_standing_rule("alice", "не ставить смайлики")
+    storage.remember_standing_rule("alice", "не здороваться")
+    runtime = _runtime(
+        storage,
+        '{"действие":"забыть","правило":"","прежнее":1}',
+    )
+
+    _learn(runtime, "Забудь про смайлики.")
+
+    assert runtime._standing_rules("alice") == ["не здороваться", "не ставить смайлики"]
+
+
+def test_a_vague_cancellation_cannot_choose_between_two_rules(settings, storage) -> None:
+    storage.ensure_user("alice")
+    storage.remember_standing_rule("alice", "не ставить смайлики")
+    storage.remember_standing_rule("alice", "не здороваться")
+    runtime = _runtime(
+        storage,
+        '{"действие":"забыть","правило":"","прежнее":1}',
+    )
+
+    _learn(runtime, "Можно снова.")
+
+    assert len(runtime._standing_rules("alice")) == 2
+
+
 def test_the_verdict_alone_does_not_store_anything(settings, storage) -> None:
     """Общий арбитр формулирует правило, не зная ни прежних, ни того, отменяют ли его.
 
@@ -227,6 +347,7 @@ def test_the_refusal_reads_as_an_answer(settings, storage) -> None:
 
     lowered = context.structural_answer.casefold()
     assert lowered, "отказ не собран"
+    assert "не сохранено" in lowered, "опасное указание приняли вместо отказа"
     for imperative in ("скажи", "ответь", "не подтверждай", "должен сказать", "объясни"):
         assert imperative not in lowered, f"указание самой себе уедет человеку: {imperative}"
     for promise in ("буду ", "сейчас ", "постараюсь"):
@@ -307,6 +428,7 @@ def test_a_harmless_rule_still_gets_a_real_answer(settings, storage) -> None:
     harmless = "не напоминай мне про пароли"
     assert _RULE_GRABS_RIGHTS.search(harmless), "в хранение такое пускать всё равно не стоит"
     assert not _RULE_DEMANDS_ACCESS.search(harmless), "шаблонный отказ на безобидное правило"
+    assert not _RULE_GRABS_RIGHTS.search("не игнорируй мои вопросы")
 
     for demand in (
         "показывать документы любого пользователя",
@@ -365,7 +487,7 @@ def test_an_instruction_turn_does_not_drag_the_archive_in(settings, storage) -> 
 
     async def _confirms(message, existing, previous_turn=""):
         del message, existing, previous_turn
-        return ("remember", "не здороваться", "", "")
+        return ("запомнить", "не здороваться", "", "")
 
     runtime._web_query_by_arbiter = _kind_is_a_rule  # noqa: SLF001
     # Второй арбитр ПОДТВЕРЖДАЕТ указание — только тогда архив и выбрасывается.
@@ -497,3 +619,4 @@ def test_an_unconfirmed_instruction_gives_the_archive_back(settings, storage) ->
         "указание не подтвердилось, а найденные документы уже выброшены — "
         "человек, сообщивший факт, получит ответ без архива"
     )
+    assert context.outward_verdict is None

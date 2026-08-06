@@ -89,7 +89,25 @@ def _answer(settings, storage, llm: _Hostile, message: str) -> str:
     agent = AgentRuntime(settings, storage)
     agent.llm = llm
     actor = ActorContext(user_id="alice", preset_key="user", source="test")
-    result = asyncio.run(agent.chat("alice", message, actor=actor, enable_tools=False))
+    conversation_id = None
+    if llm.kind == "поправка":
+        conversation = storage.create_conversation("alice", "synthetic correction")
+        conversation_id = str(conversation["id"])
+        storage.store_message(
+            conversation_id,
+            "alice",
+            "assistant",
+            "День морской пехоты отмечается 27 июля.",
+        )
+    result = asyncio.run(
+        agent.chat(
+            "alice",
+            message,
+            actor=actor,
+            enable_tools=False,
+            conversation_id=conversation_id,
+        )
+    )
     # Именно `message`: это то, что уходит человеку. Первый прогон читал
     # несуществующий `content`, получал пустую строку — и проверка «модель не
     # переспорила» проходила бы на любом коде, включая сломанный.

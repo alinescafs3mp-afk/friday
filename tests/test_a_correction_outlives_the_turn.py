@@ -51,8 +51,19 @@ def _runtime(storage, payload: str) -> AgentRuntime:
     return runtime
 
 
-def _learn(runtime: AgentRuntime, message: str, *, kind: str = "поправка"):
-    context = AgentContext(conversation_id="c", user_id="alice", outward_verdict=(kind, "x"))
+def _learn(
+    runtime: AgentRuntime,
+    message: str,
+    *,
+    kind: str = "поправка",
+    previous_answer: str = "День морской пехоты отмечается 27 июля.",
+):
+    context = AgentContext(
+        conversation_id="c",
+        user_id="alice",
+        outward_verdict=(kind, "x"),
+        previous_answer=previous_answer,
+    )
     bound = AgentRuntime._learn_a_correction.__get__(runtime, AgentRuntime)
     asyncio.run(bound(message, context))
     return context
@@ -109,7 +120,11 @@ def test_a_new_correction_replaces_the_stale_one(settings, storage) -> None:
         '{"действие": "запомнить", "правило": "договор продлили до августа", "прежнее": 1}',
     )
 
-    _learn(runtime, "это уже не так, договор продлили до августа")
+    _learn(
+        runtime,
+        "это уже не так, договор продлили до августа",
+        previous_answer="Договор закрыли в мае.",
+    )
 
     assert runtime._corrections("alice") == ["договор продлили до августа"]
 
@@ -123,6 +138,33 @@ def test_a_question_is_not_a_correction(settings, storage) -> None:
 
     assert runtime._corrections("alice") == []
     assert context.correction_learned == ""
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "В отделе теперь шестнадцать должностей.",
+        "Нет, это не так.",
+    ],
+)
+def test_two_arbiters_cannot_invent_a_durable_correction(settings, storage, message: str) -> None:
+    storage.ensure_user("alice")
+    runtime = _runtime(storage, FIXED)
+
+    _learn(runtime, message)
+
+    assert runtime._corrections("alice") == []
+
+
+def test_the_correction_arbiter_uses_the_factual_guide(settings, storage) -> None:
+    storage.ensure_user("alice")
+    runtime = _runtime(storage, NOTHING)
+
+    _learn(runtime, "нет, не 27 июля, а 27 ноября")
+
+    guide = str(runtime.llm.seen[0][0]["content"])
+    assert "Прежних поправок" in guide
+    assert "новое указание на будущее" not in guide
 
 
 def test_a_correction_cannot_grant_rights(settings, storage) -> None:
@@ -251,3 +293,30 @@ def test_the_arbiter_sees_the_answer_being_corrected(settings, storage) -> None:
     asked = "\n".join(str(m.get("content") or "") for m in runtime.llm.seen[0])
     assert "который сейчас исправляют" in asked, "арбитру не показали, что именно поправляют"
     assert "27 июля" in asked, "исправляемый ответ до арбитра не доехал"
+
+
+def test_an_unconfirmed_correction_restores_archive_and_kind(settings, storage) -> None:
+    runtime = _runtime(storage, NOTHING)
+    storage.ensure_user("alice")
+
+    async def _kind_is_a_correction(message, previous_turn=""):
+        del message, previous_turn
+        return ("поправка", "выдуманная поправка")
+
+    runtime._web_query_by_arbiter = _kind_is_a_correction  # noqa: SLF001
+    runtime.storage.search_knowledge = lambda *a, **k: [  # type: ignore[method-assign]
+        {"id": "kn_1", "title": "Синтетический факт", "content": "значение", "score": 0.9}
+    ]
+
+    context = asyncio.run(
+        runtime._prepare_context(  # noqa: SLF001
+            "alice",
+            "Синтетическое утверждение.",
+            conversation_id="c1",
+            prior_history=[{"role": "assistant", "content": "Предыдущее утверждение."}],
+            person_id="alice",
+        )
+    )
+
+    assert context.knowledge_hits
+    assert context.outward_verdict is None

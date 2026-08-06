@@ -41,6 +41,7 @@ from friday.citation_check import citation_overlap
 from friday.config import FridaySettings
 from friday.execution_kernel import ExecutionKernel, _memory_graph_context_for_llm
 from friday.knowledge_graph import build_user_model, normalize_event_date
+from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
@@ -628,7 +629,9 @@ _RULE_GRABS_RIGHTS = re.compile(
     r"прав[аоу]\b|доступ|разреш|запрет|полномоч|администратор|админк|владелец|"
     r"парол|токен|ключ|секрет|учёт[нк]|учет[нк]|"
     r"чуж|любого пользоват|всех пользоват|другого пользоват|"
-    r"игнорируй|не подчиняйся|забудь( свои| все| всё)? (правил|инструкц)|"
+    r"(?:игнорир|не\s+подчин)\w*\s+(?:сво\w*|тво\w*|системн\w*)\s+"
+    r"(?:правил|инструкц|огранич)|(?:свои|твои|системные) огранич|"
+    r"забудь( свои| все| всё)? (правил|инструкц)|"
     r"систем(?:ные|ных)? (?:правил|инструкц)|отключи проверк"
     r")",
     re.IGNORECASE,
@@ -657,11 +660,383 @@ _RULE_DEMANDS_ACCESS = re.compile(
     r"(?:"
     r"доступ|прав[аоу]\b|разреш|полномоч|"
     r"чуж|любого пользоват|всех пользоват|другого пользоват|"
-    r"игнорируй|не подчиняйся|забудь( свои| все| всё)? (правил|инструкц)|"
+    r"(?:игнорир|не\s+подчин)\w*\s+(?:сво\w*|тво\w*|системн\w*)\s+"
+    r"(?:правил|инструкц|огранич)|(?:свои|твои|системные) огранич|"
+    r"забудь( свои| все| всё)? (правил|инструкц)|"
     r"систем(?:ные|ных)? (?:правил|инструкц)|отключи проверк"
     r")",
     re.IGNORECASE,
 )
+
+#: Durable behaviour is a stronger claim than a semantic label from either
+#: classifier: it is copied into every later turn.  The live 2026-08-06 matrix
+#: showed that two agreeing arbiters still persisted reported policies
+#: ("регламент требует...") and the one-shot imperative "ответь покороче".
+#: Keep this gate deliberately conservative and code-owned.  Russian
+#: imperfective imperatives describe recurring behaviour, unlike the common
+#: perfective one-shot forms ("ответь", "покажи", "сделай").
+# These expressions do not try to understand arbitrary language.  They grant
+# authority to mutate a value copied into every future turn, so uncertainty must
+# fail closed and leave the message on the ordinary material/answer path.
+_REPORTED_RULE_CONTEXT = re.compile(
+    r"(?:"
+    r"(?:регламент\w*|инструкц\w*|политик\w*\s+(?:компани|организац)\w*|"
+    r"правил\w*\s+(?:отдел|организац|компани)\w*|цитат\w*|"
+    r"пример\w*\s+правил\w*)\b|"
+    r"(?:так\s+)?(?:требует|предписывает|написано|сказано|сказал\w*|велел\w*)\b.*"
+    r"(?:регламент|инструкц|правил|начальник|руководител)|"
+    r"(?:регламент|инструкц|правил|начальник|руководител)\w*.*"
+    r"(?:требует|предписывает|написано|сказано|велел\w*)\b|"
+    r"[,—–-]\s*(?:так\s+)?(?:сказал\w*|велел\w*)\s+[а-яёa-z][\w-]*\b|"
+    r"(?:this\s+is\s+an?\s+example|policy\s+says|the\s+manual\s+says)\b"
+    r")",
+    re.IGNORECASE,
+)
+_TEMPORARY_RULE_SCOPE = re.compile(
+    r"(?:"
+    r"\b(?:сейчас|сегодня|пока|сюда|здесь|на\s+этот\s+раз)\b|"
+    r"\b(?:в|для)\s+(?:этом|этого|следующем|следующего|текущем|текущего)\s+"
+    r"(?:ответ|сообщен|чат|диалог|файл|документ|отч[её]т|задач|озвучиван)\w*\b|"
+    r"\b(?:right\s+now|this\s+time|in\s+this\s+(?:answer|message|file|task))\b"
+    r")",
+    re.IGNORECASE,
+)
+_DURABLE_RULE_MARKER = re.compile(
+    r"\b(?:всегда|никогда|впредь|отныне|в\s+дальнейшем|с\s+этого\s+момента|"
+    r"кажд\w*\s+(?:раз|ответ|сообщен)|больше\s+не|from\s+now\s+on|always|never)\b",
+    re.IGNORECASE,
+)
+_ASSISTANT_BEHAVIOUR = re.compile(
+    r"\b(?:"
+    r"обращайся|отвечай|называй|зови|здоровайся|будь|общайся|"
+    r"пиши|говори|произноси|повторяй|упоминай|начинай|заканчивай|избегай|"
+    r"используй|ставь|добавляй|форматируй|указывай|цитируй|переспрашивай|сокращай|"
+    r"показывай|присылай|напоминай|озвучивай|объясняй|"
+    r"address|answer|write|say|call|greet|use|add|format|mention|cite|ask"
+    r")\b",
+    re.IGNORECASE,
+)
+_ASSISTANT_RESPONSE_CONTEXT = re.compile(
+    r"\b(?:мне|меня|ко\s+мне|со\s+мной|в\s+ответах?|кажд\w*\s+ответ|"
+    r"(?:после|в\s+ответ\s+на)\s+благодарност\w*|в\s+начале\s+ответ|в\s+конце\s+ответ|"
+    r"смайлик\w*|эмодзи|эмоджи|markdown|маркдаун|источник\w*|ссылк\w*|дат\w*\s+рядом|"
+    r"brief(?:ly)?|to\s+me|in\s+(?:your\s+)?answers?)\b",
+    re.IGNORECASE,
+)
+_INHERENTLY_CONVERSATIONAL_RULE = re.compile(
+    r"\b(?:обращайся|отвечай|называй|зови|здоровайся|будь|общайся|"
+    r"address|answer|call|greet)\b",
+    re.IGNORECASE,
+)
+_STOP_BEHAVIOUR = re.compile(
+    r"\b(?:не\s+надо|хватит|перестань)\b.*"
+    r"\b(?:писать|говорить|отвечать|повторять|здороваться|обращаться|называть|"
+    r"ставить|использовать|добавлять|цитировать|объяснять)\b",
+    re.IGNORECASE,
+)
+_DIRECT_STYLE_RULE = re.compile(
+    r"\b(?:давай|будь)\b.*\b(?:без\s+(?:смайлик|эмодзи|эмоджи)\w*|"
+    r"кратк\w*|короч\w*|подробн\w*)\b",
+    re.IGNORECASE,
+)
+_REPEATED_BEHAVIOUR_REBUKE = re.compile(
+    r"(?:"
+    r"\b(?:почему|зачем)\s+ты\b.*\b(?:кажд\w*\s+раз|вс[её]\s+время|постоянно)\b|"
+    r"\bты\s+(?:почему|зачем)\b.*\b(?:кажд\w*\s+раз|вс[её]\s+время|постоянно)\b|"
+    r"\b(?:сколько\s+можно|тебе\s+обязательно)\b.*"
+    r"\b(?:писать|говорить|отвечать|повторять|здороваться|обращаться|называть|"
+    r"ставить|использовать|добавлять|объяснять)\b"
+    r")",
+    re.IGNORECASE,
+)
+_STANDING_RULE_CANCELLATION = re.compile(
+    r"(?:"
+    r"\bзабудь\b|\b(?:отмени|сними)\s+(?:это|правил\w*|прежн\w*|пункт\w*)\b|"
+    r"\bне\s+надо\s+больше\b|\bможно\s+снова\b|\bя\s+передумал\w*\b.*"
+    r"\bможно\s+снова\b|\b(?:верни|давай)\s+как\s+было\b|"
+    r"\bверни\s+прежн\w*\b|\bбольше\s+не\s+надо\s+(?:это\s+)?правил\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_ENGLISH_RULE_CANCELLATION = re.compile(
+    r"\b(?:forget|cancel\s+(?:that|this\s+rule)|remove\s+(?:that|this\s+rule)|"
+    r"you\s+may\s+again|go\s+back\s+to\s+the\s+old\s+way)\b",
+    re.IGNORECASE,
+)
+_DEICTIC_RULE_CHANGE = re.compile(
+    r"(?:\b(?:это|прежн\w*|правил\w*|пункт\w*)\b|\bможно\s+снова\b|"
+    r"\bнаоборот\b|\bкак\s+было\b|\bthat\b|\bthe\s+old\s+way\b)",
+    re.IGNORECASE,
+)
+_DIRECT_SECURITY_COMMAND = re.compile(
+    r"\b(?:"
+    r"(?:показывай|покажи|показывать|дай|предоставь|открой)\w*.*(?:чуж\w*|"
+    r"любого\s+пользоват\w*|всех\s+пользоват\w*|доступ\w*)|"
+    r"(?:игнорируй|не\s+подчиняйся|забудь|отключи)\w*.*(?:системн|сво\w*\s+"
+    r"(?:правил|инструкц|огранич)\w*|проверк\w*)"
+    r")\b",
+    re.IGNORECASE,
+)
+_CORRECTION_SURFACE = re.compile(
+    r"(?:^|[.!?]\s*)(?:(?:пятниц\w*|нет|неверно|неправильно|ошибка|поправляю|"
+    r"исправляю|ты\s+(?:ошиб\w*|пута\w*))\b|\bэто\s+уже\s+не\s+так\b|"
+    r"\bне\s+[^,.!?]{1,100}\s*,?\s+а\s+[^,.!?]{1,100})",
+    re.IGNORECASE,
+)
+_CORRECTION_CANCELLATION = re.compile(
+    r"\b(?:забудь|отмени|сними)\b.*\b(?:поправк|исправлен|это|прежн)\w*\b",
+    re.IGNORECASE,
+)
+_BINDING_TOKEN = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")
+_BINDING_STOPWORDS = frozenset(
+    {
+        "а",
+        "без",
+        "бы",
+        "в",
+        "во",
+        "все",
+        "всегда",
+        "для",
+        "до",
+        "его",
+        "ее",
+        "её",
+        "и",
+        "как",
+        "ко",
+        "мне",
+        "мой",
+        "мы",
+        "на",
+        "не",
+        "нет",
+        "никогда",
+        "но",
+        "он",
+        "она",
+        "от",
+        "по",
+        "пожалуйста",
+        "про",
+        "с",
+        "со",
+        "так",
+        "тебе",
+        "ты",
+        "у",
+        "это",
+        "я",
+        "the",
+        "to",
+        "in",
+        "my",
+        "me",
+        "you",
+        "your",
+    }
+)
+_RULE_TOPIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("response", re.compile(r"\b(?:ответ|отвеч|писать|пиши|write|answer)\w*\b", re.I)),
+    ("length", re.compile(r"\b(?:кратк|короч|длинн|подробн|brief|short|long)\w*\b", re.I)),
+    ("greeting", re.compile(r"\b(?:здрав|привет|здоров|greet)\w*\b", re.I)),
+    ("address", re.compile(r"\b(?:обращ|называ|зови|имя|отчеств|address|call)\w*\b", re.I)),
+    ("emoji", re.compile(r"\b(?:смайл|эмодзи|эмоджи|рожиц|emoji)\w*\b", re.I)),
+    ("date", re.compile(r"\b(?:дат|числ|date|number)\w*\b", re.I)),
+    ("format", re.compile(r"\b(?:формат|markdown|маркдаун|список|таблиц)\w*\b", re.I)),
+    ("citation", re.compile(r"\b(?:цитир|источник|ссылк|cite|source)\w*\b", re.I)),
+    ("speech", re.compile(r"\b(?:говор|произн|озвуч|фраз|say|speak|phrase)\w*\b", re.I)),
+    ("question", re.compile(r"\b(?:переспраш|уточн|вопрос|ask|clarif)\w*\b", re.I)),
+)
+_ORDINAL_WORDS = {
+    1: ("первое", "первый", "первую", "first"),
+    2: ("второе", "второй", "вторую", "second"),
+    3: ("третье", "третий", "третью", "third"),
+    4: ("четвертое", "четвёртое", "четвертый", "четвёртый", "fourth"),
+}
+
+
+def _reported_rule_context(text: str) -> bool:
+    return bool(_REPORTED_RULE_CONTEXT.search(text))
+
+
+def _binding_terms(text: str) -> set[str]:
+    terms: set[str] = set()
+    for surface in _BINDING_TOKEN.findall(str(text or "")):
+        folded = surface.casefold().replace("ё", "е")
+        if folded in _BINDING_STOPWORDS or (len(folded) == 1 and not folded.isdigit()):
+            continue
+        terms.add(stem(folded, LEXICAL_MIN_STEM_INPUT))
+    return terms
+
+
+def _rule_topic_tags(text: str) -> set[str]:
+    return {name for name, pattern in _RULE_TOPIC_PATTERNS if pattern.search(str(text or ""))}
+
+
+def _texts_share_rule_subject(left: str, right: str) -> bool:
+    return bool(
+        _binding_terms(left) & _binding_terms(right) or _rule_topic_tags(left) & _rule_topic_tags(right)
+    )
+
+
+def _direct_security_attempt(message: str) -> bool:
+    text = " ".join(str(message or "").split())
+    return bool(text and not _reported_rule_context(text) and _DIRECT_SECURITY_COMMAND.search(text))
+
+
+def _explicit_ordinal_selects(message: str, index: int) -> bool:
+    if index <= 0:
+        return False
+    text = str(message or "").casefold()
+    if re.search(rf"\b(?:правил\w*|пункт\w*|поправк\w*)\s*(?:№\s*)?{index}\b", text):
+        return True
+    return any(re.search(rf"\b{re.escape(word)}\b", text) for word in _ORDINAL_WORDS.get(index, ()))
+
+
+def _selected_durable_item_is_bound(
+    message: str,
+    previous_item: str,
+    existing: list[str],
+    *,
+    previous_turn: str = "",
+    allow_unique_deictic: bool = False,
+) -> bool:
+    """Bind an arbiter-selected replacement/deletion to code-owned evidence."""
+
+    if not previous_item or previous_item not in existing:
+        return False
+    index = existing.index(previous_item) + 1
+    if _explicit_ordinal_selects(message, index):
+        return True
+    if _texts_share_rule_subject(message, previous_item):
+        return True
+    referential = bool(_DEICTIC_RULE_CHANGE.search(message))
+    if referential and previous_turn and _texts_share_rule_subject(previous_turn, previous_item):
+        return True
+    # A purely deictic cancellation is unambiguous only when exactly one value
+    # exists.  A specific but mismatching noun ("про смайлики") is not deictic
+    # and cannot delete the sole greeting rule by accident.
+    scaffolding = _binding_terms(
+        "забудь отмени сними это правило прежнее пункт можно снова наоборот "
+        "верни давай как было forget cancel remove that this rule again old way"
+    )
+    return bool(
+        allow_unique_deictic
+        and referential
+        and len(existing) == 1
+        and not (_binding_terms(message) - scaffolding)
+    )
+
+
+def _new_rule_is_bound(message: str, rule: str, *, previous_turn: str = "") -> bool:
+    source = message
+    if _DEICTIC_RULE_CHANGE.search(message) and previous_turn:
+        source = f"{source} {previous_turn}"
+    return bool(rule and _texts_share_rule_subject(source, rule))
+
+
+def _standing_rule_has_durable_scope(
+    message: str,
+    *,
+    action: str,
+    previous_rule: str,
+    previous_turn: str = "",
+) -> bool:
+    """Whether the person's own words authorize an account-wide behaviour rule.
+
+    Model-produced ``rule`` text is intentionally not evidence: accepting its
+    rewritten imperative would let the model manufacture the very scope this
+    guard is meant to verify.  A cancellation additionally needs an actually
+    matched existing rule, so "можно снова" cannot delete an unrelated item.
+    """
+
+    text = " ".join(str(message or "").split())
+    action = str(action or "").casefold()
+    if not text or action not in {"запомнить", "забыть"}:
+        return False
+    if _reported_rule_context(text) or _TEMPORARY_RULE_SCOPE.search(text):
+        return False
+    if action == "забыть":
+        return bool(
+            previous_rule
+            and (_STANDING_RULE_CANCELLATION.search(text) or _ENGLISH_RULE_CANCELLATION.search(text))
+        )
+    if _DEICTIC_RULE_CHANGE.search(text) and previous_turn:
+        return _standing_rule_has_durable_scope(
+            previous_turn,
+            action="запомнить",
+            previous_rule="",
+        )
+    if (
+        _STOP_BEHAVIOUR.search(text)
+        or _DIRECT_STYLE_RULE.search(text)
+        or _REPEATED_BEHAVIOUR_REBUKE.search(text)
+    ):
+        return True
+    behaviour = bool(_ASSISTANT_BEHAVIOUR.search(text))
+    return bool(
+        behaviour
+        and (
+            _DURABLE_RULE_MARKER.search(text)
+            or _INHERENTLY_CONVERSATIONAL_RULE.search(text)
+            or _ASSISTANT_RESPONSE_CONTEXT.search(text)
+        )
+    )
+
+
+def _correction_has_durable_scope(
+    message: str,
+    *,
+    action: str,
+    correction: str,
+    previous_correction: str,
+    existing: list[str],
+    corrected_answer: str,
+    previous_turn: str = "",
+) -> bool:
+    """Whether the user's own words authorize a durable factual correction."""
+
+    text = " ".join(str(message or "").split())
+    action = str(action or "").casefold()
+    if not text or action not in {"запомнить", "забыть"} or _reported_rule_context(text):
+        return False
+    if action == "забыть":
+        return bool(
+            previous_correction
+            and _CORRECTION_CANCELLATION.search(text)
+            and _selected_durable_item_is_bound(
+                text,
+                previous_correction,
+                existing,
+                previous_turn=previous_turn,
+                allow_unique_deictic=True,
+            )
+        )
+    if not corrected_answer.strip() or not _CORRECTION_SURFACE.search(text) or not correction:
+        return False
+
+    current_terms = _binding_terms(text)
+    answer_terms = _binding_terms(corrected_answer)
+    correction_terms = _binding_terms(correction)
+    # The stored statement must carry a value supplied NOW, rather than one
+    # invented by the arbiter or merely repeated from the old answer.
+    if not ((current_terms - answer_terms) & correction_terms):
+        return False
+    # A self-contained rewrite also has to remain about the thing Friday said.
+    # Otherwise `нет, это не так` plus a hostile arbiter could attach the new
+    # number to an unrelated subject.
+    if not (
+        answer_terms & correction_terms or _rule_topic_tags(corrected_answer) & _rule_topic_tags(correction)
+    ):
+        return False
+    return not previous_correction or _selected_durable_item_is_bound(
+        text,
+        previous_correction,
+        existing,
+        previous_turn=previous_turn,
+    )
+
 
 #: Инструменты, которые сами читают хранилище. Их ответ — опора на базу ничуть не
 #: меньшая, чем найденный документ, хотя ссылки `[K#]` при этом не появляются:
@@ -4751,12 +5126,20 @@ class AgentRuntime:
                 # assistant answer is insufficient.
                 if private_context_lineage:
                     LOGGER.info("standing-rule: durable learning skipped for private lineage")
-                elif not await self._learn_a_standing_rule(message, context):
+                    confirmed_rule = False
+                else:
+                    confirmed_rule = await self._learn_a_standing_rule(message, context)
+                if not confirmed_rule:
                     context.knowledge_hits = found_before_the_rule
+                    # The first verdict was only a proposal.  Keeping a rejected
+                    # durable kind would still suppress timeline/tool routing and
+                    # publish the false kind in structural metadata.
+                    context.outward_verdict = None
             # Поправка — не вопрос к архиву: человек сообщает, как правильно, а не
             # спрашивает. Найденные документы выбрасываются по той же причине, что
             # и у правил: рядом с «поняла, исправила» уехал бы пересказ документа.
             elif str((context.outward_verdict or ("", None))[0] or "").startswith("поправка"):
+                found_before_the_correction = list(context.knowledge_hits or [])
                 context.knowledge_hits = []
                 # `_learn_a_correction` receives `previous_answer` and stores a
                 # self-contained rewrite in global user metadata. On a file-
@@ -4764,8 +5147,12 @@ class AgentRuntime:
                 # into every future conversation for this account.
                 if private_context_lineage:
                     LOGGER.info("correction: durable learning skipped for private lineage")
+                    confirmed_correction = False
                 else:
-                    await self._learn_a_correction(message, context)
+                    confirmed_correction = await self._learn_a_correction(message, context)
+                if not confirmed_correction:
+                    context.knowledge_hits = found_before_the_correction
+                    context.outward_verdict = None
 
         # Снятие карточки — здесь, за пределами блока арбитра: разговорную реплику
         # опознаёт ДРУГОЙ арбитр, выше и раньше, и на том пути вердикта видов нет
@@ -5742,8 +6129,9 @@ class AgentRuntime:
         *,
         previous_turn: str = "",
         corrected_answer: str = "",
+        candidate_kind: str = "rule",
     ) -> tuple[str, str, str, str | None]:
-        """Что именно человек велел: запомнить, заменить прежнее или отменить.
+        """Confirm one suspected behaviour rule or factual correction.
 
         Второй вызов модели, и он оправдан тем, что редок: сюда попадают только
         ходы, на которых общий арбитр уже сказал «правило». Общему арбитру эту
@@ -5780,34 +6168,68 @@ class AgentRuntime:
         if not self.llm.enabled:
             return "", "", "", None
         listing = "\n".join(f"{index}. {text}" for index, text in enumerate(existing, start=1))
+        if candidate_kind == "correction":
+            decision_guide = (
+                "Первый классификатор только ПРЕДПОЛОЖИЛ поправку и мог ошибиться. "
+                "Проверь, исправляет ли человек именно твой предыдущий ответ. Верни ОДНУ "
+                "строку JSON: "
+                '{"действие": "запомнить|забыть|ничего", '
+                '"правило": "самодостаточная фактическая поправка", '
+                '"прежнее": номер или 0, "остаток": "о чём ещё спросили"}.\n'
+                "запомнить — человек заменяет ошибочное утверждение верным. В поле «правило» "
+                "положи короткую самостоятельную поправку, понятную без переписки: не «нет, "
+                "27 ноября», а «День морской пехоты — 27 ноября, а не 27 июля».\n"
+                "забыть — человек прямо снимает одну из прежних поправок. Номер снятой "
+                "поправки положи в «прежнее».\n"
+                "ничего — это новый несвязанный факт, вопрос, указание о стиле ответа либо "
+                "понять исправление не удалось.\n"
+                "Если новая поправка противоречит прежней или уточняет её, верни "
+                "«запомнить» и номер прежней: две взаимоисключающие версии не должны жить "
+                "рядом. Иначе «прежнее» равно 0.\n"
+                "остаток — вопрос или просьба помимо самой поправки, словами человека. Если "
+                "ничего больше нет — пустая строка; поле обязательно.\n"
+                + (f"Прежние поправки:\n{listing}\n" if listing else "Прежних поправок нет.\n")
+            )
+        elif candidate_kind == "rule":
+            decision_guide = (
+                "Первый классификатор только ПРЕДПОЛОЖИЛ правило и мог ошибиться. "
+                "«запомнить» разрешено лишь для ПРЯМОГО указания тебе о ТВОЁМ поведении "
+                "во всех будущих ответах. Сообщение о чужом регламенте, инструкции, "
+                "правиле организации или просто факт — «ничего», даже если в нём есть "
+                "слова «правило», «требует» или «всегда». «Регламент требует указывать "
+                "дату», «В инструкции сказано: всегда указывать дату» и «Правило отдела: "
+                "отчёты подписывает руководитель» — это «ничего».\n"
+                "Разовая просьба тоже «ничего»: «ответь покороче» относится только к этому "
+                "ответу. Но «пиши мне ответы короче» — постоянное указание, а упрёки "
+                "«почему ты каждый раз здороваешься» и «тебе обязательно писать так "
+                "длинно» требуют изменить будущее поведение и означают «запомнить».\n"
+                "Верни ОДНУ строку JSON: "
+                '{"действие": "запомнить|забыть|ничего", '
+                '"правило": "одна фраза от первого лица", "прежнее": номер или 0, '
+                '"остаток": "о чём ещё спросили"}.\n'
+                "запомнить — новое указание на будущее. Сформулируй его КОРОТКО и так, "
+                "как будешь читать сама каждый раз: «обращаться к нему по имени-отчеству», "
+                "«не ставить смайлики», «фразу „Служу России“ говорить только в ответ на "
+                "благодарность».\n"
+                "забыть — человек снимает раньше сказанное («забудь про…», «можно снова», "
+                "«отмени это»). Номер снимаемого правила клади в «прежнее».\n"
+                "ничего — разовая просьба про этот ответ либо понять указание не удалось.\n"
+                "Если новое указание противоречит прежнему или уточняет его, верни "
+                "«запомнить» и номер прежнего: они не должны жить рядом. Иначе «прежнее» "
+                "равно 0.\n"
+                "остаток — вопрос или просьба помимо указания, словами человека. "
+                "«не здоровайся, и что там по отчёту за июль» → «что там по отчёту за "
+                "июль». Если больше ничего нет — пустая строка; поле обязательно.\n"
+                + (f"Прежние правила:\n{listing}\n" if listing else "Прежних правил нет.\n")
+            )
+        else:
+            return "", "", "", None
         try:
             answer = await self.llm.chat(
                 [
                     {
                         "role": "system",
-                        "content": (
-                            "Человек говорит, как тебе себя вести. Верни ОДНУ строку JSON: "
-                            '{"действие": "запомнить|забыть|ничего", '
-                            '"правило": "одна фраза от первого лица", "прежнее": номер или 0, '
-                            '"остаток": "о чём ещё спросили"}.\n'
-                            "запомнить — новое указание на будущее. Сформулируй его КОРОТКО и "
-                            "так, как будешь читать сама каждый раз: «обращаться к нему по "
-                            "имени-отчеству», «не ставить смайлики», «фразу „Служу России“ "
-                            "говорить только в ответ на благодарность».\n"
-                            "забыть — человек снимает раньше сказанное («забудь про…», «можно "
-                            "снова», «отмени это»). Номер снимаемого правила клади в «прежнее».\n"
-                            "ничего — это разовая просьба про ЭТОТ ответ, а не правило на "
-                            "будущее, либо понять не удалось.\n"
-                            "Если новое указание ПРОТИВОРЕЧИТ одному из прежних или уточняет "
-                            "его — это «запомнить», а номер прежнего положи в «прежнее»: оно "
-                            "должно смениться, а не лежать рядом. Ничего не заменяет — ставь 0.\n"
-                            "остаток — то, о чём человек спросил ПОМИМО указания, его словами. "
-                            "«не здоровайся, и что там по отчёту за июль» → остаток «что там по "
-                            "отчёту за июль». Если кроме указания ничего не сказано — пустая "
-                            "строка. Поле обязательное: пиши его всегда.\n"
-                            + (f"Прежние правила:\n{listing}\n" if listing else "Прежних правил нет.\n")
-                            + "Никаких пояснений, только JSON."
-                        ),
+                        "content": decision_guide + "Никаких пояснений, только JSON.",
                     },
                     *(
                         [{"role": "system", "content": f"Предыдущий ход разговора: {previous_turn[:400]}"}]
@@ -5833,6 +6255,7 @@ class AgentRuntime:
                     {"role": "user", "content": message[:600]},
                 ],
                 tools=[],
+                temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
@@ -5861,9 +6284,9 @@ class AgentRuntime:
         # модель забыла поле, — а забывает она поля регулярно.
         rest = verdict.get("остаток")
         remainder = " ".join(str(rest).split())[:600] if isinstance(rest, str) else None
-        if action.startswith("забыть"):
+        if action == "забыть":
             return ("забыть", "", previous_rule, remainder) if previous_rule else ("", "", "", None)
-        if action.startswith("запомнить") and rule:
+        if action == "запомнить" and rule:
             return "запомнить", rule, previous_rule, remainder
         return "", "", "", None
 
@@ -6021,6 +6444,48 @@ class AgentRuntime:
                 bool(proposed),
             )
             return False
+        # A direct attempt to widen access is answered structurally even if the
+        # second arbiter rewrites it harmlessly.  Conversely, reported policy is
+        # rejected by `_direct_security_attempt` and continues as ordinary
+        # material instead of receiving a false refusal.
+        if _direct_security_attempt(message):
+            LOGGER.warning("standing-rule: direct attempt to expand rights rejected")
+            context.rule_refused = True
+            context.rule_demanded_access = True
+            context.structural_answer = _RIGHTS_REFUSED
+            context.open_remainder = remainder or ""
+            context.remainder_known = True
+            return True
+        if not _standing_rule_has_durable_scope(
+            message,
+            action=action,
+            previous_rule=previous_rule,
+            previous_turn=context.previous_user_turn,
+        ):
+            # Two semantic votes are still not authority for a value copied into
+            # every future turn.  In particular, never derive scope from the
+            # model-rewritten ``rule``: on the measured failures it turned a
+            # reported organisational policy and a one-shot request into direct
+            # imperatives.  Returning False also restores the archive hits that
+            # the outer caller held aside while checking the suspected rule.
+            LOGGER.info("standing-rule: durable scope not present in the user message")
+            return False
+        if previous_rule and not _selected_durable_item_is_bound(
+            message,
+            previous_rule,
+            existing,
+            previous_turn=context.previous_user_turn,
+            allow_unique_deictic=action == "забыть",
+        ):
+            LOGGER.info("standing-rule: arbiter-selected previous rule is not bound to the request")
+            return False
+        if action == "запомнить" and not _new_rule_is_bound(
+            message,
+            rule,
+            previous_turn=context.previous_user_turn,
+        ):
+            LOGGER.info("standing-rule: proposed stored text is not bound to the request")
+            return False
         if rule and _RULE_GRABS_RIGHTS.search(rule):
             # Структурный потолок. Правило едет в контекст каждым ходом и лежит
             # там рядом с системными указаниями — то есть это ровно тот канал,
@@ -6104,7 +6569,7 @@ class AgentRuntime:
                 found.append(text)
         return found[:_CORRECTION_LIMIT]
 
-    async def _learn_a_correction(self, message: str, context: AgentContext) -> None:
+    async def _learn_a_correction(self, message: str, context: AgentContext) -> bool:
         """Человек поправил сказанное — запомнить ДО того, как отвечать.
 
         Найдено в живой переписке 2026-08-03. Человек поправил дату
@@ -6129,13 +6594,14 @@ class AgentRuntime:
         """
         kind, proposed = context.outward_verdict or ("", None)
         if not str(kind).startswith("поправка"):
-            return
+            return False
         existing = self._corrections(context.person_id or context.user_id)
         action, correction, previous, remainder = await self._standing_rule_by_arbiter(
             message,
             existing,
             previous_turn=context.previous_user_turn,
             corrected_answer=context.previous_answer,
+            candidate_kind="correction",
         )
         rest = message if remainder is None else remainder
         if not action:
@@ -6143,7 +6609,26 @@ class AgentRuntime:
                 "correction: поправка не подтвердилась; proposal=%s",
                 bool(proposed),
             )
-            return
+            return False
+        if _direct_security_attempt(message):
+            LOGGER.warning("correction: direct attempt to expand rights rejected")
+            context.rule_refused = True
+            context.rule_demanded_access = True
+            context.structural_answer = _RIGHTS_REFUSED
+            context.open_remainder = remainder or ""
+            context.remainder_known = True
+            return True
+        if not _correction_has_durable_scope(
+            message,
+            action=action,
+            correction=correction,
+            previous_correction=previous,
+            existing=existing,
+            corrected_answer=context.previous_answer,
+            previous_turn=context.previous_user_turn,
+        ):
+            LOGGER.info("correction: code-owned correction authority is absent")
+            return False
         if correction and _RULE_GRABS_RIGHTS.search(correction):
             LOGGER.warning("correction: отклонено как попытка расширить права")
             context.rule_refused = True
@@ -6154,7 +6639,7 @@ class AgentRuntime:
             # документы») отвечается структурой и не возвращается модели.
             context.open_remainder = remainder or ""
             context.remainder_known = True
-            return
+            return True
         if action == "забыть":
             context.corrections = self.storage.remember_correction(
                 context.person_id or context.user_id,
@@ -6169,7 +6654,7 @@ class AgentRuntime:
             context.open_remainder = rest
             context.remainder_known = True
             LOGGER.info("correction: снято, осталось %d", len(context.corrections))
-            return
+            return True
         context.corrections = self.storage.remember_correction(
             context.person_id or context.user_id,
             correction,
@@ -6182,6 +6667,7 @@ class AgentRuntime:
         context.open_remainder = rest
         context.remainder_known = True
         LOGGER.info("correction: запомнено, всего %d", len(context.corrections))
+        return True
 
     def _conflict_map(self, user_id: str, retrieved_ids: set[str]) -> dict[str, dict[str, str]]:
         """Map each retrieved Knowledge Object to its highest-confidence pending conflict.
@@ -7432,6 +7918,11 @@ class AgentRuntime:
                             "Сюда же — ОТМЕНА раньше сказанного: «забудь, что я просил про…», "
                             "«можно снова так делать». Сам текст указания положи в поле "
                             "«правило» одной фразой, как запомнишь его для себя.\n"
+                            "Только ПРЯМОЕ указание ТЕБЕ является этим видом. Рассказ о чужом "
+                            "регламенте, инструкции или правиле организации — материал, а не "
+                            "правило твоего поведения: «Регламент требует указывать дату», "
+                            "«В инструкции сказано: всегда указывать дату», «Правило отдела: "
+                            "отчёты подписывает руководитель» — это «материал».\n"
                             "Отличай от разового: «ответь покороче» про ЭТОТ ответ — это не "
                             "правило, а «отвечай мне покороче» — правило. Сомневаешься, "
                             "разовое это или впредь, — выбирай НЕ правило.\n"
@@ -7504,6 +7995,7 @@ class AgentRuntime:
                     {"role": "user", "content": message[:600]},
                 ],
                 tools=[],
+                temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
