@@ -97,6 +97,7 @@ _PUBLIC_KNOWLEDGE_VERSION_SNAPSHOT_MAX_BYTES = 1_048_576
 _MENTION_VALIDATION_SECRET = os.urandom(32)
 _PUBLIC_KNOWLEDGE_VERSION_NESTED_DEPTH = 8
 _PUBLIC_KNOWLEDGE_VERSION_TEXT_BUDGET = 4 * 1_048_576
+_UPLOADER_SCOPE_METADATA_MAX_BYTES = 1_048_576
 
 _PUBLIC_ENTITY_LINK_COLUMNS = """substr(l.id,1,160) AS id,
                    substr(l.knowledge_object_id,1,160) AS knowledge_object_id,
@@ -2019,10 +2020,47 @@ class KnowledgeMixin(StorageShared):
             return set()
         return {str(row["term"]) for row in rows}
 
-    def search_knowledge(self, user_id: str, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    def search_knowledge(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int = 20,
+        uploaded_by: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search one tenant, optionally restricted to one exact source author.
+
+        ``uploaded_by`` is applied by joining the source Raw provenance before the
+        FTS/LIKE ``LIMIT``.  Filtering a tenant-wide page afterwards is both unsafe
+        and incorrect: other contributors can fill the cap, producing a false empty
+        answer for the requested person.  Missing, malformed and non-text author
+        metadata fails closed and is never attributed by inference.
+        """
         text = " ".join((query or "").split()).strip()
         if not text:
             return []
+        scope_join = ""
+        scope_where = ""
+        scope_params: tuple[str, ...] = ()
+        if uploaded_by is not None:
+            author = str(uploaded_by)
+            if not author:
+                return []
+            scope_join = (
+                " JOIN raw_objects uploader_raw"
+                " ON uploader_raw.id=k.raw_object_id AND uploader_raw.user_id=k.user_id"
+            )
+            scope_where = f""" AND uploader_raw.deleted_at IS NULL
+                AND {_not_private_raw_dependency("uploader_raw")}
+                AND CASE
+                  WHEN length(CAST(COALESCE(uploader_raw.metadata_json,'') AS BLOB))
+                           <={_UPLOADER_SCOPE_METADATA_MAX_BYTES}
+                   AND json_valid(uploader_raw.metadata_json)
+                  THEN CASE WHEN json_type(uploader_raw.metadata_json,'$.uploaded_by')='text'
+                       THEN json_extract(uploader_raw.metadata_json,'$.uploaded_by')=?
+                       ELSE 0 END
+                  ELSE 0 END"""
+            scope_params = (author,)
         rows: list[sqlite3.Row] = []
         terms = _fts_terms(text)
         if self._fts_available and terms:
@@ -2032,11 +2070,13 @@ class KnowledgeMixin(StorageShared):
                     f"""SELECT k.*, bm25(knowledge_fts, 1.0, 2.0, 1.5, 0.5) AS _rank
                        FROM knowledge_fts
                        JOIN knowledge_objects k ON k.rowid=knowledge_fts.rowid
+                       {scope_join}
                        WHERE k.user_id=? AND k.deleted_at IS NULL
                          AND {_not_private_knowledge_dependency("k")}
+                         {scope_where}
                          AND knowledge_fts MATCH ?
                        ORDER BY _rank ASC, k.importance DESC LIMIT ?""",  # nosec B608
-                    (user_id, match_query, max(1, min(limit, 200))),
+                    (user_id, *scope_params, match_query, max(1, min(limit, 200))),
                 ).fetchall()
             except sqlite3.OperationalError:
                 rows = []
@@ -2045,12 +2085,14 @@ class KnowledgeMixin(StorageShared):
             like = f"%{escaped}%"
             rows = self.execute(
                 f"""SELECT k.* FROM knowledge_objects k
+                   {scope_join}
                    WHERE k.user_id=? AND k.deleted_at IS NULL
                      AND {_not_private_knowledge_dependency("k")}
+                     {scope_where}
                      AND (k.title LIKE ? ESCAPE '\\' OR k.summary LIKE ? ESCAPE '\\'
                           OR k.content LIKE ? ESCAPE '\\' OR k.tags_json LIKE ? ESCAPE '\\')
                    ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?""",  # nosec B608
-                (user_id, like, like, like, like, max(1, min(limit, 200))),
+                (user_id, *scope_params, like, like, like, like, max(1, min(limit, 200))),
             ).fetchall()
         return [dict(row) for row in rows]
 

@@ -357,7 +357,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "review_relation_candidate": "(self, user_id: 'str', candidate_id: 'str', status: 'str', *, reviewed_by: 'str') -> 'dict[str, Any] | None'",
     "revoke_api_token": "(self, token_id: 'str', *, user_id: 'str | None' = None) -> 'bool'",
     "search_raw_objects": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
-    "search_knowledge": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
+    "search_knowledge": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, uploaded_by: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "search_messages": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, conversation_id: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "set_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str', conversation_id: 'str', *, mode: 'str | None' = None) -> 'None'",
     "set_channel_mode": "(self, user_id: 'str', channel: 'str', channel_id: 'str', mode: 'str') -> 'dict[str, Any] | None'",

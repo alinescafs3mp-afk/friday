@@ -4552,11 +4552,34 @@ class ExecutionKernel:
         # the bare storage fallback used to honour an unbounded limit while
         # HybridSearcher stayed capped at 20. Same bound as the declared schema.
         clamped_limit = max(1, min(int(limit), 20))
-        found = (
-            await self.searcher.search(chosen.user_id, clean_query, limit=clamped_limit)
-            if self.searcher is not None
-            else {"results": storage.search_knowledge(chosen.user_id, clean_query, limit=clamped_limit)}
-        )
+        if actor.shared_tenant:
+            # WHERE the material lives and WHO supplied it are different axes in
+            # the shared archive.  A tenant-wide HybridSearcher would let foreign
+            # FTS/recent/dense/graph candidates fill every cap before a Python
+            # post-filter, and the same mistake without that filter would expose
+            # another person's documents.  The dedicated storage lane joins the
+            # source Raw provenance and applies exact `uploaded_by` before the
+            # FTS/LIKE LIMIT. Unknown authors belong to nobody.
+            found = {
+                "results": await run_blocking(
+                    storage.search_knowledge,
+                    actor.user_id,
+                    clean_query,
+                    limit=clamped_limit,
+                    uploaded_by=chosen.user_id,
+                )
+            }
+        elif self.searcher is not None:
+            found = await self.searcher.search(chosen.user_id, clean_query, limit=clamped_limit)
+        else:
+            found = {
+                "results": await run_blocking(
+                    storage.search_knowledge,
+                    chosen.user_id,
+                    clean_query,
+                    limit=clamped_limit,
+                )
+            }
         rows = list(found.get("results") or [])
         strategy = found.get("strategy")
         dropped = 0
@@ -4588,6 +4611,14 @@ class ExecutionKernel:
             "count": len(rows),
             "query": clean_query,
         }
+        if actor.shared_tenant:
+            # This is deliberately not described as the tenant's hybrid search:
+            # dense, graph and reranker lanes are disabled until each can carry the
+            # exact author scope before its own cap.  Legacy rows without an author
+            # are excluded rather than guessed, so an empty result is not a claim
+            # that no unattributed historical material exists.
+            answer["strategy"] = "scoped_lexical"
+            answer["unattributed_excluded"] = True
         if dropped:
             answer["filtered_out"] = dropped
         answer["results"] = [
