@@ -154,15 +154,42 @@ class UnsupportedSearchFilterError(ProviderRefusedError):
     """
 
     reason = "unsupported_filter"
+    _FILTER_NAMES = frozenset({"site", "freshness", "include_domains", "exclude_domains", "lang", "region"})
 
     def __init__(self, *, provider: str, filter_name: str) -> None:
         self.provider = provider
-        self.filter_name = filter_name
-        super().__init__(f"{provider} cannot enforce {filter_name}")
+        self.filter_name = filter_name if filter_name in self._FILTER_NAMES else "unknown"
+        super().__init__(f"{provider} cannot enforce {self.filter_name}")
 
 
-class FreshnessUnavailableError(AllProvidersRefusedError):
-    """No available provider could return an honestly freshness-filtered result."""
+class SearchFilterUnavailableError(AllProvidersRefusedError):
+    """No available provider could honestly apply one requested search filter."""
+
+    reason = "search_filter_unavailable"
+
+    def __init__(
+        self,
+        *,
+        filter_name: str = "",
+        filter_names: Sequence[str] = (),
+        unsupported_providers: Sequence[str],
+        refused_providers: Sequence[str] = (),
+    ) -> None:
+        requested_names = (*filter_names, filter_name) if filter_name else tuple(filter_names)
+        safe_names = tuple(
+            dict.fromkeys(
+                name for name in requested_names if name in UnsupportedSearchFilterError._FILTER_NAMES
+            )
+        )
+        self.filter_names = safe_names or ("unknown",)
+        self.filter_name = self.filter_names[0]
+        self.unsupported_providers = tuple(unsupported_providers)
+        self.refused_providers = tuple(refused_providers)
+        super().__init__("no search provider could apply a requested filter")
+
+
+class FreshnessUnavailableError(SearchFilterUnavailableError):
+    """Compatibility-specialised failure for the established freshness filter."""
 
     reason = "freshness_unavailable"
 
@@ -172,10 +199,12 @@ class FreshnessUnavailableError(AllProvidersRefusedError):
         unsupported_providers: Sequence[str],
         refused_providers: Sequence[str] = (),
     ) -> None:
-        self.filter_name = "freshness"
-        self.unsupported_providers = tuple(unsupported_providers)
-        self.refused_providers = tuple(refused_providers)
-        super().__init__("no search provider could enforce freshness")
+        super().__init__(
+            filter_name="freshness",
+            unsupported_providers=unsupported_providers,
+            refused_providers=refused_providers,
+        )
+        self.reason = "freshness_unavailable"
 
 
 #: Ответы, которые означают отказ, а не выдачу. 202 — заглушка DuckDuckGo,
@@ -197,11 +226,222 @@ _ASKS_FOR_FOREIGN_SOURCES = re.compile(
 # spellings for the same window, so accepting arbitrary strings here would turn
 # a typo into an unfiltered (and therefore misleading) search.
 SEARCH_FRESHNESS_VALUES = ("", "day", "week", "month", "year")
+SEARCH_DOMAIN_LIST_MAX = 10
+
+
+def _closed_codes(values: str) -> frozenset[str]:
+    return frozenset(values.split())
+
+
+# ISO lists are project-owned instead of a runtime dependency.  The compact
+# whitespace form keeps the public tool schema small: the model sees a two-letter
+# pattern and examples, while the handler still rejects invented codes before a
+# quota is charged or a socket is opened.
+_ISO_639_1 = _closed_codes(
+    """aa ab ae af ak am an ar as av ay az ba be bg bi bm bn bo br bs ca ce ch co cr cs cu cv cy
+    da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho hr ht hu
+    hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks ku kv kw ky la lb
+    lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl nn no nr nv ny oc oj om
+    or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv sw
+    ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za zh zu"""
+)
+_ISO_3166_1_ALPHA2 = _closed_codes(
+    """ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bl bm bn bo bq
+    br bs bt bv bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do
+    dz ec ee eg eh er es et fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu
+    gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm jo jp ke kg kh ki km kn kp kr kw
+    ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mf mg mh mk ml mm mn mo mp mq mr ms mt mu
+    mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw
+    py qa re ro rs ru rw sa sb sc sd se sg sh si sj sk sl sm sn so sr ss st sv sx sy sz tc td tf
+    tg th tj tk tl tm tn to tr tt tv tw tz ua ug um us uy uz va vc ve vg vi vn vu wf ws ye yt za
+    zm zw"""
+)
 _FRESHNESS_DAYS = {"day": 1, "week": 7, "month": 31, "year": 365}
 _BRAVE_FRESHNESS = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
 _SERPER_FRESHNESS = {"day": "qdr:d", "week": "qdr:w", "month": "qdr:m", "year": "qdr:y"}
+_BRAVE_SEARCH_LANGUAGES = _closed_codes(
+    """ar eu bn bg ca hr cs da nl en et fi fr gl de el gu he hi hu is it ja kn ko lv lt ms ml mr
+    nb pl pa ro ru sr sk sl es sv ta te th tr uk vi"""
+)
+_BRAVE_COUNTRIES = _closed_codes(
+    """ar au at be br ca cl dk fi fr de gr hk in id it jp kr my mx nl nz no cn pl pt ph ru sa za es
+    se ch tw tr gb us"""
+)
+_YANDEX_REGION_TO_SEARCH_TYPE = {"ru": "SEARCH_TYPE_RU", "tr": "SEARCH_TYPE_TR"}
+_WIKIPEDIA_LANGUAGE_HOST = {"ru": "ru.wikipedia.org", "en": "en.wikipedia.org"}
+# Tavily's public API accepts lowercase English country names rather than ISO
+# codes.  This complete explicit mapping comes from its closed `country` enum;
+# absent codes are refused locally.  `cd` is intentionally absent because the
+# provider's sole `congo` value does not distinguish the two countries.
+_TAVILY_COUNTRY_BY_ISO = {
+    "ad": "andorra",
+    "ae": "united arab emirates",
+    "af": "afghanistan",
+    "al": "albania",
+    "am": "armenia",
+    "ao": "angola",
+    "ar": "argentina",
+    "at": "austria",
+    "au": "australia",
+    "az": "azerbaijan",
+    "ba": "bosnia and herzegovina",
+    "bb": "barbados",
+    "bd": "bangladesh",
+    "be": "belgium",
+    "bf": "burkina faso",
+    "bg": "bulgaria",
+    "bh": "bahrain",
+    "bi": "burundi",
+    "bj": "benin",
+    "bn": "brunei",
+    "bo": "bolivia",
+    "br": "brazil",
+    "bs": "bahamas",
+    "bt": "bhutan",
+    "bw": "botswana",
+    "by": "belarus",
+    "bz": "belize",
+    "ca": "canada",
+    "cf": "central african republic",
+    "cg": "congo",
+    "ch": "switzerland",
+    "cl": "chile",
+    "cm": "cameroon",
+    "cn": "china",
+    "co": "colombia",
+    "cr": "costa rica",
+    "cu": "cuba",
+    "cv": "cape verde",
+    "cy": "cyprus",
+    "cz": "czech republic",
+    "de": "germany",
+    "dj": "djibouti",
+    "dk": "denmark",
+    "do": "dominican republic",
+    "dz": "algeria",
+    "ec": "ecuador",
+    "ee": "estonia",
+    "eg": "egypt",
+    "er": "eritrea",
+    "es": "spain",
+    "et": "ethiopia",
+    "fi": "finland",
+    "fj": "fiji",
+    "fr": "france",
+    "ga": "gabon",
+    "gb": "united kingdom",
+    "ge": "georgia",
+    "gh": "ghana",
+    "gm": "gambia",
+    "gn": "guinea",
+    "gq": "equatorial guinea",
+    "gr": "greece",
+    "gt": "guatemala",
+    "hn": "honduras",
+    "hr": "croatia",
+    "ht": "haiti",
+    "hu": "hungary",
+    "id": "indonesia",
+    "ie": "ireland",
+    "il": "israel",
+    "in": "india",
+    "iq": "iraq",
+    "ir": "iran",
+    "is": "iceland",
+    "it": "italy",
+    "jm": "jamaica",
+    "jo": "jordan",
+    "jp": "japan",
+    "ke": "kenya",
+    "kg": "kyrgyzstan",
+    "kh": "cambodia",
+    "km": "comoros",
+    "kp": "north korea",
+    "kr": "south korea",
+    "kw": "kuwait",
+    "kz": "kazakhstan",
+    "lb": "lebanon",
+    "li": "liechtenstein",
+    "lk": "sri lanka",
+    "lr": "liberia",
+    "ls": "lesotho",
+    "lt": "lithuania",
+    "lu": "luxembourg",
+    "lv": "latvia",
+    "ly": "libya",
+    "ma": "morocco",
+    "mc": "monaco",
+    "md": "moldova",
+    "me": "montenegro",
+    "mg": "madagascar",
+    "mk": "north macedonia",
+    "ml": "mali",
+    "mm": "myanmar",
+    "mn": "mongolia",
+    "mr": "mauritania",
+    "mt": "malta",
+    "mu": "mauritius",
+    "mv": "maldives",
+    "mw": "malawi",
+    "mx": "mexico",
+    "my": "malaysia",
+    "mz": "mozambique",
+    "na": "namibia",
+    "ne": "niger",
+    "ng": "nigeria",
+    "ni": "nicaragua",
+    "nl": "netherlands",
+    "no": "norway",
+    "np": "nepal",
+    "nz": "new zealand",
+    "om": "oman",
+    "pa": "panama",
+    "pe": "peru",
+    "pg": "papua new guinea",
+    "ph": "philippines",
+    "pk": "pakistan",
+    "pl": "poland",
+    "pt": "portugal",
+    "py": "paraguay",
+    "qa": "qatar",
+    "ro": "romania",
+    "rs": "serbia",
+    "ru": "russia",
+    "rw": "rwanda",
+    "sa": "saudi arabia",
+    "sd": "sudan",
+    "se": "sweden",
+    "sg": "singapore",
+    "si": "slovenia",
+    "sk": "slovakia",
+    "sn": "senegal",
+    "so": "somalia",
+    "ss": "south sudan",
+    "sv": "el salvador",
+    "sy": "syria",
+    "td": "chad",
+    "tg": "togo",
+    "th": "thailand",
+    "tj": "tajikistan",
+    "tm": "turkmenistan",
+    "tn": "tunisia",
+    "tr": "turkey",
+    "tt": "trinidad and tobago",
+    "tw": "taiwan",
+    "tz": "tanzania",
+    "ua": "ukraine",
+    "ug": "uganda",
+    "us": "united states",
+    "uy": "uruguay",
+    "uz": "uzbekistan",
+    "ve": "venezuela",
+    "vn": "vietnam",
+    "ye": "yemen",
+    "za": "south africa",
+    "zm": "zambia",
+    "zw": "zimbabwe",
+}
 _DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-_WIKIPEDIA_SEARCH_HOSTS = frozenset({"wikipedia.org", "ru.wikipedia.org", "en.wikipedia.org"})
 
 
 def normalize_search_site(site: str) -> str:
@@ -250,6 +490,89 @@ def normalize_search_freshness(freshness: str) -> str:
     return freshness
 
 
+def normalize_search_language(language: str) -> str:
+    """Validate an optional ISO-639-1 code and return lowercase canonical form."""
+
+    if not isinstance(language, str):
+        raise ValueError("lang must be an empty value or a two-letter ISO-639-1 code")
+    canonical = language.casefold()
+    if canonical and canonical not in _ISO_639_1:
+        raise ValueError("lang must be an empty value or a two-letter ISO-639-1 code")
+    return canonical
+
+
+def normalize_search_region(region: str) -> str:
+    """Validate an ISO-3166-1 alpha-2 market and return lowercase canonical form."""
+
+    if not isinstance(region, str):
+        raise ValueError("region must be an empty value or a two-letter ISO-3166-1 alpha-2 code")
+    canonical = region.casefold()
+    if canonical and canonical not in _ISO_3166_1_ALPHA2:
+        raise ValueError("region must be an empty value or a two-letter ISO-3166-1 alpha-2 code")
+    return canonical
+
+
+def normalize_search_domains(domains: Sequence[str], *, filter_name: str) -> tuple[str, ...]:
+    """Canonicalise one bounded domain list without reflecting its values."""
+
+    filter_name = filter_name if filter_name in {"include_domains", "exclude_domains"} else "domain list"
+    if isinstance(domains, str | bytes) or not isinstance(domains, Sequence):
+        raise ValueError(f"{filter_name} must be an array of bare DNS hostnames")
+    if len(domains) > SEARCH_DOMAIN_LIST_MAX:
+        raise ValueError(f"{filter_name} accepts at most {SEARCH_DOMAIN_LIST_MAX} domains")
+    canonical: list[str] = []
+    seen: set[str] = set()
+    for domain in domains:
+        try:
+            item = normalize_search_site(domain)
+        except ValueError as exc:
+            raise ValueError(f"{filter_name} must contain only bare DNS hostnames") from exc
+        if not item:
+            raise ValueError(f"{filter_name} must contain only non-empty hostnames")
+        if item in seen:
+            raise ValueError(f"{filter_name} must contain unique canonical hostnames")
+        seen.add(item)
+        canonical.append(item)
+    return tuple(canonical)
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    return host == domain or host.endswith(f".{domain}")
+
+
+def normalize_search_filters(
+    *,
+    site: str = "",
+    include_domains: Sequence[str] = (),
+    exclude_domains: Sequence[str] = (),
+    freshness: str = "",
+    lang: str = "",
+    region: str = "",
+) -> tuple[str, tuple[str, ...], tuple[str, ...], str, str, str]:
+    """Validate the complete public filter combination before provider work."""
+
+    canonical_site = normalize_search_site(site)
+    included = normalize_search_domains(include_domains, filter_name="include_domains")
+    excluded = normalize_search_domains(exclude_domains, filter_name="exclude_domains")
+    if canonical_site and included:
+        raise ValueError("site and include_domains cannot be combined")
+    effective_includes = (canonical_site,) if canonical_site else included
+    if any(
+        _host_matches_domain(included_domain, excluded_domain)
+        for included_domain in effective_includes
+        for excluded_domain in excluded
+    ):
+        raise ValueError("exclude_domains cannot cover an included domain")
+    return (
+        canonical_site,
+        included,
+        excluded,
+        normalize_search_freshness(freshness),
+        normalize_search_language(lang),
+        normalize_search_region(region),
+    )
+
+
 def _freshness_after(freshness: str) -> str:
     """Calendar boundary used by Yandex's documented ``date:>`` operator."""
 
@@ -260,23 +583,62 @@ def _freshness_after(freshness: str) -> str:
     return (today - timedelta(days=_FRESHNESS_DAYS[freshness])).isoformat()
 
 
+def _query_with_domain_filter(
+    query: str,
+    *,
+    site: str,
+    include_domains: Sequence[str] = (),
+    union_operator: str = "OR",
+) -> str:
+    """Append provider hints for strict code-owned include-domain filtering."""
+
+    site, included, _, _, _, _ = normalize_search_filters(
+        site=site,
+        include_domains=include_domains,
+    )
+    targets = (site,) if site else included
+    if not targets:
+        return query
+    if len(targets) == 1:
+        clause = f"site:{targets[0]}"
+    else:
+        clause = "(" + f" {union_operator} ".join(f"site:{domain}" for domain in targets) + ")"
+    return f"{query} {clause}"
+
+
 def _query_with_site_filter(query: str, *, site: str) -> str:
-    """Append the one common operator whose result is also post-filtered."""
+    """Backward-compatible spelling for the original one-domain helper."""
 
-    site = normalize_search_site(site)
-    pieces = [query]
-    if site:
-        pieces.append(f"site:{site}")
-    return " ".join(pieces)
+    return _query_with_domain_filter(query, site=site)
 
 
-def _query_with_yandex_filters(query: str, *, site: str, freshness: str) -> str:
+def _query_with_yandex_filters(
+    query: str,
+    *,
+    site: str,
+    include_domains: Sequence[str] = (),
+    freshness: str,
+    lang: str = "",
+) -> str:
     """Use Yandex's documented date syntax, never Google's ``after:``."""
 
     freshness = normalize_search_freshness(freshness)
-    pieces = [_query_with_site_filter(query, site=site)]
+    lang = normalize_search_language(lang)
+    pieces = [
+        _query_with_domain_filter(
+            query,
+            site=site,
+            include_domains=include_domains,
+            union_operator="|",
+        )
+    ]
     if freshness:
         pieces.append(f"date:>{_freshness_after(freshness).replace('-', '')}")
+    if lang:
+        # Yandex documents this query-language operator for the document
+        # language.  `l10n` is deliberately not used: it changes error-message
+        # localisation, not search results.
+        pieces.append(f"lang:{lang}")
     return " ".join(pieces)
 
 
@@ -286,6 +648,24 @@ def _reject_unsupported_freshness(provider: str, freshness: str) -> None:
     freshness = normalize_search_freshness(freshness)
     if freshness:
         raise UnsupportedSearchFilterError(provider=provider, filter_name="freshness")
+
+
+def _reject_unsupported_locales(
+    provider: str,
+    *,
+    lang: str,
+    region: str,
+    languages: frozenset[str] | None = None,
+    regions: frozenset[str] | None = None,
+) -> None:
+    """Reject an unapplied locale before the adapter can allocate a client."""
+
+    lang = normalize_search_language(lang)
+    region = normalize_search_region(region)
+    if lang and (languages is None or lang not in languages):
+        raise UnsupportedSearchFilterError(provider=provider, filter_name="lang")
+    if region and (regions is None or region not in regions):
+        raise UnsupportedSearchFilterError(provider=provider, filter_name="region")
 
 
 def _result_matches_site(result: SearchResult, site: str) -> bool:
@@ -298,7 +678,32 @@ def _result_matches_site(result: SearchResult, site: str) -> bool:
         canonical = host.rstrip(".").encode("idna").decode("ascii").casefold()
     except (UnicodeError, ValueError):
         return False
-    return canonical == site or canonical.endswith(f".{site}")
+    return _host_matches_domain(canonical, site)
+
+
+def _result_matches_domains(
+    result: SearchResult,
+    *,
+    site: str,
+    include_domains: Sequence[str],
+    exclude_domains: Sequence[str],
+) -> bool:
+    """Enforce exact/subdomain allow and deny lists after every provider."""
+
+    effective_includes = (site,) if site else tuple(include_domains)
+    try:
+        parsed = urllib.parse.urlsplit(result.url)
+        if parsed.scheme.casefold() not in {"http", "https"} or not parsed.hostname:
+            return False
+        host = parsed.hostname
+        canonical = host.rstrip(".").encode("idna").decode("ascii").casefold()
+    except (UnicodeError, ValueError):
+        return False
+    if effective_includes and not any(
+        _host_matches_domain(canonical, domain) for domain in effective_includes
+    ):
+        return False
+    return not any(_host_matches_domain(canonical, domain) for domain in exclude_domains)
 
 
 @dataclass(frozen=True)
@@ -707,36 +1112,53 @@ class WebSurfer:
         max_results: int = _DEFAULT_MAX_RESULTS,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
-        site = normalize_search_site(site)
-        freshness = normalize_search_freshness(freshness)
+        site, include_domains, exclude_domains, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
         query = " ".join(str(query or "").split()).strip()
         if not query:
             return []
         limit = max(1, min(int(max_results), 20))
+        # Filtering after the provider is the enforcement boundary.  Ask the
+        # same provider for bounded headroom so a few forbidden rows do not
+        # needlessly fan the private query out to the next company.  Never relax
+        # the filter merely to fill the requested number of slots.
+        provider_limit = min(20, limit * 2) if include_domains or exclude_domains else limit
         results: list[SearchResult] = []
 
         refused: list[str] = []
-        unsupported_freshness: list[str] = []
+        unsupported: dict[str, list[str]] = {}
         answered = False
-        for name, provider in self._provider_chain(
-            query,
-            limit,
-            site=site,
-            freshness=freshness,
-        ):
+        chain_options: dict[str, Any] = {"site": site, "freshness": freshness}
+        # Preserve the exact legacy internal call when new filters are absent;
+        # deployments can carry small local provider-chain wrappers.
+        if include_domains:
+            chain_options["include_domains"] = include_domains
+        if exclude_domains:
+            chain_options["exclude_domains"] = exclude_domains
+        if lang:
+            chain_options["lang"] = lang
+        if region:
+            chain_options["region"] = region
+        for name, provider in self._provider_chain(query, provider_limit, **chain_options):
             try:
                 batch = await provider()
-            except UnsupportedSearchFilterError as exc:
+            except UnsupportedSearchFilterError as capability_miss:
                 # A local capability miss is different from a network refusal.
                 # Keep it structural so an all-unsupported chain cannot become
                 # either an empty result or an unfiltered request.
-                if exc.filter_name == "freshness":
-                    unsupported_freshness.append(name)
-                    LOGGER.info("Search provider %s lacks freshness support", name)
-                else:
-                    refused.append(name)
-                    LOGGER.info("Search provider %s lacks a requested filter", name)
+                unsupported.setdefault(capability_miss.filter_name, []).append(name)
+                LOGGER.info("Search provider %s lacks %s support", name, capability_miss.filter_name)
                 continue
             except ProviderRefusedError as exc:
                 LOGGER.warning("Search provider %s refused (%s)", name, type(exc).__name__)
@@ -746,22 +1168,67 @@ class WebSurfer:
                 LOGGER.warning("Search provider %s failed: %s", name, type(exc).__name__)
                 refused.append(name)
                 continue
+            if site or include_domains or exclude_domains:
+                # Even native provider parameters and query operators are hints
+                # from an external service.  A non-matching URL never crosses
+                # this API boundary; deny-list values themselves are never sent
+                # to a provider at all.
+                batch = [
+                    item
+                    for item in batch
+                    if _result_matches_domains(
+                        item,
+                        site=site,
+                        include_domains=include_domains,
+                        exclude_domains=exclude_domains,
+                    )
+                ]
+            wikipedia_targets = (site,) if site else include_domains
+            wikipedia_only = bool(wikipedia_targets) and all(
+                domain == "wikipedia.org" or domain in _WIKIPEDIA_LANGUAGE_HOST.values()
+                for domain in wikipedia_targets
+            )
+            if name == "wikipedia" and not batch and not wikipedia_only:
+                # An empty encyclopaedia index is not evidence that the open web
+                # has no answer.  It is honest emptiness only when the caller
+                # explicitly limited the corpus to Wikipedia.
+                refused.append(name)
+                LOGGER.info("Wikipedia fallback had no web-wide answer")
+                continue
             answered = True
-            if site:
-                # Even native provider parameters and `site:` are hints from an
-                # external service.  A non-matching URL never crosses this API
-                # boundary, and an all-mismatch batch falls through to the next
-                # provider instead of ending the search early.
-                batch = [item for item in batch if _result_matches_site(item, site)]
             results.extend(batch)
             if results:
                 break
             # Провайдер ответил честным нулём. Индексы у провайдеров разные,
             # поэтому спрашиваем следующего — но это уже не отказ.
 
-        if not answered and freshness and unsupported_freshness:
-            raise FreshnessUnavailableError(
-                unsupported_providers=unsupported_freshness,
+        if not answered and unsupported:
+            requested_order = (
+                ("freshness", bool(freshness)),
+                ("lang", bool(lang)),
+                ("region", bool(region)),
+                ("site", bool(site)),
+                ("include_domains", bool(include_domains)),
+                ("exclude_domains", bool(exclude_domains)),
+            )
+            filter_names = tuple(
+                key for key, requested in requested_order if requested and key in unsupported
+            )
+            if not filter_names:
+                filter_names = tuple(unsupported)
+            unsupported_providers = tuple(
+                dict.fromkeys(
+                    provider for filter_name in filter_names for provider in unsupported[filter_name]
+                )
+            )
+            if filter_names == ("freshness",):
+                raise FreshnessUnavailableError(
+                    unsupported_providers=unsupported_providers,
+                    refused_providers=refused,
+                )
+            raise SearchFilterUnavailableError(
+                filter_names=filter_names,
+                unsupported_providers=unsupported_providers,
                 refused_providers=refused,
             )
         if not answered and refused:
@@ -778,9 +1245,26 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
+        site, include_domains, _, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
         _reject_unsupported_freshness("duckduckgo", freshness)
-        provider_query = _query_with_site_filter(query, site=site)
+        _reject_unsupported_locales("duckduckgo", lang=lang, region=region)
+        provider_query = _query_with_domain_filter(
+            query,
+            site=site,
+            include_domains=include_domains,
+        )
         client = await self._get_client()
         response = await client.get(
             "https://html.duckduckgo.com/html/",
@@ -830,6 +1314,10 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
         """Последнее звено цепочки: энциклопедия вместо пустоты.
 
@@ -856,17 +1344,37 @@ class WebSurfer:
         # publication freshness promised by a public-web search.  Treating an old
         # article edited today as fresh would be the same stale leak as ignoring
         # the window altogether.
-        _reject_unsupported_freshness("wikipedia", freshness)
-        site = normalize_search_site(site)
-        if site and site not in _WIKIPEDIA_SEARCH_HOSTS:
-            # CirrusSearch indexes Wikipedia, not an arbitrary `site:` target.
-            # Sending the operator as ordinary query text and then post-filtering
-            # Wikipedia URLs produced a dishonest empty result for every external
-            # domain even though no provider had searched that domain at all.
-            raise UnsupportedSearchFilterError(provider="wikipedia", filter_name="site")
-        languages = (
-            (site.split(".", 1)[0],) if site in {"ru.wikipedia.org", "en.wikipedia.org"} else ("ru", "en")
+        site, include_domains, exclude_domains, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
         )
+        _reject_unsupported_freshness("wikipedia", freshness)
+        _reject_unsupported_locales(
+            "wikipedia",
+            lang=lang,
+            region=region,
+            languages=frozenset(_WIKIPEDIA_LANGUAGE_HOST),
+        )
+        effective_includes = (site,) if site else include_domains
+        languages = []
+        for language in (lang,) if lang else ("ru", "en"):
+            host = _WIKIPEDIA_LANGUAGE_HOST[language]
+            if effective_includes and not any(
+                _host_matches_domain(host, domain) for domain in effective_includes
+            ):
+                continue
+            if any(_host_matches_domain(host, domain) for domain in exclude_domains):
+                continue
+            languages.append(language)
+        if not languages:
+            # CirrusSearch indexes Wikipedia, not an arbitrary requested domain.
+            # A local capability miss is not an honest empty result about the web.
+            filter_name = "site" if site else "include_domains" if include_domains else "exclude_domains"
+            raise UnsupportedSearchFilterError(provider="wikipedia", filter_name=filter_name)
         client = await self._get_client()
         for language in languages:
             try:
@@ -921,6 +1429,10 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]]:
         """Провайдеры в порядке замеренной надёжности.
 
@@ -945,11 +1457,20 @@ class WebSurfer:
         ключ Brave/Tavily/Serper: ветки готовы, нужен только ключ.
         """
         chain: list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]] = []
+        provider_options: dict[str, Any] = {"site": site, "freshness": freshness}
+        if include_domains:
+            provider_options["include_domains"] = include_domains
+        if exclude_domains:
+            provider_options["exclude_domains"] = exclude_domains
+        if lang:
+            provider_options["lang"] = lang
+        if region:
+            provider_options["region"] = region
 
         def call(
             provider: Callable[..., Awaitable[list[SearchResult]]],
         ) -> Callable[[], Awaitable[list[SearchResult]]]:
-            return lambda: provider(query, limit, site=site, freshness=freshness)
+            return lambda: provider(query, limit, **provider_options)
 
         if self.settings.yandex_search_api_key:
             chain.append(("yandex", call(self._search_yandex)))
@@ -973,12 +1494,29 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
         """Brave без ключа. Отвечает не всегда, но вчетверо чаще DuckDuckGo."""
         # The documented freshness parameter belongs to Brave's API endpoint.
         # Do not assume that the consumer HTML form accepts the same contract.
+        site, include_domains, _, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
         _reject_unsupported_freshness("brave-html", freshness)
-        provider_query = _query_with_site_filter(query, site=site)
+        _reject_unsupported_locales("brave-html", lang=lang, region=region)
+        provider_query = _query_with_domain_filter(
+            query,
+            site=site,
+            include_domains=include_domains,
+        )
         client = await self._get_client()
         response = await client.get(
             "https://search.brave.com/search",
@@ -1047,23 +1585,40 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
         """Яндекс Search API v2 — синхронный поиск, ответ приходит XML-ом в base64.
 
         Ключ Yandex Cloud (`AQVN…`) сам несёт привязку к каталогу, поэтому
         `folderId` в теле не нужен — проверено на живом ключе владельца.
         """
+        site, include_domains, _, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
+        if region and region not in _YANDEX_REGION_TO_SEARCH_TYPE:
+            raise UnsupportedSearchFilterError(provider="yandex", filter_name="region")
         provider_query = _query_with_yandex_filters(
             query,
             site=site,
+            include_domains=include_domains,
             freshness=freshness,
+            lang=lang,
         )
+        search_type = _YANDEX_REGION_TO_SEARCH_TYPE.get(region) or self._yandex_segment(query)
         client = await self._get_client()
         response = await client.post(
             "https://searchapi.api.cloud.yandex.net/v2/web/search",
             json={
                 "query": {
-                    "searchType": self._yandex_segment(query),
+                    "searchType": search_type,
                     "queryText": provider_query,
                 },
                 "groupSpec": {
@@ -1126,13 +1681,40 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
-        site = normalize_search_site(site)
-        freshness = normalize_search_freshness(freshness)
-        provider_query = _query_with_site_filter(query, site=site)
+        site, include_domains, _, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
+        _reject_unsupported_locales(
+            "brave",
+            lang=lang,
+            region=region,
+            languages=_BRAVE_SEARCH_LANGUAGES,
+            regions=_BRAVE_COUNTRIES,
+        )
+        provider_query = _query_with_domain_filter(
+            query,
+            site=site,
+            include_domains=include_domains,
+        )
+        if include_domains and (len(provider_query) > 400 or len(provider_query.split()) > 50):
+            raise UnsupportedSearchFilterError(provider="brave", filter_name="include_domains")
         params: dict[str, str | int] = {"q": provider_query, "count": limit}
         if freshness:
             params["freshness"] = _BRAVE_FRESHNESS[freshness]
+        if lang:
+            params["search_lang"] = lang
+        if region:
+            params["country"] = region.upper()
         client = await self._get_client()
         response = await client.get(
             "https://api.search.brave.com/res/v1/web/search",
@@ -1147,6 +1729,14 @@ class WebSurfer:
         if response.status_code in _REFUSAL_STATUS or response.status_code >= 500:
             raise ProviderRefusedError(f"brave answered {response.status_code}")
         response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProviderRefusedError("brave answered with non-JSON") from exc
+        web_payload = payload.get("web") if isinstance(payload, dict) else None
+        items = web_payload.get("results") if isinstance(web_payload, dict) else None
+        if not isinstance(items, list):
+            raise ProviderRefusedError("brave answered without a result container")
         return [
             SearchResult(
                 title=str(item.get("title", "")),
@@ -1154,8 +1744,8 @@ class WebSurfer:
                 snippet=str(item.get("description", "")),
                 source="brave",
             )
-            for item in response.json().get("web", {}).get("results", [])[:limit]
-            if item.get("url")
+            for item in items[:limit]
+            if isinstance(item, dict) and item.get("url")
         ]
 
     async def _search_tavily(
@@ -1165,21 +1755,43 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
-        site = normalize_search_site(site)
-        freshness = normalize_search_freshness(freshness)
+        site, include_domains, _, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
+        _reject_unsupported_locales(
+            "tavily",
+            lang=lang,
+            region=region,
+            regions=frozenset(_TAVILY_COUNTRY_BY_ISO),
+        )
         payload: dict[str, Any] = {
             "api_key": self.settings.tavily_api_key,
             "query": query,
             "max_results": limit,
             "search_depth": "basic",
         }
-        if site:
+        effective_includes = (site,) if site else include_domains
+        if effective_includes:
             # Tavily has a native domain allow-list; unlike a textual operator it
             # does not depend on query parsing.
-            payload["include_domains"] = [site]
+            payload["include_domains"] = list(effective_includes)
         if freshness:
             payload["time_range"] = freshness
+        if region:
+            # Officially a country boost for general web search, not a strict
+            # geographic source filter; the public tool describes the same.
+            payload["topic"] = "general"
+            payload["country"] = _TAVILY_COUNTRY_BY_ISO[region]
         client = await self._get_client()
         response = await client.post(
             "https://api.tavily.com/search",
@@ -1189,6 +1801,13 @@ class WebSurfer:
         if response.status_code in _REFUSAL_STATUS or response.status_code >= 500:
             raise ProviderRefusedError(f"tavily answered {response.status_code}")
         response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProviderRefusedError("tavily answered with non-JSON") from exc
+        items = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise ProviderRefusedError("tavily answered without a result container")
         return [
             SearchResult(
                 title=str(item.get("title", "")),
@@ -1196,8 +1815,8 @@ class WebSurfer:
                 snippet=str(item.get("content", "")),
                 source="tavily",
             )
-            for item in response.json().get("results", [])[:limit]
-            if item.get("url")
+            for item in items[:limit]
+            if isinstance(item, dict) and item.get("url")
         ]
 
     async def _search_serper(
@@ -1207,13 +1826,40 @@ class WebSurfer:
         *,
         site: str = "",
         freshness: str = "",
+        include_domains: Sequence[str] = (),
+        exclude_domains: Sequence[str] = (),
+        lang: str = "",
+        region: str = "",
     ) -> list[SearchResult]:
-        site = normalize_search_site(site)
-        freshness = normalize_search_freshness(freshness)
-        provider_query = _query_with_site_filter(query, site=site)
+        site, include_domains, _, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
+        _reject_unsupported_locales(
+            "serper",
+            lang=lang,
+            region=region,
+            languages=_ISO_639_1,
+            regions=_ISO_3166_1_ALPHA2,
+        )
+        provider_query = _query_with_domain_filter(
+            query,
+            site=site,
+            include_domains=include_domains,
+        )
         payload: dict[str, Any] = {"q": provider_query, "num": limit}
         if freshness:
             payload["tbs"] = _SERPER_FRESHNESS[freshness]
+        if lang:
+            # Serper documents this as search localisation.  It is deliberately
+            # not described as a hard document-language guarantee.
+            payload["hl"] = lang
+        if region:
+            payload["gl"] = region
         client = await self._get_client()
         response = await client.post(
             "https://google.serper.dev/search",
@@ -1224,6 +1870,28 @@ class WebSurfer:
         if response.status_code in _REFUSAL_STATUS or response.status_code >= 500:
             raise ProviderRefusedError(f"serper answered {response.status_code}")
         response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProviderRefusedError("serper answered with non-JSON") from exc
+        recognised_sections = {
+            "answerBox",
+            "images",
+            "knowledgeGraph",
+            "news",
+            "organic",
+            "peopleAlsoAsk",
+            "places",
+            "relatedSearches",
+            "searchParameters",
+            "shopping",
+            "videos",
+        }
+        if not isinstance(payload, dict) or not recognised_sections.intersection(payload):
+            raise ProviderRefusedError("serper answered without a recognised result container")
+        items = payload.get("organic", [])
+        if not isinstance(items, list):
+            raise ProviderRefusedError("serper answered with an invalid organic result container")
         return [
             SearchResult(
                 title=str(item.get("title", "")),
@@ -1231,8 +1899,8 @@ class WebSurfer:
                 snippet=str(item.get("snippet", "")),
                 source="serper",
             )
-            for item in response.json().get("organic", [])[:limit]
-            if item.get("link")
+            for item in items[:limit]
+            if isinstance(item, dict) and item.get("link")
         ]
 
     async def _validate_url(self, url: str) -> str:

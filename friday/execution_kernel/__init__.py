@@ -59,10 +59,14 @@ from friday.storage.models import (
 )
 from friday.tts import TTSUnavailable, synthesize_speech
 from friday.web_surfer import (
+    SEARCH_DOMAIN_LIST_MAX,
     SEARCH_FRESHNESS_VALUES,
     AllProvidersRefusedError,
-    normalize_search_freshness,
-    normalize_search_site,
+    SearchFilterUnavailableError,
+    normalize_search_domains,
+    normalize_search_filters,
+    normalize_search_language,
+    normalize_search_region,
 )
 from friday.workers._blocking import run_blocking
 
@@ -2120,6 +2124,51 @@ class ExecutionKernel:
                 freshness = args.get("freshness")
                 if isinstance(freshness, str) and freshness in SEARCH_FRESHNESS_VALUES and freshness:
                     details["freshness"] = freshness
+                for field in ("include_domains", "exclude_domains"):
+                    domains = args.get(field)
+                    if isinstance(domains, list | tuple):
+                        try:
+                            canonical_domains = sorted(normalize_search_domains(domains, filter_name=field))
+                            fingerprint_body = json.dumps(
+                                canonical_domains,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )
+                        except (TypeError, ValueError):
+                            # Invalid arguments are audited too.  Keep only a
+                            # transient digest and shape, never their values.
+                            safe_items = sorted(
+                                value if isinstance(value, str) else f"<{type(value).__name__}>"
+                                for value in domains
+                            )
+                            fingerprint_body = json.dumps(
+                                safe_items,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )
+                        details[f"{field}_sha256"] = hashlib.sha256(
+                            fingerprint_body.encode("utf-8")
+                        ).hexdigest()
+                        details[f"{field}_count"] = len(domains)
+                        details[f"{field}_chars"] = sum(
+                            len(value) for value in domains if isinstance(value, str)
+                        )
+                lang = args.get("lang")
+                if isinstance(lang, str):
+                    try:
+                        canonical_lang = normalize_search_language(lang)
+                    except ValueError:
+                        canonical_lang = ""
+                    if canonical_lang:
+                        details["lang"] = canonical_lang
+                region = args.get("region")
+                if isinstance(region, str):
+                    try:
+                        canonical_region = normalize_search_region(region)
+                    except ValueError:
+                        canonical_region = ""
+                    if canonical_region:
+                        details["region"] = canonical_region
             else:
                 max_sources = args.get("max_sources")
                 if isinstance(max_sources, int):
@@ -2930,17 +2979,46 @@ class ExecutionKernel:
         max_results: int = 5,
         site: str = "",
         freshness: str = "",
+        include_domains: list[str] | tuple[str, ...] = (),
+        exclude_domains: list[str] | tuple[str, ...] = (),
+        lang: str = "",
+        region: str = "",
     ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
+        raw_site = site
+        raw_include_domains = include_domains
         # Validate before quota accounting and before any provider can see the
         # values.  Error messages are closed strings and never echo a domain.
-        site = normalize_search_site(site)
-        freshness = normalize_search_freshness(freshness)
+        site, include_domains, exclude_domains, freshness, lang, region = normalize_search_filters(
+            site=site,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            freshness=freshness,
+            lang=lang,
+            region=region,
+        )
         refusal = await self._what_must_not_leave(query, actor)
         if refusal:
             return refusal
+        outbound_domain_forms: list[str] = []
         if site:
-            refusal = await self._what_must_not_leave(site, actor)
+            outbound_domain_forms.extend((raw_site, site))
+        else:
+            for raw_domain, canonical_domain in zip(
+                raw_include_domains,
+                include_domains,
+                strict=True,
+            ):
+                outbound_domain_forms.extend((raw_domain, canonical_domain))
+        checked_domain_forms: set[str] = set()
+        for domain in outbound_domain_forms:
+            if domain in checked_domain_forms:
+                continue
+            checked_domain_forms.add(domain)
+            # Check both the human spelling and outbound punycode.  Checking
+            # only canonical IDNA would hide a private person's name from the
+            # local privacy classifier before the provider sees its encoding.
+            refusal = await self._what_must_not_leave(domain, actor)
             if refusal:
                 return refusal
         exhausted = self._web_quota_refusal(actor)
@@ -2956,8 +3034,32 @@ class ExecutionKernel:
             search_options["site"] = site
         if freshness:
             search_options["freshness"] = freshness
+        if include_domains:
+            search_options["include_domains"] = list(include_domains)
+        if exclude_domains:
+            # This crosses only the in-process WebSurfer boundary.  Provider
+            # adapters deliberately never serialise deny-list values.
+            search_options["exclude_domains"] = list(exclude_domains)
+        if lang:
+            search_options["lang"] = lang
+        if region:
+            search_options["region"] = region
         try:
             results = await web.search(query, **search_options)
+        except SearchFilterUnavailableError as capability_failure:
+            LOGGER.warning(
+                "Web search filter unavailable (%d chars): %s",
+                len(query),
+                capability_failure.filter_name,
+            )
+            return {
+                "query": query,
+                "results": [],
+                "search_failed": True,
+                "unsupported_filters": list(capability_failure.filter_names),
+                "error": "Доступные поисковые системы не умеют применить все запрошенные фильтры.",
+                "note": "Нефильтрованная выдача не запрашивалась и не использовалась.",
+            }
         except AllProvidersRefusedError as exc:
             # Отказ поисковиков — не факт об интернете. Модель обязана увидеть
             # разницу, иначе она сообщит человеку «ничего не нашлось» о запросе,
@@ -2986,7 +3088,25 @@ class ExecutionKernel:
                 # не является.
                 "note": "Сведений из интернета в этом результате нет: ни одна выдача не получена.",
             }
-        return {"query": query, "results": [item.to_dict() for item in results]}
+        response: dict[str, Any] = {
+            "query": query,
+            "results": [item.to_dict() for item in results],
+        }
+        if site or include_domains or exclude_domains:
+            requested_results = int(search_options["max_results"])
+            returned_results = len(results)
+            response.update(
+                {
+                    "requested_results": requested_results,
+                    "returned_results": returned_results,
+                    "underfilled": returned_results < requested_results,
+                }
+            )
+            if returned_results < requested_results:
+                response["note"] = (
+                    "Подходящих результатов меньше запрошенного; доменные ограничения не ослаблялись."
+                )
+        return response
 
     async def _web_fetch(self, *, actor: ActorContext, url: str, query: str = "") -> dict[str, Any]:
         _, _, web, _ = self._require_services()
@@ -4672,8 +4792,11 @@ class ExecutionKernel:
         )
         spec(
             "web_search",
-            "Поиск в открытом интернете. site — только домен без схемы, пути и порта; "
-            "freshness ограничивает окно значениями day/week/month/year.",
+            "Поиск в открытом интернете. site — один строгий домен; include_domains и "
+            "exclude_domains — строгие списки доменов (site нельзя сочетать с include_domains). "
+            "freshness ограничивает окно значениями day/week/month/year. lang и region задают "
+            "языковую и рыночную локализацию выдачи, но не гарантируют язык каждого документа "
+            "или географию владельца сайта.",
             "web.search",
             {
                 "query": {"type": "string"},
@@ -4685,6 +4808,38 @@ class ExecutionKernel:
                     "description": "hostname/domain only; no URL, path, userinfo or port",
                 },
                 "freshness": {"type": "string", "enum": list(SEARCH_FRESHNESS_VALUES)},
+                "include_domains": {
+                    "type": "array",
+                    "maxItems": SEARCH_DOMAIN_LIST_MAX,
+                    "uniqueItems": True,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": r"^[^/:@?#\\\s]+\.?$",
+                    },
+                    "description": "bare hostnames; strict exact-host/subdomain allow-list",
+                },
+                "exclude_domains": {
+                    "type": "array",
+                    "maxItems": SEARCH_DOMAIN_LIST_MAX,
+                    "uniqueItems": True,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": r"^[^/:@?#\\\s]+\.?$",
+                    },
+                    "description": "bare hostnames; strict local deny-list",
+                },
+                "lang": {
+                    "type": "string",
+                    "pattern": r"^(?:[A-Za-z]{2})?$",
+                    "description": "ISO-639-1 language localisation, for example ru or en",
+                },
+                "region": {
+                    "type": "string",
+                    "pattern": r"^(?:[A-Za-z]{2})?$",
+                    "description": "ISO-3166-1 alpha-2 market, for example RU, US or GB",
+                },
             },
             ["query"],
             risk="observe",

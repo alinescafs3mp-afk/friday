@@ -564,6 +564,7 @@ _ENUM_KEYS = frozenset(
         "granted_by",
         "history_quality",
         "kind",
+        "lang",
         "knowledge_kind",
         "lifecycle_stage",
         "match_method",
@@ -572,6 +573,7 @@ _ENUM_KEYS = frozenset(
         "operation",
         "origin",
         "reason",
+        "region",
         "relation_type",
         "resolution_method",
         "scope",
@@ -727,6 +729,8 @@ _HASH_KEYS = frozenset(
         "body_sha256",
         "code_sha256",
         "content_sha256",
+        "exclude_domains_sha256",
+        "include_domains_sha256",
         "prompt_sha256",
         "query_sha256",
         "response_sha256",
@@ -771,6 +775,10 @@ _DERIVED_NUMBER_KEYS = frozenset(
         "private_chars",
         "private_fields_count",
         "private_items_count",
+        "exclude_domains_chars",
+        "exclude_domains_count",
+        "include_domains_chars",
+        "include_domains_count",
         "site_chars",
         "url_chars",
         "changed_fields_count",
@@ -1205,6 +1213,17 @@ def _sanitize_mapping(
         if key in _ENUM_KEYS:
             if value is None:
                 out[key] = None
+            elif (
+                key in {"lang", "region"}
+                and isinstance(value, str)
+                and len(value) == 2
+                and value.isascii()
+                and value.isalpha()
+            ):
+                # Search locale codes are a bounded, low-entropy ISO namespace.
+                # The execution boundary performs the full membership check;
+                # audit projection only prevents arbitrary text here.
+                out[key] = value.casefold()
             elif isinstance(value, str) and value in _SAFE_ENUM_VALUES:
                 out[key] = value
             else:
