@@ -25,6 +25,7 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 ARCHITECTURE = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+SOL_GUIDANCE = (ROOT / "sol" / "SOL.md").read_text(encoding="utf-8")
 
 
 def test_the_readme_states_the_version_the_package_has():
@@ -46,6 +47,17 @@ def test_the_readme_states_the_schema_the_code_opens():
     )
 
 
+def test_sol_guidance_states_the_schema_the_code_opens():
+    """The assistant's mandatory startup rules must not pin a prehistoric schema."""
+    from friday.storage._base import SCHEMA_VERSION
+
+    match = re.search(r"Схема базы — (\d+)-я версия", SOL_GUIDANCE)
+    assert match, "в обязательной памятке Sol больше нет проверяемой версии схемы"
+    assert int(match.group(1)) == SCHEMA_VERSION, (
+        f"Sol получает schema {match.group(1)}, а код открывает {SCHEMA_VERSION}"
+    )
+
+
 def test_the_term_budget_in_the_docs_is_the_one_in_the_code():
     from friday.storage._knowledge import _FTS_TERM_BUDGET
 
@@ -64,7 +76,7 @@ def test_the_dense_evidence_default_in_the_docs_is_the_one_in_the_code(settings)
 
 def test_every_module_path_named_in_the_architecture_exists():
     """Ссылка на несуществующий файл отправляет читателя искать то, чего нет."""
-    referenced = set(re.findall(r"`((?:jericho/)?[\w/]+\.py)`", ARCHITECTURE))
+    referenced = set(re.findall(r"`([\w/]+\.py)`", ARCHITECTURE))
     missing = sorted(
         path for path in referenced if not (ROOT / path).exists() and not (ROOT / "friday" / path).exists()
     )

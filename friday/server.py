@@ -48,6 +48,7 @@ from friday.api.ingest import router as ingest_router
 from friday.api.kg import router as kg_router
 from friday.api.knowledge import router as knowledge_router
 from friday.api.notifications import router as notifications_router
+from friday.api.projections import public_chat_ingestion
 from friday.audit_privacy import server_audit_ip, server_audit_request_id
 from friday.config import (
     FridaySettings,
@@ -286,6 +287,121 @@ _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
 # текстом хода. Длиннее — диктовка: она остаётся материалом Inbox без ответа
 # по существу. Три минуты — щедрая верхняя граница устного вопроса.
 _VOICE_QUESTION_MAX_SEC = 180.0
+# A persisted upload may still be waiting in Inbox, but the person who attached
+# it must be able to ask about it in that same turn.  Keep the one-turn excerpt
+# inside the model's existing attachment budget; it is never copied into the API
+# response, message metadata, or a second durable object.
+_CURRENT_TURN_ATTACHMENT_CHARS = 24_000
+
+
+def _current_turn_file_attachment(
+    *,
+    filename: str,
+    file_ingestion: dict[str, Any],
+    raw: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Project a just-uploaded Raw Object into one ephemeral prompt attachment.
+
+    Inbox review governs whether material becomes reusable knowledge.  It is not
+    a reason to hide bytes the same person supplied in the current request.  The
+    storage read remains privacy-filtered, and only a bounded in-memory excerpt is
+    returned to ``AgentRuntime``; callers must not serialize this projection.
+    """
+
+    knowledge = file_ingestion.get("knowledge_object")
+    attachment: dict[str, Any] = {
+        "filename": filename,
+        # A conversation may carry only this opaque reference into a follow-up
+        # turn. AgentRuntime resolves it through a tenant-scoped storage read
+        # and verifies the original uploader before exposing another bounded
+        # excerpt; file text and storage paths never enter message metadata.
+        "raw_object_id": str(file_ingestion.get("raw_object_id") or ""),
+        "knowledge_object_id": knowledge.get("id") if isinstance(knowledge, dict) else None,
+        "persisted": True,
+        "current_turn_only": True,
+    }
+    extraction_value = file_ingestion.get("extraction")
+    extraction = extraction_value if isinstance(extraction_value, dict) else {}
+    raw_metadata = _json_load((raw or {}).get("metadata_json"), {})
+    raw_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    try:
+        extracted_chars = max(0, int(extraction.get("chars") or 0))
+    except (TypeError, ValueError):
+        extracted_chars = 0
+    raw_text = str((raw or {}).get("raw_content") or "")
+    # A content/source replay deliberately omits the extraction result block;
+    # the durable Raw metadata is the authoritative closed provenance in that
+    # case.  Do not make a successfully extracted duplicate unreadable merely
+    # because this request avoided doing the parser work twice.
+    replay_has_text = bool(
+        file_ingestion.get("idempotent_replay")
+        and raw_text.strip()
+        and not raw_text.lstrip().startswith("[File:")
+        and (
+            raw_metadata.get("extraction_success") is True
+            or raw_metadata.get("text_extraction_success") is True
+            or bool(raw_metadata.get("transcription"))
+        )
+    )
+    text = raw_text if extracted_chars or replay_has_text else ""
+    advisory_only = bool(
+        raw_metadata.get("vision_review_required")
+        or raw_metadata.get("transcription")
+        or extraction.get("vision")
+        or file_ingestion.get("transcript_text")
+    )
+    native_text_success = (
+        extraction.get("text_success") is True
+        if "text_success" in extraction
+        else raw_metadata.get("text_extraction_success") is True
+    )
+
+    def nonnegative_metric(name: str) -> int:
+        try:
+            return max(0, int(extraction.get(name) or raw_metadata.get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    if text.strip():
+        attachment.update(
+            {
+                "transient_text": text[:_CURRENT_TURN_ATTACHMENT_CHARS],
+                "extraction_success": True,
+                "extraction_error": "",
+                "text_truncated": bool(extraction.get("text_truncated") or raw_metadata.get("text_truncated"))
+                or len(text) > _CURRENT_TURN_ATTACHMENT_CHARS,
+                # OCR and speech recognition are useful same-turn context, but
+                # model-generated text is not source truth for verified=True or
+                # a repair pass. The prompt receives an explicit caveat below.
+                "advisory_only": advisory_only,
+                "verification_eligible": bool(native_text_success and not advisory_only),
+            }
+        )
+    else:
+        # A closed code is enough for the prompt caveat.  Never copy a parser
+        # exception, path, or file content through this fallback.
+        attachment.update(
+            {
+                "extraction_success": False,
+                "extraction_error": "current_turn_text_unavailable",
+                "text_truncated": False,
+                "advisory_only": advisory_only,
+                "verification_eligible": False,
+            }
+        )
+    attachment.update(
+        {
+            "parse_deadline_reached": bool(
+                extraction.get("parse_deadline_reached") or raw_metadata.get("parse_deadline_reached")
+            ),
+            "parse_pages_read": nonnegative_metric("parse_pages_read"),
+            "parse_pages_truncated": bool(
+                extraction.get("parse_pages_truncated") or raw_metadata.get("parse_pages_truncated")
+            ),
+            "parse_total_pages": nonnegative_metric("parse_total_pages"),
+        }
+    )
+    return attachment
 
 
 def _request_hostname(value: str) -> str | None:
@@ -1341,8 +1457,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     # «Ещё раз» для последнего вопроса человека: тот же self-service контур, что
     # /api/me/instructions (chat.use, только свой аккаунт). Хранилище не умеет
     # ветвление ответов — agent.chat допишет новый user+assistant ход с тем же
-    # текстом; вложения первого хода не переотправляются (осознанное упрощение G15),
-    # но если у исходного хода они были — в ответе явная пометка (G17b).
+    # текстом. Persisted-вложение AgentRuntime восстанавливает по непрозрачной
+    # ссылке из того же личного разговора с повторной проверкой uploader; для
+    # старого/transient-вложения, которое восстановить нельзя, остаётся явная
+    # пометка (G17b).
     # Гонка двух /regenerate закрыта idempotency_claim по разговору+user-ходу (G17a).
     @application.post("/api/me/regenerate", tags=["chat"])
     async def regenerate_last_turn(request: Request) -> dict[str, Any]:
@@ -1451,12 +1569,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # на повторе получал бы графовое расширение, которого первый ход
                 # не получал, — при одном и том же тексте.
                 synthetic_document_notice=bool(last_meta.get("synthetic_document_notice")),
+                # Exact immutable source, not caption equality. Repeated plain
+                # text such as «сделай сводку» must never bind itself to an old
+                # or newer private file merely because the words match.
+                replay_source_message_id=str(last_user.get("id") or ""),
             )
-            if had_attachments:
-                # Вложения не переигрываются: transient-файлы физически негде
-                # взять, а документ без подписи дал бы «Загружен документ» без
-                # байтов. Сказать об этом явно — иначе «ещё раз» выглядит как
-                # полноценный переответ на том же основании.
+            if had_attachments and not bool(result.get("attachment_context_available")):
+                # Legacy/transient-вложения физически негде взять. Persisted
+                # файл, напротив, AgentRuntime уже восстановил внутри личного
+                # разговора и обозначил это только структурным булевым полем.
+                # Предупреждать надо лишь когда основания действительно нет.
                 notice = (
                     "Ответ восстановлен без исходного вложения — модель не видит "
                     "файл, на котором строился первый ответ. Пришлите вложение "
@@ -1758,6 +1880,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # без вложения ветка не выполняется вовсе, и обращение к переменной ниже
         # роняло бы обычный текстовый ход.
         spoken_question = False
+        voice_transcript_truncated = False
         file_already_ingested = False
         attachments_value = body.get("attachments")
         attachments: list[dict[str, Any]] = (
@@ -1831,7 +1954,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             if claim["status"] == "replay":
                 cached = claim.get("response") or {}
-                return {**cached, "idempotent_replay": True}
+                return public_chat_ingestion(
+                    {**cached, "idempotent_replay": True},
+                    storage=state.storage,
+                    resource_user_id=actor.user_id,
+                    resource_owner_id=actor.own_id,
+                )
             if claim["status"] == "conflict":
                 raise HTTPException(
                     status_code=409,
@@ -1925,7 +2053,6 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # неразрешим: в общем архиве все документы лежат под одним
                     # арендатором. Замерено 2026-08-04 — 3295 документов из 3296 не
                     # несут ни одного признака автора.
-                    file_metadata["uploaded_by"] = actor.own_id
                     file_ingestion = await state.ingestion.ingest_file(
                         actor.user_id,
                         None,
@@ -1933,14 +2060,21 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         filename=filename,
                         mime_type=mime_type,
                         media_kind=media_kind,
-                        metadata=file_metadata,
+                        metadata={**file_metadata, "uploaded_by": actor.own_id},
                         source_ref=str(document.get("source_ref") or source_ref or ""),
                     )
+                    raw_id = str(file_ingestion.get("raw_object_id") or "")
+                    current_turn_raw = (
+                        await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
+                        if raw_id and state.auth_service.authorize(actor, "files.read").allowed
+                        else None
+                    )
                     attachments.append(
-                        {
-                            "filename": filename,
-                            "knowledge_object_id": (file_ingestion.get("knowledge_object") or {}).get("id"),
-                        }
+                        _current_turn_file_attachment(
+                            filename=filename,
+                            file_ingestion=file_ingestion,
+                            raw=current_turn_raw,
+                        )
                     )
                 # Голосовое сообщение — обычно ВОПРОС, произнесённый вслух.
                 # Транскрипт считался и раньше (файл ждёт разбора в Inbox), но ходу
@@ -1978,20 +2112,41 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # голосом, обязан получать то же графовое расширение, что
                     # набранный руками. Пока флаг был один, голосовой вопрос
                     # объявлялся системным уведомлением и терял графовый путь.
-                    message = transcript[:2000] if spoken_question else f"Загружен документ: {filename}"
+                    if spoken_question:
+                        message = transcript[:_CURRENT_TURN_ATTACHMENT_CHARS]
+                        voice_transcript_truncated = len(transcript) > len(message)
+                        if voice_transcript_truncated and isinstance(file_ingestion, dict):
+                            file_ingestion["voice_transcript_truncated"] = True
+                    else:
+                        message = f"Загружен документ: {filename}"
                     file_already_ingested = True
                     synthetic_document_notice = not spoken_question
+                    if spoken_question and attachments:
+                        # Here the transcript *is* the human's question, not a
+                        # second source attached to that question.  Keeping the
+                        # same text in ``attachments`` showed it to synthesis
+                        # twice, made every voice question a private-file turn
+                        # (therefore disabling an explicitly requested web
+                        # search), and made regenerate depend on a Raw pointer
+                        # even though the exact spoken words are already the
+                        # durable user message.  The audio remains inbox-first;
+                        # only its duplicate conversational projection is gone.
+                        attachments.pop()
                 elif spoken_question:
                     # Голос с подписью: подпись — вопрос человека, транскрипт — материал
-                    # текущего хода.
-                    attachments.append(
-                        {
-                            "filename": filename,
-                            "transient": True,
-                            "transient_text": transcript[:4000],
-                            "extraction_success": True,
-                        }
-                    )
+                    # текущего хода. Persisted/no-save projection above normally
+                    # already carries that exact transcript; append a fallback
+                    # only when extraction produced no visible slice. Otherwise
+                    # synthesis and cardinality verification count every row twice.
+                    current_projection = attachments[-1] if attachments else {}
+                    if not str(current_projection.get("transient_text") or "").strip():
+                        current_projection.update(
+                            transient=True,
+                            transient_text=transcript[:4000],
+                            extraction_success=True,
+                            advisory_only=True,
+                            verification_eligible=False,
+                        )
 
             conversation_id = str(body.get("conversation_id") or "").strip() or None
             channel_chat_id = getattr(request.state, "bridge_chat_id", None)
@@ -2064,6 +2219,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 mode=requested_mode,
                 answer_with_voice=spoken_question,
             )
+            if voice_transcript_truncated:
+                notice = (
+                    "⚠️ Длинное голосовое распознано не полностью: в текущий ответ вошло "
+                    "только начало транскрипта. Полная аудиозапись сохранена для разбора."
+                )
+                previous_warning = str(result.get("grounding_warning") or "").strip()
+                result["grounding_warning"] = (
+                    f"{notice}\n\n{previous_warning}" if previous_warning else notice
+                )
+                result["voice_transcript_truncated"] = True
             if actor.source == "telegram-bridge" and channel_chat_id:
                 state.storage.set_channel_conversation(
                     actor.own_id,
@@ -2075,11 +2240,17 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             result["ingestion"] = ingestion_result
             if file_ingestion:
                 result["file_ingestion"] = file_ingestion
+            public_result = public_chat_ingestion(
+                result,
+                storage=state.storage,
+                resource_user_id=actor.user_id,
+                resource_owner_id=actor.own_id,
+            )
             if source_ref and not state.storage.idempotency_complete(
-                actor.own_id, source_ref, lease_token, result
+                actor.own_id, source_ref, lease_token, public_result
             ):
                 raise RuntimeError("Lost idempotency lease before response commit")
-            return result
+            return public_result
         except BaseException:
             if source_ref and lease_token:
                 state.storage.idempotency_release(actor.own_id, source_ref, lease_token)

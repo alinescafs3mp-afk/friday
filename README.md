@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.154.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
+Текущая версия: **0.155.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -252,7 +252,7 @@ jericho backup [--label NAME]
 jericho verify-backup [FILENAME]
 jericho restore-backup [FILENAME] --yes
 jericho export-user USER_ID
-jericho import PATH [--dry-run] [--user U] [--suffix .md] [--limit N]
+jericho import PATH [--dry-run] [--user U] [--uploaded-by U] [--suffix .md] [--limit N]
 jericho events [--type TYPE] [--limit N] [--json]
 jericho model-check [--json] [--timeout SEC]
 jericho eval-bootstrap [--limit N] [--save]

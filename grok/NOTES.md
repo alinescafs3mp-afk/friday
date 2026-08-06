@@ -53,7 +53,7 @@ python grok/scan_open_tasks.py
 - state: `grok/.task_watch_state.json` (gitignore)
 - репо: `D:\jericho-src`, ветка `main`
 - закон: `grok/GROK.md` + `grok/TASKS.md`
-- gate до push: ruff / ruff format / mypy / bandit / node --check / pytest
+- gate до push: `.venv/bin/python tools/quality_gate.py` (единый canonical runner)
 - мутация обязательна для новых тестов
 
 ### Конфиг Grok Build scheduler (восстановить при «подними автопилот»)

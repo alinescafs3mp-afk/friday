@@ -12,6 +12,7 @@ import zlib
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from time import monotonic
 from typing import cast
 
 from friday.storage._base import (
@@ -29,10 +30,12 @@ from friday.storage._base import (
     _json_load,
     _snapshot,
     datetime,
+    hashlib,
     json,
     math,
     new_id,
     normalize_entity_name,
+    os,
     pack_snapshot,
     re,
     sqlite3,
@@ -91,6 +94,7 @@ _KNOWLEDGE_CONFLICT_PAGE_MAX = 501
 _KNOWLEDGE_CONFLICT_EVIDENCE_MAX_BYTES = 8_192
 _PUBLIC_ENTITY_LINK_PAGE_MAX = 500
 _PUBLIC_KNOWLEDGE_VERSION_SNAPSHOT_MAX_BYTES = 1_048_576
+_MENTION_VALIDATION_SECRET = os.urandom(32)
 _PUBLIC_KNOWLEDGE_VERSION_NESTED_DEPTH = 8
 _PUBLIC_KNOWLEDGE_VERSION_TEXT_BUDGET = 4 * 1_048_576
 
@@ -3500,122 +3504,2651 @@ class KnowledgeMixin(StorageShared):
         user_id: str,
         *,
         max_documents: int = 200,
+        max_seconds: float = 15.0,
+        max_links: int = 50,
     ) -> dict[str, Any]:
-        """Догнать старые документы уже существующими сущностями.
+        """Cooperatively link old documents to entities created after ingestion.
 
-        Связи ставятся только в момент разбора документа. Значит сущность, родившаяся
-        на девятисотом документе, к первым восьмистам не возвращается НИКОГДА —
-        обратного прохода не было ни в API, ни в CLI.
+        Candidate discovery stays inverted (bounded n-grams from the document,
+        then bounded tenant-row pages), but candidates are spooled as numeric
+        rowid markers instead of being silently capped.  Literal matching has
+        character/entity/material cursors.  Inflected matching sees the complete
+        candidate set for each small text window before applying longest-first
+        occupancy.  Every durable payload contains technical numbers only.
 
-        Замерено на архиве владельца: **1173 пары (документ, сущность), где имя стоит
-        в тексте дословно, а связи нет**; затронуто 645 документов. Документов, где
-        встречается хотя бы одна известная сущность, — 710, а связи есть у 92.
-
-        Человеческого решения проход не требует: метод `existing_entity_exact_mention`
-        с уверенностью 0.97 уже входит в `DECLARED_ENTITY_METHODS`, то есть система и
-        так принимает его автоматически при разборе. Здесь ровно то же правило,
-        применённое задним числом.
-
-        ⚠️ Пара, по которой связь УЖЕ ЕСТЬ, пропускается в любом статусе. Это главное
-        ограничение прохода: `link_knowledge_entity` перезаписывает статус, и без
-        проверки обратный ход воскресил бы отклонённые человеком связи — тот самый
-        класс ошибок, который в этом проекте закрывали трижды.
-
-        Курсор в `runtime_kv`, как у `sweep_entity_duplicates`: обход возобновляемый и
-        ограниченный, потому что на большом архиве полный проход дорог.
-
-        Сопоставление инвертировано: кандидаты — n-граммы из текста документа, база
-        отвечает по имени/алиасу. Прежний `list_entities(limit=2000)` на графе в 4458
-        узлов молча терял хвост алфавита — тот же класс, что #50.
+        The awaiting asyncio task cannot cancel a Python thread already inside
+        this method.  A wall-clock deadline is therefore observed *between* small
+        SQLite/regex units; it is not expected to interrupt an unbounded unit.
         """
-        from friday.entity_phrases import mention_phrase_candidates
-        from friday.mentions import inflected_mentions
 
-        entity_total = self.count_entities(user_id)
-        if entity_total == 0:
-            return {"linked": 0, "scanned": 0, "complete": True, "entities": 0}
+        from friday.entity_phrases import mention_phrase_candidate_page
+        from friday.mentions import (
+            MAX_INFLECTED_NAME_TOKENS,
+            exact_mentions_page,
+            inflected_mentions_present_tokens,
+            inflected_mentions_tokens,
+            inflected_token_position_page,
+        )
+
+        seconds = float(max_seconds)
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("max_seconds must be a finite positive number")
+        deadline = monotonic() + min(seconds, 60.0)
+        link_limit = int(max_links)
+        if link_limit <= 0:
+            raise ValueError("max_links must be a positive number")
+        link_limit = min(link_limit, 2000)
+        document_limit = max(1, min(int(max_documents), 2000))
+
+        discovery_page = 8
+        document_scan_page = 8
+        cleanup_page_size = 64
+        content_page_chars = 8_192
+        phrase_read_chars = 16_386
+        exact_halo_chars = 8_193
+        token_read_chars = content_page_chars + 242
+        inflected_owned_tokens = 32
+        inflected_context_tokens = MAX_INFLECTED_NAME_TOKENS - 1
+        maximum_token_positions = inflected_context_tokens + inflected_owned_tokens + inflected_context_tokens
+        maximum_winner_rowids = maximum_token_positions // 2 + 1
+
+        sqlite_integer_max = (1 << 63) - 1
+
+        def parsed_numeric(value: object) -> int | None:
+            if isinstance(value, bool):
+                parsed = int(value)
+            elif isinstance(value, int):
+                parsed = value
+            elif isinstance(value, str):
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    return None
+            else:
+                return None
+            return parsed if 0 <= parsed <= sqlite_integer_max else None
+
+        def numeric(value: object, default: int = 0) -> int:
+            parsed = parsed_numeric(value)
+            return parsed if parsed is not None else default
+
+        def entity_authority(entity_id: object, version: object) -> int:
+            identifier = str(entity_id)
+            payload = f"{len(identifier)}:{identifier}:{numeric(version, 1)}".encode()
+            authority = int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+            return (authority & sqlite_integer_max) or 1
 
         cursor = 0
+        linked = 0
+        scanned = 0
+        validated_context_key: tuple[int, ...] | None = None
+        state: dict[str, Any] = {}
         try:
             stored = self.kv_get(self._MENTION_SWEEP_KEY + user_id)
-            cursor = int(json.loads(stored).get("rowid") or 0) if stored else 0
+            loaded = json.loads(stored) if stored else {}
+            state = loaded if isinstance(loaded, dict) else {}
+            cursor = numeric(state.get("rowid"))
         except (TypeError, ValueError, AttributeError):
+            state = {}
             cursor = 0
+        pending = state.get("pending")
+        if not isinstance(pending, dict):
+            pending = {}
+        raw_count_cursor = parsed_numeric(state.get("entity_count_cursor", 0))
+        raw_count_total = parsed_numeric(state.get("entity_count_total", 0))
+        raw_count_complete = parsed_numeric(state.get("entity_count_complete", 0))
+        count_state_valid = (
+            raw_count_cursor is not None and raw_count_total is not None and raw_count_complete in {0, 1}
+        )
+        if count_state_valid:
+            assert raw_count_cursor is not None
+            assert raw_count_total is not None
+            assert raw_count_complete is not None
+            entity_count_cursor = raw_count_cursor
+            entity_count_total = raw_count_total
+            entity_count_complete = bool(raw_count_complete)
+        else:
+            entity_count_cursor = 0
+            entity_count_total = 0
+            entity_count_complete = False
 
-        rows = self.execute(
-            f"""SELECT k.rowid AS position, k.id, k.content FROM knowledge_objects k
-               WHERE k.user_id=? AND k.deleted_at IS NULL AND k.rowid > ?
-                 AND {_not_private_knowledge_dependency("k")}
-               ORDER BY k.rowid LIMIT ?""",  # nosec B608
-            (user_id, cursor, max(1, min(int(max_documents), 2000))),
-        ).fetchall()
-        if not rows:
-            # Обход дошёл до конца — начинаем сначала на следующем тике.
-            self.kv_set(self._MENTION_SWEEP_KEY + user_id, json.dumps({"rowid": 0}))
-            return {"linked": 0, "scanned": 0, "complete": True, "entities": entity_total}
+        phases = {
+            "discover",
+            "discover_fallback",
+            "exact",
+            "inflected_tokenize",
+            "inflected_validate",
+            "inflected_collect",
+            "inflected_resolve",
+            "inflected_link",
+            "present_cleanup",
+            "present_restart_cleanup",
+            "restart_cleanup",
+            "cleanup",
+        }
 
-        linked = 0
-        last_position = cursor
-        for row in rows:
-            last_position = int(row["position"])
-            document_id = str(row["id"])
-            content = str(row["content"] or "")
-            if not content:
-                continue
-            known = {
-                str(link["entity_id"])
-                for link in self.list_knowledge_entity_links(
-                    user_id, knowledge_object_id=document_id, status=None
-                )
+        def numeric_list(value: object, *, limit: int = maximum_winner_rowids) -> list[int]:
+            if not isinstance(value, list) or len(value) > limit:
+                return []
+            result_ids: list[int] = []
+            seen: set[int] = set()
+            for item in value:
+                position = numeric(item)
+                if position and position not in seen:
+                    seen.add(position)
+                    result_ids.append(position)
+            return result_ids
+
+        def aligned_winner_lists(
+            rowids_value: object,
+            versions_value: object,
+            authorities_value: object,
+        ) -> tuple[list[int], list[int], list[int]]:
+            rowids = numeric_list(rowids_value)
+            if (
+                not isinstance(versions_value, list)
+                or not isinstance(authorities_value, list)
+                or len(versions_value) > maximum_winner_rowids
+                or len(authorities_value) > maximum_winner_rowids
+            ):
+                return [], [], []
+            versions = [numeric(item) for item in versions_value]
+            authorities = [numeric(item) for item in authorities_value]
+            if (
+                len(rowids) != len(versions)
+                or len(rowids) != len(authorities)
+                or any(version <= 0 for version in versions)
+                or any(authority <= 0 for authority in authorities)
+            ):
+                return [], [], []
+            return rowids, versions, authorities
+
+        def phrase_state(value: object) -> dict[str, int]:
+            raw = value if isinstance(value, Mapping) else {}
+            result_state = {
+                "char": numeric(raw.get("char")),
+                "byte": numeric(raw.get("byte")),
+                "length": max(1, numeric(raw.get("length"), 1)),
+                "skip": min(1, numeric(raw.get("skip"))),
             }
-            lowered = content.casefold()
-            candidates = self.find_entities_by_normalized_names(user_id, mention_phrase_candidates(content))
-            # Косвенный падеж — рядом с буквальной проверкой, а не вместо неё:
-            # у идентификаторов границы слова строже, а падежей нет. См.
-            # `inflected_mentions` и ту же добавку в `match_existing_entities`:
-            # правило остаётся ОДНИМ на оба пути.
-            inflected = inflected_mentions(
-                content,
-                [(str(entity.get("name") or ""), str(entity["id"])) for entity in candidates],
+            if result_state["char"] and not result_state["byte"]:
+                return {"char": 0, "byte": 0, "length": 1, "skip": 0}
+            return result_state
+
+        def exact_state(value: object) -> dict[str, int]:
+            raw = value if isinstance(value, Mapping) else {}
+            result_state = {
+                "char": numeric(raw.get("char")),
+                "byte": numeric(raw.get("byte")),
+                "entity": numeric(raw.get("entity")),
+                "material": numeric(raw.get("material")),
+            }
+            if result_state["char"] and not result_state["byte"]:
+                return {"char": 0, "byte": 0, "entity": 0, "material": 0}
+            return result_state
+
+        def scan_state(value: object) -> dict[str, int]:
+            raw = value if isinstance(value, Mapping) else {}
+            result_state = {
+                "char": numeric(raw.get("char")),
+                "byte": numeric(raw.get("byte")),
+                "skip": min(1, numeric(raw.get("skip"))),
+            }
+            if result_state["char"] and not result_state["byte"]:
+                return {"char": 0, "byte": 0, "skip": 0}
+            return result_state
+
+        def token_positions(value: object) -> list[int]:
+            if not isinstance(value, list) or len(value) > maximum_token_positions * 2:
+                return []
+            clean: list[int] = []
+            previous_end = -1
+            for index in range(0, len(value), 2):
+                if index + 1 >= len(value):
+                    return []
+                start = numeric(value[index])
+                end = numeric(value[index + 1])
+                if start < previous_end or not start <= end or end - start > 960:
+                    return []
+                clean.extend((start, end))
+                previous_end = end
+            return clean
+
+        def token_fields(value: object) -> dict[str, Any]:
+            raw = value if isinstance(value, Mapping) else {}
+            positions = token_positions(raw.get("token_positions"))
+            offset = numeric(raw.get("owned_offset"))
+            if offset > len(positions) // 2:
+                offset = 0
+                positions = []
+            return {
+                "scan_cursor": scan_state(raw.get("scan_cursor")),
+                "token_positions": positions,
+                "owned_offset": offset,
+                "token_eof": min(1, numeric(raw.get("token_eof"))),
+            }
+
+        def token_work(phase: str, source: object, **extra: Any) -> dict[str, Any]:
+            result_work: dict[str, Any] = {"phase": phase, **token_fields(source)}
+            result_work.update(extra)
+            return result_work
+
+        def token_context_key(
+            position: int,
+            document_version: int,
+            source: object,
+        ) -> tuple[int, ...]:
+            fields = token_fields(source)
+            return (
+                position,
+                document_version,
+                int(fields["owned_offset"]),
+                *fields["token_positions"],
             )
-            for entity in candidates:
+
+        def clean_work(value: object) -> dict[str, Any]:
+            raw = value if isinstance(value, Mapping) else {}
+            phase = str(raw.get("phase") or "discover")
+            if phase not in phases:
+                return {
+                    "phase": "discover",
+                    "phrase_cursor": phrase_state(None),
+                    "entity_scan_rowid": 0,
+                }
+            if phase == "discover":
+                return {
+                    "phase": phase,
+                    "phrase_cursor": phrase_state(raw.get("phrase_cursor")),
+                    "entity_scan_rowid": numeric(raw.get("entity_scan_rowid")),
+                }
+            if phase == "discover_fallback":
+                return {
+                    "phase": phase,
+                    "entity_scan_rowid": numeric(raw.get("entity_scan_rowid")),
+                }
+            if phase == "exact":
+                return {
+                    "phase": phase,
+                    "candidate_rowid": numeric(raw.get("candidate_rowid")),
+                    "exact_cursor": exact_state(raw.get("exact_cursor")),
+                }
+            if phase == "inflected_tokenize":
+                return token_work(phase, raw)
+            if phase == "inflected_validate":
+                if "token_positions" not in raw:
+                    return token_work("inflected_tokenize", {})
+                return token_work(
+                    phase,
+                    raw,
+                    validation_index=numeric(raw.get("validation_index")),
+                    validation_byte=numeric(raw.get("validation_byte")),
+                    validation_skip=min(1, numeric(raw.get("validation_skip"))),
+                )
+            if phase == "inflected_collect":
+                # Character-window checkpoints predate the numeric token stream
+                # and cannot be translated without re-reading private text.
+                if "token_positions" not in raw:
+                    return token_work("inflected_tokenize", {})
+                return token_work(
+                    phase,
+                    raw,
+                    entity_scan_rowid=numeric(raw.get("entity_scan_rowid")),
+                )
+            if phase == "inflected_resolve":
+                if "token_positions" not in raw:
+                    return token_work("inflected_tokenize", {})
+                winners, versions, authorities = aligned_winner_lists(
+                    raw.get("winner_rowids"),
+                    raw.get("winner_versions"),
+                    raw.get("winner_authorities"),
+                )
+                return token_work(
+                    phase,
+                    raw,
+                    priority_cursor=numeric(raw.get("priority_cursor")),
+                    candidate_rowid=numeric(raw.get("candidate_rowid")),
+                    winner_rowids=winners,
+                    winner_versions=versions,
+                    winner_authorities=authorities,
+                )
+            if phase == "inflected_link":
+                if "token_positions" not in raw:
+                    return token_work("inflected_tokenize", {})
+                winners, versions, authorities = aligned_winner_lists(
+                    raw.get("winner_rowids"),
+                    raw.get("winner_versions"),
+                    raw.get("winner_authorities"),
+                )
+                return token_work(
+                    phase,
+                    raw,
+                    winner_rowids=winners,
+                    winner_versions=versions,
+                    winner_authorities=authorities,
+                    winner_cursor=numeric(raw.get("winner_cursor")),
+                )
+            if phase in {"present_cleanup", "present_restart_cleanup"}:
+                if "token_positions" not in raw:
+                    return token_work("inflected_tokenize", {})
+                return token_work(phase, raw)
+            if phase == "restart_cleanup":
+                return {
+                    "phase": phase,
+                    "cleanup_cursor": numeric(raw.get("cleanup_cursor")),
+                }
+            return {
+                "phase": "cleanup",
+                "cleanup_cursor": numeric(raw.get("cleanup_cursor")),
+            }
+
+        def result(
+            *,
+            linked: int,
+            scanned: int,
+            complete: bool,
+            entities: int,
+            budget_reason: str | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "linked": linked,
+                "scanned": scanned,
+                "complete": complete,
+                "entities": entities,
+                "budget_exhausted": budget_reason is not None,
+                "budget_reason": budget_reason,
+                "cursor": cursor,
+                "has_more": not complete,
+            }
+
+        def save_cursor() -> None:
+            self.kv_set(
+                self._MENTION_SWEEP_KEY + user_id,
+                json.dumps(
+                    {
+                        "entity_count_complete": int(entity_count_complete),
+                        "entity_count_cursor": entity_count_cursor,
+                        "entity_count_total": entity_count_total,
+                        "rowid": cursor,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            )
+
+        def pending_value(
+            position: int,
+            document_version: int,
+            work: Mapping[str, Any],
+        ) -> str:
+            return json.dumps(
+                {
+                    "pending": {
+                        "document_rowid": position,
+                        "document_version": document_version,
+                        "work": clean_work(work),
+                    },
+                    "entity_count_complete": int(entity_count_complete),
+                    "entity_count_cursor": entity_count_cursor,
+                    "entity_count_total": entity_count_total,
+                    "rowid": cursor,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+
+        def write_pending(
+            conn: Any,
+            position: int,
+            document_version: int,
+            work: Mapping[str, Any],
+        ) -> None:
+            conn.execute(
+                """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET
+                     value=excluded.value, updated_at=excluded.updated_at""",
+                (
+                    self._MENTION_SWEEP_KEY + user_id,
+                    pending_value(position, document_version, work),
+                    utc_now(),
+                ),
+            )
+
+        def save_pending(
+            position: int,
+            document_version: int,
+            work: Mapping[str, Any],
+        ) -> None:
+            # Do not serialise a caller-provided mapping.  Rebuilding the schema
+            # here guarantees that even a legacy/forged checkpoint cannot make a
+            # name, alias, text fragment or match span durable.
+            self.kv_set(
+                self._MENTION_SWEEP_KEY + user_id,
+                pending_value(position, document_version, work),
+            )
+
+        def new_work(phrase_cursor: Mapping[str, object] | None = None) -> dict[str, Any]:
+            return {
+                "phase": "discover",
+                "phrase_cursor": dict(phrase_cursor or {"char": 0, "byte": 0, "length": 1, "skip": 0}),
+                "entity_scan_rowid": 0,
+            }
+
+        def candidate_prefix(position: int, document_version: int) -> str:
+            # Length-prefix the already-technical tenant id so embedded colons
+            # cannot make two tenants share a candidate namespace.
+            return (
+                f"{self._MENTION_SWEEP_KEY}candidate:{len(user_id):08d}:{user_id}:"
+                f"{position:020d}:{document_version:020d}:"
+            )
+
+        def candidate_document_prefix(position: int) -> str:
+            return f"{self._MENTION_SWEEP_KEY}candidate:{len(user_id):08d}:{user_id}:{position:020d}:"
+
+        def candidate_key(position: int, document_version: int, entity_rowid: int) -> str:
+            return candidate_prefix(position, document_version) + f"{entity_rowid:020d}"
+
+        def store_candidate_rows(
+            position: int,
+            document_version: int,
+            rows: Sequence[Mapping[str, Any]],
+            *,
+            conn: Any,
+        ) -> None:
+            values = {
+                int(item["position"]): entity_authority(item["id"], item["version"])
+                for item in rows
+                if int(item["position"]) > 0 and str(item.get("id") or "")
+            }
+            if not values:
+                return
+            now = utc_now()
+            conn.executemany(
+                """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET
+                     value=excluded.value, updated_at=excluded.updated_at""",
+                [
+                    (
+                        candidate_key(position, document_version, entity_rowid),
+                        str(authority),
+                        now,
+                    )
+                    for entity_rowid, authority in sorted(values.items())
+                ],
+            )
+
+        def candidate_entries(
+            position: int,
+            document_version: int,
+            *,
+            after: int,
+            limit: int,
+        ) -> list[tuple[int, int]]:
+            prefix = candidate_prefix(position, document_version)
+            lower = prefix + (f"{after:020d}" if after else "")
+            rows = self.execute(
+                """SELECT key,value FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (lower, prefix + "\uffff", max(1, min(int(limit), 64))),
+            ).fetchall()
+            found: list[tuple[int, int]] = []
+            for item in rows:
+                try:
+                    authority = parsed_numeric(item["value"])
+                    if authority:
+                        found.append((int(str(item["key"]).rsplit(":", 1)[-1]), authority))
+                except (TypeError, ValueError):
+                    continue
+            return found
+
+        def candidate_cursor_is_valid(
+            position: int,
+            document_version: int,
+            candidate_rowid: int,
+        ) -> bool:
+            if candidate_rowid == 0:
+                return True
+            row = self.execute(
+                "SELECT value FROM runtime_kv WHERE key=?",
+                (candidate_key(position, document_version, candidate_rowid),),
+            ).fetchone()
+            candidates = load_candidate_rows([candidate_rowid])
+            return bool(
+                row is not None
+                and len(candidates) == 1
+                and numeric(row["value"]) == entity_authority(candidates[0]["id"], candidates[0]["version"])
+            )
+
+        def delete_candidate_page(
+            position: int,
+            document_version: int,
+            *,
+            after: int,
+        ) -> tuple[int, bool]:
+            prefix = candidate_prefix(position, document_version)
+            lower = prefix + (f"{after:020d}" if after else "")
+            rows = self.execute(
+                """SELECT key FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (lower, prefix + "\uffff", cleanup_page_size),
+            ).fetchall()
+            keys = [str(item["key"]) for item in rows]
+            if not keys:
+                return after, False
+            placeholders = ",".join("?" for _ in keys)
+            with self.transaction() as conn:
+                conn.execute(
+                    f"DELETE FROM runtime_kv WHERE key IN ({placeholders})",  # nosec B608
+                    tuple(keys),
+                )
+            try:
+                next_after = int(keys[-1].rsplit(":", 1)[-1])
+            except ValueError:
+                next_after = after
+            return next_after, len(keys) == cleanup_page_size
+
+        def present_prefix(position: int, document_version: int) -> str:
+            return (
+                f"{self._MENTION_SWEEP_KEY}present:{len(user_id):08d}:{user_id}:"
+                f"{position:020d}:{document_version:020d}:"
+            )
+
+        def present_document_prefix(position: int) -> str:
+            return f"{self._MENTION_SWEEP_KEY}present:{len(user_id):08d}:{user_id}:{position:020d}:"
+
+        def winner_document_prefix(position: int) -> str:
+            return f"{self._MENTION_SWEEP_KEY}winner:{len(user_id):08d}:{user_id}:{position:020d}:"
+
+        def validation_document_prefix(position: int) -> str:
+            return f"{self._MENTION_SWEEP_KEY}validation:{len(user_id):08d}:{user_id}:{position:020d}:"
+
+        def validation_version_prefix(position: int, document_version: int) -> str:
+            return validation_document_prefix(position) + f"{document_version:020d}:"
+
+        def validation_context_authority(source: object) -> int:
+            fields = token_fields(source)
+            scan = scan_state(fields["scan_cursor"])
+            numbers = [
+                int(fields["owned_offset"]),
+                int(fields["token_eof"]),
+                int(scan["char"]),
+                int(scan["byte"]),
+                int(scan["skip"]),
+                len(fields["token_positions"]),
+                *[int(item) for item in fields["token_positions"]],
+            ]
+            payload = b"".join(item.to_bytes(8, "big") for item in numbers)
+            authority = int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+            return (authority & sqlite_integer_max) or 1
+
+        def validation_key(
+            position: int,
+            document_version: int,
+            source: object,
+        ) -> str:
+            return validation_version_prefix(position, document_version) + (
+                f"{validation_context_authority(source):020d}"
+            )
+
+        def validation_progress_authority(
+            source: object,
+            validation_index: int,
+            validation_byte: int,
+            validation_skip: int,
+        ) -> int:
+            numbers = (
+                validation_context_authority(source),
+                validation_index,
+                validation_byte,
+                validation_skip,
+            )
+            payload = b"".join(int(item).to_bytes(8, "big") for item in numbers)
+            authority = int.from_bytes(
+                hashlib.blake2b(
+                    payload,
+                    key=_MENTION_VALIDATION_SECRET,
+                    digest_size=8,
+                ).digest(),
+                "big",
+            )
+            return (authority & sqlite_integer_max) or 1
+
+        def store_validation_progress(
+            position: int,
+            document_version: int,
+            source: object,
+            validation_index: int,
+            validation_byte: int,
+            validation_skip: int,
+            *,
+            conn: Any,
+        ) -> None:
+            conn.execute(
+                """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET
+                     value=excluded.value, updated_at=excluded.updated_at""",
+                (
+                    validation_key(position, document_version, source),
+                    str(
+                        validation_progress_authority(
+                            source,
+                            validation_index,
+                            validation_byte,
+                            validation_skip,
+                        )
+                    ),
+                    utc_now(),
+                ),
+            )
+
+        def validation_progress_is_authorized(
+            position: int,
+            document_version: int,
+            source: object,
+            validation_index: int,
+            validation_byte: int,
+            validation_skip: int,
+        ) -> bool:
+            row = self.execute(
+                "SELECT value FROM runtime_kv WHERE key=?",
+                (validation_key(position, document_version, source),),
+            ).fetchone()
+            return row is not None and numeric(row["value"]) == validation_progress_authority(
+                source,
+                validation_index,
+                validation_byte,
+                validation_skip,
+            )
+
+        def delete_validation_page(position: int, document_version: int) -> bool:
+            prefix = validation_version_prefix(position, document_version)
+            rows = self.execute(
+                """SELECT key FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (prefix, prefix + "\uffff", cleanup_page_size),
+            ).fetchall()
+            keys = [str(item["key"]) for item in rows]
+            if not keys:
+                return False
+            placeholders = ",".join("?" for _ in keys)
+            with self.transaction() as conn:
+                conn.execute(
+                    f"DELETE FROM runtime_kv WHERE key IN ({placeholders})",  # nosec B608
+                    tuple(keys),
+                )
+            return len(keys) == cleanup_page_size
+
+        def winner_version_prefix(position: int, document_version: int) -> str:
+            return winner_document_prefix(position) + f"{document_version:020d}:"
+
+        def winner_key(
+            position: int,
+            document_version: int,
+            window_start: int,
+            entity_rowid: int,
+        ) -> str:
+            return (
+                winner_version_prefix(position, document_version) + f"{window_start:020d}:{entity_rowid:020d}"
+            )
+
+        def store_winner_rows(
+            position: int,
+            document_version: int,
+            window_start: int,
+            rows: Sequence[Mapping[str, Any]],
+            *,
+            conn: Any,
+        ) -> None:
+            values = {
+                int(item["position"]): entity_authority(item["id"], item["version"])
+                for item in rows
+                if int(item["position"]) > 0 and str(item.get("id") or "")
+            }
+            if not values:
+                return
+            now = utc_now()
+            conn.executemany(
+                """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET
+                     value=excluded.value, updated_at=excluded.updated_at""",
+                [
+                    (
+                        winner_key(
+                            position,
+                            document_version,
+                            window_start,
+                            entity_rowid,
+                        ),
+                        str(authority),
+                        now,
+                    )
+                    for entity_rowid, authority in sorted(values.items())
+                ],
+            )
+
+        def winner_is_authorized(
+            position: int,
+            document_version: int,
+            window_start: int,
+            entity_rowid: int,
+            entity_id: str,
+            entity_version: int,
+        ) -> bool:
+            row = self.execute(
+                "SELECT value FROM runtime_kv WHERE key=?",
+                (
+                    winner_key(
+                        position,
+                        document_version,
+                        window_start,
+                        entity_rowid,
+                    ),
+                ),
+            ).fetchone()
+            return row is not None and numeric(row["value"]) == entity_authority(entity_id, entity_version)
+
+        def delete_winner_page(position: int, document_version: int) -> bool:
+            prefix = winner_version_prefix(position, document_version)
+            rows = self.execute(
+                """SELECT key FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (prefix, prefix + "\uffff", cleanup_page_size),
+            ).fetchall()
+            keys = [str(item["key"]) for item in rows]
+            if not keys:
+                return False
+            placeholders = ",".join("?" for _ in keys)
+            with self.transaction() as conn:
+                conn.execute(
+                    f"DELETE FROM runtime_kv WHERE key IN ({placeholders})",  # nosec B608
+                    tuple(keys),
+                )
+            return len(keys) == cleanup_page_size
+
+        def present_key(
+            position: int,
+            document_version: int,
+            name_length: int,
+            entity_rowid: int,
+        ) -> str:
+            # Ascending lexical order becomes longest-name-first, then rowid.
+            priority = 999 - max(0, min(int(name_length), 999))
+            return present_prefix(position, document_version) + f"{priority:04d}:{entity_rowid:020d}"
+
+        def store_present_rows(
+            position: int,
+            document_version: int,
+            rows: Sequence[Mapping[str, Any]],
+            *,
+            conn: Any,
+        ) -> None:
+            values = [
+                (
+                    int(item["position"]),
+                    len(str(item.get("name") or "")),
+                    entity_authority(item["id"], item["version"]),
+                )
+                for item in rows
+                if int(item["position"]) > 0 and str(item.get("id") or "")
+            ]
+            if not values:
+                return
+            now = utc_now()
+            conn.executemany(
+                """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET
+                     value=excluded.value, updated_at=excluded.updated_at""",
+                [
+                    (
+                        present_key(position, document_version, name_length, entity_rowid),
+                        str(authority),
+                        now,
+                    )
+                    for entity_rowid, name_length, authority in values
+                ],
+            )
+
+        def present_entries(
+            position: int,
+            document_version: int,
+            *,
+            after_priority: int,
+            after_rowid: int,
+            limit: int,
+        ) -> list[tuple[int, int, int]]:
+            prefix = present_prefix(position, document_version)
+            lower = (
+                prefix + f"{after_priority:04d}:{after_rowid:020d}"
+                if after_priority or after_rowid
+                else prefix
+            )
+            rows = self.execute(
+                """SELECT key,value FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (lower, prefix + "\uffff", max(1, min(int(limit), 64))),
+            ).fetchall()
+            found: list[tuple[int, int, int]] = []
+            for item in rows:
+                try:
+                    priority_text, rowid_text = str(item["key"]).rsplit(":", 2)[-2:]
+                    authority = parsed_numeric(item["value"])
+                    if authority:
+                        found.append((int(priority_text), int(rowid_text), authority))
+                except (TypeError, ValueError):
+                    continue
+            return found
+
+        def present_cursor_is_valid(
+            position: int,
+            document_version: int,
+            priority: int,
+            entity_rowid: int,
+        ) -> bool:
+            if priority == 0 and entity_rowid == 0:
+                return True
+            key = present_prefix(position, document_version) + f"{priority:04d}:{entity_rowid:020d}"
+            return self.execute("SELECT 1 FROM runtime_kv WHERE key=?", (key,)).fetchone() is not None
+
+        def delete_present_page(
+            position: int,
+            document_version: int,
+        ) -> bool:
+            prefix = present_prefix(position, document_version)
+            rows = self.execute(
+                """SELECT key FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (prefix, prefix + "\uffff", cleanup_page_size),
+            ).fetchall()
+            keys = [str(item["key"]) for item in rows]
+            if not keys:
+                return False
+            placeholders = ",".join("?" for _ in keys)
+            with self.transaction() as conn:
+                conn.execute(
+                    f"DELETE FROM runtime_kv WHERE key IN ({placeholders})",  # nosec B608
+                    tuple(keys),
+                )
+            return len(keys) == cleanup_page_size
+
+        def delete_old_namespace_page(
+            document_prefix: str,
+            current_version: int,
+        ) -> bool:
+            """Boundedly remove markers owned by an older document version."""
+
+            upper = document_prefix + f"{current_version:020d}:"
+            rows = self.execute(
+                """SELECT key FROM runtime_kv
+                   WHERE key>? AND key<? ORDER BY key LIMIT ?""",
+                (document_prefix, upper, cleanup_page_size),
+            ).fetchall()
+            keys = [str(item["key"]) for item in rows]
+            if not keys:
+                return False
+            placeholders = ",".join("?" for _ in keys)
+            with self.transaction() as conn:
+                conn.execute(
+                    f"DELETE FROM runtime_kv WHERE key IN ({placeholders})",  # nosec B608
+                    tuple(keys),
+                )
+            return len(keys) == cleanup_page_size
+
+        entity_visibility = (
+            "e.deleted_at IS NULL AND e.canonical=1 AND e.merged_into_id IS NULL "
+            f"AND {_not_private_entity_material_dependency('e')}"
+        )
+
+        def material_needs_exact_fallback(value: object) -> bool:
+            """Identify literal material outside the fast phrase grammar."""
+
+            clean = str(value or "").strip()[:8_192]
+            if len(clean) < 3:
+                return False
+            tokens: list[tuple[int, int, str]] = []
+            for match in re.finditer(r"(?u)[\w.+#/-]+", clean):
+                token = match.group(0).rstrip(".,;:!?…")
+                if token:
+                    tokens.append((match.start(), match.start() + len(token), token))
+            if (
+                not tokens
+                or len(tokens) > 12
+                or any(len(token) < 2 for _start, _end, token in tokens)
+                or tokens[0][0] != 0
+                or tokens[-1][1] != len(clean)
+            ):
+                return True
+            return any(
+                bool(gap := clean[left[1] : right[0]]) and not gap.isspace()
+                for left, right in zip(tokens, tokens[1:], strict=False)
+            )
+
+        def row_needs_exact_fallback(item: Mapping[str, Any]) -> bool:
+            return any(
+                material_needs_exact_fallback(material)
+                for material in (
+                    item.get("name"),
+                    *_aliases_of(dict(item)),
+                )
+            )
+
+        def discovery_entity_rows(after: int) -> list[dict[str, Any]]:
+            # Page the global rowid B-tree first. `WHERE user_id=? ORDER BY rowid`
+            # has no supporting compound index and may inspect an arbitrary number
+            # of another tenant's rows before returning eight. The first query
+            # reads technical rowids only; private material is projected solely
+            # from this tenant's fixed-size IN page below.
+            positions = [
+                int(item["position"])
+                for item in self.execute(
+                    """SELECT rowid AS position FROM entities
+                       WHERE rowid>? ORDER BY rowid LIMIT ?""",
+                    (after, discovery_page),
+                ).fetchall()
+            ]
+            if not positions:
+                return []
+            placeholders = ",".join("?" for _ in positions)
+            rows = self.execute(
+                f"""SELECT e.rowid AS position,
+                           CASE WHEN {entity_visibility} THEN e.id ELSE '' END AS id,
+                           CASE WHEN {entity_visibility} THEN e.version ELSE 0 END AS version,
+                           CASE WHEN {entity_visibility}
+                                THEN substr(e.name,1,240) ELSE '' END AS name,
+                           CASE WHEN {entity_visibility}
+                                  AND length(CAST(COALESCE(e.normalized_name,'') AS BLOB))<=8192
+                                THEN e.normalized_name ELSE '' END AS normalized_name,
+                           CASE WHEN {entity_visibility}
+                                  AND length(CAST(COALESCE(e.aliases_json,'') AS BLOB))<=8192
+                                  AND json_valid(e.aliases_json)
+                                  AND json_type(e.aliases_json)='array'
+                                THEN e.aliases_json ELSE '[]' END AS aliases_json,
+                           CASE WHEN {entity_visibility} THEN 1 ELSE 0 END AS eligible
+                      FROM entities e
+                     WHERE e.user_id=? AND e.rowid IN ({placeholders})
+                     ORDER BY e.rowid""",  # nosec B608
+                (user_id, *positions),
+            ).fetchall()
+            by_position = {int(item["position"]): dict(item) for item in rows}
+            return [
+                by_position.get(
+                    position,
+                    {
+                        "position": position,
+                        "id": "",
+                        "version": 0,
+                        "name": "",
+                        "normalized_name": "",
+                        "aliases_json": "[]",
+                        "eligible": 0,
+                    },
+                )
+                for position in positions
+            ]
+
+        def load_candidate_rows(rowids: Sequence[int]) -> list[dict[str, Any]]:
+            positions = sorted({int(item) for item in rowids if int(item) > 0})
+            if not positions:
+                return []
+            found: dict[int, dict[str, Any]] = {}
+            for start in range(0, len(positions), 400):
+                batch = positions[start : start + 400]
+                placeholders = ",".join("?" for _ in batch)
+                rows = self.execute(
+                    f"""SELECT e.rowid AS position, e.id, e.version,
+                               substr(e.name,1,240) AS name,
+                               CASE WHEN length(CAST(COALESCE(e.aliases_json,'') AS BLOB))<=8192
+                                          AND json_valid(e.aliases_json)
+                                          AND json_type(e.aliases_json)='array'
+                                    THEN e.aliases_json ELSE '[]' END AS aliases_json
+                          FROM entities e
+                         WHERE e.user_id=? AND e.rowid IN ({placeholders})
+                           AND {entity_visibility}
+                         ORDER BY e.rowid""",  # nosec B608
+                    (user_id, *batch),
+                ).fetchall()
+                for item in rows:
+                    found[int(item["position"])] = dict(item)
+            return [found[item] for item in positions if item in found]
+
+        def document_is_current(
+            conn: Any,
+            position: int,
+            document_version: int,
+        ) -> bool:
+            row = conn.execute(
+                f"""SELECT 1 FROM knowledge_objects k
+                     WHERE k.rowid=? AND k.user_id=? AND k.version=?
+                       AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (position, user_id, document_version),
+            ).fetchone()
+            return row is not None
+
+        def entities_are_current(
+            conn: Any,
+            expected_rows: Sequence[Mapping[str, Any]],
+        ) -> bool:
+            expected = {
+                int(item["position"]): (str(item["id"]), max(1, int(item["version"])))
+                for item in expected_rows
+                if int(item.get("position") or 0) > 0 and str(item.get("id") or "")
+            }
+            if not expected:
+                return True
+            positions = sorted(expected)
+            actual: dict[int, tuple[str, int]] = {}
+            for start in range(0, len(positions), 100):
+                batch = positions[start : start + 100]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"""SELECT e.rowid AS position,e.id,e.version FROM entities e
+                         WHERE e.user_id=? AND e.rowid IN ({placeholders})
+                           AND {entity_visibility}""",  # nosec B608
+                    (user_id, *batch),
+                ).fetchall()
+                actual.update(
+                    {int(item["position"]): (str(item["id"]), int(item["version"])) for item in rows}
+                )
+            return actual == expected
+
+        def commit_pending(
+            position: int,
+            document_version: int,
+            work: Mapping[str, Any],
+            *,
+            expected_entities: Sequence[Mapping[str, Any]] = (),
+            candidate_rows_to_store: Sequence[Mapping[str, Any]] = (),
+            present_rows_to_store: Sequence[Mapping[str, Any]] = (),
+            winner_rows_to_store: Sequence[Mapping[str, Any]] = (),
+            winner_window_start: int = 0,
+            validation_progress: tuple[object, int, int, int] | None = None,
+        ) -> bool:
+            """Publish material-derived markers and their owner checkpoint atomically."""
+
+            with self.transaction() as conn:
+                if not document_is_current(conn, position, document_version):
+                    return False
+                if not entities_are_current(conn, expected_entities):
+                    return False
+                store_candidate_rows(
+                    position,
+                    document_version,
+                    candidate_rows_to_store,
+                    conn=conn,
+                )
+                store_present_rows(
+                    position,
+                    document_version,
+                    present_rows_to_store,
+                    conn=conn,
+                )
+                store_winner_rows(
+                    position,
+                    document_version,
+                    winner_window_start,
+                    winner_rows_to_store,
+                    conn=conn,
+                )
+                if validation_progress is not None:
+                    validation_source, validation_index, validation_byte, validation_skip = (
+                        validation_progress
+                    )
+                    store_validation_progress(
+                        position,
+                        document_version,
+                        validation_source,
+                        validation_index,
+                        validation_byte,
+                        validation_skip,
+                        conn=conn,
+                    )
+                write_pending(conn, position, document_version, work)
+            return True
+
+        def link_candidate(
+            *,
+            document_rowid: int,
+            expected_version: int,
+            entity_rowid: int,
+            expected_entity_id: str,
+            expected_entity_version: int,
+            method: str,
+        ) -> str:
+            """Atomically recheck version/status and create at most one link."""
+
+            nonlocal linked
+            if linked >= link_limit:
+                return "max_links"
+            if monotonic() >= deadline:
+                return "max_seconds"
+            with self.transaction() as conn:
+                document = conn.execute(
+                    f"""SELECT k.id, k.version FROM knowledge_objects k
+                         WHERE k.rowid=? AND k.user_id=? AND k.deleted_at IS NULL
+                           AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                    (document_rowid, user_id),
+                ).fetchone()
+                if document is None or int(document["version"] or 0) != expected_version:
+                    return "stale"
+                entity = conn.execute(
+                    f"""SELECT e.id,e.version FROM entities e
+                         WHERE e.rowid=? AND e.user_id=? AND e.id=? AND e.version=?
+                           AND {entity_visibility}""",  # nosec B608
+                    (
+                        entity_rowid,
+                        user_id,
+                        expected_entity_id,
+                        expected_entity_version,
+                    ),
+                ).fetchone()
+                if entity is None:
+                    return "entity_stale"
                 entity_id = str(entity["id"])
-                if entity_id in known:
-                    continue
-                # Тот же порог и то же выражение с границами слов, что при разборе:
-                # правило должно быть ОДНО, иначе задним числом появятся связи,
-                # которых обычный путь не создал бы.
-                matched = False
-                for candidate in [entity.get("name", ""), *_aliases_of(entity)]:
-                    text = str(candidate).strip()
-                    if len(text) < 3 or text.casefold() not in lowered:
-                        continue
-                    if re.search(rf"(?<![\w.]){re.escape(text)}(?![\w.])", content, re.I):
-                        matched = True
-                        break
-                method = "existing_entity_exact_mention"
-                if not matched and entity_id in inflected:
-                    matched = True
-                    method = "existing_entity_inflected_mention"
-                if not matched:
-                    continue
+                existing = conn.execute(
+                    """SELECT 1 FROM knowledge_entity_links
+                       WHERE user_id=? AND knowledge_object_id=? AND entity_id=?""",
+                    (user_id, str(document["id"]), entity_id),
+                ).fetchone()
+                if existing is not None:
+                    return "known"
                 self.link_knowledge_entity(
                     user_id,
-                    document_id,
+                    str(document["id"]),
                     entity_id,
                     status="accepted",
                     confidence=0.97,
                     evidence={"method": method, "source": "backfill"},
                 )
-                known.add(entity_id)
                 linked += 1
-        self.kv_set(self._MENTION_SWEEP_KEY + user_id, json.dumps({"rowid": last_position}))
-        return {
-            "linked": linked,
-            "scanned": len(rows),
-            "complete": False,
-            "entities": entity_total,
-        }
+            return "linked"
+
+        def finish_document(position: int, expected_version: int) -> bool:
+            """Advance the outer cursor in the same transaction as version check."""
+
+            nonlocal cursor, scanned
+            with self.transaction() as conn:
+                current = conn.execute(
+                    f"""SELECT 1 FROM knowledge_objects k
+                         WHERE k.rowid=? AND k.user_id=? AND k.version=?
+                           AND k.deleted_at IS NULL
+                           AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                    (position, user_id, expected_version),
+                ).fetchone()
+                if current is None:
+                    return False
+                cursor = position
+                conn.execute(
+                    """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                       ON CONFLICT(key) DO UPDATE SET
+                         value=excluded.value, updated_at=excluded.updated_at""",
+                    (
+                        self._MENTION_SWEEP_KEY + user_id,
+                        json.dumps(
+                            {
+                                "entity_count_complete": int(entity_count_complete),
+                                "entity_count_cursor": entity_count_cursor,
+                                "entity_count_total": entity_count_total,
+                                "rowid": cursor,
+                            },
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                        utc_now(),
+                    ),
+                )
+                scanned += 1
+            return True
+
+        def next_document_row(after: int) -> tuple[Any | None, int, bool]:
+            """Inspect one fixed global rowid page without reading other tenants' text."""
+
+            positions = [
+                int(item["position"])
+                for item in self.execute(
+                    """SELECT rowid AS position FROM knowledge_objects
+                       WHERE rowid>? ORDER BY rowid LIMIT ?""",
+                    (after, document_scan_page),
+                ).fetchall()
+            ]
+            if not positions:
+                return None, after, True
+            placeholders = ",".join("?" for _ in positions)
+            row = self.execute(
+                f"""SELECT k.rowid AS position, k.version
+                      FROM knowledge_objects k
+                     WHERE k.user_id=? AND k.rowid IN ({placeholders})
+                       AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}
+                     ORDER BY k.rowid LIMIT 1""",  # nosec B608
+                (user_id, *positions),
+            ).fetchone()
+            return row, positions[-1], len(positions) < document_scan_page
+
+        def read_content_page(
+            position: int,
+            document_version: int,
+            byte_start: int,
+            char_length: int,
+        ) -> tuple[str, list[int], bool, bool] | None:
+            row = self.execute(
+                f"""SELECT 1 FROM knowledge_objects k
+                     WHERE k.rowid=? AND k.user_id=? AND k.version=?
+                       AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (
+                    position,
+                    user_id,
+                    document_version,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            requested = max(1, min(int(char_length), phrase_read_chars))
+            start = max(0, int(byte_start))
+            with self.conn.blobopen(
+                "knowledge_objects",
+                "content",
+                position,
+                readonly=True,
+            ) as blob:
+                total_bytes = len(blob)
+                if start > total_bytes:
+                    return "", [0], False, False
+                blob.seek(start)
+                raw = blob.read(min(total_bytes - start, requested * 4 + 4))
+
+            decoded = ""
+            consumed_raw = len(raw)
+            for trim in range(0, min(4, len(raw)) + 1):
+                try:
+                    decoded = raw[: len(raw) - trim if trim else None].decode("utf-8")
+                    consumed_raw = len(raw) - trim
+                    break
+                except UnicodeDecodeError as exc:
+                    if exc.reason != "unexpected end of data":
+                        return "", [0], False, False
+            else:  # pragma: no cover - UTF-8 code points are at most four bytes
+                return "", [0], False, False
+
+            text_page = decoded[:requested]
+            offsets = [0]
+            byte_offset = 0
+            for character in text_page:
+                byte_offset += len(character.encode("utf-8"))
+                offsets.append(byte_offset)
+            # `consumed_raw` can include decoded lookahead beyond `requested`;
+            # only the returned character prefix belongs to this page.
+            del consumed_raw
+            return text_page, offsets, start + offsets[-1] < total_bytes, True
+
+        def read_token_context(
+            position: int,
+            document_version: int,
+            flat_positions: Sequence[int],
+        ) -> tuple[str, list[tuple[int, int]], bool] | None:
+            pairs = [
+                (int(flat_positions[index]), int(flat_positions[index + 1]))
+                for index in range(0, len(flat_positions), 2)
+            ]
+            if not pairs:
+                return "", [], True
+            row = self.execute(
+                f"""SELECT 1 FROM knowledge_objects k
+                     WHERE k.rowid=? AND k.user_id=? AND k.version=?
+                       AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (position, user_id, document_version),
+            ).fetchone()
+            if row is None:
+                return None
+            pieces: list[str | None] = []
+            with self.conn.blobopen(
+                "knowledge_objects",
+                "content",
+                position,
+                readonly=True,
+            ) as blob:
+                total_bytes = len(blob)
+                for start, end in pairs:
+                    if not 0 <= start <= end <= total_bytes or end - start > 960:
+                        return "", [], False
+                    if start == end:
+                        pieces.append(None)
+                        continue
+                    blob.seek(start)
+                    try:
+                        pieces.append(blob.read(end - start).decode("utf-8"))
+                    except UnicodeDecodeError:
+                        return "", [], False
+            synthetic_parts: list[str] = []
+            synthetic_positions: list[tuple[int, int]] = []
+            offset = 0
+            for raw_piece in pieces:
+                piece = raw_piece if raw_piece is not None else "0"
+                if synthetic_parts:
+                    synthetic_parts.append(" ")
+                    offset += 1
+                start = offset
+                synthetic_parts.append(piece)
+                offset += len(piece)
+                synthetic_positions.append((start, offset))
+            return "".join(synthetic_parts), synthetic_positions, True
+
+        def previous_content_character_byte(
+            position: int,
+            document_version: int,
+            byte_start: int,
+        ) -> tuple[int, bool] | None:
+            """Return the previous UTF-8 boundary without projecting the body."""
+
+            row = self.execute(
+                f"""SELECT 1 FROM knowledge_objects k
+                     WHERE k.rowid=? AND k.user_id=? AND k.version=?
+                       AND k.deleted_at IS NULL
+                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                (position, user_id, document_version),
+            ).fetchone()
+            if row is None:
+                return None
+            current = max(0, int(byte_start))
+            if current == 0:
+                return 0, True
+            with self.conn.blobopen(
+                "knowledge_objects",
+                "content",
+                position,
+                readonly=True,
+            ) as blob:
+                if current > len(blob):
+                    return 0, False
+                probe = max(0, current - 4)
+                blob.seek(probe)
+                raw = blob.read(current - probe)
+            for skip in range(min(4, len(raw))):
+                try:
+                    decoded = raw[skip:].decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+                if decoded:
+                    return current - len(decoded[-1].encode("utf-8")), True
+            return 0, False
+
+        count_page_size = 2_048
+        while not entity_count_complete:
+            count_positions = [
+                int(item["position"])
+                for item in self.execute(
+                    """SELECT rowid AS position FROM entities
+                       WHERE rowid>? ORDER BY rowid LIMIT ?""",
+                    (entity_count_cursor, count_page_size),
+                ).fetchall()
+            ]
+            if not count_positions:
+                entity_count_complete = True
+            else:
+                for start in range(0, len(count_positions), 400):
+                    batch = count_positions[start : start + 400]
+                    placeholders = ",".join("?" for _ in batch)
+                    rows = self.execute(
+                        f"""SELECT e.rowid FROM entities e
+                             WHERE e.user_id=? AND e.rowid IN ({placeholders})
+                               AND {entity_visibility}""",  # nosec B608
+                        (user_id, *batch),
+                    ).fetchall()
+                    entity_count_total += len(rows)
+                entity_count_cursor = count_positions[-1]
+                entity_count_complete = len(count_positions) < count_page_size
+            if pending:
+                count_position = numeric(pending.get("document_rowid"))
+                count_version = numeric(pending.get("document_version"))
+                if count_position and count_version:
+                    save_pending(count_position, count_version, clean_work(pending.get("work")))
+                else:
+                    save_cursor()
+            else:
+                save_cursor()
+            if not entity_count_complete and monotonic() >= deadline:
+                return result(
+                    linked=0,
+                    scanned=0,
+                    complete=False,
+                    entities=entity_count_total,
+                    budget_reason="max_seconds",
+                )
+
+        entity_total = entity_count_total
+        if entity_total == 0:
+            stale_position = numeric(pending.get("document_rowid"))
+            stale_version = numeric(pending.get("document_version"))
+            if stale_position and stale_version:
+                _next, candidates_remain = delete_candidate_page(
+                    stale_position,
+                    stale_version,
+                    after=0,
+                )
+                present_remains = delete_present_page(stale_position, stale_version)
+                winner_remains = delete_winner_page(stale_position, stale_version)
+                validation_remains = delete_validation_page(stale_position, stale_version)
+                if candidates_remain or present_remains or winner_remains or validation_remains:
+                    cleanup_work = {"phase": "cleanup", "cleanup_cursor": 0}
+                    save_pending(stale_position, stale_version, cleanup_work)
+                    return result(linked=0, scanned=0, complete=False, entities=0)
+            cursor = 0
+            entity_count_cursor = 0
+            entity_count_total = 0
+            entity_count_complete = False
+            save_cursor()
+            return result(linked=0, scanned=0, complete=True, entities=0)
+
+        while scanned < document_limit:
+            if linked >= link_limit:
+                return result(
+                    linked=linked,
+                    scanned=scanned,
+                    complete=False,
+                    entities=entity_total,
+                    budget_reason="max_links",
+                )
+            if monotonic() >= deadline:
+                return result(
+                    linked=linked,
+                    scanned=scanned,
+                    complete=False,
+                    entities=entity_total,
+                    budget_reason="max_seconds",
+                )
+
+            pending_position = numeric(pending.get("document_rowid"))
+            pending_version = numeric(pending.get("document_version"))
+            row = None
+            if pending_position > cursor:
+                row = self.execute(
+                    f"""SELECT k.rowid AS position, k.version
+                          FROM knowledge_objects k
+                         WHERE k.user_id=? AND k.rowid=? AND k.deleted_at IS NULL
+                           AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+                    (user_id, pending_position),
+                ).fetchone()
+                if row is None or int(row["version"] or 0) != pending_version:
+                    _next_cleanup, candidates_remain = delete_candidate_page(
+                        pending_position,
+                        pending_version,
+                        after=0,
+                    )
+                    present_remains = delete_present_page(
+                        pending_position,
+                        pending_version,
+                    )
+                    winner_remains = delete_winner_page(
+                        pending_position,
+                        pending_version,
+                    )
+                    validation_remains = delete_validation_page(
+                        pending_position,
+                        pending_version,
+                    )
+                    remains = candidates_remain or present_remains or winner_remains or validation_remains
+                    if remains:
+                        cleanup_work = {"phase": "cleanup", "cleanup_cursor": 0}
+                        save_pending(pending_position, pending_version, cleanup_work)
+                        pending = {
+                            "document_rowid": pending_position,
+                            "document_version": pending_version,
+                            "work": cleanup_work,
+                        }
+                        if monotonic() >= deadline:
+                            return result(
+                                linked=linked,
+                                scanned=scanned,
+                                complete=False,
+                                entities=entity_total,
+                                budget_reason="max_seconds",
+                            )
+                        continue
+                    pending = {}
+                    save_cursor()
+                    continue
+            if row is None:
+                row, scanned_to, reached_end = next_document_row(cursor)
+                if row is None:
+                    cursor = scanned_to
+                    save_cursor()
+                    if reached_end:
+                        cursor = 0
+                        entity_count_cursor = 0
+                        entity_count_total = 0
+                        entity_count_complete = False
+                        save_cursor()
+                        return result(
+                            linked=linked,
+                            scanned=scanned,
+                            complete=True,
+                            entities=entity_total,
+                        )
+                    continue
+
+            position = int(row["position"])
+            document_version = max(1, int(row["version"] or 1))
+
+            old_candidates_remain = delete_old_namespace_page(
+                candidate_document_prefix(position),
+                document_version,
+            )
+            old_present_remain = delete_old_namespace_page(
+                present_document_prefix(position),
+                document_version,
+            )
+            old_winners_remain = delete_old_namespace_page(
+                winner_document_prefix(position),
+                document_version,
+            )
+            old_validation_remain = delete_old_namespace_page(
+                validation_document_prefix(position),
+                document_version,
+            )
+            if old_candidates_remain or old_present_remain or old_winners_remain or old_validation_remain:
+                work = new_work()
+                if same_document := (pending_position == position and pending_version == document_version):
+                    work = clean_work(pending.get("work"))
+                save_pending(position, document_version, work)
+                pending = {
+                    "document_rowid": position,
+                    "document_version": document_version,
+                    "work": work,
+                }
+                if monotonic() >= deadline:
+                    return result(
+                        linked=linked,
+                        scanned=scanned,
+                        complete=False,
+                        entities=entity_total,
+                        budget_reason="max_seconds",
+                    )
+                continue
+
+            work = new_work()
+            same_document = pending_position == position and pending_version == document_version
+            if same_document:
+                work = clean_work(pending.get("work"))
+
+            restart_document = False
+            while True:
+                if linked >= link_limit:
+                    save_pending(position, document_version, work)
+                    return result(
+                        linked=linked,
+                        scanned=scanned,
+                        complete=False,
+                        entities=entity_total,
+                        budget_reason="max_links",
+                    )
+                if monotonic() >= deadline:
+                    save_pending(position, document_version, work)
+                    return result(
+                        linked=linked,
+                        scanned=scanned,
+                        complete=False,
+                        entities=entity_total,
+                        budget_reason="max_seconds",
+                    )
+
+                phase = str(work["phase"])
+                if phase in {
+                    "inflected_collect",
+                    "inflected_resolve",
+                    "inflected_link",
+                    "present_cleanup",
+                    "present_restart_cleanup",
+                }:
+                    token_state = token_fields(work)
+                    flat = list(token_state["token_positions"])
+                    owned_offset = int(token_state["owned_offset"])
+                    context_key = token_context_key(position, document_version, token_state)
+                    if validated_context_key != context_key:
+                        if not flat or owned_offset >= len(flat) // 2:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        else:
+                            previous = previous_content_character_byte(
+                                position,
+                                document_version,
+                                int(flat[0]),
+                            )
+                            if previous is None:
+                                restart_document = True
+                                break
+                            validation_byte, previous_valid = previous
+                            if not previous_valid:
+                                work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            else:
+                                work = token_work(
+                                    "inflected_validate",
+                                    token_state,
+                                    validation_index=0,
+                                    validation_byte=validation_byte,
+                                    validation_skip=0,
+                                )
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                if phase == "discover":
+                    discovery_work = clean_work(work)
+                    source = phrase_state(work.get("phrase_cursor"))
+                    source_base = source["char"]
+                    source_byte = source["byte"]
+                    content_page = read_content_page(
+                        position,
+                        document_version,
+                        source_byte,
+                        phrase_read_chars,
+                    )
+                    if content_page is None:
+                        restart_document = True
+                        break
+                    content_chunk, byte_offsets, content_remains, content_valid = content_page
+                    if not content_valid:
+                        work = new_work()
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if not content_chunk:
+                        work = {
+                            "phase": "discover_fallback",
+                            "entity_scan_rowid": 0,
+                        }
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    phrases, next_phrase_cursor, phrases_remain, valid = mention_phrase_candidate_page(
+                        content_chunk,
+                        cursor={
+                            "char": 0,
+                            "length": source["length"],
+                            "skip": source["skip"],
+                        },
+                        limit=64,
+                    )
+                    if not valid:
+                        work = new_work()
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    next_phrase_cursor = {
+                        "char": source_base + int(next_phrase_cursor["char"]),
+                        "byte": source_byte + byte_offsets[int(next_phrase_cursor["char"])],
+                        "length": int(next_phrase_cursor["length"]),
+                        "skip": int(next_phrase_cursor["skip"]),
+                    }
+                    phrases_remain = bool(phrases_remain or content_remains)
+                    if not phrases:
+                        if phrases_remain:
+                            work = new_work(next_phrase_cursor)
+                        else:
+                            work = {
+                                "phase": "discover_fallback",
+                                "entity_scan_rowid": 0,
+                            }
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+
+                    wanted = list(
+                        dict.fromkeys(
+                            normalized
+                            for phrase in phrases
+                            if (normalized := normalize_entity_name(str(phrase or "")))
+                        )
+                    )
+                    entity_scan = numeric(work.get("entity_scan_rowid"))
+                    if entity_scan:
+                        scan_position = self.execute(
+                            "SELECT 1 FROM entities WHERE rowid=?",
+                            (entity_scan,),
+                        ).fetchone()
+                        if scan_position is None:
+                            entity_scan = 0
+                    entity_rows = discovery_entity_rows(entity_scan)
+                    matched_rows: list[dict[str, Any]] = []
+                    wanted_set = set(wanted)
+                    for item in entity_rows:
+                        entity_scan = int(item["position"])
+                        if not int(item["eligible"] or 0):
+                            continue
+                        if str(item.get("normalized_name") or "") in wanted_set:
+                            matched_rows.append(item)
+                            continue
+                        aliases = _aliases_of({"aliases_json": item["aliases_json"]})
+                        if any(normalize_entity_name(alias) in wanted_set for alias in aliases):
+                            matched_rows.append(item)
+                    if len(entity_rows) < discovery_page:
+                        if phrases_remain:
+                            work = new_work(next_phrase_cursor)
+                        else:
+                            work = {
+                                "phase": "discover_fallback",
+                                "entity_scan_rowid": 0,
+                            }
+                    else:
+                        work["entity_scan_rowid"] = entity_scan
+                    eligible_rows = [item for item in entity_rows if int(item["eligible"] or 0)]
+                    if not commit_pending(
+                        position,
+                        document_version,
+                        work,
+                        expected_entities=eligible_rows,
+                        candidate_rows_to_store=matched_rows,
+                    ):
+                        work = discovery_work
+                        continue
+                    continue
+
+                if phase == "discover_fallback":
+                    fallback_work = clean_work(work)
+                    entity_after = numeric(work.get("entity_scan_rowid"))
+                    entity_rows = discovery_entity_rows(entity_after)
+                    eligible_rows = [item for item in entity_rows if int(item["eligible"] or 0)]
+                    fallback_rows = [item for item in eligible_rows if row_needs_exact_fallback(item)]
+                    if len(entity_rows) < discovery_page:
+                        work = {
+                            "phase": "exact",
+                            "candidate_rowid": 0,
+                            "exact_cursor": exact_state(None),
+                        }
+                    else:
+                        work["entity_scan_rowid"] = int(entity_rows[-1]["position"])
+                    if not commit_pending(
+                        position,
+                        document_version,
+                        work,
+                        expected_entities=eligible_rows,
+                        candidate_rows_to_store=fallback_rows,
+                    ):
+                        work = fallback_work
+                    continue
+
+                if phase == "exact":
+                    candidate_after = numeric(work.get("candidate_rowid"))
+                    literal_cursor = exact_state(work.get("exact_cursor"))
+                    if not candidate_cursor_is_valid(
+                        position,
+                        document_version,
+                        candidate_after,
+                    ):
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if literal_cursor["char"] % content_page_chars or literal_cursor["entity"]:
+                        work["exact_cursor"] = exact_state(None)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    candidate_page_entries = candidate_entries(
+                        position,
+                        document_version,
+                        after=candidate_after,
+                        limit=1,
+                    )
+                    if not candidate_page_entries:
+                        work = token_work("inflected_tokenize", {})
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    candidate_position, marker_authority = candidate_page_entries[0]
+                    candidates = load_candidate_rows([candidate_position])
+                    if (
+                        not candidates
+                        or entity_authority(candidates[0]["id"], candidates[0]["version"]) != marker_authority
+                    ):
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    candidate = candidates[0]
+                    left_characters = 0
+                    read_byte = literal_cursor["byte"]
+                    if literal_cursor["char"]:
+                        previous = previous_content_character_byte(
+                            position,
+                            document_version,
+                            read_byte,
+                        )
+                        if previous is None:
+                            restart_document = True
+                            break
+                        read_byte, previous_valid = previous
+                        if not previous_valid:
+                            work["exact_cursor"] = exact_state(None)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        left_characters = 1
+                    content_page = read_content_page(
+                        position,
+                        document_version,
+                        read_byte,
+                        content_page_chars + exact_halo_chars + left_characters,
+                    )
+                    if content_page is None:
+                        restart_document = True
+                        break
+                    content_chunk, byte_offsets, content_remains, content_valid = content_page
+                    if not content_valid:
+                        work["exact_cursor"] = exact_state(None)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if not content_chunk:
+                        work.update(
+                            candidate_rowid=candidate_position,
+                            exact_cursor=exact_state(None),
+                        )
+                        if not commit_pending(
+                            position,
+                            document_version,
+                            work,
+                            expected_entities=[candidate],
+                        ):
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                        continue
+                    exact, next_exact, exact_remains, exact_valid = exact_mentions_page(
+                        content_chunk,
+                        [
+                            (
+                                str(candidate.get("name") or ""),
+                                str(candidate["id"]),
+                                _aliases_of(candidate),
+                            )
+                        ],
+                        cursor={
+                            "char": 0,
+                            "entity": 0,
+                            "material": literal_cursor["material"],
+                        },
+                        char_limit=content_page_chars + left_characters,
+                    )
+                    if not exact_valid:
+                        work["exact_cursor"] = exact_state(None)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if str(candidate["id"]) in exact:
+                        outcome = link_candidate(
+                            document_rowid=position,
+                            expected_version=document_version,
+                            entity_rowid=candidate_position,
+                            expected_entity_id=str(candidate["id"]),
+                            expected_entity_version=int(candidate["version"]),
+                            method="existing_entity_exact_mention",
+                        )
+                        if outcome == "stale":
+                            save_pending(position, document_version, work)
+                            restart_document = True
+                            break
+                        if outcome in {"max_links", "max_seconds"}:
+                            save_pending(position, document_version, work)
+                            return result(
+                                linked=linked,
+                                scanned=scanned,
+                                complete=False,
+                                entities=entity_total,
+                                budget_reason=outcome,
+                            )
+                        if outcome == "entity_stale":
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        else:
+                            work.update(
+                                candidate_rowid=candidate_position,
+                                exact_cursor=exact_state(None),
+                            )
+                    else:
+                        if int(next_exact["char"]) == 0:
+                            work["exact_cursor"] = {
+                                "char": literal_cursor["char"],
+                                "byte": literal_cursor["byte"],
+                                "entity": 0,
+                                "material": int(next_exact["material"]),
+                            }
+                        elif len(content_chunk) > content_page_chars + left_characters:
+                            work["exact_cursor"] = {
+                                "char": literal_cursor["char"] + content_page_chars,
+                                "byte": read_byte + byte_offsets[content_page_chars + left_characters],
+                                "entity": 0,
+                                "material": 0,
+                            }
+                        else:
+                            work.update(
+                                candidate_rowid=candidate_position,
+                                exact_cursor=exact_state(None),
+                            )
+                    if not commit_pending(
+                        position,
+                        document_version,
+                        work,
+                        expected_entities=[] if str(candidate["id"]) in exact else [candidate],
+                    ):
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                    continue
+
+                if phase == "inflected_tokenize":
+                    token_state = token_fields(work)
+                    flat = list(token_state["token_positions"])
+                    owned_offset = int(token_state["owned_offset"])
+                    token_count = len(flat) // 2
+                    target = owned_offset + inflected_owned_tokens + inflected_context_tokens
+                    if token_count >= target or int(token_state["token_eof"]):
+                        if owned_offset >= token_count:
+                            work = {"phase": "cleanup", "cleanup_cursor": 0}
+                        else:
+                            work = token_work(
+                                "inflected_collect",
+                                token_state,
+                                entity_scan_rowid=0,
+                            )
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+
+                    scan = scan_state(token_state["scan_cursor"])
+                    content_page = read_content_page(
+                        position,
+                        document_version,
+                        scan["byte"],
+                        token_read_chars,
+                    )
+                    if content_page is None:
+                        restart_document = True
+                        break
+                    content_chunk, byte_offsets, content_remains, content_valid = content_page
+                    if not content_valid:
+                        work = token_work("inflected_tokenize", {})
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if not content_chunk:
+                        token_state["token_eof"] = 1
+                        work = token_work("inflected_tokenize", token_state)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    needed = max(1, target - token_count)
+                    page_positions, next_scan, remains, valid = inflected_token_position_page(
+                        content_chunk,
+                        cursor={"char": 0, "skip": scan["skip"]},
+                        limit=needed,
+                        char_limit=content_page_chars,
+                    )
+                    if not valid or int(next_scan["char"]) <= 0:
+                        work = token_work("inflected_tokenize", {})
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    for token_start, token_end in page_positions:
+                        flat.extend(
+                            (
+                                scan["byte"] + byte_offsets[token_start],
+                                scan["byte"] + byte_offsets[token_end],
+                            )
+                        )
+                    token_state.update(
+                        scan_cursor={
+                            "char": scan["char"] + int(next_scan["char"]),
+                            "byte": scan["byte"] + byte_offsets[int(next_scan["char"])],
+                            "skip": int(next_scan["skip"]),
+                        },
+                        token_positions=flat,
+                        token_eof=int(not remains and not content_remains),
+                    )
+                    work = token_work("inflected_tokenize", token_state)
+                    if not commit_pending(position, document_version, work):
+                        restart_document = True
+                        break
+                    continue
+
+                if phase == "inflected_validate":
+                    token_state = token_fields(work)
+                    flat = list(token_state["token_positions"])
+                    pairs = len(flat) // 2
+                    validation_index = numeric(work.get("validation_index"))
+                    validation_byte = numeric(work.get("validation_byte"))
+                    validation_skip = min(1, numeric(work.get("validation_skip")))
+                    scan = scan_state(token_state["scan_cursor"])
+                    target_byte = int(scan["byte"])
+                    validation_anchor = previous_content_character_byte(
+                        position,
+                        document_version,
+                        int(flat[0]) if flat else 0,
+                    )
+                    if validation_anchor is None:
+                        restart_document = True
+                        break
+                    anchor_byte, anchor_valid = validation_anchor
+                    progress_is_anchor = (
+                        validation_index == 0 and validation_byte == anchor_byte and validation_skip == 0
+                    )
+                    progress_is_authorized = progress_is_anchor or (
+                        validation_progress_is_authorized(
+                            position,
+                            document_version,
+                            token_state,
+                            validation_index,
+                            validation_byte,
+                            validation_skip,
+                        )
+                    )
+                    if not anchor_valid or not progress_is_authorized:
+                        if not anchor_valid:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        else:
+                            work = token_work(
+                                "inflected_validate",
+                                token_state,
+                                validation_index=0,
+                                validation_byte=anchor_byte,
+                                validation_skip=0,
+                            )
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    invalid_validation = (
+                        not flat
+                        or int(token_state["owned_offset"]) >= pairs
+                        or validation_index > pairs
+                        or validation_byte > target_byte
+                    )
+                    validation_complete = (
+                        not invalid_validation
+                        and validation_index == pairs
+                        and validation_byte == target_byte
+                        and validation_skip == int(scan["skip"])
+                    )
+                    if validation_complete and int(token_state["token_eof"]):
+                        eof_probe = read_content_page(
+                            position,
+                            document_version,
+                            target_byte,
+                            1,
+                        )
+                        if eof_probe is None:
+                            restart_document = True
+                            break
+                        eof_text, _eof_offsets, eof_remains, eof_valid = eof_probe
+                        validation_complete = bool(eof_valid and not eof_text and not eof_remains)
+                        invalid_validation = not validation_complete
+                    if validation_complete:
+                        validated_context_key = token_context_key(
+                            position,
+                            document_version,
+                            token_state,
+                        )
+                        work = token_work("present_restart_cleanup", token_state)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if invalid_validation or validation_byte == target_byte:
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+
+                    content_page = read_content_page(
+                        position,
+                        document_version,
+                        validation_byte,
+                        token_read_chars,
+                    )
+                    if content_page is None:
+                        restart_document = True
+                        break
+                    content_chunk, byte_offsets, _content_remains, content_valid = content_page
+                    if not content_valid or not content_chunk:
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    page_positions, next_validation, _remains, valid = inflected_token_position_page(
+                        content_chunk,
+                        cursor={"char": 0, "skip": validation_skip},
+                        limit=max(1, min(64, pairs - validation_index)),
+                        char_limit=content_page_chars,
+                    )
+                    next_character = numeric(next_validation.get("char"))
+                    if not valid or not 0 < next_character < len(byte_offsets):
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    next_byte = validation_byte + byte_offsets[next_character]
+                    for token_start, token_end in page_positions:
+                        if validation_index >= pairs:
+                            invalid_validation = True
+                            break
+                        expected_start = int(flat[validation_index * 2])
+                        expected_end = int(flat[validation_index * 2 + 1])
+                        actual_start = validation_byte + byte_offsets[token_start]
+                        actual_end = validation_byte + byte_offsets[token_end]
+                        if (actual_start, actual_end) != (expected_start, expected_end):
+                            invalid_validation = True
+                            break
+                        validation_index += 1
+                    validation_skip = min(1, numeric(next_validation.get("skip")))
+                    if next_byte > target_byte:
+                        invalid_validation = True
+                    if invalid_validation:
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        next_progress = None
+                    else:
+                        work = token_work(
+                            "inflected_validate",
+                            token_state,
+                            validation_index=validation_index,
+                            validation_byte=next_byte,
+                            validation_skip=validation_skip,
+                        )
+                        next_progress = (
+                            token_state,
+                            validation_index,
+                            next_byte,
+                            validation_skip,
+                        )
+                    if not commit_pending(
+                        position,
+                        document_version,
+                        work,
+                        validation_progress=next_progress,
+                    ):
+                        restart_document = True
+                        break
+                    continue
+
+                if phase == "inflected_collect":
+                    token_state = token_fields(work)
+                    context = read_token_context(
+                        position,
+                        document_version,
+                        token_state["token_positions"],
+                    )
+                    if context is None:
+                        restart_document = True
+                        break
+                    synthetic, synthetic_positions, context_valid = context
+                    if not context_valid:
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    entity_after = numeric(work.get("entity_scan_rowid"))
+                    entity_rows = discovery_entity_rows(entity_after)
+                    if entity_rows:
+                        candidates = [item for item in entity_rows if int(item["eligible"] or 0)]
+                        present, valid = inflected_mentions_present_tokens(
+                            synthetic,
+                            [(str(item.get("name") or ""), str(item["id"])) for item in candidates],
+                            synthetic_positions,
+                        )
+                        if not valid:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        work = token_work(
+                            "inflected_collect",
+                            token_state,
+                            entity_scan_rowid=int(entity_rows[-1]["position"]),
+                        )
+                        if not commit_pending(
+                            position,
+                            document_version,
+                            work,
+                            expected_entities=candidates,
+                            present_rows_to_store=[item for item in candidates if str(item["id"]) in present],
+                        ):
+                            work = token_work("present_restart_cleanup", token_state)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        continue
+
+                    work = token_work(
+                        "inflected_resolve",
+                        token_state,
+                        priority_cursor=0,
+                        candidate_rowid=0,
+                        winner_rowids=[],
+                        winner_versions=[],
+                        winner_authorities=[],
+                    )
+                    if not commit_pending(position, document_version, work):
+                        restart_document = True
+                        break
+                    continue
+
+                if phase == "inflected_resolve":
+                    token_state = token_fields(work)
+                    priority_cursor = numeric(work.get("priority_cursor"))
+                    candidate_after = numeric(work.get("candidate_rowid"))
+                    if not present_cursor_is_valid(
+                        position,
+                        document_version,
+                        priority_cursor,
+                        candidate_after,
+                    ):
+                        work = token_work("present_restart_cleanup", token_state)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    present_page_entries = present_entries(
+                        position,
+                        document_version,
+                        after_priority=priority_cursor,
+                        after_rowid=candidate_after,
+                        limit=1,
+                    )
+                    if present_page_entries:
+                        next_priority, candidate_position, marker_authority = present_page_entries[0]
+                        winners, winner_versions, winner_authorities = aligned_winner_lists(
+                            work.get("winner_rowids"),
+                            work.get("winner_versions"),
+                            work.get("winner_authorities"),
+                        )
+                        combined = load_candidate_rows([*winners, candidate_position])
+                        current = {int(item["position"]): item for item in combined}
+                        expected_versions = dict(zip(winners, winner_versions, strict=True))
+                        expected_authorities = dict(zip(winners, winner_authorities, strict=True))
+                        expected_authorities[candidate_position] = marker_authority
+                        if any(
+                            rowid not in current
+                            or (
+                                rowid in expected_versions
+                                and int(current[rowid]["version"]) != expected_versions[rowid]
+                            )
+                            or entity_authority(current[rowid]["id"], current[rowid]["version"])
+                            != expected_authority
+                            for rowid, expected_authority in expected_authorities.items()
+                        ):
+                            work = token_work("present_restart_cleanup", token_state)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        context = read_token_context(
+                            position,
+                            document_version,
+                            token_state["token_positions"],
+                        )
+                        if context is None:
+                            restart_document = True
+                            break
+                        synthetic, synthetic_positions, context_valid = context
+                        if not context_valid:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        _matches, active, valid = inflected_mentions_tokens(
+                            synthetic,
+                            [(str(item.get("name") or ""), str(item["id"])) for item in combined],
+                            synthetic_positions,
+                            owned_start=int(token_state["owned_offset"]),
+                            owned_count=min(
+                                inflected_owned_tokens,
+                                len(synthetic_positions) - int(token_state["owned_offset"]),
+                            ),
+                        )
+                        if not valid:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        winners = [int(item["position"]) for item in combined if str(item["id"]) in active]
+                        if len(winners) > maximum_winner_rowids:
+                            raise RuntimeError("inflected winner bound violated")
+                        by_position = {int(item["position"]): item for item in combined}
+                        work = token_work(
+                            "inflected_resolve",
+                            token_state,
+                            priority_cursor=next_priority,
+                            candidate_rowid=candidate_position,
+                            winner_rowids=winners,
+                            winner_versions=[int(by_position[rowid]["version"]) for rowid in winners],
+                            winner_authorities=[
+                                entity_authority(
+                                    by_position[rowid]["id"],
+                                    by_position[rowid]["version"],
+                                )
+                                for rowid in winners
+                            ],
+                        )
+                        if not commit_pending(
+                            position,
+                            document_version,
+                            work,
+                            expected_entities=combined,
+                        ):
+                            work = token_work("present_restart_cleanup", token_state)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                        continue
+
+                    winners, winner_versions, winner_authorities = aligned_winner_lists(
+                        work.get("winner_rowids"),
+                        work.get("winner_versions"),
+                        work.get("winner_authorities"),
+                    )
+                    finalists = load_candidate_rows(winners)
+                    current = {int(item["position"]): item for item in finalists}
+                    if any(
+                        rowid not in current
+                        or int(current[rowid]["version"]) != expected_version
+                        or entity_authority(current[rowid]["id"], current[rowid]["version"])
+                        != expected_authority
+                        for rowid, expected_version, expected_authority in zip(
+                            winners,
+                            winner_versions,
+                            winner_authorities,
+                            strict=True,
+                        )
+                    ):
+                        work = token_work("present_restart_cleanup", token_state)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    context = read_token_context(
+                        position,
+                        document_version,
+                        token_state["token_positions"],
+                    )
+                    if context is None:
+                        restart_document = True
+                        break
+                    synthetic, synthetic_positions, context_valid = context
+                    if not context_valid:
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    matches, _active, valid = inflected_mentions_tokens(
+                        synthetic,
+                        [(str(item.get("name") or ""), str(item["id"])) for item in finalists],
+                        synthetic_positions,
+                        owned_start=int(token_state["owned_offset"]),
+                        owned_count=min(
+                            inflected_owned_tokens,
+                            len(synthetic_positions) - int(token_state["owned_offset"]),
+                        ),
+                    )
+                    if not valid:
+                        work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    winner_rowids = [
+                        int(item["position"]) for item in finalists if str(item["id"]) in matches
+                    ]
+                    by_position = {int(item["position"]): item for item in finalists}
+                    final_flat = list(token_state["token_positions"])
+                    final_owned = int(token_state["owned_offset"])
+                    final_window_start = (
+                        int(final_flat[final_owned * 2]) if final_owned < len(final_flat) // 2 else 0
+                    )
+                    work = token_work(
+                        "inflected_link",
+                        token_state,
+                        winner_rowids=winner_rowids,
+                        winner_versions=[int(by_position[rowid]["version"]) for rowid in winner_rowids],
+                        winner_authorities=[
+                            entity_authority(
+                                by_position[rowid]["id"],
+                                by_position[rowid]["version"],
+                            )
+                            for rowid in winner_rowids
+                        ],
+                        winner_cursor=0,
+                    )
+                    if not commit_pending(
+                        position,
+                        document_version,
+                        work,
+                        expected_entities=finalists,
+                        winner_rows_to_store=[by_position[rowid] for rowid in winner_rowids],
+                        winner_window_start=final_window_start,
+                    ):
+                        work = token_work("present_restart_cleanup", token_state)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                    continue
+
+                if phase == "inflected_link":
+                    token_state = token_fields(work)
+                    winners, winner_versions, winner_authorities = aligned_winner_lists(
+                        work.get("winner_rowids"),
+                        work.get("winner_versions"),
+                        work.get("winner_authorities"),
+                    )
+                    winner_cursor = numeric(work.get("winner_cursor"))
+                    if winner_cursor > len(winners):
+                        work = token_work("present_restart_cleanup", token_state)
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if winner_cursor < len(winners):
+                        candidate_position = winners[winner_cursor]
+                        expected_entity_version = winner_versions[winner_cursor]
+                        expected_entity_authority = winner_authorities[winner_cursor]
+                        candidates = load_candidate_rows([candidate_position])
+                        if (
+                            not candidates
+                            or int(candidates[0]["version"]) != expected_entity_version
+                            or entity_authority(candidates[0]["id"], candidates[0]["version"])
+                            != expected_entity_authority
+                        ):
+                            work = token_work("present_restart_cleanup", token_state)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        candidate = candidates[0]
+                        link_flat = list(token_state["token_positions"])
+                        link_owned = int(token_state["owned_offset"])
+                        if link_owned >= len(link_flat) // 2:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        link_window_start = int(link_flat[link_owned * 2])
+                        if not winner_is_authorized(
+                            position,
+                            document_version,
+                            link_window_start,
+                            candidate_position,
+                            str(candidate["id"]),
+                            expected_entity_version,
+                        ):
+                            work = token_work("present_restart_cleanup", token_state)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        context = read_token_context(
+                            position,
+                            document_version,
+                            token_state["token_positions"],
+                        )
+                        if context is None:
+                            restart_document = True
+                            break
+                        synthetic, synthetic_positions, context_valid = context
+                        if not context_valid:
+                            work = {"phase": "restart_cleanup", "cleanup_cursor": 0}
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        verified_matches, _active, verified = inflected_mentions_tokens(
+                            synthetic,
+                            [(str(candidate.get("name") or ""), str(candidate["id"]))],
+                            synthetic_positions,
+                            owned_start=link_owned,
+                            owned_count=min(
+                                inflected_owned_tokens,
+                                len(synthetic_positions) - link_owned,
+                            ),
+                        )
+                        if not verified or str(candidate["id"]) not in verified_matches:
+                            work = token_work("present_restart_cleanup", token_state)
+                            if not commit_pending(position, document_version, work):
+                                restart_document = True
+                                break
+                            continue
+                        outcome = link_candidate(
+                            document_rowid=position,
+                            expected_version=document_version,
+                            entity_rowid=candidate_position,
+                            expected_entity_id=str(candidate["id"]),
+                            expected_entity_version=expected_entity_version,
+                            method="existing_entity_inflected_mention",
+                        )
+                        if outcome == "stale":
+                            save_pending(position, document_version, work)
+                            restart_document = True
+                            break
+                        if outcome in {"max_links", "max_seconds"}:
+                            save_pending(position, document_version, work)
+                            return result(
+                                linked=linked,
+                                scanned=scanned,
+                                complete=False,
+                                entities=entity_total,
+                                budget_reason=outcome,
+                            )
+                        if outcome == "entity_stale":
+                            work = token_work("present_restart_cleanup", token_state)
+                        else:
+                            work = token_work(
+                                "inflected_link",
+                                token_state,
+                                winner_rowids=winners,
+                                winner_versions=winner_versions,
+                                winner_authorities=winner_authorities,
+                                winner_cursor=winner_cursor + 1,
+                            )
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    work = token_work("present_cleanup", token_state)
+                    if not commit_pending(position, document_version, work):
+                        restart_document = True
+                        break
+                    continue
+
+                if phase in {"present_cleanup", "present_restart_cleanup"}:
+                    token_state = token_fields(work)
+                    present_remains = delete_present_page(position, document_version)
+                    winner_remains = delete_winner_page(position, document_version)
+                    validation_remains = delete_validation_page(position, document_version)
+                    if present_remains or winner_remains or validation_remains:
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    if phase == "present_restart_cleanup":
+                        work = token_work(
+                            "inflected_collect",
+                            token_state,
+                            entity_scan_rowid=0,
+                        )
+                        if not commit_pending(position, document_version, work):
+                            restart_document = True
+                            break
+                        continue
+                    flat = list(token_state["token_positions"])
+                    pairs = len(flat) // 2
+                    owned_offset = int(token_state["owned_offset"])
+                    advance = min(inflected_owned_tokens, max(0, pairs - owned_offset))
+                    next_owned = owned_offset + advance
+                    retain_from = max(0, next_owned - inflected_context_tokens)
+                    token_state.update(
+                        token_positions=flat[retain_from * 2 :],
+                        owned_offset=next_owned - retain_from,
+                    )
+                    work = token_work("inflected_tokenize", token_state)
+                    if not commit_pending(position, document_version, work):
+                        restart_document = True
+                        break
+                    continue
+
+                _next_cleanup, candidates_remain = delete_candidate_page(
+                    position,
+                    document_version,
+                    after=0,
+                )
+                present_remains = delete_present_page(position, document_version)
+                winner_remains = delete_winner_page(position, document_version)
+                validation_remains = delete_validation_page(position, document_version)
+                if candidates_remain or present_remains or winner_remains or validation_remains:
+                    work["cleanup_cursor"] = 0
+                    save_pending(position, document_version, work)
+                    continue
+                if phase == "restart_cleanup":
+                    work = new_work()
+                    if not commit_pending(position, document_version, work):
+                        restart_document = True
+                        break
+                    continue
+                if not finish_document(position, document_version):
+                    restart_document = True
+                    break
+                pending = {}
+                break
+
+            if restart_document:
+                pending = {
+                    "document_rowid": position,
+                    "document_version": document_version,
+                    "work": clean_work(work),
+                }
+                continue
+
+        return result(linked=linked, scanned=scanned, complete=False, entities=entity_total)
 
     def sweep_entity_duplicates(
         self,

@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from friday.api.deps import _audit, _parse_json_bool, _request_json, _require
+from friday.api.projections import public_ingestion_receipt
 
 router = APIRouter(prefix="/api/ingest", tags=["ingestion"])
 
@@ -24,7 +25,7 @@ async def ingest(request: Request) -> dict[str, Any]:
     if not content:
         raise HTTPException(status_code=400, detail="Нужен content")
     force_knowledge = _parse_json_bool(body.get("force_knowledge"), field="force_knowledge", default=False)
-    return await request.app.state.ingestion.ingest_text(
+    outcome = await request.app.state.ingestion.ingest_text(
         actor.user_id,
         content,
         source="api",
@@ -35,6 +36,13 @@ async def ingest(request: Request) -> dict[str, Any]:
             **(dict(given) if isinstance(given := body.get("metadata"), dict) else {}),
             "uploaded_by": actor.own_id,
         },
+    )
+    return public_ingestion_receipt(
+        outcome,
+        include_resource_id=True,
+        storage=request.app.state.storage,
+        resource_user_id=actor.user_id,
+        resource_owner_id=actor.own_id,
     )
 
 
@@ -79,6 +87,9 @@ async def ingest_url(request: Request) -> dict[str, Any]:
             "title": title,
             "status_code": result.status_code,
             "content_source": "web_fetch",
+            # В общем архиве арендатор один на всех; автора называет учётка
+            # аутентифицированного человека, а не tenant строки.
+            "uploaded_by": actor.own_id,
             # Неполнота — свойство сохраняемого объекта, а не подробность ответа.
             # Провенанс указывает на ПОЛНЫЙ адрес, поэтому без этой строки ревьюер
             # (и всё, что придёт потом: поиск, модель, повторный разбор) принимает
@@ -94,4 +105,14 @@ async def ingest_url(request: Request) -> dict[str, Any]:
         outcome.get("raw_object_id"),
         after={"url": result.url},
     )
-    return {**outcome, "url": result.url, "title": title}
+    return {
+        **public_ingestion_receipt(
+            outcome,
+            include_resource_id=True,
+            storage=request.app.state.storage,
+            resource_user_id=actor.user_id,
+            resource_owner_id=actor.own_id,
+        ),
+        "url": result.url,
+        "title": title,
+    }

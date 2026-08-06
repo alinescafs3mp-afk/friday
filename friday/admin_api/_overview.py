@@ -24,12 +24,19 @@ from friday.storage._privacy import (
     _not_private_relation_candidate_dependency,
     _not_private_relation_dependency,
 )
+from friday.workers._blocking import run_blocking
 
 router = APIRouter()
 
 
 @router.get("/overview")
 async def overview(request: Request) -> dict[str, Any]:
+    return await run_blocking(_overview_sync, request)
+
+
+def _overview_sync(request: Request) -> dict[str, Any]:
+    """Build every SQLite-backed aggregate outside the serving event loop."""
+
     actor = _require(request, "admin.diagnostics")
     storage = _services(request).storage
     tenant_user_id = actor.user_id
@@ -164,12 +171,24 @@ async def overview(request: Request) -> dict[str, Any]:
 
 @router.get("/settings")
 async def settings_info(request: Request) -> dict[str, Any]:
+    return await run_blocking(_settings_info_sync, request)
+
+
+def _settings_info_sync(request: Request) -> dict[str, Any]:
     _require(request, "admin.diagnostics")
     return _services(request).settings.public_dict()
 
 
 @router.get("/diagnostics")
 async def diagnostics(request: Request, check_llm: bool = False) -> dict[str, Any]:
+    return await run_blocking(_diagnostics_sync, request, check_llm)
+
+
+def _diagnostics_sync(request: Request, check_llm: bool) -> dict[str, Any]:
     _require(request, "admin.diagnostics")
     state = _services(request)
-    return collect_diagnostics(state.settings, state.storage, check_llm_port=check_llm)
+    return collect_diagnostics(
+        state.settings,
+        state.storage,
+        check_llm_port=check_llm,
+    )

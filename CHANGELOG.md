@@ -1,3 +1,117 @@
+## 0.155.0 — 2026-08-06
+
+### Файл отвечает в том же ходе и не теряется в продолжении
+
+Загруженный через Telegram/`/api/chat` файл теперь сразу становится bounded
+контекстом того же вопроса: Inbox-review по-прежнему решает, станет ли материал
+знанием, но не заставляет человека отдельным сообщением напоминать модели, что файл
+только что прислан. Persisted Raw Object восстанавливается в естественном follow-up
+и regenerate по immutable message pointer; каждый раз заново проверяются tenant,
+точный uploader и право `files.read`. Caption equality, filename и старый пересказ
+не являются authority. Voice-транскрипт не дублируется как вопрос и вложение, а
+обрезка длинной речи называется человеку явно.
+
+Private attachment lineage стала crash-sticky до модели и инструментов. Маркер
+пишется уже на текущем user-row и ищется по всему ограниченному storage tail, а не
+по урезанному prompt window. Поэтому падение между записью вопроса и assistant-row,
+а также 10 000-символьный промежуточный ход не открывают `web_search`, `web_fetch`,
+`web_research`, внешний `data_query`, `code_run`, web-prefetch или глобальное
+обучение правил/коррекций. Hallucinated native tool call режется той же границей до
+kernel.
+
+Attachment-aware verifier и единственный repair видят одну и ту же 24k-проекцию.
+Для count/all/exhaustiveness неполный parser/context, advisory OCR/vision/transcript
+или неполная verification eligibility принудительно дают `unknown` и до, и после
+repair. Финальный ceiling проверяет уже сам ответ, поэтому «16 позиций», «полный
+состав» и «это всё» нельзя подтвердить частичным перечнем. Synthetic DOCX/XLSX
+сохранили 16 из 16 строк; отдельный `OfficeStructureIndex v1`, который сделает row
+IDs и authoritative record set фактом кода, честно остаётся OPEN.
+
+### Нулевая доказательная база больше не превращается в досье
+
+`user_model` остаётся подсказкой о предпочтениях, но не evidence о названном
+человеке. Если person-intent не получил ни Knowledge Object, ни допустимого
+person-tool result, ни attachment/graph evidence, свободное тело модели отбрасывается
+до verifier и persistence вместе с подготовленными file/voice/citation carriers.
+Ответ структурно сообщает, что подтверждённых данных недостаточно. Обычный поиск по
+архиву для названного имени при этом не отключается.
+
+### HTTP публикует allowlist, а не внутренние словари
+
+Self/admin conversation history, `/channel/why`, file lists, direct ingest/file
+receipts, chat и legacy idempotency replay проходят единый fail-closed projector.
+`metadata_json`, Raw attachment pointers, absolute storage paths, transcript/content,
+parser errors, vision internals и suggestions не становятся API случайно при
+добавлении нового внутреннего поля. Direct capability-gated endpoints сохраняют
+только строгие opaque resource handles, доказанные для tenant и конкретного
+uploader; chat не отдаёт Raw handle. Нужный Telegram-кнопкам Inbox handle остаётся,
+но повторно авторизуется даже в cached replay. Path-shaped псевдо-ID отклоняются.
+
+### Старые документы догоняют сущности ограниченно и возобновляемо
+
+`entity_mention_backfill` больше не оставляет неотменяемый thread после timeout.
+Один tick ограничен `8 documents / 25 links / <=10 s`; content читается bounded
+UTF-8 blob-страницами, а character+byte cursors, numeric spool и secondary cursors
+переживают restart. Checkpoint связан с document/entity ID+version и process-local
+keyed authority, поэтому stale или скопированное состояние не авторизует продолжение.
+Longest-first работает по полному bounded token-window; literal fallback покрывает
+canonical material до 240 символов, включая пунктуацию, dotted identifiers и
+sentence-final dot. Три независимых adversarial review закрыли page boundary,
+TOCTOU, orphan spool, cleanup и large-gap counterexamples.
+
+Все восемь путей приёма теперь пишут один provenance `uploaded_by`: точный
+`actor.own_id`, а для дискового CLI — явный `--uploaded-by` либо честный `null`.
+Историческим строкам автор не выдумывается. Rolling upgrade сохраняет прежнюю
+replay/conflict-семантику legacy file `source_ref`: совместимый unprefixed key
+заимствуется только тем же доказанным uploader и повторно проверяется под write
+transaction; foreign/missing provenance остаётся изолированной.
+
+### Живую SQLite диагностирует её владелец
+
+После двух `SIGBUS`, совпавших со вторым процессом у WAL/SHM, лишняя поверхность
+удалена. При active backend внешний `status`/`doctor` получает snapshot у
+authenticated host-local API и никогда не делает SQLite fallback; target обязан
+быть OS-proven numeric local address, proxy/redirect запрещены, ответ связан с PID
+lease и lease перепроверяется после чтения. Offline reader удерживает тот же backend
+lease на всём окне integrity/worker/auth reads. Bridge queue имеет такую же
+handoff-границу и впервые открывается только после своего lease. Переданный caller-ом
+`storage` сам по себе не является правом. Admin overview/settings/diagnostics целиком,
+включая authorization и integrity/count queries, выполняются вне event loop.
+
+Secret hygiene поднял измеренно недостаточный предел 4 000 до 20 000 путей и
+перешёл с skip-large на small-first streaming под общим 256 МиБ budget. Exact secret
+виден через chunk boundary и non-UTF8 bytes; hardlink физически читается один раз,
+но каждый путь сообщается отдельно. File/metadata/byte cap, unreadable или midstream
+I/O всегда дают incomplete warning. Main/bridge SQLite, WAL/SHM/journal/lease и их
+текущие hardlink-inodes не открываются даже как обычные файлы. Credential никогда
+не повторяется в report, даже если его поместили в filename или label.
+
+### Temporal candidate запечатан, но holdout ещё не потрачен
+
+Frozen 40-case temporal-relational прибор разделён целыми мирами на 20 calibration
+и 20 sealed holdout. Baseline воспроизвёл `4/20`; единственный candidate сохраняет
+в rerank-slice только exact query-grounded, structurally published, non-implicit
+temporal path, не меняя classifier, веса или non-temporal поиск. Три calibration
+прогона дали `20/20`, MRR `0.875`, no-answer `4/4`, forbidden hits `0`.
+
+Manifest v2 связывает exact candidate diff, frozen gold, evaluator и helper blobs
+из HEAD. Запуск разрешён только из private capability-bound temporary projection;
+atomic durable latch расходует единственную holdout-попытку до старта любой руки.
+Код и seal прошли независимую acceptance, реальный latch отсутствует и holdout в
+этом commit ещё не запускался. После commit обязательны seal check, committed
+isolated calibration и только затем один paired holdout.
+
+### Точечные эксплуатационные улучшения
+
+Strict web `site` и `freshness` доходят только до провайдера с доказанной семантикой;
+неспособный adapter отказывается до сети, а ответ дополнительно фильтруется по
+exact/subdomain hostname. Поиск не выдаёт старую страницу под видом свежей.
+Mission runner получил read-only `message_search`. Cold privacy-authority validation
+после свежего rebuild больше не строит тот же live fixed point ещё два раза: на
+усиленном synthetic стенде reopen сократился `161.944 → 48.615 s` (`0.3002x`), UDF
+`3x → 1x`, exact authority tuples не изменились; отдельный pathological writer
+остаётся OPEN.
+
 ## 0.154.0 — 2026-08-06
 
 ### Relation history получает честную миграцию 31 → 32

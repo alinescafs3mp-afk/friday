@@ -42,7 +42,7 @@ proposed ─▶ ready ─▶ running ─▶ completed | failed
 
 ## 4. Выполнение
 
-Фоновый worker `mission_runner` продвигает готовые задачи короткими тактами (интервал `FRIDAY_EXECUTIVE_TICK_INTERVAL_SEC`), не перекрываясь и не удерживая транзакцию во время работы модели. Шаг выполняется ограниченным tool-loop’ом (бюджет `FRIDAY_EXECUTIVE_TASK_TOOL_BUDGET`) над read/gather-инструментами (`memory_search`, `entity_lookup`, `kg_stats`, `inbox_list`, `web_search`, `web_fetch`, `web_research`). Итог `produce`-шага направляется в Inbox как `knowledge_work` candidate — Knowledge Object напрямую не создаётся.
+Фоновый worker `mission_runner` продвигает готовые задачи короткими тактами (интервал `FRIDAY_EXECUTIVE_TICK_INTERVAL_SEC`), не перекрываясь и не удерживая транзакцию во время работы модели. Шаг выполняется ограниченным tool-loop’ом (бюджет `FRIDAY_EXECUTIVE_TASK_TOOL_BUDGET`) над read/gather-инструментами (`memory_search`, `message_search`, `entity_lookup`, `kg_stats`, `inbox_list`, `web_search`, `web_fetch`, `web_research`). Итог `produce`-шага направляется в Inbox как `knowledge_work` candidate — Knowledge Object напрямую не создаётся.
 
 ## 5. Управляемая автономия
 

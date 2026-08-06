@@ -366,17 +366,71 @@ class FilesMixin(PipelineShared):
         guessed_type, _ = mimetypes.guess_type(filename)
         mime_type = (mime_type or guessed_type or "application/octet-stream").split(";", 1)[0].strip()
         digest = hashlib.sha256(file_content).hexdigest()
-        effective_source_ref = source_ref or f"sha256:{digest}"
+        supplied_metadata = metadata if isinstance(metadata, dict) else {}
+        uploader_scoped = "uploaded_by" in supplied_metadata
+        uploaded_by = supplied_metadata.get("uploaded_by")
+        base_source_ref = source_ref or f"sha256:{digest}"
+        # Raw Objects share ``user_id`` in a shared archive, while a file's
+        # conversational provenance belongs to the exact person who supplied
+        # it.  The historical UNIQUE key covered only tenant/source/source_ref,
+        # so two people using the same Telegram/API source key could not both
+        # receive an uploader-owned Raw pointer.  Namespace only the shared or
+        # explicitly-unknown provenance cases; personal tenants retain their
+        # existing source_ref verbatim.  The original key remains present after
+        # the fixed prefix for diagnostics, without storing file content or a
+        # person's identifier in the namespace.
+        if uploader_scoped and uploaded_by != user_id:
+            uploader_material = "<explicit-null>" if uploaded_by is None else str(uploaded_by)
+            uploader_namespace = hashlib.sha256(uploader_material.encode("utf-8")).hexdigest()[:24]
+            effective_source_ref = f"uploader:{uploader_namespace}:{base_source_ref}"
+        else:
+            effective_source_ref = base_source_ref
+
+        def belongs_to_this_uploader(existing_raw: dict[str, Any]) -> bool:
+            if not uploader_scoped:
+                return True
+            existing_metadata = _json_dict(existing_raw.get("metadata_json"))
+            return "uploaded_by" in existing_metadata and existing_metadata.get("uploaded_by") == uploaded_by
+
+        def find_existing_source() -> dict[str, Any] | None:
+            # `uploaded_by` namespacing was added after source_ref had already
+            # become a durable idempotency key.  A row written before that
+            # migration therefore still owns the unprefixed key, but only for
+            # the exact uploader recorded on that row.  Missing provenance and
+            # another person's provenance are deliberately ignored: neither is
+            # authority to borrow their Raw Object or learn whether its bytes
+            # match this upload.
+            if effective_source_ref != base_source_ref:
+                legacy = self.storage.find_raw_by_source_ref(user_id, "upload", base_source_ref)
+                if legacy is not None and belongs_to_this_uploader(legacy):
+                    return legacy
+
+            existing_raw = self.storage.find_raw_by_source_ref(
+                user_id,
+                "upload",
+                effective_source_ref,
+            )
+            if existing_raw is not None and not belongs_to_this_uploader(existing_raw):
+                # source_ref is an idempotency key, not permission to borrow a
+                # Raw Object from another participant of the same shared tenant.
+                # A collision fails closed; callers may retry with their own key.
+                raise IdempotencyConflictError("source_ref is unavailable for this upload")
+            return existing_raw
 
         self.storage.ensure_user(user_id, source="upload")
-        existing = self.storage.find_raw_by_source_ref(user_id, "upload", effective_source_ref)
+        existing = find_existing_source()
         if not existing:
             # Запасной ключ — само содержимое. Он применялся только при пустом
             # `source_ref`, то есть из Telegram не применялся никогда: там ключ
             # содержит `update_id`, уникальный у каждой отправки. Пересланный
             # второй раз документ заводил второй Raw Object, второй Inbox и
             # второй одинаковый Knowledge Object.
-            existing = self.storage.find_file_by_content_hash(user_id, digest)
+            existing = self.storage.find_file_by_content_hash(
+                user_id,
+                digest,
+                uploaded_by=uploaded_by,
+                scope_uploaded_by=uploader_scoped,
+            )
         if existing:
             self._validate_existing_file_source(existing, digest)
             # An exact retry can also repair a missing/corrupt content-addressed
@@ -446,7 +500,12 @@ class FilesMixin(PipelineShared):
         # что не разобралось.
         text_digest = _extracted_text_digest(text_content)
         if text_digest:
-            same_document = self.storage.find_file_by_extracted_text(user_id, text_digest)
+            same_document = self.storage.find_file_by_extracted_text(
+                user_id,
+                text_digest,
+                uploaded_by=uploaded_by,
+                scope_uploaded_by=uploader_scoped,
+            )
             if same_document:
                 LOGGER.info("Тот же текст уже принят; повторяю прежний исход")
                 self._store_file(user_id, file_content, digest, filename)
@@ -610,6 +669,10 @@ class FilesMixin(PipelineShared):
             # или положенный в две папки, даёт другой `sha256` при том же тексте.
             "text_sha256": _extracted_text_digest(text_content),
             "text_extraction_success": bool(extraction.success),
+            # Durable because source/content replay deliberately skips the
+            # parser result block; the next same-turn projection and later
+            # conversation follow-up must retain the same coverage caveat.
+            "text_truncated": text_truncated,
             "extraction_error": extraction.error if not extraction.success else "",
             "vision_used": bool(vision),
             "vision_review_required": bool(vision),
@@ -688,7 +751,12 @@ class FilesMixin(PipelineShared):
             # one serialized unit, so a losing source_ref race leaves neither a
             # duplicate object nor an orphaned final file.
             with self.storage.transaction() as conn:
-                existing = self.storage.find_raw_by_source_ref(user_id, "upload", effective_source_ref)
+                # Repeat both the namespaced lookup and the compatible legacy
+                # lookup while holding the writer lock.  Otherwise an older
+                # worker can bind the legacy key between the optimistic read
+                # above and this transaction, weakening replay/conflict
+                # semantics during a rolling upgrade.
+                existing = find_existing_source()
                 if existing:
                     self._validate_existing_file_source(existing, digest)
                     return self._replay_file_source(user_id, existing)

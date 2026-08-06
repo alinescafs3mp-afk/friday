@@ -127,6 +127,7 @@ def test_the_channel_why_route_reports_the_stored_diagnosis(settings):
         conversation_id = storage.create_conversation(LEGACY_OWNER_USER_ID, title="Проба")
         conversation_id = conversation_id if isinstance(conversation_id, str) else conversation_id["id"]
         storage.set_channel_conversation(LEGACY_OWNER_USER_ID, "api", "c1", conversation_id)
+        knowledge_id = _knowledge(storage, LEGACY_OWNER_USER_ID, "Договор аренды")
         storage.store_message(
             conversation_id,
             LEGACY_OWNER_USER_ID,
@@ -138,7 +139,7 @@ def test_the_channel_why_route_reports_the_stored_diagnosis(settings):
                 "knowledge_hits": 0,
                 "retrieval_trace": [
                     {
-                        "id": "ko_x",
+                        "id": knowledge_id,
                         "title": "Договор аренды",
                         "score": 0.31,
                         "status": "discarded",

@@ -23,6 +23,7 @@ from friday.admin_api._deps import (
     _services,
     _target_user,
 )
+from friday.api.projections import public_file_record
 from friday.file_delivery import (
     AuthorizedFileReadError,
     FileRecordUnavailable,
@@ -67,8 +68,13 @@ async def list_files(
     items = []
     for row in rows:
         item = dict(row)
-        item["metadata"] = _json_value(item.pop("metadata_json", "{}"), {})
-        items.append(item)
+        metadata = _json_value(item.get("metadata_json", "{}"), {})
+        items.append(
+            public_file_record(
+                item,
+                metadata if isinstance(metadata, dict) else {},
+            )
+        )
     return {
         "user_id": target,
         "items": items,

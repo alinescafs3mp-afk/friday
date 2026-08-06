@@ -210,6 +210,7 @@ async def run_import(
     user_id: str,
     plan: ImportPlan,
     *,
+    uploaded_by: str | None = None,
     on_progress: Callable[[int, int, Outcome], None] | None = None,
     stop_after: int | None = None,
 ) -> list[Outcome]:
@@ -228,12 +229,18 @@ async def run_import(
     все они отыгрывались как дубликаты, и человек, следующий рецепту из OPERATIONS.md,
     не продвигался дальше первой партии никогда. Дубликат — это признак, что здесь уже
     были; он не должен занимать место в партии.
+
+    У CLI нет аутентифицированного актора. Поэтому `uploaded_by` задаёт человек,
+    который действительно знает автора; умолчание хранится как JSON `null`, а не
+    выводится из `user_id`: в общем архиве тот называет tenant, не загрузившего.
+    Идемпотентный повтор не меняет метаданные уже существующего Raw Object — это
+    намеренно не является историческим backfill.
     """
     outcomes: list[Outcome] = []
     total = len(plan.candidates)
     ingested = 0
     for index, candidate in enumerate(plan.candidates, start=1):
-        outcome = await _ingest_one(pipeline, user_id, candidate)
+        outcome = await _ingest_one(pipeline, user_id, candidate, uploaded_by=uploaded_by)
         outcomes.append(outcome)
         if on_progress is not None:
             on_progress(index, total, outcome)
@@ -244,7 +251,13 @@ async def run_import(
     return outcomes
 
 
-async def _ingest_one(pipeline: Any, user_id: str, candidate: Candidate) -> Outcome:
+async def _ingest_one(
+    pipeline: Any,
+    user_id: str,
+    candidate: Candidate,
+    *,
+    uploaded_by: str | None,
+) -> Outcome:
     try:
         content = candidate.path.read_bytes()
     except OSError as exc:
@@ -258,7 +271,12 @@ async def _ingest_one(pipeline: Any, user_id: str, candidate: Candidate) -> Outc
             # The absolute path is provenance, not identity: identity stays the content
             # hash so the run resumes and duplicates collapse. Passing the path as
             # source_ref instead would make an edited file a hard conflict.
-            metadata={"import_source_path": str(candidate.path)},
+            metadata={
+                "import_source_path": str(candidate.path),
+                # `None` is an explicit unknown. Never substitute `user_id`:
+                # it may be the shared archive tenant rather than a person.
+                "uploaded_by": uploaded_by,
+            },
             # Pointing at a folder is one action; it is not a judgement on each file.
             force_review=True,
         )

@@ -64,18 +64,44 @@ def _bridge_redactor(config: TelegramConfig):
     return redact
 
 
+class _LazyUpdateInbox:
+    """Delay every SQLite touch until the bridge owns its process lease."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._instance: _UpdateInbox | None = None
+
+    def _opened(self) -> _UpdateInbox:
+        if self._instance is None:
+            self._instance = _UpdateInbox(self._path)
+        return self._instance
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._opened(), name)
+
+    def close(self) -> None:
+        instance = self._instance
+        self._instance = None
+        if instance is not None:
+            instance.close()
+
+
 class TransportMixin(BridgeShared):
     def __init__(self, config: TelegramConfig) -> None:
         config.validate()
         self.config = config
         self._running = False
-        self._inbox = _UpdateInbox(config.inbox_db_path)
         inbox_path = Path(config.inbox_db_path)
         self._lease = ProcessLease(
             inbox_path.with_name(f"{inbox_path.name}.lock"),
             protocol="friday.telegram-bridge.v1",
         )
-        self._offset = self._inbox.get_offset()
+        # Production opens/migrates the queue only AFTER acquiring the process
+        # lease in ``run``.  The lazy property preserves the small direct bridge
+        # fixtures without letting a losing second production process map the
+        # live WAL before it discovers that another bridge owns it.
+        self._inbox = _LazyUpdateInbox(config.inbox_db_path)
+        self._offset = 0
         self._api_url = f"{API_BASE}/bot{config.bot_token}"
         self._file_url = f"{API_BASE}/file/bot{config.bot_token}"
         # The API URL CONTAINS the bot token, and httpx puts the URL in the text
@@ -109,7 +135,12 @@ class TransportMixin(BridgeShared):
         try:
             self._lease.acquire()
         except RuntimeLeaseError:
+            raise
+        try:
+            self._offset = self._inbox.get_offset()
+        except BaseException:
             self._inbox.close()
+            self._lease.release()
             raise
         self._running = True
         timeout = httpx.Timeout(POLL_TIMEOUT + 10.0, connect=15.0)

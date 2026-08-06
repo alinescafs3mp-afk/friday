@@ -1308,3 +1308,518 @@
   cache/work/state equality, connection authorizer или финальной public projection
   обязано независимо красить тест; direct caller DML/DDL и invalid-state reads
   проверяются отдельно.
+
+## 31. Замороженный synthetic gold set для temporal relation ranking
+
+- **Статус:** gold-контракт, критерий и единственный candidate зафиксированы;
+  sealed-прибор manifest v2 прошёл независимую code acceptance (`PASS`). Product
+  acceptance намеренно не завершён: настоящий one-shot latch отсутствует, holdout
+  никогда не запускался.
+- **Граница вопроса:** этот прибор отвечает только на «правильно ли production
+  search ранжирует уже запрошенный снимок». Каждый кейс явно передаёт `as_of` и/или
+  символический `known_at`, который разрешается в настоящий `recorded_at` только
+  после построения одноразовой базы. Умеет ли модель сама выбрать `memory_search` и
+  извлечь 2022 из фразы «кто руководил в 2022», проверяется отдельным E2E-набором.
+  Подмешивать tool-routing в ranking score запрещено. S10b также остаётся отдельным:
+  отсутствующий human-authored handoff нельзя заменить удобной синтетикой.
+- **Набор:** ровно 40 полностью синтетических кейсов, по восемь каждого класса:
+  `valid_time_handover`, `late_known_correction`, `combined_bitemporal`,
+  `two_hop_chain`, `temporal_gap`. В каждом классе первые четыре мира относятся к
+  `calibration`, вторые четыре заранее лежат в `holdout`. Имена, тексты, даты,
+  relation evidence и ожидаемые/запрещённые ID создаются только кодом стенда в
+  throwaway `FRIDAY_HOME`; живые DB, eval cases, переписка и корпус не читаются.
+  Разбиение идёт целыми мирами, а не соседними boundary-вопросами одного мира.
+- **Защита от лёгкого эталона:** target Knowledge Object не повторяет root, query или
+  relation-слова. Каждая explicit relation проходит production review path
+  `candidate -> accepted` и несёт synthetic evidence Knowledge Object с
+  `document_date`. Для положительного кейса заранее заданы expected и forbidden
+  knowledge/entity IDs; для gap — только forbidden. Проверка набора отвергает
+  dangling ID, одинаковые expected/forbidden, неполные пять классов, неверный split,
+  лексическое решение target без графа, implicit `co_occurs_in` и temporal boundary,
+  не совпавшую с замороженной спецификацией.
+- **Baseline:** тот же `HybridSearcher`, что собирает production eval, с рабочими
+  embeddings/reranker при их настройке, `record_usage=false`, одинаковыми weights,
+  pool, depth, threshold и одной scratch DB. Graph включается потому, что boundary
+  задан явно, как в `memory_search`; результат текущего regex в эту руку не входит.
+  Отчёт содержит только synthetic enum/ID, ranks, boolean, агрегаты и длительности;
+  URL, имена моделей, ответы, vectors и rerank scores не публикуются. Любой graph,
+  reranker или snapshot failure делает прогон недействительным, а revision checksum
+  до/после обязан совпасть.
+- **Порядок:** holdout остаётся замороженным кодом. Прибор отказывается его считать,
+  пока один commit не закрепит candidate, manifest v2 и связанные с ним HEAD blobs
+  evaluator/helper. После commit сначала обязаны пройти seal check и calibration,
+  исполненная из committed изолированной проекции; лишь её успешный результат
+  разрешает ровно один paired holdout. Если seal или calibration не приняты,
+  scoring не объявляется принятым и holdout не тратится.
+- **Единственный будущий критерий candidate:** на 20 holdout cases
+  `case_correct@10` означает для positive expected в top-10 и выше каждого forbidden,
+  а для gap отсутствие всех forbidden в top-10. Нужны `wins-losses >= 2`, `losses=0`,
+  expected hits не ниже baseline, forbidden hits не выше, MRR не ниже baseline более
+  чем на 0.01, ноль graph/reranker/snapshot failures и byte-identical non-temporal
+  control. Глобальный graph weight этот набор менять не разрешает: для этого нужен
+  прежний S8 regression set, которого в открытом виде нет.
+- **Мутации:** удаление `as_of`, `known_at`, forbidden-проверки, split-guard,
+  `record_usage=false`, production-searcher factory, revision checksum либо
+  graph/reranker failure accounting обязано красить отдельный тест. Изменение любого
+  frozen case после baseline должно менять manifest digest и аннулировать сравнение.
+- **Пост-baseline приборный контракт:** два production-like прогона calibration
+  воспроизвели один дефект: `case_correct@10=4/20`, expected hit `0/16`, четыре
+  no-answer верны `4/4`, forbidden KO hit `0`, стандартный MRR `0`, infrastructure
+  failures `0`, scratch-структура неизменна. Calibration acceptance отделён от
+  будущего holdout-критерия: валидный прогон принимается только при `correct>=12/20`,
+  expected hits `>=8/16`, no-answer `4/4`, forbidden hits `0` и хотя бы одном
+  правильном positive в каждом из пяти классов. Половина positive и покрытие всех
+  классов нужны, чтобы не тратить holdout на канал, работающий лишь в одном частном
+  сценарии; все negatives сохраняются, потому что ложный исторический факт хуже
+  молчания. Exit `0` означает принятую calibration; `2` — сломанный contract/sealed
+  split, `3` — недействительный infrastructure/snapshot run, `4` — технически
+  валидный замер, отвергнутый по quality. MRR считается как сумма reciprocal rank по
+  всем 16 positive, где miss даёт ноль; среднее только по найденным запрещено.
+- **Read-only диагноз:** expected entity и expected graph candidate найдены `16/16`;
+  candidate во всех 16 случаях query-grounded, имеет published explicit path и
+  положительный graph signal, проходит первичный evidence gate, но затем `16/16`
+  снимается единственной причиной `rerank_below_threshold`. Это не отсутствие
+  temporal truth и не dense/graph outage: текстовый reranker закономерно не видит в
+  намеренно симметричном KO псевдоним запроса и отменяет уже доказанный explicit
+  relation path. Отдельно actual graph context содержит forbidden entity в 4/20,
+  хотя forbidden KO в выдачу не попал; этот долг не маскируется расширением текущего
+  candidate.
+- **Ровно один temporal-only candidate до holdout:**
+  `candidate_id=temporal_explicit_path_bypass_reranker_v1`. В
+  `HybridSearcher.search` при разборе
+  `knowledge_candidates` собрать ID, у которых одновременно задан `as_of` или
+  `known_at`, `query_matched is True` и строковый `path_id`, совпадающий с одним
+  структурно валидным опубликованным `paths`, у которого каждое ребро явно
+  `implicit is False`; наличие такого path в temporal
+  traversal доказывает хотя бы одно accepted explicit relation, потому что implicit
+  co-occurrence при любой temporal boundary уже запрещён. Перед reranker множество
+  пересекается только с той головой фактических кандидатов, которую reranker
+  действительно будет оценивать после evidence/lifecycle/identifier gates:
+  исключённый raw graph candidate или защищённый хвост за `rerank_top` не может
+  отключить проверку остальных. Если
+  пересечение непусто, не применять reranker reorder/confidence-cut к этому запросу
+  и оставить исходный production blend; если пусто — выполнить нынешний код
+  byte-for-byte. Точный diff — добавить closed set опубликованных path ID и один
+  `temporal_explicit_path_grounded` set в цикл кандидатов, затем дополнить условие
+  rerank-блока проверкой пересечения с фактическим `results`; веса, graph score,
+  threshold, classifier и non-temporal путь не менять. До реализации критерий на двух повторных
+  calibration-прогонах: весь post-baseline acceptance выше, `losses=0` относительно
+  четырёх baseline-correct negatives, forbidden hits `0`, infrastructure failures
+  `0`, structure unchanged; отдельная мутация удаления temporal/path guard обязана
+  изменить non-temporal control и покрасить тест. Только после commit точного diff и
+  candidate manifest можно один раз открыть прежний будущий holdout-критерий; сейчас
+  holdout не запускался.
+- **Результат после зафиксированного критерия:** read-only counterfactual оставил
+  production reranker на четырёх gap-кейсах и заменил его identity только для тех 16
+  calibration queries, где предыдущий observer уже доказал тот же
+  `temporal_explicit_path_grounded` predicate. Два независимых scratch-прогона дали
+  одинаково `20/20`, expected hits `16/16`, no-answer `4/4`, forbidden hits `0`,
+  standard MRR `0.875`, uncovered classes `0`, infrastructure failures `0` и
+  unchanged structure; p50 `38.8/42.0 ms`, p95 `58.6/60.3 ms`. Это подтверждает
+  calibration acceptance, но не является реализацией и не расходует holdout.
+- **Результат реализации candidate:** внесён только объявленный guard
+  `temporal + query_matched + published path_id`; weights, threshold, classifier и
+  non-temporal reranking не менялись. Два новых production-like calibration-прогона
+  дали одинаково `20/20`, expected hits `16/16`, no-answer `4/4`, forbidden hits
+  `0`, MRR `0.875`, infrastructure failures `0` и unchanged structure; p50
+  `37.132/37.555 ms`, p95 `55.439/57.779 ms`. Отдельные мутации удаления temporal-
+  и path-guard независимо ломают synthetic non-temporal/pathless controls. После
+  adversarial review guard дополнительно требует exact boolean, explicit non-implicit
+  published path и присутствие защищённого ID именно в `rerank_top`; malformed,
+  excluded и protected-tail controls закреплены тестами. Финальный прогон уже на
+  этом exact diff снова дал `20/20`, MRR `0.875`, все failures `0`, unchanged
+  structure, p50 `36.119 ms`, p95 `51.834 ms`. Код sealed-прибора v2 прошёл
+  независимую acceptance (`PASS`), но этот результат не заменяет product holdout:
+  до commit, повторного seal check и committed calibration он остаётся запечатан.
+  Настоящий one-shot latch отсутствует, holdout никогда не запускался.
+- **Exact-base arm вместо эмуляции:** старое поведение теперь исполняется не
+  wrapper-ом текущего класса, а отдельным `python -I` процессом над `friday/`,
+  извлечённым read-only `git archive` ровно из `dc69b3f`; текущими остаются только
+  замороженный tool и synthetic cases. Model/retrieval allowlist передаётся через
+  stdin, LLM выключен, все home/data/cache/log/state/database пути принудительно
+  лежат в удаляемом scratch, а происхождение каждого загруженного `friday.*`
+  проверяется относительно archive root. Один такой calibration-прогон точно
+  воспроизвёл опубликованный baseline: `4/20`, expected `0/16`, gap `4/4`, forbidden
+  `0`, MRR `0`, reranker calls/applied `17/17`, все failures `0`, полный embedding
+  index и unchanged structure. Будущая paired-рука candidate строится из той же
+  base-копии с наложением только committed `HEAD:friday/retrieval/__init__.py`;
+  отдельные scratch DB строят одинаковые frozen IDs и разрешают одинаковые
+  символические checkpoints в собственные revision stamps до запросов; отчёт
+  связывает руки frozen case IDs. Non-temporal контроль сравнивает byte-identical
+  сериализацию упорядоченных result IDs без динамических timestamps/latency.
+  Runner и acceptance готовы, holdout этим изменением не запускался.
+- **Формат candidate manifest v2:**
+  `tools/temporal_relational_candidate_manifest.json` — один JSON-object version 2
+  с ровно одним `candidate_id`, full SHA base commit, закреплёнными candidate,
+  evaluator и helper paths, SHA256 frozen gold, SHA256 exact binary/full-index Git
+  diff `base..HEAD` только для `friday/retrieval/__init__.py` и SHA256 evaluator и
+  helper blobs именно из HEAD. Seal fail-closed требует, чтобы manifest и все три
+  пути уже находились в HEAD и были чисты, base был предком HEAD, а gold, diff и оба
+  tool blob digest пересчитывались без расхождений. Стейджинг или незакоммиченные
+  candidate/tools не снимают seal.
+- **Изолированное исполнение и одноразовость:** публичный запуск re-exec-ит только
+  два manifest-bound HEAD blob из приватной capability-bound tool projection вне
+  repository и Git common dir; неожиданный файл, symlink, чужие permissions,
+  неверная capability или digest закрывают arm. Перед запуском любой holdout-arm в
+  Git common dir атомарно и durably создаётся one-shot latch, связанный с тем же
+  candidate/gold/evaluator/helper; уже существующий latch запрещает повтор. Текущее
+  принятое состояние — code acceptance `PASS`, реального latch нет и holdout ни
+  разу не запускался. После commit последовательность неизменна: seal check,
+  committed isolated calibration, затем и только затем единственный holdout.
+
+## 32. Entity mention backfill — ограниченная кооперативная работа
+
+- **Статус: ПРИНЯТО после трёх независимых counterexample-review.** Аварийный
+  safety-контракт был зафиксирован до изменения backfill и worker.
+  Production-инцидент показал, что один `run_blocking` с пакетом до 200 документов
+  переживает внешний timeout: Python-поток не отменяется, продолжает держать CPU и
+  SQLite, а следующий рестарт backend уже не гарантирует целостное обслуживание.
+- **Граница безопасности:** один worker-вызов получает малый документный batch и
+  внутренние бюджеты по wall-clock и числу создаваемых links. Бюджет проверяется
+  кооперативно между документами и внутри дорогого цикла кандидатов; внешний timeout
+  остаётся последней страховкой, а не штатным способом остановки. Значения должны
+  быть конечными, положительными и консервативными по умолчанию.
+- **Cursor и возобновление:** progress cursor продвигается только после полностью
+  обработанного документа. Если link/time budget исчерпан посреди документа, уже
+  записанные links остаются как идемпотентный внутренний checkpoint, cursor остаётся
+  перед документом, а следующий bounded-вызов видит ВСЕ прежние статусы и продолжает
+  только отсутствующие пары. Так документ с числом связей больше одного tick-budget
+  всё же завершается, но ни одна непроверенная пара не пропускается.
+- **Privacy и изоляция:** backfill работает только внутри точного `user_id`, не
+  пишет содержимое, имена, aliases или snippets в отчёт/лог и не расширяет
+  существующие visibility predicates. Budget/cursor state содержит только
+  технические счётчики и tenant-local SQLite position; malformed/чужая ссылка не
+  становится основанием продолжить обработку другого tenant.
+- **Структурный результат:** каждый вызов возвращает прежние счётчики плюс явные
+  `budget_exhausted`, `budget_reason`, `cursor` и `has_more`. `budget_exhausted`
+  отличает нормальный кооперативный yield от ошибки; worker немедленно отдаёт
+  управление event loop и продолжает работу только следующим плановым tick, без
+  tight retry и без удержания SQLite после возврата.
+- **Критерии:** synthetic тесты доказывают остановку по времени и links, сохранение
+  безопасного progress незавершённого документа, точное возобновление с него и
+  сохранение rejected/accepted решений за прежним page-limit, продвижение cursor после
+  завершённого документа, tenant isolation и обратную совместимость полного
+  короткого прогона. Worker передаёт малые budgets и публикует только структурные
+  метрики. Мутации удаления внутренней budget-проверки, полного known-status lookup,
+  cursor-after-complete либо `budget_exhausted` обязаны независимо красить тест.
+- **Первый результат — ОТКЛОНЁН независимым review:** worker был включён с лимитами `8 documents / 25 links / <=10 s` на
+  tenant; внутри документа phrase cursor возобновляет страницы за прежним потолком
+  800 без ложного completion. 51 related test и static gate зелёные, cursor mutation
+  красная. Первый просроченный production-тик после безопасного рестарта завершился
+  `ok` за `6.272 s`, без failure/stranded call; backend после него idle, очередь
+  Telegram `0 pending / 0 dead-letter`. Следующий уже штатный tick supervisor в
+  11:36 завершился за `0.483 s`, `consecutive_failures=0`; это подтверждает не
+  только разовый recovery, но и устойчивый периодический режим.
+- **Повторный review — тоже FAIL:** исправленный numeric-spool
+  candidate закрыл cap-800, page-overlap, regex-unit и document-version случаи,
+  однако adversarial проверка нашла три оставшихся blocker: stale entity material
+  между scan/link, orphan spool после crash до primary checkpoint и расхождение
+  bounded halo с online matching на больших token gaps.
+- **Принятый результат:** содержимое читается только bounded UTF-8 страницами через
+  SQLite blob I/O; character и byte cursors возобновляют phrase/exact/token работу
+  без повторного чтения префикса. Candidate/present/winner/validation spool хранит
+  только числовые позиции и authority, атомарен с primary checkpoint и по страницам
+  удаляет старые, orphan и завершённые namespace. Любое продолжение перепроверяет
+  document version, entity ID+version и keyed process-local validation authority:
+  подделанный persisted progress или рестарт процесса запускает повторную bounded
+  валидацию, а не разрешает ссылку. Fast phrase path дополнен полным literal fallback
+  для всего принятого canonical-domain до 240 символов, включая >12 токенов,
+  односимвольные токены, внутреннюю/внешнюю пунктуацию и sentence-final dot без
+  ложного совпадения dotted identifier prefix. Ни полный текст, ни unbounded
+  `COUNT(*)`, ни имена/aliases/snippets в durable progress не попадают.
+- **Финальная приёмка:** 54/54 focused последовательно и canonical static PASS;
+  независимые full-DB punctuation/dotted controls 11/11, exact-domain 4/4, cleanup
+  candidate/present/winner/validation 520/520 с нулевым остатком, fuzz token
+  boundaries 250/250, phrase resume 300/300 и exact windows 200/200. Подтверждены
+  cooperative material/time/link bounds, malformed checkpoint recovery, version/ID
+  binding, tenant isolation и сохранение терминальных accepted/rejected решений.
+
+## 33. Single-pass validation патологического privacy closure
+
+- **Статус:** один measurable candidate зафиксирован до изменения product-кода;
+  только полностью синтетическая throwaway SQLite, без чтения live DB, переписки,
+  логов, имён, identity material или конфигурации владельца.
+- **Воспроизведение:** усиленный pathological стенд содержит 4 500 current entities,
+  4 500 их аутентифицированных version snapshots, 1 500 независимых Raw и 1 500 KO.
+  Последняя установка одного durable private-owner расширяет ID closure по цепочке
+  на все 4 500 сущностей. Baseline: поздний commit `51.821 s`, отдельный live entity
+  closure `13.353 s`, отдельная derivative authority `34.874 s`, cold reopen
+  `161.944 s`. Значения зависят от CPU и намеренно не сравниваются с прежними
+  `7.648/22.080 s` как абсолютные; структурный диагноз воспроизводим.
+- **Доказанный bottleneck:** `EXPLAIN QUERY PLAN` показывает повторную материализацию
+  `closure_material_states`, `closure_identity_tokens` и recursive step. Один rebuild
+  вызвал `54 000 000` `jericho_private_identity_match`; cold reopen — ровно
+  `162 000 000`, а identity-token UDF соответственно `72 000/216 000`. Причина:
+  rebuild уже записывает exact live result в обе staging/public пары, после чего
+  startup-validator ещё дважды раскрывает live entity/derivative VIEW в двух сторонах
+  symmetric difference. То есть reopen платит за три полных fixed point, а не за
+  дополнительную дешёвую проверку опубликованного результата.
+- **Ровно один candidate:** `fresh_rebuild_work_validation_v1`. Вызов validator,
+  следующий непосредственно за успешным code-owned rebuild в той же
+  `BEGIN IMMEDIATE`, обязан проверять shape/allowlist/state и для каждого только что
+  пересобранного tier — symmetric equality `work == cache`, но не строить его live
+  VIEW повторно. Это не доверие старому cache: work перед проверкой очищен и целиком
+  заполнен одним exact current + authenticated-history fixed point, cache опубликован
+  из этого work, persistent guards не дают поставить `valid=1` при их расхождении, а
+  write-lock исключает внешний source race. Tier, который этот caller не пересобрал,
+  сохраняет прежнюю независимую проверку `cache == live`; в частности derivative-only
+  heal не может легализовать подменённую пару entity work/cache.
+- **Критерий до реализации:** на том же стенде cold reopen должен вызвать не более
+  `1.2x` UDF-вызовов одного позднего rebuild и занять не более `0.45x` baseline,
+  поздний commit не должен ухудшиться более чем на 10%. Все 4 500 entity IDs и все
+  ожидаемые Raw/KO derivative IDs остаются byte-for-byte тем же exact множеством;
+  malformed/current/history, rollback, external invalidation и authorizer tests
+  зелёные. Synthetic regression считает UDF только как структурную метрику, без
+  вывода аргументов; мутация удаления fresh-rebuild режима хотя бы на одном startup
+  call site обязана вернуть повторный live closure и покрасить guard.
+- **Результат:** на неизменном усиленном стенде поздний commit остался `51.770 s`
+  против baseline `51.821 s`, cold reopen сократился до `48.615 s`, то есть
+  `0.3002x` baseline. Cold и один write rebuild вызвали ровно одинаковые
+  `54 000 000` identity-match и `72 000` identity-token UDF (`1.0x/1.0x`), все
+  4 500 entity и 3 000 Raw/KO authority tuples до/после byte-for-byte равны.
+  Focused suite: `17 passed`, соседняя privacy-матрица `79 passed`; Ruff clean.
+  Независимое удаление fast-mode из cold migration и schema-ready repair дважды
+  покрасило synthetic guard: `4 608` вызовов вместо `1 536`, ровно `3x`. Третья
+  мутация, ошибочно объявившая entity tier свежим после derivative-only rebuild,
+  покрасила fail-closed тест на counterfeit work/cache; все мутации восстановлены.
+  Редкий writer остаётся отдельным P1: его измеренный остаток — `54M`
+  identity-match в derivative rebuild; этот candidate намеренно не меняет matching
+  semantics или depth.
+
+## 34. Prepared identity prefilter для pathological privacy writer
+
+- **Статус:** отдельный measurable candidate зафиксирован до изменения следующего
+  product diff. Стенд полностью synthetic/throwaway; live DB, конфигурация,
+  переписка и логи владельца не читаются.
+- **Оставшийся bottleneck:** после single-pass startup поздний owner flip на
+  усиленной цепочке 4 500 current + 4 500 authenticated snapshots и 1 500 Raw/KO
+  занимает `51.770 s`. Из них отдельный entity closure — `13.353 s`, derivative
+  authority — `34.874 s` и ровно `54 000 000` вызовов
+  `jericho_private_identity_match`. Это не recursive-depth cliff: одни и те же
+  bounded Raw/KO scalars и private names заново NFC-normalize/casefold на каждой
+  паре object × identity.
+- **Read-only counterfactual:** на уменьшенной, но той же по форме цепочке
+  1 000 current + 1 000 authenticated snapshots / 300 Raw+KO production derivative
+  VIEW дал `1.5619 s`, `2 400 000` boundary-match UDF и 600 public IDs. Подготовленный
+  SQL, включая время materialization, дал те же 300 Raw + 300 KO за `0.1645 s` и
+  ноль boundary UDF: NFC/casefold каждого private name и каждого проверяемого scalar
+  вычислялся один раз, built-in `instr` отсеивал невозможные пары, а прежний exact
+  boundary matcher оставался последней проверкой только для substring candidates.
+- **Ровно один candidate:** `prepared_derivative_identity_prefilter_v1`. Только
+  global derivative rebuild получает connection-local TEMP/rebuild CTE с
+  `(id, name, folded_name)` из прежнего exact cached closure и подготовленные
+  folded Raw/KO scalar и bounded JSON-leaf values. ID сохраняет консервативный
+  исходный substring predicate. Human identity сначала обязана целиком встретиться
+  в обоих NFC→casefold→NFC scalars через `instr`; только после этого вызывается
+  прежний boundary matcher над исходными значениями. NULL JSON root key явно не
+  кандидат, text values/не-NULL keys сохраняют прежнюю проверку. Hot per-ID triggers,
+  invalid-state all-entity fallback, current/authenticated-history token source,
+  byte/node budgets, ordering Raw → Knowledge/hidden → Inbox и persistent schema не
+  меняются; folded text живёт только в TEMP памяти соединения и не попадает в DB/WAL.
+- **Критерий до реализации:** на полном усиленном стенде late commit не более
+  `0.55x` от `51.770 s`, derivative identity-match не более `0.05x` от `54M`, exact
+  entity/Raw/KO authority tuples совпадают с baseline. Cold остаётся одним rebuild,
+  ordinary managed batch не ухудшается более чем на 10%. Unicode NFC/NFD/case,
+  numeric-boundary, ID substring, current/history aliases, JSON value/key,
+  malformed/oversized и rollback/external-heal regressions зелёные. Мутации удаления
+  folded substring gate и NULL-key gate независимо обязаны покрасить synthetic
+  structural UDF guard либо exact JSON privacy case.
+- **Предреализационная проверка:** adversarial synthetic 161 Raw / 160 KO покрыл
+  current/history identity, alias NFC/NFD/case, numeric/underscore boundary, ID
+  substring, JSON text value/key, nested-encoded и malformed. Candidate и production
+  дали exact symmetric difference `0/0`, совпавшие digests и только 120 финальных
+  boundary-match. На полном 4 500+4 500 history / 1 500 Raw+KO production owner flip
+  в повторе занял `49.221 s` и те же `54M` match. Candidate derivative вместе с
+  materialization занял `3.752 s` (`0.050 s` preparation + `3.702 s` scan), вызвал
+  ноль boundary UDF и дал exact Raw/KO sets/digest, difference `0`. С отдельно
+  измеренным entity closure `13.353 s` прогноз полного write — `17.105 s`, или
+  `0.3304x` от зафиксированного `51.770 s`. Это read-only SQL counterfactual, не
+  реализация; до отдельного checkpoint product/tests не менялись.
+
+## 35. OfficeStructureIndex v1: точный состав Office-документа принадлежит коду
+
+- **Статус: OPEN, только дизайн.** Немедленное восстановление persisted-вложения в
+  продолжении разговора и attachment-aware verifier реализуются отдельно в текущем
+  цикле. Eligible native evidence получает bounded verifier и при failed допускает
+  один repair. Если для count/all-запроса неполны context, parser coverage или
+  verification eligibility, результат принудительно UNKNOWN и repair не запускается.
+  Ceiling повторяется по финальному тексту после repair и узнаёт answer-only
+  exhaustiveness (`N позиций`, `только`, `полный состав`, `и всё`); immediate
+  follow-up про повторный подсчёт/перечисление rehydrate точный persisted source.
+  Это не создаёт структурный инвентарь Office и не закрывает предложение.
+- **Полностью synthetic воспроизведение:** DOCX-таблица и XLSX-лист с одинаковыми
+  16 строками извлеклись без потери: оба результата содержали 16 из 16 стабильных
+  маркеров, и после штатной сборки/подгонки prompt все 16 остались видимы. Значит
+  для малого целого вложения недобор нельзя объяснить самим context window:
+  генеративной модели дали плоский текст и доверили доказать полноту, которой в её
+  выходном контракте нет.
+- **Дополнительный структурный диагноз:** нынешний DOCX-текст сначала складывает
+  все body paragraphs, затем все tables, поэтому чередование paragraph → table →
+  paragraph в источнике меняет порядок. У строки нет ID, координат ячеек и роли
+  header/record/footer; merged cell повторяется по grid-колонкам; runs теряют
+  форматную роль. XLSX сохраняет значения строк, но `rows_read` не равен числу
+  позиций и не доезжает до модели. Это не обязательно потеря символов, но этого
+  достаточно, чтобы «16 строк» осталось зрительной догадкой модели, а не фактом
+  системы.
+- **Главный инвариант первой версии:** `DocumentResult.text` остаётся byte-for-byte
+  прежним. Никаких row labels, JSON или служебных разделителей в `raw_content`;
+  следовательно, не меняются extracted-text hash, dedup, FTS, embeddings, ranking
+  и уже сложившаяся семантика нового корпуса. Структура едет отдельным bounded
+  индексом, привязанным к hash ровно того текста, на который ссылаются spans.
+- **Минимальная схема `OfficeStructureIndex v1`:** `schema_version`, `format`,
+  `text_sha256`, общий `complete`, `coverage`, ordered `blocks`, `record_sets` и
+  `candidate_refs`. Paragraph block несёт стабильный ordinal ID, `source_order`,
+  style, общий `text_span` и run spans с минимальными форматными признаками. Table
+  block несёт table ID, source order и строки; у каждой строки есть ordinal row ID,
+  исходный номер, роль и cells с column/coordinate и text spans. Индекс хранит
+  преимущественно числа и enum, а literal values восстанавливаются из
+  `raw_content`; копировать имена и содержимое ячеек в metadata нельзя.
+- **Порядок без изменения текста:** DOCX builder обходит `iter_inner_content` и
+  записывает настоящий `source_order`, но spans указывают на прежние части
+  неизменённого плоского текста. Prompt renderer сортирует blocks по source order и
+  берёт значения по spans. XLSX сохраняет sheet index/title, visibility, source row
+  и column coordinate. Структура, чей `text_sha256` не совпал с текущим текстом,
+  отбрасывается fail-closed, а не применяется к похожему содержимому.
+- **Record set, а не `rows_read`:** таблица получает authoritative
+  `records_total` только при структурно понятной шапке и однозначной области
+  записей. Header, пустая строка, subtotal/footer и data row различаются. Для
+  неоднозначной таблицы сохраняются literal rows и кандидаты, но record count
+  остаётся неизвестным: лучше честно не обещать «всех», чем точно посчитать не ту
+  сущность. Несколько sheets/tables получают отдельные record-set IDs; глобальная
+  сумма допустима только по явно совместимым наборам.
+- **Детерминированные entity candidates — отдельный prompt inventory, не граф.** Если
+  заголовок однозначно объявляет person-column, каждая непустая data-cell этой
+  колонки становится row-scoped literal candidate независимо от формы имени. Для
+  свободного текста regex запускается внутри одного paragraph/cell и не имеет права
+  склеивать соседние строки. Candidate содержит ordinal ID, type, record/cell/span
+  evidence и basis, но не получает права автоматически создать или принять graph
+  entity. Нынешние review/noise caps переиспользовать нельзя: на отдельном synthetic
+  16-row варианте детектор увидел 16 двухсловных person candidates, а общий
+  per-method cap оставил 8 — разумно для review UI, неприемлемо для слова «все».
+- **Prompt contract:** Office-вложение передаётся как один
+  `FRIDAY_ATTACHMENT_DATA` JSON user-data block, а не как сырой текст внутри
+  XML-подобной рамки. Renderer расходует бюджет только целыми records/blocks и
+  всегда публикует `records_total`, `records_emitted`, `candidates_total`,
+  `candidates_emitted`, `complete_for_prompt` и причины omissions. Произвольный
+  substring-cut JSON запрещён. Текст ячейки остаётся недоверенными данными и не
+  может изменить статические правила.
+- **Exact count/list принадлежит коду:** при вопросе «сколько позиций» число берётся
+  из authoritative record set; при «перечисли все» код рендерит все record IDs в
+  source order. Модель может написать вводную или объяснение, но не определяет
+  состав множества. Если внутренний model path возвращает selected IDs, validator
+  требует известные уникальные IDs, согласованный count и exact expected set;
+  пропуск, дубликат и выдуманный ID ведут к deterministic render либо repair, а не
+  к выдаче. Для semantic filter полнота может называться доказанной только когда
+  predicate тоже code-owned; свободная классификация модели остаётся явно
+  вероятностной.
+- **Разные честные числа:** `position_records`, `person_mentions` и
+  `unique_normalized_person_values` не сливаются. В synthetic наборе из 16 строк с
+  одним повтором система обязана сказать «16 позиций» и отдельно «15 различных
+  literal values», не превращая нормализацию строки в identity resolution.
+- **Границы coverage:** первая версия индексирует только то, что уже присутствует
+  в неизменённом `raw_content`. Nested tables, headers/footers, text boxes и formula
+  cells без cached result нельзя молча объявлять прочитанными; обнаружение любой
+  такой области ставит соответствующий coverage reason и снимает `complete`.
+  Исправление самого извлечения, backfill старых файлов и изменение corpus text —
+  отдельный этап с собственным измерением hashes/ranking. Vision/OCR/transcript не
+  наследуют native Office completeness и остаются advisory.
+- **Acceptance:** два synthetic 16-row носителя дают по 16 unique row IDs, 16
+  emitted records и 16 row-scoped candidates; interleaved DOCX сохраняет настоящий
+  block order; split runs дают один literal value; merged header не становится
+  несколькими records; повтор даёт `positions=16`, `unique=15`; весь structured
+  prompt сохраняет 16 из 16; bounded неполный prompt сообщает emitted/total и не
+  употребляет «все»; `DocumentResult.text` и digest до/после byte-identical;
+  persisted index не содержит literal cell text, а no-save индекс не попадает в
+  storage.
+- **Обязательные мутации:** потеря `source_order`, row/cell ID, hash binding,
+  record role, whole-record budget, coverage reason или candidate evidence должна
+  независимо красить тест. Подмена prompt inventory общим graph-suggestion list
+  обязана воспроизвести 8 вместо synthetic 16 и упасть. Fake model с count 15,
+  пятнадцатью IDs, duplicate ID или неизвестным ID не должен попасть человеку.
+  Добавление row labels в `text` обязано покрасить digest-invariance; копирование
+  literal values в metadata — privacy regression; `complete=true` после любого
+  declared omission — coverage regression.
+
+## 36. Живой backend сам диагностирует свою SQLite
+
+- **Статус: ПРИНЯТО после независимого adversarial review.** Контракт был записан
+  после повторного SIGBUS до исправления.
+  2026-08-06 в 15:44 старый backend снова завершился `status=7/BUS`; systemd
+  восстановил его через шесть секунд. Core в этой установке не сохранился, kernel
+  не сообщил I/O/OOM/hardware error, поэтому точную инструкцию падения доказать
+  нельзя. Единственным дополнительным процессом, достоверно открывавшим тот же WAL
+  в ближайшем окне, был `jericho status --json --check-llm`: три последовательных
+  `mode=ro` SQLite connection для integrity/counts, worker state и auth failures.
+  Это не доказательство причинности, но после уже подтверждённого SIGBUS внутри
+  `libsqlite3`/`-shm` отдельный mmap живого WAL не имеет эксплуатационного смысла:
+  работающий владелец connection уже отдаёт те же diagnostics по loopback API.
+- **Граница:** если process lease подтверждает живой backend, CLI/TUI не открывают
+  основную SQLite ни read-write, ни `mode=ro`. Они получают diagnostics у backend
+  по локальному authenticated API; secret-hygiene остаётся отдельным filesystem
+  scan и добавляется к полученному отчёту. Если API не отвечает при активном lease,
+  результат fail-closed `degraded`: нельзя ради более подробной диагностики делать
+  тот самый второй SQLite-open, безопасность которого проверяется.
+- **Offline-совместимость:** когда lease действительно неактивен, прежняя
+  read-only диагностика остаётся доступной и не создаёт/не мигрирует базу. Admin
+  endpoint передаёт уже открытый `storage` и никогда не проксирует сам в себя.
+  Bridge queue — отдельная SQLite и не становится authority состояния основной БД.
+- **Acceptance:** synthetic active-lease test подменяет каждый offline main-DB
+  reader исключением и доказывает, что успешный API-report проходит без них;
+  недоступный API при том же lease тоже не вызывает ни одного main-DB reader и
+  возвращает явное действие. Inactive lease сохраняет прежний offline path.
+  Secret findings добавляются без значений и заново вычисляют state. Мутации
+  fallback-to-SQLite при active lease и self-proxy при переданном `storage`
+  независимо обязаны красить тест.
+- **Результат:** отрицательная pre-inspection больше не является полномочием открыть
+  SQLite: внешний процесс удерживает тот же OS-backed backend/bridge lease на всём
+  offline-read окне, а проигрыш гонки переводит его только в local API либо
+  fail-closed report. Переданный caller-ом `storage` принимается напрямую лишь у
+  фактического владельца backend lease. Loopback target доказан numeric host-local,
+  proxy и redirects запрещены, ответ связан с PID lease и lease перепроверяется
+  после чтения. Secret scan исключает main/queue SQLite, WAL/SHM/journal/lease и их
+  текущие hardlink-inodes даже для raw `open(2)`. Admin overview/settings/diagnostics
+  целиком, включая authorization и integrity/count queries, выполняются вне event
+  loop; bridge не открывает queue до lease и умеет безопасно закрыть/reopen lazy
+  handle. Независимая проверка: `140` focused PASS, Ruff/mypy/Bandit/diff-check PASS.
+
+## 37. Проверка секретов не имеет слепой зоны по размеру и порядку обхода
+
+- **Статус: ПРИНЯТО после независимого adversarial review.** Safety-контракт был
+  записан до исправления. После удаления четырёх
+  лишних копий одного live credential повторный scan сообщил ноль находок, но
+  остановился на старом пределе `4 000`: ещё `493` подходящих малых файла вообще
+  не были открыты, а `58` уже встреченных файлов крупнее 1 МиБ были только
+  посчитаны. Значит «чисто» описывало порядок `os.walk`, а не заявленные корни.
+- **Ровно один candidate:** `bounded_streaming_secret_scan_v1`. Кандидаты сначала
+  ограниченно собираются и сортируются так, чтобы все малые файлы проверялись до
+  крупных независимо от порядка каталогов; предел путей поднимается выше
+  измеренного дерева. Крупные файлы читаются chunks с overlap не короче самого
+  длинного искомого значения минус один байт и общим byte budget. Один inode
+  читается один раз, но при находке каждый hardlink-path остаётся отдельной
+  экспозицией: дополнительное имя файла само является дополнительной дорогой
+  утечки.
+- **Fail-honest:** file-count cap, исчерпанный byte budget, неполностью прочитанный
+  крупный файл и unreadable regular file обязаны давать
+  `secret_scan_incomplete`; ни один из этих случаев не может выглядеть как полный
+  чистый scan. Значения credential не входят ни в report, ни в action, ни в тестовый
+  вывод. Symlink не разыменовывается; configured protected path проверяется только
+  по permissions и не становится собственной экспозицией, а иной hardlink к его
+  inode остаётся кандидатом.
+- **Acceptance:** synthetic secret находится после прежней границы 4 000, в
+  крупном файле и на границе двух chunks; hardlink физически читается один раз и
+  сообщает оба пути; byte budget детерминированно оставляет явный incomplete
+  report. На текущих корнях scan завершает все малые подходящие файлы либо честно
+  называет оставшийся предел. Мутации возврата skip-large, удаления overlap,
+  подавления budget-warning и path-alias обязаны независимо красить тесты.
+- **Результат:** предел поднят до 20 000 путей, но traversal сам дополнительно
+  ограничен числом metadata entries и fail-honest сообщает отрезанные каталоги;
+  synthetic secret найден на реальном пути №4495. Protected reads входят в общий
+  256 МиБ budget, используют bounded no-follow descriptor, а `excluded` сильнее
+  любого пересечения/hardlink и повторно связывает inode поздно появившегося
+  WAL/SHM до первого content read. Midstream I/O сохраняет уже потраченные bytes и
+  не перечитывает inode через alias. Exact bytes ищутся без UTF-8 round-trip;
+  credential вычищается даже из attacker-controlled secret label и pathname.
+  Любой traversal/read/budget failure теперь доходит до diagnostics warning вместо
+  молчаливого исчезновения scanner. Независимая проверка: `71` focused PASS,
+  Ruff/format/mypy/Bandit/diff-check PASS; отдельные mutation-прогоны покрасили
+  large-file skip, chunk overlap, hardlink projection и excluded-inode boundary.

@@ -51,8 +51,20 @@ def _knowledge(storage, text: str = "Atlas production notes") -> str:
 
 
 class _SnapshotGraph:
-    def __init__(self, knowledge_id: str) -> None:
+    def __init__(
+        self,
+        knowledge_id: str,
+        *,
+        candidate_path_id: object | None = "path_0",
+        candidate_query_matched: object = True,
+        candidate_score: float = 0.9,
+        path_implicit: object | None = False,
+    ) -> None:
         self.knowledge_id = knowledge_id
+        self.candidate_path_id = candidate_path_id
+        self.candidate_query_matched = candidate_query_matched
+        self.candidate_score = candidate_score
+        self.path_implicit = path_implicit
         self.calls: list[dict] = []
 
     def context_for_query(self, user_id, query, **kwargs):
@@ -102,7 +114,7 @@ class _SnapshotGraph:
                         "target": f"ent_{index + 1}",
                         "type": "depends_on",
                         "weight": 0.8,
-                        "implicit": False,
+                        **({"implicit": self.path_implicit} if self.path_implicit is not None else {}),
                         "valid_from": "2020-01-01",
                         "valid_to": "",
                         "created_at": "2020-01-02T00:00:00+00:00",
@@ -135,9 +147,10 @@ class _SnapshotGraph:
             "knowledge_candidates": [
                 {
                     "knowledge_object_id": self.knowledge_id,
-                    "score": 0.9,
-                    "query_matched": True,
+                    "score": self.candidate_score,
+                    "query_matched": self.candidate_query_matched,
                     "evidence": [{"path_id": "path_0"}],
+                    **({"path_id": self.candidate_path_id} if self.candidate_path_id is not None else {}),
                 }
             ],
             "raw_document_body": "must never leave retrieval",
@@ -186,6 +199,124 @@ async def test_search_returns_the_same_bounded_temporal_graph_snapshot(storage):
     assert "secret" not in whole_response
     assert result["entity_matches"] == context["nodes"][:5]
     assert "metadata_json" not in json.dumps(result["entity_matches"], ensure_ascii=False)
+
+
+async def test_temporal_explicit_path_is_not_vetoed_by_text_only_reranking(storage):
+    """An accepted explicit temporal path is stronger than a text-only veto.
+
+    Mutation: dropping the temporal guard makes the current query bypass the
+    reranker too; dropping the published-path guard makes the pathless query do
+    so. Both controls below must remain empty.
+    """
+
+    knowledge_id = _knowledge(storage, "Atlas archive fact")
+    rerank_calls = 0
+
+    async def reject_everything(_query, items):
+        nonlocal rerank_calls
+        rerank_calls += 1
+        return [{**item, "_rerank_score": 0.001} for item in items]
+
+    searcher = HybridSearcher(
+        storage,
+        record_usage=False,
+        reranker=reject_everything,
+        rerank_top=20,
+        rerank_confident_min=0.10,
+    )
+
+    temporal = await searcher.search(
+        "alice",
+        "Atlas",
+        kg=_SnapshotGraph(knowledge_id),
+        as_of="2024-03-05",
+    )
+    assert [item["id"] for item in temporal["results"]] == [knowledge_id]
+    assert rerank_calls == 0
+
+    current = await searcher.search("alice", "Atlas", kg=_SnapshotGraph(knowledge_id))
+    assert current["results"] == []
+    assert rerank_calls == 1
+
+    untrusted_candidates = (
+        _SnapshotGraph(knowledge_id, candidate_path_id=None),
+        _SnapshotGraph(knowledge_id, candidate_path_id="path-not-published"),
+        _SnapshotGraph(knowledge_id, candidate_path_id=True),
+        _SnapshotGraph(knowledge_id, candidate_query_matched="truthy-but-not-attested"),
+        _SnapshotGraph(knowledge_id, path_implicit=True),
+        _SnapshotGraph(knowledge_id, path_implicit=None),
+    )
+    for graph in untrusted_candidates:
+        untrusted = await searcher.search(
+            "alice",
+            "Atlas",
+            kg=graph,
+            as_of="2024-03-05",
+        )
+        assert untrusted["results"] == []
+    assert rerank_calls == 1 + len(untrusted_candidates)
+
+
+async def test_an_excluded_temporal_path_cannot_disable_reranking_for_other_results(storage):
+    """The bypass belongs to a returned candidate, never a discarded graph row."""
+
+    protected_id = _knowledge(storage, "BRK.B protected historical row")
+    _knowledge(storage, "BRK.A eligible current row")
+    rerank_calls = 0
+
+    async def reject_everything(_query, items):
+        nonlocal rerank_calls
+        rerank_calls += 1
+        return [{**item, "_rerank_score": 0.001} for item in items]
+
+    searcher = HybridSearcher(
+        storage,
+        record_usage=False,
+        reranker=reject_everything,
+        rerank_top=20,
+        rerank_confident_min=0.10,
+    )
+    result = await searcher.search(
+        "alice",
+        "BRK.A",
+        kg=_SnapshotGraph(protected_id),
+        as_of="2024-03-05",
+    )
+
+    assert result["results"] == []
+    assert rerank_calls == 1
+
+
+async def test_a_protected_tail_cannot_disable_reranking_for_the_head(storage):
+    """A path beyond rerank_top cannot be vetoed, so it grants no global bypass."""
+
+    protected_id = _knowledge(storage, "historical graph-only tail")
+    eligible_id = _knowledge(storage, "Atlas eligible lexical head")
+    rerank_calls = 0
+
+    async def reject_head(_query, items):
+        nonlocal rerank_calls
+        rerank_calls += 1
+        return [{**item, "_rerank_score": 0.001} for item in items]
+
+    searcher = HybridSearcher(
+        storage,
+        record_usage=False,
+        reranker=reject_head,
+        rerank_top=1,
+        rerank_confident_min=0.10,
+    )
+    result = await searcher.search(
+        "alice",
+        "Atlas eligible",
+        kg=_SnapshotGraph(protected_id, candidate_score=0.21),
+        as_of="2024-03-05",
+        limit=2,
+    )
+
+    assert rerank_calls == 1
+    assert [item["id"] for item in result["results"]] == [protected_id]
+    assert eligible_id not in {item["id"] for item in result["results"]}
 
 
 class _LightweightGraph:

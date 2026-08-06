@@ -18,10 +18,11 @@ are slow or fail.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
-from friday.secret_hygiene import MAX_FILE_BYTES, MIN_SECRET_LENGTH, named_secrets, scan
+from friday.secret_hygiene import MAX_FILE_BYTES, MAX_FILES, MIN_SECRET_LENGTH, named_secrets, scan
 
 TOKEN = "7891234567:AAH-realistic-looking-bot-token-value"
 API_KEY = "sk-" + "z" * 40
@@ -108,6 +109,18 @@ def test_a_copy_of_the_backup_key_is_found_by_its_value(tmp_path):
     assert key_file not in {exposure.path for exposure in report.exposures}
 
 
+def test_non_utf8_protected_key_bytes_are_matched_losslessly(tmp_path):
+    key_file = tmp_path / "backup.key"
+    key_material = b"\xff" * 32
+    key_file.write_bytes(key_material)
+    copy = tmp_path / "backup-key-copy.bin"
+    copy.write_bytes(key_material)
+
+    report = scan([tmp_path], secrets={}, protected=[key_file])
+
+    assert [item.path for item in report.exposures] == [copy]
+
+
 def test_a_backup_of_the_env_file_is_still_an_extra_copy(tmp_path):
     """`.env.local.bak.*` holds the same live credential and is one more place to lose
     it from. Found in practice on this machine, left by an earlier edit."""
@@ -126,6 +139,98 @@ def test_overlapping_roots_report_each_file_once(tmp_path):
 
     report = scan([tmp_path, inner], secrets={"FRIDAY_TELEGRAM_BOT_TOKEN": TOKEN})
     assert len(report.exposures) == 1
+
+
+def test_excluded_live_artifact_is_never_opened(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    live = tmp_path / "live.sqlite3"
+    ordinary = tmp_path / "ordinary.txt"
+    live.write_text(TOKEN, encoding="utf-8")
+    ordinary.write_text("ordinary", encoding="utf-8")
+    original = hygiene._scan_regular_file
+
+    def forbidden(candidate, *args, **kwargs):
+        assert candidate.path != live, "an excluded live artifact was opened"
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(hygiene, "_scan_regular_file", forbidden)
+
+    report = scan([tmp_path], secrets={"T": TOKEN}, excluded=[live])
+
+    assert report.exposures == []
+    assert report.files_scanned == 1
+
+
+def test_a_hardlink_to_an_excluded_live_inode_is_also_never_opened(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    live = tmp_path / "live.sqlite3"
+    alias = tmp_path / "innocent-name.txt"
+    live.write_text(TOKEN, encoding="utf-8")
+    os.link(live, alias)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("an excluded live inode was opened through a hardlink")
+
+    monkeypatch.setattr(hygiene, "_scan_regular_file", forbidden)
+
+    report = scan([tmp_path], secrets={"T": TOKEN}, excluded=[live])
+
+    assert report.exposures == []
+    assert report.files_scanned == 0
+
+
+def test_excluded_boundary_overrides_a_protected_hardlink(tmp_path, monkeypatch):
+    """`excluded` is the live-DB boundary even if a caller also marks an alias protected."""
+    import friday.secret_hygiene as hygiene
+
+    live = tmp_path / "live.sqlite3"
+    protected_alias = tmp_path / "configured-secret"
+    live.write_text(TOKEN, encoding="utf-8")
+    os.link(live, protected_alias)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("an excluded inode was opened through protected")
+
+    monkeypatch.setattr(hygiene, "_read_protected_value", forbidden)
+
+    report = scan(
+        [tmp_path],
+        secrets={"T": TOKEN},
+        protected=[protected_alias],
+        excluded=[live],
+    )
+
+    assert report.exposures == []
+    assert report.loose_permissions == []
+    assert report.files_scanned == 0
+
+
+def test_an_excluded_sidecar_appearing_after_discovery_excludes_its_inode(tmp_path, monkeypatch):
+    """A WAL/SHM absent at scan start may appear before candidate files are opened."""
+    import friday.secret_hygiene as hygiene
+
+    candidate = tmp_path / "candidate.bin"
+    live = tmp_path / "live.sqlite3-wal"
+    candidate.write_text(TOKEN, encoding="utf-8")
+    original_collect = hygiene._collect_candidates
+
+    def collect_then_create_sidecar(*args, **kwargs):
+        collected = original_collect(*args, **kwargs)
+        os.link(candidate, live)
+        return collected
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("a newly excluded inode was opened through an earlier alias")
+
+    monkeypatch.setattr(hygiene, "_collect_candidates", collect_then_create_sidecar)
+    monkeypatch.setattr(hygiene, "_scan_regular_file", forbidden)
+
+    report = scan([tmp_path], secrets={"T": TOKEN}, excluded=[live])
+
+    assert report.exposures == []
+    assert report.files_scanned == 0
 
 
 def test_a_protected_file_is_judged_on_its_permissions(tmp_path):
@@ -169,20 +274,216 @@ def test_only_credential_shaped_variables_are_treated_as_secrets():
     assert set(picked) == {"FRIDAY_API_TOKEN", "FRIDAY_LLM_API_KEY", "FRIDAY_TELEGRAM_BRIDGE_SECRET"}
 
 
-def test_large_files_are_skipped_rather_than_read(tmp_path):
-    """Bounded by design: doctor is run when something is already wrong.
-
-    But a skip that leaves no trace reads as coverage it never had: a big file
-    is not an unusual place for a leaked secret to end up (a config dump, a
-    log, an exported profile), and `report.clean` said nothing about it.
-    """
+def test_large_files_are_streamed_instead_of_skipped(tmp_path):
+    """A config dump or log is a normal place for a copied credential to land."""
     big = tmp_path / "huge.bin"
     big.write_bytes(b"." * (MAX_FILE_BYTES + 1024) + TOKEN.encode())
 
     report = scan([tmp_path], secrets={"T": TOKEN})
+    assert [item.path for item in report.exposures] == [big]
+    assert report.files_scanned == 1
+    assert report.oversized_skipped == 0
+    assert report.complete is True
+
+
+def test_a_secret_crossing_a_stream_chunk_boundary_is_found(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    monkeypatch.setattr(hygiene, "SCAN_CHUNK_BYTES", 64)
+    prefix = b"." * (64 - len(TOKEN.encode()) // 2)
+    boundary = tmp_path / "boundary.bin"
+    boundary.write_bytes(prefix + TOKEN.encode() + b"tail")
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert [item.path for item in report.exposures] == [boundary]
+
+
+def test_hardlinks_are_read_once_but_every_path_is_reported(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text(TOKEN, encoding="utf-8")
+    os.link(first, second)
+    original = hygiene._scan_regular_file
+    reads: list[str] = []
+
+    def counted(*args, **kwargs):
+        reads.append(args[0].path.name)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(hygiene, "_scan_regular_file", counted)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert {item.path for item in report.exposures} == {first, second}
+    assert len(reads) == 1
+    assert report.hardlink_aliases == 1
+    assert report.files_scanned == 2
+
+
+def test_a_midstream_read_error_cannot_retry_a_hardlink_or_escape_the_budget(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    first = tmp_path / "first.bin"
+    second = tmp_path / "second.bin"
+    first.write_bytes(b"." * 64)
+    os.link(first, second)
+    original_read = hygiene.os.read
+    physical_bytes = 0
+    successful_reads = 0
+    injected = False
+
+    def fail_after_one_chunk(descriptor, amount):
+        nonlocal physical_bytes, successful_reads, injected
+        if successful_reads == 1 and not injected:
+            injected = True
+            raise OSError("synthetic midstream failure")
+        chunk = original_read(descriptor, amount)
+        physical_bytes += len(chunk)
+        successful_reads += 1
+        return chunk
+
+    monkeypatch.setattr(hygiene, "SCAN_CHUNK_BYTES", 8)
+    monkeypatch.setattr(hygiene, "MAX_SCAN_BYTES", 16)
+    monkeypatch.setattr(hygiene.os, "read", fail_after_one_chunk)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert physical_bytes == report.bytes_scanned == 8
+    assert report.hardlink_aliases == 1
+    assert report.files_not_fully_scanned == 2
+    assert report.unreadable_skipped == 2
+    assert report.complete is False
+
+
+def test_small_files_are_scanned_before_large_files_under_the_byte_budget(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    large = tmp_path / "a-large.bin"
+    small = tmp_path / "z-small.txt"
+    large.write_bytes(b"." * (MAX_FILE_BYTES + 1))
+    small.write_text(TOKEN, encoding="utf-8")
+    monkeypatch.setattr(hygiene, "MAX_SCAN_BYTES", len(TOKEN.encode()))
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert [item.path for item in report.exposures] == [small]
+    assert report.files_scanned == 1
+    assert report.byte_budget_exhausted is True
+    assert report.files_not_fully_scanned == 1
+    assert report.clean is False
+
+
+def test_byte_budget_exhaustion_is_explicit(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    (tmp_path / "one.bin").write_bytes(b"." * 64)
+    (tmp_path / "two.bin").write_bytes(b"." * 64)
+    monkeypatch.setattr(hygiene, "MAX_SCAN_BYTES", 32)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
     assert report.exposures == []
-    assert report.files_scanned == 0
-    assert report.oversized_skipped == 1
+    assert report.bytes_scanned == 32
+    assert report.byte_budget_exhausted is True
+    assert report.files_not_fully_scanned == 2
+    assert report.complete is False
+    assert report.clean is False
+
+
+def test_measured_working_tree_fits_the_file_bound():
+    """The former 4,000 cap missed 493 measured eligible small files."""
+    assert MAX_FILES > 4_493
+
+
+def test_a_secret_after_the_measured_4493_path_boundary_is_reached(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    seed = tmp_path / "ordinary-seed"
+    seed.write_bytes(b"")
+    ordered_paths = []
+    for index in range(4_494):
+        alias = tmp_path / f"ordinary-{index:04d}"
+        os.link(seed, alias)
+        ordered_paths.append(alias)
+    stray = tmp_path / "stray-after-old-bound.txt"
+    stray.write_text(TOKEN, encoding="utf-8")
+    ordered_paths.append(stray)
+
+    def candidates(_roots, *, report):
+        del report
+        yield from ordered_paths
+
+    monkeypatch.setattr(hygiene, "_candidate_files", candidates)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert [item.path for item in report.exposures] == [stray]
+    assert report.files_scanned == 4_495
+    assert report.stopped_early is False
+
+
+def test_file_count_exhaustion_is_explicit(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    (tmp_path / "one.txt").write_text("ordinary", encoding="utf-8")
+    (tmp_path / "two.txt").write_text("ordinary", encoding="utf-8")
+    monkeypatch.setattr(hygiene, "MAX_FILES", 1)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert report.stopped_early is True
+    assert report.complete is False
+    assert report.clean is False
+
+
+def test_entry_flood_hits_a_fail_honest_metadata_bound(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    for index in range(3):
+        (tmp_path / f"directory-{index}").mkdir()
+    monkeypatch.setattr(hygiene, "MAX_WALK_ENTRIES", 2)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert report.discovery_limit_exhausted is True
+    assert report.complete is False
+    assert report.clean is False
+
+
+def test_an_unreadable_directory_makes_coverage_incomplete(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    ordinary = tmp_path / "ordinary.txt"
+    ordinary.write_text("ordinary", encoding="utf-8")
+    original_open = hygiene.os.open
+
+    def deny_one_directory(path, flags, *args, **kwargs):
+        if Path(path) == blocked:
+            raise PermissionError("synthetic directory denial")
+        return original_open(path, flags, *args, **kwargs)
+
+    if hygiene.os.scandir in hygiene.os.supports_fd:
+        monkeypatch.setattr(hygiene.os, "open", deny_one_directory)
+    else:
+        original_scandir = hygiene.os.scandir
+
+        def deny_one_scandir(path):
+            if Path(path) == blocked:
+                raise PermissionError("synthetic directory denial")
+            return original_scandir(path)
+
+        monkeypatch.setattr(hygiene.os, "scandir", deny_one_scandir)
+
+    report = scan([tmp_path], secrets={"T": TOKEN})
+
+    assert report.files_scanned == 1
+    assert report.traversal_errors == 1
+    assert report.complete is False
 
 
 def test_an_oversized_protected_file_is_not_counted_twice(tmp_path):
@@ -196,6 +497,37 @@ def test_an_oversized_protected_file_is_not_counted_twice(tmp_path):
     report = scan([tmp_path], secrets={"T": TOKEN}, protected=[protected])
 
     assert report.oversized_skipped == 1
+
+
+def test_an_unreadable_protected_secret_source_is_fail_honest(tmp_path, monkeypatch):
+    import friday.secret_hygiene as hygiene
+
+    protected = tmp_path / "backup.key"
+    protected.write_text("k" * 64, encoding="utf-8")
+
+    def unreadable(*_args, **_kwargs):
+        raise OSError("synthetic read failure")
+
+    monkeypatch.setattr(hygiene.os, "read", unreadable)
+
+    report = scan([tmp_path], secrets={}, protected=[protected])
+
+    assert report.unreadable_skipped == 1
+    assert report.files_not_fully_scanned == 1
+    assert report.complete is False
+    assert report.clean is False
+
+
+def test_attacker_controlled_path_and_label_cannot_echo_the_secret(tmp_path):
+    stray = tmp_path / f"copy-{API_KEY}.txt"
+    stray.write_text(API_KEY, encoding="utf-8")
+
+    report = scan([tmp_path], secrets={f"credential-{API_KEY}": API_KEY})
+
+    assert len(report.exposures) == 1
+    assert API_KEY not in repr(report)
+    assert API_KEY not in str(report.exposures[0].path)
+    assert API_KEY not in report.exposures[0].secret_name
 
 
 def test_an_unreadable_file_does_not_stop_the_scan(tree):
@@ -236,11 +568,13 @@ def test_a_failing_scan_never_breaks_diagnostics(settings, monkeypatch):
     from friday.diagnostics import collect_diagnostics
 
     def explode(*_args, **_kwargs):
-        raise OSError("permission denied")
+        raise OSError(f"permission denied near {TOKEN}")
 
     monkeypatch.setattr("friday.secret_hygiene.scan", explode)
     report = collect_diagnostics(settings, check_secrets=True)
     assert "actions" in report and isinstance(report["actions"], list)
+    assert "secret_scan_unavailable" in {action["code"] for action in report["actions"]}
+    assert TOKEN not in repr(report["actions"])
 
 
 def test_an_incomplete_scan_says_so_instead_of_looking_clean(settings, monkeypatch):
@@ -266,6 +600,54 @@ def test_an_incomplete_scan_says_so_instead_of_looking_clean(settings, monkeypat
 
     assert warnings, "a scan that skipped files must say so, not just report clean"
     assert "3" in warnings[0]["detail"]
+
+
+def test_a_byte_limited_scan_reaches_diagnostics(settings, monkeypatch):
+    from friday.diagnostics import collect_diagnostics
+    from friday.secret_hygiene import Report
+
+    def byte_limited_scan(*_args, **_kwargs):
+        return Report(
+            exposures=[],
+            loose_permissions=[],
+            files_scanned=4,
+            stopped_early=False,
+            files_not_fully_scanned=2,
+            byte_budget_exhausted=True,
+        )
+
+    monkeypatch.setattr("friday.secret_hygiene.scan", byte_limited_scan)
+
+    actions = collect_diagnostics(settings, check_secrets=True)["actions"]
+    warnings = [action for action in actions if action["code"] == "secret_scan_incomplete"]
+
+    assert len(warnings) == 1
+    assert "2" in warnings[0]["detail"]
+    assert "МиБ" in warnings[0]["detail"]
+
+
+def test_a_metadata_limited_scan_reaches_diagnostics(settings, monkeypatch):
+    from friday.diagnostics import collect_diagnostics
+    from friday.secret_hygiene import Report
+
+    def metadata_limited_scan(*_args, **_kwargs):
+        return Report(
+            exposures=[],
+            loose_permissions=[],
+            files_scanned=4,
+            stopped_early=False,
+            traversal_errors=2,
+            discovery_limit_exhausted=True,
+        )
+
+    monkeypatch.setattr("friday.secret_hygiene.scan", metadata_limited_scan)
+
+    actions = collect_diagnostics(settings, check_secrets=True)["actions"]
+    warnings = [action for action in actions if action["code"] == "secret_scan_incomplete"]
+
+    assert len(warnings) == 1
+    assert "пределе обхода" in warnings[0]["detail"]
+    assert "2 каталог" in warnings[0]["detail"]
 
 
 def test_a_complete_scan_says_nothing_about_completeness(settings, monkeypatch):

@@ -14,6 +14,7 @@ from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from friday.api.deps import _audit, _json_load, _require
+from friday.api.projections import public_file_record, public_ingestion_receipt
 from friday.file_delivery import (
     AuthorizedFileReadError,
     FileRecordUnavailable,
@@ -51,7 +52,14 @@ async def upload_file(
         result.get("raw_object_id"),
         after={"filename": file.filename, "size_bytes": len(content)},
     )
-    return result
+    return public_ingestion_receipt(
+        result,
+        file=True,
+        include_resource_id=True,
+        storage=request.app.state.storage,
+        resource_user_id=actor.user_id,
+        resource_owner_id=actor.own_id,
+    )
 
 
 @router.get("", tags=["files"])
@@ -71,8 +79,13 @@ async def list_files(
     items = []
     for row in rows:
         item = dict(row)
-        item["metadata"] = _json_load(item.pop("metadata_json", "{}"), {})
-        items.append(item)
+        metadata = _json_load(item.get("metadata_json", "{}"), {})
+        items.append(
+            public_file_record(
+                item,
+                metadata if isinstance(metadata, dict) else {},
+            )
+        )
     return {"items": items, "count": len(items)}
 
 

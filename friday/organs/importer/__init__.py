@@ -390,7 +390,11 @@ def _router() -> APIRouter:
                     # The review gate is absolute for bulk material: an import is
                     # an explicit action, but each ITEM still awaits the user.
                     force_review=True,
-                    metadata={"import_kind": kind_label, "filename": str(file.filename or "")},
+                    metadata={
+                        "import_kind": kind_label,
+                        "filename": str(file.filename or ""),
+                        "uploaded_by": actor.own_id,
+                    },
                 )
             except IdempotencyConflictError:
                 conflicts += 1

@@ -55,20 +55,16 @@
 
 Здесь не «сделать», а «выбрать». Пока выбора нет, работа стоит честно.
 
-### 1.1. Автор у 3298 накопленных документов
+### ~~1.1. Автор у накопленных документов~~ — ЗАКРЫТО 2026-08-06
 
-Механизм заведён и работает **вперёд**: `friday/api/ingest.py:36`,
-`friday/api/files.py:37`, `friday/server.py:2036` пишут `uploaded_by`. Но 3295
-документов из 3296 приняты до этого и метки не несут.
-
-Выбор: приписать их владельцу (это неправда — архив общий, учёток 11) или
-оставить пустыми (тогда они навсегда вне надзора «кто что принёс»).
-Моё предложение: оставить пустыми, а надзору говорить прямо — «принято до того,
-как система начала записывать автора». В админке такая строка уже есть
-(`admin_ui/static/app.js:109`).
-
-Хвост независимо от решения: два пути приёма (CLI-импорт и орган-импортёр)
-метку не ставят до сих пор.
+Историческим строкам автор не выдумывается: отсутствие метки честно означает
+«принято до появления контракта». Все восемь нынешних дорог приёма теперь пишут
+один `uploaded_by`: семь аутентифицированных путей — точный `actor.own_id`, а
+дисковый CLI-импорт — явный `--uploaded-by` либо JSON `null`. Tenant общего
+архива автором не считается, повторный импорт старую строку задним числом не
+переписывает. Полный AST-переучёт вызовов и runtime-матрица с различными
+person/tenant закрепляют не наличие слова в модуле, а значение на каждом Raw
+Object; мутация `own_id -> user_id` красит соответствующую дорогу.
 
 ### 1.2. Файл из Telegram и `/api/files` идёт в знания без ревью
 
@@ -120,14 +116,23 @@ S10b (#71) — точность незаякоренного `_RELATIONAL_QUERY_
 учётными данными hysteria2 (mode 600), юниты, `install.sh`. Владелец от установки
 отказался неделю назад. Либо стереть, либо решить хранить осознанно.
 
-### 1.8. Bi-temporal рёбра в ранжировании — нужен золотой набор
+### 1.8. Bi-temporal рёбра в ранжировании — SEALED-ПРИБОР V2 CODE-ACCEPTED; HOLDOUT НЕ ЗАПУЩЕН
 
-Transaction-time инфраструктура уже сделана: append-only relation revisions и
-`known_at` выбирают воспроизводимый снимок от storage до Agent Runtime. Это
-исправляет данные, но **не разрешает менять ranking-веса**. Против «графа вперёд»
-есть число (recall@10 0.35 → 0.15), а за временной сигнал числа нет ни за, ни
-против. Нужен набор реляционно-временных вопросов («кто командовал в 2024») ДО
-правки scoring, иначе замерить будет нечем.
+Заморожены 40 полностью синтетических temporal-relational cases, split целыми
+мирами: 20 calibration и 20 sealed holdout. Baseline воспроизвёл дефект `4/20`:
+все 16 expected graph candidates доходили до text-only reranker и снимались им.
+Единственный заранее объявленный candidate защищает только exact
+query-grounded, structurally published, non-implicit temporal path внутри
+фактического rerank-slice; веса, classifier и non-temporal путь не менялись.
+Три production-like calibration-прогона после реализации дали `20/20`, MRR
+`0.875`, no-answer `4/4`, forbidden hits `0`, infrastructure failures `0`.
+Manifest v2 связывает exact candidate diff, frozen gold и evaluator/helper blobs
+из HEAD; запуск идёт из приватной capability-bound изолированной проекции, а
+атомарный durable latch расходует попытку до запуска любой руки. Код и seal-контракт
+прошли независимую acceptance (`PASS`), но product acceptance ещё не завершён:
+реального latch нет, holdout никогда не запускался. После commit обязательны
+успешные seal check и committed isolated calibration; только затем разрешён один
+paired holdout.
 
 ### 1.9. «Решения» как первоклассная запись — ни кода, ни отказа
 
@@ -153,6 +158,18 @@ identity authority. Нужна отдельная owner-only destructive capabil
 явную backup/export retention policy и через code-owned maintenance path атомарно
 пересобирает cache/work/state с проверкой `cache == live closure`. До такого решения
 quarantine остаётся монотонным на обычных mutation paths.
+
+### 1.11. Перевыпустить внешний web-search credential у провайдера
+
+Четыре лишние локальные копии одного действующего cloud web-search credential
+удалены безвозвратно 2026-08-06; active configuration и runtime data не тронуты,
+повторный прежний exact-value scan в проверенной части находок не показал (его
+file/size coverage gap закрывается тем же релизом). Локальное удаление не отзывает уже
+скомпрометированное значение: владелец должен перевыпустить/отозвать его в кабинете
+провайдера и затем штатно обновить единственный protected env-файл. Значение, прежние
+пути и содержимое файлов в репозиторий/отчёт не записываются. Этот внешний шаг не
+блокирует code release, но privacy-инцидент нельзя считать полностью закрытым до
+ротации.
 
 ---
 
@@ -263,8 +280,9 @@ DDL; verified backups есть с обеих сторон миграции. Эт
   и класс реален — но 5–7 дней работы против нулевой наблюдаемой частоты не
   окупаются. Вернуться, если появится хоть один живой случай; замер повторяется
   одним запросом по `messages`.
-* **Grok №4 — дедуп выдачи СДЕЛАН 2026-08-05, операторы и окно свежести
-  остались.** Претензия подтвердилась замером, но оказалась про другое: зеркала —
+* **Grok №4 — дедуп, строгий `site` и fail-closed `freshness` СДЕЛАНЫ
+  2026-08-06; `lang` / `region` / списки доменов остались.** Претензия
+  подтвердилась замером, но оказалась прежде всего про другое: зеркала —
   не разные сайты, а ОДИН сайт на нескольких местах. Десять живых запросов по
   восемь результатов: в девяти из десяти домен занимал два места и больше, 21
   «лишний» результат из 80. Канонизация адреса (схема, `www.`, `utm_*`, якорь,
@@ -272,8 +290,21 @@ DDL; verified backups есть с обеих сторон миграции. Эт
   потолок «не больше двух мест одному сайту» с добором отброшенных в конец, чтобы
   узкий вопрос не схлопывал выдачу. Контроль на ОДНОМ сыром ответе провайдера:
   слотов сверх потолка 10 → 0, разных доменов в первой пятёрке 37 → 42 из 50, ни
-  одна выдача не стала короче.
-  Осталось: поисковые операторы (`site:`, кавычки) и окно свежести.
+  одна выдача не стала короче. Строгие `site` и
+  `freshness=day|week|month|year` теперь объявлены в закрытой схеме инструмента и
+  валидируются до квоты/провайдера. Brave и Serper получают свои нативные окна,
+  Tavily — `include_domains`/`time_range`, Yandex — документированный
+  `date:>YYYYMMDD`; кавычки исходного запроса сохраняются. Brave HTML, DuckDuckGo
+  HTML и Wikipedia не умеют доказанно соблюдать именно публикационную свежесть и
+  отказываются до сети: цепочка пробует следующий адаптер, а если способного нет,
+  `web_surfer` поднимает структурный `freshness_unavailable`; существующий kernel
+  переводит его в обычный явный `search_failed`, никогда не в старую выдачу без
+  предупреждения.
+  Ответ дополнительно фильтруется по exact/subdomain hostname, поэтому
+  проигнорированный провайдером оператор не выпускает чужой домен и не мешает
+  fallback. В append-only audit домен остаётся только как keyed `site_ref`, в
+  логи не попадает. Контракт закреплён полностью синтетическими provider-stub
+  тестами, включая мутацию удаления финального site-filter (ожидаемый FAIL).
 * **Grok №5 — квота и пауза СДЕЛАНЫ 2026-08-05, robots.txt остался.** Потолка не
   было вовсе. Размер взят замером на живом архиве, а не из головы: пик 135
   вызовов веб-инструментов на человека за сутки, медиана по человеко-дням 76 —
@@ -330,23 +361,60 @@ DDL; verified backups есть с обеих сторон миграции. Эт
   совпадают — «тест, мокающий место дефекта»), и сторож на класс обрывал строку
   на `reviewed_by=getattr(actor` до слова `user_id`. Обе проверки переписаны и
   подтверждены мутацией.
-* **P1: pathological dependency closure держит writer/startup секунды.** Это цена
-  корректности, а не privacy bypass: на синтетической цепочке 4 500 сущностей /
-  1 500 Knowledge Objects поздно расширяющий closure commit занял `7.648 s`, cold
-  reopen с rebuild/validation — `22.080 s`. Hot read cliff отдельно закрыт ID-only
-  authority: на sparse 4 500/1 500/15 Raw point `0.074 ms`, search20 `151 ms`,
-  Inbox list/count `0.96/0.41 ms`, обычный ingest `27 ms`. Atomicity и fail-closed
-  сохраняются; открытым остаётся именно редкий pathological write/cold start, и его
-  оптимизация обязана сохранить current + authenticated-history семантику без depth
-  cap либо неполного cache.
+* **P1: pathological dependency closure всё ещё держит редкий writer секунды; cold
+  triple rebuild ЗАКРЫТ 2026-08-06.** Исходный стенд 4 500 сущностей / 1 500 KO дал
+  `7.648 s` на поздний closure commit и `22.080 s` на reopen. Усиленный повтор с
+  4 500 authenticated snapshots доказал причину структурно: validator после exact
+  rebuild дважды заново раскрывал те же live views, поэтому cold делал ровно `3x`
+  identity UDF. Fresh tier теперь валидируется по атомной паре work/cache, untouched
+  tier по-прежнему независимо сверяется с live. На усиленном стенде reopen сократился
+  `161.944 -> 48.615 s` (`0.3002x`), UDF `3x -> 1x`, authority tuples совпали точно;
+  commit не изменился (`51.821 -> 51.770 s`). Hot read cliff ранее закрыт ID-only
+  authority: sparse Raw point `0.074 ms`, search20 `151 ms`, Inbox `0.96/0.41 ms`,
+  ingest `27 ms`. Открыт только сам pathological write: `54M` identity-match в
+  derivative rebuild. Его следующая оптимизация также обязана сохранить current +
+  authenticated-history семантику без depth cap или неполного cache.
 * **Надзор «вижу своих, а не всех»** доехал не до всех дорог.
-* **SIGBUS живого экземпляра 2026-08-05 00:22:29** — упал внутри libsqlite3,
-  адрес обращения внутри отображения `jericho.sqlite3-shm`, в ту минуту по той же
-  базе шёл проход `retag-documents --apply` вторым процессом. База уцелела,
-  служба поднялась через 19 секунд. `PRAGMA persist_wal` не лечит — такой прагмы
-  в SQLite нет вовсе, неизвестные молча игнорируются (проверено исполнением).
-  Лечение — не пускать пишущие проходы в живую базу молча: датчик
-  `live_service_heartbeat_age()` уже есть.
+* ~~**SIGBUS живого экземпляра при втором процессе на WAL**~~ — **ЗАКРЫТО
+  2026-08-06 ПОСЛЕ НЕЗАВИСИМОГО REVIEW.** Первое падение 2026-08-05 произошло в
+  `libsqlite3`/отображении `-shm`, пока второй процесс писал той же базой. Повтор
+  2026-08-06 снова дал `status=7/BUS`; core не сохранился и kernel не сообщил
+  I/O/OOM/hardware error, но в том же окне внешний `status --check-llm` трижды
+  открывал live WAL read-only, включая полный integrity check. Причинность второго
+  случая недоказуема, зато второй mmap не даёт ничего, чего уже не знает владелец
+  connection, поэтому сама поверхность удалена.
+  При active backend CLI получает snapshot у локального authenticated API; отказ
+  API означает degraded без SQLite fallback. Offline reader держит тот же OS lease
+  на всём окне DB/worker/auth snapshots, а bridge queue — свой lease; проигравший
+  гонку не открывает WAL. Переданный `storage` не является доказательством
+  владения. Secret scan не делает даже raw-open main/queue DB, WAL/SHM/journal и
+  их hardlink-inodes. Admin overview/settings/diagnostics целиком вынесены с event
+  loop, а bridge открывает queue только после lease. Независимо прошли 140 focused,
+  Ruff, mypy и Bandit; после принятого кода release-blocker снят.
+* **Неотменяемый `entity_mention_backfill` переживал timeout и останавливал
+  обслуживание** — ЗАКРЫТО 2026-08-06 ПОСЛЕ ТРЁХ REVIEW. Перед повторным `status=7/BUS` supervisor
+  уже видел оставшийся от прошлого запуска blocking call: `asyncio.to_thread`
+  отменяет ожидающую coroutine, но не Python-поток, который продолжал грузить CPU
+  и обращаться к SQLite. Поэтому рестарт без убийства всего cgroup оставлял ту же
+  работу в процессе, Telegram ждал, а следующий tick правильно отказывался запускать
+  дубль. Первая bounded-реализация была отклонена независимым review: теряла 801-ю
+  сущность, нарушала longest-first между страницами, не ограничивала regex-unit и
+  имела version TOCTOU. Вторая также не принята: повторный review нашёл stale
+  entity-material TOCTOU, orphan secondary-spool после crash и расхождение с
+  online-semantics на больших token gaps. Принятый repair сохраняет внешние пределы
+  `8 documents / 25 links / <=10 s`, читает content bounded UTF-8 blob-страницами,
+  возобновляет character+byte cursors, связывает spool с document version и entity
+  ID+version, а process-local keyed authority не позволяет persisted checkpoint самому
+  себя авторизовать после рестарта. Полный literal fallback покрывает canonical
+  material до 240 символов, включая пунктуацию и sentence-final dot. Финальный
+  независимый прогон: 54/54 focused, cleanup 520/520, fuzz 250+300+200, static PASS.
+  Внешний timeout 300 s остаётся последним предохранителем, а не штатным механизмом.
+* **Online `inflected_mentions` прекращает сбор после 5000 spans** — OPEN. Новый
+  backfill выбирает longest-first по полному bounded token-window и этой ошибки не
+  наследует, но старый синхронный helper всё ещё может не увидеть позднее длинное имя,
+  если первые 5000 позиций заняты более коротким. Нужен отдельный измеримый contract:
+  сохранять ограничение вывода 500 spans, не позволяя порядку entity-list определять
+  победителя после внутреннего collect-limit.
 
 ---
 
@@ -386,6 +454,30 @@ DDL; verified backups есть с обеих сторон миграции. Эт
   логах за окно нет ни строки `LLM call` и ни одной ошибки.
 * **Сортировка чанкового отбора** отложена «до живой модели». Модель есть неделю.
 * **Пять находок веера 2026-07-28** остались непроверенными, выдача потеряна.
+
+### 6.1. OfficeStructureIndex v1 и code-owned полный список — OPEN
+
+Полностью synthetic DOCX/XLSX с 16 строками проходят нынешний extractor и prompt
+как 16 из 16, но дальше таблица становится плоским текстом без row IDs,
+authoritative record count и проверяемого множества ответа. Отдельный synthetic
+вариант показывает вторую границу: 16 literal person candidates могут превратиться
+в 8 после graph-oriented per-method cap, который нельзя использовать для слова
+«все».
+
+Немедленные continuity для persisted-вложения и attachment-aware verifier
+реализованы отдельно. Eligible native evidence получает bounded verifier и при
+failed допускает один repair; если для count/all-запроса неполны context, parser
+coverage или verification eligibility, результат принудительно UNKNOWN и repair
+не запускается. Тот же deterministic ceiling повторяется после repair и узнаёт
+exhaustiveness в самом ответе (`N позиций`, `только`, `полный состав`, `и всё`),
+даже если исходный вопрос не содержал слова «все». Immediate follow-up про повторный
+подсчёт/перечисление восстанавливает точный persisted source, а не отвечает по
+предыдущему частичному пересказу. Это не создаёт `OfficeStructureIndex` и не закрывает пункт.
+Остаётся Proposal 35: отдельный content-free span/index при
+byte-identical `raw_content`, ordered paragraphs/runs/tables/sheets/rows/cells,
+row-scoped candidates без graph caps, явные coverage totals/reasons и code-owned
+count/list с exact ID-set validation. Пока индекс не реализован, неизвестные,
+непоместившиеся или неразбираемые области Office нельзя называть полным документом.
 
 ---
 
@@ -427,6 +519,20 @@ DDL; verified backups есть с обеих сторон миграции. Эт
 ---
 
 ## Что закрыто и больше не висит
+
+* ~~Неподтверждённое досье при виде `человек` и нулевых источниках~~ — ЗАКРЫТО
+  2026-08-06. Нерелевантный `user_model` больше не считается evidence; названное
+  non-account имя сохраняет обычный поиск по архиву, а при нуле Knowledge/entity/
+  person-tool/attachment/graph evidence модельное тело вместе с file/voice/
+  attribution carriers отбрасывается до persistence. Пять новых регрессий и 127
+  смежных person/grounding/citation тестов прошли независимый review.
+* ~~Persisted-вложение терялось на естественном follow-up, а incomplete count мог
+  стать verified после repair~~ — ЗАКРЫТО 2026-08-06. Exact uploader/capability и
+  immutable source pointer перепроверяются каждый ход; common repeat-count/list
+  continuation rehydrate исходный файл, sticky private-lineage блокирует outbound
+  и глобальное обучение, verifier/repair видят один 24k slice до последнего знака,
+  а answer-only exhaustiveness получает UNKNOWN и до, и после repair. Независимый
+  adversarial review: 124 focused PASS. Сам OfficeStructureIndex остаётся OPEN в §6.1.
 
 Проверено на HEAD и вычеркнуто из прежних списков: разбор очереди связей,
 вид документа как факт, отбор тегов (служебные слова, имена, корпусная частота,

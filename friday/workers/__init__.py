@@ -636,8 +636,9 @@ class WorkersManager:
         self.supervisor.register(
             "entity_mention_backfill",
             self._entity_mention_backfill_all,
-            # Раз в четверть часа: обход возобновляемый и берёт по двести документов,
-            # так что архив в полторы тысячи закрывается за пару часов без нагрузки.
+            # Раз в четверть часа: каждый вызов сам кооперативно ограничен временем,
+            # восемью документами и 25 links, поэтому внешний timeout не используется
+            # как штатный способ остановить неотменяемый Python thread.
             900.0,
             run_immediately=False,
             timeout_sec=300,
@@ -805,9 +806,14 @@ class WorkersManager:
         )
 
     async def _entity_mention_backfill_all(self) -> None:
-        await self._for_each_user(self._entity_mention_backfill)
+        # ``run_blocking`` uses a thread which an asyncio timeout cannot cancel.
+        # Divide a conservative inner budget between tenants so the thread returns
+        # cooperatively long before the supervisor's five-minute last-resort guard.
+        tenants = max(1, len(await self._tenants()))
+        share = max(1.0, min(10.0, 120.0 / tenants))
+        await self._for_each_user(functools.partial(self._entity_mention_backfill, max_seconds=share))
 
-    async def _entity_mention_backfill(self, user_id: str) -> None:
+    async def _entity_mention_backfill(self, user_id: str, *, max_seconds: float = 10.0) -> None:
         """Догнать старые документы уже существующими сущностями.
 
         Связи ставятся только при разборе, поэтому сущность, родившаяся поздно, к
@@ -815,7 +821,13 @@ class WorkersManager:
         «имя в тексте, связи нет» на 645 документах — это и есть главная причина, по
         которой граф не растёт.
         """
-        report = await run_blocking(self.storage.backfill_entity_mentions, user_id)
+        report = await run_blocking(
+            self.storage.backfill_entity_mentions,
+            user_id,
+            max_documents=8,
+            max_seconds=max_seconds,
+            max_links=25,
+        )
         if report.get("linked"):
             LOGGER.info(
                 "entity mentions backfilled: %d links over %d documents",

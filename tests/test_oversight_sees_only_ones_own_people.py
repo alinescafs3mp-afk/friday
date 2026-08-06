@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 
 import pytest
@@ -29,6 +30,7 @@ from friday.oversight_scope import (
     supervisor_of,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
+from friday.storage.models import RawObject, new_id
 from friday.web_surfer import WebSurfer
 
 OWNER = LEGACY_OWNER_USER_ID
@@ -38,6 +40,20 @@ def _hire(storage, user_id: str, *, supervisor: str = "", name: str = "") -> Non
     metadata = {"supervisor_id": supervisor} if supervisor else {}
     storage.ensure_user(user_id, preset_key="owner", display_name=name or user_id)
     storage.update_user(user_id, metadata_json=metadata, display_name=name or user_id)
+
+
+def _arrival_without_author(storage, user_id: str, content: str) -> None:
+    storage.store_raw_object(
+        RawObject(
+            id=new_id("raw"),
+            user_id=user_id,
+            source="test",
+            source_ref=new_id("source"),
+            raw_content=content,
+            content_type="text",
+            content_hash=hashlib.sha256(content.encode()).hexdigest(),
+        )
+    )
 
 
 @pytest.fixture
@@ -145,3 +161,24 @@ def test_the_tool_still_serves_ones_own_people(settings, company) -> None:
     # `confidence`) убраны — модель пересказывала их человеку дословно.
     assert not result.data.get("denied"), result.data
     assert result.data.get("человек") == "Первый", result.data
+
+
+def test_nameless_arrivals_are_counted_in_the_targets_archive(settings, company) -> None:
+    """Оговорка о неизвестном авторе относится к подчинённому, не начальнику."""
+
+    _arrival_without_author(company, "boss", "Первый документ начальника")
+    _arrival_without_author(company, "boss", "Второй документ начальника")
+    assert company.arrivals_without_an_author("boss") == 2
+    assert company.arrivals_without_an_author("worker_a") == 0
+
+    auth = AuthorizationService(company)
+    graph = KnowledgeGraph(company)
+    core = ExecutionKernel(auth, settings)
+    core.bind_services(company, graph, WebSurfer(settings), IngestionPipeline(settings, company, graph))
+    actor = auth.actor_for_user("boss", source="test")
+
+    result = asyncio.run(core.execute("user_activity", {"person": "Первый"}, actor=actor))
+
+    wording = str(result.data.get("про загруженные материалы") or "")
+    assert "все загрузки помечены авторами" in wording, result.data
+    assert "2 материалов без отметки" not in wording, result.data

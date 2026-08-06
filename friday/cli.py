@@ -668,8 +668,21 @@ def _import(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+        uploaded_by = str(args.uploaded_by or "").strip() or None
+        if uploaded_by is not None and uploaded_by != user_id and storage.get_user(uploaded_by) is None:
+            print(
+                f"Аккаунт автора загрузки не найден: {uploaded_by}. "
+                "Создайте его или не передавайте --uploaded-by, чтобы честно записать автора неизвестным.",
+                file=sys.stderr,
+            )
+            return 2
         pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
         print(f"Импорт в аккаунт {user_id}. Всё уходит в Inbox на ваше подтверждение.\n")
+        if uploaded_by is None:
+            print(
+                "Автор загрузки неизвестен: uploaded_by будет записан как null. "
+                "Если человек известен, повторите с --uploaded-by ACCOUNT_ID.\n"
+            )
 
         def progress(index: int, total: int, outcome: Outcome) -> None:
             if outcome.status == "failed":
@@ -680,7 +693,14 @@ def _import(args: argparse.Namespace) -> int:
 
         try:
             outcomes = asyncio.run(
-                run_import(pipeline, user_id, plan, on_progress=progress, stop_after=args.limit)
+                run_import(
+                    pipeline,
+                    user_id,
+                    plan,
+                    uploaded_by=uploaded_by,
+                    on_progress=progress,
+                    stop_after=args.limit,
+                )
             )
         except KeyboardInterrupt:
             # Content-hash idempotency means a re-run resumes; say so rather than
@@ -2442,6 +2462,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     importer.add_argument("path", help="Directory (or single file) to import")
     importer.add_argument("--user", help="Target account (default: the only one, if there is one)")
+    importer.add_argument(
+        "--uploaded-by",
+        help=(
+            "Account id of the person who brought the files; omitted is stored as unknown "
+            "and is never inferred from --user"
+        ),
+    )
     importer.add_argument(
         "--dry-run", action="store_true", help="Show what would be imported and write nothing"
     )

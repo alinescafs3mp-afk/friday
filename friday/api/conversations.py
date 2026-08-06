@@ -7,11 +7,13 @@ router. ``tests/test_route_inventory.py`` pins the published contract.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from friday.api.deps import _json_load, _parse_json_bool, _request_json, _require
+from friday.api.projections import is_public_opaque_id, public_conversation_message
 from friday.storage import normalize_conversation_mode
 
 router = APIRouter(prefix="/api/conversations", tags=["chat"])
@@ -20,6 +22,25 @@ router = APIRouter(prefix="/api/conversations", tags=["chat"])
 # but a multi-year chat should not dump unbounded rows into memory. The file
 # header always states when the window is the last N of a longer history.
 EXPORT_MESSAGE_LIMIT = 500
+_PUBLIC_ANSWER_MODES = frozenset(
+    {"general_conversation", "mixed", "personal_knowledge", "personal_knowledge_missing", "structural"}
+)
+_PUBLIC_TRACE_STATUSES = frozenset({"below_limit", "discarded", "returned"})
+_PUBLIC_TRACE_REASONS = frozenset(
+    {"deleted", "deprecated_weak", "identifier_mismatch", "insufficient_evidence", "rerank_below_threshold"}
+)
+
+
+def _public_probability(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return round(max(0.0, min(1.0, parsed)), 6)
 
 
 def _resolve_conversation_ref(request: Request, actor: Any, conversation_id: str) -> str:
@@ -92,16 +113,80 @@ async def channel_answer_diagnostics(
         raise HTTPException(status_code=404, detail="Пока нет ответа для объяснения")
     metadata = _json_load(latest.get("metadata_json"), {})
     metadata = metadata if isinstance(metadata, dict) else {}
+    knowledge_cache: dict[str, dict[str, Any] | None] = {}
+
+    def resolve_knowledge(value: Any) -> tuple[str, dict[str, Any]] | None:
+        if not is_public_opaque_id(value, "ko"):
+            return None
+        if value not in knowledge_cache:
+            knowledge_cache[value] = storage.get_knowledge_object(value, actor.user_id)
+        item = knowledge_cache[value]
+        return (value, item) if item else None
+
+    citations: dict[str, str] = {}
+    citation_value = metadata.get("knowledge_citations")
+    if isinstance(citation_value, dict):
+        for label, knowledge_id in list(citation_value.items())[:100]:
+            if (
+                isinstance(label, str)
+                and label.startswith("K")
+                and label[1:].isdigit()
+                and 1 <= len(label[1:]) <= 4
+                and resolve_knowledge(knowledge_id)
+            ):
+                citations[label] = str(knowledge_id)
+
+    trace: list[dict[str, Any]] = []
+    trace_value = metadata.get("retrieval_trace")
+    if isinstance(trace_value, list):
+        for candidate in trace_value[:10]:
+            if not isinstance(candidate, dict):
+                continue
+            resolved = resolve_knowledge(candidate.get("id"))
+            if not resolved:
+                continue
+            knowledge_id, knowledge = resolved
+            projected: dict[str, Any] = {
+                "id": knowledge_id,
+                # Metadata is not authoritative for titles: an injected path or
+                # private excerpt under `title` must not become a diagnostic.
+                "title": str(knowledge.get("title") or "")[:500],
+            }
+            score = _public_probability(candidate.get("score"))
+            if score is not None:
+                projected["score"] = score
+            status = candidate.get("status")
+            if isinstance(status, str) and status in _PUBLIC_TRACE_STATUSES:
+                projected["status"] = status
+            reason = candidate.get("reason")
+            if isinstance(reason, str) and reason in _PUBLIC_TRACE_REASONS:
+                projected["reason"] = reason
+            trace.append(projected)
+
+    answer_mode = metadata.get("answer_mode")
+    numeric_confidence = _public_probability(metadata.get("retrieval_confidence"))
+    grounded = metadata.get("answer_grounded")
+    try:
+        knowledge_hits = (
+            int(metadata.get("knowledge_hits") or 0)
+            if not isinstance(metadata.get("knowledge_hits"), bool)
+            else 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        knowledge_hits = 0
+    search_query = metadata.get("search_query")
     return {
         "conversation_id": conversation_id,
         "created_at": latest.get("created_at"),
-        "search_query": metadata.get("search_query", ""),
-        "answer_mode": metadata.get("answer_mode", ""),
-        "knowledge_hits": metadata.get("knowledge_hits", 0),
-        "answer_grounded": metadata.get("answer_grounded"),
-        "retrieval_confidence": metadata.get("retrieval_confidence"),
-        "citations": metadata.get("knowledge_citations", {}),
-        "trace": metadata.get("retrieval_trace", []),
+        "search_query": search_query[:2_000] if isinstance(search_query, str) else "",
+        "answer_mode": answer_mode
+        if isinstance(answer_mode, str) and answer_mode in _PUBLIC_ANSWER_MODES
+        else "",
+        "knowledge_hits": min(max(0, knowledge_hits), 2_147_483_647),
+        "answer_grounded": grounded if isinstance(grounded, bool) else None,
+        "retrieval_confidence": numeric_confidence,
+        "citations": citations,
+        "trace": trace,
     }
 
 
@@ -173,7 +258,8 @@ async def conversation_messages(
         user_id=actor.own_id,
         limit=limit,
     )
-    return {"items": items, "count": len(items)}
+    public_items = [public_conversation_message(item) for item in items]
+    return {"items": public_items, "count": len(public_items)}
 
 
 def format_conversation_export(

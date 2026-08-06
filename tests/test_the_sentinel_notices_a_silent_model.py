@@ -98,19 +98,52 @@ def test_the_probe_is_cheap(monkeypatch) -> None:
     assert seen["body"]["temperature"] == 0
 
 
-def test_the_health_scan_raises_an_alert_operators_can_act_on() -> None:
-    """Сообщение должно называть и причину, и цену молчания, и что делать."""
-    import inspect
+def test_the_health_scan_raises_an_alert_operators_can_act_on(settings, monkeypatch) -> None:
+    """Сообщение должно называть и причину, и цену молчания, и что делать.
 
-    from friday.diagnostics import collect_diagnostics
+    Проверяем публичное поведение, а не расположение вызова в исходнике:
+    ``collect_diagnostics`` обязан сохранять безопасную границу живой БД и
+    потому делегирует сбор отдельному helper'у.
+    """
+    from dataclasses import replace
 
-    source = inspect.getsource(collect_diagnostics)
-    assert "_llm_generates(" in source, "проверку генерации никто не зовёт"
-    assert "llm_not_generating" in source, "у отказа нет собственного кода"
-    marker = source.index("llm_not_generating")
-    alert = source[marker : marker + 700]
-    assert "перезапуск" in alert.casefold(), "не сказано, что делать"
-    assert "испорченные ответы" in alert, "не сказано, чем это грозит людям"
+    import friday.diagnostics as diagnostics
+
+    calls: list[tuple[str, str]] = []
+    tuned = replace(
+        settings,
+        llm_enabled=True,
+        llm_base_url="http://127.0.0.1:9/v1",
+        llm_model="synthetic-silent-model",
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "_llm_endpoint_status",
+        lambda *_args, **_kwargs: {
+            "reachable": True,
+            "model_served": True,
+            "served_models": ["synthetic-silent-model"],
+        },
+    )
+
+    def silent_generation(base_url: str, model: str, **_kwargs):
+        calls.append((base_url, model))
+        return {"generates": False, "seconds": 25.0, "error": "synthetic timeout"}
+
+    monkeypatch.setattr(diagnostics, "_llm_generates", silent_generation)
+
+    report = diagnostics.collect_diagnostics(tuned, check_llm_port=True)
+
+    assert calls == [(tuned.llm_base_url, tuned.llm_model)], "проверку генерации никто не зовёт"
+    alert = next(
+        (item for item in report["actions"] if item.get("code") == "llm_not_generating"),
+        None,
+    )
+    assert alert is not None, "у отказа нет собственного кода"
+    detail = str(alert.get("detail") or "")
+    assert "перезапуск" in detail.casefold(), "не сказано, что делать"
+    assert "испорченные ответы" in detail, "не сказано, чем это грозит людям"
+    assert report["ok"] is False
 
 
 @pytest.mark.parametrize("base", ["http://model:8001/v1", "http://model:8001/v1/"])

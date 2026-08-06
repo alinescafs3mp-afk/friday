@@ -255,10 +255,11 @@ async def test_concurrent_regenerate_does_not_call_agent_twice(settings):
             assert calls == 1
 
 
-def test_regenerate_warns_when_original_turn_had_attachments(settings):
-    """G17b: lost attachment must be audible; plain text turns stay silent.
+def test_regenerate_warns_only_when_original_attachment_cannot_be_restored(settings):
+    """G17b: lost attachment is audible; restored/plain turns stay silent.
 
-    Mutation: stop writing had_attachments in AgentRuntime.chat → notice absent.
+    Mutations: stop writing ``had_attachments`` or ignore
+    ``attachment_context_available`` — one of the two branches turns red.
     """
     from friday.server import create_app
     from friday.telegram_bridge._callbacks import CallbacksMixin
@@ -315,6 +316,40 @@ def test_regenerate_warns_when_original_turn_had_attachments(settings):
             }
         )
         assert "вложен" in formatted.casefold()
+
+        # Persisted attachment: AgentRuntime recovered the bounded text in the
+        # same private conversation, so the old warning would now be false.
+        restored_conv = storage.create_conversation(user_id, title="restored attach regen")
+        restored_id = restored_conv["id"]
+        storage.store_message(
+            restored_id,
+            user_id,
+            "user",
+            "что в восстановленном файле?",
+            metadata={"had_attachments": True, "attachment_count": 1},
+        )
+        storage.store_message(restored_id, user_id, "assistant", "первый ответ")
+
+        async def _restored(user_id_arg, message, **kwargs):
+            assert kwargs.get("attachments") == []
+            return {
+                "conversation_id": restored_id,
+                "message": {"role": "assistant", "content": "повтор по тому же файлу"},
+                "answer": "повтор по тому же файлу",
+                "attachment_context_available": True,
+                "context": {"interaction_mode": "dialogue"},
+            }
+
+        client.app.state.agent.chat = AsyncMock(side_effect=_restored)  # type: ignore[method-assign]
+        restored = client.post(
+            "/api/me/regenerate",
+            json={"conversation_id": restored_id},
+            headers=headers,
+        )
+        assert restored.status_code == 200, restored.text
+        restored_body = restored.json()
+        assert not restored_body.get("regenerate_notice")
+        assert not restored_body.get("grounding_warning")
 
         # Plain turn: no marker, no notice.
         plain_conv = storage.create_conversation(user_id, title="plain regen")

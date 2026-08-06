@@ -149,8 +149,9 @@ async def test_the_executor_itself_writes_the_rollback(settings, storage):
                 }
             return {"content": "Готово.", "finish_reason": "stop"}
 
-    async def _pretend(name, arguments, *, actor):
+    async def _pretend(name, arguments, *, actor, execution_scope):
         del name, arguments, actor
+        assert execution_scope == "mission"
 
         class _Result:
             def to_llm_message(self) -> str:
@@ -160,7 +161,12 @@ async def test_the_executor_itself_writes_the_rollback(settings, storage):
 
     service.llm = _AsksForATool()
     service.kernel.execute = _pretend  # type: ignore[method-assign]
-    service.kernel.get_tool_definitions = lambda actor: [{"function": {"name": "web_research"}}]  # type: ignore[method-assign]
+
+    def _definitions(actor, *, execution_scope):  # noqa: ANN001, ARG001
+        assert execution_scope == "mission"
+        return [{"function": {"name": "web_research"}}]
+
+    service.kernel.get_tool_definitions = _definitions  # type: ignore[method-assign]
 
     mission = storage.get_mission(mission_id, "alice")
     task = next(item for item in storage.get_mission_tasks(mission_id, "alice") if item["id"] == task_id)

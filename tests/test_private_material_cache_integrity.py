@@ -66,6 +66,68 @@ def _authenticated_snapshot(
     )
 
 
+def test_runtime_privacy_schema_compiles_with_a_bounded_sqlite_parser(
+    storage: FridayStorage,
+    settings,
+) -> None:
+    """The managed Knowledge UPDATE trigger must not inline the JSON tree twice.
+
+    GitHub's CPython 3.14.6 SQLite build has a fixed Lemon parser stack and
+    rejected ``privacy_material_knowledge_au_refresh`` with ``parser stack
+    overflow``.  Local distro SQLite grows that stack dynamically, so a lowered
+    expression-depth limit is the deterministic cross-build proxy: before the
+    refactor limit 30 reached that exact trigger and failed; compiling the live
+    predicate once in its TEMP view leaves the complete runtime schema below it.
+    """
+
+    from friday.storage._core import (
+        _private_identity_match,
+        _private_identity_tokens_json,
+        _unicode_casefold,
+    )
+    from friday.storage._privacy import PRIVATE_MATERIAL_RUNTIME_SCHEMA
+
+    storage.ensure_user("parser-probe")
+    connection = sqlite3.connect(settings.database_path, timeout=10.0)
+    connection.create_function("jericho_casefold", 1, _unicode_casefold, deterministic=True)
+    connection.create_function(
+        "jericho_private_identity_tokens",
+        2,
+        _private_identity_tokens_json,
+        deterministic=True,
+    )
+    connection.create_function(
+        "jericho_private_identity_match",
+        2,
+        _private_identity_match,
+        deterministic=True,
+    )
+    previous_limit = connection.setlimit(sqlite3.SQLITE_LIMIT_EXPR_DEPTH, 30)
+    assert previous_limit >= 30
+    pending = ""
+    compiled: list[str] = []
+    try:
+        for line in PRIVATE_MATERIAL_RUNTIME_SCHEMA.splitlines(keepends=True):
+            pending += line
+            if not sqlite3.complete_statement(pending):
+                continue
+            statement = pending.strip()
+            pending = ""
+            if not statement:
+                continue
+            try:
+                connection.execute(statement)
+            except sqlite3.OperationalError as exc:
+                first_line = " ".join(statement.split())[:160]
+                pytest.fail(f"bounded SQLite parser rejected {first_line}: {exc}")
+            compiled.append(statement)
+    finally:
+        connection.close()
+
+    assert not pending.strip()
+    assert any("privacy_material_knowledge_au_refresh" in statement for statement in compiled)
+
+
 def test_nested_encoded_and_malformed_identity_tokens_quarantine_current_and_history(
     storage: FridayStorage,
 ) -> None:
@@ -529,6 +591,234 @@ def test_external_derivative_invalidation_is_fail_closed_and_a_new_thread_heals(
         assert storage.get_raw_object(raw.id, "alice") is None
     outer_healed = storage.get_raw_object(raw.id, "alice")
     assert outer_healed is not None and outer_healed["source_ref"] == "healed-at-outer-commit"
+
+
+def test_fresh_privacy_rebuild_validation_does_not_repeat_the_live_fixed_point(
+    settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cold migration and schema-ready repair each execute one exact live rebuild."""
+
+    from friday.storage import _core
+
+    database = tmp_path / "single-pass-privacy-rebuild.sqlite3"
+    isolated_settings = replace(settings, database_path=database)
+    storage = FridayStorage(isolated_settings)
+    storage.ensure_user("alice")
+    chain_ids = [f"ent-single-pass-{number:02d}" for number in range(24)]
+    for number, entity_id in enumerate(chain_ids):
+        _insert_entity(
+            storage,
+            entity_id,
+            name=f"SYNTHETIC SINGLE PASS IDENTITY {number:02d}",
+            description="" if number == 0 else chain_ids[number - 1],
+        )
+    with storage.transaction() as conn:
+        conn.executemany(
+            """INSERT INTO entity_versions(
+                   id,user_id,entity_id,version,snapshot_json,created_at)
+               VALUES(?, 'alice', ?, 1, ?, ?)""",
+            [
+                (
+                    f"entv-single-pass-{number:02d}",
+                    entity_id,
+                    _authenticated_snapshot(
+                        entity_id,
+                        name=f"SYNTHETIC SINGLE PASS IDENTITY {number:02d}",
+                        aliases_json="[]",
+                    ),
+                    utc_now(),
+                )
+                for number, entity_id in enumerate(chain_ids)
+            ],
+        )
+    raw_ids: list[str] = []
+    knowledge_ids: list[str] = []
+    for number in range(8):
+        raw = storage.store_raw_object(
+            RawObject(
+                id=f"raw-single-pass-{number:02d}",
+                user_id="alice",
+                source="test",
+                source_ref=f"single-pass-{number:02d}",
+                raw_content=f"Independent synthetic body {number:02d}",
+                content_type="text",
+            )
+        )
+        knowledge = storage.store_knowledge_object(
+            KnowledgeObject(
+                id=f"ko-single-pass-{number:02d}",
+                user_id="alice",
+                raw_object_id=raw.id,
+                content=f"Independent synthetic knowledge {number:02d}",
+                content_type="text",
+            )
+        )
+        raw_ids.append(raw.id)
+        knowledge_ids.append(knowledge.id)
+
+    identity_match = _core._private_identity_match
+    calls = 0
+
+    def counted_identity_match(value: object, identity: object) -> int:
+        nonlocal calls
+        calls += 1
+        return identity_match(value, identity)
+
+    storage.conn.create_function(
+        "jericho_private_identity_match",
+        2,
+        counted_identity_match,
+        deterministic=True,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO private_entity_owners(
+                   entity_id,person_id,privacy_kind,created_at)
+               VALUES(?, 'bob', 'reminder', ?)""",
+            (chain_ids[0], utc_now()),
+        )
+    one_rebuild_calls = calls
+    assert one_rebuild_calls > 0
+    storage.close()
+
+    calls = 0
+    monkeypatch.setattr(_core, "_private_identity_match", counted_identity_match)
+    reopened = FridayStorage(isolated_settings)
+    try:
+        assert reopened.execute("SELECT COUNT(*) FROM private_entity_material_cache").fetchone()[0] == len(
+            chain_ids
+        )
+        cold_reopen_calls = calls
+        assert cold_reopen_calls <= one_rebuild_calls * 6 // 5 + 2
+        authority = {
+            (str(row[0]), str(row[1]))
+            for row in reopened.execute(
+                """SELECT material_kind, object_id
+                     FROM private_entity_material_derivative_cache
+                    WHERE material_kind IN ('raw','knowledge')"""
+            ).fetchall()
+        }
+        assert authority == (
+            {("raw", object_id) for object_id in raw_ids}
+            | {("knowledge", object_id) for object_id in knowledge_ids}
+        )
+
+        external = sqlite3.connect(database, timeout=10.0)
+        try:
+            now = utc_now()
+            external.execute("PRAGMA foreign_keys=ON")
+            external.execute(
+                """INSERT INTO entities(
+                       id,user_id,name,normalized_name,entity_type,aliases_json,
+                       description,metadata_json,version,created_at,updated_at)
+                   VALUES('ent-single-pass-public-extra','alice','Independent extra',
+                          'independent extra','event','[]','','{}',1,?,?)""",
+                (now, now),
+            )
+            external.commit()
+        finally:
+            external.close()
+        assert (
+            reopened.execute(
+                "SELECT valid FROM private_entity_material_cache_state WHERE singleton=1"
+            ).fetchone()[0]
+            == 0
+        )
+
+        calls = 0
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            repaired_count = executor.submit(
+                lambda: reopened.execute("SELECT COUNT(*) FROM private_entity_material_cache").fetchone()[0]
+            ).result(timeout=20)
+        assert repaired_count == len(chain_ids)
+        schema_ready_repair_calls = calls
+        assert schema_ready_repair_calls <= one_rebuild_calls * 6 // 5 + 2
+    finally:
+        reopened.close()
+
+
+def test_derivative_only_heal_still_validates_the_untouched_entity_authority(
+    settings,
+    tmp_path: Path,
+) -> None:
+    """A fresh derivative work set cannot bless a counterfeit valid entity tier."""
+
+    database = tmp_path / "derivative-heal-validates-entity.sqlite3"
+    isolated_settings = replace(settings, database_path=database)
+    storage = FridayStorage(isolated_settings)
+    try:
+        storage.ensure_user("alice")
+        hidden = storage.create_entity(
+            Entity(
+                id="ent-derivative-heal-private",
+                user_id="alice",
+                name="SYNTHETIC DERIVATIVE HEAL PRIVATE",
+                entity_type=EntityType.EVENT,
+            )
+        )
+        raw = storage.store_raw_object(
+            RawObject(
+                id="raw-derivative-heal-public",
+                user_id="alice",
+                source="test",
+                source_ref="before-derivative-heal",
+                raw_content="Independent synthetic body",
+                content_type="text",
+            )
+        )
+        with storage.transaction() as conn:
+            conn.execute(
+                """INSERT INTO private_entity_owners(
+                       entity_id,person_id,privacy_kind,created_at)
+                   VALUES(?, 'bob', 'reminder', ?)""",
+                (hidden.id, utc_now()),
+            )
+
+        external = sqlite3.connect(database, timeout=10.0)
+        try:
+            external.execute("DELETE FROM private_entity_material_cache WHERE entity_id=?", (hidden.id,))
+            external.execute("DELETE FROM private_entity_material_work WHERE entity_id=?", (hidden.id,))
+            external.execute(
+                """UPDATE private_entity_material_cache_state
+                      SET valid=1, prior_valid=1 WHERE singleton=1"""
+            )
+            external.execute(
+                "UPDATE raw_objects SET source_ref='after-derivative-heal' WHERE id=?",
+                (raw.id,),
+            )
+            external.commit()
+        finally:
+            external.close()
+
+        assert (
+            storage.execute(
+                "SELECT valid FROM private_entity_material_cache_state WHERE singleton=1"
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            storage.execute(
+                "SELECT valid FROM private_entity_material_derivative_state WHERE singleton=1"
+            ).fetchone()[0]
+            == 0
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            attempted = executor.submit(storage.get_raw_object, raw.id, "alice")
+            with pytest.raises(
+                sqlite3.DatabaseError,
+                match="did not match the live privacy closure",
+            ):
+                attempted.result(timeout=20)
+        assert (
+            storage.execute(
+                "SELECT valid FROM private_entity_material_derivative_state WHERE singleton=1"
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        storage.close()
 
 
 def test_nested_private_flip_rollback_restores_source_and_derivative_authority(

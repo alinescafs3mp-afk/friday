@@ -20,6 +20,7 @@ import urllib.parse
 import urllib.robotparser
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpcore
@@ -144,6 +145,39 @@ class AllProvidersRefusedError(RuntimeError):
     """Ни один поисковик не ответил по существу — искать было нечем."""
 
 
+class UnsupportedSearchFilterError(ProviderRefusedError):
+    """One adapter cannot enforce a requested filter and was not called.
+
+    This is deliberately a provider refusal, not an empty result: returning an
+    unfiltered batch would turn "nothing recent" into a false fact.  Attributes
+    are closed structural values so callers never need to parse exception text.
+    """
+
+    reason = "unsupported_filter"
+
+    def __init__(self, *, provider: str, filter_name: str) -> None:
+        self.provider = provider
+        self.filter_name = filter_name
+        super().__init__(f"{provider} cannot enforce {filter_name}")
+
+
+class FreshnessUnavailableError(AllProvidersRefusedError):
+    """No available provider could return an honestly freshness-filtered result."""
+
+    reason = "freshness_unavailable"
+
+    def __init__(
+        self,
+        *,
+        unsupported_providers: Sequence[str],
+        refused_providers: Sequence[str] = (),
+    ) -> None:
+        self.filter_name = "freshness"
+        self.unsupported_providers = tuple(unsupported_providers)
+        self.refused_providers = tuple(refused_providers)
+        super().__init__("no search provider could enforce freshness")
+
+
 #: Ответы, которые означают отказ, а не выдачу. 202 — заглушка DuckDuckGo,
 #: 401/403 — неверный или истёкший ключ, 429 — исчерпанный лимит.
 _REFUSAL_STATUS = frozenset({202, 401, 403, 429})
@@ -158,6 +192,113 @@ _ASKS_FOR_FOREIGN_SOURCES = re.compile(
     r"english\s+sources?|foreign\s+(?:press|media|sources?)",
     re.IGNORECASE,
 )
+
+# Closed vocabulary exposed by the `web_search` tool.  Providers use different
+# spellings for the same window, so accepting arbitrary strings here would turn
+# a typo into an unfiltered (and therefore misleading) search.
+SEARCH_FRESHNESS_VALUES = ("", "day", "week", "month", "year")
+_FRESHNESS_DAYS = {"day": 1, "week": 7, "month": 31, "year": 365}
+_BRAVE_FRESHNESS = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
+_SERPER_FRESHNESS = {"day": "qdr:d", "week": "qdr:w", "month": "qdr:m", "year": "qdr:y"}
+_DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_WIKIPEDIA_SEARCH_HOSTS = frozenset({"wikipedia.org", "ru.wikipedia.org", "en.wikipedia.org"})
+
+
+def normalize_search_site(site: str) -> str:
+    """Return one canonical bare DNS hostname or reject the filter.
+
+    A site filter becomes part of a provider query, so it is deliberately much
+    narrower than a URL: no scheme, port, path, userinfo, wildcard or query
+    syntax.  IDNs are accepted and converted to their ASCII DNS form before the
+    provider sees them.
+    """
+
+    if not isinstance(site, str):
+        raise ValueError("site must be a bare DNS hostname")
+    candidate = site.strip()
+    if not candidate:
+        return ""
+    if any(character.isspace() for character in candidate) or any(
+        marker in candidate for marker in (":", "/", "\\", "@", "?", "#", "*")
+    ):
+        raise ValueError("site must be a bare DNS hostname")
+    candidate = candidate.removesuffix(".")
+    try:
+        canonical = candidate.encode("idna").decode("ascii").casefold()
+    except UnicodeError as exc:
+        raise ValueError("site must be a bare DNS hostname") from exc
+    labels = canonical.split(".")
+    if (
+        len(canonical) > 253
+        or len(labels) < 2
+        or labels[-1].isdigit()
+        or any(not _DNS_LABEL.fullmatch(label) for label in labels)
+    ):
+        raise ValueError("site must be a bare DNS hostname")
+    try:
+        ipaddress.ip_address(canonical)
+    except ValueError:
+        return canonical
+    raise ValueError("site must be a bare DNS hostname")
+
+
+def normalize_search_freshness(freshness: str) -> str:
+    """Validate the public freshness enum without silently widening the search."""
+
+    if not isinstance(freshness, str) or freshness not in SEARCH_FRESHNESS_VALUES:
+        raise ValueError("freshness must be one of: day, week, month, year, or empty")
+    return freshness
+
+
+def _freshness_after(freshness: str) -> str:
+    """Calendar boundary used by Yandex's documented ``date:>`` operator."""
+
+    freshness = normalize_search_freshness(freshness)
+    if not freshness:
+        return ""
+    today = datetime.now(UTC).date()
+    return (today - timedelta(days=_FRESHNESS_DAYS[freshness])).isoformat()
+
+
+def _query_with_site_filter(query: str, *, site: str) -> str:
+    """Append the one common operator whose result is also post-filtered."""
+
+    site = normalize_search_site(site)
+    pieces = [query]
+    if site:
+        pieces.append(f"site:{site}")
+    return " ".join(pieces)
+
+
+def _query_with_yandex_filters(query: str, *, site: str, freshness: str) -> str:
+    """Use Yandex's documented date syntax, never Google's ``after:``."""
+
+    freshness = normalize_search_freshness(freshness)
+    pieces = [_query_with_site_filter(query, site=site)]
+    if freshness:
+        pieces.append(f"date:>{_freshness_after(freshness).replace('-', '')}")
+    return " ".join(pieces)
+
+
+def _reject_unsupported_freshness(provider: str, freshness: str) -> None:
+    """Fail before opening a socket when an adapter cannot enforce freshness."""
+
+    freshness = normalize_search_freshness(freshness)
+    if freshness:
+        raise UnsupportedSearchFilterError(provider=provider, filter_name="freshness")
+
+
+def _result_matches_site(result: SearchResult, site: str) -> bool:
+    """Provider hints are advisory; this makes the returned site filter strict."""
+
+    if not site:
+        return True
+    try:
+        host = urllib.parse.urlsplit(result.url).hostname or ""
+        canonical = host.rstrip(".").encode("idna").decode("ascii").casefold()
+    except (UnicodeError, ValueError):
+        return False
+    return canonical == site or canonical.endswith(f".{site}")
 
 
 @dataclass(frozen=True)
@@ -559,7 +700,16 @@ class WebSurfer:
             await self._client.aclose()
             self._client = None
 
-    async def search(self, query: str, *, max_results: int = _DEFAULT_MAX_RESULTS) -> list[SearchResult]:
+    async def search(
+        self,
+        query: str,
+        *,
+        max_results: int = _DEFAULT_MAX_RESULTS,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
+        site = normalize_search_site(site)
+        freshness = normalize_search_freshness(freshness)
         query = " ".join(str(query or "").split()).strip()
         if not query:
             return []
@@ -567,10 +717,27 @@ class WebSurfer:
         results: list[SearchResult] = []
 
         refused: list[str] = []
+        unsupported_freshness: list[str] = []
         answered = False
-        for name, provider in self._provider_chain(query, limit):
+        for name, provider in self._provider_chain(
+            query,
+            limit,
+            site=site,
+            freshness=freshness,
+        ):
             try:
                 batch = await provider()
+            except UnsupportedSearchFilterError as exc:
+                # A local capability miss is different from a network refusal.
+                # Keep it structural so an all-unsupported chain cannot become
+                # either an empty result or an unfiltered request.
+                if exc.filter_name == "freshness":
+                    unsupported_freshness.append(name)
+                    LOGGER.info("Search provider %s lacks freshness support", name)
+                else:
+                    refused.append(name)
+                    LOGGER.info("Search provider %s lacks a requested filter", name)
+                continue
             except ProviderRefusedError as exc:
                 LOGGER.warning("Search provider %s refused (%s)", name, type(exc).__name__)
                 refused.append(name)
@@ -580,12 +747,23 @@ class WebSurfer:
                 refused.append(name)
                 continue
             answered = True
+            if site:
+                # Even native provider parameters and `site:` are hints from an
+                # external service.  A non-matching URL never crosses this API
+                # boundary, and an all-mismatch batch falls through to the next
+                # provider instead of ending the search early.
+                batch = [item for item in batch if _result_matches_site(item, site)]
             results.extend(batch)
             if results:
                 break
             # Провайдер ответил честным нулём. Индексы у провайдеров разные,
             # поэтому спрашиваем следующего — но это уже не отказ.
 
+        if not answered and freshness and unsupported_freshness:
+            raise FreshnessUnavailableError(
+                unsupported_providers=unsupported_freshness,
+                refused_providers=refused,
+            )
         if not answered and refused:
             # Ни один не ответил по существу. Сказать «ничего не найдено» здесь
             # значило бы выдать чужой отказ за факт об интернете.
@@ -593,11 +771,20 @@ class WebSurfer:
 
         return _diversify(results, limit)
 
-    async def _search_duckduckgo_html(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_duckduckgo_html(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
+        _reject_unsupported_freshness("duckduckgo", freshness)
+        provider_query = _query_with_site_filter(query, site=site)
         client = await self._get_client()
         response = await client.get(
             "https://html.duckduckgo.com/html/",
-            params={"q": query},
+            params={"q": provider_query},
             timeout=_SEARCH_TIMEOUT,
         )
         # 202 — анти-бот заглушка, и она приходит чаще, чем выдача: 19 ответов
@@ -636,7 +823,14 @@ class WebSurfer:
         except Exception as exc:
             raise ProviderRefusedError(f"duckduckgo failed: {type(exc).__name__}") from exc
 
-    async def _search_wikipedia(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_wikipedia(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
         """Последнее звено цепочки: энциклопедия вместо пустоты.
 
         Замерено 2026-08-02, тем же набором из двадцати запросов и тем же
@@ -658,8 +852,23 @@ class WebSurfer:
         Правило Wikimedia про User-Agent соблюдается: осмысленное имя и адрес
         проекта, а не подделка под браузер.
         """
+        # CirrusSearch can filter by page creation/edit time, but that is not the
+        # publication freshness promised by a public-web search.  Treating an old
+        # article edited today as fresh would be the same stale leak as ignoring
+        # the window altogether.
+        _reject_unsupported_freshness("wikipedia", freshness)
+        site = normalize_search_site(site)
+        if site and site not in _WIKIPEDIA_SEARCH_HOSTS:
+            # CirrusSearch indexes Wikipedia, not an arbitrary `site:` target.
+            # Sending the operator as ordinary query text and then post-filtering
+            # Wikipedia URLs produced a dishonest empty result for every external
+            # domain even though no provider had searched that domain at all.
+            raise UnsupportedSearchFilterError(provider="wikipedia", filter_name="site")
+        languages = (
+            (site.split(".", 1)[0],) if site in {"ru.wikipedia.org", "en.wikipedia.org"} else ("ru", "en")
+        )
         client = await self._get_client()
-        for language in ("ru", "en"):
+        for language in languages:
             try:
                 response = await client.get(
                     f"https://{language}.wikipedia.org/w/api.php",
@@ -706,7 +915,12 @@ class WebSurfer:
         return []
 
     def _provider_chain(
-        self, query: str, limit: int
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
     ) -> list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]]:
         """Провайдеры в порядке замеренной надёжности.
 
@@ -731,27 +945,44 @@ class WebSurfer:
         ключ Brave/Tavily/Serper: ветки готовы, нужен только ключ.
         """
         chain: list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]] = []
+
+        def call(
+            provider: Callable[..., Awaitable[list[SearchResult]]],
+        ) -> Callable[[], Awaitable[list[SearchResult]]]:
+            return lambda: provider(query, limit, site=site, freshness=freshness)
+
         if self.settings.yandex_search_api_key:
-            chain.append(("yandex", lambda: self._search_yandex(query, limit)))
+            chain.append(("yandex", call(self._search_yandex)))
         if self.settings.brave_search_api_key:
-            chain.append(("brave", lambda: self._search_brave(query, limit)))
+            chain.append(("brave", call(self._search_brave)))
         if self.settings.tavily_api_key:
-            chain.append(("tavily", lambda: self._search_tavily(query, limit)))
+            chain.append(("tavily", call(self._search_tavily)))
         if self.settings.serper_api_key:
-            chain.append(("serper", lambda: self._search_serper(query, limit)))
-        chain.append(("brave-html", lambda: self._search_brave_html(query, limit)))
-        chain.append(("duckduckgo", lambda: self._search_duckduckgo_html(query, limit)))
+            chain.append(("serper", call(self._search_serper)))
+        chain.append(("brave-html", call(self._search_brave_html)))
+        chain.append(("duckduckgo", call(self._search_duckduckgo_html)))
         # Последним — энциклопедия: она отвечает не на всё, но отвечает ВСЕГДА,
         # тогда как бесплатные HTML-провайдеры при серии запросов дают 1-2 из 20.
-        chain.append(("wikipedia", lambda: self._search_wikipedia(query, limit)))
+        chain.append(("wikipedia", call(self._search_wikipedia)))
         return chain
 
-    async def _search_brave_html(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_brave_html(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
         """Brave без ключа. Отвечает не всегда, но вчетверо чаще DuckDuckGo."""
+        # The documented freshness parameter belongs to Brave's API endpoint.
+        # Do not assume that the consumer HTML form accepts the same contract.
+        _reject_unsupported_freshness("brave-html", freshness)
+        provider_query = _query_with_site_filter(query, site=site)
         client = await self._get_client()
         response = await client.get(
             "https://search.brave.com/search",
-            params={"q": query},
+            params={"q": provider_query},
             timeout=_SEARCH_TIMEOUT,
         )
         if response.status_code in _REFUSAL_STATUS or response.status_code >= 500:
@@ -809,19 +1040,31 @@ class WebSurfer:
             return "SEARCH_TYPE_COM"
         return "SEARCH_TYPE_RU"
 
-    async def _search_yandex(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_yandex(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
         """Яндекс Search API v2 — синхронный поиск, ответ приходит XML-ом в base64.
 
         Ключ Yandex Cloud (`AQVN…`) сам несёт привязку к каталогу, поэтому
         `folderId` в теле не нужен — проверено на живом ключе владельца.
         """
+        provider_query = _query_with_yandex_filters(
+            query,
+            site=site,
+            freshness=freshness,
+        )
         client = await self._get_client()
         response = await client.post(
             "https://searchapi.api.cloud.yandex.net/v2/web/search",
             json={
                 "query": {
                     "searchType": self._yandex_segment(query),
-                    "queryText": query,
+                    "queryText": provider_query,
                 },
                 "groupSpec": {
                     "groupMode": "GROUP_MODE_FLAT",
@@ -876,11 +1119,24 @@ class WebSurfer:
                 break
         return results
 
-    async def _search_brave(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_brave(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
+        site = normalize_search_site(site)
+        freshness = normalize_search_freshness(freshness)
+        provider_query = _query_with_site_filter(query, site=site)
+        params: dict[str, str | int] = {"q": provider_query, "count": limit}
+        if freshness:
+            params["freshness"] = _BRAVE_FRESHNESS[freshness]
         client = await self._get_client()
         response = await client.get(
             "https://api.search.brave.com/res/v1/web/search",
-            params={"q": query, "count": limit},
+            params=params,
             headers={
                 "Accept": "application/json",
                 "X-Subscription-Token": self.settings.brave_search_api_key,
@@ -902,16 +1158,32 @@ class WebSurfer:
             if item.get("url")
         ]
 
-    async def _search_tavily(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_tavily(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
+        site = normalize_search_site(site)
+        freshness = normalize_search_freshness(freshness)
+        payload: dict[str, Any] = {
+            "api_key": self.settings.tavily_api_key,
+            "query": query,
+            "max_results": limit,
+            "search_depth": "basic",
+        }
+        if site:
+            # Tavily has a native domain allow-list; unlike a textual operator it
+            # does not depend on query parsing.
+            payload["include_domains"] = [site]
+        if freshness:
+            payload["time_range"] = freshness
         client = await self._get_client()
         response = await client.post(
             "https://api.tavily.com/search",
-            json={
-                "api_key": self.settings.tavily_api_key,
-                "query": query,
-                "max_results": limit,
-                "search_depth": "basic",
-            },
+            json=payload,
             timeout=_SEARCH_TIMEOUT,
         )
         if response.status_code in _REFUSAL_STATUS or response.status_code >= 500:
@@ -928,11 +1200,24 @@ class WebSurfer:
             if item.get("url")
         ]
 
-    async def _search_serper(self, query: str, limit: int) -> list[SearchResult]:
+    async def _search_serper(
+        self,
+        query: str,
+        limit: int,
+        *,
+        site: str = "",
+        freshness: str = "",
+    ) -> list[SearchResult]:
+        site = normalize_search_site(site)
+        freshness = normalize_search_freshness(freshness)
+        provider_query = _query_with_site_filter(query, site=site)
+        payload: dict[str, Any] = {"q": provider_query, "num": limit}
+        if freshness:
+            payload["tbs"] = _SERPER_FRESHNESS[freshness]
         client = await self._get_client()
         response = await client.post(
             "https://google.serper.dev/search",
-            json={"q": query, "num": limit},
+            json=payload,
             headers={"X-API-KEY": self.settings.serper_api_key},
             timeout=_SEARCH_TIMEOUT,
         )

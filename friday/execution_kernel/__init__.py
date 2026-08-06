@@ -58,7 +58,12 @@ from friday.storage.models import (
     utc_now,
 )
 from friday.tts import TTSUnavailable, synthesize_speech
-from friday.web_surfer import AllProvidersRefusedError
+from friday.web_surfer import (
+    SEARCH_FRESHNESS_VALUES,
+    AllProvidersRefusedError,
+    normalize_search_freshness,
+    normalize_search_site,
+)
 from friday.workers._blocking import run_blocking
 
 if TYPE_CHECKING:
@@ -94,6 +99,26 @@ _MAX_ARCHIVE_FILES = 300
 
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
+
+# Execution scope is code-owned context, not a model/tool argument.  A mission
+# receives only the bounded gather surface below; every other tool remains a
+# dialogue-only capability even when the mission actor is otherwise authorized
+# to use it.  The kernel checks this immediately before dispatch as well as when
+# definitions are selected, because the list shown to a model is not a security
+# boundary.
+EXECUTION_SCOPES = frozenset({"dialogue", "mission"})
+MISSION_EXECUTION_TOOLS = frozenset(
+    {
+        "memory_search",
+        "message_search",
+        "entity_lookup",
+        "kg_stats",
+        "inbox_list",
+        "web_search",
+        "web_fetch",
+        "web_research",
+    }
+)
 
 
 async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
@@ -615,6 +640,16 @@ class ToolSpec:
     #             если предикат из HIGH_RISK_TOOLS подтверждает риск аргументов.
     risk: str
     handler: Handler | None = None
+    allowed_execution_scopes: frozenset[str] = frozenset({"dialogue"})
+
+    def __post_init__(self) -> None:
+        scopes = frozenset(self.allowed_execution_scopes)
+        if not scopes or not scopes <= EXECUTION_SCOPES:
+            raise ValueError(
+                f"unknown or empty execution scope for tool {self.name!r}: "
+                f"{sorted(str(scope) for scope in scopes)!r}"
+            )
+        self.allowed_execution_scopes = scopes
 
     def to_openai(self, *, brief: bool = False) -> dict[str, Any]:
         """Описание для модели. `brief` — короткая форма, одна фраза.
@@ -1419,8 +1454,13 @@ class ExecutionKernel:
     def get_tool(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)
 
-    def get_tool_names(self, actor: ActorContext | None = None) -> list[str]:
-        return [tool.name for tool in self._visible_tools(actor)]
+    def get_tool_names(
+        self,
+        actor: ActorContext | None = None,
+        *,
+        execution_scope: str = "dialogue",
+    ) -> list[str]:
+        return [tool.name for tool in self._visible_tools(actor, execution_scope=execution_scope)]
 
     #: Какие инструменты уместны при каком виде вопроса. Остальные остаются
     #: доступны, но описаны одной строкой — см. `ToolSpec.to_openai(brief=True)`.
@@ -1517,7 +1557,11 @@ class ExecutionKernel:
     }
 
     def get_tool_definitions(
-        self, actor: ActorContext | None = None, *, topic: str = ""
+        self,
+        actor: ActorContext | None = None,
+        *,
+        topic: str = "",
+        execution_scope: str = "dialogue",
     ) -> list[dict[str, Any]]:
         """Описания инструментов; `topic` — вид вопроса от арбитра намерения.
 
@@ -1529,11 +1573,18 @@ class ExecutionKernel:
         withheld: set[str] | frozenset[str] = self._WITHHELD_TOOLS.get(kind, frozenset())
         return [
             tool.to_openai(brief=relevant is not None and tool.name not in relevant)
-            for tool in self._visible_tools(actor)
+            for tool in self._visible_tools(actor, execution_scope=execution_scope)
             if tool.name not in withheld
         ]
 
-    def _visible_tools(self, actor: ActorContext | None) -> list[ToolSpec]:
+    def _visible_tools(
+        self,
+        actor: ActorContext | None,
+        *,
+        execution_scope: str = "dialogue",
+    ) -> list[ToolSpec]:
+        if execution_scope not in EXECUTION_SCOPES:
+            return []
         if actor is None:
             try:
                 actor = current_actor()
@@ -1545,6 +1596,8 @@ class ExecutionKernel:
             return []
         visible: list[ToolSpec] = []
         for tool in self._tools.values():
+            if execution_scope not in tool.allowed_execution_scopes:
+                continue
             if tool.name == "code_run" and not (self.settings and self.settings.code_execution_enabled):
                 continue
             if not self.authorization.authorize(actor, tool.security_id).allowed:
@@ -1559,6 +1612,7 @@ class ExecutionKernel:
         arguments: dict[str, Any],
         *,
         actor: ActorContext | None = None,
+        execution_scope: str = "dialogue",
     ) -> ToolResult:
         actor = actor or current_actor()
         details = self._audit_details(name, arguments)
@@ -1572,6 +1626,20 @@ class ExecutionKernel:
             return ToolResult(name, False, error="Unknown tool")
         if not tool.handler:
             return ToolResult(name, False, error="Tool is not initialized")
+        if execution_scope not in EXECUTION_SCOPES or execution_scope not in tool.allowed_execution_scopes:
+            await self._audit(
+                actor,
+                name,
+                False,
+                "execution_scope_denied",
+                details={
+                    **details,
+                    "execution_scope": (
+                        execution_scope if execution_scope in EXECUTION_SCOPES else "invalid"
+                    ),
+                },
+            )
+            return ToolResult(name, False, error="Tool is unavailable in this execution scope")
         try:
             self.authorization.require(actor, tool.security_id)
         except AuthorizationError:
@@ -2042,6 +2110,16 @@ class ExecutionKernel:
                 max_results = args.get("max_results")
                 if isinstance(max_results, int):
                     details["max_results"] = max_results
+                site = args.get("site")
+                if isinstance(site, str) and site:
+                    # A domain can identify a private customer just as easily as
+                    # a query can.  The append-only audit gets only a fingerprint
+                    # and length; storage projects the digest to a keyed `*_ref`.
+                    details["site_sha256"] = hashlib.sha256(site.encode("utf-8")).hexdigest()
+                    details["site_chars"] = len(site)
+                freshness = args.get("freshness")
+                if isinstance(freshness, str) and freshness in SEARCH_FRESHNESS_VALUES and freshness:
+                    details["freshness"] = freshness
             else:
                 max_sources = args.get("max_sources")
                 if isinstance(max_sources, int):
@@ -2844,17 +2922,42 @@ class ExecutionKernel:
             },
         )
 
-    async def _web_search(self, *, actor: ActorContext, query: str, max_results: int = 5) -> dict[str, Any]:
+    async def _web_search(
+        self,
+        *,
+        actor: ActorContext,
+        query: str,
+        max_results: int = 5,
+        site: str = "",
+        freshness: str = "",
+    ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
+        # Validate before quota accounting and before any provider can see the
+        # values.  Error messages are closed strings and never echo a domain.
+        site = normalize_search_site(site)
+        freshness = normalize_search_freshness(freshness)
         refusal = await self._what_must_not_leave(query, actor)
         if refusal:
             return refusal
+        if site:
+            refusal = await self._what_must_not_leave(site, actor)
+            if refusal:
+                return refusal
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
             return {**exhausted, "query": query}
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
+        search_options: dict[str, Any] = {
+            "max_results": max(1, min(int(max_results), 10)),
+        }
+        # Keeping absent filters absent preserves compatibility with local test
+        # doubles and with adapters written against the original search method.
+        if site:
+            search_options["site"] = site
+        if freshness:
+            search_options["freshness"] = freshness
         try:
-            results = await web.search(query, max_results=max(1, min(int(max_results), 10)))
+            results = await web.search(query, **search_options)
         except AllProvidersRefusedError as exc:
             # Отказ поисковиков — не факт об интернете. Модель обязана увидеть
             # разницу, иначе она сообщит человеку «ничего не нашлось» о запросе,
@@ -2933,7 +3036,7 @@ class ExecutionKernel:
         # Сутки — местные для ЧЕЛОВЕКА, а не UTC: иначе счёт обнуляется среди
         # его рабочего дня. Тот же выбор, что у ночной сводки.
         day = local_now(settings).date().isoformat()
-        used = storage.bump_daily_counter("web", actor.user_id, day)
+        used = storage.bump_daily_counter("web", actor.own_id, day)
         if used <= limit:
             return None
         LOGGER.warning("web quota exhausted: %d > %d", used, limit)
@@ -2966,7 +3069,8 @@ class ExecutionKernel:
         """
         storage, _, _, _ = self._require_services()
         if not hasattr(storage, "people_whose_name_starts_with"):
-            return None
+            LOGGER.warning("Outbound privacy guard is unavailable; web request refused")
+            return self._outbound_privacy_guard_refusal()
         words = [
             word.strip(".,!?…«»\"'()[]:;")
             for word in str(query or "").split()
@@ -2986,7 +3090,7 @@ class ExecutionKernel:
                 "Could not check the graph before a web search (%s)",
                 type(exc).__name__,
             )
-            return None
+            return self._outbound_privacy_guard_refusal()
         if found:
             return {
                 "query": "",
@@ -2998,6 +3102,20 @@ class ExecutionKernel:
                 ),
             }
         return None
+
+    @staticmethod
+    def _outbound_privacy_guard_refusal() -> dict[str, Any]:
+        """Fail closed when the archive privacy check cannot prove a query safe."""
+
+        return {
+            "query": "",
+            "results": [],
+            "refused": True,
+            "reason": (
+                "Не удалось безопасно проверить запрос по архиву, поэтому наружу "
+                "он не отправлен. Попробуйте ещё раз позже."
+            ),
+        }
 
     async def _capture_web_sources(
         self, actor: ActorContext, query: str, report: dict[str, Any]
@@ -3052,6 +3170,9 @@ class ExecutionKernel:
                         "url": url,
                         "title": title,
                         "content_source": "web_research",
+                        # Поиск выполняет конкретный человек даже тогда, когда
+                        # найденная страница сохраняется в общий tenant.
+                        "uploaded_by": actor.own_id,
                         # Запрос — часть провенанса: по нему видно, зачем эта
                         # страница вообще попала в архив.
                         "search_query": query,
@@ -4195,7 +4316,7 @@ class ExecutionKernel:
             # того как новые документы приходят уже с отметкой, безымянных в
             # СВЕЖЕМ окне становится ноль — и отрицание делается законным, без
             # единой правки здесь.
-            "arrivals_without_an_author": storage.arrivals_without_an_author(actor.user_id, since, until),
+            "arrivals_without_an_author": storage.arrivals_without_an_author(tenant, since, until),
         }
         if analysis:
             try:
@@ -4460,6 +4581,11 @@ class ExecutionKernel:
                     description=description,
                     security_id=security_id,
                     risk=risk,
+                    allowed_execution_scopes=(
+                        frozenset({"dialogue", "mission"})
+                        if name in MISSION_EXECUTION_TOOLS
+                        else frozenset({"dialogue"})
+                    ),
                     parameters={
                         "type": "object",
                         "properties": properties,
@@ -4546,9 +4672,20 @@ class ExecutionKernel:
         )
         spec(
             "web_search",
-            "Поиск в открытом интернете.",
+            "Поиск в открытом интернете. site — только домен без схемы, пути и порта; "
+            "freshness ограничивает окно значениями day/week/month/year.",
             "web.search",
-            {"query": {"type": "string"}, "max_results": {"type": "integer", "minimum": 1, "maximum": 10}},
+            {
+                "query": {"type": "string"},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 10},
+                "site": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "pattern": r"^[^/:@?#\\\s]+\.?$",
+                    "description": "hostname/domain only; no URL, path, userinfo or port",
+                },
+                "freshness": {"type": "string", "enum": list(SEARCH_FRESHNESS_VALUES)},
+            },
             ["query"],
             risk="observe",
         )

@@ -24,7 +24,12 @@ import inspect
 
 import pytest
 
-from friday.agent_runtime import _ASKS_WHAT_A_PERSON_WROTE, AgentContext, AgentRuntime
+from friday.agent_runtime import (
+    _ASKS_WHAT_A_PERSON_WROTE,
+    _OUTBOUND_TOOL_NAMES,
+    AgentContext,
+    AgentRuntime,
+)
 from tests.test_asking_about_a_person_reaches_the_right_tool import PEOPLE, _runtime
 
 
@@ -159,10 +164,11 @@ def test_the_model_is_not_even_offered_the_web_for_a_person_question() -> None:
     поиск) — уговорами это не лечится, только тем, чего нет в списке.
     """
     source = inspect.getsource(AgentRuntime.chat)
-    at = source.index('if topic.startswith("человек")')
+    assert 'or topic.startswith("человек")' in source
+    at = source.index("if outbound_blocked")
     guard = source[at : at + 1800]
-    assert "web_research" in guard, "инструмент снова предлагается модели"
-    assert "web_search" in guard and "web_fetch" in guard, "закрыт не весь выход наружу"
+    assert "_OUTBOUND_TOOL_NAMES" in guard, "модель снова получила закрытые инструменты"
+    assert {"web_research", "web_search", "web_fetch"} <= _OUTBOUND_TOOL_NAMES
 
 
 def test_the_archive_hint_is_dropped_when_understanding_says_person() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -17,7 +18,12 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from friday.config import FridaySettings, validate_settings
-from friday.diagnostics.runtime_lease import inspect_process_lease
+from friday.diagnostics.runtime_lease import (
+    ProcessLease,
+    RuntimeLeaseError,
+    inspect_process_lease,
+    process_owns_lease,
+)
 from friday.telemetry import SystemTelemetry
 from friday.telemetry.logging import redact_text
 
@@ -618,6 +624,65 @@ def _bridge_queue_status(path: Path) -> dict[str, Any]:
     }
 
 
+def _bridge_queue_status_without_live_open(path: Path) -> dict[str, Any]:
+    """Inspect the bridge queue only when no bridge process owns its WAL.
+
+    Read-only SQLite connections still map ``-shm``.  On this installation a
+    second process touching a live WAL has twice coincided with ``SIGBUS`` in the
+    owning process, so diagnostics must not create that second mapping merely to
+    obtain counters.  The running bridge remains authoritative; stopped queues
+    keep the existing offline inspection path.
+    """
+
+    lease_path = path.with_name(f"{path.name}.lock")
+    lease = inspect_process_lease(
+        lease_path,
+        protocol="friday.telegram-bridge.v1",
+    )
+    if lease.get("active") is True or lease.get("state") == "active_hint":
+        return {
+            "state": "active_uninspected",
+            "pending": None,
+            "dead_letter": None,
+            "healthy": bool(lease.get("healthy", True)),
+        }
+    if path.is_symlink():
+        return {
+            "state": "unsafe_symlink_uninspected",
+            "pending": None,
+            "dead_letter": None,
+            "healthy": False,
+        }
+    if not path.is_file():
+        # No SQLite open follows this observation, so a bridge creating the
+        # queue immediately afterwards is harmless and needs no lease handoff.
+        return {"state": "absent", "pending": 0, "dead_letter": 0, "healthy": True}
+
+    # Inspection and SQLite open cannot be two independent operations.  A
+    # bridge may acquire its lease in between them and turn this apparently
+    # offline read into a second mapping of its live ``-shm`` file.  Claiming
+    # the same lease closes that window: either this process owns the whole
+    # read, or a starting/running bridge wins and the queue remains untouched.
+    boundary = ProcessLease(lease_path, protocol="friday.telegram-bridge.v1")
+    try:
+        boundary.acquire()
+    except (OSError, RuntimeLeaseError):
+        contender = inspect_process_lease(
+            lease_path,
+            protocol="friday.telegram-bridge.v1",
+        )
+        return {
+            "state": "active_uninspected",
+            "pending": None,
+            "dead_letter": None,
+            "healthy": bool(contender.get("healthy", False)),
+        }
+    try:
+        return _bridge_queue_status(path)
+    finally:
+        boundary.release()
+
+
 # Bound the auth-failure scan: only a threshold comparison is needed, and a
 # request flood keeps appending auth.failed rows even while rate-limited, so an
 # unbounded COUNT could scan a huge trailing window on every diagnostics call.
@@ -756,7 +821,13 @@ def _add_secret_hygiene_actions(add_action: Any, settings: FridaySettings) -> No
     one. Paths are reported; values never are.
     """
     from friday.config import local_env_file_path
-    from friday.secret_hygiene import MAX_FILE_BYTES, MAX_FILES, scan
+    from friday.secret_hygiene import (
+        MAX_FILE_BYTES,
+        MAX_FILES,
+        MAX_SCAN_BYTES,
+        MAX_WALK_ENTRIES,
+        scan,
+    )
 
     # The env file is protected by PATH now, not by name: skipping every file called
     # `.env` anywhere in the tree hid copies of live credentials in other projects,
@@ -764,9 +835,37 @@ def _add_secret_hygiene_actions(add_action: Any, settings: FridaySettings) -> No
     # check ran over `protected` only, which used to be empty by default.
     protected = [path for path in (settings.backup_encryption_key_file, local_env_file_path()) if path]
     roots = [settings.home, Path.home()]
+    main_database = settings.database_path
+    bridge_queue = settings.state_dir / "telegram-inbox.sqlite3"
+    excluded: list[Path] = []
+    for live_sqlite in (main_database, bridge_queue):
+        excluded.extend(
+            [
+                live_sqlite,
+                live_sqlite.with_name(f"{live_sqlite.name}-wal"),
+                live_sqlite.with_name(f"{live_sqlite.name}-shm"),
+                live_sqlite.with_name(f"{live_sqlite.name}-journal"),
+                live_sqlite.with_name(f"{live_sqlite.name}.lock"),
+            ]
+        )
+    excluded.append(settings.state_dir / "backend.lock")
     try:
-        report = scan(roots, protected=protected)
+        # The scanner deliberately walks the whole owner home.  These exact
+        # runtime paths (and hardlinks to their current inodes) are a stronger
+        # exclusion than ``protected``: even a raw ``open(2)`` of a live SQLite,
+        # WAL or SHM from an external doctor process violates the single-owner
+        # boundary that prevents SIGBUS.
+        report = scan(roots, protected=protected, excluded=excluded)
     except Exception:  # a hygiene check must never be why diagnostics fail
+        # Do not include the exception: a filesystem/backend error can carry a
+        # credential-bearing filename.  Silence would falsely look like complete,
+        # clean coverage.
+        add_action(
+            "secret_scan_unavailable",
+            "warning",
+            "Проверка секретов не завершилась",
+            "Filesystem scan завершился внутренней ошибкой; отсутствие находок не значит их отсутствие.",
+        )
         return
 
     for path, mode in report.loose_permissions:
@@ -786,22 +885,331 @@ def _add_secret_hygiene_actions(add_action: Any, settings: FridaySettings) -> No
             + (" и доступен на чтение другим пользователям" if exposure.world_readable else "")
             + ". Удалите файл и перевыпустите этот секрет.",
         )
-    # `clean` only speaks for the files the scan actually opened. A large file is
-    # not an unusual place for a leaked secret (a config dump, a log, an exported
-    # profile) to end up, and until this counter existed that gap was invisible —
-    # `stopped_early` had the same problem for the file-count cap.
-    if report.oversized_skipped or report.stopped_early:
+    # `clean` only speaks for complete coverage.  Large files are now streamed, but
+    # file/byte bounds and unreadable paths remain intentionally fail-honest.
+    if not report.complete:
         parts = []
-        if report.oversized_skipped:
-            parts.append(f"{report.oversized_skipped} файл(ов) крупнее {MAX_FILE_BYTES // (1 << 20)} МиБ")
         if report.stopped_early:
             parts.append(f"остановлено на пределе в {MAX_FILES} файлов")
+        if report.discovery_limit_exhausted:
+            parts.append(f"остановлено на пределе обхода в {MAX_WALK_ENTRIES} записей")
+        if report.files_not_fully_scanned:
+            parts.append(f"{report.files_not_fully_scanned} файл(ов) проверены не полностью")
+        elif report.oversized_skipped:
+            # Backward-compatible reports from a mixed-version backend may only
+            # carry the legacy counter.
+            parts.append(f"{report.oversized_skipped} файл(ов) крупнее {MAX_FILE_BYTES // (1 << 20)} МиБ")
+        if report.byte_budget_exhausted:
+            parts.append(f"исчерпан предел чтения {MAX_SCAN_BYTES // (1 << 20)} МиБ")
+        if report.unreadable_skipped:
+            parts.append(f"{report.unreadable_skipped} файл(ов) недоступны для чтения")
+        if report.traversal_errors:
+            parts.append(f"{report.traversal_errors} каталог(ов) не удалось обойти")
         add_action(
             "secret_scan_incomplete",
             "warning",
             "Проверка секретов охватила не всё",
             "Пропущено: " + ", ".join(parts) + ". Отсутствие находок для них не значит их отсутствие.",
         )
+
+
+_LIVE_DIAGNOSTICS_MAX_BYTES = 4 * 1_048_576
+
+
+class _NoLiveDiagnosticsRedirects(urllib.request.HTTPRedirectHandler):
+    """Keep the bearer token on the one host-local request it was built for."""
+
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+def _diagnostic_state(ok: bool, actions: list[dict[str, Any]]) -> str:
+    severities = {str(item.get("severity")) for item in actions}
+    if not ok or "error" in severities:
+        return "degraded"
+    if "setup" in severities:
+        return "setup_required"
+    if "warning" in severities:
+        return "attention"
+    return "ready"
+
+
+def _append_secret_hygiene_report(result: dict[str, Any], settings: FridaySettings) -> None:
+    """Merge the filesystem-only hygiene scan into an in-process API report."""
+
+    current = result.get("actions")
+    if not isinstance(current, list) or any(not isinstance(item, dict) for item in current):
+        current = []
+        result["actions"] = current
+    additions: list[dict[str, Any]] = []
+
+    def add_action(
+        code: str,
+        severity: str,
+        title: str,
+        detail: str,
+        command: str | None = None,
+    ) -> None:
+        action: dict[str, Any] = {
+            "code": code,
+            "severity": severity,
+            "title": title,
+            "detail": detail,
+        }
+        if command:
+            action["command"] = command
+        additions.append(action)
+
+    _add_secret_hygiene_actions(add_action, settings)
+    existing = {str(item.get("code")) for item in current}
+    current.extend(item for item in additions if str(item.get("code")) not in existing)
+    result["state"] = _diagnostic_state(bool(result.get("ok")), current)
+
+
+def _local_live_diagnostics_host(configured_host: str) -> str | None:
+    """Return a numeric host only when the OS confirms it belongs to this host.
+
+    The request carries the owner bearer token.  A configured hostname must not
+    get a chance to resolve off-host (or be rebound between validation and
+    connection), so the only accepted name is the fixed localhost alias.  A
+    concrete non-loopback bind is accepted only when a no-packet ``bind(2)``
+    probe proves that the address is assigned locally.
+    """
+
+    host = str(configured_host or "").strip()
+    if host in {"", "0.0.0.0", "localhost"}:
+        return "127.0.0.1"
+    if host == "::":
+        return "::1"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if address.is_multicast:
+        return None
+    if address.is_unspecified:
+        return "::1" if address.version == 6 else "127.0.0.1"
+    if address.is_loopback:
+        return str(address)
+
+    family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+    probe = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        if address.version == 6:
+            probe.bind((str(address), 0, 0, 0))
+        else:
+            probe.bind((str(address), 0))
+    except OSError:
+        return None
+    finally:
+        probe.close()
+    return str(address)
+
+
+def _live_backend_diagnostics_url(
+    settings: FridaySettings,
+    *,
+    check_llm_port: bool,
+) -> str | None:
+    host = _local_live_diagnostics_host(settings.api_host)
+    if host is None:
+        return None
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    scheme = "https" if settings.ssl_certfile and settings.ssl_keyfile else "http"
+    flag = "true" if check_llm_port else "false"
+    return f"{scheme}://{host}:{settings.api_port}/api/admin/diagnostics?check_llm={flag}"
+
+
+def _fetch_live_backend_diagnostics(
+    settings: FridaySettings,
+    backend_lease: dict[str, Any],
+    *,
+    check_llm_port: bool,
+) -> dict[str, Any] | None:
+    """Ask the process that already owns SQLite; never echo response failures."""
+
+    try:
+        url = _live_backend_diagnostics_url(settings, check_llm_port=check_llm_port)
+        if url is None:
+            return None
+        headers = {"Accept": "application/json"}
+        if settings.api_token:
+            headers["Authorization"] = f"Bearer {settings.api_token}"
+        request = urllib.request.Request(  # noqa: S310 - proven host-local destination
+            url,
+            headers=headers,
+            method="GET",
+        )
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _NoLiveDiagnosticsRedirects(),
+        )
+        with opener.open(request, timeout=15.0) as response:  # noqa: S310 - proven host-local API
+            if int(getattr(response, "status", 0) or 0) != 200:
+                return None
+            payload = response.read(_LIVE_DIAGNOSTICS_MAX_BYTES + 1)
+        if len(payload) > _LIVE_DIAGNOSTICS_MAX_BYTES:
+            return None
+        result = json.loads(payload.decode("utf-8"))
+    except Exception:  # noqa: BLE001 - every transport/parse failure is fail-closed
+        return None
+    if not isinstance(result, dict):
+        return None
+    if not {
+        "ok",
+        "state",
+        "database",
+        "workers",
+        "backend_lease",
+        "bridge_queue",
+        "actions",
+    }.issubset(result):
+        return None
+    reported_lease = result.get("backend_lease")
+    if not isinstance(reported_lease, dict):
+        return None
+    expected_pid = backend_lease.get("pid")
+    if (
+        not isinstance(expected_pid, int)
+        or isinstance(expected_pid, bool)
+        or reported_lease.get("pid") != expected_pid
+        or not (reported_lease.get("active") is True or reported_lease.get("state") == "active_hint")
+    ):
+        return None
+    current_lease = inspect_process_lease(
+        settings.state_dir / "backend.lock",
+        protocol="friday.backend.v1",
+    )
+    if current_lease.get("pid") != expected_pid or not (
+        current_lease.get("active") is True or current_lease.get("state") == "active_hint"
+    ):
+        return None
+    return result
+
+
+def _active_backend_diagnostics_unavailable(
+    settings: FridaySettings,
+    backend_lease: dict[str, Any],
+    *,
+    check_secrets: bool,
+) -> dict[str, Any]:
+    """Fail closed without mapping the live main database in this process."""
+
+    configuration = validate_settings(settings, production=not settings.is_loopback_bind)
+    actions: list[dict[str, Any]] = []
+
+    def add_action(
+        code: str,
+        severity: str,
+        title: str,
+        detail: str,
+        command: str | None = None,
+    ) -> None:
+        action: dict[str, Any] = {
+            "code": code,
+            "severity": severity,
+            "title": title,
+            "detail": detail,
+        }
+        if command:
+            action["command"] = command
+        actions.append(action)
+
+    for issue in configuration:
+        warning = issue.startswith("warning:")
+        add_action(
+            "configuration_warning" if warning else "configuration_error",
+            "warning" if warning else "error",
+            "Проверьте конфигурацию",
+            issue.removeprefix("warning:").strip(),
+            "jericho doctor",
+        )
+    add_action(
+        "active_backend_diagnostics_unavailable",
+        "error",
+        "Живой backend не отдал диагностику",
+        "Process lease активен, но локальный диагностический API не ответил. "
+        "Основная SQLite намеренно не открывалась вторым процессом; проверьте event loop "
+        "и журнал backend.",
+    )
+    if check_secrets:
+        _add_secret_hygiene_actions(add_action, settings)
+    model = _model_status(settings.model_dir)
+    result: dict[str, Any] = {
+        "ok": False,
+        "configuration_issues": configuration,
+        "paths": {
+            "home": _path_status(settings.home),
+            "state": _path_status(settings.state_dir),
+            "files": _path_status(settings.files_dir),
+            "vault": _path_status(settings.memory_vault_dir),
+            "backups": _path_status(settings.backups_dir),
+            "exports": _path_status(settings.exports_dir),
+            "model": model,
+        },
+        "database": {
+            "path": str(settings.database_path),
+            "exists": settings.database_path.is_file(),
+            "schema_version": None,
+            "ok": False,
+            "state": "active_backend_uninspected",
+        },
+        "backups": _latest_backup_status(settings.backups_dir),
+        "files_backup": {},
+        "workers": {
+            "state": "active_backend_uninspected",
+            "healthy": False,
+            "task_count": 0,
+            "tasks": {},
+        },
+        "backend_lease": backend_lease,
+        "bridge_queue": _bridge_queue_status_without_live_open(settings.state_dir / "telegram-inbox.sqlite3"),
+        "auth_failures": {"state": "active_backend_uninspected"},
+        "embeddings_index": {"available": False},
+        "runtime": SystemTelemetry(settings.home).snapshot(),
+        "features": {
+            "llm_enabled": settings.llm_enabled,
+            "embeddings_enabled": settings.embeddings_enabled,
+            "workers_enabled": settings.workers_enabled,
+            "code_execution_enabled": settings.code_execution_enabled,
+            "web_private_networks_allowed": settings.web_allow_private_networks,
+        },
+        "actions": actions,
+    }
+    result["state"] = _diagnostic_state(False, actions)
+    return result
+
+
+def _live_backend_report(
+    settings: FridaySettings,
+    backend_lease: dict[str, Any],
+    *,
+    check_llm_port: bool,
+    check_secrets: bool,
+) -> dict[str, Any]:
+    pid = backend_lease.get("pid")
+    active = backend_lease.get("active") is True or backend_lease.get("state") == "active_hint"
+    if not active or not isinstance(pid, int) or isinstance(pid, bool):
+        return _active_backend_diagnostics_unavailable(
+            settings,
+            backend_lease,
+            check_secrets=check_secrets,
+        )
+    live = _fetch_live_backend_diagnostics(
+        settings,
+        backend_lease,
+        check_llm_port=check_llm_port,
+    )
+    if live is None:
+        return _active_backend_diagnostics_unavailable(
+            settings,
+            backend_lease,
+            check_secrets=check_secrets,
+        )
+    if check_secrets:
+        _append_secret_hygiene_report(live, settings)
+    return live
 
 
 def collect_diagnostics(
@@ -812,16 +1220,130 @@ def collect_diagnostics(
     check_secrets: bool = False,
 ) -> dict[str, Any]:
     """Collect safe diagnostics without exposing secrets or document contents."""
-    configuration = validate_settings(settings, production=not settings.is_loopback_bind)
-    database = storage.diagnostics() if storage is not None else _database_status(settings.database_path)
-    backups = _latest_backup_status(settings.backups_dir)
-    workers = _worker_status(settings, storage)
+    lease_path = settings.state_dir / "backend.lock"
     backend_lease = inspect_process_lease(
-        settings.state_dir / "backend.lock",
+        lease_path,
         protocol="friday.backend.v1",
     )
-    bridge_queue = _bridge_queue_status(settings.state_dir / "telegram-inbox.sqlite3")
     backend_active = backend_lease.get("active") is True or backend_lease.get("state") == "active_hint"
+    this_process_owns_backend = process_owns_lease(
+        lease_path,
+        protocol="friday.backend.v1",
+    )
+    if storage is not None and this_process_owns_backend:
+        return _collect_diagnostics_under_boundary(
+            settings,
+            storage,
+            backend_lease,
+            check_llm_port=check_llm_port,
+            check_secrets=check_secrets,
+        )
+    if backend_active:
+        return _live_backend_report(
+            settings,
+            backend_lease,
+            check_llm_port=check_llm_port,
+            check_secrets=check_secrets,
+        )
+
+    if storage is not None:
+        # A storage object is not proof that this is the backend process.  Tests,
+        # maintenance commands and third-party callers can construct one too.
+        # Admit it only while this process owns the same boundary a backend
+        # would need; a concurrently starting backend wins or loses atomically.
+        storage_boundary = ProcessLease(lease_path, protocol="friday.backend.v1")
+        try:
+            storage_boundary.acquire()
+        except Exception:  # noqa: BLE001 - never use storage after losing the lease race
+            contender = inspect_process_lease(
+                lease_path,
+                protocol="friday.backend.v1",
+            )
+            return _live_backend_report(
+                settings,
+                contender,
+                check_llm_port=check_llm_port,
+                check_secrets=check_secrets,
+            )
+        try:
+            return _collect_diagnostics_under_boundary(
+                settings,
+                storage,
+                backend_lease,
+                check_llm_port=check_llm_port,
+                check_secrets=check_secrets,
+            )
+        finally:
+            storage_boundary.release()
+
+    # A negative inspection is only a point-in-time observation.  Hold the
+    # backend's exact lease while all three main-database snapshots are taken,
+    # otherwise the backend can start after inspection and before any one of
+    # these read-only connections maps its live WAL.  Release before backup
+    # verification, filesystem scans and model probes so diagnostics cannot
+    # delay normal startup beyond the bounded SQLite snapshot itself.
+    boundary = ProcessLease(lease_path, protocol="friday.backend.v1")
+    try:
+        boundary.acquire()
+    except Exception:  # noqa: BLE001 - losing/unsafe boundary must fail closed
+        contender = inspect_process_lease(
+            lease_path,
+            protocol="friday.backend.v1",
+        )
+        return _live_backend_report(
+            settings,
+            contender,
+            check_llm_port=check_llm_port,
+            check_secrets=check_secrets,
+        )
+    try:
+        offline_database = _database_status(settings.database_path)
+        offline_workers = _worker_status(settings, None)
+        offline_auth_failures = _auth_failure_status(
+            settings.database_path,
+            None,
+            threshold=settings.auth_failure_alert_threshold,
+        )
+    finally:
+        boundary.release()
+    return _collect_diagnostics_under_boundary(
+        settings,
+        None,
+        backend_lease,
+        check_llm_port=check_llm_port,
+        check_secrets=check_secrets,
+        offline_database=offline_database,
+        offline_workers=offline_workers,
+        offline_auth_failures=offline_auth_failures,
+    )
+
+
+def _collect_diagnostics_under_boundary(
+    settings: FridaySettings,
+    storage: FridayStorage | None,
+    backend_lease: dict[str, Any],
+    *,
+    check_llm_port: bool,
+    check_secrets: bool,
+    offline_database: dict[str, Any] | None = None,
+    offline_workers: dict[str, Any] | None = None,
+    offline_auth_failures: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a report from in-process storage or lease-protected snapshots."""
+
+    backend_active = backend_lease.get("active") is True or backend_lease.get("state") == "active_hint"
+    if storage is None:
+        if offline_database is None or offline_workers is None or offline_auth_failures is None:
+            raise RuntimeError("offline diagnostics require lease-protected snapshots")
+        database = offline_database
+        workers = offline_workers
+    else:
+        database = storage.diagnostics()
+        workers = _worker_status(settings, storage)
+
+    configuration = validate_settings(settings, production=not settings.is_loopback_bind)
+    backups = _latest_backup_status(settings.backups_dir)
+    bridge_queue = _bridge_queue_status_without_live_open(settings.state_dir / "telegram-inbox.sqlite3")
     if not backend_active and workers.get("stale_tasks"):
         # A stopped backend naturally has old worker timestamps.  Keep the
         # evidence visible, but do not diagnose intentional downtime as a
@@ -1047,7 +1569,7 @@ def collect_diagnostics(
             "Файл process lease небезопасен или принадлежит другому протоколу",
             "Не удаляйте lock-файл при работающем процессе; сначала установите владельца lease.",
         )
-    dead_letters = int(bridge_queue.get("dead_letter", 0))
+    dead_letters = int(bridge_queue.get("dead_letter") or 0)
     if dead_letters:
         add_action(
             "inspect_bridge_dead_letters",
@@ -1057,9 +1579,17 @@ def collect_diagnostics(
             "но требуют внимания. Проверьте журнал моста и последнюю ошибку.",
             "jericho status",
         )
-    auth_failures = _auth_failure_status(
-        settings.database_path, storage, threshold=settings.auth_failure_alert_threshold
+    auth_failures = (
+        offline_auth_failures
+        if storage is None
+        else _auth_failure_status(
+            settings.database_path,
+            storage,
+            threshold=settings.auth_failure_alert_threshold,
+        )
     )
+    if auth_failures is None:  # guarded at the helper boundary; keeps the type explicit
+        raise RuntimeError("offline auth diagnostics snapshot is missing")
     if auth_failures["threshold"] > 0 and auth_failures["recent_failures"] >= auth_failures["threshold"]:
         shown = f"{'≥' if auth_failures['capped'] else ''}{auth_failures['recent_failures']}"
         add_action(
@@ -1315,15 +1845,7 @@ def collect_diagnostics(
                 f"Обслуживаются: {served}.",
             )
 
-    severities = {str(item.get("severity")) for item in actions}
-    if not result["ok"] or "error" in severities:
-        result["state"] = "degraded"
-    elif "setup" in severities:
-        result["state"] = "setup_required"
-    elif "warning" in severities:
-        result["state"] = "attention"
-    else:
-        result["state"] = "ready"
+    result["state"] = _diagnostic_state(bool(result["ok"]), actions)
     return result
 
 

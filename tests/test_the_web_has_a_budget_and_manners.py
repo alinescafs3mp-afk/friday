@@ -137,6 +137,39 @@ async def test_the_neighbour_has_their_own_budget(kernel, storage) -> None:
 
 
 @pytest.mark.anyio
+async def test_shared_archive_people_have_independent_budgets(settings, storage) -> None:
+    """Общий tenant не превращает личную квоту в одну общую на всех."""
+
+    for user_id in ("shared-tenant", "person-alice", "person-bob"):
+        storage.ensure_user(user_id, source="test", external_id=user_id)
+    kernel = _kernel(settings, storage, web_daily_quota=1)
+    alice = ActorContext(
+        user_id="shared-tenant",
+        preset_key="owner",
+        source="test",
+        shared_tenant=True,
+        person_id="person-alice",
+    )
+    bob = ActorContext(
+        user_id="shared-tenant",
+        preset_key="owner",
+        source="test",
+        shared_tenant=True,
+        person_id="person-bob",
+    )
+
+    assert not (await kernel._web_search(actor=alice, query="а")).get(  # noqa: SLF001
+        "quota_exhausted"
+    )
+    assert (await kernel._web_search(actor=alice, query="б")).get(  # noqa: SLF001
+        "quota_exhausted"
+    )
+    assert not (await kernel._web_search(actor=bob, query="в")).get(  # noqa: SLF001
+        "quota_exhausted"
+    )
+
+
+@pytest.mark.anyio
 async def test_a_zero_quota_means_no_limit(settings, storage) -> None:
     """Ноль — «не ограничивать»: иначе выключение потолка отрезало бы интернет."""
 

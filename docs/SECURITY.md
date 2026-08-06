@@ -93,9 +93,11 @@ TEMP schema identity views и AFTER triggers: обычный insert/non-flipping
 а raw/offline write остаётся invalid до exact heal новым соединением. Поэтому
 обычный `ALTER TABLE` не обязан знать application UDF. Per-connection SQLite
 authorizer запрещает прямой caller DML над обоими cache/work/state, DDL над owned
-privacy objects и `writable_schema`; startup отдельно доказывает обе пары
-`cache == live`. Повреждённая derivative authority поэтому закрывает generic
-чтение, а не открывает его.
+privacy objects и `writable_schema`. Startup под тем же write-lock проверяет только
+что пересобранный tier как `work == cache`: work перед этим очищен и целиком заполнен
+из live authority, а cache опубликован только из work. Tier, который этот opener не
+пересобирал, по-прежнему независимо проверяется как `cache == live`. Повреждённая
+derivative authority поэтому закрывает generic чтение, а не открывает его.
 
 Личный reminder-reader и доставка возвращают запись только точному `person_id`,
 когда одновременно совпали durable marker, time provenance, валидные
@@ -155,6 +157,10 @@ Background worker использует тот же ingestion boundary и обр�
 
 Research synthesis также является недоверенным output. Даже явная кнопка сохранения создаёт только Raw Object + pending Inbox candidate. Relation candidates, potential conflicts и lifecycle candidates остаются review-only и capability-gated.
 
+Ход с приватным вложением или данными о человеке закрывает outbound hard boundary, а не полагается на уговор модели: `web_search`, `web_fetch`, `web_research`, внешний `data_query` и не являющийся OS-песочницей `code_run` удаляются из schemas; web-prefetch отключён; даже hallucinated/native call с таким именем отклоняется до kernel. После первого file-grounded хода private-lineage переносится каждым assistant message до нового conversation: файл сам по себе не становится ambient context, но outbound и account-wide обучение standing rules/corrections остаются закрыты, чтобы пересказ приватного ответа не попал в глобальную память. Synthesis, verifier и единственный repair используют один bounded projection без повторной обрезки attachment chunks. Vision/OCR/transcript видимы только как advisory и не становятся verification evidence. Неполный parser/context/advisory projection не может подтвердить count/all/exhaustiveness ни в исходном ответе, ни после repair: финальный статус принудительно `unknown`. Сырые замечания verifier доступны лишь немедленному repair; durable metadata, API, Telegram, TTS и idempotency получают только allowlisted issue code. Данные repair передаются user-role недоверенным JSON, а system-role остаётся статическим.
+
+`user_model` остаётся только фоновым ориентиром и не лицензирует факты о человеке. Для person-intent без Knowledge Object, допустимого person-tool, attachment или graph evidence свободный модельный текст отбрасывается до verifier/persistence; одновременно очищаются подготовленные моделью file, voice и Knowledge attribution carriers. Структура отвечает, что подтверждённых данных недостаточно. Это fail-closed граница против досье, сгенерированного из весов модели при нулевой retrieval confidence.
+
 ## 7. Web surfer и SSRF
 
 По умолчанию запрещены:
@@ -203,6 +209,7 @@ Extractor:
 - Не выводите их в screenshots. Стандартный logging formatter дополнительно редактирует известные credentials, Authorization values и Telegram token внутри URL/traceback, но это defense in depth, а не разрешение логировать секреты намеренно.
 - **Приватность запросов в логах**: access-log uvicorn проходит через фильтр, срезающий query string (`/api/search?[stripped]`) — поисковые запросы и browse-фильтры суть персональные данные, которые редактор секретов распознать не может. `web_surfer` логирует только hostname и класс исключения — `str()` httpx-ошибок содержит полный URL с параметрами поисковых провайдеров.
 - **Все application-логи content-free by construction.** В них разрешены фиксированный event, числовые счётчики, жёстко заданные enum, класс ошибки и обезличенный hostname. Запрещены текст/запрос/ответ, URL, имя файла и путь, user/chat/callback/entity ID, `str(exception)`, traceback, `exc_info`, `stack_info` и произвольный `extra`. AST-contract проверяет все logger aliases и inline `logging.getLogger`; synthetic caplog-тесты подставляют длинные маркеры в exception/query/backend response.
+- Secret hygiene ищет только точные известные этому процессу credential values и никогда не повторяет значение в finding, включая случай, когда оно встроено в filename или имя переменной. Scan ограничен path/byte budget, честно отмечает неполный охват и не открывает live main/bridge SQLite, WAL/SHM/journal/lease либо hardlink к их текущему inode.
 - Храните backup secrets отдельно и зашифрованно.
 - После подозрения на утечку одновременно смените API token, bridge secret и Telegram bot token.
 - Перезапустите backend/bridge после ротации.

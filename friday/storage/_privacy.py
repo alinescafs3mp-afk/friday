@@ -1023,10 +1023,21 @@ def _raw_derivative_live(alias: str) -> str:
 
 
 def _knowledge_derivative_live(alias: str) -> str:
-    return f"""(
-        {_private_material_cache_valid()}
-        AND {_not_private_knowledge_structure_dependency(alias, _work=True)}
-        AND {_knowledge_material_expression(alias)}
+    """Lookup the exact live predicate compiled once in the TEMP view.
+
+    Inlining the predicate into each managed trigger repeated its guarded JSON
+    ``CASE`` tree several times.  SQLite builds with a fixed Lemon parser stack
+    overflowed while compiling ``privacy_material_knowledge_au_refresh`` even
+    though the same predicate had already compiled successfully in the live
+    view.  The view's ``knowledge`` branch is the former expression verbatim;
+    this ID/tenant lookup changes only where SQLite parses it, not what is public.
+    """
+
+    return f"""EXISTS (
+        SELECT 1 FROM private_entity_material_derivative_live live_knowledge
+         WHERE live_knowledge.material_kind='knowledge'
+           AND live_knowledge.object_id={alias}.id
+           AND live_knowledge.user_id={alias}.user_id
     )"""
 
 

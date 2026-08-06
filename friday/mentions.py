@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from friday.morphology import stem_to_fixpoint
@@ -161,6 +162,23 @@ _NOMINAL_TAILS = frozenset(
 # Длиннее этого дописка не бывает ни в одной форме списка — дешёвый отсев до поиска
 # по множеству.
 _MAX_ENDING = max(len(tail) for tail in _NOMINAL_TAILS)
+_COOPERATIVE_MENTION_CHARS = 8_192
+_COOPERATIVE_INFLECTION_HALO = 8_192
+_MAX_COOPERATIVE_ENTITY_NAME_CHARS = 240
+# A 240-character canonical card made only of accepted three-letter stems and
+# separators contains at most sixty signature tokens; storage retains width-1.
+MAX_INFLECTED_NAME_TOKENS = 60
+_EXACT_PATTERN_WORK_LIMIT = 32
+
+
+def _cursor_integer(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    raise ValueError("cursor integer required")
 
 
 @dataclass(frozen=True)
@@ -173,6 +191,12 @@ class Mention:
 
 def _is_word_char(character: str) -> bool:
     return character.isalnum() or character in "_-"
+
+
+def _is_token_char(character: str) -> bool:
+    r"""The single-character equivalent of Python's Unicode ``(?u)\w``."""
+
+    return character.isalnum() or character == "_"
 
 
 _TOKEN_RE = re.compile(r"(?u)\w+")
@@ -269,6 +293,464 @@ def inflected_mentions(text: str, entities: list[tuple[str, str]]) -> dict[str, 
         if clean:
             _inflected_spans(body, tokens, clean, entity_id, taken, found)
     return {item.entity_id: (item.start, item.end) for item in found}
+
+
+def exact_mentions_page(
+    text: str,
+    entities: Sequence[tuple[str, str, Sequence[str]]],
+    *,
+    cursor: Mapping[str, object] | None,
+    char_limit: int = _COOPERATIVE_MENTION_CHARS,
+    pattern_limit: int = _EXACT_PATTERN_WORK_LIMIT,
+) -> tuple[set[str], dict[str, int], bool, bool]:
+    """Run a bounded number of literal name/alias searches.
+
+    The old "page" bounded only document characters.  With 800 entities carrying
+    1,365 short aliases each, one call still compiled and searched more than a
+    million regular expressions before its caller could observe a deadline.
+    ``entity`` and ``material`` are therefore first-class cooperative cursors.
+    The checkpoint contains numbers only; names and aliases are re-read from the
+    tenant-checked entity rows on every invocation.
+    """
+
+    body = text or ""
+    raw = dict(cursor or {})
+    try:
+        start = _cursor_integer(raw.get("char", 0))
+        entity_index = _cursor_integer(raw.get("entity", 0))
+        material_index = _cursor_integer(raw.get("material", 0))
+        bounded = max(256, min(_cursor_integer(char_limit), 65_536))
+        work_limit = max(1, min(_cursor_integer(pattern_limit), 256))
+    except (TypeError, ValueError):
+        return set(), {"char": 0, "entity": 0, "material": 0}, False, False
+    reset = {"char": 0, "entity": 0, "material": 0}
+    if (
+        not 0 <= start <= len(body)
+        or not 0 <= entity_index <= len(entities)
+        or material_index < 0
+        or (start < len(body) and start % bounded != 0)
+    ):
+        return set(), reset, False, False
+    if entity_index == len(entities):
+        if start < len(body) or material_index:
+            return set(), reset, False, False
+    else:
+        name, _entity_id, aliases = entities[entity_index]
+        if material_index > len((name, *aliases)):
+            return set(), reset, False, False
+    if start == len(body) or not entities:
+        return set(), {"char": len(body), "entity": 0, "material": 0}, False, True
+
+    central_end = min(len(body), start + bounded)
+    matched: set[str] = set()
+    consumed = 0
+    while consumed < work_limit and entity_index < len(entities):
+        name, entity_id, aliases = entities[entity_index]
+        materials = (name, *aliases)
+        if material_index >= len(materials):
+            entity_index += 1
+            material_index = 0
+            continue
+        clean = str(materials[material_index] or "").strip()[:8_192]
+        material_index += 1
+        consumed += 1
+        if len(clean) < 3:
+            continue
+
+        # One extra character on each side preserves both look-arounds even when
+        # a possible match begins exactly at the owned window boundary.
+        halo = len(clean) + 1
+        chunk_start = max(0, start - halo)
+        chunk_end = min(len(body), central_end + halo)
+        chunk = body[chunk_start:chunk_end]
+        pattern = re.compile(rf"(?<![\w.]){re.escape(clean)}", re.I)
+        search_at = 0
+        while True:
+            found = pattern.search(chunk, search_at)
+            if found is None:
+                break
+            following = found.end()
+            right_is_word = following < len(chunk) and bool(re.fullmatch(r"(?u)\w", chunk[following]))
+            right_is_dotted_identifier = (
+                following + 1 < len(chunk)
+                and chunk[following] == "."
+                and bool(re.fullmatch(r"(?u)\w", chunk[following + 1]))
+            )
+            if right_is_word or right_is_dotted_identifier:
+                search_at = max(found.end(), found.start() + 1)
+                continue
+            absolute = chunk_start + found.start()
+            if start <= absolute < central_end:
+                matched.add(str(entity_id))
+                break
+            search_at = max(found.end(), found.start() + 1)
+
+    if entity_index >= len(entities):
+        start = central_end
+        entity_index = 0
+        material_index = 0
+    state = {"char": start, "entity": entity_index, "material": material_index}
+    return matched, state, start < len(body), True
+
+
+def inflected_mention_signature(name: str) -> tuple[str, ...] | None:
+    """The exact token signature accepted by ``_inflected_spans``."""
+
+    clean = " ".join(str(name or "").split()).strip()
+    parts = clean.split()
+    if len(parts) < 2:
+        return None
+    if not all(_ALL_CYRILLIC.match(part.casefold().replace("ё", "е")) for part in parts):
+        return None
+    words = tuple(_fold_word(part) for part in parts)
+    if any(len(word) < _MIN_STEM for word in words):
+        return None
+    return words
+
+
+def inflected_token_position_page(
+    text: str,
+    *,
+    cursor: Mapping[str, object] | None,
+    limit: int = 64,
+    char_limit: int = _COOPERATIVE_MENTION_CHARS,
+) -> tuple[list[tuple[int, int]], dict[str, int], bool, bool]:
+    """Read one bounded page of ``_TOKEN_RE`` positions.
+
+    Only numeric offsets cross the cooperative boundary.  A token longer than
+    every accepted entity name is skipped in bounded pieces: no suffix of such a
+    token may become a synthetic word after a resume, and none of its private
+    characters has to be written to a durable checkpoint.
+    """
+
+    body = text or ""
+    raw = dict(cursor or {})
+    reset = {"char": 0, "skip": 0}
+    try:
+        position = _cursor_integer(raw.get("char", 0))
+        skipping = _cursor_integer(raw.get("skip", 0))
+        bounded_chars = max(64, min(_cursor_integer(char_limit), 65_536))
+        bounded_tokens = max(1, min(_cursor_integer(limit), 256))
+    except (TypeError, ValueError, AttributeError):
+        return [], reset, False, False
+    if not 0 <= position <= len(body) or skipping not in {0, 1}:
+        return [], reset, False, False
+    if skipping and (position == len(body) or not _is_token_char(body[position])):
+        return [], reset, False, False
+
+    page: list[tuple[int, int]] = []
+    remaining = bounded_chars
+    while position < len(body) and remaining > 0 and len(page) < bounded_tokens:
+        before = position
+        if skipping:
+            ceiling = min(len(body), position + remaining)
+            while position < ceiling and _is_token_char(body[position]):
+                position += 1
+            remaining -= max(1, position - before)
+            if position < len(body) and _is_token_char(body[position]):
+                continue
+            skipping = 0
+            continue
+
+        ceiling = min(len(body), position + remaining)
+        while position < ceiling and not _is_token_char(body[position]):
+            position += 1
+        remaining -= max(1, position - before)
+        if position >= len(body) or remaining <= 0:
+            break
+
+        start = position
+        token_ceiling = min(len(body), start + _MAX_COOPERATIVE_ENTITY_NAME_CHARS + 1)
+        while position < token_ceiling and _is_token_char(body[position]):
+            position += 1
+        remaining = max(0, remaining - (position - start))
+        if position - start > _MAX_COOPERATIVE_ENTITY_NAME_CHARS:
+            skipping = int(position < len(body) and _is_token_char(body[position]))
+            # A too-long token cannot equal entity material, but it still breaks
+            # adjacency between the matchable tokens on its sides.
+            page.append((start, start))
+            continue
+        page.append((start, position))
+
+    state = {"char": position, "skip": skipping}
+    return page, state, position < len(body), True
+
+
+def _valid_token_positions(
+    body: str,
+    token_positions: Sequence[tuple[int, int]],
+) -> list[tuple[int, int]] | None:
+    if len(token_positions) > 256:
+        return None
+    clean: list[tuple[int, int]] = []
+    previous_end = -1
+    for raw in token_positions:
+        if not isinstance(raw, (tuple, list)) or len(raw) != 2:
+            return None
+        try:
+            start, end = _cursor_integer(raw[0]), _cursor_integer(raw[1])
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= start <= end <= len(body) or start < previous_end:
+            return None
+        if start == end:
+            clean.append((start, end))
+            previous_end = end
+            continue
+        if not _is_token_char(body[start]) or not _is_token_char(body[end - 1]):
+            return None
+        if start and _is_token_char(body[start - 1]):
+            return None
+        if end < len(body) and _is_token_char(body[end]):
+            return None
+        clean.append((start, end))
+        previous_end = end
+    return clean
+
+
+def inflected_mentions_present_tokens(
+    text: str,
+    entities: Sequence[tuple[str, str]],
+    token_positions: Sequence[tuple[int, int]],
+) -> tuple[set[str], bool]:
+    """Return candidates present in a bounded numeric token context."""
+
+    body = text or ""
+    positions = _valid_token_positions(body, token_positions)
+    if positions is None:
+        return set(), False
+    tokens = ["\0" if start == end else _fold_word(body[start:end]) for start, end in positions]
+    present: set[str] = set()
+    for name, entity_id in entities:
+        signature = inflected_mention_signature(name)
+        if signature is None or len(signature) > len(tokens):
+            continue
+        width = len(signature)
+        if any(tuple(tokens[index : index + width]) == signature for index in range(len(tokens) - width + 1)):
+            present.add(str(entity_id))
+    return present, True
+
+
+def inflected_mentions_tokens(
+    text: str,
+    entities: Sequence[tuple[str, str]],
+    token_positions: Sequence[tuple[int, int]],
+    *,
+    owned_start: int,
+    owned_count: int,
+) -> tuple[dict[str, tuple[int, int]], set[str], bool]:
+    """Resolve longest-first matches in one fixed numeric token context.
+
+    ``active`` includes halo matches so a longer name beginning to the left can
+    continue to suppress its shorter suffix.  ``matches`` owns only starts in the
+    requested central token interval, which makes adjacent pages equivalent to
+    one unbounded ``inflected_mentions`` pass.
+    """
+
+    body = text or ""
+    positions = _valid_token_positions(body, token_positions)
+    try:
+        first = _cursor_integer(owned_start)
+        count = _cursor_integer(owned_count)
+    except (TypeError, ValueError):
+        return {}, set(), False
+    if positions is None or first < 0 or count < 0 or first > len(positions):
+        return {}, set(), False
+    owned_end = min(len(positions), first + count)
+    folded = ["\0" if start == end else _fold_word(body[start:end]) for start, end in positions]
+    taken = [False] * len(positions)
+    matches: dict[str, tuple[int, int]] = {}
+    active: set[str] = set()
+    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
+        signature = inflected_mention_signature(name)
+        if signature is None or len(signature) > len(folded):
+            continue
+        width = len(signature)
+        clean_id = str(entity_id)
+        for index in range(len(folded) - width + 1):
+            if tuple(folded[index : index + width]) != signature:
+                continue
+            if any(taken[index : index + width]):
+                continue
+            for occupied in range(index, index + width):
+                taken[occupied] = True
+            active.add(clean_id)
+            if first <= index < owned_end:
+                matches[clean_id] = (positions[index][0], positions[index + width - 1][1])
+    return matches, active, True
+
+
+def _cooperative_token_chunk(
+    body: str,
+    start: int,
+    central_end: int,
+) -> tuple[int, int, str]:
+    """Return a bounded chunk whose first/last token is never a cut suffix.
+
+    A previous left-halo repair stopped walking at ``start``.  When ``start`` was
+    still inside a token longer than the halo, its suffix became a brand-new token
+    and could produce a false person match.  Entity names are capped at 240 chars,
+    so a token for which no boundary exists in that bounded distance cannot match
+    and is safely excluded rather than exposed as a suffix.
+    """
+
+    size = len(body)
+    chunk_start = max(0, start - _COOPERATIVE_INFLECTION_HALO)
+    if chunk_start > 0 and _is_token_char(body[chunk_start - 1]) and _is_token_char(body[chunk_start]):
+        lower = max(0, chunk_start - _MAX_COOPERATIVE_ENTITY_NAME_CHARS)
+        probe = chunk_start
+        while probe > lower and _is_token_char(body[probe - 1]):
+            probe -= 1
+        if probe == 0 or not _is_token_char(body[probe - 1]):
+            chunk_start = probe
+        else:
+            # The leading token is longer than every entity material this reader
+            # accepts. Skip its suffix, but never scan farther than this bounded
+            # central window plus the right halo.
+            ceiling = min(
+                size,
+                central_end + _COOPERATIVE_INFLECTION_HALO + _MAX_COOPERATIVE_ENTITY_NAME_CHARS,
+            )
+            probe = chunk_start
+            while probe < ceiling and _is_token_char(body[probe]):
+                probe += 1
+            chunk_start = probe
+
+    chunk_end = min(size, central_end + _COOPERATIVE_INFLECTION_HALO)
+    if chunk_end < size and _is_token_char(body[chunk_end - 1]) and _is_token_char(body[chunk_end]):
+        ceiling = min(size, chunk_end + _MAX_COOPERATIVE_ENTITY_NAME_CHARS)
+        probe = chunk_end
+        while probe < ceiling and _is_token_char(body[probe]):
+            probe += 1
+        if probe == size or not _is_token_char(body[probe]):
+            chunk_end = probe
+        else:
+            # Exclude the incomplete trailing token. Walking back is bounded by
+            # the maximum matchable entity material.
+            probe = chunk_end
+            lower = max(chunk_start, chunk_end - _MAX_COOPERATIVE_ENTITY_NAME_CHARS)
+            while probe > lower and _is_token_char(body[probe - 1]):
+                probe -= 1
+            chunk_end = probe
+
+    chunk_end = max(chunk_start, chunk_end)
+    return chunk_start, chunk_end, body[chunk_start:chunk_end]
+
+
+def inflected_mentions_present_page(
+    text: str,
+    entities: Sequence[tuple[str, str]],
+    *,
+    cursor: int,
+    char_limit: int = _COOPERATIVE_MENTION_CHARS,
+) -> tuple[set[str], int, bool, bool]:
+    """Entities with an inflected occurrence in the bounded window plus halo.
+
+    Unlike the final winner pass this deliberately has no occupancy mask.  It is
+    used to retain one best rowid per token signature while candidate rows arrive
+    in cooperative pages; overlap is resolved only after the complete candidate
+    set for the window has been seen.
+    """
+
+    body = text or ""
+    try:
+        start = _cursor_integer(cursor)
+        bounded = max(64, min(_cursor_integer(char_limit), 65_536))
+    except (TypeError, ValueError):
+        return set(), 0, False, False
+    if not 0 <= start <= len(body):
+        return set(), 0, False, False
+    central_end = min(len(body), start + bounded)
+    if start == len(body):
+        return set(), len(body), False, True
+    if not entities:
+        return set(), central_end, central_end < len(body), True
+    _chunk_start, _chunk_end, chunk = _cooperative_token_chunk(body, start, central_end)
+    tokens = [_fold_word(match.group(0)) for match in _TOKEN_RE.finditer(chunk)]
+    present: set[str] = set()
+    for name, entity_id in entities:
+        signature = inflected_mention_signature(name)
+        if signature is None or len(signature) > len(tokens):
+            continue
+        width = len(signature)
+        if any(tuple(tokens[index : index + width]) == signature for index in range(len(tokens) - width + 1)):
+            present.add(str(entity_id))
+    return present, central_end, central_end < len(body), True
+
+
+def inflected_mentions_window(
+    text: str,
+    entities: Sequence[tuple[str, str]],
+    *,
+    cursor: int,
+    char_limit: int = _COOPERATIVE_MENTION_CHARS,
+) -> tuple[dict[str, tuple[int, int]], set[str], int, bool, bool]:
+    """Resolve longest-first winners for one bounded window.
+
+    The second result contains winners anywhere in the halo-bearing chunk.  A
+    cooperative caller keeps their numeric rowids while it pages more candidates;
+    otherwise a match beginning just left of the owned window could be forgotten
+    before it suppresses an overlapping shorter name inside the window.
+    """
+
+    body = text or ""
+    try:
+        start = _cursor_integer(cursor)
+        bounded = max(64, min(_cursor_integer(char_limit), 65_536))
+    except (TypeError, ValueError):
+        return {}, set(), 0, False, False
+    if not 0 <= start <= len(body):
+        return {}, set(), 0, False, False
+    central_end = min(len(body), start + bounded)
+    if start == len(body):
+        return {}, set(), len(body), False, True
+    if not entities:
+        return {}, set(), central_end, central_end < len(body), True
+    chunk_start, _chunk_end, chunk = _cooperative_token_chunk(body, start, central_end)
+    tokens = [(m.start(), m.end(), _fold_word(m.group(0))) for m in _TOKEN_RE.finditer(chunk)]
+    if not tokens:
+        return {}, set(), central_end, central_end < len(body), True
+    taken = [False] * len(chunk)
+    found: list[Mention] = []
+    for name, entity_id in sorted(entities, key=lambda pair: -len(pair[0])):
+        clean = " ".join(str(name or "").split()).strip()
+        if clean:
+            _inflected_spans(chunk, tokens, clean, str(entity_id), taken, found)
+
+    matches: dict[str, tuple[int, int]] = {}
+    active: set[str] = set()
+    for item in found:
+        active.add(item.entity_id)
+        absolute_start = chunk_start + item.start
+        if start <= absolute_start < central_end:
+            matches[item.entity_id] = (absolute_start, chunk_start + item.end)
+    return matches, active, central_end, central_end < len(body), True
+
+
+def inflected_mentions_page(
+    text: str,
+    entities: Sequence[tuple[str, str]],
+    *,
+    cursor: int,
+    char_limit: int = _COOPERATIVE_MENTION_CHARS,
+) -> tuple[dict[str, tuple[int, int]], int, bool, bool]:
+    """A resumable window with the same longest-first, non-overlap rule.
+
+    Each window recomputes a bounded halo in memory.  Thus a longer name beginning
+    immediately before the cursor still owns the overlapping words, but no token,
+    name or span is written to the durable worker checkpoint.  Entity search cards
+    cap canonical names at 240 characters.  The compatibility reader uses a
+    fixed 8 KiB halo; the storage worker itself carries the exact bounded token
+    context instead of relying on a character-distance guess.
+    """
+
+    matches, _active, next_cursor, remains, valid = inflected_mentions_window(
+        text,
+        entities,
+        cursor=cursor,
+        char_limit=char_limit,
+    )
+    return matches, next_cursor, remains, valid
 
 
 def mention_spans(text: str, entities: list[tuple[str, str]]) -> list[Mention]:

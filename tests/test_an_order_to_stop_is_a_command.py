@@ -87,6 +87,7 @@ class _Storage:
 
     def __init__(self) -> None:
         self.stored: list[tuple[str, str]] = []
+        self.metadata: list[dict] = []
 
     def get_conversation(self, conversation_id, user_id):  # noqa: ANN001, ARG002
         return {"id": "conv_1", "mode": "dialogue"}
@@ -99,6 +100,7 @@ class _Storage:
 
     def store_message(self, conversation_id, user_id, role, content, metadata=None):  # noqa: ANN001, ARG002
         self.stored.append((role, content))
+        self.metadata.append(dict(metadata or {}))
         return {"id": f"msg_{len(self.stored)}", "metadata_json": metadata or {}}
 
 
@@ -114,6 +116,12 @@ class _ExplodingLLM:
 
     async def chat(self, *args, **kwargs):  # noqa: ANN002, ANN003, ARG002
         raise AssertionError("приказ замолчать дошёл до модели")
+
+
+class _ExplodingKernel:
+    @property
+    def authorization(self):  # noqa: ANN201
+        raise AssertionError("приказ замолчать дошёл до авторизации файла")
 
 
 def _runtime(storage):
@@ -146,6 +154,41 @@ async def test_the_turn_stops_before_the_model(order: str) -> None:
     assert answer["tools_used"] == []
     roles = [role for role, _ in storage.stored]
     assert roles == ["user", "assistant"], "ход записан не как обычно"
+
+
+@pytest.mark.asyncio
+async def test_the_stop_path_does_not_open_an_attachment_boundary() -> None:
+    """The emergency command records facts but never reads caller file data.
+
+    Mutation: moving the branch below ``kernel.authorization`` or attachment
+    restoration makes the exploding boundary fail immediately.
+    """
+    from friday.agent_runtime import AgentRuntime
+
+    storage = _Storage()
+    runtime = _runtime(storage)
+    runtime.kernel = _ExplodingKernel()
+
+    answer = await AgentRuntime.chat(
+        runtime,
+        "alice",
+        "Стой",
+        actor=_actor(),
+        attachments=[
+            {
+                "raw_object_id": "raw_untrusted",
+                "transient_text": "private attachment payload",
+            }
+        ],
+    )
+
+    assert answer["message"] == "Молчу."
+    assert [role for role, _ in storage.stored] == ["user", "assistant"]
+    assert storage.metadata[0] == {
+        "had_attachments": True,
+        "attachment_count": 1,
+        "private_context_lineage": True,
+    }
 
 
 @pytest.mark.asyncio

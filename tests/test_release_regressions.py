@@ -603,7 +603,11 @@ async def test_failed_file_promotion_does_not_delete_bytes_referenced_by_another
     # Ранний дедуп по содержимому здесь глушится намеренно: он ловит обычный
     # повтор, а проверяется ГОНКА — строка с теми же байтами появилась ПОСЛЕ
     # проверки, и удалить файл, на который она ссылается, нельзя.
-    monkeypatch.setattr(storage, "find_file_by_content_hash", lambda user_id, content_hash: None)
+    monkeypatch.setattr(
+        storage,
+        "find_file_by_content_hash",
+        lambda user_id, content_hash, **_scope: None,
+    )
     with pytest.raises(RuntimeError, match="injected promotion failure"):
         await pipeline.ingest_file(
             user_id,

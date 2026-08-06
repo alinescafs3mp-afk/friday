@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "candidate_id": "temporal_explicit_path_bypass_reranker_v1",
+  "base_commit": "dc69b3f60a88d60b06911534356548764da4e02e",
+  "candidate_path": "friday/retrieval/__init__.py",
+  "evaluator_path": "tools/temporal_relational_bench.py",
+  "helper_path": "tools/retrieval_bench.py",
+  "gold_manifest_sha256": "f5292d9f9fa4188633f140eb3efd848da14fdbcbe7b2090002801ea10780c3b5",
+  "candidate_diff_sha256": "89ed1c5828f5a8a744c8083c1aaf9ca3adf31f3205f72031e5a2609b5d44a04d",
+  "evaluator_blob_sha256": "430183cbe5e8815793354ef9cd9957ce2d122c95ea19fd3879612d82d0565d77",
+  "helper_blob_sha256": "094e3e31f7e54a8613133071a3a681c4a1b40cf1c1d9a93d36359c6fc163a738"
+}

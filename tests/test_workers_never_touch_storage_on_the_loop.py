@@ -2,7 +2,7 @@
 
 The audit named five or six such call sites. A list of names goes stale the
 moment someone adds the seventh, so this walks the AST of every `async def` in
-`jericho/workers/` instead and fails on any direct `self.storage.…(…)` /
+`friday/workers/` instead and fails on any direct `self.storage.…(…)` /
 `self.memory_vault.…(…)` call that is not wrapped in `run_blocking`.
 
 Why it matters, measured: every storage WRITE takes the process-wide write lock,

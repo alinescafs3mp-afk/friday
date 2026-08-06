@@ -742,7 +742,7 @@ def test_explicit_no_save_document_is_transient_and_never_written(settings):
         payload = response.json()
         assert payload["ingestion"]["persisted"] is False
         assert payload["file_ingestion"]["persisted"] is False
-        assert payload["file_ingestion"]["raw_object_id"] is None
+        assert "raw_object_id" not in payload["file_ingestion"]
         assert app.state.storage.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0] == 0
         assert app.state.storage.execute("SELECT COUNT(*) FROM knowledge_objects").fetchone()[0] == 0
         assert not any(settings.files_dir.rglob("private.txt"))
@@ -751,6 +751,54 @@ def test_explicit_no_save_document_is_transient_and_never_written(settings):
     assert isinstance(attachments, list)
     assert attachments[0]["transient"] is True
     assert attachments[0]["transient_text"] == "private transient payload"
+
+
+def test_a_pending_file_is_readable_in_the_same_turn_without_bypassing_review(settings):
+    """Mutation: filename-only attachments make the just-uploaded text disappear."""
+
+    from dataclasses import replace
+
+    from friday.server import create_app
+
+    strict = replace(settings, ingestion_review_policy="always")
+    app = create_app(strict)
+    headers = {"Authorization": f"Bearer {strict.api_token}"}
+    captured: dict[str, object] = {}
+    document_text = "SYNTHETIC CURRENT TURN FACT: marker-47 belongs to sector violet."
+
+    with TestClient(app) as client:
+
+        async def capture_chat(*args, **kwargs):
+            captured["attachments"] = kwargs.get("attachments")
+            return {"conversation_id": "same-turn-file", "content": "ok"}
+
+        app.state.agent.chat = capture_chat
+        response = client.post(
+            "/api/chat",
+            headers=headers,
+            json={
+                "message": "Что сказано об этом маркере?",
+                "document": {
+                    "filename": "same-turn.txt",
+                    "mime_type": "text/plain",
+                    "content_base64": base64.b64encode(document_text.encode()).decode(),
+                },
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["file_ingestion"]["queued_for_review"] is True
+        assert document_text not in response.text, "one-turn evidence leaked into the durable/API result"
+
+    attachments = captured["attachments"]
+    assert isinstance(attachments, list) and len(attachments) == 1
+    attachment = attachments[0]
+    assert attachment["persisted"] is True
+    assert attachment["current_turn_only"] is True
+    assert attachment["raw_object_id"]
+    assert attachment["transient_text"] == document_text
+    assert attachment["extraction_success"] is True
 
 
 def test_invalid_oversized_caption_cannot_persist_document_before_413(settings):

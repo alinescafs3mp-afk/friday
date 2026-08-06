@@ -5,6 +5,13 @@ from pathlib import Path
 
 from tools import quality_gate
 
+CANONICAL_GATE_COMMAND = ".venv/bin/python tools/quality_gate.py"
+ASSISTANT_GATE_GUIDANCE = (
+    quality_gate.ROOT / "sol" / "SOL.md",
+    quality_gate.ROOT / "grok" / "GROK.md",
+    quality_gate.ROOT / "grok" / "NOTES.md",
+)
+
 
 def _args(**overrides: object) -> argparse.Namespace:
     values: dict[str, object] = {
@@ -42,6 +49,27 @@ def test_static_gate_checks_the_current_package_and_high_bandit_only() -> None:
         "friday/admin_ui/static/app.js",
     )
     assert all("jericho" not in argument for command in commands for argument in command.argv)
+
+
+def test_assistant_instructions_delegate_to_the_canonical_gate() -> None:
+    copied_internal_commands = (
+        ".venv/bin/ruff ",
+        ".venv/bin/mypy ",
+        ".venv/bin/bandit ",
+        ".venv/bin/python -m pytest",
+        "node --check friday/",
+    )
+
+    for path in ASSISTANT_GATE_GUIDANCE:
+        text = path.read_text(encoding="utf-8-sig")
+        assert CANONICAL_GATE_COMMAND in text, (
+            f"{path.relative_to(quality_gate.ROOT)} bypasses the canonical gate"
+        )
+        copied = [command for command in copied_internal_commands if command in text]
+        assert not copied, (
+            f"{path.relative_to(quality_gate.ROOT)} copies gate internals {copied}; "
+            "call the canonical runner so package paths cannot drift"
+        )
 
 
 def test_non_ui_tests_exclude_all_nine_browser_modules() -> None:

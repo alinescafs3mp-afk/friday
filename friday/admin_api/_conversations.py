@@ -24,6 +24,7 @@ from friday.admin_api._deps import (
     _services,
     _target_user,
 )
+from friday.api.projections import is_public_opaque_id, public_conversation_message
 
 router = APIRouter()
 
@@ -241,36 +242,58 @@ async def conversation_messages(
     # Surface the stored [K#] → Knowledge Object attribution as a resolved legend so
     # the inspector shows what each answer rested on (titles resolved once, cached).
     title_cache: dict[str, str] = {}
+    public_items: list[dict[str, Any]] = []
     for item in items:
         metadata = _json_value(item.get("metadata_json"), {})
+        public_item = public_conversation_message(item)
         if not isinstance(metadata, dict):
-            item["insights"] = {}
+            public_item["insights"] = {}
+            public_items.append(public_item)
             continue
         citation_map = metadata.get("knowledge_citations")
         citation_map = citation_map if isinstance(citation_map, dict) else {}
         citations = []
-        for label, knowledge_id in citation_map.items():
-            knowledge_id = str(knowledge_id)
-            if knowledge_id and knowledge_id not in title_cache:
+        for label, knowledge_id in list(citation_map.items())[:100]:
+            if not isinstance(label, str):
+                continue
+            if not label.startswith("K") or not label[1:].isdigit() or not 1 <= len(label[1:]) <= 4:
+                continue
+            if not is_public_opaque_id(knowledge_id, "ko"):
+                continue
+            if knowledge_id not in title_cache:
                 obj = storage.get_knowledge_object(knowledge_id, user_id)
-                title_cache[knowledge_id] = str((obj or {}).get("title") or "")
+                if not obj:
+                    # Metadata is not an authority for an identifier.  Besides
+                    # stale references, this rejects a Raw Object id or host
+                    # path planted under a citation-looking key.
+                    continue
+                title_cache[knowledge_id] = str(obj.get("title") or "")[:500]
             citations.append(
                 {
-                    "label": str(label),
+                    "label": label,
                     "knowledge_id": knowledge_id,
                     "title": title_cache.get(knowledge_id, ""),
                 }
             )
-        item["insights"] = {
-            "answer_grounded": metadata.get("answer_grounded"),
-            "verification_status": metadata.get("verification_status"),
-            "verified": metadata.get("verified"),
+        answer_grounded = metadata.get("answer_grounded")
+        verification_status = metadata.get("verification_status")
+        verified = metadata.get("verified")
+        public_item["insights"] = {
+            "answer_grounded": answer_grounded if isinstance(answer_grounded, bool) else None,
+            "verification_status": (
+                verification_status
+                if isinstance(verification_status, str)
+                and verification_status in {"failed", "passed", "pending", "skipped", "unknown"}
+                else None
+            ),
+            "verified": verified if isinstance(verified, bool) else None,
             "citations": citations,
         }
+        public_items.append(public_item)
     return {
         "conversation_id": conversation_id,
-        "items": items,
-        "count": len(items),
+        "items": public_items,
+        "count": len(public_items),
         "total": total,
         "limit": limit,
         "offset": effective_offset,

@@ -164,7 +164,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
     "relativize_stored_paths": "(self, files_root: 'str') -> 'dict[str, int]'",
     "arrivals_without_an_author": "(self, user_id: 'str', since: 'str | None' = None, until: 'str | None' = None) -> 'int'",
-    "backfill_entity_mentions": "(self, user_id: 'str', *, max_documents: 'int' = 200) -> 'dict[str, Any]'",
+    "backfill_entity_mentions": "(self, user_id: 'str', *, max_documents: 'int' = 200, max_seconds: 'float' = 15.0, max_links: 'int' = 50) -> 'dict[str, Any]'",
     "get_knowledge_conflict_by_pair": "(self, user_id: 'str', pair_key: 'str', conflict_type: 'str') -> 'dict[str, Any]'",
     "_inbox_group_key": "(row: 'dict[str, Any]', by: 'str') -> 'str'",
     "group_pending_inbox": "(self, user_id: 'str', *, by: 'str' = 'extension', limit_ids: 'int' = 200, max_groups: 'int' = 100) -> 'dict[str, Any]'",

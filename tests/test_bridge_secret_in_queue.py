@@ -71,7 +71,11 @@ def test_diagnostics_redacts_what_it_reads_back(tmp_path):
 
     database = tmp_path / "telegram.sqlite3"
     bridge = _bridge(tmp_path)
-    bridge._inbox.close()  # noqa: SLF001 - created the schema, now write into it directly
+    # Opening is explicit in this fixture.  The production constructor must stay
+    # side-effect free so a second bridge cannot map the live WAL before losing
+    # the process lease; calling an inbox operation is what opens/migrates it.
+    assert bridge._inbox.get_offset() == 0  # noqa: SLF001
+    bridge._inbox.close()  # noqa: SLF001 - schema is durable; write a legacy row directly
 
     connection = sqlite3.connect(database)
     connection.execute(

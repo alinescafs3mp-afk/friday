@@ -2184,6 +2184,11 @@ class HybridSearcher:
         # reached through another document. Only the first is evidence by itself
         # — see the gate below.
         graph_query_matched: set[str] = set()
+        # A text-only cross-encoder cannot see the accepted relation path that
+        # proves a historical answer. Keep these IDs separate so only an explicit,
+        # query-grounded temporal traversal can prevent that later veto.
+        temporal_explicit_path_grounded: set[str] = set()
+        published_temporal_path_ids: set[str] = set()
         graph_evidence: dict[str, list[dict[str, Any]]] = {}
         graph_evidence_counts: dict[str, tuple[int, bool]] = {}
         graph_expanded = False
@@ -2242,6 +2247,24 @@ class HybridSearcher:
                     **history_status,
                 }
                 graph_expanded = True
+                raw_graph_paths = graph_context.get("paths")
+                if (
+                    (normalized_as_of or normalized_known_at)
+                    and isinstance(raw_graph_paths, Sequence)
+                    and not isinstance(raw_graph_paths, (str, bytes))
+                ):
+                    for raw_path in raw_graph_paths[:_PUBLIC_GRAPH_PATH_CAP]:
+                        published_path = _project_graph_path(raw_path)
+                        path_id = published_path.get("path_id")
+                        path_edges = published_path.get("edges")
+                        if (
+                            isinstance(path_id, str)
+                            and path_id
+                            and isinstance(path_edges, list)
+                            and path_edges
+                            and all(edge.get("implicit") is False for edge in path_edges)
+                        ):
+                            published_temporal_path_ids.add(path_id)
                 raw_graph_candidates = graph_context.get("knowledge_candidates")
                 graph_candidates = (
                     raw_graph_candidates[:_PUBLIC_GRAPH_CANDIDATE_CAP]
@@ -2266,8 +2289,11 @@ class HybridSearcher:
                     if not item or item.get("deleted_at"):
                         continue
                     candidate_map[document_id] = item
-                    if candidate.get("query_matched"):
+                    if candidate.get("query_matched") is True:
                         graph_query_matched.add(document_id)
+                        path_id = candidate.get("path_id")
+                        if isinstance(path_id, str) and path_id in published_temporal_path_ids:
+                            temporal_explicit_path_grounded.add(document_id)
                     candidate_score = _bounded_graph_unit_score(candidate.get("score"))
                     previous_score = graph_scores.get(document_id, -1.0)
                     graph_scores[document_id] = max(previous_score, candidate_score)
@@ -2627,6 +2653,9 @@ class HybridSearcher:
         reranked_count = 0
         rerank_cut: set[str] = set()
         rerank_scores: dict[str, float] = {}
+        temporal_explicit_path_results = temporal_explicit_path_grounded.intersection(
+            str(item.get("id") or "") for item in results[: self._rerank_top]
+        )
         # Условие «кандидатов больше запрошенного» здесь стояло, пока шаг только
         # ПЕРЕСТАВЛЯЛ: переставлять пятёрку внутри пятёрки бессмысленно. С порогом у
         # шага появилась вторая работа — отсев, — и нужен он как раз тогда, когда
@@ -2636,7 +2665,12 @@ class HybridSearcher:
         # показывался вовсе без оценки, ровно там, где ложный ответ дороже всего.
         # Без порога перестановка одного — пустой HTTP-вызов, и планка остаётся 2.
         rerank_floor = 1 if self._confident_min > 0.0 else 2
-        if self._reranker is not None and self._rerank_top > 0 and len(results) >= rerank_floor:
+        if (
+            self._reranker is not None
+            and self._rerank_top > 0
+            and len(results) >= rerank_floor
+            and not temporal_explicit_path_results
+        ):
             reordered = await self._reranker(clean_query, results[: self._rerank_top])
             if reordered is not None and len(reordered) == len(results[: self._rerank_top]):
                 # Порядок меняется, состав — нет: хвост за `rerank_top` остаётся на

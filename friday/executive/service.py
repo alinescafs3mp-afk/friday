@@ -23,7 +23,11 @@ from friday.agent_runtime.tool_protocol import (
     normalize_native_tool_calls,
 )
 from friday.config import FridaySettings
-from friday.execution_kernel import POSTCONDITIONS, ExecutionKernel
+from friday.execution_kernel import (
+    MISSION_EXECUTION_TOOLS,
+    POSTCONDITIONS,
+    ExecutionKernel,
+)
 from friday.executive.planner import MissionPlanner, PlannedTask
 from friday.ingestion import IdempotencyConflictError, IngestionPipeline
 from friday.ingestion._base import _json_dict
@@ -66,18 +70,7 @@ _STALE_RUNNING_SECONDS = 3600
 # Tools a mission step may call: read/search/gather only.  Side-effecting tools
 # (memory_save, entity_create, entity_link) are excluded because a mission's
 # durable output is routed to the Inbox once, deliberately, by the executor.
-GATHER_TOOLS = frozenset(
-    {
-        "memory_search",
-        "message_search",
-        "entity_lookup",
-        "kg_stats",
-        "inbox_list",
-        "web_search",
-        "web_fetch",
-        "web_research",
-    }
-)
+GATHER_TOOLS = MISSION_EXECUTION_TOOLS
 
 #: Инструменты шага, которые ТОЧНО ничего не оставляют после себя.
 #:
@@ -86,8 +79,9 @@ GATHER_TOOLS = frozenset(
 #: уйдёт на сверку вместо повтора. Ошибка в обратном списке стоила бы второго
 #: эффекта: повторная запись, второй элемент во входящих, второе письмо.
 #:
-#: `web_search`, `web_fetch` и `web_research` сюда НЕ входят намеренно: последний
-#: кладёт страницы в Raw Object и во входящие, хотя объявлен наблюдением.
+#: `web_search`, `web_fetch` и `web_research` сюда НЕ входят намеренно: все они
+#: меняют суточный счётчик выхода в интернет, а `web_research` дополнительно
+#: кладёт страницы в Raw Object и во входящие.
 _READ_ONLY_STEP_TOOLS = frozenset(
     {
         "memory_search",
@@ -999,7 +993,7 @@ class ExecutiveService:
     ) -> tuple[str, list[str]]:
         tools = [
             spec
-            for spec in self.kernel.get_tool_definitions(actor)
+            for spec in self.kernel.get_tool_definitions(actor, execution_scope="mission")
             if spec.get("function", {}).get("name") in GATHER_TOOLS
         ]
         messages: list[dict[str, Any]] = [
@@ -1097,7 +1091,12 @@ class ExecutiveService:
                         # описание и состоит.
                         compensation=_compensation_for(call.name, call.arguments),
                     )
-                tool_result = await self.kernel.execute(call.name, call.arguments, actor=actor)
+                tool_result = await self.kernel.execute(
+                    call.name,
+                    call.arguments,
+                    actor=actor,
+                    execution_scope="mission",
+                )
                 tools_used.append(call.name)
                 total_calls += 1
                 messages.append(

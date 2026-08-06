@@ -155,7 +155,14 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
-    def find_file_by_content_hash(self, user_id: str, content_hash: str) -> dict[str, Any] | None:
+    def find_file_by_content_hash(
+        self,
+        user_id: str,
+        content_hash: str,
+        *,
+        uploaded_by: str | None = None,
+        scope_uploaded_by: bool = False,
+    ) -> dict[str, Any] | None:
         """Тот же файл этого человека, принятый раньше под другим `source_ref`.
 
         Ключ происхождения у Telegram содержит `update_id`, уникальный для каждой
@@ -171,13 +178,25 @@ class IntakeMixin(StorageShared):
         content_hash = str(content_hash or "").strip()
         if not content_hash:
             return None
+        uploader_clause = ""
+        parameters: list[Any] = [user_id, content_hash]
+        if scope_uploaded_by:
+            if uploaded_by is None:
+                # Explicit JSON null is an explicitly unknown uploader. Missing
+                # legacy provenance is a different, untrusted state and must not
+                # authorize replay for a new scoped upload.
+                uploader_clause = "AND json_type(r.metadata_json,'$.uploaded_by')='null'"
+            else:
+                uploader_clause = "AND json_extract(r.metadata_json,'$.uploaded_by')=?"
+                parameters.append(str(uploaded_by))
         row = self.execute(
             f"""SELECT r.* FROM raw_objects r
                  WHERE r.user_id=? AND r.content_type='file' AND r.content_hash=?
+                   {uploader_clause}
                    AND r.deleted_at IS NULL
                    AND {_not_private_raw_dependency("r")}
                  ORDER BY r.received_at ASC, r.id ASC LIMIT 1""",  # nosec B608
-            (user_id, content_hash),
+            tuple(parameters),
         ).fetchone()
         return dict(row) if row else None
 
@@ -238,7 +257,14 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
-    def find_file_by_extracted_text(self, user_id: str, text_hash: str) -> dict[str, Any] | None:
+    def find_file_by_extracted_text(
+        self,
+        user_id: str,
+        text_hash: str,
+        *,
+        uploaded_by: str | None = None,
+        scope_uploaded_by: bool = False,
+    ) -> dict[str, Any] | None:
         """Тот же ДОКУМЕНТ, пришедший другим файлом.
 
         `find_file_by_content_hash` сравнивает байты, а один и тот же документ,
@@ -260,14 +286,23 @@ class IntakeMixin(StorageShared):
         text_hash = str(text_hash or "").strip()
         if not text_hash:
             return None
+        uploader_clause = ""
+        parameters: list[Any] = [user_id, text_hash]
+        if scope_uploaded_by:
+            if uploaded_by is None:
+                uploader_clause = "AND json_type(r.metadata_json,'$.uploaded_by')='null'"
+            else:
+                uploader_clause = "AND json_extract(r.metadata_json,'$.uploaded_by')=?"
+                parameters.append(str(uploaded_by))
         row = self.execute(
             f"""SELECT r.* FROM raw_objects r
                  WHERE r.user_id=? AND r.content_type='file'
                    AND json_extract(r.metadata_json,'$.text_sha256')=?
+                   {uploader_clause}
                    AND r.deleted_at IS NULL
                    AND {_not_private_raw_dependency("r")}
                  ORDER BY r.received_at ASC, r.id ASC LIMIT 1""",  # nosec B608
-            (user_id, text_hash),
+            tuple(parameters),
         ).fetchone()
         return dict(row) if row else None
 

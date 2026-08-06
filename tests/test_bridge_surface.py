@@ -581,6 +581,54 @@ def _bridge(tmp_path, allowed: list[int]):
     )
 
 
+def test_bridge_constructor_does_not_open_queue_before_runtime_lease(tmp_path, monkeypatch) -> None:
+    """A losing second bridge must fail on the lease before it maps the live WAL."""
+
+    import friday.telegram_bridge._transport as transport
+    from friday.diagnostics.runtime_lease import RuntimeLeaseError
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
+
+    opened: list[str] = []
+
+    class FakeInbox:
+        def __init__(self, path: str) -> None:
+            opened.append(path)
+
+        def get_offset(self) -> int:
+            return 0
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_UpdateInbox", FakeInbox)
+    config = TelegramConfig(
+        bot_token="1:aaa",
+        inbox_db_path=str(tmp_path / "telegram-inbox.sqlite3"),
+        bridge_secret="x" * 32,
+        allowed_chat_ids=[1],
+    )
+    bridge = TelegramBridge(config)
+
+    assert opened == []
+    bridge._lease.acquire()  # noqa: SLF001 - exact production ordering under test
+    try:
+        contender = TelegramBridge(config)
+        with pytest.raises(RuntimeLeaseError):
+            asyncio.run(contender.run())
+        assert opened == [], "the lease loser must not construct or close-open the queue"
+    finally:
+        bridge._lease.release()  # noqa: SLF001
+
+    bridge._lease.acquire()  # noqa: SLF001 - a winner may now map the queue
+    try:
+        assert bridge._inbox.get_offset() == 0  # noqa: SLF001 - lazy open after ownership
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+        bridge._lease.release()  # noqa: SLF001
+
+    assert len(opened) == 1
+
+
 def test_one_allowlisted_group_used_to_silence_every_notification(tmp_path) -> None:
     """The signer was `allowed_chat_ids[0]`, and the effective allowlist is sorted().
 

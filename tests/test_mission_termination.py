@@ -207,8 +207,9 @@ async def test_a_mission_step_cannot_call_a_tool_outside_its_allowed_set(setting
                 }
             return {"content": "Готово: сведения собраны.", "finish_reason": "stop"}
 
-    async def _spy_execute(name, arguments, *, actor):
+    async def _spy_execute(name, arguments, *, actor, execution_scope):
         del arguments, actor
+        assert execution_scope == "mission"
         executed.append(name)
 
         class _Result:
@@ -219,9 +220,12 @@ async def test_a_mission_step_cannot_call_a_tool_outside_its_allowed_set(setting
 
     service.llm = _ToolHappyLLM()
     service.kernel.execute = _spy_execute  # type: ignore[method-assign]
-    service.kernel.get_tool_definitions = lambda actor: [  # type: ignore[method-assign]
-        {"function": {"name": name}} for name in sorted(GATHER_TOOLS)
-    ]
+
+    def _definitions(actor, *, execution_scope):  # noqa: ANN001, ARG001
+        assert execution_scope == "mission"
+        return [{"function": {"name": name}} for name in sorted(GATHER_TOOLS)]
+
+    service.kernel.get_tool_definitions = _definitions  # type: ignore[method-assign]
 
     actor = service.auth_service.actor_for_user("alice", source="test")
     await service._run_tool_loop("собери сведения", actor)  # noqa: SLF001

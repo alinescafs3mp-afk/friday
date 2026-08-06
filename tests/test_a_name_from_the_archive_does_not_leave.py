@@ -114,6 +114,51 @@ async def test_the_research_road_is_closed_too(kernel_and_wire):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("guard_mode", ["missing", "broken"])
+async def test_a_broken_privacy_guard_fails_closed(kernel_and_wire, guard_mode):
+    """Недоступный граф — это отказ, а не разрешение отправить запрос наружу."""
+
+    kernel, went_out = kernel_and_wire
+    original_storage = kernel.storage
+    assert original_storage is not None
+
+    class _StorageProxy:
+        def __getattribute__(self, name):  # noqa: ANN001
+            if name == "people_whose_name_starts_with":
+                mode = object.__getattribute__(self, "mode")
+                if mode == "missing":
+                    raise AttributeError(name)
+
+                def _broken(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+                    raise RuntimeError("synthetic private database failure")
+
+                return _broken
+            return object.__getattribute__(self, name)
+
+        def __init__(self, delegate, mode):  # noqa: ANN001
+            self.delegate = delegate
+            self.mode = mode
+
+        def __getattr__(self, name):  # noqa: ANN001
+            if name == "people_whose_name_starts_with" and self.mode == "missing":
+                raise AttributeError(name)
+            return getattr(self.delegate, name)
+
+    kernel.storage = _StorageProxy(original_storage, guard_mode)  # type: ignore[assignment]
+
+    search = await kernel._web_search(  # noqa: SLF001
+        actor=_actor(), query="проверь приватную справку"
+    )
+    research = await kernel._web_research(  # noqa: SLF001
+        actor=_actor(), query="найди приватную справку"
+    )
+
+    assert search.get("refused") is True
+    assert research.get("refused") is True
+    assert went_out == [], "сеть вызвана при недоступной проверке приватности"
+
+
+@pytest.mark.asyncio
 async def test_an_ordinary_question_still_goes_out(kernel_and_wire):
     """Ошибка в другую сторону: обычный вопрос обязан искаться.
 

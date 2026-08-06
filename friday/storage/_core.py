@@ -806,8 +806,20 @@ def _install_private_material_authorizer(conn: sqlite3.Connection) -> None:
     conn.set_authorizer(authorize)
 
 
-def _validate_private_material_cache(conn: sqlite3.Connection) -> None:
-    """Fail startup unless the rebuilt cache exactly matches its live source."""
+def _validate_private_material_cache(
+    conn: sqlite3.Connection,
+    *,
+    fresh_entity_rebuild_from_live: bool = False,
+    fresh_derivative_rebuild_from_live: bool = False,
+) -> None:
+    """Fail startup unless the privacy authority has one exact source.
+
+    A caller which has just rebuilt one authority tier under the same write
+    transaction already materialized its complete live fixed point into that work
+    table.  In that narrow context compare the published table with its staging
+    result instead of expanding the corresponding live view twice more.  Any tier
+    which was not freshly rebuilt retains the independent live-source validation.
+    """
 
     _validate_private_material_cache_tables(conn)
     if unexpected := _private_material_unexpected_triggers(conn, allow_legacy=False):
@@ -998,48 +1010,92 @@ def _validate_private_material_cache(conn: sqlite3.Connection) -> None:
         if derivative_duplicate is None or bool(derivative_duplicate[0]):
             raise sqlite3.DatabaseError("Private derivative authority contains duplicate ids")
 
-    mismatch = conn.execute(
-        """SELECT 1 FROM (
-               SELECT live.id AS entity_id
-                 FROM private_entity_material_live live
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM private_entity_material_cache cached
-                     WHERE cached.entity_id=live.id
-                )
-               UNION ALL
-               SELECT cached.entity_id
-                 FROM private_entity_material_cache cached
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM private_entity_material_live live
-                     WHERE live.id=cached.entity_id
-                )
-           ) cache_difference
-           LIMIT 1"""
-    ).fetchone()
+    if fresh_entity_rebuild_from_live:
+        mismatch = conn.execute(
+            """SELECT 1 FROM (
+                   SELECT work.entity_id
+                     FROM private_entity_material_work work
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_cache cached
+                         WHERE cached.entity_id=work.entity_id
+                    )
+                   UNION ALL
+                   SELECT cached.entity_id
+                     FROM private_entity_material_cache cached
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_work work
+                         WHERE work.entity_id=cached.entity_id
+                    )
+               ) cache_difference
+               LIMIT 1"""
+        ).fetchone()
+    else:
+        mismatch = conn.execute(
+            """SELECT 1 FROM (
+                   SELECT live.id AS entity_id
+                     FROM private_entity_material_live live
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_cache cached
+                         WHERE cached.entity_id=live.id
+                    )
+                   UNION ALL
+                   SELECT cached.entity_id
+                     FROM private_entity_material_cache cached
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_live live
+                         WHERE live.id=cached.entity_id
+                    )
+               ) cache_difference
+               LIMIT 1"""
+        ).fetchone()
     if mismatch is not None:
         raise sqlite3.DatabaseError("Private material cache rebuild did not match the live privacy closure")
-    derivative_mismatch = conn.execute(
-        """SELECT 1 FROM (
-               SELECT live.material_kind, live.object_id, live.user_id
-                 FROM private_entity_material_derivative_live live
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM private_entity_material_derivative_cache cached
-                     WHERE cached.material_kind=live.material_kind
-                       AND cached.object_id=live.object_id
-                       AND cached.user_id=live.user_id
-                )
-               UNION ALL
-               SELECT cached.material_kind, cached.object_id, cached.user_id
-                 FROM private_entity_material_derivative_cache cached
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM private_entity_material_derivative_live live
-                     WHERE live.material_kind=cached.material_kind
-                       AND live.object_id=cached.object_id
-                       AND live.user_id=cached.user_id
-                )
-           ) derivative_difference
-           LIMIT 1"""
-    ).fetchone()
+    if fresh_derivative_rebuild_from_live:
+        derivative_mismatch = conn.execute(
+            """SELECT 1 FROM (
+                   SELECT work.material_kind, work.object_id, work.user_id
+                     FROM private_entity_material_derivative_work work
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_derivative_cache cached
+                         WHERE cached.material_kind=work.material_kind
+                           AND cached.object_id=work.object_id
+                           AND cached.user_id=work.user_id
+                    )
+                   UNION ALL
+                   SELECT cached.material_kind, cached.object_id, cached.user_id
+                     FROM private_entity_material_derivative_cache cached
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_derivative_work work
+                         WHERE work.material_kind=cached.material_kind
+                           AND work.object_id=cached.object_id
+                           AND work.user_id=cached.user_id
+                    )
+               ) derivative_difference
+               LIMIT 1"""
+        ).fetchone()
+    else:
+        derivative_mismatch = conn.execute(
+            """SELECT 1 FROM (
+                   SELECT live.material_kind, live.object_id, live.user_id
+                     FROM private_entity_material_derivative_live live
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_derivative_cache cached
+                         WHERE cached.material_kind=live.material_kind
+                           AND cached.object_id=live.object_id
+                           AND cached.user_id=live.user_id
+                    )
+                   UNION ALL
+                   SELECT cached.material_kind, cached.object_id, cached.user_id
+                     FROM private_entity_material_derivative_cache cached
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM private_entity_material_derivative_live live
+                         WHERE live.material_kind=cached.material_kind
+                           AND live.object_id=cached.object_id
+                           AND live.user_id=cached.user_id
+                    )
+               ) derivative_difference
+               LIMIT 1"""
+        ).fetchone()
     if derivative_mismatch is not None:
         raise sqlite3.DatabaseError("Private derivative cache rebuild did not match live dependencies")
 
@@ -2044,7 +2100,8 @@ class CoreMixin(StorageShared):
             # Recheck after BEGIN IMMEDIATE: another opener may have repaired the
             # same global state while this connection waited for the lock.
             conn.execute("BEGIN IMMEDIATE")
-            repaired = False
+            material_rebuilt = False
+            derivative_rebuilt = False
             material_state = conn.execute(
                 "SELECT valid FROM main.private_entity_material_cache_state WHERE singleton=1"
             ).fetchone()
@@ -2055,12 +2112,17 @@ class CoreMixin(StorageShared):
                 raise sqlite3.DatabaseError("Private material authority state is missing")
             if int(material_state[0]) != 1:
                 self._execute_statements(conn, PRIVATE_MATERIAL_CACHE_REBUILD_SQL)
-                repaired = True
+                material_rebuilt = True
+                derivative_rebuilt = True
             elif int(derivative_state[0]) != 1:
                 self._execute_statements(conn, PRIVATE_DERIVATIVE_CACHE_REBUILD_SQL)
-                repaired = True
-            if repaired:
-                _validate_private_material_cache(conn)
+                derivative_rebuilt = True
+            if material_rebuilt or derivative_rebuilt:
+                _validate_private_material_cache(
+                    conn,
+                    fresh_entity_rebuild_from_live=material_rebuilt,
+                    fresh_derivative_rebuild_from_live=derivative_rebuilt,
+                )
             conn.commit()
             _install_private_material_authorizer(conn)
             # The core migration transiently lowers busy_timeout (a PRAGMA embedded
@@ -2202,7 +2264,11 @@ class CoreMixin(StorageShared):
             self._execute_statements(conn, PRIVATE_MATERIAL_PERSISTENT_SCHEMA)
             self._execute_statements(conn, PRIVATE_MATERIAL_RUNTIME_SCHEMA)
             self._execute_statements(conn, PRIVATE_MATERIAL_CACHE_REBUILD_SQL)
-            _validate_private_material_cache(conn)
+            _validate_private_material_cache(
+                conn,
+                fresh_entity_rebuild_from_live=True,
+                fresh_derivative_rebuild_from_live=True,
+            )
             # Pre-release audit tables can predate ``request_id``.  The legacy
             # migration above adds that column; sanitising before it therefore
             # fails startup exactly on the databases this path exists to heal.

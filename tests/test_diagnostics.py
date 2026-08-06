@@ -60,6 +60,226 @@ def test_diagnostics_reports_uninitialized_database_without_creating_it(settings
     assert not database_path.exists()
 
 
+def test_active_backend_diagnostics_use_its_api_without_opening_the_main_wal(settings, monkeypatch):
+    import friday.diagnostics as diagnostics
+
+    lease = {"state": "active", "active": True, "healthy": True, "pid": 4242}
+    remote = {
+        "ok": True,
+        "state": "ready",
+        "database": {"ok": True, "state": "ready"},
+        "workers": {"healthy": True, "tasks": {}},
+        "backend_lease": lease,
+        "bridge_queue": {"state": "active_uninspected", "healthy": True},
+        "actions": [],
+    }
+    monkeypatch.setattr(diagnostics, "inspect_process_lease", lambda *_a, **_k: lease)
+    monkeypatch.setattr(diagnostics, "_fetch_live_backend_diagnostics", lambda *_a, **_k: remote)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("active backend diagnostics must not map the main WAL")
+
+    monkeypatch.setattr(diagnostics, "_database_status", forbidden)
+    monkeypatch.setattr(diagnostics, "_worker_status", forbidden)
+    monkeypatch.setattr(diagnostics, "_auth_failure_status", forbidden)
+
+    assert diagnostics.collect_diagnostics(settings) is remote
+
+
+def test_a_foreign_storage_argument_cannot_bypass_the_live_backend_boundary(settings, monkeypatch):
+    import friday.diagnostics as diagnostics
+
+    lease = {"state": "active", "active": True, "healthy": True, "pid": 4243}
+    remote = {"ok": True, "state": "ready", "actions": []}
+    monkeypatch.setattr(diagnostics, "inspect_process_lease", lambda *_a, **_k: lease)
+    monkeypatch.setattr(diagnostics, "process_owns_lease", lambda *_a, **_k: False)
+    monkeypatch.setattr(diagnostics, "_fetch_live_backend_diagnostics", lambda *_a, **_k: remote)
+
+    class ForeignStorage:
+        def diagnostics(self):
+            raise AssertionError("foreign storage must not touch a live backend database")
+
+    assert diagnostics.collect_diagnostics(settings, ForeignStorage()) is remote
+
+
+def test_active_backend_api_failure_is_degraded_without_sqlite_fallback(settings, monkeypatch):
+    import friday.diagnostics as diagnostics
+
+    lease = {"state": "active", "active": True, "healthy": True, "pid": 4343}
+    monkeypatch.setattr(diagnostics, "inspect_process_lease", lambda *_a, **_k: lease)
+    monkeypatch.setattr(diagnostics, "_fetch_live_backend_diagnostics", lambda *_a, **_k: None)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("API failure must not fall back to a live SQLite mapping")
+
+    monkeypatch.setattr(diagnostics, "_database_status", forbidden)
+    monkeypatch.setattr(diagnostics, "_worker_status", forbidden)
+    monkeypatch.setattr(diagnostics, "_auth_failure_status", forbidden)
+
+    report = diagnostics.collect_diagnostics(settings)
+
+    assert report["state"] == "degraded"
+    assert report["database"]["state"] == "active_backend_uninspected"
+    assert {item["code"] for item in report["actions"]} >= {"active_backend_diagnostics_unavailable"}
+
+
+def test_backend_start_winning_after_probe_still_prevents_every_sqlite_open(settings, monkeypatch):
+    """The lease boundary, not the earlier observation, owns the open decision."""
+
+    import friday.diagnostics as diagnostics
+    from friday.diagnostics.runtime_lease import RuntimeLeaseError
+
+    inactive = {"state": "inactive", "active": False, "healthy": True, "pid": None}
+    active = {"state": "active", "active": True, "healthy": True, "pid": 4444}
+    inspections = iter((inactive, active))
+    monkeypatch.setattr(diagnostics, "inspect_process_lease", lambda *_a, **_k: next(inspections))
+
+    class LosingBoundary:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def acquire(self) -> None:
+            raise RuntimeLeaseError("synthetic concurrent backend")
+
+    monkeypatch.setattr(diagnostics, "ProcessLease", LosingBoundary)
+    remote = {"ok": True, "state": "ready", "actions": []}
+    monkeypatch.setattr(
+        diagnostics,
+        "_fetch_live_backend_diagnostics",
+        lambda _settings, lease, **_kwargs: remote if lease is active else None,
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("a lost lease race must not reach SQLite")
+
+    monkeypatch.setattr(diagnostics, "_database_status", forbidden)
+    monkeypatch.setattr(diagnostics, "_worker_status", forbidden)
+    monkeypatch.setattr(diagnostics, "_auth_failure_status", forbidden)
+
+    assert diagnostics.collect_diagnostics(settings) is remote
+
+
+def test_live_diagnostics_bearer_target_must_be_proven_host_local(settings):
+    import friday.diagnostics as diagnostics
+
+    remote_named = replace(settings, api_host="diagnostics.invalid")
+    assert (
+        diagnostics._live_backend_diagnostics_url(  # noqa: SLF001
+            remote_named,
+            check_llm_port=False,
+        )
+        is None
+    )
+    assert diagnostics._live_backend_diagnostics_url(  # noqa: SLF001
+        replace(settings, api_host="0.0.0.0"),
+        check_llm_port=False,
+    ).startswith("http://127.0.0.1:")
+
+
+def test_live_diagnostics_disables_proxy_redirects_and_rechecks_the_pid(settings, monkeypatch):
+    import json
+    import urllib.request
+
+    import friday.diagnostics as diagnostics
+
+    expected_pid = 4555
+    payload = json.dumps(
+        {
+            "ok": True,
+            "state": "ready",
+            "database": {},
+            "workers": {},
+            "backend_lease": {"active": True, "state": "active", "pid": expected_pid},
+            "bridge_queue": {},
+            "actions": [],
+        }
+    ).encode()
+    handlers: list[object] = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            pass
+
+        def read(self, _limit: int) -> bytes:
+            return payload
+
+    class Opener:
+        def open(self, _request, *, timeout: float):
+            assert timeout > 0
+            return Response()
+
+    def build_opener(*items):
+        handlers.extend(items)
+        return Opener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", build_opener)
+    # The serving process changed after its response.  A structurally valid old
+    # response must not be accepted as evidence about the replacement backend.
+    monkeypatch.setattr(
+        diagnostics,
+        "inspect_process_lease",
+        lambda *_a, **_k: {"active": True, "state": "active", "pid": expected_pid + 1},
+    )
+
+    result = diagnostics._fetch_live_backend_diagnostics(  # noqa: SLF001
+        settings,
+        {"active": True, "state": "active", "pid": expected_pid},
+        check_llm_port=False,
+    )
+
+    assert result is None
+    proxy = next(item for item in handlers if isinstance(item, urllib.request.ProxyHandler))
+    assert proxy.proxies == {}
+    assert any(isinstance(item, diagnostics._NoLiveDiagnosticsRedirects) for item in handlers)  # noqa: SLF001
+
+
+def test_admin_overview_and_diagnostics_never_run_sqlite_work_on_the_event_loop():
+    import inspect
+
+    from friday.admin_api._overview import diagnostics, overview, settings_info
+
+    for endpoint in (overview, settings_info, diagnostics):
+        source = inspect.getsource(endpoint)
+        assert "await run_blocking(" in source
+        assert "_require(" not in source
+        assert "storage." not in source
+    assert "collect_diagnostics(" not in inspect.getsource(diagnostics)
+
+
+def test_secret_scan_never_raw_opens_runtime_sqlite_artifacts(settings, monkeypatch):
+    import friday.diagnostics as diagnostics
+    from friday.secret_hygiene import Report
+
+    captured: list[set] = []
+
+    def fake_scan(*_args, **kwargs):
+        captured.append({path.resolve() for path in kwargs.get("excluded", ())})
+        return Report(exposures=[], loose_permissions=[], files_scanned=0, stopped_early=False)
+
+    monkeypatch.setattr("friday.secret_hygiene.scan", fake_scan)
+    diagnostics.collect_diagnostics(settings, check_secrets=True)
+
+    assert len(captured) == 1
+    database = settings.database_path
+    queue = settings.state_dir / "telegram-inbox.sqlite3"
+    expected = {
+        path.resolve()
+        for base in (database, queue)
+        for path in (
+            base,
+            base.with_name(f"{base.name}-wal"),
+            base.with_name(f"{base.name}-shm"),
+            base.with_name(f"{base.name}-journal"),
+        )
+    }
+    assert expected <= captured[0]
+
+
 def test_diagnostics_turns_worker_failures_and_stalls_into_actions(settings, storage):
     import json
     from datetime import UTC, datetime, timedelta
@@ -190,6 +410,66 @@ def test_bridge_queue_status_is_absent_when_no_inbox(settings):
     status = _bridge_queue_status(settings.state_dir / "telegram-inbox.sqlite3")
     assert status["state"] == "absent"
     assert status["pending"] == 0 and status["dead_letter"] == 0 and status["healthy"] is True
+
+
+def test_diagnostics_never_maps_the_queue_owned_by_a_live_bridge(settings, monkeypatch):
+    import friday.diagnostics as diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "inspect_process_lease",
+        lambda *_a, **_k: {"state": "active", "active": True, "healthy": True},
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "_bridge_queue_status",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("live bridge queue must not be opened")),
+    )
+
+    status = diagnostics._bridge_queue_status_without_live_open(  # noqa: SLF001
+        settings.state_dir / "telegram-inbox.sqlite3"
+    )
+
+    assert status == {
+        "state": "active_uninspected",
+        "pending": None,
+        "dead_letter": None,
+        "healthy": True,
+    }
+
+
+def test_bridge_start_winning_after_probe_still_prevents_queue_open(settings, monkeypatch):
+    import friday.diagnostics as diagnostics
+    from friday.diagnostics.runtime_lease import RuntimeLeaseError
+
+    inactive = {"state": "inactive", "active": False, "healthy": True}
+    active = {"state": "active", "active": True, "healthy": True}
+    inspections = iter((inactive, active))
+    monkeypatch.setattr(diagnostics, "inspect_process_lease", lambda *_a, **_k: next(inspections))
+
+    class LosingBoundary:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def acquire(self) -> None:
+            raise RuntimeLeaseError("synthetic concurrent bridge")
+
+    monkeypatch.setattr(diagnostics, "ProcessLease", LosingBoundary)
+    monkeypatch.setattr(
+        diagnostics,
+        "_bridge_queue_status",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("lost race must not open queue")),
+    )
+
+    queue = settings.state_dir / "telegram-inbox.sqlite3"
+    queue.parent.mkdir(parents=True, exist_ok=True)
+    queue.write_bytes(b"synthetic stopped queue")
+    status = diagnostics._bridge_queue_status_without_live_open(  # noqa: SLF001
+        queue
+    )
+
+    assert status["state"] == "active_uninspected"
+    assert status["pending"] is None and status["dead_letter"] is None
 
 
 def test_llm_endpoint_status_unreachable_skips_http(settings):

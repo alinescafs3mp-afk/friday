@@ -66,5 +66,6 @@ def test_no_importer_is_advertised_anywhere():
     """
     from pathlib import Path
 
-    sources = " ".join(path.read_text(encoding="utf-8") for path in Path("jericho").rglob("*.py"))
+    package = Path(__file__).resolve().parents[1] / "friday"
+    sources = " ".join(path.read_text(encoding="utf-8") for path in package.rglob("*.py"))
     assert "def import_user" not in sources, "появился импортёр — ответ выгрузки всё ещё говорит, что его нет"
