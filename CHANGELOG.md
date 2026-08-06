@@ -86,7 +86,7 @@ I/O всегда дают incomplete warning. Main/bridge SQLite, WAL/SHM/journa
 текущие hardlink-inodes не открываются даже как обычные файлы. Credential никогда
 не повторяется в report, даже если его поместили в filename или label.
 
-### Temporal candidate запечатан, но holdout ещё не потрачен
+### Temporal candidate принят на единственном sealed holdout
 
 Frozen 40-case temporal-relational прибор разделён целыми мирами на 20 calibration
 и 20 sealed holdout. Baseline воспроизвёл `4/20`; единственный candidate сохраняет
@@ -97,9 +97,12 @@ temporal path, не меняя classifier, веса или non-temporal поис
 Manifest v2 связывает exact candidate diff, frozen gold, evaluator и helper blobs
 из HEAD. Запуск разрешён только из private capability-bound temporary projection;
 atomic durable latch расходует единственную holdout-попытку до старта любой руки.
-Код и seal прошли независимую acceptance, реальный latch отсутствует и holdout в
-этом commit ещё не запускался. После commit обязательны seal check, committed
-isolated calibration и только затем один paired holdout.
+После commit `8c4c334` seal check и committed isolated calibration прошли. Затем
+единственный paired holdout дал baseline `4/20` и candidate `20/20`: `wins=16`,
+`losses=0`, expected hits `0→16`, forbidden hits `0→0`, MRR `0→0.8542`.
+Infrastructure failures отсутствовали, структуры обеих рук не изменились,
+non-temporal control побайтно идентичен. Все product acceptance checks прошли;
+durable latch закрывает повторный запуск.
 
 ### Точечные эксплуатационные улучшения
 

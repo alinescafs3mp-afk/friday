@@ -1312,9 +1312,9 @@
 ## 31. Замороженный synthetic gold set для temporal relation ranking
 
 - **Статус:** gold-контракт, критерий и единственный candidate зафиксированы;
-  sealed-прибор manifest v2 прошёл независимую code acceptance (`PASS`). Product
-  acceptance намеренно не завершён: настоящий one-shot latch отсутствует, holdout
-  никогда не запускался.
+  sealed-прибор manifest v2 прошёл независимую code acceptance (`PASS`). После
+  commit `8c4c334` committed calibration и единственный paired holdout прошли;
+  product acceptance завершён (`PASS`), durable one-shot latch израсходован.
 - **Граница вопроса:** этот прибор отвечает только на «правильно ли production
   search ранжирует уже запрошенный снимок». Каждый кейс явно передаёт `as_of` и/или
   символический `known_at`, который разрешается в настоящий `recorded_at` только
@@ -1345,19 +1345,24 @@
   URL, имена моделей, ответы, vectors и rerank scores не публикуются. Любой graph,
   reranker или snapshot failure делает прогон недействительным, а revision checksum
   до/после обязан совпасть.
-- **Порядок:** holdout остаётся замороженным кодом. Прибор отказывается его считать,
-  пока один commit не закрепит candidate, manifest v2 и связанные с ним HEAD blobs
-  evaluator/helper. После commit сначала обязаны пройти seal check и calibration,
-  исполненная из committed изолированной проекции; лишь её успешный результат
-  разрешает ровно один paired holdout. Если seal или calibration не приняты,
-  scoring не объявляется принятым и holdout не тратится.
-- **Единственный будущий критерий candidate:** на 20 holdout cases
+- **Порядок исполнения:** прибор отказался считать holdout до commit candidate,
+  manifest v2 и связанных HEAD blobs evaluator/helper. После `8c4c334` прошли seal
+  check и calibration из committed изолированной проекции; лишь затем atomic latch
+  допустил и до запуска первой руки израсходовал единственный paired holdout.
+- **Критерий candidate:** на 20 holdout cases
   `case_correct@10` означает для positive expected в top-10 и выше каждого forbidden,
   а для gap отсутствие всех forbidden в top-10. Нужны `wins-losses >= 2`, `losses=0`,
   expected hits не ниже baseline, forbidden hits не выше, MRR не ниже baseline более
   чем на 0.01, ноль graph/reranker/snapshot failures и byte-identical non-temporal
   control. Глобальный graph weight этот набор менять не разрешает: для этого нужен
   прежний S8 regression set, которого в открытом виде нет.
+- **Результат единственного holdout:** baseline воспроизвёл `4/20`, expected hits
+  `0/16`, no-answer `4/4`, forbidden hits `0`, MRR `0`; candidate дал `20/20`,
+  expected hits `16/16`, no-answer `4/4`, forbidden hits `0`, MRR `0.8542`.
+  Сравнение: `wins=16`, `losses=0`, `net=16`, expected delta `+16`, forbidden
+  delta `0`, MRR delta `+0.8542`. Обе руки имели полный embedding index, production
+  reranker, ноль graph/reranker/snapshot failures и unchanged structure;
+  non-temporal control совпал побайтно. Все acceptance checks приняты.
 - **Мутации:** удаление `as_of`, `known_at`, forbidden-проверки, split-guard,
   `record_usage=false`, production-searcher factory, revision checksum либо
   graph/reranker failure accounting обязано красить отдельный тест. Изменение любого
@@ -1407,8 +1412,8 @@
   четырёх baseline-correct negatives, forbidden hits `0`, infrastructure failures
   `0`, structure unchanged; отдельная мутация удаления temporal/path guard обязана
   изменить non-temporal control и покрасить тест. Только после commit точного diff и
-  candidate manifest можно один раз открыть прежний будущий holdout-критерий; сейчас
-  holdout не запускался.
+  candidate manifest можно было один раз открыть holdout-критерий; эта попытка
+  завершилась принятым результатом, повтор закрыт durable latch.
 - **Результат после зафиксированного критерия:** read-only counterfactual оставил
   production reranker на четырёх gap-кейсах и заменил его identity только для тех 16
   calibration queries, где предыдущий observer уже доказал тот же
@@ -1429,9 +1434,8 @@
   excluded и protected-tail controls закреплены тестами. Финальный прогон уже на
   этом exact diff снова дал `20/20`, MRR `0.875`, все failures `0`, unchanged
   structure, p50 `36.119 ms`, p95 `51.834 ms`. Код sealed-прибора v2 прошёл
-  независимую acceptance (`PASS`), но этот результат не заменяет product holdout:
-  до commit, повторного seal check и committed calibration он остаётся запечатан.
-  Настоящий one-shot latch отсутствует, holdout никогда не запускался.
+  независимую acceptance (`PASS`); после commit, повторного seal check и committed
+  calibration product holdout также принят с `16` wins и без потерь.
 - **Exact-base arm вместо эмуляции:** старое поведение теперь исполняется не
   wrapper-ом текущего класса, а отдельным `python -I` процессом над `friday/`,
   извлечённым read-only `git archive` ровно из `dc69b3f`; текущими остаются только
@@ -1441,13 +1445,13 @@
   проверяется относительно archive root. Один такой calibration-прогон точно
   воспроизвёл опубликованный baseline: `4/20`, expected `0/16`, gap `4/4`, forbidden
   `0`, MRR `0`, reranker calls/applied `17/17`, все failures `0`, полный embedding
-  index и unchanged structure. Будущая paired-рука candidate строится из той же
+  index и unchanged structure. Paired-рука candidate строилась из той же
   base-копии с наложением только committed `HEAD:friday/retrieval/__init__.py`;
   отдельные scratch DB строят одинаковые frozen IDs и разрешают одинаковые
   символические checkpoints в собственные revision stamps до запросов; отчёт
   связывает руки frozen case IDs. Non-temporal контроль сравнивает byte-identical
   сериализацию упорядоченных result IDs без динамических timestamps/latency.
-  Runner и acceptance готовы, holdout этим изменением не запускался.
+  В единственном holdout эта сериализация совпала побайтно.
 - **Формат candidate manifest v2:**
   `tools/temporal_relational_candidate_manifest.json` — один JSON-object version 2
   с ровно одним `candidate_id`, full SHA base commit, закреплёнными candidate,
@@ -1462,10 +1466,9 @@
   repository и Git common dir; неожиданный файл, symlink, чужие permissions,
   неверная capability или digest закрывают arm. Перед запуском любой holdout-arm в
   Git common dir атомарно и durably создаётся one-shot latch, связанный с тем же
-  candidate/gold/evaluator/helper; уже существующий latch запрещает повтор. Текущее
-  принятое состояние — code acceptance `PASS`, реального latch нет и holdout ни
-  разу не запускался. После commit последовательность неизменна: seal check,
-  committed isolated calibration, затем и только затем единственный holdout.
+  candidate/gold/evaluator/helper; уже существующий latch запрещает повтор. Эта
+  последовательность исполнена после `8c4c334`: calibration принята, holdout принят,
+  latch существует и навсегда запрещает вторую попытку для того же кандидата.
 
 ## 32. Entity mention backfill — ограниченная кооперативная работа
 

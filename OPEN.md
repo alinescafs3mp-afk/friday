@@ -116,7 +116,7 @@ S10b (#71) — точность незаякоренного `_RELATIONAL_QUERY_
 учётными данными hysteria2 (mode 600), юниты, `install.sh`. Владелец от установки
 отказался неделю назад. Либо стереть, либо решить хранить осознанно.
 
-### 1.8. Bi-temporal рёбра в ранжировании — SEALED-ПРИБОР V2 CODE-ACCEPTED; HOLDOUT НЕ ЗАПУЩЕН
+### 1.8. Bi-temporal рёбра в ранжировании — PRODUCT ACCEPTED
 
 Заморожены 40 полностью синтетических temporal-relational cases, split целыми
 мирами: 20 calibration и 20 sealed holdout. Baseline воспроизвёл дефект `4/20`:
@@ -128,11 +128,12 @@ query-grounded, structurally published, non-implicit temporal path внутри
 `0.875`, no-answer `4/4`, forbidden hits `0`, infrastructure failures `0`.
 Manifest v2 связывает exact candidate diff, frozen gold и evaluator/helper blobs
 из HEAD; запуск идёт из приватной capability-bound изолированной проекции, а
-атомарный durable latch расходует попытку до запуска любой руки. Код и seal-контракт
-прошли независимую acceptance (`PASS`), но product acceptance ещё не завершён:
-реального latch нет, holdout никогда не запускался. После commit обязательны
-успешные seal check и committed isolated calibration; только затем разрешён один
-paired holdout.
+атомарный durable latch расходует попытку до запуска любой руки. После commit
+`8c4c334` seal check и committed isolated calibration прошли, единственный paired
+holdout штатно израсходован и принят: baseline `4/20`, candidate `20/20`,
+`wins=16`, `losses=0`, expected hits `0→16`, forbidden hits `0→0`, MRR
+`0→0.8542`. Обе руки не имели infrastructure failures и не меняли структуру;
+non-temporal control побайтно идентичен. Product acceptance завершён.
 
 ### 1.9. «Решения» как первоклассная запись — ни кода, ни отказа
 

@@ -184,7 +184,7 @@ Runner выполняет три фазы в фиксированном поря
 Вторая папка — `grok/` — принадлежит второму помощнику. Не правь её файлы:
 если нужно что-то сказать ему, пиши в своём `PROPOSALS.md`, владелец сведёт.
 
-## 9. Checkpoint 2026-08-06 перед релизом 0.155.0
+## 9. Checkpoint 2026-08-06: релиз 0.155.0 и temporal holdout приняты
 
 **ПРИВАТНОСТЬ ГЛАВНЕЕ ЛЮБОЙ ФУНКЦИИ.** Живое содержимое можно читать только
 локально для диагностики, но нельзя копировать в модельные пробы, внешние сервисы,
@@ -192,30 +192,29 @@ Runner выполняет три фазы в фиксированном поря
 и хеши. Synthetic model probes допустимы; туннель не нужен. `start.txt` — чужой
 untracked-файл владельца: не читать, не добавлять, не удалять.
 
-Текущий base — `dc69b3f`, ветка `main`, origin до начала цикла совпадал. Большой
-dirty diff собран как 0.155.0 и независимо принят по областям: attachment
+Кодовый релиз закреплён в `8c4c334` и отправлен прямо в `main`. Он независимо
+принят по областям: attachment
 continuity/completeness/private-lineage; zero-evidence person guard; resumable
 entity backfill; temporal seal v2; SIGBUS/live SQLite boundary; streaming secret
 scan; fail-closed API projections; legacy uploader idempotency. Последние числа:
 diagnostics 140 focused, scanner 71, API 278 + fuzz 2000, остальная release surface
-459 и migration repair 141. Canonical static после version/changelog/docs — PASS.
+459 и migration repair 141. Canonical gate перед commit: 4633 основных теста
+прошли, 1 штатно пропущен, 23/23 UI прошли.
+
+После commit manifest complaints пусты, committed calibration принята `20/20`,
+затем единственный paired temporal holdout израсходован и принят: baseline `4/20`,
+candidate `20/20`, wins `16`, losses `0`, forbidden delta `0`, non-temporal control
+byte-identical, infrastructure failures `0`. Durable latch теперь закрыт; holdout
+никогда не повторять.
 
 Если сессия оборвалась, продолжать строго отсюда:
 
-1. Выполнить полный `.venv/bin/python tools/quality_gate.py`; частичные зелёные
-   прогоны его не заменяют.
-2. Проверить `git diff --check`, version/doc guards, `git fetch` и отсутствие нового
-   origin; при необходимости только безопасный `pull --rebase`, без stash/reset.
-3. Commit по-русски и push прямо в `main`, исключив `start.txt`.
-4. **Не запускать temporal holdout до commit.** На чистом committed HEAD проверить
-   `candidate_manifest_complaints()==[]`, затем запустить committed isolated
-   calibration. Только после её PASS разрешён ровно один
-   `baseline --split holdout`: durable latch расходует попытку до обеих рук.
-5. Записать результат holdout в OPEN/Proposal/CHANGELOG, повторить нужный gate и
-   push документационного commit.
-6. Перезапустить `friday-backend.service` и `friday-bridge.service`, проверить их
+1. Проверить документационный diff, version/doc guards и полный canonical gate.
+2. `git fetch`; при неизменном origin commit по-русски и push прямо в `main`,
+   исключив `start.txt`.
+3. Перезапустить `friday-backend.service` и `friday-bridge.service`, проверить их
    через безопасный локальный API/lease boundary, затем synthetic latency LLM,
    embeddings и reranker. Никогда не возвращаться к внешнему SQLite-open живого WAL.
-7. После релиза продолжить OPEN с `OfficeStructureIndex v1`; отдельно остаётся
+4. После релиза продолжить OPEN с `OfficeStructureIndex v1`; отдельно остаётся
    внешний шаг владельца — перевыпустить удалённый локально cloud web-search
    credential у провайдера.
