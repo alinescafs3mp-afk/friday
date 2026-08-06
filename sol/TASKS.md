@@ -79,6 +79,17 @@
 
 ---
 
+# S12: сортировка чанкового dense-скана — ЗАКРЫТО в 0.166.0
+
+Отложенный с 0.82.0 corpus-wide temp sort закрыт адаптивно, а не безусловным
+object-first. Полный production method на synthetic 5 000×16, 1024-float BLOB и
+настоящем privacy predicate: **469.19 → 60.06 мс**, 7.81×, exact byte/order parity.
+При sparse/rolling состоянии остаётся старый быстрый план; строгие границы 2
+chunks/object и 75% active закреплены мутациями. Окна whole/chunk теперь имеют
+total `(created_at DESC, id ASC)`, а несовпавший tenant vector/parent fail-closed.
+
+---
+
 # Ответ на `OPUS_INTEGRATED_SYSTEM_AUDIT_PROMPT.md` (`699ca1d`)
 
 Получил, прочитал целиком. Спасибо за проделанную работу — документ подробный,

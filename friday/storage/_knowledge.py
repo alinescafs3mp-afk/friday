@@ -6420,24 +6420,94 @@ class KnowledgeMixin(StorageShared):
         Soft-deleted objects are excluded, mirroring the whole-object query — without
         that, deleted knowledge would resurrect through its chunks.
         """
-        query = (
-            "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
-            "FROM knowledge_chunk_embeddings c "
-            "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
-            "WHERE c.user_id = ? AND c.model = ? AND c.dim = ? AND k.deleted_at IS NULL "
-            f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
-        )
-        params: list[Any] = [user_id, model, int(dim)]
+        # There are two opposite good plans, and neither is safe unconditionally.
+        #
+        # * Sparse/rolling index: start at the exact (user, model, dim) chunk rows,
+        #   then sort the small survivor set.  Walking every KO would be 20-30x
+        #   slower when only 1% of passage rows belong to the current model.
+        # * Dense/current index: walk KOs in final order and look up their chunks by
+        #   the composite PK.  This avoids sorting tens of thousands of vector BLOBs.
+        #
+        # The profile reads covering indexes only.  The two gates are deliberately
+        # conservative: more than two active chunks per object in the scanned window,
+        # and strictly more than 75% of this tenant's chunks on the active model/dim.
+        # Production method, synthetic 5k x 16 with 1024-float BLOBs and privacy
+        # predicates: 469.19 ms -> 60.06 ms; at 1% the legacy branch stays around
+        # 3 ms instead of taking about 12 ms object-first.
+        profile = self.execute(
+            """SELECT
+                 (SELECT COUNT(*) FROM knowledge_chunk_embeddings
+                   WHERE user_id=?) AS total_chunks,
+                 (SELECT COUNT(*) FROM knowledge_chunk_embeddings
+                   WHERE user_id=? AND model=? AND dim=?) AS active_chunks,
+                 (SELECT COUNT(*) FROM knowledge_objects
+                   WHERE user_id=? AND deleted_at IS NULL) AS live_objects""",
+            (user_id, user_id, model, int(dim), user_id),
+        ).fetchone()
+        total_chunks = int(profile["total_chunks"] if profile else 0)
+        active_chunks = int(profile["active_chunks"] if profile else 0)
+        live_objects = int(profile["live_objects"] if profile else 0)
+        object_window = live_objects
         if object_limit is not None and object_limit > 0:
-            query += (
-                " AND c.knowledge_object_id IN ("
-                "SELECT window_k.id FROM knowledge_objects window_k "
-                "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
-                f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
-                "ORDER BY window_k.created_at DESC LIMIT ?)"
+            object_window = min(object_window, int(object_limit))
+        use_index_order = (
+            object_window > 0 and active_chunks > 2 * object_window and 4 * active_chunks > 3 * total_chunks
+        )
+
+        if use_index_order:
+            # CROSS JOIN fixes the outer loop.  INDEXED BY must name the PK index:
+            # without it SQLite prefers idx_knowledge_chunks_user_model for every
+            # parent and turns an 14-ms scan into a multi-second nested scan.  This
+            # is the deterministic autoindex of the table's sole composite PK;
+            # migration tests cover every shipped schema that can create the table.
+            query = (
+                "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
+                "FROM knowledge_objects k INDEXED BY idx_knowledge_chunk_scan_order "
+                "CROSS JOIN knowledge_chunk_embeddings c "
+                "INDEXED BY sqlite_autoindex_knowledge_chunk_embeddings_1 "
+                "ON c.knowledge_object_id = k.id "
+                "WHERE k.user_id = ? AND k.deleted_at IS NULL "
+                f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
+                "AND c.user_id = ? AND c.model = ? AND c.dim = ?"
             )
+            params: list[Any] = [user_id, user_id, model, int(dim)]
+        else:
+            query = (
+                "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
+                "FROM knowledge_chunk_embeddings c "
+                "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
+                "WHERE c.user_id = ? AND c.model = ? AND c.dim = ? "
+                "AND k.user_id = ? AND k.deleted_at IS NULL "
+                f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
+            )
+            # The denormalised chunk owner is not an FK to the parent owner.  Both
+            # sides are therefore tenant predicates: malformed rows fail closed in
+            # the sparse branch exactly as they do in the parent-first branch.
+            params = [user_id, model, int(dim), user_id]
+        if object_limit is not None and object_limit > 0:
+            if use_index_order:
+                # rowid is only the membership key; selection itself has the explicit
+                # total (created_at, id) order, so VACUUM/insertion order cannot move
+                # an equal-timestamp object across the recall-window boundary.
+                query += (
+                    " AND k.rowid IN ("
+                    "SELECT window_k.rowid FROM knowledge_objects window_k "
+                    "INDEXED BY idx_knowledge_chunk_scan_order "
+                    "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                    f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
+                    "ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
+                )
+            else:
+                query += (
+                    " AND c.knowledge_object_id IN ("
+                    "SELECT window_k.id FROM knowledge_objects window_k "
+                    "INDEXED BY idx_knowledge_chunk_scan_order "
+                    "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                    f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
+                    "ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
+                )
             params.extend([user_id, int(object_limit)])
-        query += " ORDER BY k.created_at DESC, c.knowledge_object_id, c.chunk_index"
+        query += " ORDER BY k.created_at DESC, k.id, c.chunk_index"
         if row_limit is not None and row_limit > 0:
             query += " LIMIT ?"
             params.append(int(row_limit))

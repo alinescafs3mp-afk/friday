@@ -64,17 +64,19 @@ class VectorsMixin(StorageShared):
             # vector BLOB belonging to the tenant was read and pushed through a temp
             # b-tree before N of them survived. Measured at 10k 1024-float vectors:
             # 469 ms, and the whole point of the cap was to avoid exactly that.
-            # `idx_knowledge_user_created` makes the inner select an index walk that
-            # stops after N rows.
+            # `idx_knowledge_chunk_scan_order` makes the inner select an index walk
+            # that stops after N rows.  The id tail is load-bearing: equal import
+            # timestamps must not let physical rowid/VACUUM choose the recall window.
             query = (
                 "SELECT e.knowledge_object_id AS id, e.vector AS vector "
                 "FROM knowledge_embeddings e "
                 "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? "
                 "AND e.knowledge_object_id IN ("
-                "  SELECT window_k.id FROM knowledge_objects window_k"
+                "  SELECT window_k.id FROM knowledge_objects window_k "
+                "  INDEXED BY idx_knowledge_chunk_scan_order"
                 "  WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
                 f" AND {_not_private_knowledge_dependency('window_k')}"  # nosec B608
-                "  ORDER BY window_k.created_at DESC LIMIT ?"
+                "  ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?"
                 ")"
             )
             params.extend([user_id, int(limit)])
@@ -83,9 +85,13 @@ class VectorsMixin(StorageShared):
                 "SELECT e.knowledge_object_id AS id, e.vector AS vector "
                 "FROM knowledge_embeddings e "
                 "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
-                "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? AND k.deleted_at IS NULL "
+                "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? "
+                "AND k.user_id = ? AND k.deleted_at IS NULL "
                 f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             )
+            # Embedding owner is denormalised and can be malformed independently of
+            # its KO.  Both sides are authority predicates, never one or the other.
+            params.append(user_id)
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 

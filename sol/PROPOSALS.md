@@ -1847,3 +1847,62 @@
   молчаливого исчезновения scanner. Независимая проверка: `71` focused PASS,
   Ruff/format/mypy/Bandit/diff-check PASS; отдельные mutation-прогоны покрасили
   large-file skip, chunk overlap, hardlink projection и excluded-inode boundary.
+
+## 38. Чанковый dense-скан сохраняет порядок без сортировки всего корпуса
+
+- **Статус: СДЕЛАНО в 0.166.0.** Независимый adversarial review пройден.
+- **Что не так:** запасной dense-путь читает passage-векторы через join от
+  `knowledge_chunk_embeddings` к `knowledge_objects`, после чего SQLite сортирует
+  весь выживший набор во временном b-tree ради окна новейших объектов. На холодном
+  старте резидентного кэша и при его отключении это лишняя работа прямо на пути
+  ответа; пункт отложен с 0.82.0, хотя живая модель уже доступна.
+- **Доказательство:** `friday/storage/_knowledge.py:get_user_chunk_embeddings`
+  заканчивает запрос `ORDER BY k.created_at DESC, c.knowledge_object_id,
+  c.chunk_index`; `EXPLAIN QUERY PLAN` на synthetic 5 000 объектов по 16 chunks
+  содержит top-level `USE TEMP B-TREE FOR ORDER BY`. Повторный замер до правки
+  на 5 000×16 с 64-byte векторами, настоящим privacy predicate, timestamp ties и
+  окном 20 064 строк дал median **108.94 ms** (106.64–111.56).
+- **Сценарий отказа:** первый dense-поиск после рестарта/cache reload либо штатный
+  fallback без resident cache тратит время на чтение и пересортировку десятков
+  тысяч BLOB-строк, хотя требуемый порядок уже можно получить индексным обходом.
+- **Что предлагаю:** один адаптивный кандидат `dense_chunk_order_v1`. Добавить
+  partial order-index
+  `idx_knowledge_chunk_scan_order(user_id, created_at DESC, id ASC) WHERE
+  deleted_at IS NULL`; вести внешний обход от `knowledge_objects` с явным
+  `CROSS JOIN` к chunks. Ограниченное окно оставить отдельным подзапросом, но
+  сделать его порядок полным: `created_at DESC, id ASC` через новый индекс;
+  tenant/model/dim/privacy-фильтры и финальный порядок сохранить дословно по
+  смыслу. Старый физический tie-break по rowid не является семантикой: две
+  логически одинаковые synthetic БД с `a,b,c` и обратным INSERT-order при равном
+  времени давали разные окна `[a,b]` и `[c,b]`. Новый порядок обязан дать `[a,b]`
+  в обеих; тот же total key получает whole-vector window. Этот план разрешён,
+  только когда active chunks
+  одновременно плотнее двух на объект окна и составляют строго больше 75% всех
+  chunks пользователя (`4*active > 3*total`): при sparse/rolling индексе остаётся
+  прежний chunk-first запрос. Эта граница зафиксирована после отдельной матрицы:
+  object-first хуже на 1–20% active rows, сравнялся около 30% и стал быстрее лишь
+  на плотном актуальном корпусе. Индекс входит в идемпотентный
+  `CORE_INDEX_SCHEMA`, который исполняется и для current schema, поэтому номер
+  схемы не меняется.
+- **Чем проверим:** до реализации зафиксировать ordered baseline и план. После —
+  exact row-for-row parity на смешанных tenants/model/dim, soft-delete, private
+  dependencies, `object_limit` и `row_limit`; при равных timestamps два разных
+  insertion order дают один ID-ordered результат; corpus-wide
+  `USE TEMP B-TREE FOR ORDER BY` отсутствует на dense-ветке (локальный
+  `LAST TERM OF ORDER BY` внутри одного KO допустим); её median на 5 000×16 не
+  выше 0.25 baseline.
+  На 10% и 1% active rows выбирается legacy-ветка, а цена profile-count не выше
+  4 ms на том же 80 000-row корпусе. Удаление нового индекса/`CROSS JOIN`, опасный
+  nested model-index внутри object-first либо неверный выбор ветки обязаны
+  покрасить structural plan test, а изменение окна или порядка — parity test.
+- **Цена и риск:** один дополнительный небольшой partial index на KO и более
+  жёстко закреплённый SQLite plan. Тёплый resident-cache путь не ускорится; риск —
+  planner-specific поведение при обновлении SQLite, поэтому тест проверяет
+  семантику отдельно от формы плана и не требует полного текста `EXPLAIN`.
+- **Результат:** полный production method (включая profile) на 5 000×16 и
+  1024-float BLOB дал **469.19 → 60.06 ms**, 7.81×, 20 064 byte/order-identical
+  rows; критерий `≤0.25 baseline` пройден с 0.128. Dense plan использует exact
+  KO order-index и chunk PK, sparse/rolling сохраняет legacy. Равные timestamps
+  детерминированы по ID независимо от INSERT-order; malformed vector/parent tenant
+  закрыт с обеих сторон. Current-schema reopen восстанавливает индекс без schema
+  bump; named duplicate chunk-index отклонён замером (+38% DB, +32–43% insert).

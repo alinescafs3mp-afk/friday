@@ -491,20 +491,16 @@ def test_the_hot_read_paths_are_index_ordered(storage):
     # change this assertion exists to notice.
     assert "idx_knowledge_pool_order" in _index_names(pool), pool
 
-    vectors = _plan(
-        storage,
-        "SELECT e.knowledge_object_id AS id, e.vector AS vector FROM knowledge_embeddings e "
-        "WHERE e.user_id=? AND e.model=? AND e.dim=? AND e.knowledge_object_id IN ("
-        "  SELECT id FROM knowledge_objects WHERE user_id=? AND deleted_at IS NULL"
-        "  ORDER BY created_at DESC LIMIT ?)",
-        ("owner", "m", 4, "owner", 100),
-    )
+    sql, params = _captured_sql(storage, lambda: storage.get_user_embeddings("owner", "m", 4, limit=100))
+    vectors = _plan(storage, sql, params)
+    assert "INDEXED BY idx_knowledge_chunk_scan_order" in sql
+    assert "ORDER BY window_k.created_at DESC, window_k.id ASC" in sql
     assert not [
         detail
         for parent, detail in vectors
         if parent == 0 and "TEMP B-TREE" in detail and "ORDER BY" in detail
     ], vectors
-    assert any("idx_knowledge_user_created" in detail for _, detail in vectors), vectors
+    assert any("idx_knowledge_chunk_scan_order" in detail for _, detail in vectors), vectors
 
 
 def test_the_capped_vector_window_still_returns_the_newest_object(storage):
@@ -557,3 +553,332 @@ def test_the_capped_vector_window_still_returns_the_newest_object(storage):
     assert [row[0] for row in storage.get_user_embeddings("owner", "m", 4, limit=1)] == [ids[-1]]
     assert len(storage.get_user_embeddings("owner", "m", 4, limit=3)) == 3
     assert len(storage.get_user_embeddings("owner", "m", 4)) == 5
+
+
+def _seed_chunk_scan(
+    storage, *, user_id: str = "owner", objects: int = 8, chunks_per_object: int = 4
+) -> list[str]:
+    from friday.retrieval import pack_vector
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
+
+    storage.ensure_user(user_id)
+    ids: list[str] = []
+    vectors = []
+    chunks = {}
+    for object_index in range(objects):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=user_id,
+            source="test",
+            source_ref=new_id("src"),
+            raw_content=f"чанковый объект {object_index}",
+            content_type="text",
+        )
+        storage.store_raw_object(raw)
+        ko = KnowledgeObject(
+            # Reverse lexical vs insertion order so equal-timestamp tests detect a
+            # regression from the declared id tie-break back to incidental rowid.
+            id=f"ko_scan_{user_id}_{objects - object_index:04d}",
+            user_id=user_id,
+            raw_object_id=raw.id,
+            content=raw.raw_content,
+            title=f"K{object_index}",
+            summary=raw.raw_content,
+            created_at=f"2026-01-{object_index + 1:02d}T00:00:00Z",
+        )
+        storage.store_knowledge_object(ko)
+        ids.append(ko.id)
+        vectors.append(
+            {
+                "knowledge_object_id": ko.id,
+                "user_id": user_id,
+                "model": "m",
+                "dim": 4,
+                "source_version": 1,
+                "content_hash": ko.id,
+                "vector": pack_vector([float(object_index + 1), 0.0, 0.0, 0.0]),
+            }
+        )
+        chunks[ko.id] = [
+            {
+                "chunk_index": chunk_index,
+                "user_id": user_id,
+                "model": "m",
+                "dim": 4,
+                "source_version": 1,
+                "content_hash": f"{ko.id}:{chunk_index}",
+                "vector": pack_vector([float(object_index + 1), float(chunk_index), 0.0, 0.0]),
+            }
+            for chunk_index in range(chunks_per_object)
+        ]
+    storage.upsert_knowledge_vectors(vectors, chunks)
+    return ids
+
+
+def test_dense_chunk_vector_scan_uses_parent_order_and_primary_key(storage):
+    _seed_chunk_scan(storage)
+
+    sql, params = _captured_sql(
+        storage,
+        lambda: storage.get_user_chunk_embeddings("owner", "m", 4, object_limit=8, row_limit=33),
+    )
+    plan = _plan(storage, sql, params)
+    details = [detail for _, detail in plan]
+
+    assert "CROSS JOIN knowledge_chunk_embeddings" in sql
+    assert "ORDER BY k.created_at DESC, k.id, c.chunk_index" in sql
+    assert sql.count("INDEXED BY idx_knowledge_chunk_scan_order") == 2
+    assert any("idx_knowledge_chunk_scan_order" in detail for detail in details), plan
+    assert any("sqlite_autoindex_knowledge_chunk_embeddings_1" in detail for detail in details), plan
+    # SQLite may sort only the final chunk_index term INSIDE one KO.  What must
+    # never return is the corpus-wide sort spelled without "LAST TERM".
+    assert "USE TEMP B-TREE FOR ORDER BY" not in details, plan
+
+
+def test_current_schema_recreates_chunk_order_index(settings, tmp_path):
+    from dataclasses import replace
+
+    database = tmp_path / "current-schema-index.sqlite3"
+    tuned = replace(settings, database_path=database)
+    first = FridayStorage(tuned)
+    try:
+        first.execute("DROP INDEX idx_knowledge_chunk_scan_order")
+        first.commit()
+        assert (
+            first.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_knowledge_chunk_scan_order'"
+            ).fetchone()
+            is None
+        )
+    finally:
+        first.close()
+
+    reopened = FridayStorage(tuned)
+    try:
+        names = {
+            str(row["name"])
+            for row in reopened.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name IN ('knowledge_objects', 'knowledge_chunk_embeddings')"
+            ).fetchall()
+        }
+        assert "idx_knowledge_chunk_scan_order" in names
+        assert "sqlite_autoindex_knowledge_chunk_embeddings_1" in names
+    finally:
+        reopened.close()
+
+
+def test_chunk_vector_scan_keeps_legacy_plan_at_density_and_rollover_boundaries(storage):
+    ids = _seed_chunk_scan(storage, chunks_per_object=4)
+
+    # Exactly 75% current is intentionally NOT authority for object-first.
+    placeholders = ",".join("?" for _ in ids[:2])
+    storage.execute(
+        f"UPDATE knowledge_chunk_embeddings SET model='retired' "  # nosec B608 - placeholders only
+        f"WHERE knowledge_object_id IN ({placeholders})",
+        tuple(ids[:2]),
+    )
+    storage.commit()
+    sql, _ = _captured_sql(storage, lambda: storage.get_user_chunk_embeddings("owner", "m", 4))
+    assert "FROM knowledge_chunk_embeddings c" in sql
+    assert "CROSS JOIN" not in sql
+
+    # Above 75%, with >2 active chunks per object, the indexed-order path opens.
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET model='m' WHERE knowledge_object_id=?",
+        (ids[0],),
+    )
+    storage.commit()
+    sql, _ = _captured_sql(storage, lambda: storage.get_user_chunk_embeddings("owner", "m", 4))
+    assert "CROSS JOIN knowledge_chunk_embeddings" in sql
+
+    # Density is a separate strict gate: exactly two active chunks per live object
+    # remains legacy even with a 100% current model.
+    storage.execute("UPDATE knowledge_chunk_embeddings SET model='m'")
+    storage.execute("DELETE FROM knowledge_chunk_embeddings WHERE chunk_index >= 2")
+    storage.commit()
+    sql, _ = _captured_sql(storage, lambda: storage.get_user_chunk_embeddings("owner", "m", 4))
+    assert "FROM knowledge_chunk_embeddings c" in sql
+    assert "CROSS JOIN" not in sql
+
+
+def _reference_chunk_scan(
+    storage,
+    user_id: str,
+    model: str,
+    dim: int,
+    *,
+    object_limit: int | None,
+    row_limit: int | None,
+) -> list[tuple[str, bytes]]:
+    """The pre-optimization selection, with the now-explicit two-sided tenant gate."""
+    from friday.storage._privacy import _not_private_knowledge_dependency
+
+    query = (
+        "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
+        "FROM knowledge_chunk_embeddings c "
+        "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
+        "WHERE c.user_id = ? AND c.model = ? AND c.dim = ? "
+        "AND k.user_id = ? AND k.deleted_at IS NULL "
+        f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
+    )
+    params: list[object] = [user_id, model, int(dim), user_id]
+    if object_limit is not None and object_limit > 0:
+        query += (
+            " AND c.knowledge_object_id IN ("
+            "SELECT window_k.id FROM knowledge_objects window_k "
+            "INDEXED BY idx_knowledge_chunk_scan_order "
+            "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+            f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
+            "ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
+        )
+        params.extend([user_id, int(object_limit)])
+    query += " ORDER BY k.created_at DESC, c.knowledge_object_id, c.chunk_index"
+    if row_limit is not None and row_limit > 0:
+        query += " LIMIT ?"
+        params.append(int(row_limit))
+    rows = storage.execute(query, tuple(params)).fetchall()
+    return [(str(row["id"]), bytes(row["vector"])) for row in rows]
+
+
+def test_adaptive_chunk_plans_are_row_for_row_equivalent_and_fail_closed(storage):
+    from friday.storage.models import Entity, EntityType, new_id
+
+    owner_ids = _seed_chunk_scan(storage, objects=8, chunks_per_object=8)
+    _seed_chunk_scan(storage, user_id="other", objects=3, chunks_per_object=8)
+
+    private_name = "PRIVATE-CHUNK-DEPENDENCY-7f13"
+    private_entity = Entity(new_id("ent"), "other", private_name, EntityType.EVENT)
+    storage.create_entity(private_entity)
+    # The carrier predates the reminder becoming private, reproducing a legacy or
+    # cross-source dependency that the closure must hide after authority changes.
+    storage.update_knowledge_fields(owner_ids[3], "owner", content=f"Copied private identity: {private_name}")
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO entity_time(
+                   entity_id, user_id, occurred_at, precision, source, updated_at)
+               VALUES(?, 'other', '2026-08-10T09:00:00Z', 'day',
+                      'reminder:other', '2026-08-06T00:00:00Z')""",
+            (private_entity.id,),
+        )
+        conn.execute(
+            """INSERT INTO private_entity_owners(entity_id, person_id, privacy_kind, created_at)
+               VALUES(?, 'other', 'reminder', '2026-08-06T00:00:00Z')""",
+            (private_entity.id,),
+        )
+    # Ties exercise the total id-selected object window; insertion order is the
+    # deliberate reverse of lexical id order. Deleted/model/dim rows must not leak.
+    placeholders = ",".join("?" for _ in owner_ids)
+    storage.execute(
+        f"UPDATE knowledge_objects SET created_at='2026-01-01T00:00:00Z' "  # nosec B608
+        f"WHERE id IN ({placeholders})",
+        tuple(owner_ids),
+    )
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET model='retired' WHERE knowledge_object_id=? AND chunk_index=0",
+        (owner_ids[0],),
+    )
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET dim=9 WHERE knowledge_object_id=? AND chunk_index=1",
+        (owner_ids[1],),
+    )
+    storage.commit()
+    storage.soft_delete_knowledge_object(owner_ids[-1], "owner")
+
+    private_chunk_prefix = f"{owner_ids[3]}#"
+    assert not [
+        key
+        for key, _ in storage.get_user_chunk_embeddings("owner", "m", 4)
+        if key.startswith(private_chunk_prefix)
+    ]
+
+    for object_limit in (None, 5):
+        for row_limit in (None, 17):
+            assert storage.get_user_chunk_embeddings(
+                "owner", "m", 4, object_limit=object_limit, row_limit=row_limit
+            ) == _reference_chunk_scan(
+                storage,
+                "owner",
+                "m",
+                4,
+                object_limit=object_limit,
+                row_limit=row_limit,
+            )
+
+    eligible = sorted(set(owner_ids) - {owner_ids[3], owner_ids[-1]})[:5]
+    selected_rows = storage.get_user_chunk_embeddings("owner", "m", 4, object_limit=5)
+    selected_objects = list(dict.fromkeys(key.rpartition("#")[0] for key, _ in selected_rows))
+    assert selected_objects == eligible
+    assert {key for key, _ in storage.get_user_embeddings("owner", "m", 4, limit=5)} == set(eligible)
+
+    # The chunk-side user_id is denormalised and can be malformed.  It grants no
+    # authority: neither tenant may read a row whose parent and chunk owners differ.
+    mismatch_key = f"{owner_ids[2]}#0"
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET user_id='other' WHERE knowledge_object_id=? AND chunk_index=0",
+        (owner_ids[2],),
+    )
+    storage.commit()
+    assert mismatch_key not in {key for key, _ in storage.get_user_chunk_embeddings("owner", "m", 4)}
+    assert mismatch_key not in {key for key, _ in storage.get_user_chunk_embeddings("other", "m", 4)}
+
+    # Rolling most rows to an old model selects the sparse branch; it must have the
+    # same ordered semantics as the dense branch, not merely the same set.
+    retired_ids = [value for index, value in enumerate(owner_ids) if index != 3][:6]
+    storage.execute(
+        f"UPDATE knowledge_chunk_embeddings SET model='retired' "  # nosec B608
+        f"WHERE knowledge_object_id IN ({','.join('?' for _ in retired_ids)})",
+        tuple(retired_ids),
+    )
+    storage.commit()
+    sparse_rows = storage.get_user_chunk_embeddings("owner", "m", 4, object_limit=5, row_limit=17)
+    assert sparse_rows == _reference_chunk_scan(storage, "owner", "m", 4, object_limit=5, row_limit=17)
+    assert not [key for key, _ in sparse_rows if key.startswith(private_chunk_prefix)]
+
+
+def test_denormalized_vector_owner_never_overrides_parent_tenant(storage):
+    owner_ids = _seed_chunk_scan(storage, objects=2, chunks_per_object=4)
+    other_ids = _seed_chunk_scan(storage, user_id="other", objects=2, chunks_per_object=4)
+    mismatched = owner_ids[0]
+    reverse_mismatched = other_ids[0]
+    storage.execute(
+        "UPDATE knowledge_embeddings SET user_id='other' WHERE knowledge_object_id=?",
+        (mismatched,),
+    )
+    storage.execute(
+        "UPDATE knowledge_embeddings SET user_id='owner' WHERE knowledge_object_id=?",
+        (reverse_mismatched,),
+    )
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET user_id='other' WHERE knowledge_object_id=?",
+        (mismatched,),
+    )
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET user_id='owner' WHERE knowledge_object_id=?",
+        (reverse_mismatched,),
+    )
+    # Keep both callers on the sparse/rolling branch.  Each has one active malformed
+    # row group whose chunk owner matches the caller but whose parent belongs to the
+    # other tenant; removing the parent-side tenant gate must now fail.
+    storage.execute(
+        "UPDATE knowledge_chunk_embeddings SET model='retired' WHERE knowledge_object_id IN (?, ?)",
+        (owner_ids[1], other_ids[1]),
+    )
+    storage.commit()
+
+    for tenant in ("owner", "other"):
+        sql, _ = _captured_sql(
+            storage,
+            lambda tenant=tenant: storage.get_user_chunk_embeddings(tenant, "m", 4),
+        )
+        assert "CROSS JOIN" not in sql
+        for foreign_parent in (mismatched, reverse_mismatched):
+            assert foreign_parent not in {key for key, _ in storage.get_user_embeddings(tenant, "m", 4)}
+            assert foreign_parent not in {
+                key for key, _ in storage.get_user_embeddings(tenant, "m", 4, limit=10)
+            }
+            assert not [
+                key
+                for key, _ in storage.get_user_chunk_embeddings(tenant, "m", 4)
+                if key.startswith(f"{foreign_parent}#")
+            ]

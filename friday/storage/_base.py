@@ -1539,6 +1539,12 @@ CREATE INDEX IF NOT EXISTS idx_mission_tasks_mission ON mission_tasks(mission_id
 CREATE INDEX IF NOT EXISTS idx_mission_tasks_status ON mission_tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_user_model
     ON knowledge_embeddings(user_id, model);
+-- Dense passage reloads need newest objects first.  The chunk table cannot order
+-- by its parent's created_at, so a dense, current corpus is walked parent-first;
+-- id is the exact tie-breaker used by the public result order.
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_scan_order
+    ON knowledge_objects(user_id, created_at DESC, id ASC)
+    WHERE deleted_at IS NULL;
 -- The composite primary key's implicit index already serves lookups and deletes by
 -- knowledge_object_id (leftmost prefix), so only the scan path needs an index.
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_user_model
