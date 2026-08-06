@@ -552,6 +552,22 @@ _RELATIONAL_QUERY_RE = re.compile(
     r"related\s+to|depends?\s+on|works?\s+on|part\s+of|connected\s+to|between)\b",
     re.IGNORECASE,
 )
+_DISMISSED_RELATIONAL_PREFIX_RE = re.compile(
+    r"""
+    (?:^|[.!?;\n])\s*
+    (?:вообще\s+)?
+    (?:
+        (?:(?:мне|меня)\s+)?не\s*важно
+      | (?:меня\s+)?не\s+интерес\w*
+      | (?:мне\s+)?не\s+нуж\w*
+      | (?:мне\s+)?не\s+надо
+      | я\s+не\s+спрашива\w*
+      | без\s+разницы
+    )
+    \s*[,:\-—]?\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 def filename_words(title: str) -> str:
@@ -589,7 +605,22 @@ def _title_text(title: str) -> str:
 def is_relational_query(query: str) -> bool:
     """Return whether the measured relational graph path should be enabled."""
 
-    return _RELATIONAL_QUERY_RE.search(query) is not None
+    # S10b froze the only candidate before either arm.  On 12 Russian
+    # human-authored cases the old bare search scored TP/FP/TN/FN=6/6/0/0;
+    # ignoring only a match immediately preceded by an explicit dismissal scored
+    # 6/0/6/0.  Do not anchor or expand the phrase lists without another frozen
+    # measurement: introductory words before a real relational request are valid.
+    previous_match_end = 0
+    for match in _RELATIONAL_QUERY_RE.finditer(query):
+        # The measured candidate searches query[:match.start()]. Once an earlier
+        # relational match was dismissed, that relational word makes it impossible
+        # for the anchored dismissal expression to start before the word and still
+        # end at this match. Restricting the next search to the text after that word
+        # is therefore exact, while avoiding quadratic growing-prefix rescans.
+        if _DISMISSED_RELATIONAL_PREFIX_RE.search(query, previous_match_end, match.start()) is None:
+            return True
+        previous_match_end = match.end()
+    return False
 
 
 _STOPWORDS = {

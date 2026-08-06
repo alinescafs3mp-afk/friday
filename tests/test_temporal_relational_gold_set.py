@@ -90,9 +90,9 @@ def test_explicit_time_routes_every_case_without_expanding_the_classifier() -> N
         assert case.as_of or case.known_at_checkpoint
         if case.kind == "two_hop_chain":
             assert is_relational_query(case.query), "two-hop truth would be cut to depth one"
-    # The natural one-hop formulation is intentionally outside the old measured
-    # regex.  Its explicit temporal boundary, just like memory_search, enables the
-    # graph without pretending S10b's missing human handoff exists.
+    # The natural one-hop formulation is intentionally outside the measured regex.
+    # Its explicit temporal boundary, just like memory_search, enables the graph;
+    # accepted S10b only measured explicit dismissals and did not broaden phrases.
     one_hop = next(case for case in bench.GOLD_CASES if case.kind == "valid_time_handover")
     assert is_relational_query(one_hop.query) is False
     assert bool(one_hop.as_of or one_hop.known_at_checkpoint) is True

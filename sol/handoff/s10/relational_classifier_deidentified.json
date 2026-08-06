@@ -1,0 +1,136 @@
+{
+  "cases": 12,
+  "candidate": "dismiss_explicit_prefix_v1",
+  "dataset": {
+    "selection_frozen_before_arms": true,
+    "labels_frozen_before_arms": true,
+    "human_authored_only": true,
+    "synthetic_document_notices": false,
+    "language": "ru"
+  },
+  "per_case": [
+    {
+      "case": "bd6f50c73b08344e",
+      "class": "direct_relational_request",
+      "expected_relational": true,
+      "baseline_match": true,
+      "candidate_match": true,
+      "relational_match_count": 1,
+      "dismissed_match_count": 0
+    },
+    {
+      "case": "02218980baa49d90",
+      "class": "direct_relational_request",
+      "expected_relational": true,
+      "baseline_match": true,
+      "candidate_match": true,
+      "relational_match_count": 1,
+      "dismissed_match_count": 0
+    },
+    {
+      "case": "abb68aa1a8d3b422",
+      "class": "direct_relational_request",
+      "expected_relational": true,
+      "baseline_match": true,
+      "candidate_match": true,
+      "relational_match_count": 1,
+      "dismissed_match_count": 0
+    },
+    {
+      "case": "18606805e4d8dce3",
+      "class": "prefaced_relational_request",
+      "expected_relational": true,
+      "baseline_match": true,
+      "candidate_match": true,
+      "relational_match_count": 1,
+      "dismissed_match_count": 0
+    },
+    {
+      "case": "283a9d94c57275f1",
+      "class": "prefaced_relational_request",
+      "expected_relational": true,
+      "baseline_match": true,
+      "candidate_match": true,
+      "relational_match_count": 1,
+      "dismissed_match_count": 0
+    },
+    {
+      "case": "7f5536fb01ea5ffb",
+      "class": "prefaced_relational_request",
+      "expected_relational": true,
+      "baseline_match": true,
+      "candidate_match": true,
+      "relational_match_count": 1,
+      "dismissed_match_count": 0
+    },
+    {
+      "case": "e68044485e503eca",
+      "class": "dismissed_relational_mention",
+      "expected_relational": false,
+      "baseline_match": true,
+      "candidate_match": false,
+      "relational_match_count": 1,
+      "dismissed_match_count": 1
+    },
+    {
+      "case": "7dc1a9b411caace5",
+      "class": "dismissed_relational_mention",
+      "expected_relational": false,
+      "baseline_match": true,
+      "candidate_match": false,
+      "relational_match_count": 1,
+      "dismissed_match_count": 1
+    },
+    {
+      "case": "92a1c81272b13d06",
+      "class": "dismissed_relational_mention",
+      "expected_relational": false,
+      "baseline_match": true,
+      "candidate_match": false,
+      "relational_match_count": 1,
+      "dismissed_match_count": 1
+    },
+    {
+      "case": "683dd7fd409a7616",
+      "class": "redirected_nonrelational_request",
+      "expected_relational": false,
+      "baseline_match": true,
+      "candidate_match": false,
+      "relational_match_count": 1,
+      "dismissed_match_count": 1
+    },
+    {
+      "case": "bbfb74516fec138e",
+      "class": "redirected_nonrelational_request",
+      "expected_relational": false,
+      "baseline_match": true,
+      "candidate_match": false,
+      "relational_match_count": 1,
+      "dismissed_match_count": 1
+    },
+    {
+      "case": "b5eaa9e86a42eed4",
+      "class": "redirected_nonrelational_request",
+      "expected_relational": false,
+      "baseline_match": true,
+      "candidate_match": false,
+      "relational_match_count": 1,
+      "dismissed_match_count": 1
+    }
+  ],
+  "summary": {
+    "true_positives_baseline": 6,
+    "false_positives_baseline": 6,
+    "true_negatives_baseline": 0,
+    "false_negatives_baseline": 0,
+    "true_positives_candidate": 6,
+    "false_positives_candidate": 0,
+    "true_negatives_candidate": 6,
+    "false_negatives_candidate": 0,
+    "fixed_false_positives": 6,
+    "new_false_negatives": 0,
+    "correct_baseline": 6,
+    "correct_candidate": 12,
+    "net_corrections": 6
+  }
+}
