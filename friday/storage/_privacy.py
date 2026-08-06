@@ -8,6 +8,8 @@ Aliases are code-owned SQL identifiers, never request values.
 
 from __future__ import annotations
 
+from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
+
 _INBOX_PUBLIC_JSON_MAX_BYTES = 8_192
 _INBOX_PUBLIC_NOTES_MAX_CHARS = 4_000
 _GRAPH_PUBLIC_JSON_MAX_BYTES = 8_192
@@ -737,6 +739,52 @@ def _not_private_raw_dependency(alias: str = "r") -> str:
                AND raw_dependency_inbox.user_id={alias}.user_id
                AND NOT ({inbox})
         )
+    )"""
+
+
+def _exact_uploader_knowledge_dependency(
+    knowledge_alias: str = "k",
+    raw_alias: str = "uploader_raw",
+) -> str:
+    """One exact, fail-closed author boundary for a Knowledge Object.
+
+    The author is provenance on the source Raw Object, not the shared tenant on
+    the Knowledge Object.  The returned expression contains one bound ``?`` for
+    the exact uploader id.  Aliases are code-owned SQL identifiers; request data
+    never enters the SQL text.
+
+    Keep this as a correlated ``EXISTS`` rather than a caller-specific JOIN so
+    FTS, date/recent pools and both vector readers can apply the identical rule
+    before their own LIMIT without changing column resolution or join order.
+    """
+
+    public_raw = _not_private_raw_dependency(raw_alias)
+    return f"""EXISTS (
+        SELECT 1 FROM raw_objects {raw_alias}
+         WHERE {raw_alias}.id={knowledge_alias}.raw_object_id
+           AND {raw_alias}.user_id={knowledge_alias}.user_id
+           AND {raw_alias}.deleted_at IS NULL
+           AND {public_raw}
+           AND CASE
+             WHEN length(CAST(COALESCE({raw_alias}.metadata_json,'') AS BLOB))
+                      <={RAW_FILE_METADATA_MAX_BYTES}
+              AND typeof({raw_alias}.metadata_json)='text'
+              AND json_valid({raw_alias}.metadata_json)
+             THEN CASE
+               WHEN json_type({raw_alias}.metadata_json)='object'
+                AND NOT EXISTS (
+                      SELECT 1 FROM json_tree({raw_alias}.metadata_json) uploader_json_member
+                       WHERE uploader_json_member.key IS NOT NULL
+                       GROUP BY uploader_json_member.parent,
+                                CAST(uploader_json_member.key AS TEXT)
+                      HAVING COUNT(*) > 1
+                    )
+                AND json_type({raw_alias}.metadata_json,'$.uploaded_by')='text'
+               THEN json_extract({raw_alias}.metadata_json,'$.uploaded_by')=?
+               ELSE 0
+             END
+             ELSE 0
+           END
     )"""
 
 

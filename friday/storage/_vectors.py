@@ -14,7 +14,10 @@ from friday.storage._base import (
     StorageShared,
     utc_now,
 )
-from friday.storage._privacy import _not_private_knowledge_dependency
+from friday.storage._privacy import (
+    _exact_uploader_knowledge_dependency,
+    _not_private_knowledge_dependency,
+)
 
 
 class VectorsMixin(StorageShared):
@@ -46,7 +49,13 @@ class VectorsMixin(StorageShared):
         return tuple(row)
 
     def get_user_embeddings(
-        self, user_id: str, model: str, dim: int, *, limit: int | None = None
+        self,
+        user_id: str,
+        model: str,
+        dim: int,
+        *,
+        limit: int | None = None,
+        uploaded_by: str | None = None,
     ) -> list[tuple[str, bytes]]:
         """Return (knowledge_object_id, packed vector) for a user's live vectors.
 
@@ -55,6 +64,9 @@ class VectorsMixin(StorageShared):
         never resurrect deleted knowledge into dense recall. ``limit`` caps the scan
         to the newest N objects (a latency guard on a large corpus).
         """
+        author = str(uploaded_by) if uploaded_by is not None else None
+        if author is not None and not author.strip():
+            return []
         params: list[Any] = [user_id, model, int(dim)]
         if limit is not None and limit > 0:
             # The window is chosen FIRST, by id, and only then are vectors fetched.
@@ -76,10 +88,13 @@ class VectorsMixin(StorageShared):
                 "  INDEXED BY idx_knowledge_chunk_scan_order"
                 "  WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
                 f" AND {_not_private_knowledge_dependency('window_k')}"  # nosec B608
-                "  ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?"
-                ")"
             )
-            params.extend([user_id, int(limit)])
+            params.append(user_id)
+            if author is not None:
+                query += f" AND {_exact_uploader_knowledge_dependency('window_k')}"
+                params.append(author)
+            query += " ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
+            params.append(int(limit))
         else:
             query = (
                 "SELECT e.knowledge_object_id AS id, e.vector AS vector "
@@ -92,6 +107,9 @@ class VectorsMixin(StorageShared):
             # Embedding owner is denormalised and can be malformed independently of
             # its KO.  Both sides are authority predicates, never one or the other.
             params.append(user_id)
+            if author is not None:
+                query += f" AND {_exact_uploader_knowledge_dependency('k')}"
+                params.append(author)
         rows = self.execute(query, tuple(params)).fetchall()
         return [(str(row["id"]), bytes(row["vector"])) for row in rows]
 
@@ -164,7 +182,12 @@ class VectorsMixin(StorageShared):
         return int(row["n"]) if row else 0
 
     def get_chunk_spans(
-        self, user_id: str, model: str, keys: Sequence[tuple[str, int]]
+        self,
+        user_id: str,
+        model: str,
+        keys: Sequence[tuple[str, int]],
+        *,
+        uploaded_by: str | None = None,
     ) -> dict[tuple[str, int], tuple[int, int]]:
         """Character spans of specific chunks, so the answer can quote the passage
         that actually matched instead of the lexically best window.
@@ -176,23 +199,28 @@ class VectorsMixin(StorageShared):
         """
         spans: dict[tuple[str, int], tuple[int, int]] = {}
         wanted = {(str(ko_id), int(index)) for ko_id, index in keys}
-        if not wanted:
+        if not wanted or (uploaded_by is not None and not str(uploaded_by).strip()):
             return spans
         ordered = sorted({ko_id for ko_id, _ in wanted})
         for start in range(0, len(ordered), 400):
             batch = ordered[start : start + 400]
             placeholders = ",".join("?" for _ in batch)
-            rows = self.execute(
-                "SELECT c.knowledge_object_id AS knowledge_object_id, c.chunk_index AS chunk_index, "  # nosec B608
+            query = (
+                "SELECT c.knowledge_object_id AS knowledge_object_id, c.chunk_index AS chunk_index, "
                 "c.start_char AS start_char, c.end_char AS end_char "
                 "FROM knowledge_chunk_embeddings c "
                 "JOIN knowledge_objects k ON k.id = c.knowledge_object_id "
                 "AND k.version = c.source_version "
-                f"WHERE c.user_id = ? AND c.model = ? "  # nosec B608
+                "WHERE c.user_id = ? AND c.model = ? AND k.user_id = ? "
                 f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
-                f"AND c.knowledge_object_id IN ({placeholders})",  # nosec B608
-                (user_id, model, *batch),
-            ).fetchall()
+            )
+            params: list[Any] = [user_id, model, user_id]
+            if uploaded_by is not None:
+                query += f"AND {_exact_uploader_knowledge_dependency('k')} "
+                params.append(str(uploaded_by))
+            query += f"AND c.knowledge_object_id IN ({placeholders})"  # nosec B608
+            params.extend(batch)
+            rows = self.execute(query, tuple(params)).fetchall()
             for row in rows:
                 key = (str(row["knowledge_object_id"]), int(row["chunk_index"]))
                 if key in wanted:

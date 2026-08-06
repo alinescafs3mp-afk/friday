@@ -427,17 +427,21 @@ DDL; verified backups есть с обеих сторон миграции. Эт
   тем же `_arrival_window`, что лента, сводка, ритм и объём; регрессия с двумя
   авторами и двумя окнами подтверждена мутацией удаления scope.
 
-  `user_knowledge_search` также больше не ищет общий Knowledge Object по отдельной
+  ~~`user_knowledge_search` также больше не ищет общий Knowledge Object по отдельной
   учётке человека и не фильтрует готовую tenant-страницу постфактум. Shared-ветка
   использует точный Raw `uploaded_by` **до** FTS/LIKE candidate cap; строки без
   достоверного текстового автора никому не приписываются. Тридцать более сильных
   чужих совпадений, LIKE fallback и параллельные запросы разных людей закреплены
-  синтетически. Ответ помечен `scoped_lexical`.
+  синтетически. Ответ помечен `scoped_lexical`.~~ **Полный используемый hybrid
+  закрыт в 0.167.0:** exact uploader теперь входит до caps в FTS/LIKE, recent,
+  date window, whole-document и passage dense; resident tenant cache обходится,
+  reranker получает только author-scoped canonical rows, а relevant passage доходит
+  до выдержки. Без поисковика остаётся fail-safe `scoped_lexical`.
 
-  Открыто только улучшение качества: протянуть тот же exact uploader scope до каждого
-  cap полного HybridSearcher (recent, dense whole-document/chunks, reranker и graph).
-  До этого эти каналы в shared person-search намеренно выключены и privacy-gap не
-  создают; личный архив продолжает использовать полный hybrid.
+  Открыт отдельный graph-provenance этап: shared entities/relations не имеют
+  достоверного `uploaded_by`, поэтому graph expansion, entity-name signal и
+  relation history на авторской дороге намеренно fail-closed. Author-aware repair
+  словаря также не включён: глобальный словарь мог бы внести чужие названия.
 * ~~**SIGBUS живого экземпляра при втором процессе на WAL**~~ — **ЗАКРЫТО
   2026-08-06 ПОСЛЕ НЕЗАВИСИМОГО REVIEW.** Первое падение 2026-08-05 произошло в
   `libsqlite3`/отображении `-shm`, пока второй процесс писал той же базой. Повтор

@@ -209,7 +209,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_entity_knowledge": "(self, user_id: 'str', entity_id: 'str') -> 'int'",
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
     "count_feedback_state": "(self, user_id: 'str', *, target_type: 'str | None' = None, target_id: 'str | None' = None, feedback_type: 'str | None' = None, negative_only: 'bool' = False) -> 'int'",
-    "count_knowledge_objects": "(self, user_id: 'str') -> 'int'",
+    "count_knowledge_objects": "(self, user_id: 'str', *, uploaded_by: 'str | None' = None) -> 'int'",
     "count_missions": "(self, user_id: 'str', *, statuses: 'Sequence[str] | None' = None) -> 'int'",
     "count_recent_audit": "(self, action: 'str', since: 'str', *, limit: 'int | None' = None) -> 'int'",
     "count_user_vectors": "(self, user_id: 'str', model: 'str', *, before: 'tuple[str, str] | None' = None) -> 'int'",
@@ -249,7 +249,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_api_token": "(self, token_id: 'str') -> 'dict[str, Any] | None'",
     "get_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'str | None'",
     "get_channel_session": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'dict[str, Any] | None'",
-    "get_chunk_spans": "(self, user_id: 'str', model: 'str', keys: 'Sequence[tuple[str, int]]') -> 'dict[tuple[str, int], tuple[int, int]]'",
+    "get_chunk_spans": "(self, user_id: 'str', model: 'str', keys: 'Sequence[tuple[str, int]]', *, uploaded_by: 'str | None' = None) -> 'dict[tuple[str, int], tuple[int, int]]'",
     "get_conflict_pair_statuses": "(self, user_id: 'str', conflict_type: 'str') -> 'dict[str, str]'",
     "get_conversation": "(self, conversation_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "get_conversation_messages": "(self, conversation_id: 'str', *, user_id: 'str', limit: 'int' = 50, offset: 'int | None' = None) -> 'list[dict[str, Any]]'",
@@ -272,7 +272,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_inbox_item": "(self, inbox_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "get_knowledge_by_raw": "(self, raw_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
     "get_knowledge_conflict": "(self, user_id: 'str', conflict_id: 'str') -> 'dict[str, Any] | None'",
-    "get_knowledge_object": "(self, ko_id: 'str', user_id: 'str | None' = None) -> 'dict[str, Any] | None'",
+    "get_knowledge_object": "(self, ko_id: 'str', user_id: 'str | None' = None, *, uploaded_by: 'str | None' = None) -> 'dict[str, Any] | None'",
     "get_knowledge_usage": "(self, user_id: 'str', knowledge_object_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
     "get_lifecycle_stats": "(self, user_id: 'str') -> 'dict[str, int]'",
     "get_message": "(self, message_id: 'str', user_id: 'str') -> 'dict[str, Any] | None'",
@@ -285,8 +285,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_vectors_by_content_hash": "(self, content_hashes: 'Sequence[str]', model: 'str') -> 'dict[str, bytes]'",
     "get_reusable_vectors": "(self, knowledge_object_ids: 'Sequence[str]', model: 'str') -> 'dict[str, dict[str, bytes]]'",
     "get_user": "(self, user_id: 'str') -> 'dict[str, Any] | None'",
-    "get_user_chunk_embeddings": "(self, user_id: 'str', model: 'str', dim: 'int', *, object_limit: 'int | None' = None, row_limit: 'int | None' = None) -> 'list[tuple[str, bytes]]'",
-    "get_user_embeddings": "(self, user_id: 'str', model: 'str', dim: 'int', *, limit: 'int | None' = None) -> 'list[tuple[str, bytes]]'",
+    "get_user_chunk_embeddings": "(self, user_id: 'str', model: 'str', dim: 'int', *, object_limit: 'int | None' = None, row_limit: 'int | None' = None, uploaded_by: 'str | None' = None) -> 'list[tuple[str, bytes]]'",
+    "get_user_embeddings": "(self, user_id: 'str', model: 'str', dim: 'int', *, limit: 'int | None' = None, uploaded_by: 'str | None' = None) -> 'list[tuple[str, bytes]]'",
     "idempotency_claim": "(self, user_id: 'str', request_key: 'str', *, request_hash: 'str' = '', lease_seconds: 'int' = 300) -> 'dict[str, Any]'",
     "idempotency_complete": "(self, user_id: 'str', request_key: 'str', lease_token: 'str', response: 'dict[str, Any]') -> 'bool'",
     "idempotency_get": "(self, user_id: 'str', request_key: 'str', *, request_hash: 'str' = '') -> 'dict[str, Any] | None'",
@@ -320,7 +320,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_knowledge_entity_links": "(self, user_id: 'str', *, entity_id: 'str | None' = None, knowledge_object_id: 'str | None' = None, status: 'str | None' = 'accepted', limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "list_knowledge_missing_embedding": "(self, model: 'str', *, limit: 'int' = 64, chunk_scheme: 'str' = '', chunk_threshold: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_live_knowledge_ids": "(self, user_id: 'str') -> 'set[str]'",
-    "list_knowledge_objects": "(self, user_id: 'str', *, limit: 'int' = 100, offset: 'int' = 0, lifecycle_stage: 'str | None' = None, tag: 'str | None' = None, entity_id: 'str | None' = None, query: 'str | None' = None, since: 'str | None' = None, until: 'str | None' = None) -> 'list[dict[str, Any]]'",
+    "list_knowledge_objects": "(self, user_id: 'str', *, limit: 'int' = 100, offset: 'int' = 0, lifecycle_stage: 'str | None' = None, tag: 'str | None' = None, entity_id: 'str | None' = None, query: 'str | None' = None, since: 'str | None' = None, until: 'str | None' = None, uploaded_by: 'str | None' = None) -> 'list[dict[str, Any]]'",
     # +`utc_offset_minutes`: годовщина считается в сутках ЧЕЛОВЕКА. День приходил
     # из местного времени, а `created_at` лежит в UTC — две разные шкалы.
     "list_knowledge_on_this_day": "(self, user_id: 'str', *, month_day: 'str', before_iso: 'str', limit: 'int' = 10, utc_offset_minutes: 'int' = 0) -> 'list[dict[str, Any]]'",
@@ -633,6 +633,21 @@ def test_dense_chunk_vector_scan_uses_parent_order_and_primary_key(storage):
     # SQLite may sort only the final chunk_index term INSIDE one KO.  What must
     # never return is the corpus-wide sort spelled without "LAST TERM".
     assert "USE TEMP B-TREE FOR ORDER BY" not in details, plan
+
+
+def test_scoped_chunk_plan_prices_the_tenant_index_it_physically_walks(storage):
+    _seed_chunk_scan(storage)
+
+    # None of these legacy synthetic rows has this uploader.  Membership is still
+    # fail-closed in SQL, but plan selection must price the tenant-wide KO index
+    # that the parent-first branch would physically walk.  Replacing live_objects
+    # with the scoped author count (zero here) incorrectly selects the sparse plan.
+    sql, _ = _captured_sql(
+        storage,
+        lambda: storage.get_user_chunk_embeddings("owner", "m", 4, uploaded_by="missing-author"),
+    )
+
+    assert "CROSS JOIN knowledge_chunk_embeddings" in sql
 
 
 def test_current_schema_recreates_chunk_order_index(settings, tmp_path):

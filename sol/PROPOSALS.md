@@ -1906,3 +1906,79 @@
   детерминированы по ID независимо от INSERT-order; malformed vector/parent tenant
   закрыт с обеих сторон. Current-schema reopen восстанавливает индекс без schema
   bump; named duplicate chunk-index отклонён замером (+38% DB, +32–43% insert).
+
+## 39. Авторский поиск в общем архиве получает hybrid без позднего фильтра
+
+- **Статус: СДЕЛАНО В 0.167.0, 2026-08-07.** Нынешняя защита из
+  0.164.0 корректна по privacy, но намеренно отвечает только `scoped_lexical`:
+  `user_knowledge_search` не зовёт tenant-wide `HybridSearcher`, потому что чужие
+  recent/dense/chunk кандидаты могут заполнить внутренний cap раньше позднего
+  Python-фильтра. В итоге администратор на вопрос о материале названного человека
+  теряет semantic-only совпадения и passage recall, хотя те же каналы работают в
+  личном архиве.
+- **Ровно один кандидат:** `uploader_scoped_hybrid_v1`. Опциональный exact
+  `uploaded_by` проходит через `HybridSearcher` и storage. Один fail-closed
+  provenance-предикат проверяет source Raw того же tenant, live/non-private Raw,
+  bounded valid JSON, текстовый `uploaded_by` и точное равенство. Он применяется
+  внутри SQL **до** каждого FTS/LIKE, date-window, recent-pool, whole-vector и
+  chunk-vector LIMIT. Строка без автора, `null`, число, массив, битый/слишком
+  большой JSON и несовпавший parent tenant никому не приписываются.
+- **Resident cache:** tenant-wide матрицу нельзя сначала top-k ранжировать, а затем
+  фильтровать по автору: более сильные чужие векторы создадут false empty. В первой
+  версии scoped-вызов обходит resident cache и читает author-scoped векторы из SQL;
+  это редкий административный путь, а корректность важнее отдельного кеша. Новый
+  author-keyed cache возможен только после собственного invalidation/signature
+  контракта и в этот кандидат не входит.
+- **Graph boundary:** текущий `user_knowledge_search` не передаёт `kg` даже в
+  личной ветке. Scoped-вызов дополнительно fail-closed отключает graph/entity
+  expansion до первого graph read, если будущий caller всё же передаст `kg`:
+  общие entities/relations не имеют достоверного `uploaded_by`, а фильтр готовых
+  Knowledge candidates после `knowledge_limit` повторил бы исходную ошибку.
+  Поэтому этот релиз включает все реально используемые hybrid-каналы
+  (FTS/fuzzy/dense documents/chunks/reranker), но не объявляет graph авторским;
+  graph-provenance scope остаётся отдельным этапом.
+- **Замер до реализации:** полностью synthetic общий tenant содержит старый
+  документ выбранного автора без лексем вопроса, но с заранее заданным близким
+  вектором, и более сильные/свежие чужие документы, заполняющие обычные caps.
+  Текущая production-ветка обязана зафиксировать baseline `0/1` и стратегию
+  `scoped_lexical`. Изолированный личный hybrid на том же author corpus задаёт
+  reference IDs/order; кандидат должен вернуть `1/1` и совпасть с reference после
+  удаления tenant-only служебных полей.
+- **Baseline снят после заморозки:** production `ExecutionKernel` на synthetic
+  shared tenant вернул `success=true`, `count=0`, `strategy=scoped_lexical`,
+  `target_found=false`; bound `HybridSearcher` получил ровно `0` вызовов. Тридцать
+  foreign exact matches наружу не вышли, то есть это именно честная потеря качества,
+  а не существующая утечка.
+- **Acceptance:** selected-author rows входят в FTS, recent, date window,
+  whole-vector и chunk-vector pools до их caps; reranker получает только их IDs.
+  Никакой foreign/unattributed/malformed row не попадает даже в spy перед
+  ранжированием. Dense target за foreign saturation возвращается, а foreign exact
+  lexical и stronger vector не появляются ни в result, trace, graph context, span
+  lookup, usage IDs, ни в reranker input. Scoped дата не становится пустой из-за
+  чужого материала, и author corpus size считается по той же границе. Обычный
+  `uploaded_by=None` сохраняет прежние вызовы, bytes/order и resident-cache путь.
+- **Обязательные мутации:** удалить scope отдельно из FTS, recent, window,
+  whole-vector, chunk-vector либо promoted-object recheck — соответствующий
+  saturation/malformed тест краснеет. Вернуть tenant-wide resident cache — красит
+  top-k saturation. Перенести фильтр после LIMIT — красит target-beyond-cap.
+  Передать scoped-вызову `kg`/entity fallback — красит no-graph-read spy. Снять
+  reranker assertion — foreign sentinel достигает модельной границы и тест падает.
+- **Цена и откат:** scoped dense читает BLOB из SQLite вместо общей RAM-матрицы и
+  потому может быть медленнее обычного личного поиска; измеряется отдельно, но не
+  компенсируется небезопасным late filter. Изменение аддитивно: отсутствие
+  `uploaded_by` оставляет старый path, а runtime при отсутствии `HybridSearcher`
+  сохраняет нынешний `scoped_lexical` fallback.
+- **Результат:** whole-only и chunk-only semantic targets за насыщенными чужими
+  caps возвращаются выбранному автору; foreign, unattributed, malformed,
+  oversized, duplicate-key и tenant-mismatched provenance не проходят ни один
+  storage/reranker/graph spy. Relevant late passage формирует выдержку вместо
+  заголовка. Явный `uploaded_by=None` сохранил прежний bytes/order и cache path.
+  Scoped SQL, feedback/usage и dense scoring подтверждены вне event loop.
+- **Мутации:** удаление scope из whole-vector и chunk-vector fetch независимо
+  красило соответствующий semantic target; возврат tenant resident cache красил
+  poison-cache saturation; удаление text-type metadata guard пропускало BLOB;
+  hostile reranker с in-place заменой ID/body красил canonical-output тест до
+  snapshot+deepcopy защиты. Отдельный замер нашёл неверную цену плана: scoped
+  author-count включал parent-first scan на synthetic 6000 KO/600 chunks за
+  `28.6 ms` против `1.1 ms` sparse. Gate теперь считает tenant population,
+  который план физически сканирует; авторская membership остаётся внутри SQL.

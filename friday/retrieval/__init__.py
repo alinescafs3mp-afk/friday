@@ -14,6 +14,7 @@ from bisect import bisect_right
 from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -1991,6 +1992,7 @@ class HybridSearcher:
         as_of: str = "",
         known_at: str = "",
         record_usage: bool | None = None,
+        uploaded_by: str | None = None,
     ) -> dict[str, Any]:
         # Deferred: `friday.workers` (the package, not just `_blocking`) imports
         # FROM `friday.retrieval` — a module-level import here would be circular.
@@ -1999,12 +2001,32 @@ class HybridSearcher:
         from friday.workers._blocking import run_blocking
 
         limit = max(1, min(int(limit), 100))
+        author_scope = str(uploaded_by) if uploaded_by is not None else None
+        if author_scope is not None and not author_scope.strip():
+            raise ValueError("uploaded_by must name an exact non-empty account")
+        graph_author_scope_disabled = author_scope is not None and kg is not None
+        # Shared graph entities and relations do not carry exact Raw uploader
+        # provenance. A late filter of bounded Knowledge candidates would let
+        # foreign rows fill the cap, so an author-scoped call reaches no graph read.
+        if author_scope is not None:
+            kg = None
+        scope_kwargs = {"uploaded_by": author_scope} if author_scope is not None else {}
+
+        async def storage_read(function, /, *args, **kwargs):
+            """Keep the new uncached scoped SQL lane off the shared event loop."""
+
+            if author_scope is None:
+                return function(*args, **kwargs)
+            return await run_blocking(function, *args, **kwargs)
+
         # Parse outside graph enrichment's best-effort ``except Exception``. A bad
         # user date is input refusal, not an unavailable optional graph channel;
         # swallowing it would turn an invalid historical question into a current,
         # graphless HTTP 200.
         normalized_as_of = _normalize_search_as_of(as_of)
         requested_known_at = _normalize_search_known_at(known_at)
+        if author_scope is not None and requested_known_at:
+            raise ValueError("author-scoped relation history is not available")
         # Validate the history floor and mutable identity topology before every
         # candidate read.  Doing this only inside graph expansion would let an
         # empty query, an empty date window, or graph_expansion=False silently
@@ -2087,7 +2109,13 @@ class HybridSearcher:
         # Множество строится один раз тем же предикатом, что и листинг («своя дата
         # документа либо любая упомянутая»). None означает «окна не задано» или «окно
         # шире, чем имеет смысл фильтровать»; пустое множество — «в периоде пусто».
-        window_ids = self.storage.knowledge_ids_in_window(user_id, since=since, until=until)
+        window_ids = await storage_read(
+            self.storage.knowledge_ids_in_window,
+            user_id,
+            since=since,
+            until=until,
+            **scope_kwargs,
+        )
         if window_ids is not None and not window_ids:
             confirm_history_snapshot()
             return {
@@ -2113,7 +2141,13 @@ class HybridSearcher:
                 "strategy": {"date_window": True, "date_window_empty": True},
             }
 
-        fts_candidates = self.storage.search_knowledge(user_id, clean_query, limit=depth * 5)
+        fts_candidates = await storage_read(
+            self.storage.search_knowledge,
+            user_id,
+            clean_query,
+            limit=depth * 5,
+            **scope_kwargs,
+        )
         # Only when the question as typed matched nothing at all. A stuck keyboard
         # layout and a slipped finger produce strings the archive cannot match,
         # and both are ordinary human typing rather than nonsense — without this
@@ -2121,7 +2155,7 @@ class HybridSearcher:
         # one case where an empty answer is right. Gated on the search that was
         # going to happen anyway, so a question that works pays nothing for this.
         repair = None
-        if not fts_candidates:
+        if not fts_candidates and author_scope is None:
             repair = self._repair_query(user_id, clean_query)
             if repair is not None:
                 clean_query = repair.query
@@ -2131,7 +2165,14 @@ class HybridSearcher:
         # Пул тоже собирается ИЗ ОКНА, а не фильтруется после: он упорядочен по
         # важности и свежести, и на узком периоде отфильтрованный «общий» пул дал бы
         # ноль строк там, где в периоде документы есть.
-        recent_pool = self.storage.list_knowledge_objects(user_id, limit=pool_limit, since=since, until=until)
+        recent_pool = await storage_read(
+            self.storage.list_knowledge_objects,
+            user_id,
+            limit=pool_limit,
+            since=since,
+            until=until,
+            **scope_kwargs,
+        )
         if window_ids is not None:
             fts_candidates = [item for item in fts_candidates if str(item["id"]) in window_ids]
         candidate_map = {item["id"]: item for item in [*fts_candidates, *recent_pool]}
@@ -2161,10 +2202,14 @@ class HybridSearcher:
             token for token in tokens_of(clean_query) if len(token) > 1 and token.casefold() not in _STOPWORDS
         ]
         if substantive and len(substantive) < len(tokens_of(clean_query)):
-            evidence_ranking = {
-                str(item["id"])
-                for item in self.storage.search_knowledge(user_id, " ".join(substantive), limit=depth * 5)
-            }
+            evidence_rows = await storage_read(
+                self.storage.search_knowledge,
+                user_id,
+                " ".join(substantive),
+                limit=depth * 5,
+                **scope_kwargs,
+            )
+            evidence_ranking = {str(item["id"]) for item in evidence_rows}
         else:
             # Nothing to strip, or nothing left after stripping: a question made of
             # stopwords has no better evidence than the pool it already produced.
@@ -2185,8 +2230,14 @@ class HybridSearcher:
         chunk_provenance: dict[str, tuple[int, int]] = {}
         chunk_carried: set[str] = set()
         if self.embeddings and self.embeddings.remote_enabled:
+            dense_scope_kwargs = {"uploaded_by": author_scope} if author_scope is not None else {}
             embedding_scores = await self._dense_recall(
-                user_id, clean_query, candidate_map, meta=dense_meta, window_ids=window_ids
+                user_id,
+                clean_query,
+                candidate_map,
+                meta=dense_meta,
+                window_ids=window_ids,
+                **dense_scope_kwargs,
             )
             chunk_provenance = dict(dense_meta.get("chunk_provenance") or {})
             chunk_carried = set(dense_meta.get("chunk_carried") or set())
@@ -2313,9 +2364,11 @@ class HybridSearcher:
                         # Связь по графу — не основание вывести документ за границы
                         # периода, заданного человеком.
                         continue
-                    item = candidate_map.get(document_id) or self.storage.get_knowledge_object(
+                    item = candidate_map.get(document_id) or await storage_read(
+                        self.storage.get_knowledge_object,
                         document_id,
                         user_id,
+                        **scope_kwargs,
                     )
                     if not item or item.get("deleted_at"):
                         continue
@@ -2379,7 +2432,13 @@ class HybridSearcher:
 
         # A match in a concise, curated field is more trustworthy than the same token buried in a
         # long body. Entity names are loaded in one batch so this remains cheap on a local SQLite KB.
-        entity_links = self._entity_links_by_document(user_id, list(candidate_map))
+        # Entity identities live in the shared graph and do not carry exact Raw
+        # uploader provenance. Even links attached to a scoped document can expose
+        # a name later rewritten from another participant's material, so v1 keeps
+        # this signal hard-off together with graph expansion.
+        entity_links = (
+            {} if author_scope is not None else self._entity_links_by_document(user_id, list(candidate_map))
+        )
         field_components: dict[str, dict[str, float]] = {}
         field_scores: dict[str, float] = {}
         identifier_coverage: dict[str, float] = {}
@@ -2419,8 +2478,8 @@ class HybridSearcher:
         # removing the redundant ranking costs nothing — and a cliff nothing pays
         # for should not decide seven positions.
         rrf = reciprocal_rank_fusion([ranking for ranking in rankings if ranking], k=45)
-        feedback = self._feedback_scores(user_id, list(candidate_map))
-        usage = self.storage.get_knowledge_usage(user_id, list(candidate_map))
+        feedback = await storage_read(self._feedback_scores, user_id, list(candidate_map))
+        usage = await storage_read(self.storage.get_knowledge_usage, user_id, list(candidate_map))
         # Ablation seam: an advisory harness zeroes ONE weight and re-measures the gold
         # set, which is what turns a hand-tuned constant into a measured one. Lifted
         # out of the loop so the blend expression below stays a single readable line
@@ -2648,7 +2707,12 @@ class HybridSearcher:
         for document_id in ordered:
             if len(results) >= collect:
                 break
-            item = self.storage.get_knowledge_object(document_id, user_id)
+            item = await storage_read(
+                self.storage.get_knowledge_object,
+                document_id,
+                user_id,
+                **scope_kwargs,
+            )
             if not item or item.get("deleted_at"):
                 continue
             lexical_score = lexical_scores.get(document_id, 0.0)
@@ -2702,13 +2766,48 @@ class HybridSearcher:
             and len(results) >= rerank_floor
             and not temporal_explicit_path_results
         ):
-            reordered = await self._reranker(clean_query, results[: self._rerank_top])
-            if reordered is not None and len(reordered) == len(results[: self._rerank_top]):
+            rerank_slice = results[: self._rerank_top]
+            original_by_id = {str(item.get("id") or ""): item for item in rerank_slice}
+            # The adapter is a ranking oracle, not an owner of canonical rows. Give
+            # it detached values so an in-place mutation cannot rewrite the snapshot
+            # that the membership guard compares against after the await.
+            reordered = await self._reranker(clean_query, deepcopy(rerank_slice))
+            valid_reordered = isinstance(reordered, list) and all(
+                isinstance(item, Mapping) for item in reordered
+            )
+            reordered_ids = [str(item.get("id") or "") for item in reordered] if valid_reordered else []
+            valid_scores = valid_reordered and all(
+                "_rerank_score" not in item
+                or (
+                    not isinstance(item.get("_rerank_score"), bool)
+                    and isinstance(item.get("_rerank_score"), (int, float))
+                    and math.isfinite(float(item["_rerank_score"]))
+                )
+                for item in reordered
+            )
+            if (
+                valid_reordered
+                and valid_scores
+                and len(reordered) == len(rerank_slice)
+                and len(original_by_id) == len(rerank_slice)
+                and len(set(reordered_ids)) == len(reordered_ids)
+                and set(reordered_ids) == set(original_by_id)
+            ):
                 # Порядок меняется, состав — нет: хвост за `rerank_top` остаётся на
                 # месте. Проверка длины не формальность: потеря объекта выглядела бы
                 # как «поиск ничего не нашёл», а не как сбой модели.
-                results = reordered + results[self._rerank_top :]
-                reranked_count = len(reordered)
+                # Callback controls only order and its numeric score. Rebuild every
+                # row from the final author-scoped storage read above so a malformed
+                # adapter cannot replace an id's title/body while preserving length.
+                canonical_reordered: list[dict[str, Any]] = []
+                for reranked in reordered:
+                    document_id = str(reranked.get("id") or "")
+                    canonical = original_by_id[document_id]
+                    if "_rerank_score" in reranked:
+                        canonical["_rerank_score"] = reranked["_rerank_score"]
+                    canonical_reordered.append(canonical)
+                results = canonical_reordered + results[self._rerank_top :]
+                reranked_count = len(canonical_reordered)
                 if self._confident_min > 0.0:
                     # Отсев по откалиброванному скору. Замер размена — в
                     # `_rerank_backend.py`: доля отвечающих среди показанного растёт
@@ -2759,8 +2858,12 @@ class HybridSearcher:
             ]
             if wanted:
                 with suppress(Exception):
-                    spans = self.storage.get_chunk_spans(
-                        user_id, self.embeddings.settings.embeddings_model, wanted
+                    spans = await storage_read(
+                        self.storage.get_chunk_spans,
+                        user_id,
+                        self.embeddings.settings.embeddings_model,
+                        wanted,
+                        **scope_kwargs,
                     )
                     for item in results:
                         key = (str(item["id"]), int(item.get("_embedding_chunk", -1)))
@@ -2788,7 +2891,8 @@ class HybridSearcher:
                     for item in results[:5]
                     if item.get("id") and float(item.get("_score", 0.0) or 0.0) >= usage_floor
                 ]
-                self.storage.record_knowledge_usage(
+                await storage_read(
+                    self.storage.record_knowledge_usage,
                     user_id,
                     retrieved_ids,
                     retrieved=True,
@@ -2827,6 +2931,10 @@ class HybridSearcher:
             "feedback": True,
             "graph": bool(kg),
         }
+        if author_scope is not None:
+            strategy["uploader_scoped"] = True
+            if graph_author_scope_disabled:
+                strategy["graph_author_scope_disabled"] = True
         if reranked_count:
             # Видно в explain-трейсе: порядок выдачи решала не только формула, и
             # человек, разбирающий «почему это первым», должен об этом знать.
@@ -2861,7 +2969,11 @@ class HybridSearcher:
             # lexical channel actually looked at. The count is only paid here, on a
             # saturated pool: an empty result over 8000 objects and an empty result
             # over 40 mean opposite things, and until now they printed the same.
-            corpus_size = self.storage.count_knowledge_objects(user_id)
+            corpus_size = await storage_read(
+                self.storage.count_knowledge_objects,
+                user_id,
+                **scope_kwargs,
+            )
             if corpus_size > pool_limit:
                 strategy["lexical_pool_capped"] = True
                 strategy["lexical_pool_scanned"] = pool_limit
@@ -3278,6 +3390,7 @@ class HybridSearcher:
         *,
         meta: dict[str, Any] | None = None,
         window_ids: set[str] | None = None,
+        uploaded_by: str | None = None,
     ) -> dict[str, float]:
         """Corpus-wide dense recall over persisted vectors.
 
@@ -3289,6 +3402,17 @@ class HybridSearcher:
         re-ranking the existing pool by embedding the candidate texts directly.
         """
         assert self.embeddings is not None
+        from friday.workers._blocking import run_blocking
+
+        scope_kwargs = {"uploaded_by": uploaded_by} if uploaded_by is not None else {}
+
+        async def scoped_work(function, /, *args, **kwargs):
+            if uploaded_by is None:
+                return function(*args, **kwargs)
+            return await run_blocking(function, *args, **kwargs)
+
+        storage_read = scoped_work
+
         # Плотный канал — улучшение, а не условие ответа: лексика и граф уже дали
         # результат, и ждать ради добавки дольше, чем человек готов ждать весь ответ,
         # значит менять полезное на бесполезное.
@@ -3307,7 +3431,7 @@ class HybridSearcher:
 
         cached = (
             self._dense_cache.get(self.storage, user_id, model, query_dim)
-            if settings.embeddings_resident_cache
+            if settings.embeddings_resident_cache and uploaded_by is None
             else None
         )
         if cached is not None:
@@ -3339,15 +3463,21 @@ class HybridSearcher:
             if not cached.doc_ids and not cached.chunk_ids:
                 return await self._dense_recall_pool(query_vector, candidate_map)
         else:
-            stored = self.storage.get_user_embeddings(user_id, model, query_dim, limit=(max_objects or None))
+            stored = await storage_read(
+                self.storage.get_user_embeddings,
+                user_id,
+                model,
+                query_dim,
+                limit=(max_objects or None),
+                **scope_kwargs,
+            )
             if meta is not None:
                 # Deliberately still counted in OBJECTS: the cap, its explain-trace flag
                 # and the operator-facing wording all keep the meaning they had.
                 meta["dense_scanned"] = len(stored)
                 meta["dense_capped"] = bool(max_objects) and len(stored) >= max_objects
-            doc_scores = {
-                document_id: score for score, document_id in dense_scores(query_vector, stored, query_dim)
-            }
+            doc_pairs = await scoped_work(dense_scores, query_vector, stored, query_dim)
+            doc_scores = {document_id: score for score, document_id in doc_pairs}
 
             chunk_scores = {}
             provenance = {}
@@ -3365,21 +3495,28 @@ class HybridSearcher:
                 # averages over however many chunks were scanned — hands the truncated
                 # document an undiscounted score it did not earn.
                 over_fetch = int(settings.embeddings_chunk_max_per_object)
-                fetched = self.storage.get_user_chunk_embeddings(
+                fetched = await storage_read(
+                    self.storage.get_user_chunk_embeddings,
                     user_id,
                     model,
                     query_dim,
                     object_limit=(max_objects or None),
                     row_limit=(row_cap + over_fetch if row_cap else None),
+                    **scope_kwargs,
                 )
-                chunk_rows = _trim_to_whole_objects(fetched, row_cap) if row_cap else fetched
+
+                def score_fetched_chunks():
+                    rows = _trim_to_whole_objects(fetched, row_cap) if row_cap else fetched
+                    scores, spans = aggregate_chunk_scores(
+                        dense_scores(query_vector, rows, query_dim),
+                        blend=float(settings.embeddings_chunk_blend),
+                    )
+                    return rows, scores, spans
+
+                chunk_rows, chunk_scores, provenance = await scoped_work(score_fetched_chunks)
                 if meta is not None:
                     meta["dense_chunks_scanned"] = len(chunk_rows)
                     meta["dense_chunks_capped"] = bool(row_cap) and len(chunk_rows) < len(fetched)
-                chunk_scores, provenance = aggregate_chunk_scores(
-                    dense_scores(query_vector, chunk_rows, query_dim),
-                    blend=float(settings.embeddings_chunk_blend),
-                )
 
             if not stored and not chunk_rows:
                 # Nothing indexed yet: degrade to re-ranking the pool, exactly as before.
@@ -3424,7 +3561,12 @@ class HybridSearcher:
             # означал бы, что «жёсткий предфильтр» держится только на одном канале.
             if window_ids is not None and document_id not in window_ids:
                 continue
-            item = self.storage.get_knowledge_object(document_id, user_id)
+            item = await storage_read(
+                self.storage.get_knowledge_object,
+                document_id,
+                user_id,
+                **scope_kwargs,
+            )
             if item and not item.get("deleted_at"):
                 candidate_map[document_id] = item
         if meta is not None:

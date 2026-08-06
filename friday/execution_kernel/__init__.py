@@ -4552,14 +4552,30 @@ class ExecutionKernel:
         # the bare storage fallback used to honour an unbounded limit while
         # HybridSearcher stayed capped at 20. Same bound as the declared schema.
         clamped_limit = max(1, min(int(limit), 20))
-        if actor.shared_tenant:
+        scoped_hybrid = False
+        if actor.shared_tenant and self.searcher is not None:
+            # The searcher carries the exact Raw uploader through every candidate
+            # lane before its cap.  It deliberately disables graph/entity expansion:
+            # shared graph rows do not yet have trustworthy author provenance.
+            found = await self.searcher.search(
+                actor.user_id,
+                clean_query,
+                limit=clamped_limit,
+                uploaded_by=chosen.user_id,
+                record_usage=False,
+                include_entities=False,
+                graph_expansion=False,
+            )
+            scoped_hybrid = True
+        elif actor.shared_tenant:
             # WHERE the material lives and WHO supplied it are different axes in
             # the shared archive.  A tenant-wide HybridSearcher would let foreign
             # FTS/recent/dense/graph candidates fill every cap before a Python
             # post-filter, and the same mistake without that filter would expose
             # another person's documents.  The dedicated storage lane joins the
             # source Raw provenance and applies exact `uploaded_by` before the
-            # FTS/LIKE LIMIT. Unknown authors belong to nobody.
+            # FTS/LIKE LIMIT. Unknown authors belong to nobody. This remains the
+            # no-searcher fallback for offline/minimal deployments.
             found = {
                 "results": await run_blocking(
                     storage.search_knowledge,
@@ -4612,24 +4628,39 @@ class ExecutionKernel:
             "query": clean_query,
         }
         if actor.shared_tenant:
-            # This is deliberately not described as the tenant's hybrid search:
-            # dense, graph and reranker lanes are disabled until each can carry the
-            # exact author scope before its own cap.  Legacy rows without an author
-            # are excluded rather than guessed, so an empty result is not a claim
-            # that no unattributed historical material exists.
-            answer["strategy"] = "scoped_lexical"
+            # Legacy rows without an author are excluded rather than guessed, so an
+            # empty result is not a claim that no unattributed historical material
+            # exists. Graph remains excluded on both paths until its own provenance
+            # can carry an exact uploader boundary.
+            answer["strategy"] = "scoped_hybrid" if scoped_hybrid else "scoped_lexical"
             answer["unattributed_excluded"] = True
         if dropped:
             answer["filtered_out"] = dropped
+
+        query_for_excerpt = str(found.get("query") or clean_query)
+
+        def scoped_excerpt(row: Mapping[str, Any]) -> str:
+            """Quote the passage that carried dense recall, not the file header."""
+
+            content = str(row.get("content") or "")
+            region = content
+            span = row.get("_embedding_chunk_span")
+            if isinstance(span, (list, tuple)) and len(span) == 2:
+                try:
+                    start, end = int(span[0]), int(span[1])
+                except (TypeError, ValueError):
+                    start = end = -1
+                if 0 <= start < end <= len(content):
+                    region = content[start:end]
+            return best_snippet(query_for_excerpt, region, max_chars=_TOOL_EXCERPT_CHARS)
+
         answer["results"] = [
             {
                 "id": str(row.get("id") or ""),
                 "title": str(row.get("title") or "Без названия")[:200],
                 "kind": str(row.get("knowledge_kind") or "note"),
                 "updated_at": row.get("updated_at"),
-                "excerpt": best_snippet(
-                    clean_query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS
-                ),
+                "excerpt": scoped_excerpt(row),
             }
             for row in rows
         ]

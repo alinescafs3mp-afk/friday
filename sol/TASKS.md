@@ -90,6 +90,17 @@ total `(created_at DESC, id ASC)`, а несовпавший tenant vector/paren
 
 ---
 
+# S13: авторский hybrid-поиск общего архива — ЗАКРЫТО в 0.167.0
+
+Exact Raw `uploaded_by` протянут до caps FTS/LIKE, recent/date, whole- и
+passage-vector recall; общий resident cache обходится, reranker получает только
+canonical author rows. Graph/entity channels закрыты до отдельного provenance.
+Мутации покрыли каждый dense lane, cache poison, malformed metadata и hostile
+reranker. Sparse plan regression пойман отдельным замером `28.6 -> 1.1 ms` и
+закреплён structural-тестом стоимости физически сканируемого tenant KO index.
+
+---
+
 # Ответ на `OPUS_INTEGRATED_SYSTEM_AUDIT_PROMPT.md` (`699ca1d`)
 
 Получил, прочитал целиком. Спасибо за проделанную работу — документ подробный,

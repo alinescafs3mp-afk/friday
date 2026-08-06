@@ -44,6 +44,7 @@ from friday.storage._base import (
     utc_now,
 )
 from friday.storage._privacy import (
+    _exact_uploader_knowledge_dependency,
     _not_private_entity_material_dependency,
     _not_private_knowledge_dependency,
     _not_private_knowledge_structure_dependency,
@@ -97,7 +98,6 @@ _PUBLIC_KNOWLEDGE_VERSION_SNAPSHOT_MAX_BYTES = 1_048_576
 _MENTION_VALIDATION_SECRET = os.urandom(32)
 _PUBLIC_KNOWLEDGE_VERSION_NESTED_DEPTH = 8
 _PUBLIC_KNOWLEDGE_VERSION_TEXT_BUDGET = 4 * 1_048_576
-_UPLOADER_SCOPE_METADATA_MAX_BYTES = 1_048_576
 
 _PUBLIC_ENTITY_LINK_COLUMNS = """substr(l.id,1,160) AS id,
                    substr(l.knowledge_object_id,1,160) AS knowledge_object_id,
@@ -1057,19 +1057,34 @@ class KnowledgeMixin(StorageShared):
             self.update_knowledge_object(obj)
             return self.get_knowledge_object(ko_id, user_id)
 
-    def get_knowledge_object(self, ko_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+    def get_knowledge_object(
+        self,
+        ko_id: str,
+        user_id: str | None = None,
+        *,
+        uploaded_by: str | None = None,
+    ) -> dict[str, Any] | None:
+        scope = ""
+        scope_params: tuple[str, ...] = ()
+        if uploaded_by is not None:
+            if not str(uploaded_by).strip():
+                return None
+            scope = f" AND {_exact_uploader_knowledge_dependency('k')}"
+            scope_params = (str(uploaded_by),)
         if user_id is None:
             row = self.execute(
                 f"""SELECT k.* FROM knowledge_objects k WHERE k.id=?
-                      AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
-                (ko_id,),
+                      AND {_not_private_knowledge_dependency("k")}
+                      {scope}""",  # nosec B608
+                (ko_id, *scope_params),
             ).fetchone()
         else:
             row = self.execute(
                 f"""SELECT k.* FROM knowledge_objects k
                      WHERE k.id=? AND k.user_id=?
-                       AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
-                (ko_id, user_id),
+                       AND {_not_private_knowledge_dependency("k")}
+                       {scope}""",  # nosec B608
+                (ko_id, user_id, *scope_params),
             ).fetchone()
         return dict(row) if row else None
 
@@ -1193,12 +1208,20 @@ class KnowledgeMixin(StorageShared):
             "changes": diff_snapshots(by_version[base], by_version[target]),
         }
 
-    def count_knowledge_objects(self, user_id: str) -> int:
+    def count_knowledge_objects(self, user_id: str, *, uploaded_by: str | None = None) -> int:
+        if uploaded_by is not None and not str(uploaded_by).strip():
+            return 0
+        scope = ""
+        params: list[Any] = [user_id]
+        if uploaded_by is not None:
+            scope = f" AND {_exact_uploader_knowledge_dependency('k')}"
+            params.append(str(uploaded_by))
         row = self.execute(
             f"""SELECT COUNT(*) AS count FROM knowledge_objects k
                  WHERE k.user_id=? AND k.deleted_at IS NULL
-                   AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
-            (user_id,),
+                   AND {_not_private_knowledge_dependency("k")}
+                   {scope}""",  # nosec B608
+            tuple(params),
         ).fetchone()
         return int(row["count"] if row else 0)
 
@@ -1209,7 +1232,12 @@ class KnowledgeMixin(StorageShared):
     _WINDOW_IDS_MAX = 20_000
 
     def knowledge_ids_in_window(
-        self, user_id: str, *, since: str | None = None, until: str | None = None
+        self,
+        user_id: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        uploaded_by: str | None = None,
     ) -> set[str] | None:
         """Идентификаторы объектов, попадающих в диапазон дат. None — окна нет.
 
@@ -1231,6 +1259,7 @@ class KnowledgeMixin(StorageShared):
             entity_id=None,
             since=since,
             until=until,
+            uploaded_by=uploaded_by,
         )
         rows = self.execute(
             f"SELECT id FROM knowledge_objects WHERE {where} LIMIT ?",  # nosec B608 - предикат из общего построителя
@@ -1273,6 +1302,7 @@ class KnowledgeMixin(StorageShared):
         query: str | None = None,
         since: str | None = None,
         until: str | None = None,
+        uploaded_by: str | None = None,
     ) -> tuple[str, list[Any]]:
         """The WHERE clause and its parameters, built ONCE for the list and its count.
 
@@ -1286,6 +1316,13 @@ class KnowledgeMixin(StorageShared):
         where = "user_id=? AND deleted_at IS NULL AND " + _not_private_knowledge_dependency(
             "knowledge_objects"
         )
+        if uploaded_by is not None:
+            author = str(uploaded_by)
+            if not author.strip():
+                where += " AND 0"
+            else:
+                where += " AND " + _exact_uploader_knowledge_dependency("knowledge_objects")
+                params.append(author)
         if lifecycle_stage:
             where += " AND lifecycle_stage=?"
             params.append(lifecycle_stage)
@@ -1413,6 +1450,7 @@ class KnowledgeMixin(StorageShared):
         query: str | None = None,
         since: str | None = None,
         until: str | None = None,
+        uploaded_by: str | None = None,
     ) -> list[dict[str, Any]]:
         where, params = self._knowledge_filter(
             user_id,
@@ -1422,6 +1460,7 @@ class KnowledgeMixin(StorageShared):
             query=query,
             since=since,
             until=until,
+            uploaded_by=uploaded_by,
         )
         params.extend([max(1, min(limit, 5000)), max(0, offset)])
         # ``where`` contains only fixed clauses; all values remain bound parameters.
@@ -2039,27 +2078,13 @@ class KnowledgeMixin(StorageShared):
         text = " ".join((query or "").split()).strip()
         if not text:
             return []
-        scope_join = ""
         scope_where = ""
         scope_params: tuple[str, ...] = ()
         if uploaded_by is not None:
             author = str(uploaded_by)
-            if not author:
+            if not author.strip():
                 return []
-            scope_join = (
-                " JOIN raw_objects uploader_raw"
-                " ON uploader_raw.id=k.raw_object_id AND uploader_raw.user_id=k.user_id"
-            )
-            scope_where = f""" AND uploader_raw.deleted_at IS NULL
-                AND {_not_private_raw_dependency("uploader_raw")}
-                AND CASE
-                  WHEN length(CAST(COALESCE(uploader_raw.metadata_json,'') AS BLOB))
-                           <={_UPLOADER_SCOPE_METADATA_MAX_BYTES}
-                   AND json_valid(uploader_raw.metadata_json)
-                  THEN CASE WHEN json_type(uploader_raw.metadata_json,'$.uploaded_by')='text'
-                       THEN json_extract(uploader_raw.metadata_json,'$.uploaded_by')=?
-                       ELSE 0 END
-                  ELSE 0 END"""
+            scope_where = f" AND {_exact_uploader_knowledge_dependency('k')}"
             scope_params = (author,)
         rows: list[sqlite3.Row] = []
         terms = _fts_terms(text)
@@ -2070,7 +2095,6 @@ class KnowledgeMixin(StorageShared):
                     f"""SELECT k.*, bm25(knowledge_fts, 1.0, 2.0, 1.5, 0.5) AS _rank
                        FROM knowledge_fts
                        JOIN knowledge_objects k ON k.rowid=knowledge_fts.rowid
-                       {scope_join}
                        WHERE k.user_id=? AND k.deleted_at IS NULL
                          AND {_not_private_knowledge_dependency("k")}
                          {scope_where}
@@ -2085,7 +2109,6 @@ class KnowledgeMixin(StorageShared):
             like = f"%{escaped}%"
             rows = self.execute(
                 f"""SELECT k.* FROM knowledge_objects k
-                   {scope_join}
                    WHERE k.user_id=? AND k.deleted_at IS NULL
                      AND {_not_private_knowledge_dependency("k")}
                      {scope_where}
@@ -6411,6 +6434,7 @@ class KnowledgeMixin(StorageShared):
         *,
         object_limit: int | None = None,
         row_limit: int | None = None,
+        uploaded_by: str | None = None,
     ) -> list[tuple[str, bytes]]:
         """Return (``ko_id#chunk_index``, packed vector) for a user's passage vectors.
 
@@ -6434,6 +6458,9 @@ class KnowledgeMixin(StorageShared):
         # Production method, synthetic 5k x 16 with 1024-float BLOBs and privacy
         # predicates: 469.19 ms -> 60.06 ms; at 1% the legacy branch stays around
         # 3 ms instead of taking about 12 ms object-first.
+        author = str(uploaded_by) if uploaded_by is not None else None
+        if author is not None and not author.strip():
+            return []
         profile = self.execute(
             """SELECT
                  (SELECT COUNT(*) FROM knowledge_chunk_embeddings
@@ -6447,6 +6474,11 @@ class KnowledgeMixin(StorageShared):
         total_chunks = int(profile["total_chunks"] if profile else 0)
         active_chunks = int(profile["active_chunks"] if profile else 0)
         live_objects = int(profile["live_objects"] if profile else 0)
+        # The parent-first branch physically walks the tenant KO order index before
+        # testing Raw uploader provenance.  Its cost denominator must therefore be
+        # the tenant population, not the much smaller matching-author population;
+        # using the latter opened this plan on a sparse tenant and was ~26x slower
+        # than the chunk-first branch (28.6 ms vs 1.1 ms on synthetic 6k/600).
         object_window = live_objects
         if object_limit is not None and object_limit > 0:
             object_window = min(object_window, int(object_limit))
@@ -6468,9 +6500,13 @@ class KnowledgeMixin(StorageShared):
                 "ON c.knowledge_object_id = k.id "
                 "WHERE k.user_id = ? AND k.deleted_at IS NULL "
                 f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
-                "AND c.user_id = ? AND c.model = ? AND c.dim = ?"
             )
-            params: list[Any] = [user_id, user_id, model, int(dim)]
+            params: list[Any] = [user_id]
+            if author is not None:
+                query += f"AND {_exact_uploader_knowledge_dependency('k')} "
+                params.append(author)
+            query += "AND c.user_id = ? AND c.model = ? AND c.dim = ?"
+            params.extend([user_id, model, int(dim)])
         else:
             query = (
                 "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
@@ -6484,6 +6520,9 @@ class KnowledgeMixin(StorageShared):
             # sides are therefore tenant predicates: malformed rows fail closed in
             # the sparse branch exactly as they do in the parent-first branch.
             params = [user_id, model, int(dim), user_id]
+            if author is not None:
+                query += f" AND {_exact_uploader_knowledge_dependency('k')}"
+                params.append(author)
         if object_limit is not None and object_limit > 0:
             if use_index_order:
                 # rowid is only the membership key; selection itself has the explicit
@@ -6495,7 +6534,6 @@ class KnowledgeMixin(StorageShared):
                     "INDEXED BY idx_knowledge_chunk_scan_order "
                     "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
                     f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
-                    "ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
                 )
             else:
                 query += (
@@ -6504,9 +6542,13 @@ class KnowledgeMixin(StorageShared):
                     "INDEXED BY idx_knowledge_chunk_scan_order "
                     "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
                     f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
-                    "ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
                 )
-            params.extend([user_id, int(object_limit)])
+            params.append(user_id)
+            if author is not None:
+                query += f"AND {_exact_uploader_knowledge_dependency('window_k')} "
+                params.append(author)
+            query += "ORDER BY window_k.created_at DESC, window_k.id ASC LIMIT ?)"
+            params.append(int(object_limit))
         query += " ORDER BY k.created_at DESC, k.id, c.chunk_index"
         if row_limit is not None and row_limit > 0:
             query += " LIMIT ?"

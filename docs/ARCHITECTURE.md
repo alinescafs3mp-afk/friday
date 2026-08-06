@@ -101,7 +101,7 @@ backend-клиентом.
    - `review` — создаются Raw Object и pending Inbox item с объяснением и предложенной структурой, но без Knowledge Object;
    - `promote` — создаются Raw Object, Knowledge Object и links к достаточно уверенным сущностям; неоднозначные links всё равно остаются reviewable.
 7. Явное намерение «запомни/сохрани» повышает решение до promotion, но не отменяет provenance и validation.
-8. Retrieval собирает tenant-scoped контекст из FTS/lexical/embeddings, предметных полей, качества, lifecycle, feedback и графа.
+8. Retrieval собирает tenant-scoped контекст из FTS/lexical/embeddings, предметных полей, качества, lifecycle, feedback и графа. В shared person-search это две независимые координаты: tenant задаёт место хранения, exact Raw `uploaded_by` — автора. Авторский предикат проверяется до caps FTS/LIKE, recent/date, whole- и chunk-vector SQL; tenant resident cache обходится. Общие graph/entities не имеют такого provenance и на этом пути не читаются. Reranker получает detached author-only rows и может менять только порядок/числовой score; canonical тело восстанавливается после него. Все uncached SQL и dense aggregation выполняются через blocking boundary, а passage span переносится в пользовательскую выдержку.
 9. Agent Runtime разделяет current conversation, personal knowledge, graph evidence и general reasoning, затем вызывает только разрешённые tools в рамках mode-specific budget. Research-результат не становится знанием, пока пользователь явно не отправит его в Inbox.
 10. Ответ, сообщения и tool audit сохраняются; bridge отправляет ответ и после успеха удаляет update из durable queue. Временные ошибки получают bounded backoff, исчерпанные — retained dead-letter.
 

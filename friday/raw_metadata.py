@@ -9,6 +9,17 @@ from typing import Any
 RAW_FILE_METADATA_MAX_BYTES = 128 * 1024
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous JSON objects instead of choosing a duplicate-key winner."""
+
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
 def bounded_raw_file_metadata(value: Any) -> dict[str, Any]:
     """Decode one metadata object without accepting an unbounded carrier."""
 
@@ -27,7 +38,7 @@ def bounded_raw_file_metadata(value: Any) -> dict[str, Any]:
     if len(encoded) > RAW_FILE_METADATA_MAX_BYTES:
         return {}
     try:
-        parsed = json.loads(value or "{}")
+        parsed = json.loads(value or "{}", object_pairs_hook=_unique_object)
     except (TypeError, ValueError, json.JSONDecodeError, RecursionError):
         return {}
     return dict(parsed) if isinstance(parsed, Mapping) else {}

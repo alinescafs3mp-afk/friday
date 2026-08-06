@@ -24,6 +24,7 @@ from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import AuthorizationService
+from friday.retrieval import HybridSearcher
 from friday.storage.models import KnowledgeObject, RawObject, new_id
 from friday.web_surfer import WebSurfer
 
@@ -276,18 +277,17 @@ async def test_shared_search_scopes_by_uploader_before_the_candidate_cap(shared_
 
     real_search = storage.search_knowledge
 
-    def _off_loop_search(*args, **kwargs):
-        with pytest.raises(RuntimeError, match="no running event loop"):
-            asyncio.get_running_loop()
+    scoped_calls: list[str | None] = []
+
+    def _scoped_search(*args, **kwargs):
+        if kwargs.get("uploaded_by") is not None:
+            with pytest.raises(RuntimeError, match="no running event loop"):
+                asyncio.get_running_loop()
+        scoped_calls.append(kwargs.get("uploaded_by"))
         return real_search(*args, **kwargs)
 
-    monkeypatch.setattr(storage, "search_knowledge", _off_loop_search)
-
-    class _ForbiddenTenantWideSearcher:
-        async def search(self, *_args, **_kwargs):
-            raise AssertionError("shared person search used an unscoped hybrid corpus")
-
-    runtime.searcher = _ForbiddenTenantWideSearcher()
+    monkeypatch.setattr(storage, "search_knowledge", _scoped_search)
+    runtime.searcher = HybridSearcher(storage, None)
     result = await runtime.execute(
         "user_knowledge_search",
         {"person": "Иван", "query": term, "limit": 20},
@@ -296,11 +296,12 @@ async def test_shared_search_scopes_by_uploader_before_the_candidate_cap(shared_
 
     assert result.success is True, result.error
     assert result.data["resolved"]["user_id"] == "usr_ivan"
-    assert result.data["strategy"] == "scoped_lexical"
+    assert result.data["strategy"] == "scoped_hybrid"
     assert result.data["unattributed_excluded"] is True
     assert [item["id"] for item in result.data["results"]] == [target_id]
     assert result.data["results"][0]["title"] == "Документ Ивана"
     assert "FOREIGN_SCOPE_SENTINEL" not in json.dumps(result.data, ensure_ascii=False)
+    assert scoped_calls and set(scoped_calls) == {"usr_ivan"}
 
     like_target = _knowledge(
         storage,
@@ -329,6 +330,7 @@ async def test_shared_search_scopes_by_uploader_before_the_candidate_cap(shared_
     assert like_result.success is True, like_result.error
     assert [item["id"] for item in like_result.data["results"]] == [like_target]
 
+    scoped_calls.clear()
     ivan_again, anna = await asyncio.gather(
         runtime.execute(
             "user_knowledge_search",
@@ -345,6 +347,7 @@ async def test_shared_search_scopes_by_uploader_before_the_candidate_cap(shared_
     assert [item["id"] for item in ivan_again.data["results"]] == [target_id]
     assert target_id not in {item["id"] for item in anna.data["results"]}
     assert all(item["title"].startswith("Чужой документ") for item in anna.data["results"])
+    assert set(scoped_calls) == {"usr_ivan", "usr_anna"}
 
 
 @pytest.mark.asyncio
@@ -369,3 +372,49 @@ async def test_personal_archive_keeps_using_the_hybrid_searcher(kernel):
     assert result.success is True, result.error
     assert calls == [("usr_ivan", "срыв сроков поставки", 8)]
     assert any(item["title"] == "Поставка" for item in result.data["results"])
+
+
+@pytest.mark.asyncio
+async def test_shared_hybrid_quotes_the_passage_that_dense_recall_found(shared_kernel):
+    runtime, auth, _, tenant, target_id, _ = shared_kernel
+    boss = auth.actor_for_user("boss", source="test")
+    header = "HEADER_SENTINEL " * 80
+    evidence = "LATE_PASSAGE_EVIDENCE именно здесь находится ответ."
+    content = header + evidence + (" хвост" * 80)
+    start = len(header)
+
+    class _PassageSearcher:
+        async def search(self, user_id, query, **kwargs):
+            assert user_id == tenant
+            assert kwargs == {
+                "limit": 8,
+                "uploaded_by": "usr_ivan",
+                "record_usage": False,
+                "include_entities": False,
+                "graph_expansion": False,
+            }
+            return {
+                "query": "semantic rewritten query",
+                "results": [
+                    {
+                        "id": target_id,
+                        "title": "Поздний фрагмент",
+                        "knowledge_kind": "note",
+                        "content": content,
+                        "_embedding_chunk_span": [start, start + len(evidence)],
+                    }
+                ],
+                "strategy": {"uploader_scoped": True},
+            }
+
+    runtime.searcher = _PassageSearcher()
+    result = await runtime.execute(
+        "user_knowledge_search",
+        {"person": "Иван", "query": "вопрос без общих слов", "limit": 8},
+        actor=boss,
+    )
+
+    assert result.success is True, result.error
+    excerpt = result.data["results"][0]["excerpt"]
+    assert "LATE_PASSAGE_EVIDENCE" in excerpt
+    assert "HEADER_SENTINEL" not in excerpt

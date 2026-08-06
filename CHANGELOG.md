@@ -5595,3 +5595,30 @@ router: 12345
 - Rate limits, strict CORS validation, security headers.
 - Cross-tenant administrative mutations требуют `admin.all_data.manage`.
 - Web fetch блокирует private network targets и проверяет redirects/DNS.
+## 0.167.0 — 2026-08-07
+
+### Авторский поиск общего архива получил безопасный hybrid
+
+`user_knowledge_search` больше не теряет semantic-only документы выбранного
+человека. Exact `uploaded_by` исходного Raw Object проходит внутри SQL до каждого
+FTS/LIKE, recent/date, whole-document и passage-vector cap. Строки без однозначного
+текстового автора, с malformed, oversized, duplicate-key или tenant-mismatched
+metadata принадлежат никому. Tenant-wide resident cache обходится: фильтрация его
+готового top-k снова позволила бы более сильным чужим векторам вытеснить цель.
+
+Scoped reranker получает detached author-only rows и управляет только порядком и
+конечным числовым score; ID, тело и остальные поля восстанавливаются из canonical
+результата. Это закрывает как foreign sentinel, так и in-place подмену объекта
+callback-ом. Общие graph/entity names и relation history остаются fail-closed до
+появления авторского provenance. Late matching passage теперь доходит до выдержки,
+а не теряется ради шапки документа. Новый путь помечен `scoped_hybrid`; минимальная
+конфигурация без HybridSearcher сохраняет `scoped_lexical` fallback.
+
+Новые uncached SQL, feedback/usage reads, vector scoring и chunk aggregation
+вынесены с event loop. Adversarial review отдельно поймал неверный adaptive plan:
+на synthetic 6000 KO/600 chunks author-count включал parent-first scan за
+**28.6 ms** против **1.1 ms** sparse (~26x). Стоимость снова считается по tenant
+KO index, который план физически проходит; exact author membership остаётся до
+лимита. После исправления целевой набор дал **25 passed**. Финальный canonical
+gate: **4962 passed**, 1 штатный backup-fixture skip; UI **23/23**, Ruff/format,
+mypy, compileall, Bandit HIGH и JavaScript syntax — без ошибок.
