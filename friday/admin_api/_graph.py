@@ -407,6 +407,7 @@ async def graph(
     min_confidence: float = Query(0.0, ge=0.0, le=1.0),
     as_of: str = "",
     known_at: str = Query("", max_length=64),
+    include_cooccurrence: bool = False,
 ) -> dict[str, Any]:
     """Окрестность узла — с теми же фильтрами, что и общий вид.
 
@@ -435,6 +436,13 @@ async def graph(
             relation_types=[item for item in relation_types.split(",") if item.strip()],
             min_weight=min_weight,
             min_confidence=min_confidence,
+            # Общая картина держится в основном на совместной встречаемости
+            # (подтверждённых связей на живой установке 192), поэтому окрестность
+            # без неё выглядела пустой: человек кликал узел с десятком линий и
+            # проваливался в никуда. Канал включает ровно рисующая дорога — агент
+            # и публичный маршрут его не получают, потому что соседство в
+            # концентраторе замерено как НЕ-улика.
+            include_cooccurrence=include_cooccurrence,
         )
     except RelationHistorySnapshotError as exc:
         raise HTTPException(status_code=400, detail=relation_history_http_detail(exc)) from exc

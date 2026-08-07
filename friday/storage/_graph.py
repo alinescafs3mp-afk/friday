@@ -1633,6 +1633,90 @@ def _historical_entity_relations(
     return [dict(row) for row in rows]
 
 
+def _cooccurrence_neighbours_for_traversal(
+    storage: StorageShared,
+    entity_id: str,
+    user_id: str,
+    *,
+    entity_types: Sequence[str] = (),
+    root_entity_id: str = "",
+    row_limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Соседи по совместной встречаемости — то же ребро, что рисует общая картина.
+
+    Зачем это здесь. `graph_overview` строит рёбра ДВУХ родов: подтверждённые
+    `relations` и встречаемость из `knowledge_entity_links`. Обход окрестности до
+    сих пор читал только первые, и на живой установке, где подтверждённых связей
+    192, а картина держится на встречаемости, человек кликал узел с десятком линий
+    и проваливался в пустоту. «Показать окрестность» читалось как «здесь ничего
+    нет», хотя предыдущий экран говорил обратное.
+
+    Ребро получает устойчивый идентификатор из пары концов в отсортированном
+    порядке: иначе один и тот же сосед, найденный с двух сторон, дал бы два ребра.
+
+    Порог `min_weight` сюда НЕ передаётся намеренно. В локальном виде это порог
+    УВЕРЕННОСТИ связи (0..1), а вес встречаемости — число общих документов; под
+    одним именем это два разных смысла, и путать их проект уже пробовал.
+    """
+
+    wanted_entities = [str(item).strip() for item in entity_types if str(item).strip()]
+    clauses = [
+        "a.user_id = ?",
+        "a.entity_id = ?",
+        "a.status = 'accepted'",
+        "b.status = 'accepted'",
+    ]
+    params: list[Any] = [user_id, entity_id]
+    if wanted_entities:
+        holders = ",".join("?" * len(wanted_entities))
+        # Корень остаётся виден при любом фильтре: иначе окрестность узла, чей тип
+        # человек только что отключил, схлопнулась бы в пустой экран без точки отсчёта.
+        clauses.append(f"(other.entity_type IN ({holders}) OR other.id = ?)")
+        params.extend([*wanted_entities, root_entity_id])
+    rows = storage.execute(
+        f"""SELECT b.entity_id AS other_id,
+                   COUNT(DISTINCT a.knowledge_object_id) AS weight
+            FROM knowledge_entity_links a
+            JOIN knowledge_entity_links b
+              ON b.knowledge_object_id = a.knowledge_object_id
+             AND b.user_id = a.user_id
+             AND b.entity_id <> a.entity_id
+            JOIN knowledge_objects k
+              ON k.id = a.knowledge_object_id AND k.user_id = a.user_id
+             AND k.deleted_at IS NULL
+             AND {_not_private_knowledge_dependency("k")}
+            JOIN entities other
+              ON other.id = b.entity_id AND other.user_id = a.user_id
+             AND other.deleted_at IS NULL
+             AND {_not_private_entity_material_dependency("other")}
+            WHERE {" AND ".join(clauses)}
+            GROUP BY b.entity_id
+            ORDER BY weight DESC, other_id
+            LIMIT ?""",  # nosec B608
+        (*params, int(row_limit)),
+    ).fetchall()
+
+    edges: list[dict[str, Any]] = []
+    for row in rows:
+        other = str(row["other_id"])
+        low, high = sorted((str(entity_id), other))
+        edges.append(
+            {
+                "id": f"cooc:{low}:{high}",
+                "source_entity_id": low,
+                "target_entity_id": high,
+                "relation_type": "",
+                "weight": int(row["weight"] or 0),
+                "kind": "cooccurrence",
+                # Встречаемость — наблюдение, а не утверждение. Пометка обязана
+                # доехать до потребителя: рисовать её как подтверждённую связь
+                # значило бы выдавать соседство в документе за объявленный факт.
+                "implicit": True,
+            }
+        )
+    return edges
+
+
 def _current_entity_relations_for_traversal(
     storage: StorageShared,
     entity_id: str,
@@ -3609,6 +3693,7 @@ class GraphMixin(StorageShared):
         min_weight: float = 0.0,
         min_confidence: float = 0.0,
         known_at: str = "",
+        include_cooccurrence: bool = False,
     ) -> dict[str, Any]:
         """Окрестность узла. `as_of` — «как это выглядело на ту дату».
 
@@ -3725,13 +3810,44 @@ class GraphMixin(StorageShared):
                         root_entity_id=entity_id,
                         row_limit=_ENTITY_GRAPH_PAGE_SIZE,
                     )
+                # Встречаемость добавляется ровно той дороге, которая её просила,
+                # и НИКОГДА при названной дате: у ссылок на документы нет истории,
+                # и подмешивать сегодняшнее соседство в картину на прошлое значило
+                # бы выдавать нынешнее за бывшее. Общий вид поступает так же.
+                if include_cooccurrence and not as_of and history_status is None:
+                    relation_rows = [
+                        *relation_rows,
+                        *_cooccurrence_neighbours_for_traversal(
+                            self,
+                            current,
+                            user_id,
+                            entity_types=tuple(wanted_entities),
+                            root_entity_id=entity_id,
+                            row_limit=_ENTITY_GRAPH_PAGE_SIZE,
+                        ),
+                    ]
+
                 for relation in relation_rows:
                     relation_id = str(relation["id"])
                     if relation_id in edges:
                         continue
+                    # Фильтр по виду связи отсекает встречаемость: человек, выбравший
+                    # «только родня», просит утверждения определённого вида, а
+                    # соседство в документе не относится ни к одному из них.
+                    if wanted_relations and relation.get("kind") == "cooccurrence":
+                        continue
                     if wanted_relations and str(relation.get("relation_type") or "") not in wanted_relations:
                         continue
-                    if floor and float(relation.get("weight") or 0.0) < floor:
+                    # Порог применяется только к утверждениям. В локальном виде это
+                    # порог УВЕРЕННОСТИ (0..1), а вес встречаемости — число общих
+                    # документов: сравнивать их значило бы, что «не меньше 0.9
+                    # уверенности» молча отрезает всё, что встречалось реже
+                    # одного раза, то есть ничего, — либо наоборот, смотря как
+                    # лягут числа. Два разных смысла под одним именем проект уже
+                    # ловил однажды.
+                    if relation.get("kind") == "cooccurrence":
+                        pass
+                    elif floor and float(relation.get("weight") or 0.0) < floor:
                         continue
                     neighbours = []
                     for candidate in (relation["source_entity_id"], relation["target_entity_id"]):

@@ -489,7 +489,12 @@ actions.inspectKnowledge=async id=>{
     const suggBlock=sugg.error?`<div class="notice">Подсказки недоступны: ${esc(sugg.error)}</div>`
       :(suggRows.length?`<section class="card"><h3>Предложенные сущности (${suggRows.length})</h3><div class="notice">Подтверждение создаёт узел графа и утверждённую связь с этим документом, после чего пересчитываются связи сущность-сущность.</div>${table(['Имя','Тип','Уверенность',''],suggRows)}</section>`
       :`<section class="card"><h3>Предложенные сущности</h3>${empty('Все кандидаты уже разобраны')}</section>`);
-    const linkRows=links.map(l=>`<tr><td><b>${esc(l.entity?.name||l.entity_name||l.entity_id)}</b><div class="muted">${esc(l.entity?.entity_type||l.entity_type||'')}</div></td><td><span class="badge ${l.status==='accepted'?'ok':(l.status==='rejected'?'bad':'warn')}">${esc(l.status)}</span></td><td>${Number(l.confidence||0).toFixed(2)}</td><td>${l.status!=='accepted'?`<button class="btn small good" ${call('reviewEntityLink',l.id,'accepted',k.id)}>Принять</button>`:''} ${l.status!=='rejected'?`<button class="btn small danger" ${call('reviewEntityLink',l.id,'rejected',k.id)}>Отклонить</button>`:''}</td></tr>`);
+    // «Показать в графе» — обратная дорога, которой не было: от узла к документам
+    // перейти было нельзя, и от документа к узлу тоже. Кнопка появляется только у
+    // подтверждённой связи: у предложенной узла в графе ещё нет.
+    const linkRows=links.map(l=>{const eid=l.entity?.id||l.entity_id;
+      const ename=l.entity?.name||l.entity_name||eid;
+      return `<tr><td><b>${esc(ename)}</b><div class="muted">${esc(l.entity?.entity_type||l.entity_type||'')}</div></td><td><span class="badge ${l.status==='accepted'?'ok':(l.status==='rejected'?'bad':'warn')}">${esc(l.status)}</span></td><td>${Number(l.confidence||0).toFixed(2)}</td><td>${l.status==='accepted'&&eid?`<button class="btn small" ${call('showEntityInGraph',eid,ename)}>В графе</button>`:''} ${l.status!=='accepted'?`<button class="btn small good" ${call('reviewEntityLink',l.id,'accepted',k.id)}>Принять</button>`:''} ${l.status!=='rejected'?`<button class="btn small danger" ${call('reviewEntityLink',l.id,'rejected',k.id)}>Отклонить</button>`:''}</td></tr>`});
     openModal(`Инспекция: ${k.title||k.id}`,`${suggBlock}<div class="grid two"><section class="card"><h3>Knowledge Object</h3><div class="kv"><div>Тип</div><div>${esc(k.knowledge_kind)}</div><div>Lifecycle</div><div>${esc(k.lifecycle_stage)}</div><div>Качество</div><div>${Number(k.quality_score??.5).toFixed(2)}</div><div>Promotion</div><div>${Number(k.promotion_score??.5).toFixed(2)}</div><div>Версия</div><div>${esc(k.version)}</div></div><h3 class="mt16">Summary</h3><div class="pre">${esc(k.summary||'')}</div></section><section class="card"><h3>Provenance / Raw Object</h3><div class="kv"><div>Источник</div><div>${esc(raw.source||'')}</div><div>Source ref</div><div class="mono">${esc(raw.source_ref||'')}</div><div>Raw ID</div><div class="mono">${esc(raw.id||'')}</div><div>Получен</div><div>${fmtDate(raw.received_at)}</div></div><div class="pre mt12">${esc(raw.raw_content||'')}</div></section></div><section class="card mt14"><div class="toolbar"><h3 class="grow">Текст с подсветкой сущностей</h3><span class="badge">${Number(mentions.count||0)}</span></div>${mentions.error?`<div class="notice">Подсветка недоступна: ${esc(mentions.error)}</div>`:((mentions.items||[]).length?`<div class="notice">Отмечены только ПОДТВЕРЖДЁННЫЕ сущности: предложенные не подсвечиваются, чтобы догадка не выглядела как решение человека.${mentions.truncated?' Показаны первые 500 упоминаний.':''}</div><div class="pre">${highlightMentions(k.content||'',mentions.items)}</div>`:empty('Подтверждённых сущностей в этом документе нет — подтвердите кандидатов выше, и они появятся в тексте'))}</section><section class="card mt14"><h3>Связи с сущностями</h3>${linkRows.length?table(['Сущность','Статус','Уверенность','Решение'],linkRows):empty('Связей пока нет')}<div class="toolbar mt12"><button class="btn" ${call('addEntityLinkDialog',k.id)}>Добавить связь</button></div></section><section class="card mt14"><h3>История версий</h3>${versionRows(k.id,d.versions||[])}</section><section class="card mt14"><h3>Метаданные</h3><div class="pre">${esc(JSON.stringify({metadata:k.metadata,tags:k.tags},null,2))}</div></section>`,`${(d.versions||[]).length>1?`<button class="btn" ${call('showDiff',k.id)}>Изменения версий</button>`:''}<button class="btn" ${call('reenrichKnowledge',k.id,false)}>Предпросмотр enrichment</button><button class="btn" ${call('editKnowledge',k.id)}>Исправить</button><button class="btn" ${call('closeModal')}>Закрыть</button>`);
   }catch(e){toast(e.message,true)}
 };
@@ -885,13 +890,30 @@ function bindGraph(){
 
 actions.inspectEntityNode=async id=>{
   try{
-    const data=await api(`/api/admin/graph/${q(id)}?user_id=${q(selectedUser())}&depth=1`);
+    // Документы запрашиваются вместе с окрестностью, а не после: от узла до его
+    // бумаг не было НИ ОДНОГО перехода, хотя маршрут с `entity_id` уже
+    // существовал и им пользовалась вкладка контейнеров. Человек видел «Документов: 7»
+    // и не мог открыть ни один из семи.
+    const [data,papers]=await Promise.all([
+      api(`/api/admin/graph/${q(id)}?user_id=${q(selectedUser())}&depth=1&include_cooccurrence=true`),
+      api(`/api/admin/knowledge?user_id=${q(selectedUser())}&entity_id=${q(id)}&limit=50`).catch(()=>({items:[]})),
+    ]);
     const node=(data.nodes||[]).find(n=>n.id===id)||(state.graphNodes||[]).find(n=>n.id===id)||{};
     const near=(data.nodes||[]).filter(n=>n.id!==id);
+    // Два рода рёбер называются РАЗНО: подтверждённая связь — утверждение, а
+    // совместная встречаемость — наблюдение. Считать их вместе значило бы выдать
+    // соседство в документе за объявленный человеком факт.
+    const edges=data.edges||[];
+    const asserted=edges.filter(e=>String(e.kind||'relation')!=='cooccurrence').length;
+    const observed=edges.length-asserted;
+    const docs=(papers.items||[]);
     openModal(`Сущность: ${node.name||id}`,
       `<div class="kv"><div>Тип</div><div>${esc(node.entity_type||'—')}</div><div>Документов</div><div>${esc(String(node.knowledge_count??'—'))}</div><div>Идентификатор</div><div class="mono">${esc(id)}</div></div>
-       <h3>Соседи по подтверждённым связям (${near.length})</h3>
-       ${near.length?table(['Имя','Тип'],near.map(n=>`<tr><td>${esc(n.name)}</td><td>${esc(n.entity_type)}</td></tr>`)):empty('Подтверждённых связей сущность-сущность нет — они появляются после вашего подтверждения')}`,
+       <h3>Соседи (${near.length})</h3>
+       <div class="muted">Подтверждённых связей: ${asserted}; встретились в одном документе: ${observed}.</div>
+       ${near.length?table(['Имя','Тип'],near.map(n=>`<tr><td>${esc(n.name)}</td><td>${esc(n.entity_type)}</td></tr>`)):empty('Соседей нет: сущность не встречается ни с кем в одном документе и подтверждённых связей у неё тоже нет')}
+       <h3 class="mt14">Документы (${docs.length}${Number(node.knowledge_count||0)>docs.length?` из ${node.knowledge_count}`:''})</h3>
+       ${docs.length?table(['Название','Вид',''],docs.map(k=>`<tr><td><b>${esc(k.title||'Без названия')}</b></td><td>${esc(k.knowledge_kind||'')}</td><td><button class="btn small" ${call('inspectKnowledge',k.id)}>Открыть</button></td></tr>`)):empty('Документов за сущностью не числится')}`,
       // Переход к окрестности — отсюда, а не двойным кликом по узлу: первый клик
       // уже открывает эту самую карточку, и она перехватывает второй. Проверено
       // в браузере — двойной клик не срабатывал вовсе.
@@ -918,6 +940,11 @@ async function graphData(uid){
     // органом управления. Теперь у общей картины свой орган, у окрестности свой.
     if(f.minConfidence>0)local.push(`min_confidence=${Number(f.minConfidence)}`);
     if(f.asOf)local.push(`as_of=${q(f.asOf)}`);
+    // Окрестность просит ТУ ЖЕ ткань, что и общая картина. Без этого человек
+    // кликал узел с десятком линий и проваливался в пустоту: общий вид держится
+    // на совместной встречаемости, а обход читал только подтверждённые связи.
+    // Флаг называется вслух именно здесь, потому что агенту он не нужен и вреден.
+    if(!f.onlyRelations)local.push('include_cooccurrence=true');
     // Потолка окрестности здесь намеренно НЕТ. Прийти она может с 1601 узлом
     // (бюджет обхода — 801 ребро, узлов до 801*2+1), и прежняя раскладка на такой
     // картине вставала на секунды. Барнс-Хат снял причину: 1601 узел стоит около
@@ -951,6 +978,17 @@ actions.applyGraphAsOf=()=>{const el=document.getElementById('graphAsOf');graphS
 actions.clearGraphAsOf=()=>{graphState().asOf='';refresh()};
 actions.applyGraphSearch=()=>{const el=document.getElementById('graphSearch');graphState().search=el?el.value.trim():'';refresh()};
 actions.focusGraphNode=(id,name)=>{closeModal();state.graphView='local';state.graphFocus=id;state.graphFocusName=name||'';refresh()};
+// Переход «документ → узел в графе». Экран графа и экран знаний жили порознь:
+// увидев в документе подтверждённую сущность, человек не мог посмотреть, с чем
+// ещё она связана, — и наоборот. Камера сбрасывается намеренно: это переход к
+// ДРУГОМУ месту графа, и оставить прежнее приближение значило бы открыть пустоту.
+// Порядок важен: сначала выставляется фокус, потом переход. `navigate` сам зовёт
+// `refresh`, и если бы фокус ставился после, вкладка успела бы отрисовать общую
+// картину, а не окрестность — человек увидел бы «не туда попал».
+actions.showEntityInGraph=(id,name)=>{closeModal();
+  state.graphCamera={x:0,y:0,k:1};
+  state.graphView='local';state.graphFocus=id;state.graphFocusName=name||'';
+  navigate('graph')};
 // Сброс снимает и хранилище, и уже загруженные закрепления: без второго узлы
 // остались бы приколоченными до перезагрузки страницы, и человек решил бы, что
 // кнопка не работает.

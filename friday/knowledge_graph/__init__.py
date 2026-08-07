@@ -166,6 +166,11 @@ _PUBLIC_RELATION_TEXT_LIMITS = {
     "created_at": 64,
     "invalidated_at": 64,
     "superseded_by": 160,
+    # Род ребра — закрытый перечень из двух значений, и он обязан доехать до
+    # рисующей стороны: подтверждённая связь рисуется сплошной линией, а
+    # совместная встречаемость пунктиром. Без этого поля наблюдение выглядело бы
+    # на экране объявленным фактом.
+    "kind": 16,
 }
 _PUBLIC_RELATION_FIELDS = tuple(_PUBLIC_RELATION_TEXT_LIMITS)
 _PUBLIC_GRAPH_NODE_TEXT_LIMITS = {
@@ -321,6 +326,12 @@ def _public_relation(relation: Mapping[str, Any]) -> dict[str, Any]:
                 -_PUBLIC_GRAPH_NUMBER_LIMIT,
                 min(numeric_weight, _PUBLIC_GRAPH_NUMBER_LIMIT),
             )
+    # `implicit` — булево, а не строка, поэтому мимо текстового allowlist оно
+    # прошло бы молча. Пометка обязательна: без неё выведенное соседство
+    # неотличимо от объявленной человеком связи.
+    implicit = relation.get("implicit")
+    if isinstance(implicit, bool):
+        projected["implicit"] = implicit
     provenance = _relation_provenance(dict(relation))
     if provenance:
         projected["provenance"] = provenance
@@ -3036,6 +3047,13 @@ class KnowledgeGraph:
         relation_types: Any = (),
         min_weight: float = 0.0,
         min_confidence: float = 0.0,
+        # Умолчание `False` — замер, а не осторожность. Этот метод читают ТРИ
+        # дороги: агент (`entity_lookup`), публичный маршрут и админка. Соседство
+        # в концентраторе уже признано не-уликой — штатное расписание на полсотни
+        # имён делает «связанными» все пары этих людей, и именно этот канал
+        # уполовинивал recall@10 (0.35 -> 0.15). Поэтому встречаемость включает
+        # ровно та дорога, которой она нужна для РИСОВАНИЯ, и говорит об этом вслух.
+        include_cooccurrence: bool = False,
     ) -> dict[str, Any]:
         cleaned_as_of = str(as_of or "").strip()
         normalized_as_of = normalize_event_date(cleaned_as_of)[0] if cleaned_as_of else ""
@@ -3060,6 +3078,7 @@ class KnowledgeGraph:
             relation_types=relation_types,
             min_weight=min_weight,
             min_confidence=min_confidence,
+            include_cooccurrence=bool(include_cooccurrence),
         )
         if not isinstance(raw_result, Mapping):
             raise ValueError("entity graph result is not a mapping")
@@ -3117,7 +3136,14 @@ class KnowledgeGraph:
             sortable_edges.append((projected, source_id, target_id))
 
         def edge_rank(item: tuple[dict[str, Any], str, str]) -> tuple[Any, ...]:
+            # Подтверждённые связи идут ПЕРВЫМИ, и это не вкус. Вес у двух родов
+            # рёбер меряется в разном: у связи это уверенность 0..1, у совместной
+            # встречаемости — число общих документов. Сортируя их одним числом,
+            # бюджет отдавался бы встречаемости целиком (3 общих документа больше
+            # уверенности 0.9), и объявленные человеком связи вылетали бы из
+            # картины первыми. Внутри каждого рода порядок прежний.
             return (
+                0 if str(item[0].get("kind") or "relation") != "cooccurrence" else 1,
                 -float(item[0].get("weight") or 0.0),
                 str(item[0].get("relation_type") or "").casefold(),
                 item[1],

@@ -256,7 +256,11 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "get_current_feedback_stats": "(self, user_id: 'str', target_type: 'str | None' = None) -> 'dict[str, Any]'",
     "get_custom_preset": "(self, preset_key: 'str') -> 'dict[str, Any] | None'",
     "get_entity": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'dict[str, Any] | None'",
-    "get_entity_graph": "(self, user_id: 'str', entity_id: 'str', depth: 'int' = 2, *, as_of: 'str' = '', entity_types: 'Sequence[str]' = (), relation_types: 'Sequence[str]' = (), min_weight: 'float' = 0.0, min_confidence: 'float' = 0.0, known_at: 'str' = '') -> 'dict[str, Any]'",
+    # `include_cooccurrence` добавлен в 0.170.0 и объявлен здесь осознанно: у
+    # окрестности узла появился второй род рёбер — совместная встречаемость, та же,
+    # что рисует общая картина. Умолчание `False` держит агента и публичный
+    # маршрут на прежнем ответе; соседство в концентраторе замерено как не-улика.
+    "get_entity_graph": "(self, user_id: 'str', entity_id: 'str', depth: 'int' = 2, *, as_of: 'str' = '', entity_types: 'Sequence[str]' = (), relation_types: 'Sequence[str]' = (), min_weight: 'float' = 0.0, min_confidence: 'float' = 0.0, known_at: 'str' = '', include_cooccurrence: 'bool' = False) -> 'dict[str, Any]'",
     "get_entity_knowledge": "(self, user_id: 'str', entity_id: 'str', *, limit: 'int' = 50) -> 'list[dict[str, Any]]'",
     "get_entity_relations": (
         "(self, entity_id: 'str', user_id: 'str | None' = None, *, "
