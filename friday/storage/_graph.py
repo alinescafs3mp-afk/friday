@@ -2422,9 +2422,15 @@ class GraphMixin(StorageShared):
             parameters.extend(wanted_types)
         needle = str(search or "").strip()
         if needle:
-            conditions.append("e.name LIKE ? ESCAPE '\\'")
+            # Псевдоним — это ТО ЖЕ имя, и человек ищет им ровно так же. Поиск
+            # смотрел только в `name`, поэтому «в/ч 30926», заведённая под
+            # официальным названием, по своему же обиходному имени не находилась:
+            # человек делал вывод, что её в графе нет. Список псевдонимов лежит
+            # в `aliases_json` строкой JSON, и точного сравнения тут не нужно —
+            # достаточно вхождения, как и у имени.
+            conditions.append("(e.name LIKE ? ESCAPE '\\' OR e.aliases_json LIKE ? ESCAPE '\\')")
             escaped = needle.replace("%", r"\%").replace("_", r"\_")
-            parameters.append(f"%{escaped}%")
+            parameters.extend([f"%{escaped}%", f"%{escaped}%"])
         rows = self.execute(
             f"""SELECT substr(e.id,1,160) AS id, substr(e.name,1,240) AS name,
                        substr(e.entity_type,1,80) AS entity_type,

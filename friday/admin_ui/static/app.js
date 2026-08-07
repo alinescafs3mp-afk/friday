@@ -532,13 +532,20 @@ actions.runLifecycle=async()=>navigate('quality');
 // подтвердил, сплошной линией. `cooccurrence` — просто встретились в одном
 // документе, пунктиром, толщина по числу общих документов. Рисовать их одинаково
 // значило бы выдавать наблюдение за утверждение.
+// `document` тут не хватало, а в списке фильтров он был: документ рисовался серым
+// «прочим», и фильтр «только документы» показывал их неотличимо от остального.
 const GRAPH_COLORS={person:'#e06c9f',organization:'#f4a261',project:'#7bc86c',collection:'#7bc86c',
-  location:'#61a5c2',event:'#c98bdb',concept:'#8ecae6',other:'#9aa5b1'};
+  location:'#61a5c2',event:'#c98bdb',concept:'#8ecae6',document:'#d6c68a',other:'#9aa5b1'};
 // Подтверждённые связи РАЗНЫЕ по смыслу, и одинаковый синий их прятал: «служит в
 // части» и «супруга» рисовались одной линией. Цвет несёт вид отношения, подпись
 // появляется по наведению.
+// Цвет есть у КАЖДОГО вида связи, который система умеет называть. Прежде их было
+// семь из пятнадцати, и восемь оставшихся — «создано», «зависит от», «то же, что» —
+// рисовались одним серым «связано»: разные утверждения выглядели одинаково.
 const RELATION_COLORS={family_of:'#e06c9f',member_of:'#4c9aff',manages:'#f4a261',part_of:'#7bc86c',
-  located_at:'#61a5c2',works_on:'#c98bdb',related_to:'#9aa5b1'};
+  located_at:'#61a5c2',works_on:'#c98bdb',occurred_at:'#c98bdb',created_by:'#f4a261',
+  mentions:'#8ecae6',references:'#8ecae6',derived_from:'#7bc86c',same_as:'#e06c9f',
+  uses:'#61a5c2',depends_on:'#4c9aff',related_to:'#9aa5b1'};
 const RELATION_LABELS={family_of:'родня',member_of:'состоит в',manages:'руководит',part_of:'входит в',
   located_at:'находится в',works_on:'занят',related_to:'связано',occurred_at:'произошло',
   created_by:'создано',mentions:'упоминает',references:'ссылается',derived_from:'выведено из',
@@ -554,6 +561,9 @@ const GRAPH_LABELS=60;
 // 4500 при бюджете кадра 16.7 мс. Выше тысячи нужен canvas — это отдельная работа.
 const GRAPH_LIMIT=1000;
 const GRAPH_TYPES=['person','organization','location','project','collection','event','concept','document','other'];
+const GRAPH_TYPE_LABELS={person:'человек',organization:'организация',location:'место',
+  project:'проект',collection:'коллекция',event:'событие',concept:'понятие',
+  document:'документ',other:'прочее'};
 // Раскладка живёт в браузере, а не в базе: это свойство ЭТОГО экрана, а не знание
 // об архиве. Ключ включает пользователя и режим — иначе локальный вид одного узла
 // перетаскивал бы узлы глобального.
@@ -730,7 +740,11 @@ function graphMarkup(raw){
     // толще и без прозрачности: подменять цвет значило бы соврать про вид связи
     // ради поиска — ровно как с цветом узла, который занят типом сущности.
     const lit=onPath.has(i);
+    // Стрелка только у ПОДТВЕРЖДЁННОЙ связи: «Иванов руководит отделом» имеет
+    // направление, а «встретились в одном документе» — нет, и рисовать её
+    // стрелкой значило бы придумать направление там, где его не наблюдали.
     return `<line data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"${lit?' class="gpath"':''}`
+      +(rel?' marker-end="url(#garrow)"':'')
       +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
       +` stroke="${color}" stroke-width="${(lit?w+2.2:w).toFixed(1)}"${rel&&!lit?'':(lit?'':' stroke-dasharray="3 4"')}`
       +` opacity="${lit?1:rel?0.92:0.4}"><title>${esc(s.name)} → ${esc(t.name)}: ${esc(label)}</title></line>`}).join('');
@@ -746,9 +760,11 @@ function graphMarkup(raw){
       +`<title>${esc(node.name)} — ${esc(node.entity_type)}, документов: ${node.knowledge_count}</title></circle>`
       +`<text class="glabel${named.has(node.id)||hit||focused?'':' ghide'}" data-lift="${(r+6).toFixed(1)}"`
       +` x="${node.x.toFixed(1)}" y="${(node.y-r-6).toFixed(1)}" text-anchor="middle" font-size="12" fill="#c9d1d9">${esc(short(node.name,24))}</text></g>`}).join('');
-  const legend=Object.entries({person:'человек',organization:'организация',project:'проект',
-    location:'место',event:'событие',concept:'понятие',other:'прочее'})
-    .map(([k,label])=>`<span class="badge gt-${k}">${label}</span>`).join(' ');
+  // Легенда строится ИЗ ПАЛИТРЫ, а не из своего списка. Прежде их было два, и они
+  // разошлись: подпись знала семь видов из девяти, и человек, включивший фильтр
+  // «документ», не находил его в легенде вовсе.
+  const legend=GRAPH_TYPES.filter(k=>GRAPH_COLORS[k])
+    .map(k=>`<span class="badge gt-${k}">${GRAPH_TYPE_LABELS[k]||k}</span>`).join(' ');
   // Легенда ВИДОВ СВЯЗИ показывает только встреченные: перечислять все пятнадцать
   // под картинкой с двумя — обещать связи, которых в архиве нет.
   const present=[...new Set(edges.filter(e=>e.kind==='relation').map(e=>String(e.relation_type||'')))].filter(Boolean);
@@ -774,7 +790,7 @@ function graphMarkup(raw){
       : needle?' Чтобы увидеть пути, откройте окрестность узла — на общей картине точки отсчёта нет.':'');
   const searchNote=needle?`<div class="notice">Найдено на картине: ${found}. Подсвечены жёлтым.${pathNote}</div>`:'';
   return `${capped}${searchNote}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>${relLegend}
-    <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}">${lines}${circles}</svg>
+    <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}"><defs><marker id="garrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="context-stroke"/></marker></defs>${lines}${circles}</svg>
     <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — соседи откликнутся, отпустить — узел закрепится, клик по узлу — карточка и переход к его окрестности</div></div>`;
 }
 
