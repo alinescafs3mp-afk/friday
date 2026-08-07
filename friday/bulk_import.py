@@ -102,7 +102,15 @@ class ImportPlan:
 
 @dataclass
 class Outcome:
-    """What became of one file. ``status`` is one of ingested/duplicate/failed."""
+    """Что стало с одним файлом.
+
+    ``status`` — одно из ingested/empty/duplicate/failed. `empty` отделён от
+    `ingested` намеренно: файл сохранён, но текста из него не вышло ни знака —
+    сканы без текстового слоя, битые выгрузки, пустые заготовки. Считать их
+    загруженными значит говорить человеку «загружено 480», когда спрашивать
+    можно у трёхсот; при импорте папки на тысячи файлов разница видна только в
+    этом счётчике.
+    """
 
     path: Path
     status: str
@@ -282,16 +290,28 @@ async def _ingest_one(
         )
     except Exception as exc:  # one bad file must not end the run
         return Outcome(candidate.path, "failed", f"{type(exc).__name__}: {exc}")
+    extraction = result.get("extraction")
+    extraction = extraction if isinstance(extraction, dict) else {}
+    # Ноль знаков — это НЕ ошибка разбора: скан читается зрением, а не текстом, и
+    # `chars` уже включает его результат. Ноль здесь значит, что содержимого не
+    # получил никто.
+    nothing_came_out = int(extraction.get("chars") or 0) == 0
+    if result.get("idempotent_replay"):
+        status = "duplicate"
+    elif nothing_came_out:
+        status = "empty"
+    else:
+        status = "ingested"
     return Outcome(
         candidate.path,
-        "duplicate" if result.get("idempotent_replay") else "ingested",
+        status,
         raw_object_id=str(result.get("raw_object_id") or ""),
         inbox_id=str(result.get("inbox_id") or ""),
     )
 
 
 def summarise(outcomes: list[Outcome]) -> dict[str, int]:
-    counts = {"ingested": 0, "duplicate": 0, "failed": 0}
+    counts = {"ingested": 0, "empty": 0, "duplicate": 0, "failed": 0}
     for outcome in outcomes:
         counts[outcome.status] = counts.get(outcome.status, 0) + 1
     return counts

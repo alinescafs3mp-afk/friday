@@ -128,7 +128,7 @@ def test_every_imported_file_waits_in_the_inbox(settings, storage):
 
     outcomes = asyncio.run(run_import(pipeline, "alice", plan))
 
-    assert summarise(outcomes) == {"ingested": 2, "duplicate": 0, "failed": 0}
+    assert summarise(outcomes) == {"ingested": 2, "empty": 0, "duplicate": 0, "failed": 0}
     assert storage.list_knowledge_objects("alice") == [], "an import must not create knowledge directly"
     pending = [item for item in pipeline.list_inbox("alice") if item["status"] == "pending"]
     assert len(pending) == 2
@@ -145,7 +145,7 @@ def test_rerunning_the_same_tree_ingests_nothing_twice(settings, storage):
     )
 
     assert summarise(first)["ingested"] == 2
-    assert summarise(second) == {"ingested": 0, "duplicate": 2, "failed": 0}
+    assert summarise(second) == {"ingested": 0, "empty": 0, "duplicate": 2, "failed": 0}
     # Both runs point at the same raw objects: a resume, not a second copy.
     assert {o.raw_object_id for o in first} == {o.raw_object_id for o in second}
     assert len(pipeline.list_inbox("alice")) == 2
@@ -164,7 +164,7 @@ def test_identical_files_at_different_paths_collapse_to_one(settings, storage):
         )
     )
 
-    assert summarise(outcomes) == {"ingested": 1, "duplicate": 1, "failed": 0}
+    assert summarise(outcomes) == {"ingested": 1, "empty": 0, "duplicate": 1, "failed": 0}
     assert len({o.raw_object_id for o in outcomes}) == 1
 
 
@@ -186,7 +186,7 @@ def test_one_unreadable_file_does_not_end_the_run(settings, storage, monkeypatch
     monkeypatch.setattr(type(root), "read_bytes", explode)
     outcomes = asyncio.run(run_import(_pipeline(settings, storage), "alice", plan))
 
-    assert summarise(outcomes) == {"ingested": 2, "duplicate": 0, "failed": 1}
+    assert summarise(outcomes) == {"ingested": 2, "empty": 0, "duplicate": 0, "failed": 1}
     failed = [o for o in outcomes if o.status == "failed"]
     assert failed[0].path.name == "beta.txt" and "OSError" in failed[0].detail
 
@@ -418,3 +418,30 @@ def test_without_a_batch_limit_everything_lands_as_before(settings, storage):
 
     plan = plan_import(root, max_bytes=settings.max_upload_bytes)
     assert summarise(asyncio.run(run_import(pipeline, "alice", plan)))["ingested"] == 4
+
+
+def test_a_file_without_content_is_counted_separately(settings, storage):
+    """«Загружено 480» при трёхстах читаемых — не итог, а неправда.
+
+    Файл без единого знака текста сохраняется (он ЕСТЬ, и его место в архиве
+    законно), но спрашивать по нему нечего. На дереве в тысячи файлов — сканы без
+    текстового слоя, пустые заготовки, битые выгрузки — разница видна только в
+    этом счётчике, и человек должен увидеть её до того, как спросит.
+
+    Мутация: считать пустой файл загруженным — тест краснеет.
+    """
+    root = settings.state_dir.parent / "corpus-empty"
+    (root / "notes").mkdir(parents=True, exist_ok=True)
+    (root / "notes" / "alpha.md").write_text("Альфа: первый файл.", encoding="utf-8")
+    (root / "notes" / "пустой.txt").write_text("   \n  \n", encoding="utf-8")
+    plan = plan_import(root, max_bytes=settings.max_upload_bytes)
+    assert len(plan.candidates) == 2
+
+    outcomes = asyncio.run(run_import(_pipeline(settings, storage), "alice", plan))
+    counts = summarise(outcomes)
+
+    assert counts["empty"] == 1, counts
+    assert counts["ingested"] == 1, counts
+    empty = [outcome for outcome in outcomes if outcome.status == "empty"]
+    # Файл сохранён, а не потерян: у него есть Raw Object, и он ждёт в Inbox.
+    assert empty[0].raw_object_id, empty[0]

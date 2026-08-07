@@ -721,8 +721,16 @@ def _import(args: argparse.Namespace) -> int:
     counts = summarise(outcomes)
     print(
         f"\nГотово: загружено {counts['ingested']}, "
+        f"без содержимого {counts['empty']}, "
         f"уже было {counts['duplicate']}, ошибок {counts['failed']}."
     )
+    if counts["empty"]:
+        # Отдельной строкой, потому что следующий шаг у них другой: спрашивать по
+        # ним нечего, и человек должен знать это до того, как спросит.
+        print(
+            f"  Из них {counts['empty']} файлов сохранены, но текста из них не вышло — "
+            "сканы без текстового слоя, пустые заготовки, битые выгрузки."
+        )
     if counts["ingested"]:
         print("Разобрать: /inbox в Telegram или раздел Inbox в админке.")
     return 1 if counts["failed"] else 0
