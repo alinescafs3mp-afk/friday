@@ -211,7 +211,15 @@ class CommandsMixin(BridgeShared):
             "чат, файлы и веб-поиск; миссии и выполнение кода закрыты.",
             reply_markup={
                 "inline_keyboard": [
-                    [{"text": "Выдать полный доступ", "callback_data": f"acc:grant:{newcomer_id}"}]
+                    [
+                        {
+                            "text": "Выдать полный доступ",
+                            # Кнопка привязана к тому, кому её показали, — как у
+                            # `conv` и `know`. Здесь это владелец: чат подписи и
+                            # есть его учётка.
+                            "callback_data": f"acc:grant:{newcomer_id}.{owner_chat}",
+                        }
+                    ]
                 ]
             },
         )

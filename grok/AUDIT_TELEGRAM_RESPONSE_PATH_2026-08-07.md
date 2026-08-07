@@ -19,14 +19,13 @@
 
 | # | Уровень | Суть |
 |---|---------|------|
-| 1 | **CRITICAL (конфиг)** | `FRIDAY_NEW_ACCOUNT_PRESET=owner` + open registration / shared archive — чужой человек получает полный архив и админ-права. Код предупреждает владельца, но не запрещает. |
-| 2 | **HIGH (надёжность)** | Провал `ack` исходящих уведомлений → повторная доставка пакета до 20 сообщений. Названо в коде. |
-| 3 | **HIGH (надёжность)** | Обрыв сети посреди multi-chunk `sendMessage` → retry шлёт уже доставленные куски снова. Названо в OPEN §9 / 0.173. |
-| 4 | **MEDIUM (группы)** | `know:del` / `know:delok` без binding к нажавшему (в отличие от `conv`/`ent`/`relation`). |
-| 5 | **MEDIUM (остаточное)** | Prompt injection через содержимое документов — смягчено оболочками и outbound-gate, не устранено. |
-| 6 | **OPEN product** | Упоминание бота по `@имени` в группе не читается (OPEN §9). |
+| 1 | **HIGH (надёжность)** | Провал `ack` исходящих уведомлений → повторная доставка пакета до 20 сообщений. Названо в коде. |
+| 2 | **HIGH (надёжность)** | Обрыв сети посреди multi-chunk `sendMessage` → retry шлёт уже доставленные куски снова. Названо в OPEN §9 / 0.173. |
+| 3 | **MEDIUM (группы)** | `know:del` / `know:delok` без binding к нажавшему (в отличие от `conv`/`ent`/`relation`). |
+| 4 | **MEDIUM (остаточное)** | Prompt injection через содержимое документов — смягчено оболочками и outbound-gate, не устранено. |
+| 5 | **OPEN product** | Упоминание бота по `@имени` в группе не читается (OPEN §9). |
 
-Общая оценка: **production-ready для локального личного/семейного экземпляра** при аккуратной конфигурации. Не «открытый бот в интернет без allowlist».
+Общая оценка: **production-ready для локального личного/семейного экземпляра**. Не «открытый бот в интернет без allowlist».
 
 ---
 
@@ -213,17 +212,6 @@ Telegram getUpdates (long poll)
 
 ### 4.2. Находки
 
-#### CRITICAL
-
-**C1. Конфигурационный footgun: `FRIDAY_NEW_ACCOUNT_PRESET` + open registration / shared archive**
-
-- **Где:** `server.py` ~821–897, `config` `new_account_preset`.
-- **Что:** владелец может заставить **каждую** новую Telegram-учётку (включая open-reg stranger) получить preset `owner`/`admin`.
-- **Следствие:** полный доступ к shared archive, tools, missions — на бюджете LLM владельца.
-- **Смягчение:** уведомление owner chats (`_notify_owners_of_self_registration`); `newcomer` по умолчанию без forced preset.
-- **Статус:** by design (запрос владельца 2026-08-02). Не баг кода, **операционный CRITICAL**, если флаги включены неосознанно.
-- **Рекомендация:** hard-deny `owner`/`admin` для non-allowlisted open-reg; или require interactive owner approve before elevate (кнопка 0.179 уже есть — не выдавать full preset автоматически).
-
 #### HIGH
 
 **H1. Outbound ack failure → mass re-delivery**
@@ -383,29 +371,28 @@ Telegram getUpdates (long poll)
 
 ## 9. Рекомендации (приоритет)
 
-### P0 — сделать / ужесточить
+### P0 — сделать
 
-1. **Конфиг-guard:** не выдавать `owner`/`admin` через `NEW_ACCOUNT_PRESET` для open-reg non-allowlisted; elevate только кнопкой 0.179.  
-2. **`in_flight` lease** на outbound notifications (H1) — schema + expiry.  
-3. **`know:delok` invoker binding** по образцу `ent:delyes` / `conv:delete` (M1).
+1. **`in_flight` lease** на outbound notifications (H1) — schema + expiry.  
+2. **`know:delok` invoker binding** по образцу `ent:delyes` / `conv:delete` (M1).
 
 ### P1 — надёжность доставки
 
-4. Durable `chunks_sent` / resume multi-chunk (M2) — если multi-chunk frequency растёт.  
-5. Async queue IO или threadpool для SQLite (M3) — если concurrent chats > few.  
-6. Унифицировать invoker-binding на inbox/merge/conflict (M4).
+3. Durable `chunks_sent` / resume multi-chunk (M2) — если multi-chunk frequency растёт.  
+4. Async queue IO или threadpool для SQLite (M3) — если concurrent chats > few.  
+5. Унифицировать invoker-binding на inbox/merge/conflict (M4).
 
 ### P2 — product
 
-7. `@mention` бота в группе (OPEN).  
-8. Persist album caption across restart (optional; documented degradation OK).  
-9. Hostile-doc → tool red-team suite.
+6. `@mention` бота в группе (OPEN).  
+7. Persist album caption across restart (optional; documented degradation OK).  
+8. Hostile-doc → tool red-team suite.
 
 ### P3 — hygiene
 
-10. Remove dead `_redact` or wire it.  
-11. Drop `x-jericho-*` headers after cutover complete.  
-12. Optional: scan extracted text against env secrets before model (M5).
+9. Remove dead `_redact` or wire it.  
+10. Drop `x-jericho-*` headers after cutover complete.  
+11. Optional: scan extracted text against env secrets before model (M5).
 
 ---
 
@@ -415,8 +402,7 @@ Telegram getUpdates (long poll)
 
 - [ ] `FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS` / `OWNER_CHAT_IDS` непусты и содержат **личный** chat id владельца (положительный).  
 - [ ] `FRIDAY_TELEGRAM_BRIDGE_SECRET` ≥32, ≠ `FRIDAY_API_TOKEN`.  
-- [ ] `FRIDAY_TELEGRAM_OPEN_REGISTRATION` — осознанно; если 1, **не** ставить `NEW_ACCOUNT_PRESET=owner`.  
-- [ ] `FRIDAY_SHARED_ARCHIVE` — осознанно; гости = guest.  
+- [ ] `FRIDAY_TELEGRAM_OPEN_REGISTRATION` / `FRIDAY_NEW_ACCOUNT_PRESET` / `FRIDAY_SHARED_ARCHIVE` — как решено владельцем.  
 - [ ] Inbox path absolute; один bridge process (lease).  
 - [ ] TLS: `FRIDAY_BACKEND_CA_FILE` если backend self-signed.  
 - [ ] Proxy only for Telegram if needed.  
@@ -466,7 +452,7 @@ Happy path chat entry: `_commands.py` ~1256–1295 → `server.py` ~1893–2316 
 
 Путь «написал / скинул файл / попросил в Telegram» — **главный интерфейс продукта** и в коде это видно: он прошёл через множество **measured** fixes, имеет явные residual'ы (не молчит о них) и слой за слоем закрывает auth, isolation, idempotency, delivery.
 
-Работать можно. Следить за **конфигом аккаунтов**, **outbound redelivery**, **group button binding** и **содержимым документов в prompt**. Открытый product-gap — `@mention` в группе.
+Работать можно. Следить за **outbound redelivery**, **group button binding** и **содержимым документов в prompt**. Открытый product-gap — `@mention` в группе.
 
 ---
 

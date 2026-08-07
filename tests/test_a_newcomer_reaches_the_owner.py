@@ -105,7 +105,7 @@ async def test_the_owner_hears_about_a_newcomer_and_gets_a_button(tmp_path):
     to_owner = [payload for payload in telegram.sent if payload.get("chat_id") == OWNER_CHAT]
     assert to_owner, "владелец не узнал о новичке ниоткуда, кроме админки"
     targets = [button["callback_data"] for button in telegram.buttons()]
-    assert f"acc:grant:{NEWCOMER_ID}" in targets, "кнопки выдать доступ нет"
+    assert f"acc:grant:{NEWCOMER_ID}.{OWNER_CHAT}" in targets, "кнопки выдать доступ нет"
 
 
 @pytest.mark.asyncio
@@ -137,7 +137,7 @@ async def test_the_button_actually_grants_access(tmp_path):
     press = {
         "id": "cb-grant",
         "from": {"id": OWNER_CHAT, "first_name": "Владелец"},
-        "data": f"acc:grant:{NEWCOMER_ID}",
+        "data": f"acc:grant:{NEWCOMER_ID}.{OWNER_CHAT}",
         "message": {"message_id": 9, "chat": {"id": OWNER_CHAT}},
     }
     try:

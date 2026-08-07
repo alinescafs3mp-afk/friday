@@ -106,7 +106,7 @@ async def test_an_opened_record_offers_deletion(tmp_path):
         bridge._inbox.close()
 
     targets = [button["callback_data"] for button in telegram.buttons()]
-    assert f"know:del:{DOCUMENT_ID}" in targets, (
+    assert f"know:del:{DOCUMENT_ID}.5001" in targets, (
         "у открытой записи нет кнопки удаления — из чата её по-прежнему не убрать"
     )
 
@@ -121,7 +121,7 @@ async def test_the_first_press_asks_instead_of_deleting(tmp_path):
     bridge = _bridge(tmp_path)
     telegram, backend = _Telegram(), _Backend()
     try:
-        await bridge._process_callback_query(telegram, backend, _press(f"know:del:{DOCUMENT_ID}"))
+        await bridge._process_callback_query(telegram, backend, _press(f"know:del:{DOCUMENT_ID}.5001"))
     finally:
         bridge._inbox.close()
 
@@ -129,7 +129,7 @@ async def test_the_first_press_asks_instead_of_deleting(tmp_path):
         "первое нажатие уже удалило запись, ничего не спросив"
     )
     targets = [button["callback_data"] for button in telegram.buttons()]
-    assert f"know:delok:{DOCUMENT_ID}" in targets, "подтверждения не предложено"
+    assert f"know:delok:{DOCUMENT_ID}.5001" in targets, "подтверждения не предложено"
 
 
 @pytest.mark.asyncio
@@ -139,7 +139,7 @@ async def test_the_confirmation_actually_deletes(tmp_path):
     bridge = _bridge(tmp_path)
     telegram, backend = _Telegram(), _Backend()
     try:
-        await bridge._process_callback_query(telegram, backend, _press(f"know:delok:{DOCUMENT_ID}"))
+        await bridge._process_callback_query(telegram, backend, _press(f"know:delok:{DOCUMENT_ID}.5001"))
     finally:
         bridge._inbox.close()
 
@@ -159,7 +159,7 @@ async def test_a_malformed_target_is_refused(tmp_path):
 
     bridge = _bridge(tmp_path)
     telegram, backend = _Telegram(), _Backend()
-    press = _press("know:delok:../../secret")
+    press = _press("know:delok:../../secret.5001")
     try:
         await bridge._process_callback_query(telegram, backend, press)
     except Exception as exc:  # noqa: BLE001
@@ -231,10 +231,10 @@ async def test_a_record_can_be_corrected_by_replying(tmp_path):
             for row in (payload.get("reply_markup") or {}).get("inline_keyboard", [])
             for button in row
         ]
-        assert f"know:fix:{DOCUMENT_ID}" in targets, "у записи нет кнопки «Исправить»"
+        assert f"know:fix:{DOCUMENT_ID}.5001" in targets, "у записи нет кнопки «Исправить»"
 
         # 2. Нажали — мост прислал приглашение и запомнил его.
-        await bridge._process_callback_query(telegram, backend, _press(f"know:fix:{DOCUMENT_ID}"))
+        await bridge._process_callback_query(telegram, backend, _press(f"know:fix:{DOCUMENT_ID}.5001"))
         assert bridge._edit_targets, "приглашение не запомнено — ответ будет некуда адресовать"
         prompt_id = next(iter(bridge._edit_targets))
         assert bridge._edit_targets[prompt_id] == DOCUMENT_ID
@@ -263,3 +263,28 @@ async def test_a_record_can_be_corrected_by_replying(tmp_path):
         "текст правки уехал к модели как обычный вопрос"
     )
     assert bridge._edit_targets == {}, "приглашение осталось в памяти после использования"
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_button_is_refused(tmp_path):
+    """Кнопка привязана к тому, КОМУ её показали.
+
+    Сообщение с кнопкой видно всему чату, и без привязки любая другая способная
+    учётка, нажав первой, действовала бы на чужом экране. Соседние семейства
+    (`conv`, `ent`, `relation`) привязку имели с самого начала; у заведённого мной
+    `know` её не было, и это нашёл аудит Grok по пути ответа.
+
+    Мутация: снять проверку нажавшего — краснеет.
+    """
+
+    bridge = _bridge(tmp_path)
+    telegram, backend = _Telegram(), _Backend()
+    press = _press(f"know:delok:{DOCUMENT_ID}.9999")  # кнопку показали не этому человеку
+    try:
+        await bridge._process_callback_query(telegram, backend, press)
+    finally:
+        bridge._inbox.close()
+
+    assert not [call for call in backend.calls if call.startswith("DELETE")], (
+        "чужая кнопка сработала: запись удалил не тот, кому её показали"
+    )

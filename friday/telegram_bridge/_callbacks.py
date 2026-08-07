@@ -214,10 +214,18 @@ class CallbacksMixin(BridgeShared):
                 # равно спрашивается: одно нажатие мимо не должно уносить запись.
                 more = self._document_more_markup(document, target_id, 0)
                 rows = list(more["inline_keyboard"]) if more else []
+                # Кнопка несёт id того, КОМУ её показали, — как уже делает `conv`.
+                # Сообщение видно всему чату, и без привязки любая другая способная
+                # учётка, нажав первой, действовала бы на чужом экране. Найдено
+                # аудитом Grok по пути ответа (2026-08-07): у `conv`, `ent` и
+                # `relation` привязка была, у заведённого мной `know` — нет.
                 rows.append(
                     [
-                        {"text": "Исправить", "callback_data": f"know:fix:{target_id}"},
-                        {"text": "Удалить запись", "callback_data": f"know:del:{target_id}"},
+                        {"text": "Исправить", "callback_data": f"know:fix:{target_id}.{external_user_id}"},
+                        {
+                            "text": "Удалить запись",
+                            "callback_data": f"know:del:{target_id}.{external_user_id}",
+                        },
                     ]
                 )
                 await self._send_message(
@@ -227,6 +235,12 @@ class CallbacksMixin(BridgeShared):
                     reply_markup={"inline_keyboard": rows},
                 )
             elif family == "acc" and action == "grant":
+                # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
+                # точек не содержат, поэтому разделение по последней однозначно.
+                target_id, _, pressed_by = target_id.rpartition(".")
+                if not target_id or pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 # Право выдаёт backend, а не мост: `admin.users.manage` проверяется
                 # там же, где и всегда. Нажатие не владельца просто получит отказ,
                 # и он будет назван — `refusal_notice` уже различает «нет права».
@@ -246,6 +260,12 @@ class CallbacksMixin(BridgeShared):
                 )
                 clear_markup = True
             elif family == "know" and action == "fix":
+                # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
+                # точек не содержат, поэтому разделение по последней однозначно.
+                target_id, _, pressed_by = target_id.rpartition(".")
+                if not target_id or pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 # Правка использует тот же механизм ответа на реплику, который
                 # появился в 0.175.0, и это не совпадение: заводить ради неё
                 # второй способ ввода значило бы выбросить его при первой же
@@ -263,6 +283,12 @@ class CallbacksMixin(BridgeShared):
                     self._edit_targets[prompt_id] = target_id
                 await self._answer_callback(telegram, callback_id, "Жду новый текст")
             elif family == "know" and action in {"del", "delok"}:
+                # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
+                # точек не содержат, поэтому разделение по последней однозначно.
+                target_id, _, pressed_by = target_id.rpartition(".")
+                if not target_id or pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 if action == "del":
                     await self._answer_callback(telegram, callback_id, "Точно удалить?")
                     await self._send_message(
@@ -272,7 +298,12 @@ class CallbacksMixin(BridgeShared):
                         "ответов; восстановить можно в админке до истечения срока хранения.",
                         reply_markup={
                             "inline_keyboard": [
-                                [{"text": "Да, удалить", "callback_data": f"know:delok:{target_id}"}]
+                                [
+                                    {
+                                        "text": "Да, удалить",
+                                        "callback_data": f"know:delok:{target_id}.{external_user_id}",
+                                    }
+                                ]
                             ]
                         },
                     )
