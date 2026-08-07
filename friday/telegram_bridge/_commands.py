@@ -249,6 +249,18 @@ class CommandsMixin(BridgeShared):
             self._inbox.remember_registered_chat(chat_id)
 
         text = str(message.get("text") or message.get("caption") or "").strip()
+        # Альбом Telegram шлёт несколькими сообщениями с общим `media_group_id`, и
+        # подпись стоит ровно у одной части. Остальные приходили совсем пустыми:
+        # «вот договор, пять страниц» относилось к одному файлу из пяти, а четыре
+        # попадали в архив без единого слова о том, что это.
+        #
+        # Помощник зовётся ВСЕГДА, а не только при пустом тексте: у части С
+        # подписью он её ЗАПОМИНАЕТ и возвращает пустую строку. Первая редакция
+        # звала его под `if not text`, то есть ровно мимо той части, у которой
+        # подпись есть, — и запоминать было нечего.
+        borrowed_caption = self._album_caption(message)
+        if not text:
+            text = borrowed_caption
         # Command and argument come from the SAME split. They used to disagree: the
         # command was found with `split(maxsplit=1)` (any whitespace, so a newline
         # counted) while the argument was taken with `partition(" ")` (a literal

@@ -19,6 +19,11 @@ from friday.telegram_bridge._base import (
     httpx,
 )
 
+#: Сколько альбомов помнить одновременно. Группа живёт секунды, десяти хватает с
+#: запасом на несколько человек, пишущих разом; без потолка словарь рос бы всю
+#: жизнь процесса.
+_ALBUM_CAPTION_MEMORY = 10
+
 # `MediaTooLargeError` carries the text the user reads in the chat, so the reason
 # must be the true one: «настроенный предел» and «потолок Telegram» ask for
 # different next steps from the sender.
@@ -139,6 +144,32 @@ class MediaMixin(BridgeShared):
         if isinstance(duration, int) and duration > 0:
             prepared["duration"] = duration
         return prepared
+
+    def _album_caption(self, message: dict[str, Any]) -> str:
+        """Подпись альбома, отданная ВСЕМ его частям.
+
+        Telegram шлёт альбом несколькими сообщениями с общим `media_group_id`, и
+        подпись стоит ровно у одной части — обычно у первой. Остальные приходят
+        совсем пустыми, поэтому «вот договор, пять страниц» относилось к одному
+        файлу из пяти, а четыре попадали в архив без единого слова о том, что это.
+
+        Части одного чата обрабатываются строго по очереди (`ordering_key`),
+        поэтому достаточно помнить последнюю группу: подпись доезжает до частей,
+        пришедших ПОСЛЕ подписанной. Память живёт в процессе — после рестарта
+        поведение честно возвращается к прежнему, а не притворяется.
+        """
+        group_id = str(message.get("media_group_id") or "")
+        if not group_id:
+            return ""
+        own = str(message.get("caption") or "").strip()
+        if own:
+            # Потолок словаря: группа живёт секунды, а без ограничения он рос бы
+            # всю жизнь процесса. Вытесняется самая старая запись.
+            if len(self._album_captions) >= _ALBUM_CAPTION_MEMORY:
+                self._album_captions.pop(next(iter(self._album_captions)), None)
+            self._album_captions[group_id] = own[:1000]
+            return ""
+        return self._album_captions.get(group_id, "")
 
     @staticmethod
     def _reply_quote(message: dict[str, Any]) -> str:

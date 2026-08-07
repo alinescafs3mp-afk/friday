@@ -293,6 +293,8 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
+# 71 -> 72 в 0.176.0: `_album_caption` — подпись альбома, доезжающая до всех его
+# частей; Telegram ставит её ровно у одной.
 # 70 -> 71 в 0.175.0: `_reply_quote` — текст сообщения, на которое человек
 # ответил репликой; до этого `reply_to_message` не читался вовсе.
 # 69 -> 70 в 0.174.0: `_document_more_markup` — кнопка «Дальше» под длинным
@@ -303,8 +305,9 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 71
+EXPECTED_BRIDGE_COUNT = 72
 EXPECTED_BRIDGE: dict[str, str] = {
+    "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
     "_backend_json": "(self, client: 'httpx.AsyncClient', method: 'str', path: 'str', payload: 'dict[str, Any] | None', external_user_id: 'str', chat_id: 'str') -> 'dict[str, Any]'",

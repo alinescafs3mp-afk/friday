@@ -304,6 +304,8 @@ class BridgeShared:
     _format_full_document: Callable[..., Any]
     _document_more_markup: Callable[..., Any]
     _reply_quote: Callable[..., Any]
+    _album_caption: Callable[..., Any]
+    _album_captions: dict[str, str]
     _format_browse_results: Callable[..., Any]
     _format_status: Callable[..., Any]
     _format_timeline: Callable[..., Any]
