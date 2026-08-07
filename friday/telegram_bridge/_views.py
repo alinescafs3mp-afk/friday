@@ -1090,7 +1090,7 @@ class ViewsMixin(BridgeShared):
     _FULL_DOCUMENT_CHARS = 3_000
 
     @classmethod
-    def _format_full_document(cls, document: Any) -> str:
+    def _format_full_document(cls, document: Any, *, offset: int = 0) -> str:
         # `GET /api/knowledge/{id}` отвечает конвертом {"item": …, "versions": …,
         # "entity_links": …} — сам объект лежит под "item". Прежний код искал ключ
         # "knowledge_object", падал на весь конверт и КАЖДЫЙ документ показывал как
@@ -1114,21 +1114,56 @@ class ViewsMixin(BridgeShared):
         if not body:
             lines.append("У этой записи нет текста — только заголовок и метаданные.")
             return "\n".join(lines)
-        lines.append(body[: cls._FULL_DOCUMENT_CHARS])
-        rest = len(body) - cls._FULL_DOCUMENT_CHARS
+        # Смещение приходит от кнопки «Дальше»: прежде документ обрывался на первых
+        # трёх тысячах знаков и отправлял человека в админку — то есть кнопка,
+        # заведённая чтобы найденное перестало быть тупиком, упиралась в тупик на
+        # шаг дальше. Потолок при этом верен и остаётся: в архиве есть документы под
+        # восемьсот тысяч знаков, а это две сотни сообщений подряд. Ответ не
+        # «показать всё», а «показать дальше».
+        start = max(0, min(int(offset or 0), len(body)))
+        end = start + cls._FULL_DOCUMENT_CHARS
+        if start:
+            lines.append(f"(продолжение, знаки {start + 1}–{min(end, len(body))})")
+            lines.append("")
+        lines.append(body[start:end])
+        rest = len(body) - end
         if rest > 0:
             # Число, а не многоточие: человек должен понимать, четверть он увидел или
             # девяносто девять сотых.
             lines.append("")
-            lines.append(
-                f"…показано {cls._FULL_DOCUMENT_CHARS} знаков из {len(body)}. "
-                "Остальное — в админке, раздел «Объекты знаний»."
-            )
+            lines.append(f"…показано {min(end, len(body))} знаков из {len(body)}. Дальше — кнопкой ниже.")
+        elif start:
+            lines.append("")
+            lines.append("Это конец документа.")
         lineage = cls._format_lineage_footer(envelope)
         if lineage:
             lines.append("")
             lines.append(lineage)
         return "\n".join(lines)
+
+    @classmethod
+    def _document_more_markup(cls, document: Any, document_id: str, offset: int) -> dict[str, Any] | None:
+        """Кнопка «Дальше», если текст на этом не кончился.
+
+        Смещение едет В КНОПКЕ, а не хранится в мосте: состояние на стороне моста
+        пережило бы рестарт неверно, а кнопка всегда знает своё место.
+        """
+        envelope = document if isinstance(document, dict) else {}
+        item = envelope.get("item")
+        if not isinstance(item, dict):
+            item = envelope.get("knowledge_object")
+        if not isinstance(item, dict):
+            item = envelope
+        body = str(item.get("content") or "").strip() or str(item.get("summary") or "").strip()
+        start = max(0, min(int(offset or 0), len(body)))
+        following = start + cls._FULL_DOCUMENT_CHARS
+        if following >= len(body):
+            return None
+        if not CALLBACK_TARGET_RE.fullmatch(f"{document_id}.{following}"):
+            return None
+        return {
+            "inline_keyboard": [[{"text": "Дальше", "callback_data": f"doc:more:{document_id}.{following}"}]]
+        }
 
     @staticmethod
     def _format_lineage_footer(envelope: dict[str, Any]) -> str:

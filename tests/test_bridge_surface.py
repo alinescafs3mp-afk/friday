@@ -293,13 +293,15 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
+# 69 -> 70 в 0.174.0: `_document_more_markup` — кнопка «Дальше» под длинным
+# документом, чтобы источник дочитывался в чате, а не в админке.
 # 67 -> 69 в 0.173.0: отправка одного куска выделилась в `_post_message_chunk`
 # (обработка `429` с ожиданием по просьбе Telegram) вместе с `_retry_after_sec`.
 # 64 -> 67 в 0.172.0: обход очереди перестал быть блокирующим и разделился на
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 69
+EXPECTED_BRIDGE_COUNT = 70
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -311,10 +313,11 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_await_inflight_updates": "(self) -> 'None'",
     "_dispatch_ready_updates": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'int'",
     "_drain_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
+    "_document_more_markup": "(document: 'Any', document_id: 'str', offset: 'int') -> 'dict[str, Any] | None'",
     "_drain_outbound": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_extract_forward": "(message: 'dict[str, Any]') -> 'dict[str, Any]'",
     "_format_browse_results": "(header: 'str', items: 'list[Any]') -> 'str'",
-    "_format_full_document": "(document: 'Any') -> 'str'",
+    "_format_full_document": "(document: 'Any', *, offset: 'int' = 0) -> 'str'",
     "_format_lineage_footer": "(envelope: 'dict[str, Any]') -> 'str'",
     "_format_mission_created": "(self, mission: 'dict[str, Any]') -> 'str'",
     "_format_response_message": "(response: 'dict[str, Any]') -> 'str'",

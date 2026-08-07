@@ -302,6 +302,7 @@ class BridgeShared:
     _extract_forward: Callable[..., Any]
     _file_url: Any
     _format_full_document: Callable[..., Any]
+    _document_more_markup: Callable[..., Any]
     _format_browse_results: Callable[..., Any]
     _format_status: Callable[..., Any]
     _format_timeline: Callable[..., Any]

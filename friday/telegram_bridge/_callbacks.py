@@ -164,6 +164,27 @@ class CallbacksMixin(BridgeShared):
                     "Добавлено в знания" if action == "promote" else "Предложение проигнорировано",
                 )
                 clear_markup = True
+            elif family == "doc" and action == "more":
+                # «{id}.{смещение}» — то же устройство, что у отмены правки
+                # сущности: место едет в кнопке, а не хранится в мосте.
+                document_id, _, raw_offset = target_id.rpartition(".")
+                if not document_id or not raw_offset.isdigit():
+                    raise PermanentUpdateError("Invalid document offset")
+                document = await self._backend_json(
+                    backend,
+                    "GET",
+                    f"/api/knowledge/{document_id}",
+                    None,
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(telegram, callback_id, "Читаю дальше")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    self._format_full_document(document, offset=int(raw_offset)),
+                    reply_markup=self._document_more_markup(document, document_id, int(raw_offset)),
+                )
             elif family == "doc" and action == "show":
                 # Открыть найденный документ целиком. До этого выдача поиска была
                 # ТУПИКОМ: заголовок и 160 знаков, а дальше ни id, ни ссылки, ни
@@ -190,15 +211,14 @@ class CallbacksMixin(BridgeShared):
                 # заметивший ошибку, шёл в админку — при том что чат основной
                 # интерфейс. Удаление мягкое и обратимое, но подтверждение всё
                 # равно спрашивается: одно нажатие мимо не должно уносить запись.
+                more = self._document_more_markup(document, target_id, 0)
+                rows = list(more["inline_keyboard"]) if more else []
+                rows.append([{"text": "Удалить запись", "callback_data": f"know:del:{target_id}"}])
                 await self._send_message(
                     telegram,
                     chat_id,
                     self._format_full_document(document),
-                    reply_markup={
-                        "inline_keyboard": [
-                            [{"text": "Удалить запись", "callback_data": f"know:del:{target_id}"}]
-                        ]
-                    },
+                    reply_markup={"inline_keyboard": rows},
                 )
             elif family == "know" and action in {"del", "delok"}:
                 if action == "del":
