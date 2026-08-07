@@ -183,6 +183,51 @@ def _utf16_prefix_index(text: str, limit: int) -> int:
     return len(text)
 
 
+#: Парные знаки разметки, которые нельзя разрывать границей куска.
+#:
+#: Тройной обратный апостроф стоит первым намеренно: блок кода содержит одиночные,
+#: и считать их до него значило бы вечно видеть непарный.
+_MARKUP_PAIRS = ("```", "**", "~~", "`")
+
+
+def _markup_is_balanced(piece: str) -> bool:
+    """Все ли парные знаки разметки закрыты внутри куска."""
+    rest = piece
+    for token in _MARKUP_PAIRS:
+        count = rest.count(token)
+        if count % 2:
+            return False
+        rest = rest.replace(token, "")
+    return True
+
+
+def _split_without_breaking_markup(clean: str, split_at: int, hard: int) -> int:
+    """Отодвинуть границу назад, пока пары разметки не окажутся целыми.
+
+    Ищется ближайший перевод строки левее, потому что абзац — естественная
+    граница и почти всегда стоит вне разметки.
+
+    `floor` ограничивает ПОИСК, а не результат, и это важно понимать точно:
+    когда целой границы не нашлось, возвращается ИСХОДНАЯ — текст не дробится и
+    не теряется, просто разметка в этом месте не спасена. Доставка важнее
+    начертания, и сломанную разметку `_send_message` всё равно переживает
+    отправкой простым текстом. Проверено мутацией: снятие `floor` не меняет
+    выдачу вовсе, только длину обратного просмотра, поэтому в обязательный список
+    мутаций он не входит.
+    """
+    if _markup_is_balanced(clean[:split_at]):
+        return split_at
+    floor = max(1, hard // 4)
+    candidate = split_at
+    while candidate > floor:
+        candidate = clean.rfind("\n", 0, candidate)
+        if candidate <= floor:
+            break
+        if _markup_is_balanced(clean[:candidate]):
+            return candidate
+    return split_at
+
+
 def split_for_telegram(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
     """Split a reply into sendMessage-sized chunks, preferring line then word breaks.
 
@@ -207,6 +252,12 @@ def split_for_telegram(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]
             # surrogate pair, because the cost of a non-BMP character is charged
             # whole or not at all.
             split_at = hard
+        # Граница не должна разрывать пару разметки. Раскол идёт по СЫРОМУ тексту,
+        # а размечается каждый кусок отдельно: `**срок**`, разрезанное пополам,
+        # оставляло человеку сырые звёздочки в обоих кусках. Отступаем к
+        # ближайшему месту, где пары целы; если такого нет — режем как резали,
+        # потому что доставка важнее начертания.
+        split_at = _split_without_breaking_markup(clean, split_at, hard)
         piece = clean[:split_at].rstrip()
         if piece:
             chunks.append(piece)

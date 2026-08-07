@@ -47,7 +47,56 @@ _RULE = re.compile(r"^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$", re.MULTILINE)
 #: поэтому маркер приводится к одному виду, а не выбрасывается.
 _BULLET = re.compile(r"^(\s*)[-*+]\s+(?=\S)", re.MULTILINE)
 
+#: Строка таблицы Markdown: `| a | b |`. Разделитель шапки (`|---|---|`) отдельно.
+_TABLE_ROW = re.compile(r"^[ \t]{0,3}\|.*\|[ \t]*$")
+_TABLE_RULE = re.compile(r"^[ \t]{0,3}\|[\s:|-]+\|[ \t]*$")
+
 _PLACEHOLDER = "\x00code{}\x00"
+
+
+def _table_to_monospace(text: str) -> str:
+    """Таблицу Markdown — в моноширинный блок с выровненными колонками.
+
+    У Telegram таблиц нет вовсе, и до этого они доезжали сырыми палками: строка
+    `| срок | ответственный |` приходила ровно так, как написана. Читать это
+    нельзя, а модель пишет таблицы сама, когда просят сравнить.
+
+    Ответ — не выбросить разметку, а превратить её в то единственное, что
+    мессенджер умеет ровно: блок `<pre>` с колонками, выровненными пробелами.
+    Ширина колонки считается по самой длинной ячейке, поэтому столбцы стоят
+    столбцами и на телефоне.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    index = 0
+    while index < len(lines):
+        if not _TABLE_ROW.match(lines[index]):
+            out.append(lines[index])
+            index += 1
+            continue
+        block: list[str] = []
+        while index < len(lines) and _TABLE_ROW.match(lines[index]):
+            block.append(lines[index])
+            index += 1
+        rows = [
+            [cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in block
+            if not _TABLE_RULE.match(line)
+        ]
+        # Одна строка — это не таблица, а предложение с палками. Не трогаем.
+        if len(rows) < 2:
+            out.extend(block)
+            continue
+        width = max(len(row) for row in rows)
+        rows = [row + [""] * (width - len(row)) for row in rows]
+        sizes = [max(len(row[column]) for row in rows) for column in range(width)]
+        rendered = [
+            "  ".join(cell.ljust(sizes[column]) for column, cell in enumerate(row)).rstrip() for row in rows
+        ]
+        out.append("```")
+        out.extend(rendered)
+        out.append("```")
+    return "\n".join(out)
 
 
 def to_telegram_html(text: str) -> str:
@@ -59,6 +108,10 @@ def to_telegram_html(text: str) -> str:
     source = str(text or "")
     if not source.strip():
         return ""
+
+    # 0. Таблицы — ДО вынимания кода: они превращаются в блок кода, и дальше по
+    # тексту это уже обычный блок, который вынется вместе с остальными.
+    source = _table_to_monospace(source)
 
     # 1. Вынимаем код: внутри него разметки нет и быть не должно.
     stash: list[str] = []
