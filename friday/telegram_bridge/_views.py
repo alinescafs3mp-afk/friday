@@ -663,7 +663,19 @@ class ViewsMixin(BridgeShared):
             source_count = int(derived.get("source_count") or 0)
             lines.append(f"По его документам ({source_count}):" if source_count else "По его документам:")
         if tags:
-            lines.append("Теги: " + ", ".join(f"#{tag}" for tag in tags[:15]))
+            # ДВА обреза, и до сих пор ни об одном не говорилось: хранилище режет
+            # список тегов своим потолком и честно ставит `tags_truncated`, а
+            # карточка резала показанное ещё раз, на пятнадцати. Оба признака
+            # считались и терялись — тот же класс, что ловится в проекте седьмой
+            # раз. Человек, увидев пятнадцать тегов, считал их полным набором.
+            shown = tags[:15]
+            matched = int(profile.get("tags_matched_at_least") or 0)
+            hidden = bool(profile.get("tags_truncated")) or len(tags) > len(shown)
+            line = "Теги: " + ", ".join(f"#{tag}" for tag in shown)
+            if hidden:
+                total = max(matched, len(tags))
+                line += f" — показаны {len(shown)} из {total}" if total > len(shown) else " — показаны не все"
+            lines.append(line)
         if isinstance(date_range, dict):
             earliest = date_range.get("earliest")
             latest = date_range.get("latest")
