@@ -402,8 +402,11 @@ class LLMRouter:
         full attempt plus half of another leaves room for a real retry after a fast
         failure (connection refused, HTTP 503) while refusing to spend three whole
         timeouts on an endpoint that accepts the connection and then says nothing.
+
+        Число живёт в настройках, а не здесь: из него же выводится потолок хода и
+        таймаут моста, и три копии одной формулы уже расходились однажды.
         """
-        return max(30.0, self.timeout_sec * 1.5)
+        return self.settings.llm_call_budget_sec
 
     @property
     def max_tokens(self) -> int:

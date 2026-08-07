@@ -203,10 +203,16 @@ async def test_a_slow_but_alive_endpoint_cannot_hold_a_slot_for_every_round(sett
         context, "вопрос", actor, tools=[{"type": "function"}], attachments=None
     )
 
-    # 3 round-loop calls (checks at t=0, 90, 180 all under the 200s loop budget)
-    # + 1 final synthesis call. Without the fix this would run all 5 rounds plus
-    # the final call: 6.
-    assert llm.calls == 4, f"the loop spent {llm.calls} calls instead of stopping early"
+    # 2 round-loop calls + 1 final synthesis call. Without the fix this would run
+    # all 5 rounds plus the final call: 6.
+    #
+    # Число изменилось с 4 на 3 в 0.171.0, и это ожидаемо. Прежде цикл спрашивал
+    # «прошёл ли дедлайн», поэтому третий круг стартовал в t=180 при бюджете 200 и
+    # был волен идти ещё полные 100 с — объявленный потолок 200 превращался в 280.
+    # Теперь цикл спрашивает «успеет ли вызов»: в t=180 остаётся 20 с при цене
+    # вызова 100, и круг не начинается. Ровно ради этого потолок и объявляют:
+    # мост, честно ждущий объявленное, иначе сдавался раньше ядра.
+    assert llm.calls == 3, f"the loop spent {llm.calls} calls instead of stopping early"
     assert result["content"] == "Итоговый ответ."
 
 

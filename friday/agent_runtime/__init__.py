@@ -5560,13 +5560,23 @@ class AgentRuntime:
         # queueing time against the SAME turn's tool-round allowance and cut its
         # rounds short for being busy, not for being slow — the opposite of what
         # this budget exists to catch.
+        # Бюджет берётся у РОУТЕРА, а не у настроек напрямую: роутер бывает
+        # подменён (тестовый двойник, иной транспорт), и цикл обязан следовать
+        # тому, кто на самом деле ходит к модели. Согласие этого числа с тем,
+        # которое ждёт мост, закреплено отдельной пробой на боевом роутере —
+        # именно там два числа однажды и разъехались.
         loop_budget_sec = self.llm.total_budget_sec * 2
         loop_deadline = time.monotonic() + loop_budget_sec
 
         for round_number in range(max_tool_rounds):
             if total_calls >= max_tool_calls:
                 break
-            if time.monotonic() >= loop_deadline:
+            # Проверяется не «прошёл ли дедлайн», а «успеет ли вызов до него».
+            # Прежняя редакция лишь не начинала новый круг ПОСЛЕ дедлайна, а уже
+            # начатый вызов был волен идти ещё один полный бюджет: настоящий
+            # потолок хода выходил в полтора раза выше объявленного, и мост,
+            # честно ждавший объявленное, всё равно сдавался раньше ядра.
+            if time.monotonic() + self.llm.total_budget_sec > loop_deadline:
                 LOGGER.warning("Agentic loop budget of %.0fs is spent; stopping early", loop_budget_sec)
                 break
             try:

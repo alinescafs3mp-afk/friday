@@ -2346,7 +2346,11 @@ def _run_telegram_bridge() -> int:
         allowed_chat_ids=settings.telegram_effective_allowed_chat_ids,
         inbox_db_path=str(settings.state_dir / "telegram-inbox.sqlite3"),
         max_document_bytes=settings.max_upload_bytes,
-        backend_timeout_sec=max(30.0, settings.llm_timeout_sec + 30.0),
+        # Одно число на обе стороны. Прежняя формула `llm_timeout_sec + 30` жила
+        # своей жизнью и на умолчаниях давала 270 с против 720 с, которые
+        # разрешены ходу агента: мост бросал запрос, ядро продолжало считать, и
+        # доведённая до конца работа выбрасывалась.
+        backend_timeout_sec=settings.bridge_backend_timeout_sec,
         telegram_proxy=settings.telegram_proxy,
         open_registration=settings.telegram_open_registration,
         # Outbound delivery polls faster than the reminder scan so a queued
