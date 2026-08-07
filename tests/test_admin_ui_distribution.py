@@ -58,4 +58,8 @@ def test_real_wheel_ignores_a_stale_manifest_and_carries_admin_ui(tmp_path):
         "friday/admin_ui/static/index.html",
         "friday/admin_ui/static/app.js",
         "friday/admin_ui/static/app.css",
+        # Панель без раскладки открывается, но граф в ней падает на первом же
+        # обращении к `FridayGraphLayout`. Файл подключает страница, а не `app.js`,
+        # поэтому сборщик о нём иначе не узнаёт.
+        "friday/admin_ui/static/graph-layout.js",
     } <= packaged

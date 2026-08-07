@@ -539,46 +539,39 @@ const RELATION_LABELS={family_of:'родня',member_of:'состоит в',mana
   created_by:'создано',mentions:'упоминает',references:'ссылается',derived_from:'выведено из',
   same_as:'то же, что',uses:'использует',depends_on:'зависит от'};
 const GRAPH_W=1200, GRAPH_H=700;
+// Сколько узлов носят подпись постоянно. Остальные показывают имя по наведению:
+// на тысяче узлов тысяча подписей нечитаема и стоит трети всех элементов DOM.
+const GRAPH_LABELS=60;
+// Потолок картины. Прежние 150 были не решением о том, что показывать, а
+// следствием того, что раскладка не тянула больше: замер боевой функции давал
+// 15 114 мс на 4500 узлах. Барнс-Хат снял это ограничение, и потолок теперь
+// упирается в рисование: один кадр SVG стоит 6.5 мс при 1000 узлах и 27.2 мс при
+// 4500 при бюджете кадра 16.7 мс. Выше тысячи нужен canvas — это отдельная работа.
+const GRAPH_LIMIT=1000;
 const GRAPH_TYPES=['person','organization','location','project','collection','event','concept','document','other'];
 // Раскладка живёт в браузере, а не в базе: это свойство ЭТОГО экрана, а не знание
 // об архиве. Ключ включает пользователя и режим — иначе локальный вид одного узла
 // перетаскивал бы узлы глобального.
 function graphLayoutKey(){return `friday:graph:${selectedUser()}:${state.graphView||'global'}:${state.graphFocus||''}`}
 function savedLayout(){try{return JSON.parse(localStorage.getItem(graphLayoutKey())||'{}')||{}}catch(e){return {}}}
-function saveLayout(nodes){try{const map={};nodes.forEach(n=>{map[n.id]=[Math.round(n.x),Math.round(n.y)]});
-  localStorage.setItem(graphLayoutKey(),JSON.stringify(map))}catch(e){}}
+// Сохраняются ТОЛЬКО закреплённые узлы, а не весь вид. Прежняя редакция писала
+// координаты всех: человек двигал один узел, при следующем открытии закреплёнными
+// оказывались все, и раскладка не делала ни шага — картина замирала навсегда, а
+// вернуть её можно было только полным сбросом.
+function saveLayout(pins){try{localStorage.setItem(graphLayoutKey(),JSON.stringify(pins||{}))}catch(e){}}
 
-function graphLayout(nodes,edges){
-  // Стартовое положение по кругу, а не случайное: случайный старт даёт разную
-  // картинку при каждом открытии, и человек не узнаёт свой же граф.
-  const n=nodes.length;
-  const saved=savedLayout();
-  nodes.forEach((node,i)=>{const a=2*Math.PI*i/Math.max(1,n);
-    node.x=GRAPH_W/2+Math.cos(a)*Math.min(GRAPH_W,GRAPH_H)*0.36;
-    node.y=GRAPH_H/2+Math.sin(a)*Math.min(GRAPH_W,GRAPH_H)*0.36;node.vx=0;node.vy=0});
+// Раскладка живёт в отдельном поставляемом файле `graph-layout.js`: её надо мерить,
+// а через браузер меряется заодно разметка и перерисовка. Здесь только связывание
+// с экраном — создать симуляцию и вернуть закреплённое на место.
+function graphSimulation(nodes,edges){
+  const pins=savedLayout();
+  const sim=FridayGraphLayout.createSimulation({nodes,edges,width:GRAPH_W,height:GRAPH_H});
   // Расставленное руками важнее расчёта: узел, который человек передвинул,
-  // остаётся на месте и не участвует в укладке — иначе следующее открытие
-  // экрана отменяло бы его работу.
-  let pinned=0;
-  nodes.forEach(node=>{const at=saved[node.id];if(at&&at.length===2){node.x=at[0];node.y=at[1];node.fixed=true;pinned++}});
-  if(pinned===nodes.length&&pinned)return nodes;
-  const byId=new Map(nodes.map(x=>[x.id,x]));
-  const links=edges.map(e=>({s:byId.get(e.source),t:byId.get(e.target),w:Math.min(4,e.weight||1)})).filter(l=>l.s&&l.t);
-  for(let step=0;step<260;step++){
-    const cool=1-step/260;
-    for(let i=0;i<n;i++){const a=nodes[i];
-      for(let j=i+1;j<n;j++){const b=nodes[j];
-        let dx=a.x-b.x,dy=a.y-b.y;const d=Math.sqrt(dx*dx+dy*dy)||0.01;
-        const push=3000/(d*d);dx/=d;dy/=d;
-        a.vx+=dx*push;a.vy+=dy*push;b.vx-=dx*push;b.vy-=dy*push}}
-    for(const l of links){let dx=l.t.x-l.s.x,dy=l.t.y-l.s.y;
-      const d=Math.sqrt(dx*dx+dy*dy)||0.01;const pull=(d-110)*0.007*l.w;dx/=d;dy/=d;
-      l.s.vx+=dx*pull;l.s.vy+=dy*pull;l.t.vx-=dx*pull;l.t.vy-=dy*pull}
-    for(const node of nodes){if(node.fixed){node.vx=0;node.vy=0;continue}
-      node.vx+=(GRAPH_W/2-node.x)*0.0015;node.vy+=(GRAPH_H/2-node.y)*0.0015;
-      node.x+=node.vx*cool;node.y+=node.vy*cool;node.vx*=0.82;node.vy*=0.82;
-      node.x=Math.max(40,Math.min(GRAPH_W-40,node.x));node.y=Math.max(30,Math.min(GRAPH_H-30,node.y))}}
-  return nodes;
+  // остаётся на месте — но остальные продолжают укладываться вокруг него.
+  Object.keys(pins).forEach(id=>{const at=pins[id];
+    if(Array.isArray(at)&&at.length===2)sim.pin(id,at[0],at[1])});
+  state.graphPins=pins;
+  return sim;
 }
 
 // Фильтры и режим — состояние ЭКРАНА, а не запроса: их читает и загрузка данных,
@@ -641,8 +634,18 @@ function normalizeGraph(data){
     relation_type:e.relation_type, weight:e.weight,
     kind:e.kind||(e.relation_type?'relation':'cooccurrence')}))
     .filter(e=>e.source&&e.target);
-  return {nodes:data.nodes||[], edges, shown:data.shown!==undefined?data.shown:(data.nodes||[]).length,
-    total:data.total!==undefined?data.total:(data.nodes||[]).length};
+  const nodes=data.nodes||[];
+  // Обрез окрестности сервер называет ЧЕСТНО — `nodes_matched_at_least` и
+  // `nodes_truncated` приходят в ответе, — но экран их не читал и брал `total` из
+  // длины собственного массива. Получалось «показано 800 из 800» на срезанной
+  // картине: молчание, которое читается как «это весь граф».
+  const matched=Number(data.nodes_matched_at_least);
+  const total=data.total!==undefined?data.total
+    :(Number.isFinite(matched)&&matched>0?matched:nodes.length);
+  return {nodes, edges, shown:data.shown!==undefined?data.shown:nodes.length, total,
+    truncated:Boolean(data.nodes_truncated)||Boolean(data.edges_truncated),
+    edgesMatched:Number(data.edges_matched_at_least)||edges.length,
+    edgesTruncated:Boolean(data.edges_truncated)};
 }
 
 // Пути от узла-фокуса до найденных: подсветить сам узел мало — человек видит,
@@ -689,9 +692,21 @@ function graphMarkup(raw){
     ? 'Под эти условия не подходит ни одна сущность — ослабьте фильтры'
     : 'В графе пока нет подтверждённых связей с документами');
   const edges=data.edges;
-  graphLayout(nodes,edges);
+  // Симуляция создаётся здесь, а крутится кадрами в `bindGraph`: разметка выходит
+  // со стартовыми координатами, и человек ВИДИТ, как картина оседает, вместо того
+  // чтобы ждать её пятнадцать секунд на неподвижном экране.
+  const sim=graphSimulation(nodes,edges);
+  sim.nodes.forEach((point,i)=>{nodes[i].x=point.x;nodes[i].y=point.y});
+  state.graphSim=sim;
   state.graphNodes=nodes;state.graphEdges=edges;
   const byId=new Map(nodes.map(x=>[x.id,x]));
+  // Подписи: тысяча имён нечитаема и стоит трети элементов DOM. Постоянно видны
+  // только самые связанные, найденное поиском и фокус; остальные — по наведению.
+  const degree=new Map();
+  edges.forEach(e=>{degree.set(e.source,(degree.get(e.source)||0)+1);
+    degree.set(e.target,(degree.get(e.target)||0)+1)});
+  const named=new Set([...nodes].sort((a,b)=>(degree.get(b.id)||0)-(degree.get(a.id)||0))
+    .slice(0,GRAPH_LABELS).map(n=>n.id));
   const maxCount=Math.max(1,...nodes.map(x=>x.knowledge_count||0));
   const needle=(f.search||'').trim().toLowerCase();
   const matched=new Set(needle?nodes.filter(n=>String(n.name||'').toLowerCase().includes(needle)).map(n=>n.id):[]);
@@ -724,7 +739,8 @@ function graphMarkup(raw){
       +(hit||focused?`<circle cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(r+5).toFixed(1)}" fill="none" stroke="${focused?'#7bc86c':'#ffd166'}" stroke-width="2.5" opacity="0.9"/>`:'')
       +`<circle cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${r.toFixed(1)}" class="gfill-${kind}" stroke="#0a0f18" stroke-width="1.5">`
       +`<title>${esc(node.name)} — ${esc(node.entity_type)}, документов: ${node.knowledge_count}</title></circle>`
-      +`<text x="${node.x.toFixed(1)}" y="${(node.y-r-6).toFixed(1)}" text-anchor="middle" font-size="12" fill="#c9d1d9">${esc(short(node.name,24))}</text></g>`}).join('');
+      +`<text class="glabel${named.has(node.id)||hit||focused?'':' ghide'}" data-lift="${(r+6).toFixed(1)}"`
+      +` x="${node.x.toFixed(1)}" y="${(node.y-r-6).toFixed(1)}" text-anchor="middle" font-size="12" fill="#c9d1d9">${esc(short(node.name,24))}</text></g>`}).join('');
   const legend=Object.entries({person:'человек',organization:'организация',project:'проект',
     location:'место',event:'событие',concept:'понятие',other:'прочее'})
     .map(([k,label])=>`<span class="badge gt-${k}">${label}</span>`).join(' ');
@@ -734,9 +750,15 @@ function graphMarkup(raw){
   const relLegend=present.length
     ? `<div class="graph-legend">${present.map(k=>`<span class="badge rl-${esc(RELATION_COLORS[k]?k:'related_to')}">${esc(RELATION_LABELS[k]||k)}</span>`).join(' ')}<span class="muted">цвет линии — вид связи</span></div>`
     : '';
-  // Обрез называется вслух: картинка, молча показывающая часть графа, хуже отсутствующей.
-  const capped=(data.total||0)>(data.shown||0)
-    ? `<div class="notice">Показано ${data.shown} сущностей из ${data.total} — самые связанные с документами. Остальные не поместились, а не отсутствуют.</div>`:'';
+  // Обрез называется вслух: картинка, молча показывающая часть графа, хуже
+  // отсутствующей. Говорят ОБА вида — прежде окрестность молчала всегда.
+  const cutNodes=(data.total||0)>(data.shown||0);
+  const cutEdges=data.edgesTruncated&&data.edgesMatched>edges.length;
+  const capped=cutNodes||cutEdges||data.truncated
+    ? `<div class="notice">Показано ${data.shown} сущностей${cutNodes?` из ${data.total}`:''}`
+      +(cutEdges?` и ${edges.length} связей из ${data.edgesMatched}`:'')
+      +`${state.graphView==='local'?' — обход остановлен на границе, а не потому, что дальше пусто.'
+        :' — самые связанные с документами. Остальные не поместились, а не отсутствуют.'}</div>`:'';
   const found=matched.size;
   // Про пути говорится ровно то, что есть: подсвечен путь ОТ ФОКУСА, и только в
   // окрестности узла. На общей картине точки отсчёта нет, и молчать об этом
@@ -748,16 +770,67 @@ function graphMarkup(raw){
   const searchNote=needle?`<div class="notice">Найдено на картине: ${found}. Подсвечены жёлтым.${pathNote}</div>`:'';
   return `${capped}${searchNote}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>${relLegend}
     <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}">${lines}${circles}</svg>
-    <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — переставить (запомнится), клик по узлу — карточка и переход к его окрестности</div></div>`;
+    <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — соседи откликнутся, отпустить — узел закрепится, клик по узлу — карточка и переход к его окрестности</div></div>`;
 }
 
 // Взаимодействие вешается ПОСЛЕ отрисовки: обработчики живут на контейнере, а не на
 // каждом узле, иначе их пришлось бы переставлять при каждой перерисовке.
 function bindGraph(){
   const canvas=document.getElementById('graphCanvas'), svg=document.getElementById('graphSvg');
+  // Прежний цикл кадров останавливается ДО проверки на отсутствие полотна: уход с
+  // вкладки тоже зовёт `bindGraph`, и без этого симуляция считала бы кадры в
+  // никуда до конца сессии.
+  if(state.graphFrame){cancelAnimationFrame(state.graphFrame);state.graphFrame=0}
   if(!canvas||!svg)return;
-  let view={x:0,y:0,k:1}, drag=null, moved=false;
+  // Камера переживает перерисовку. Прежде она была локальной переменной, а
+  // `bindGraph` зовётся заново после каждого нажатия фильтра: человек приближал
+  // интересный куст, включал «только люди» и возвращался на общий план.
+  if(!state.graphCamera)state.graphCamera={x:0,y:0,k:1};
+  let view=state.graphCamera, drag=null, moved=false;
   const apply=()=>svg.setAttribute('viewBox',`${view.x} ${view.y} ${GRAPH_W/view.k} ${GRAPH_H/view.k}`);
+  apply();
+
+  // Живой цикл кадров вместо одного синхронного прогона. Замер прежней раскладки:
+  // 150 узлов — 22 мс, 1000 — 499 мс, 4500 — 15 114 мс, и всё это ДО первой
+  // отрисовки, то есть человек видел неотвечающую вкладку. Теперь шаг стоит
+  // доли миллисекунды, картина оседает на глазах, и её можно трогать по дороге.
+  //
+  // Ссылки на элементы собираются ОДИН раз: искать их заново каждый кадр значило
+  // бы платить обходом дерева шестьдесят раз в секунду.
+  const at=state.graphSim?state.graphSim.byId:new Map();
+  const painted=[...svg.querySelectorAll('.gnode')].map(group=>({
+    point:at.get(group.dataset.node),
+    circles:[...group.querySelectorAll('circle')],
+    label:group.querySelector('text'),
+  })).filter(item=>item.point);
+  const wires=[...svg.querySelectorAll('line')].map(element=>({
+    element,a:at.get(element.dataset.a),b:at.get(element.dataset.b),
+  })).filter(item=>item.a&&item.b);
+  const draw=()=>{
+    for(const item of painted){
+      const x=item.point.x.toFixed(1), y=item.point.y.toFixed(1);
+      for(const circle of item.circles){circle.setAttribute('cx',x);circle.setAttribute('cy',y)}
+      if(item.label){item.label.setAttribute('x',x);
+        item.label.setAttribute('y',(item.point.y-Number(item.label.dataset.lift||12)).toFixed(1))}
+    }
+    for(const wire of wires){
+      wire.element.setAttribute('x1',wire.a.x.toFixed(1));wire.element.setAttribute('y1',wire.a.y.toFixed(1));
+      wire.element.setAttribute('x2',wire.b.x.toFixed(1));wire.element.setAttribute('y2',wire.b.y.toFixed(1));
+    }
+  };
+  const tick=()=>{
+    const sim=state.graphSim;
+    if(!sim){state.graphFrame=0;return}
+    const movement=sim.step();
+    draw();
+    // Устоявшаяся картина засыпает: жечь кадры на неподвижном графе значит греть
+    // ноутбук ради ничего. Ввод человека будит её через `wake`.
+    if(sim.quiet(movement)&&!drag){state.graphFrame=0;return}
+    state.graphFrame=requestAnimationFrame(tick);
+  };
+  const wake=()=>{if(!state.graphFrame)state.graphFrame=requestAnimationFrame(tick)};
+  wake();
+
   const toSvg=event=>{const rect=canvas.getBoundingClientRect();
     return {x:view.x+(event.clientX-rect.left)/rect.width*(GRAPH_W/view.k),
             y:view.y+(event.clientY-rect.top)/rect.height*(GRAPH_H/view.k)}};
@@ -774,20 +847,26 @@ function bindGraph(){
     if(drag.pan){const rect=canvas.getBoundingClientRect();
       view.x=drag.vx-(event.clientX-drag.sx)/rect.width*(GRAPH_W/view.k);
       view.y=drag.vy-(event.clientY-drag.sy)/rect.height*(GRAPH_H/view.k);apply();return}
-    const point=toSvg(event), node=(state.graphNodes||[]).find(n=>n.id===drag.node);
-    if(!node)return;node.x=point.x;node.y=point.y;
-    const circle=drag.group.querySelector('circle'), label=drag.group.querySelector('text');
-    circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);
-    label.setAttribute('x',point.x);label.setAttribute('y',point.y-Number(circle.getAttribute('r'))-6);
-    svg.querySelectorAll(`line[data-a="${CSS.escape(node.id)}"]`).forEach(line=>{
-      line.setAttribute('x1',point.x);line.setAttribute('y1',point.y)});
-    svg.querySelectorAll(`line[data-b="${CSS.escape(node.id)}"]`).forEach(line=>{
-      line.setAttribute('x2',point.x);line.setAttribute('y2',point.y)})});
+    // Перетаскивание — не рисование, а ВВОД В СИМУЛЯЦИЮ: узел под пальцем держится
+    // на месте, а соседи откликаются сами. Прежде двигался только сам узел и его
+    // собственные линии, и граф читался как нарисованная схема, а не как ткань.
+    const point=toSvg(event), sim=state.graphSim;
+    if(!sim)return;
+    sim.hold(drag.node,point.x,point.y);
+    sim.reheat(30);
+    wake()});
   canvas.addEventListener('pointerup',event=>{
     const wasNode=drag&&drag.node;canvas.classList.remove('dragging');drag=null;
     // Клик и перетаскивание различаются по факту движения — иначе любое смещение
     // узла открывало бы карточку, и переставить его было бы нельзя.
-    if(wasNode&&moved)saveLayout(state.graphNodes||[]);
+    if(wasNode&&moved){
+      // Закрепляется РОВНО сдвинутый узел. Прежде сохранялись координаты всего
+      // вида, и одно перетаскивание молча замораживало картину целиком.
+      const point=(state.graphSim&&state.graphSim.byId.get(wasNode))||null;
+      if(point){state.graphPins=state.graphPins||{};
+        state.graphPins[wasNode]=[Math.round(point.x),Math.round(point.y)];
+        saveLayout(state.graphPins)}
+    }
     if(wasNode&&!moved)actions.inspectEntityNode(wasNode)});
   // Наведение подсвечивает соседей: на плотном графе это единственный способ
   // разглядеть, с чем связан конкретный узел.
@@ -839,9 +918,14 @@ async function graphData(uid){
     // органом управления. Теперь у общей картины свой орган, у окрестности свой.
     if(f.minConfidence>0)local.push(`min_confidence=${Number(f.minConfidence)}`);
     if(f.asOf)local.push(`as_of=${q(f.asOf)}`);
+    // Потолка окрестности здесь намеренно НЕТ. Прийти она может с 1601 узлом
+    // (бюджет обхода — 801 ребро, узлов до 801*2+1), и прежняя раскладка на такой
+    // картине вставала на секунды. Барнс-Хат снял причину: 1601 узел стоит около
+    // полутора миллисекунд на кадр. Ограничивать вид ради алгоритма, которого уже
+    // нет, значило бы прятать от человека его же граф.
     return api(`/api/admin/graph/${q(state.graphFocus)}?${local.join('&')}`);
   }
-  const params=[`user_id=${q(uid)}`,'limit=150'];
+  const params=[`user_id=${q(uid)}`,`limit=${GRAPH_LIMIT}`];
   if(f.types.length)params.push(`entity_types=${q(f.types.join(','))}`);
   if(f.relations.length)params.push(`relation_types=${q(f.relations.join(','))}`);
   if(f.onlyRelations)params.push('only_relations=true');
@@ -867,7 +951,11 @@ actions.applyGraphAsOf=()=>{const el=document.getElementById('graphAsOf');graphS
 actions.clearGraphAsOf=()=>{graphState().asOf='';refresh()};
 actions.applyGraphSearch=()=>{const el=document.getElementById('graphSearch');graphState().search=el?el.value.trim():'';refresh()};
 actions.focusGraphNode=(id,name)=>{closeModal();state.graphView='local';state.graphFocus=id;state.graphFocusName=name||'';refresh()};
-actions.resetGraphLayout=()=>{try{localStorage.removeItem(graphLayoutKey())}catch(e){}toast('Раскладка сброшена');refresh()};
+// Сброс снимает и хранилище, и уже загруженные закрепления: без второго узлы
+// остались бы приколоченными до перезагрузки страницы, и человек решил бы, что
+// кнопка не работает.
+actions.resetGraphLayout=()=>{try{localStorage.removeItem(graphLayoutKey())}catch(e){}
+  state.graphPins={};toast('Раскладка сброшена');refresh()};
 
 renderers.graph=async gen=>{
   const uid=selectedUser();

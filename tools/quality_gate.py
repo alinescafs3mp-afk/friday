@@ -29,6 +29,7 @@ UI_TEST_MODULES = (
     "tests/test_admin_ui_resolution_queue.py",
     "tests/test_admin_ui_sources_tab.py",
     "tests/test_admin_ui_timeline.py",
+    "tests/test_the_graph_is_alive_and_remembers_the_view.py",
     "tests/test_the_graph_shows_the_path_not_just_the_hit.py",
     "tests/test_the_graph_tab_can_be_navigated.py",
 )
@@ -81,6 +82,13 @@ def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
             ),
         ),
         GateCommand("admin JavaScript syntax", ("node", "--check", "friday/admin_ui/static/app.js")),
+        # Раскладка графа — отдельный поставляемый файл. Без собственной строки
+        # здесь он поехал бы в браузер непроверенным: `app.js` его не импортирует,
+        # а подключает страница.
+        GateCommand(
+            "graph layout JavaScript syntax",
+            ("node", "--check", "friday/admin_ui/static/graph-layout.js"),
+        ),
     )
 
 

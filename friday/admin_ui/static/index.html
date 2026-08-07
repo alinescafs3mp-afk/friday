@@ -6,6 +6,13 @@
 <meta name="color-scheme" content="dark">
 <title>Friday Control Room</title>
 <link rel="stylesheet" href="./app.css">
+<!-- Раскладка графа отдельным файлом и БЕЗ defer-порядка наперекор: `defer`
+     сохраняет порядок исполнения, поэтому `FridayGraphLayout` существует к моменту
+     запуска `app.js`. Отдельный файл нужен, чтобы раскладку можно было прогнать в
+     Node и померить ровно то, что поставляется. Загружается своим адресом, а не
+     как blob: строгая CSP этой панели (`default-src 'self'`) blob-источник не
+     пропустит. -->
+<script src="./graph-layout.js" defer></script>
 <script src="./app.js" defer></script>
 </head>
 <body>
