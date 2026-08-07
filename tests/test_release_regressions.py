@@ -112,7 +112,11 @@ async def test_start_registers_telegram_user_before_local_reply(tmp_path: Path):
         backend_calls.append((method, path, payload, external_user_id, chat_id))
         return {"actor": {"user_id": "telegram:42", "preset_key": "user"}}
 
-    async def send_message(client, chat_id, text):
+    # `reply_markup` принимается и игнорируется: с 0.179.0 `/start` новичка ещё и
+    # сообщает ВЛАДЕЛЬЦУ, что человек пришёл, — и то сообщение несёт кнопку. Проба
+    # здесь про текст новичку, поэтому кнопка ей не нужна, но подпись обязана
+    # совпадать с настоящей, иначе краснеет не дефект, а несовпадение сигнатур.
+    async def send_message(client, chat_id, text, *, reply_markup=None):
         replies.append((chat_id, text))
 
     bridge._backend_json = backend_json  # type: ignore[method-assign]  # noqa: SLF001
@@ -169,7 +173,11 @@ async def test_start_newcomer_is_told_about_limited_access(tmp_path: Path):
     async def backend_json(client, method, path, payload, external_user_id, chat_id):
         return {"actor": {"user_id": "telegram:telegram:7777", "preset_key": "newcomer"}}
 
-    async def send_message(client, chat_id, text):
+    # `reply_markup` принимается и игнорируется: с 0.179.0 `/start` новичка ещё и
+    # сообщает ВЛАДЕЛЬЦУ, что человек пришёл, — и то сообщение несёт кнопку. Проба
+    # здесь про текст новичку, поэтому кнопка ей не нужна, но подпись обязана
+    # совпадать с настоящей, иначе краснеет не дефект, а несовпадение сигнатур.
+    async def send_message(client, chat_id, text, *, reply_markup=None):
         replies.append((chat_id, text))
 
     bridge._backend_json = backend_json  # type: ignore[method-assign]  # noqa: SLF001

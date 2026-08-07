@@ -211,6 +211,8 @@ def test_every_button_namespace_has_a_handler() -> None:
 # `ent` добавлен осознанно: выбор из однофамильцев под /browse — молчаливый выбор
 # первого совпадения делал записи остальных несуществующими.
 EXPECTED_CALLBACK_NAMESPACES = {
+    # `acc` заведён в 0.179.0: выдать новичку доступ одной кнопкой из чата.
+    "acc",
     "conflict",
     "apr",
     "conv",
@@ -293,6 +295,8 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
+# 73 -> 74 в 0.179.0: `_offer_access_to_owner` — обещание `/start` про расширение
+# доступа получило исполнителя: владелец узнаёт о новичке и жмёт одну кнопку.
 # 72 -> 73 в 0.178.0: `_send_message_returning_id` — короткое приглашение, чей
 # `message_id` нужен, чтобы ответ человека адресовался однозначно.
 # 71 -> 72 в 0.176.0: `_album_caption` — подпись альбома, доезжающая до всех его
@@ -307,7 +311,7 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 73
+EXPECTED_BRIDGE_COUNT = 74
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
@@ -341,6 +345,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_prepare_document": "(self, telegram: 'httpx.AsyncClient', message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
     "_post_message_chunk": "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str') -> 'httpx.Response'",
+    "_offer_access_to_owner": "(self, telegram: 'httpx.AsyncClient', actor: 'dict[str, Any]', newcomer: 'dict[str, Any]') -> 'None'",
     "_process_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None') -> 'None'",
     "_retry_after_sec": "(response: 'httpx.Response') -> 'float'",
     "_reply_quote": "(message: 'dict[str, Any]') -> 'str'",

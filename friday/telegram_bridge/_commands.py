@@ -182,6 +182,40 @@ class CommandsMixin(BridgeShared):
         # around a single space is the exact defect `_process_update` documents.
         return flipped + text[len(head) :]
 
+    async def _offer_access_to_owner(
+        self,
+        telegram: httpx.AsyncClient,
+        actor: dict[str, Any],
+        newcomer: dict[str, Any],
+    ) -> None:
+        """Сказать владельцу, что пришёл новичок, и дать кнопку выдать доступ.
+
+        До этого `/start` обещал «владелец может расширить доступ», а механизма В
+        ЧАТЕ не было вовсе: маршрут смены пресета существует, но владелец о
+        новичке не узнавал ниоткуда, кроме админки. Обещание без исполнителя —
+        это тот же мёртвый конец, что и кнопка без обработчика.
+
+        Имя и фамилию из Telegram сюда не переносим: владельцу довольно того, что
+        человек с таким именем написал, а лишние персональные поля в чужой чат
+        отправлять незачем.
+        """
+        owner_chat = self._signer_chat_id()
+        newcomer_id = str(actor.get("user_id") or actor.get("id") or "")
+        if not owner_chat or not newcomer_id:
+            return
+        name = str(newcomer.get("first_name") or newcomer.get("username") or "новый человек")
+        await self._send_message(
+            telegram,
+            int(owner_chat),
+            f"Новый человек в чате: {name}. Сейчас у него режим новичка — "
+            "чат, файлы и веб-поиск; миссии и выполнение кода закрыты.",
+            reply_markup={
+                "inline_keyboard": [
+                    [{"text": "Выдать полный доступ", "callback_data": f"acc:grant:{newcomer_id}"}]
+                ]
+            },
+        )
+
     async def _process_update(
         self,
         telegram: httpx.AsyncClient,
@@ -331,13 +365,23 @@ class CommandsMixin(BridgeShared):
             )
             raw_actor = me.get("actor")
             actor: dict[str, Any] = raw_actor if isinstance(raw_actor, dict) else {}
-            if str(actor.get("preset_key") or "") == "newcomer":
+            newcomer = str(actor.get("preset_key") or "") == "newcomer"
+            if newcomer:
                 start_text = (
                     f"{start_text}\n\n"
                     "Сейчас у вас режим новичка: чат, файлы и веб-поиск доступны, "
-                    "миссии и выполнение кода — нет. Владелец может расширить доступ."
+                    "миссии и выполнение кода — нет. Я сказала владельцу, что вы пришли: "
+                    "расширить доступ он может одной кнопкой."
                 )
+            # Сначала отвечаем ТОМУ, КТО ЖДЁТ. Владелец узнаёт следом: он не стоит
+            # у экрана, а человек, написавший `/start`, стоит.
             await self._send_message(telegram, chat_id, start_text)
+            if newcomer:
+                # Обещание «владелец может расширить доступ» до этого не имело
+                # механизма В ЧАТЕ вовсе: маршрут смены пресета существует, но
+                # владелец о новичке не узнавал ниоткуда, кроме админки, — то есть
+                # фраза была обещанием без исполнителя.
+                await self._offer_access_to_owner(telegram, actor, user)
             return
         if command == "/help":
             await register_backend_user()

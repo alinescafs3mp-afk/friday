@@ -362,6 +362,8 @@ class BridgeShared:
     _album_captions: dict[str, str]
     _edit_targets: dict[int, str]
     _send_message_returning_id: Callable[..., Any]
+    _offer_access_to_owner: Callable[..., Any]
+    _signer_chat_id: Callable[..., Any]
     _format_browse_results: Callable[..., Any]
     _format_status: Callable[..., Any]
     _format_timeline: Callable[..., Any]

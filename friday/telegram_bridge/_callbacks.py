@@ -226,6 +226,25 @@ class CallbacksMixin(BridgeShared):
                     self._format_full_document(document),
                     reply_markup={"inline_keyboard": rows},
                 )
+            elif family == "acc" and action == "grant":
+                # Право выдаёт backend, а не мост: `admin.users.manage` проверяется
+                # там же, где и всегда. Нажатие не владельца просто получит отказ,
+                # и он будет назван — `refusal_notice` уже различает «нет права».
+                await self._backend_json(
+                    backend,
+                    "POST",
+                    f"/api/admin/users/{target_id}/preset",
+                    {"preset_key": "user", "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(telegram, callback_id, "Доступ выдан")
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Доступ расширен: человеку открыты миссии и остальное, что есть у обычного участника.",
+                )
+                clear_markup = True
             elif family == "know" and action == "fix":
                 # Правка использует тот же механизм ответа на реплику, который
                 # появился в 0.175.0, и это не совпадение: заводить ради неё
