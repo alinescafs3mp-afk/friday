@@ -18,6 +18,7 @@ from friday.telegram_bridge._base import (
     base64,
     httpx,
     quote,
+    refusal_notice,
 )
 
 
@@ -658,8 +659,19 @@ class CallbacksMixin(BridgeShared):
                 clear_markup = True
             else:
                 raise PermanentUpdateError("Unknown callback action")
-        except PermanentUpdateError:
-            await self._answer_callback(telegram, callback_id, "Действие уже недоступно", alert=True)
+        except PermanentUpdateError as exc:
+            # «Действие уже недоступно» — правда только для устаревшей кнопки.
+            # Отказ ПО ПРАВАМ и «нет такого» — утверждения о разных вещах, и
+            # человек, которому не хватает права, принимал общую фразу за поломку
+            # и жал ещё раз. `refusal_notice` уже умеет их различать, но сюда его
+            # никто не звал: тот же разбор стоял только на текстовых командах.
+            notice = refusal_notice(exc)
+            await self._answer_callback(
+                telegram,
+                callback_id,
+                notice or "Действие уже недоступно",
+                alert=True,
+            )
             clear_markup = True
             LOGGER.info("Telegram callback rejected")
         finally:

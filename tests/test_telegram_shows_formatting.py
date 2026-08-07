@@ -84,7 +84,14 @@ def test_the_sender_falls_back_to_plain_text_on_a_rejection() -> None:
 
     from friday.telegram_bridge._transport import TransportMixin
 
-    source = inspect.getsource(TransportMixin._send_message)
+    # Читается исходник ОБОИХ методов, а не одного. В 0.173.0 отправка одного
+    # куска выделилась в `_post_message_chunk` — туда же уехала ветка на 400, — и
+    # проба покраснела не от пропажи механизма, а от его переезда. Само поведение
+    # с тех пор закреплено настоящим прогоном:
+    # `tests/test_a_rate_limit_does_not_duplicate_the_answer.py`.
+    source = inspect.getsource(TransportMixin._send_message) + inspect.getsource(
+        TransportMixin._post_message_chunk
+    )
     assert '"parse_mode": "HTML"' in source, "разметка снова не включена"
     assert "status_code == 400" in source, "нет запасного пути — отказ разбора съест сообщение"
     assert 'payload.pop("parse_mode"' in source, "повтор идёт с той же разметкой, что и отказала"

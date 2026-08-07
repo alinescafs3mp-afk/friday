@@ -921,6 +921,35 @@ class TransportMixin(BridgeShared):
             }
             if reply_markup and index == len(chunks) - 1:
                 payload["reply_markup"] = reply_markup
+            response = await self._post_message_chunk(client, payload, chunk)
+            response.raise_for_status()
+
+    #: Сколько раз ждать по просьбе Telegram, прежде чем сдаться.
+    _RATE_LIMIT_RETRIES = 3
+    #: Потолок ожидания на одну просьбу. Telegram при жёстком лимите просит и
+    #: несколько минут; столько держать ход нельзя — лучше честно отдать отказ
+    #: наверх, чем занимать слот и молчать.
+    _RATE_LIMIT_MAX_WAIT_SEC = 30.0
+
+    async def _post_message_chunk(
+        self,
+        client: httpx.AsyncClient,
+        payload: dict[str, Any],
+        chunk: str,
+    ) -> httpx.Response:
+        """Отправить один кусок, пережив разметку и ограничение частоты.
+
+        `429` до этого не читался вовсе: `raise_for_status` ронял ВЕСЬ ход, тот
+        уходил в повтор, и уже доставленные куски длинного ответа приходили
+        человеку второй раз. Ответ модели при этом не пересчитывался (он лежит в
+        кеше обновления) — то есть платил за это только читающий, дубликатами.
+
+        Telegram сам говорит, сколько ждать, в `parameters.retry_after`. Ждём
+        столько и повторяем ЭТОТ ЖЕ кусок, поэтому доставка продолжается с места
+        остановки, а не начинается заново.
+        """
+
+        for attempt in range(self._RATE_LIMIT_RETRIES):
             response = await client.post(f"{self._api_url}/sendMessage", json=payload)
             if response.status_code == 400:
                 # Разметка важна, но доставка важнее. Любая неожиданная
@@ -931,7 +960,29 @@ class TransportMixin(BridgeShared):
                 payload.pop("parse_mode", None)
                 payload["text"] = chunk
                 response = await client.post(f"{self._api_url}/sendMessage", json=payload)
-            response.raise_for_status()
+            if response.status_code != 429 or attempt == self._RATE_LIMIT_RETRIES - 1:
+                return response
+            wait_sec = self._retry_after_sec(response)
+            LOGGER.warning("Telegram rate limit; waiting %.1fs before resending the same chunk", wait_sec)
+            await asyncio.sleep(wait_sec)
+        return response
+
+    @classmethod
+    def _retry_after_sec(cls, response: httpx.Response) -> float:
+        """Сколько ждать по просьбе Telegram. Тело важнее заголовка: `retry_after`
+        приходит именно в `parameters`, а `Retry-After` бывает не у всех прокси."""
+
+        requested = 0.0
+        with suppress(ValueError, TypeError, json.JSONDecodeError):
+            body = response.json()
+            parameters = body.get("parameters") if isinstance(body, dict) else None
+            if isinstance(parameters, dict):
+                requested = float(parameters.get("retry_after") or 0.0)
+        if requested <= 0:
+            with suppress(ValueError, TypeError):
+                requested = float(response.headers.get("Retry-After", "") or 0.0)
+        # Ноль означал бы busy-loop, поэтому пол — секунда.
+        return max(1.0, min(requested, cls._RATE_LIMIT_MAX_WAIT_SEC))
 
     async def _send_document(
         self,

@@ -1011,14 +1011,22 @@ class CommandsMixin(BridgeShared):
                     "включённой автономии, начну выполнять в фоне. Итоги придут в Inbox на review.",
                 )
                 return
-            created = await self._backend_json(
-                backend,
-                "POST",
-                "/api/missions",
-                {"goal": goal, "telegram_user": user},
-                external_user_id,
-                str(chat_id),
-            )
+            # Признак «думаю» стоял только у обычного хода и у /retry. Создание
+            # миссии разбивает цель на шаги моделью, то есть длится столько же, —
+            # а чат при этом молчал, и человек не понимал, дошла ли команда.
+            mission_typing = asyncio.create_task(self._typing_loop(telegram, chat_id))
+            try:
+                created = await self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/missions",
+                    {"goal": goal, "telegram_user": user},
+                    external_user_id,
+                    str(chat_id),
+                )
+            finally:
+                mission_typing.cancel()
+                await asyncio.gather(mission_typing, return_exceptions=True)
             raw_mission = created.get("mission")
             mission: dict[str, Any] = raw_mission if isinstance(raw_mission, dict) else {}
             await self._send_message(
