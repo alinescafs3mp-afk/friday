@@ -198,7 +198,8 @@ def test_answer_sources_open_as_documents_from_the_legend():
                 {"label": "K2", "knowledge_id": "ko_bbbb", "title": "Рапорт"},
                 {"label": "K3", "knowledge_id": "bad id", "title": "Пропуск"},
             ],
-        }
+        },
+        external_user_id="4242",
     )
     assert markup is not None
     buttons = [button for row in markup["inline_keyboard"] for button in row]
@@ -221,7 +222,9 @@ def test_answer_sources_open_as_documents_from_the_legend():
 def test_answer_without_openable_sources_has_no_source_buttons():
     from friday.telegram_bridge import TelegramBridge
 
-    markup = TelegramBridge._response_reply_markup({"message_id": "msg_empty", "citations": []})
+    markup = TelegramBridge._response_reply_markup(
+        {"message_id": "msg_empty", "citations": []}, external_user_id="4242"
+    )
     assert markup is not None
     data = {button["callback_data"] for row in markup["inline_keyboard"] for button in row}
     assert not any(item.startswith("doc:show:") for item in data)

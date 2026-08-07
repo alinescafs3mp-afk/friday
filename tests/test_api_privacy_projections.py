@@ -560,7 +560,7 @@ def test_chat_keeps_only_an_owned_inbox_handle_and_revalidates_it_on_replay(sett
     for payload in (first.json(), replay.json()):
         assert payload["ingestion"]["inbox_id"] == inbox.id
         assert "raw_object_id" not in payload["ingestion"]
-        markup = CallbacksMixin._response_reply_markup(payload)
+        markup = CallbacksMixin._response_reply_markup(payload, external_user_id="4242")
         assert markup is not None
         encoded = json.dumps(markup, ensure_ascii=False)
         assert f"inbox:promote:{inbox.id}" in encoded

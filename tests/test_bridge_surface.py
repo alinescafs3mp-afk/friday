@@ -352,7 +352,9 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_run_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', row: 'dict[str, Any]') -> 'None'",
     "_read_command_layout": "(text: 'str') -> 'str'",
     "_register_commands": "(self, telegram: 'httpx.AsyncClient') -> 'None'",
-    "_response_reply_markup": "(response: 'dict[str, Any]') -> 'dict[str, Any] | None'",
+    "_response_reply_markup": (
+        "(response: 'dict[str, Any]', *, external_user_id: 'str') -> 'dict[str, Any] | None'"
+    ),
     "_retire_markup_family": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int', message: 'dict[str, Any]', family: 'str') -> 'None'",
     "_search_reply_markup": "(results: 'list[Any]') -> 'dict[str, Any] | None'",
     "_select_media": "(message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'tuple[dict[str, Any] | None, str, str, str]'",

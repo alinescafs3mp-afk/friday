@@ -1268,6 +1268,42 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             "are empty: reranking and the confidence cut-off would silently never run — "
             "set both or set FRIDAY_RERANK_TOP=0"
         )
+    # Открытая регистрация впускает НЕЗНАКОМОГО человека — того, кого владелец не
+    # называл ни по имени, ни по номеру чата. Что этот человек получит, решают две
+    # соседние настройки, и оба сочетания отдают ему архив целиком. Цена ошибки
+    # несимметрична: ложный отказ стоит одной правки `.env` (внести чат в список
+    # разрешённых), пропуск стоит всего архива — и узнаётся позже всех. Поэтому
+    # ошибка, а не предупреждение: предупреждение здесь — строка в журнале в
+    # момент, когда архив уже открыт.
+    #
+    # Текст по-русски по той же причине, что у предупреждения про TLS ниже: это
+    # решение владельца о доступе, и оно попадает в его панель как есть.
+    new_preset = str(getattr(settings, "new_account_preset", "") or "").strip()
+    if settings.telegram_open_registration and new_preset.casefold() in {"owner", "admin"}:
+        errors.append(
+            "FRIDAY_TELEGRAM_OPEN_REGISTRATION=1 вместе с "
+            f"FRIDAY_NEW_ACCOUNT_PRESET={new_preset} означает, что ЛЮБОЙ написавший "
+            "боту незнакомый человек получает административные права: чужие "
+            "документы, ФИО и суммы, чистку базы. Выберите одно — либо узкий пресет "
+            "для самозаписи, либо список разрешённых чатов вместо открытой регистрации"
+        )
+    if settings.telegram_open_registration and settings.shared_archive:
+        errors.append(
+            "FRIDAY_TELEGRAM_OPEN_REGISTRATION=1 вместе с FRIDAY_SHARED_ARCHIVE=1 "
+            "открывает весь общий архив любому написавшему боту: общий архив кладёт "
+            "всех в одного арендатора, а право читать знания есть даже у самого "
+            "узкого пресета. Впускайте по списку разрешённых чатов или выключите "
+            "общий архив"
+        )
+    elif (
+        settings.telegram_open_registration and new_preset and new_preset.casefold() not in {"owner", "admin"}
+    ):
+        # Состав произвольного пресета живёт в базе, а не в коде, поэтому здесь
+        # его не проверить — но сказать, кому он достаётся, обязаны.
+        warnings.append(
+            f"FRIDAY_NEW_ACCOUNT_PRESET={new_preset} выдаётся при открытой регистрации "
+            "КАЖДОМУ незнакомому человеку, написавшему боту; проверьте состав этого пресета"
+        )
     if production and settings.code_execution_enabled:
         warnings.append("Host-side code execution is enabled; use a separate sandbox container")
     return errors + [f"warning: {item}" for item in warnings]

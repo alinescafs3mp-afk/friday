@@ -150,6 +150,12 @@ class CallbacksMixin(BridgeShared):
             if not CALLBACK_TARGET_RE.fullmatch(target_id):
                 raise PermanentUpdateError("Invalid callback target")
             if family == "inbox" and action in {"promote", "ignore"}:
+                # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
+                # точек не содержат, поэтому разделение по последней однозначно.
+                target_id, _, pressed_by = target_id.rpartition(".")
+                if not target_id or pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 status = "classified" if action == "promote" else "ignored"
                 await self._backend_json(
                     backend,
@@ -329,9 +335,17 @@ class CallbacksMixin(BridgeShared):
                 # вклиниться другая правка, и «отменить последнюю» отменило бы уже
                 # не то, что человек видел на экране. Если версии больше нет —
                 # backend ответит 404, и это правильный отказ, а не тихий успех.
-                entity_id, _, raw_version = target_id.partition(".")
+                # Цель — «{id}.{версия}.{id нажавшего}»: три части, потому что
+                # версия и нажавший отвечают на разные вопросы. Версия защищает от
+                # чужой правки, вклинившейся между показом и нажатием; привязка —
+                # от чужого нажатия по кнопке, показанной не ему.
+                head, _, pressed_by = target_id.rpartition(".")
+                entity_id, _, raw_version = head.partition(".")
                 if not entity_id or not raw_version.isdigit():
                     raise PermanentUpdateError("Invalid entity undo target")
+                if pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 restored = await self._backend_json(
                     backend,
                     "POST",
@@ -640,6 +654,12 @@ class CallbacksMixin(BridgeShared):
                         f"«{name}» найдена, но подтверждённых записей у неё пока нет.",
                     )
             elif family == "merge" and action in {"accept", "reject"}:
+                # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
+                # точек не содержат, поэтому разделение по последней однозначно.
+                target_id, _, pressed_by = target_id.rpartition(".")
+                if not target_id or pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 await self._backend_json(
                     backend,
                     "POST",
@@ -685,6 +705,12 @@ class CallbacksMixin(BridgeShared):
                 )
                 clear_markup = True
             elif family == "conflict" and action in {"dismiss", "keep_a", "keep_b"}:
+                # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
+                # точек не содержат, поэтому разделение по последней однозначно.
+                target_id, _, pressed_by = target_id.rpartition(".")
+                if not target_id or pressed_by != external_user_id:
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
                 await self._backend_json(
                     backend,
                     "POST",
@@ -847,7 +873,7 @@ class CallbacksMixin(BridgeShared):
         return buttons
 
     @staticmethod
-    def _response_reply_markup(response: dict[str, Any]) -> dict[str, Any] | None:
+    def _response_reply_markup(response: dict[str, Any], *, external_user_id: str) -> dict[str, Any] | None:
         message_id = str(response.get("message_id") or "")
         if not message_id:
             return None
@@ -880,10 +906,20 @@ class CallbacksMixin(BridgeShared):
         ingestion: dict[str, Any] = dict(raw_ingestion) if isinstance(raw_ingestion, dict) else {}
         inbox_id = str(ingestion.get("inbox_id") or "")
         if inbox_id:
+            # Кнопка несёт id того, КОМУ её показали. `external_user_id` —
+            # обязательный именованный параметр, а не значение по умолчанию:
+            # забытая привязка должна ломаться вызовом, а не молча раздавать
+            # кнопку всему чату.
             keyboard.append(
                 [
-                    {"text": "✓ Подтвердить знание", "callback_data": f"inbox:promote:{inbox_id}"},
-                    {"text": "✕ Игнорировать", "callback_data": f"inbox:ignore:{inbox_id}"},
+                    {
+                        "text": "✓ Подтвердить знание",
+                        "callback_data": f"inbox:promote:{inbox_id}.{external_user_id}",
+                    },
+                    {
+                        "text": "✕ Игнорировать",
+                        "callback_data": f"inbox:ignore:{inbox_id}.{external_user_id}",
+                    },
                 ]
             )
         return {"inline_keyboard": keyboard}

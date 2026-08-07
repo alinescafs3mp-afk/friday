@@ -199,7 +199,7 @@ async def test_a_permission_refusal_says_what_is_missing(tmp_path, monkeypatch):
     callback = {
         "id": "cb-403",
         "from": {"id": 5001, "first_name": "Гость"},
-        "data": "inbox:promote:inb_1",
+        "data": "inbox:promote:inb_1.5001",
         "message": {"message_id": 7, "chat": {"id": 5001}},
     }
     try:

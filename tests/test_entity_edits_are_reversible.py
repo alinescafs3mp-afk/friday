@@ -203,7 +203,9 @@ async def test_telegram_undo_button_carries_the_version_it_was_shown_for(setting
     buttons = [button for row in markup["inline_keyboard"] for button in row]
     undo = [button for button in buttons if str(button["callback_data"]).startswith("ent:undo:")]
     assert undo, "среди действий карточки нет отката"
-    assert undo[0]["callback_data"] == "ent:undo:ent_abc123.2"
+    # Третья часть — id того, КОМУ показали карточку: кнопка видна всему чату, и
+    # откат чужой правки не должен доставаться тому, кто нажал первым.
+    assert undo[0]["callback_data"] == "ent:undo:ent_abc123.2.42"
     for button in buttons:
         assert len(str(button["callback_data"]).encode()) <= 64, "Telegram: 64 байта на callback_data"
 

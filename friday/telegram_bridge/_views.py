@@ -144,8 +144,14 @@ class ViewsMixin(BridgeShared):
                 reply_markup={
                     "inline_keyboard": [
                         [
-                            {"text": "✓ В знания", "callback_data": f"inbox:promote:{inbox_id}"},
-                            {"text": "✕ Игнорировать", "callback_data": f"inbox:ignore:{inbox_id}"},
+                            {
+                                "text": "✓ В знания",
+                                "callback_data": f"inbox:promote:{inbox_id}.{external_user_id}",
+                            },
+                            {
+                                "text": "✕ Игнорировать",
+                                "callback_data": f"inbox:ignore:{inbox_id}.{external_user_id}",
+                            },
                         ]
                     ]
                 },
@@ -214,11 +220,20 @@ class ViewsMixin(BridgeShared):
                 reply_markup={
                     "inline_keyboard": [
                         [
-                            {"text": "1 оставить", "callback_data": f"conflict:keep_a:{conflict_id}"},
-                            {"text": "2 оставить", "callback_data": f"conflict:keep_b:{conflict_id}"},
+                            {
+                                "text": "1 оставить",
+                                "callback_data": f"conflict:keep_a:{conflict_id}.{external_user_id}",
+                            },
+                            {
+                                "text": "2 оставить",
+                                "callback_data": f"conflict:keep_b:{conflict_id}.{external_user_id}",
+                            },
                         ],
                         [
-                            {"text": "не конфликт", "callback_data": f"conflict:dismiss:{conflict_id}"},
+                            {
+                                "text": "не конфликт",
+                                "callback_data": f"conflict:dismiss:{conflict_id}.{external_user_id}",
+                            },
                         ],
                     ]
                 },
@@ -271,8 +286,14 @@ class ViewsMixin(BridgeShared):
                 reply_markup={
                     "inline_keyboard": [
                         [
-                            {"text": "🔗 Объединить", "callback_data": f"merge:accept:{candidate_id}"},
-                            {"text": "✕ Не дубликат", "callback_data": f"merge:reject:{candidate_id}"},
+                            {
+                                "text": "🔗 Объединить",
+                                "callback_data": f"merge:accept:{candidate_id}.{external_user_id}",
+                            },
+                            {
+                                "text": "✕ Не дубликат",
+                                "callback_data": f"merge:reject:{candidate_id}.{external_user_id}",
+                            },
                         ]
                     ]
                 },
@@ -760,13 +781,12 @@ class ViewsMixin(BridgeShared):
                 [
                     {
                         "text": "↩︎ Отменить последнюю правку",
-                        "callback_data": f"ent:undo:{entity_id}.{restorable_version}",
+                        "callback_data": (f"ent:undo:{entity_id}.{restorable_version}.{external_user_id}"),
                     }
                 ]
             )
         rows.append([{"text": "🗑 Удалить объект", "callback_data": f"ent:del:{entity_id}"}])
         del entity_type  # текущий тип показан в карточке; кнопка ведёт к выбору
-        del external_user_id  # id вызвавшего нужен только на шаге подтверждения
         return {"inline_keyboard": rows}
 
     @classmethod

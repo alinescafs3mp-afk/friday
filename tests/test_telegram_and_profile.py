@@ -226,8 +226,8 @@ async def test_telegram_bridge_exposes_modes_inbox_and_feedback_callbacks(tmp_pa
         inbox_messages = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
         keyboard = inbox_messages[-1]["reply_markup"]["inline_keyboard"][0]
         assert {button["callback_data"] for button in keyboard} == {
-            "inbox:promote:inbox_123",
-            "inbox:ignore:inbox_123",
+            "inbox:promote:inbox_123.1001",
+            "inbox:ignore:inbox_123.1001",
         }
 
         await bridge._process_update(
@@ -255,15 +255,16 @@ async def test_telegram_bridge_exposes_modes_inbox_and_feedback_callbacks(tmp_pa
                 "message_id": "msg_abc",
                 "context": {"interaction_mode": "research"},
                 "ingestion": {"inbox_id": "inbox_abc"},
-            }
+            },
+            external_user_id="4242",
         )
         callback_data = {button["callback_data"] for row in markup["inline_keyboard"] for button in row}
         assert callback_data == {
             "feedback:up:msg_abc",
             "feedback:down:msg_abc",
             "research:save:msg_abc",
-            "inbox:promote:inbox_abc",
-            "inbox:ignore:inbox_abc",
+            "inbox:promote:inbox_abc.4242",
+            "inbox:ignore:inbox_abc.4242",
         }
 
         backend_calls_before = len(backend.calls)
@@ -478,8 +479,8 @@ async def test_merges_command_lists_candidates_and_accept_rejects_via_backend(tm
         assert "Иван Петров" in card["text"] and "И. Петров" in card["text"]
         keyboard = card["reply_markup"]["inline_keyboard"][0]
         assert {button["callback_data"] for button in keyboard} == {
-            "merge:accept:res_abc123",
-            "merge:reject:res_abc123",
+            "merge:accept:res_abc123.1001",
+            "merge:reject:res_abc123.1001",
         }
 
         await bridge._process_update(
@@ -490,7 +491,7 @@ async def test_merges_command_lists_candidates_and_accept_rejects_via_backend(tm
                 "callback_query": {
                     "id": "cb-accept",
                     "from": user,
-                    "data": "merge:accept:res_abc123",
+                    "data": "merge:accept:res_abc123.1001",
                     "message": {"message_id": 99, "chat": {"id": 5001}},
                 },
             },
@@ -510,7 +511,7 @@ async def test_merges_command_lists_candidates_and_accept_rejects_via_backend(tm
                 "callback_query": {
                     "id": "cb-reject",
                     "from": user,
-                    "data": "merge:reject:res_abc123",
+                    "data": "merge:reject:res_abc123.1001",
                     "message": {"message_id": 100, "chat": {"id": 5001}},
                 },
             },
@@ -576,9 +577,9 @@ async def test_conflicts_command_lists_and_decides_via_backend(tmp_path):
             button["callback_data"] for row in card["reply_markup"]["inline_keyboard"] for button in row
         }
         assert buttons == {
-            "conflict:keep_a:kc_abc123",
-            "conflict:keep_b:kc_abc123",
-            "conflict:dismiss:kc_abc123",
+            "conflict:keep_a:kc_abc123.1001",
+            "conflict:keep_b:kc_abc123.1001",
+            "conflict:dismiss:kc_abc123.1001",
         }
 
         await bridge._process_update(
@@ -589,7 +590,7 @@ async def test_conflicts_command_lists_and_decides_via_backend(tmp_path):
                 "callback_query": {
                     "id": "cb-dismiss",
                     "from": user,
-                    "data": "conflict:dismiss:kc_abc123",
+                    "data": "conflict:dismiss:kc_abc123.1001",
                     "message": {"message_id": 99, "chat": {"id": 5001}},
                 },
             },
@@ -835,13 +836,16 @@ def test_search_quality_button_appears_only_with_citations(tmp_path):
         {
             "message_id": "msg_g",
             "citations": [{"label": "K1", "knowledge_id": "ko_1", "title": "Заметка"}],
-        }
+        },
+        external_user_id="4242",
     )
     data = {b["callback_data"] for row in grounded["inline_keyboard"] for b in row}
     assert "feedback:search_off:msg_g" in data
     assert "doc:show:ko_1" in data
 
-    ungrounded = bridge._response_reply_markup({"message_id": "msg_u", "citations": []})
+    ungrounded = bridge._response_reply_markup(
+        {"message_id": "msg_u", "citations": []}, external_user_id="4242"
+    )
     data_u = {b["callback_data"] for row in ungrounded["inline_keyboard"] for b in row}
     assert not any("search_off" in d for d in data_u)
     assert not any(item.startswith("doc:show:") for item in data_u)

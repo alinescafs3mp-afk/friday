@@ -453,7 +453,7 @@ class CommandsMixin(BridgeShared):
                 telegram,
                 chat_id,
                 self._format_response_message(response),
-                reply_markup=self._response_reply_markup(response),
+                reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
             )
             await self._deliver_voice_reply(telegram, chat_id, response)
             await self._deliver_generated_files(telegram, chat_id, response)
@@ -1219,7 +1219,7 @@ class CommandsMixin(BridgeShared):
                 telegram,
                 chat_id,
                 self._format_response_message(cached_response),
-                reply_markup=self._response_reply_markup(cached_response),
+                reply_markup=self._response_reply_markup(cached_response, external_user_id=external_user_id),
             )
             await self._deliver_voice_reply(telegram, chat_id, cached_response)
             await self._deliver_generated_files(telegram, chat_id, cached_response)
@@ -1297,7 +1297,7 @@ class CommandsMixin(BridgeShared):
             telegram,
             chat_id,
             self._format_response_message(response),
-            reply_markup=self._response_reply_markup(response),
+            reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
         )
         await self._deliver_voice_reply(telegram, chat_id, response)
         await self._deliver_generated_files(telegram, chat_id, response)
