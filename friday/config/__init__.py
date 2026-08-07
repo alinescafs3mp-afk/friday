@@ -541,6 +541,19 @@ class FridaySettings:
     #: Личная переписка общей НЕ становится: список разговоров остаётся своим у
     #: каждого. Общими становятся документы и знания — то, о чём просьба.
     shared_archive: bool
+    #: «Я знаю, что открытая регистрация выдаёт всё это, и хочу именно так».
+    #:
+    #: Открытая регистрация вместе с широким пресетом или общим архивом отдаёт
+    #: архив человеку, которого владелец не называл по идентификатору. Без этой
+    #: подписи такое сочетание — ошибка конфигурации, то есть отказ подняться:
+    #: попасть в него случайно, переключив один флаг, нельзя. С подписью оно
+    #: работает и остаётся ГРОМКИМ — предупреждение никуда не девается, оно видно
+    #: в `jericho doctor` и в панели.
+    #:
+    #: Почему подпись, а не запрет: живой экземпляр владельца работает в этом
+    #: режиме с 2026-08-02 по его прямой просьбе, и валидатор, роняющий чужую
+    #: работающую систему из-за несогласия с её хозяином, не защита, а поломка.
+    open_registration_grants_full_access: bool
 
     autonomy_enabled: bool
     operator_full_autonomy: bool
@@ -982,6 +995,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         telegram_open_registration=_bool_env("FRIDAY_TELEGRAM_OPEN_REGISTRATION", False),
         new_account_preset=env("FRIDAY_NEW_ACCOUNT_PRESET", "").strip(),
         shared_archive=_bool_env("FRIDAY_SHARED_ARCHIVE", False),
+        open_registration_grants_full_access=_bool_env("FRIDAY_OPEN_REGISTRATION_GRANTS_FULL_ACCESS", False),
         autonomy_enabled=_bool_env("FRIDAY_AUTONOMY_ENABLED", True),
         operator_full_autonomy=_bool_env("FRIDAY_OPERATOR_FULL_AUTONOMY", False),
         cognition_enabled=_bool_env("FRIDAY_COGNITION_ENABLED", True),
@@ -1278,22 +1292,33 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
     #
     # Текст по-русски по той же причине, что у предупреждения про TLS ниже: это
     # решение владельца о доступе, и оно попадает в его панель как есть.
+    #
+    # `FRIDAY_OPEN_REGISTRATION_GRANTS_FULL_ACCESS=1` — подпись владельца под этим
+    # сочетанием. С ней оно перестаёт быть ошибкой и остаётся ПРЕДУПРЕЖДЕНИЕМ: то
+    # есть случайно, переключением одного флага, в него не попасть, а сознательно
+    # — можно, и система при этом не молчит. Валидатор, роняющий чужую
+    # работающую систему из-за несогласия с её хозяином, — не защита, а поломка;
+    # это выяснилось не в рассуждении, а на живом экземпляре.
+    acknowledged = bool(settings.open_registration_grants_full_access)
+    speak = warnings.append if acknowledged else errors.append
     new_preset = str(getattr(settings, "new_account_preset", "") or "").strip()
     if settings.telegram_open_registration and new_preset.casefold() in {"owner", "admin"}:
-        errors.append(
+        speak(
             "FRIDAY_TELEGRAM_OPEN_REGISTRATION=1 вместе с "
             f"FRIDAY_NEW_ACCOUNT_PRESET={new_preset} означает, что ЛЮБОЙ написавший "
             "боту незнакомый человек получает административные права: чужие "
             "документы, ФИО и суммы, чистку базы. Выберите одно — либо узкий пресет "
             "для самозаписи, либо список разрешённых чатов вместо открытой регистрации"
+            + (" (сочетание подписано FRIDAY_OPEN_REGISTRATION_GRANTS_FULL_ACCESS=1)" if acknowledged else "")
         )
     if settings.telegram_open_registration and settings.shared_archive:
-        errors.append(
+        speak(
             "FRIDAY_TELEGRAM_OPEN_REGISTRATION=1 вместе с FRIDAY_SHARED_ARCHIVE=1 "
             "открывает весь общий архив любому написавшему боту: общий архив кладёт "
             "всех в одного арендатора, а право читать знания есть даже у самого "
             "узкого пресета. Впускайте по списку разрешённых чатов или выключите "
             "общий архив"
+            + (" (сочетание подписано FRIDAY_OPEN_REGISTRATION_GRANTS_FULL_ACCESS=1)" if acknowledged else "")
         )
     elif (
         settings.telegram_open_registration and new_preset and new_preset.casefold() not in {"owner", "admin"}

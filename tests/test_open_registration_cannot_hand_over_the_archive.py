@@ -111,3 +111,47 @@ def test_another_preset_is_named_out_loud_but_not_refused(settings):
     )
     assert not [item for item in _errors(other) if "NEW_ACCOUNT_PRESET" in item], _errors(other)
     assert [item for item in _warnings(other) if "FRIDAY_NEW_ACCOUNT_PRESET" in item], _warnings(other)
+
+
+def test_the_owner_can_sign_under_the_combination(settings):
+    """Подпись владельца снимает отказ — но не молчание.
+
+    Живой экземпляр работает в этом режиме с 2026-08-02 по прямой просьбе
+    владельца. Валидатор, роняющий чужую работающую систему из-за несогласия с её
+    хозяином, — не защита, а поломка; это выяснилось не в рассуждении, а на живом
+    экземпляре, который лёг от первой же редакции этой проверки.
+    """
+    signed = replace(
+        settings,
+        telegram_open_registration=True,
+        new_account_preset="owner",
+        shared_archive=True,
+        open_registration_grants_full_access=True,
+    )
+    assert not _errors(signed), f"подписанное сочетание всё ещё роняет запуск: {_errors(signed)}"
+    spoken = [item for item in _warnings(signed) if "OPEN_REGISTRATION" in item]
+    assert len(spoken) == 2, f"подписанное сочетание замолчало вместо того, чтобы предупредить: {spoken}"
+
+
+def test_the_signature_alone_grants_nothing(settings):
+    """Подпись без самого сочетания не должна ничего говорить."""
+    quiet = replace(
+        settings,
+        telegram_open_registration=False,
+        new_account_preset="owner",
+        shared_archive=True,
+        open_registration_grants_full_access=True,
+    )
+    assert not [item for item in _warnings(quiet) if "OPEN_REGISTRATION" in item], _warnings(quiet)
+
+
+def test_without_the_signature_it_is_still_a_refusal(settings):
+    """Главное свойство: случайным переключением одного флага сюда не попасть."""
+    unsigned = replace(
+        settings,
+        telegram_open_registration=True,
+        new_account_preset="owner",
+        shared_archive=True,
+        open_registration_grants_full_access=False,
+    )
+    assert len([item for item in _errors(unsigned) if "OPEN_REGISTRATION" in item]) == 2
