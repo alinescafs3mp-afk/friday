@@ -367,6 +367,7 @@ class BridgeShared:
     _document_more_markup: Callable[..., Any]
     _reply_quote: Callable[..., Any]
     _album_caption: Callable[..., Any]
+    _group_address: Callable[..., Any]
     _album_captions: dict[str, str]
     _send_message_returning_id: Callable[..., Any]
     _offer_access_to_owner: Callable[..., Any]
@@ -380,6 +381,7 @@ class BridgeShared:
     _ENTITY_TYPE_CHOICES: Any
     _entity_type_markup: Callable[..., Any]
     _inbox: Any
+    _bot_username: str
     _may_message_chat: Callable[..., Any]
     _prepare_document: Callable[..., Any]
     _process_callback_query: Callable[..., Any]

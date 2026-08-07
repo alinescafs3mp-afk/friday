@@ -767,7 +767,8 @@ class DocumentExtractor:
                 except json.JSONDecodeError:
                     metadata["json_valid"] = False
         elif ext in {".csv", ".tsv"}:
-            delimiter = "\t" if ext == ".tsv" else ","
+            delimiter = self._table_delimiter(text, default="\t" if ext == ".tsv" else ",")
+            metadata["delimiter"] = delimiter
             try:
                 rendered_rows: list[str] = []
                 rendered_chars = 0
@@ -794,6 +795,47 @@ class DocumentExtractor:
         elif ext == ".xml":
             text = self._strip_xml_tags(text)
         return DocumentResult(text, metadata)
+
+    @staticmethod
+    def _table_delimiter(text: str, *, default: str) -> str:
+        """Каким знаком разделены колонки — по самому тексту, а не по расширению.
+
+        Русский Excel сохраняет CSV с ТОЧКОЙ С ЗАПЯТОЙ: это его локальное
+        умолчание, и такой файл — обычный рабочий документ, а не экзотика. Пока
+        разделитель был зашит запятой, каждая строка такого файла становилась
+        ОДНОЙ ячейкой: таблица уходила модели плоским текстом, а вид
+        «ячейка | ячейка», на который рассчитан и точный путь по таблицам, не
+        появлялся вовсе.
+
+        Выбор — не `csv.Sniffer`: тот эвристичен, бросает исключение на коротких
+        файлах и на однострочных заголовках, и объяснить его выбор человеку
+        нечем. Здесь правило простое и проверяемое: побеждает знак, который даёт
+        одинаковое число колонок (больше одной) в наибольшем числе первых строк.
+        Ничья — за умолчанием расширения.
+        """
+        lines = [line for line in text.splitlines()[:20] if line.strip()]
+        if not lines:
+            return default
+        best = default
+        best_score = 0
+        for candidate in (",", ";", "\t", "|"):
+            counts = [line.count(candidate) for line in lines]
+            positive = [value for value in counts if value > 0]
+            if not positive:
+                continue
+            # Сколько колонок — решает САМОЕ ЧАСТОЕ значение, а не первая строка.
+            # По первой строке считать нельзя: над шапкой часто стоит название
+            # отчёта или пустая строка, и один такой заголовок уводил выбор.
+            columns = max(set(positive), key=positive.count)
+            agreeing = sum(1 for value in counts if value == columns)
+            # Две согласные строки — минимум: одна строка согласна сама с собой
+            # всегда, и это не признак таблицы, а признак одной запятой в прозе.
+            if agreeing < 2:
+                continue
+            score = agreeing * (columns + 1)
+            if score > best_score:
+                best_score, best = score, candidate
+        return best
 
     def _extract_html(self, content: bytes) -> DocumentResult:
         source, source_truncated = self._bounded_text_source(content, structured=True)

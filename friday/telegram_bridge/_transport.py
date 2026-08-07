@@ -109,6 +109,10 @@ class TransportMixin(BridgeShared):
         # Last known failing/healthy state per loop, for transition detection.
         self._loop_failing: dict[str, bool] = {}
         self._warned_no_signer = False
+        # Своё имя в Telegram: узнаётся при подъёме через `getMe`. Пустое —
+        # значит обращения по `@имени` мост не узнаёт и в группе отвечает
+        # только на команды и на ответы своим сообщениям.
+        self._bot_username = ""
         # Сторож backend: мост — первый, кто узнаёт о его смерти, и единственный,
         # кто может об этом сказать (sentinel живёт ВНУТРИ backend и молчит с ним).
         self._backend_down_since = 0.0
@@ -166,6 +170,7 @@ class TransportMixin(BridgeShared):
                     self._offset,
                     " via configured proxy" if self.config.telegram_proxy else "",
                 )
+                await self._learn_own_username(telegram)
                 await self._register_commands(telegram)
                 # Inbound polling and outbound push run concurrently; a crash in
                 # one loop must not take down the other, so each supervises itself.
@@ -269,6 +274,30 @@ class TransportMixin(BridgeShared):
             )
         except Exception as exc:
             LOGGER.debug("Could not journal bridge %s transition (%s)", loop_name, type(exc).__name__)
+
+    async def _learn_own_username(self, telegram: httpx.AsyncClient) -> None:
+        """Своё имя в Telegram — чтобы узнавать обращение к себе в группе.
+
+        Имя спрашивается У TELEGRAM, а не берётся из настройки: настройка была бы
+        четвёртым местом, где живёт одна и та же правда (токен, id бота внутри
+        токена, меню команд), и разошлась бы при первом же переименовании бота.
+
+        Best-effort: без имени мост работает как раньше — в группе он тогда не
+        узнаёт обращения по `@имени` и отвечает только на команды и ответы на свои
+        сообщения. Молчаливого «отвечаю всем подряд» при этом не возникает.
+        """
+        try:
+            response = await telegram.post(f"{self._api_url}/getMe", json={})
+            response.raise_for_status()
+            body = response.json()
+            result = body.get("result") if isinstance(body, dict) else None
+            username = str((result or {}).get("username") or "").strip()
+        except Exception as exc:
+            LOGGER.warning("Telegram getMe failed (non-fatal, %s)", type(exc).__name__)
+            return
+        if username:
+            self._bot_username = username
+            LOGGER.info("Telegram bot username: @%s", username)
 
     async def _register_commands(self, telegram: httpx.AsyncClient) -> None:
         """Register the command menu once so Telegram shows '/' autocomplete.

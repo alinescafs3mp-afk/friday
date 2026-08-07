@@ -7,6 +7,8 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import re
+
 from friday.telegram_bridge._base import (
     _SINGLE_MEDIA_FIELDS,
     BOT_API_DOWNLOAD_LIMIT_BYTES,
@@ -144,6 +146,52 @@ class MediaMixin(BridgeShared):
         if isinstance(duration, int) and duration > 0:
             prepared["duration"] = duration
         return prepared
+
+    def _group_address(
+        self,
+        message: dict[str, Any],
+        chat: dict[str, Any],
+        text: str,
+    ) -> tuple[bool, str]:
+        """Обращаются ли к Пятнице в этом сообщении — и текст без самого обращения.
+
+        В личной переписке обращением является само сообщение: там `True` всегда.
+        В группе — только три вещи: упоминание по `@имени`, ответ на сообщение
+        самой Пятницы и команда. Всё остальное — разговор людей между собой, и
+        вмешиваться в него нельзя ни ответом, ни записью в архив.
+
+        Обращение УБИРАЕТСЯ из текста: «@friday_bot что по смете» — это вопрос
+        «что по смете», а не вопрос про бота. Оставленное упоминание попадало бы и
+        в классификатор, и в поиск, и в сохранённую запись.
+
+        Без известного имени (`getMe` не ответил) упоминание не распознаётся —
+        остаются команды и ответы. Это ограничение названо, а не спрятано: тихо
+        отвечать всем подряд хуже, чем честно отвечать реже.
+        """
+        # Требование обращения включается ТОЛЬКО там, где Telegram прямо сказал
+        # «группа». Обратное правило («молчать везде, кроме явно личного») было бы
+        # закрытым умолчанием — но цена ошибки здесь несимметрична в другую
+        # сторону: лишний ответ это шум, а лишнее молчание это сломанный главный
+        # интерфейс продукта. Обновление без вида чата ведёт себя как прежде.
+        if str(chat.get("type") or "") not in {"group", "supergroup"}:
+            return True, text
+        if text.startswith("/"):
+            return True, text
+        reply = message.get("reply_to_message")
+        if isinstance(reply, dict):
+            author = reply.get("from")
+            if isinstance(author, dict) and bool(author.get("is_bot")):
+                return True, text
+        username = str(getattr(self, "_bot_username", "") or "")
+        if not username:
+            return False, text
+        mention = f"@{username}"
+        if mention.casefold() not in text.casefold():
+            return False, text
+        # Вырезается ровно упоминание, в любом регистре и в любом месте строки:
+        # обратиться могут и в начале, и в конце («что по смете, @friday_bot»).
+        cleaned = re.sub(re.escape(mention), " ", text, flags=re.IGNORECASE)
+        return True, " ".join(cleaned.split())
 
     def _album_caption(self, message: dict[str, Any]) -> str:
         """Подпись альбома, отданная ВСЕМ его частям.
