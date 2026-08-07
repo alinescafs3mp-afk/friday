@@ -1183,6 +1183,13 @@ class CommandsMixin(BridgeShared):
             payload["forward"] = forward
         if document:
             payload["document"] = document
+        # На что человек ответил репликой. Прежде `reply_to_message` не читался
+        # вовсе: человек отвечал на конкретное сообщение — своё или Пятницы, — и
+        # связь терялась. Отдельным полем, а не приклеенным к тексту: текст хода
+        # идёт в архив как слова человека и в классификатор графа.
+        quoted = self._reply_quote(message)
+        if quoted:
+            payload["reply_to"] = quoted
         typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
         try:
             response = await self._backend_json(

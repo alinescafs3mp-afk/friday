@@ -2273,6 +2273,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 synthetic_document_notice=synthetic_document_notice,
                 mode=requested_mode,
                 answer_with_voice=spoken_question,
+                # На что человек показал репликой. Едет ОТДЕЛЬНЫМ полем до самой
+                # сборки контекста: приклеенная к тексту хода цитата попала бы и в
+                # архив как слова человека, и в классификатор, решающий про граф.
+                reply_to=str(body.get("reply_to") or "").strip() or None,
             )
             if voice_transcript_truncated:
                 notice = (

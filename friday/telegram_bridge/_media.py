@@ -141,6 +141,21 @@ class MediaMixin(BridgeShared):
         return prepared
 
     @staticmethod
+    def _reply_quote(message: dict[str, Any]) -> str:
+        """Текст сообщения, НА КОТОРОЕ человек ответил репликой.
+
+        Пустая строка означает «ответа ни на что не было» — обычное сообщение.
+        Берётся и `text`, и `caption`: ответить можно и на картинку с подписью.
+        Длина ограничена здесь же, у источника: отвечают и на документ в тысячу
+        строк, а смысл только в том, НА ЧТО человек показал.
+        """
+        replied = message.get("reply_to_message")
+        if not isinstance(replied, dict):
+            return ""
+        text = str(replied.get("text") or replied.get("caption") or "").strip()
+        return text[:1000]
+
+    @staticmethod
     def _extract_forward(message: dict[str, Any]) -> dict[str, Any]:
         """Capture forwarded-message provenance for the Raw Object, if present."""
         forward: dict[str, Any] = {}

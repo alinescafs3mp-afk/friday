@@ -293,6 +293,8 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
+# 70 -> 71 в 0.175.0: `_reply_quote` — текст сообщения, на которое человек
+# ответил репликой; до этого `reply_to_message` не читался вовсе.
 # 69 -> 70 в 0.174.0: `_document_more_markup` — кнопка «Дальше» под длинным
 # документом, чтобы источник дочитывался в чате, а не в админке.
 # 67 -> 69 в 0.173.0: отправка одного куска выделилась в `_post_message_chunk`
@@ -301,7 +303,7 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 70
+EXPECTED_BRIDGE_COUNT = 71
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -336,6 +338,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_post_message_chunk": "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str') -> 'httpx.Response'",
     "_process_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None') -> 'None'",
     "_retry_after_sec": "(response: 'httpx.Response') -> 'float'",
+    "_reply_quote": "(message: 'dict[str, Any]') -> 'str'",
     "_run_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', row: 'dict[str, Any]') -> 'None'",
     "_read_command_layout": "(text: 'str') -> 'str'",
     "_register_commands": "(self, telegram: 'httpx.AsyncClient') -> 'None'",
