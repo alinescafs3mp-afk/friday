@@ -71,9 +71,27 @@ def _file_fate_line(file_ingestion: Any) -> str:
         if beyond_the_pages and total_pages
         else ""
     )
+    # Скан без текстового слоя читается ГЛАЗАМИ модели, и в запрос уходит лишь
+    # несколько страниц: распознавание стоит места. Цена честная, молчание о ней —
+    # нет. Скан на сорок страниц читался по четырём картинкам, а человек получал
+    # документ в полной уверенности, что прочитано всё.
+    # Поля ПЛОСКИЕ, а не вложенный словарь: публичная проекция
+    # (`public_chat_ingestion`) пропускает наружу только перечисленные имена, и
+    # вложенный `vision` до моста не доезжает вовсе. Ровно на этом уже обжигались
+    # с `parse_pages_truncated`: правка доехала до базы и не доехала до человека.
+    vision_total = int(extraction.get("vision_pages_total") or 0)
+    vision_read = int(extraction.get("vision_pages_read") or 0)
+    vision_line = (
+        f" Текста в файле нет — распознавала по картинкам: посмотрено {vision_read} "
+        f"страниц из {vision_total}, про остальные я ничего не знаю."
+        if vision_total > vision_read > 0
+        else ""
+    )
     if file_ingestion.get("promoted"):
         line = "✅ Файл стал знанием — можно спрашивать."
-        if beyond_the_pages:
+        if vision_line:
+            line += vision_line
+        elif beyond_the_pages:
             line += pages_line
         elif over_the_cap:
             line += (
@@ -87,7 +105,9 @@ def _file_fate_line(file_ingestion: Any) -> str:
         return line
     if file_ingestion.get("queued_for_review") or file_ingestion.get("inbox_id"):
         line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
-        if beyond_the_pages:
+        if vision_line:
+            line += vision_line
+        elif beyond_the_pages:
             line += pages_line
         elif text_missing:
             line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."

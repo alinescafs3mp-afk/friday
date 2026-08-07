@@ -496,6 +496,50 @@ class DocumentExtractor:
                 break
         return assets
 
+    def visual_source_pages(self, content: bytes, filename: str, mime_type: str = "") -> int:
+        """Сколько страниц (или вложенных картинок) есть у документа ВСЕГО.
+
+        `extract_visual_assets` берёт из них лишь несколько — распознавание идёт
+        через модель, и каждая страница стоит места в запросе. Само по себе это
+        честная цена; молчание о ней — нет: скан на сорок страниц читался по
+        четырём картинкам, и человек получал ответ, уверенный, что прочитано всё.
+
+        Число берётся отдельным дешёвым проходом (у PDF это оглавление, у офисных
+        — список членов архива), а не выводится из числа взятых картинок: у одной
+        страницы их может быть несколько, и «взято 4» не значит «страниц 4».
+        """
+        if not isinstance(content, bytes) or len(content) > self.max_input_bytes:
+            return 0
+        safe_name = Path(str(filename or "document")).name
+        ext = self._compound_extension(safe_name.casefold())
+        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
+        if ext in _IMAGE_EXTENSIONS or detected_mime.startswith("image/"):
+            return 1
+        if ext == ".pdf" or detected_mime == "application/pdf":
+            with suppress(Exception):
+                from pypdf import PdfReader
+
+                reader = PdfReader(io.BytesIO(content), strict=False)
+                if reader.is_encrypted:
+                    with suppress(Exception):
+                        if reader.decrypt("") == 0:
+                            return 0
+                return len(reader.pages)
+            return 0
+        if ext in {".docx", ".pptx", ".xlsx", ".odt"}:
+            with suppress(Exception), zipfile.ZipFile(io.BytesIO(content)) as archive:
+                return sum(
+                    1
+                    for info in archive.infolist()
+                    if not info.is_dir()
+                    and info.filename.casefold().startswith(
+                        ("word/media/", "ppt/media/", "xl/media/", "pictures/")
+                    )
+                    and Path(info.filename).suffix.casefold() in _IMAGE_EXTENSIONS
+                )
+            return 0
+        return 0
+
     @staticmethod
     def _normalize_visual_asset(
         content: bytes,

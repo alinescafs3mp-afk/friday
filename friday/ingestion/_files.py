@@ -130,6 +130,18 @@ class FilesMixin(PipelineShared):
         )
         if not assets:
             return None
+        # Сколько страниц у документа ВСЕГО против того, сколько ушло в модель.
+        # Считается отдельным дешёвым проходом, а не выводится из числа картинок:
+        # у одной страницы их может быть несколько.
+        pages_total = await asyncio.to_thread(
+            self._doc_extractor.visual_source_pages,
+            file_content,
+            filename,
+            mime_type,
+        )
+        # Источник у актива вида `pdf-page-7-image-1` — до `-image-` стоит страница.
+        # Строку эту собираем мы сами, здесь же и разбираем.
+        pages_read = len({asset.source.split("-image-")[0] for asset in assets})
         asset_catalog = {
             f"A{index}": {"asset_id": f"A{index}", **asset.to_dict()}
             for index, asset in enumerate(assets, start=1)
@@ -199,6 +211,8 @@ class FilesMixin(PipelineShared):
                 "success": False,
                 "error": f"vision_request_failed:{type(exc).__name__}",
                 "confidence": 0.0,
+                "pages_total": pages_total,
+                "pages_read": pages_read,
                 "assets": list(asset_catalog.values()),
                 "text": "",
                 "title": "",
@@ -292,6 +306,8 @@ class FilesMixin(PipelineShared):
             "warnings": warnings,
             "grounded_evidence_count": len(evidence),
             "asset_coverage": round(len(used_assets) / len(assets), 3) if assets else 0.0,
+            "pages_total": pages_total,
+            "pages_read": pages_read,
             "assets": list(asset_catalog.values()),
             "model": self.settings.llm_model,
             "advisory_only": True,
@@ -980,6 +996,11 @@ class FilesMixin(PipelineShared):
                         # где обрыв и был.
                         "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
                         "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
+                        # Скан без текстового слоя читается глазами модели, и в
+                        # запрос уходит лишь несколько страниц. Цена честная,
+                        # молчание о ней — нет.
+                        "vision_pages_total": int((vision or {}).get("pages_total") or 0),
+                        "vision_pages_read": int((vision or {}).get("pages_read") or 0),
                         "vision": {
                             key: value
                             for key, value in (vision or {}).items()

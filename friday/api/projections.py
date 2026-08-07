@@ -84,7 +84,13 @@ _EXTRACTION_BOOL_FIELDS = (
     "parse_deadline_reached",
     "parse_pages_truncated",
 )
-_EXTRACTION_COUNT_FIELDS = ("chars", "parse_pages_read", "parse_total_pages")
+_EXTRACTION_COUNT_FIELDS = (
+    "chars",
+    "parse_pages_read",
+    "parse_total_pages",
+    "vision_pages_read",
+    "vision_pages_total",
+)
 
 _PUBLIC_FILE_ROW_FIELDS = ("id", "received_at", "deleted_at")
 _PUBLIC_MEDIA_KINDS = frozenset({"animation", "audio", "document", "video", "video_note", "voice"})
