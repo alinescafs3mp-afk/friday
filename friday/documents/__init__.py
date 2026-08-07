@@ -95,6 +95,14 @@ _TEXT_EXTENSIONS = {
     ".rst",
 }
 _HTML_EXTENSIONS = {".html", ".htm"}
+#: Семья OpenDocument: текст лежит в `content.xml` у всех трёх, разборщик один.
+#: Принят был только `.odt` — не решение, а недосмотр.
+_OPENDOCUMENT_EXTENSIONS = {".odt": "odt", ".ods": "ods", ".odp": "odp"}
+_OPENDOCUMENT_MIME_TYPES = {
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+}
 _OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx", ".odt", ".rtf"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 _ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst"}
@@ -167,6 +175,17 @@ def _office_document_date(content: bytes) -> str | None:
 
 # Форматы, у которых внутри zip лежит docProps/core.xml.
 _OFFICE_DATE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+
+
+def _email_iso_date(raw: str) -> str:
+    """Дата письма в виде ISO — из заголовка `Date`, который пишет почтовик."""
+    if not raw.strip():
+        return ""
+    with suppress(Exception):
+        from email.utils import parsedate_to_datetime
+
+        return parsedate_to_datetime(raw).date().isoformat()
+    return ""
 
 
 def _pdf_document_date_from_bytes(content: bytes) -> str | None:
@@ -372,8 +391,20 @@ class DocumentExtractor:
                 result = self._extract_xlsx(content)
             elif ext == ".pptx":
                 result = self._extract_pptx(content)
-            elif ext == ".odt":
-                result = self._extract_xml_zip_text(content, "content.xml", "odt")
+            elif ext in _OPENDOCUMENT_EXTENSIONS or detected_mime in _OPENDOCUMENT_MIME_TYPES:
+                # Таблица и презентация OpenDocument держат текст ровно там же,
+                # где документ, — в `content.xml`. Принят был только `.odt`, и
+                # это не решение, а недосмотр: у семьи форматов один разборщик.
+                result = self._extract_xml_zip_text(
+                    content, "content.xml", _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
+                )
+            elif ext == ".epub" or detected_mime == "application/epub+zip":
+                result = self._extract_epub(content)
+            elif ext in {".eml", ".mht", ".mhtml"} or detected_mime in {
+                "message/rfc822",
+                "multipart/related",
+            }:
+                result = self._extract_email(content)
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
             elif ext in _ARCHIVE_EXTENSIONS or ext.startswith(".tar."):
@@ -780,6 +811,19 @@ class DocumentExtractor:
             metadata,
         )
 
+    @staticmethod
+    def _html_to_text(source: str) -> str:
+        """Видимый текст из размеченного куска — тем же способом, что у страницы.
+
+        Отдельная функция, а не повторное `_extract_html`: у письма и у главы книги
+        нет ни заголовка страницы, ни `<main>`, и разметка приходит уже строкой.
+        """
+        soup = BeautifulSoup(source, "lxml")
+        for tag in soup(["script", "style", "svg", "noscript"]):
+            tag.decompose()
+        lines = [" ".join(line.split()) for line in soup.get_text("\n").splitlines()]
+        return "\n".join(line for line in lines if line)
+
     def _validate_zip(
         self,
         archive: zipfile.ZipFile,
@@ -981,6 +1025,103 @@ class DocumentExtractor:
             return DocumentResult(" ".join(source.split()), metadata)
         metadata["parser"] = "striprtf"
         return DocumentResult(rtf_to_text(source), metadata)
+
+    def _extract_email(self, content: bytes) -> DocumentResult:
+        """Письмо целиком: заголовки, которые человек читает, и тело.
+
+        Почта разбиралась только органом-импортёром почтового ящика. Файл `.eml`,
+        присланный в чат или лежащий в папке, отвергался как «формат не
+        поддерживается» — при том что это обычный текст с заголовками, и стандартная
+        библиотека разбирает его без единой зависимости.
+
+        Берётся `text/plain`-часть, а при её отсутствии — `text/html`, очищенный тем
+        же способом, что и обычная веб-страница. Вложения НЕ разворачиваются: у них
+        свой путь через архивы, и разворачивать их здесь значило бы обойти
+        собственные потолки этого пути.
+        """
+        from email import policy
+        from email.parser import BytesParser
+
+        source, source_truncated = content[:_MAX_TEXT_PARSE_BYTES], len(content) > _MAX_TEXT_PARSE_BYTES
+        message = BytesParser(policy=policy.default).parsebytes(source)
+        metadata: dict[str, Any] = {"format": "eml"}
+        if source_truncated:
+            metadata["source_truncated_for_parse"] = True
+        lines: list[str] = []
+        for header, label in (
+            ("From", "От"),
+            ("To", "Кому"),
+            ("Cc", "Копия"),
+            ("Date", "Дата"),
+            ("Subject", "Тема"),
+        ):
+            value = str(message.get(header) or "").strip()
+            if value:
+                lines.append(f"{label}: {value}")
+        own_date = _plausible_document_date(_email_iso_date(str(message.get("Date") or "")))
+        if own_date:
+            # Дата письма — его собственная дата, а не день, когда файл попал в
+            # архив: то же правило, что у docx и pdf.
+            metadata["document_date"] = own_date
+        attachments = [
+            str(part.get_filename() or "").strip()
+            for part in message.walk()
+            if part.get_content_disposition() == "attachment"
+        ]
+        attachments = [name for name in attachments if name]
+        if attachments:
+            # Названы вслух: их содержимое сюда не разворачивается, и человек
+            # должен знать, что в письме было что-то ещё.
+            metadata["attachment_names"] = attachments[:20]
+            lines.append("Вложения: " + ", ".join(attachments[:20]))
+        body = message.get_body(preferencelist=("plain", "html"))
+        text = ""
+        if body is not None:
+            payload = body.get_content()
+            text = str(payload)
+            if body.get_content_type() == "text/html":
+                text = self._html_to_text(text)
+                metadata["parser"] = "html-body"
+        if lines:
+            text = "\n".join(lines) + ("\n\n" + text if text.strip() else "")
+        return DocumentResult(text.strip(), metadata)
+
+    def _extract_epub(self, content: bytes) -> DocumentResult:
+        """Книга: главы лежат отдельными XHTML внутри обычного zip.
+
+        Порядок глав берётся из имён членов архива, а не из `content.opf`: чтение
+        манифеста добавило бы разбор ещё одного XML ради порядка, который у
+        подавляющего большинства книг и так задан именами. Расхождение возможно и
+        названо здесь, а не спрятано.
+        """
+        chapters: list[str] = []
+        skipped = 0
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = self._validate_office_zip(archive)
+            candidates = sorted(
+                (
+                    info
+                    for info in members
+                    if Path(info.filename).suffix.casefold() in {".xhtml", ".html", ".htm"}
+                ),
+                key=lambda info: info.filename,
+            )
+            budget = min(self.max_archive_uncompressed_bytes, _MAX_OFFICE_MEMBER_BYTES)
+            for info in candidates:
+                if info.file_size > budget:
+                    skipped += 1
+                    continue
+                budget -= info.file_size
+                with archive.open(info) as stream:
+                    data, _ = self._read_stream_preview(stream, _MAX_STRUCTURED_PARSE_BYTES)
+                chapter = self._html_to_text(self._decode(data))
+                if chapter.strip():
+                    chapters.append(chapter)
+        metadata: dict[str, Any] = {"format": "epub", "chapters_read": len(chapters)}
+        if skipped:
+            # Молчаливая потеря главы читалась бы как «в книге этого нет».
+            metadata["chapters_skipped"] = skipped
+        return DocumentResult("\n\n".join(chapters), metadata)
 
     def _extract_xml_zip_text(self, content: bytes, member_name: str, format_name: str) -> DocumentResult:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
