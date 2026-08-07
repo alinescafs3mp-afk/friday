@@ -182,7 +182,53 @@ class CallbacksMixin(BridgeShared):
                     str(chat_id),
                 )
                 await self._answer_callback(telegram, callback_id, "Открываю")
-                await self._send_message(telegram, chat_id, self._format_full_document(document))
+                # Кнопка удаления едет вместе с документом. До этого запись,
+                # созданную из чата, нельзя было ни исправить, ни удалить оттуда
+                # же: `PATCH`/`DELETE` в `api/knowledge.py` есть с самого начала,
+                # а мост звал только `GET`. Человек, сказавший «запомни» и тут же
+                # заметивший ошибку, шёл в админку — при том что чат основной
+                # интерфейс. Удаление мягкое и обратимое, но подтверждение всё
+                # равно спрашивается: одно нажатие мимо не должно уносить запись.
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    self._format_full_document(document),
+                    reply_markup={
+                        "inline_keyboard": [
+                            [{"text": "Удалить запись", "callback_data": f"know:del:{target_id}"}]
+                        ]
+                    },
+                )
+            elif family == "know" and action in {"del", "delok"}:
+                if action == "del":
+                    await self._answer_callback(telegram, callback_id, "Точно удалить?")
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Удалить эту запись из знаний? Она станет невидимой для поиска и "
+                        "ответов; восстановить можно в админке до истечения срока хранения.",
+                        reply_markup={
+                            "inline_keyboard": [
+                                [{"text": "Да, удалить", "callback_data": f"know:delok:{target_id}"}]
+                            ]
+                        },
+                    )
+                else:
+                    await self._backend_json(
+                        backend,
+                        "DELETE",
+                        f"/api/knowledge/{target_id}",
+                        None,
+                        external_user_id,
+                        str(chat_id),
+                    )
+                    await self._answer_callback(telegram, callback_id, "Запись удалена")
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Запись удалена из знаний. Поиск и ответы её больше не увидят.",
+                    )
+                    clear_markup = True
             elif family == "ent" and action == "undo":
                 # `target_id` — «{id сущности}.{версия}». Версия едет в кнопке, а не
                 # вычисляется здесь заново: между показом карточки и нажатием могла

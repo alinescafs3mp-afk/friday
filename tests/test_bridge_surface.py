@@ -218,6 +218,10 @@ EXPECTED_CALLBACK_NAMESPACES = {
     "ent",
     "feedback",
     "inbox",
+    # `know` заведён в 0.172.0: удаление записи знаний прямо из чата. Список
+    # существует затем, чтобы кнопка не могла появиться без ветки-обработчика —
+    # такая кнопка рисуется исправно и молча ничего не делает.
+    "know",
     "merge",
     "relation",
     "mission",
@@ -289,7 +293,11 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
-EXPECTED_BRIDGE_COUNT = 64
+# 64 -> 67 в 0.172.0: обход очереди перестал быть блокирующим и разделился на
+# раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
+# полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
+# моста нельзя было расширить молча.
+EXPECTED_BRIDGE_COUNT = 67
 EXPECTED_BRIDGE: dict[str, str] = {
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
@@ -298,6 +306,8 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_citation_open_buttons": "(citations: 'Any') -> 'list[dict[str, str]]'",
     "_clear_inline_markup": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int') -> 'None'",
     "_describe_merge_entity": "(entity: 'dict[str, Any]') -> 'str'",
+    "_await_inflight_updates": "(self) -> 'None'",
+    "_dispatch_ready_updates": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'int'",
     "_drain_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_drain_outbound": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_extract_forward": "(message: 'dict[str, Any]') -> 'dict[str, Any]'",
@@ -319,6 +329,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_prepare_document": "(self, telegram: 'httpx.AsyncClient', message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
     "_process_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None') -> 'None'",
+    "_run_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', row: 'dict[str, Any]') -> 'None'",
     "_read_command_layout": "(text: 'str') -> 'str'",
     "_register_commands": "(self, telegram: 'httpx.AsyncClient') -> 'None'",
     "_response_reply_markup": "(response: 'dict[str, Any]') -> 'dict[str, Any] | None'",

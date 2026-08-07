@@ -45,6 +45,15 @@ ALLOWED_UPDATE_KINDS = ("message", "edited_message", "callback_query")
 BACKOFF_MAX = 60.0
 MAX_ATTEMPTS = 288
 BATCH_SIZE = 20
+#: Сколько обновлений мост обрабатывает ОДНОВРЕМЕННО.
+#:
+#: Число не с потолка. У ядра четыре передних слота для модели, и восемь дают
+#: запас на ходы, которые до модели не доходят вовсе — команды, нажатия кнопок,
+#: загрузка файла. Больше не нужно: очередь слотов на стороне ядра никуда не
+#: делась, и лишние одновременные обращения просто ждали бы в ней, занимая
+#: соединения. Меньше — и возвращается ровно та болезнь, ради которой это
+#: заведено: один долгий ход держит чужие чаты.
+MAX_CONCURRENT_UPDATES = 8
 # Telegram counts sendMessage's 4096 in UTF-16 code units, not code points.
 TELEGRAM_TEXT_LIMIT = 4096
 RETRY_DELAYS_SEC = (2.0, 10.0, 30.0, 60.0, 300.0)
@@ -342,6 +351,7 @@ __all__ = [
     "CALLBACK_TARGET_RE",
     "LOGGER",
     "MAX_ATTEMPTS",
+    "MAX_CONCURRENT_UPDATES",
     "MediaTooLargeError",
     "POLL_TIMEOUT",
     "Path",

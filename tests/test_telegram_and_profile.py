@@ -1133,6 +1133,7 @@ async def test_dead_lettered_update_replies_to_the_user(tmp_path, monkeypatch):
     )
     try:
         await bridge._drain_inbox(telegram, backend)
+        await bridge._await_inflight_updates()
         sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
         assert sends and sends[-1]["chat_id"] == 5001
         assert "отклонено" in sends[-1]["text"]  # the user is told, not left silent
@@ -1174,6 +1175,7 @@ async def test_transient_update_failure_isolated_by_chat_without_reordering(tmp_
 
     try:
         await bridge._drain_inbox(telegram, backend)
+        await bridge._await_inflight_updates()
 
         # 604 belongs to another chat and must cross the failed 602 in this same
         # drain. 603 belongs to 602's chat and must not overtake it.
@@ -1186,11 +1188,13 @@ async def test_transient_update_failure_isolated_by_chat_without_reordering(tmp_
 
         # The retry delay on 602 must keep 603 blocked on the next tick as well.
         await bridge._drain_inbox(telegram, backend)
+        await bridge._await_inflight_updates()
         assert attempts == [601, 602, 604]
 
         bridge._inbox._conn.execute("UPDATE updates SET next_attempt_at=0 WHERE update_id=602")
         bridge._inbox._conn.commit()
         await bridge._drain_inbox(telegram, backend)
+        await bridge._await_inflight_updates()
         assert attempts == [601, 602, 604, 602, 603]
         assert processed == [601, 604, 602, 603]
         assert bridge._inbox.stats() == {"pending": 0, "dead_letter": 0}

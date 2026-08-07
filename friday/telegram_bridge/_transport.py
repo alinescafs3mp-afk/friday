@@ -17,6 +17,7 @@ from friday.telegram_bridge._base import (
     BOT_COMMANDS,
     CALLBACK_TARGET_RE,
     LOGGER,
+    MAX_CONCURRENT_UPDATES,
     POLL_TIMEOUT,
     Any,
     BridgeShared,
@@ -91,6 +92,14 @@ class TransportMixin(BridgeShared):
         config.validate()
         self.config = config
         self._running = False
+        # Работа, запущенная и ещё не законченная, — по одной задаче на чат.
+        # Ключ тот же `ordering_key`, которым хранилище держит FIFO внутри чата:
+        # пока задача этого чата в полёте, следующая его строка не берётся, и
+        # порядок сохраняется без прежней сериализации ВСЕХ чатов подряд.
+        self._inflight: dict[str, asyncio.Task[None]] = {}
+        # Раздача прекращается на остановке, но уже начатое доводится до конца:
+        # брошенная задача — это обновление, снятое с очереди и не отвеченное.
+        self._stopping = False
         inbox_path = Path(config.inbox_db_path)
         self._lease = ProcessLease(
             inbox_path.with_name(f"{inbox_path.name}.lock"),
@@ -547,6 +556,8 @@ class TransportMixin(BridgeShared):
 
     async def stop(self) -> None:
         self._running = False
+        self._stopping = True
+        await self._await_inflight_updates()
 
     async def _get_updates(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
         response = await client.post(
@@ -570,60 +581,111 @@ class TransportMixin(BridgeShared):
         telegram: httpx.AsyncClient,
         backend: httpx.AsyncClient,
     ) -> None:
-        # The budget counts attempted rows, not SELECT rounds. `pending()` exposes
-        # only the ready head of each chat; after a success/removal the next update
-        # of that same chat can become eligible in this drain. A retryable failure
-        # blocks only its own chat for the rest of this call, while other chats keep
-        # spending the bounded batch. This preserves per-chat FIFO across retry
-        # delays without restoring global head-of-line blocking.
-        attempted = 0
-        blocked_keys: set[str] = set()
-        while attempted < BATCH_SIZE:
-            remaining = BATCH_SIZE - attempted
+        """Запустить работу по готовым обновлениям и вернуться, НЕ дожидаясь её.
+
+        Раньше здесь стоял последовательный `await` на каждую строку, а
+        `_poll_loop` зовёт этот обход ПЕРЕД `_get_updates`. Значит один долгий ход
+        держал и остальную пачку, и сам опрос Telegram: после 0.171.0 мост честно
+        ждёт ответа ядра до 780 с, и всё это время у остальных были мертвы и чат,
+        и кнопки — они приходят теми же обновлениями.
+
+        Порядок внутри чата защищает хранилище, а не эта функция: `pending()`
+        отдаёт ровно ОДНУ готовую строку на `ordering_key`. Поэтому строки одной
+        пачки принадлежат разным чатам по построению, и запускать их одновременно
+        безопасно. Единственное, что нужно добавить, — не брать строку чата, у
+        которого работа уже в полёте.
+        """
+
+        self._dispatch_ready_updates(telegram, backend)
+
+    def _dispatch_ready_updates(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+    ) -> int:
+        """Раздать готовые строки задачам. Синхронно — здесь нечего ждать.
+
+        Синхронность существенна: эту же раздачу зовёт задача, которая только что
+        закончилась, чтобы следующая строка её чата ушла в работу немедленно, а не
+        ждала следующего опроса Telegram (а он длинный). Без этого продолжения
+        разбор накопившейся очереди замедлился бы ровно во столько раз, во сколько
+        длинный опрос дольше хода.
+        """
+
+        if self._stopping:
+            return 0
+        started = 0
+        blocked_keys = set(self._inflight)
+        while len(self._inflight) < MAX_CONCURRENT_UPDATES and started < BATCH_SIZE:
+            room = MAX_CONCURRENT_UPDATES - len(self._inflight)
             rows = [
                 row
-                for row in self._inbox.pending(limit=remaining + len(blocked_keys))
+                for row in self._inbox.pending(limit=room + len(blocked_keys))
                 if str(row["ordering_key"]) not in blocked_keys
-            ][:remaining]
+            ][:room]
             if not rows:
                 break
             for row in rows:
-                attempted += 1
-                update_id = int(row["update_id"])
                 ordering_key = str(row["ordering_key"])
-                update: dict[str, Any] = {}
-                try:
-                    update = json.loads(row["payload_json"])
-                    cached = (
-                        json.loads(row["backend_response_json"]) if row.get("backend_response_json") else None
-                    )
-                    await self._process_update(telegram, backend, update, cached_response=cached)
-                    self._inbox.remove(update_id)
-                except PermanentUpdateError as exc:
-                    LOGGER.warning("Quarantining invalid Telegram update (%s)", type(exc).__name__)
-                    self._inbox.mark_dead_letter(
-                        update_id,
-                        type(exc).__name__,
-                    )
-                    # MediaTooLargeError already told the user; others left them in
-                    # silence — a rejected message must never just vanish.
-                    if not isinstance(exc, MediaTooLargeError):
-                        await self._notify_dead_letter(telegram, update, permanent=True)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
-                    dead_lettered = self._inbox.mark_failure(
-                        update_id,
-                        type(exc).__name__,
-                    )
-                    if dead_lettered:
-                        LOGGER.error("Telegram update exhausted its retry budget")
-                        await self._notify_dead_letter(telegram, update, permanent=False)
-                    else:
-                        # Do not retry this row again if enough work in other chats
-                        # makes its delay expire before this same drain returns.
-                        blocked_keys.add(ordering_key)
+                blocked_keys.add(ordering_key)
+                task = asyncio.create_task(self._run_update(telegram, backend, dict(row)))
+                self._inflight[ordering_key] = task
+                started += 1
+        return started
+
+    async def _run_update(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        row: dict[str, Any],
+    ) -> None:
+        """Один ход: обработать обновление и учесть исход РОВНО ОДИН раз."""
+
+        update_id = int(row["update_id"])
+        ordering_key = str(row["ordering_key"])
+        update: dict[str, Any] = {}
+        cancelled = False
+        try:
+            update = json.loads(row["payload_json"])
+            cached = json.loads(row["backend_response_json"]) if row.get("backend_response_json") else None
+            await self._process_update(telegram, backend, update, cached_response=cached)
+            self._inbox.remove(update_id)
+        except PermanentUpdateError as exc:
+            LOGGER.warning("Quarantining invalid Telegram update (%s)", type(exc).__name__)
+            self._inbox.mark_dead_letter(update_id, type(exc).__name__)
+            # MediaTooLargeError already told the user; others left them in
+            # silence — a rejected message must never just vanish.
+            if not isinstance(exc, MediaTooLargeError):
+                await self._notify_dead_letter(telegram, update, permanent=True)
+        except asyncio.CancelledError:
+            # Отмена — не отказ обновления: строка остаётся ожидающей, попытка не
+            # тратится. Иначе остановка моста съедала бы людям попытки.
+            cancelled = True
+            raise
+        except Exception as exc:
+            LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
+            dead_lettered = self._inbox.mark_failure(update_id, type(exc).__name__)
+            if dead_lettered:
+                LOGGER.error("Telegram update exhausted its retry budget")
+                await self._notify_dead_letter(telegram, update, permanent=False)
+        finally:
+            # Чат освобождается ЗДЕСЬ, а не в чужом обходе: только эта задача
+            # знает, что её работа кончилась, и только отсюда следующая строка
+            # того же чата может уйти в работу немедленно.
+            self._inflight.pop(ordering_key, None)
+            # После ОТМЕНЫ продолжения нет: отменяют при разборке, и очередь к
+            # этому моменту может быть уже закрыта — раздача полезла бы в мёртвую
+            # базу вместо того, чтобы дать процессу спокойно завершиться.
+            if not cancelled:
+                self._dispatch_ready_updates(telegram, backend)
+
+    async def _await_inflight_updates(self) -> None:
+        """Дождаться работы в полёте. Брошенная задача — обновление, снятое с
+        очереди и не отвеченное, поэтому остановка ждёт, а не рубит."""
+
+        while self._inflight:
+            tasks = list(self._inflight.values())
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     @staticmethod
     def _update_chat_id(update: dict[str, Any]) -> int | None:
