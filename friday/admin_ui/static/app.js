@@ -601,7 +601,7 @@ function graphSimulation(nodes,edges){
 // Фильтры и режим — состояние ЭКРАНА, а не запроса: их читает и загрузка данных,
 // и отрисовка, поэтому умолчания заданы в одном месте.
 function graphState(){
-  if(!state.graphFilters)state.graphFilters={types:[],relations:[],onlyRelations:false,minWeight:1,minConfidence:0,asOf:'',search:'',hideIsolates:false};
+  if(!state.graphFilters)state.graphFilters={types:[],relations:[],onlyRelations:false,minWeight:1,minConfidence:0,asOf:'',knownAt:'',search:'',hideIsolates:false};
   if(!state.graphView)state.graphView='global';
   if(!state.graphDepth)state.graphDepth=2;
   return state.graphFilters;
@@ -646,12 +646,55 @@ function graphControls(data){
       <button class="btn small" ${call('applyGraphAsOf')}>Показать</button>
       ${f.asOf?`<button class="btn small" ${call('clearGraphAsOf')}>сегодня</button>`:''}
     </div>
-    ${f.asOf?`<div class="notice">Картина на ${esc(f.asOf)}: связь показана, если на эту дату она уже началась и ещё не кончилась. Связь с неизвестным началом не исключается — «неизвестно, когда началось» это не «началось позже».</div>`:''}`;
+    <div class="toolbar">
+      <span class="muted">что система ЗНАЛА к дате</span>
+      <input id="graphKnownAt" class="field graph-asof" type="date" value="${esc(String(f.knownAt||'').slice(0,10))}">
+      <button class="btn small" ${call('applyGraphKnownAt')}>Показать</button>
+      ${f.knownAt?`<button class="btn small" ${call('clearGraphKnownAt')}>сейчас</button>`:''}
+    </div>
+    ${f.asOf?`<div class="notice">Картина на ${esc(f.asOf)}: связь показана, если на эту дату она уже началась и ещё не кончилась. Связь с неизвестным началом не исключается — «неизвестно, когда началось» это не «началось позже».</div>`:''}
+    ${f.knownAt?`<div class="notice">Что система ЗНАЛА к ${esc(String(f.knownAt).slice(0,10))}: показаны только связи, записанные к этому моменту. Это ДРУГАЯ ось, чем «картина на дату»: та про то, когда связь была верна, эта про то, когда мы о ней узнали. Связь, существовавшая в 2019-м, но записанная вчера, в этой картине не появится.</div>`:''}`;
 }
 
 // Локальный вид отдаёт рёбра строками таблицы связей (`source_entity_id`), а
 // обзорный — уже приведёнными (`source`). Приводим ОДИН раз здесь, иначе каждая
 // последующая правка рисования будет чинить два формата.
+// Кратные рёбра между одной парой узлов лежали ровно друг на друге: «Иванов
+// руководит отделом» и «Иванов состоит в отделе» рисовались одной линией, и
+// человек видел ОДНУ связь вместо двух. Разводим их перпендикулярно направлению
+// ребра — прямые остаются прямыми (дуги пришлось бы считать и на полотне, и в
+// попадании мышью), а разные виды связи становятся различимы.
+const GRAPH_EDGE_GAP=7;
+function edgeOffsets(edges){
+  const seen=new Map(), total=new Map();
+  for(const e of edges){
+    const key=e.source<e.target?e.source+'|'+e.target:e.target+'|'+e.source;
+    total.set(key,(total.get(key)||0)+1);
+  }
+  return edges.map(e=>{
+    const key=e.source<e.target?e.source+'|'+e.target:e.target+'|'+e.source;
+    const count=total.get(key)||1;
+    if(count<2)return 0;
+    const index=seen.get(key)||0;
+    seen.set(key,index+1);
+    // Симметрично относительно прямой: две связи расходятся на ±половину шага,
+    // три — одна по центру и две по краям.
+    const shift=(index-(count-1)/2)*GRAPH_EDGE_GAP;
+    // Знак берётся в КАНОНИЧЕСКОМ направлении пары, а не в направлении самого
+    // ребра. Перпендикуляр считается от ребра, и у встречной связи (`b→a` при
+    // `a→b` у соседней) он смотрит в другую сторону: одинаковое смещение уводило
+    // обе линии на одно и то же место, и разведение схлопывалось ровно там, где
+    // оно нужнее всего. Поймано мутацией, а не рассуждением.
+    return e.source<e.target?shift:-shift;
+  });
+}
+function shiftEdge(s,t,offset){
+  if(!offset)return {x1:s.x,y1:s.y,x2:t.x,y2:t.y};
+  const dx=t.x-s.x, dy=t.y-s.y, length=Math.hypot(dx,dy)||1;
+  const nx=-dy/length*offset, ny=dx/length*offset;
+  return {x1:s.x+nx,y1:s.y+ny,x2:t.x+nx,y2:t.y+ny};
+}
+
 function normalizeGraph(data){
   const edges=(data.edges||[]).map(e=>({
     source:e.source||e.source_entity_id, target:e.target||e.target_entity_id,
@@ -746,7 +789,9 @@ function graphMarkup(raw){
   // там, где их видно и человеку, и пробе.
   const heavy=nodes.length>=GRAPH_CANVAS_FROM;
   state.graphHeavy=heavy;
+  const offsets=edgeOffsets(edges);
   const lines=heavy?'':edges.map((e,i)=>{const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
+    const seg=shiftEdge(s,t,offsets[i]);
     const rel=e.kind==='relation';
     const kind=String(e.relation_type||'');
     // Толщина подтверждённой связи следует её весу, а не единице: у слабого
@@ -764,7 +809,7 @@ function graphMarkup(raw){
     // стрелкой значило бы придумать направление там, где его не наблюдали.
     return `<line data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"${lit?' class="gpath"':''}`
       +(rel?' marker-end="url(#garrow)"':'')
-      +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
+      +` x1="${seg.x1.toFixed(1)}" y1="${seg.y1.toFixed(1)}" x2="${seg.x2.toFixed(1)}" y2="${seg.y2.toFixed(1)}"`
       +` stroke="${color}" stroke-width="${(lit?w+2.2:w).toFixed(1)}"${rel&&!lit?'':(lit?'':' stroke-dasharray="3 4"')}`
       +` opacity="${lit?1:rel?0.92:0.4}"><title>${esc(s.name)} → ${esc(t.name)}: ${esc(label)}</title></line>`}).join('');
   const circles=heavy?'':nodes.map(node=>{const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
@@ -864,8 +909,16 @@ function bindGraph(){
     circles:[...group.querySelectorAll('circle')],
     label:group.querySelector('text'),
   })).filter(item=>item.point);
-  const wires=[...svg.querySelectorAll('line')].map(element=>({
+  // Смещение кратных рёбер живёт и здесь: разметка выходит один раз, а каждый
+  // КАДР переписывает координаты линий заново. Первая редакция правки развела
+  // рёбра только в разметке, и симуляция тут же схлопывала их обратно — на
+  // неподвижной картинке это было незаметно, а живая укладка стирала правку с
+  // первого же кадра. Поймано мутацией: проба падала в общем прогоне и проходила
+  // в одиночном, потому что там картина не успевала пошевелиться.
+  const wireOffsets=edgeOffsets(state.graphEdges||[]);
+  const wires=[...svg.querySelectorAll('line[data-edge]')].map(element=>({
     element,a:at.get(element.dataset.a),b:at.get(element.dataset.b),
+    offset:wireOffsets[Number(element.dataset.edge)]||0,
   })).filter(item=>item.a&&item.b);
   // Сцена на полотне: рёбра и узлы. Группируем по цвету — смена стиля в canvas
   // дороже самой линии, а на тринадцати тысячах рёбер это решает.
@@ -879,6 +932,9 @@ function bindGraph(){
     ctx.clearRect(0,0,GRAPH_W,GRAPH_H);
     // Полотно повторяет камеру SVG: иначе слои разъедутся при первом же зуме.
     ctx.setTransform(view.k,0,0,view.k,-view.x*view.k,-view.y*view.k);
+    // Те же смещения, что и в SVG: иначе два слоя одной картины разошлись бы.
+    const sceneShift=edgeOffsets(edges);
+    const sceneOffsets=new Map(edges.map((edge,index)=>[edge,sceneShift[index]]));
     const byKind=new Map();
     for(const edge of edges){
       const rel=edge.kind==='relation';
@@ -896,7 +952,8 @@ function bindGraph(){
       for(const edge of group.items){
         const s=at.get(edge.source), t=at.get(edge.target);
         if(!s||!t)continue;
-        ctx.moveTo(s.x,s.y);ctx.lineTo(t.x,t.y);
+        const seg=shiftEdge(s,t,sceneOffsets.get(edge)||0);
+        ctx.moveTo(seg.x1,seg.y1);ctx.lineTo(seg.x2,seg.y2);
       }
       ctx.stroke();
     }
@@ -930,8 +987,9 @@ function bindGraph(){
         item.label.setAttribute('y',(item.point.y-Number(item.label.dataset.lift||12)).toFixed(1))}
     }
     for(const wire of wires){
-      wire.element.setAttribute('x1',wire.a.x.toFixed(1));wire.element.setAttribute('y1',wire.a.y.toFixed(1));
-      wire.element.setAttribute('x2',wire.b.x.toFixed(1));wire.element.setAttribute('y2',wire.b.y.toFixed(1));
+      const seg=shiftEdge(wire.a,wire.b,wire.offset);
+      wire.element.setAttribute('x1',seg.x1.toFixed(1));wire.element.setAttribute('y1',seg.y1.toFixed(1));
+      wire.element.setAttribute('x2',seg.x2.toFixed(1));wire.element.setAttribute('y2',seg.y2.toFixed(1));
     }
   };
   const tick=()=>{
@@ -1066,6 +1124,7 @@ async function graphData(uid){
     // органом управления. Теперь у общей картины свой орган, у окрестности свой.
     if(f.minConfidence>0)local.push(`min_confidence=${Number(f.minConfidence)}`);
     if(f.asOf)local.push(`as_of=${q(f.asOf)}`);
+    if(f.knownAt)local.push(`known_at=${q(f.knownAt)}`);
     // Окрестность просит ТУ ЖЕ ткань, что и общая картина. Без этого человек
     // кликал узел с десятком линий и проваливался в пустоту: общий вид держится
     // на совместной встречаемости, а обход читал только подтверждённые связи.
@@ -1086,6 +1145,7 @@ async function graphData(uid){
   if(f.minWeight>1)params.push(`min_weight=${Number(f.minWeight)}`);
   if(f.minConfidence>0)params.push(`min_confidence=${Number(f.minConfidence)}`);
   if(f.asOf)params.push(`as_of=${q(f.asOf)}`);
+  if(f.knownAt)params.push(`known_at=${q(f.knownAt)}`);
   if(f.search)params.push(`search=${q(f.search)}`);
   return api(`/api/admin/graph?${params.join('&')}`);
 }
@@ -1102,6 +1162,13 @@ actions.setGraphMinWeight=weight=>{graphState().minWeight=Number(weight)||1;refr
 actions.setGraphMinConfidence=value=>{graphState().minConfidence=Number(value)||0;refresh()};
 actions.applyGraphAsOf=()=>{const el=document.getElementById('graphAsOf');graphState().asOf=el?el.value.trim():'';refresh()};
 actions.clearGraphAsOf=()=>{graphState().asOf='';refresh()};
+// `known_at` — момент времени, а не дата: сервер принимает offset-aware RFC3339.
+// Человеку удобнее выбрать день, поэтому день превращается в КОНЕЦ этого дня:
+// «что знали к 5 августа» означает «на конец 5 августа», а не «на его полночь»,
+// иначе записанное в тот же день не попадало бы в картину вовсе.
+actions.applyGraphKnownAt=()=>{const el=document.getElementById('graphKnownAt');const day=el?el.value.trim():'';
+  graphState().knownAt=day?`${day}T23:59:59+00:00`:'';refresh()};
+actions.clearGraphKnownAt=()=>{graphState().knownAt='';refresh()};
 actions.applyGraphSearch=()=>{const el=document.getElementById('graphSearch');graphState().search=el?el.value.trim():'';refresh()};
 actions.focusGraphNode=(id,name)=>{closeModal();state.graphView='local';state.graphFocus=id;state.graphFocusName=name||'';refresh()};
 // Переход «документ → узел в графе». Экран графа и экран знаний жили порознь:

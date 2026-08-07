@@ -75,11 +75,10 @@ def test_assistant_instructions_delegate_to_the_canonical_gate() -> None:
 def test_non_ui_tests_exclude_all_eleven_browser_modules() -> None:
     command = quality_gate.non_ui_command(workers=12, python="python")
 
-    # Десятый модуль добавлен в 0.169.0 вместе с живой раскладкой графа:
-    # `test_the_graph_is_alive_and_remembers_the_view.py`. Число здесь стоит
-    # затем, чтобы браузерный модуль нельзя было завести молча и потерять из
-    # общего прогона.
-    assert len(quality_gate.UI_TEST_MODULES) == 11
+    # Число здесь стоит затем, чтобы браузерный модуль нельзя было завести молча
+    # и потерять из общего прогона. Двенадцатый добавлен в 0.196.0 вместе со
+    # второй осью времени и разведением кратных рёбер.
+    assert len(quality_gate.UI_TEST_MODULES) == 12
     assert command.argv[5:8] == ("-n", "12", "--dist=load")
     assert {
         argument.removeprefix("--ignore=") for argument in command.argv if argument.startswith("--ignore=")
@@ -98,10 +97,10 @@ def test_ui_module_inventory_cannot_silently_drift() -> None:
 
 
 def test_ui_tests_use_one_loadscope_worker_per_module() -> None:
-    command = quality_gate.ui_command(report_path="report.xml", workers=11, python="python")
+    command = quality_gate.ui_command(report_path="report.xml", workers=12, python="python")
 
-    assert command.argv[6:9] == ("-n", "11", "--dist=loadscope")
-    assert command.argv[-11:] == quality_gate.UI_TEST_MODULES
+    assert command.argv[6:9] == ("-n", "12", "--dist=loadscope")
+    assert command.argv[-12:] == quality_gate.UI_TEST_MODULES
     assert "--junitxml=report.xml" in command.argv
 
 
@@ -174,7 +173,7 @@ def test_requested_phases_keep_canonical_order() -> None:
 
 
 def test_more_ui_workers_than_modules_is_rejected(capsys) -> None:
-    result = quality_gate.execute(_args(phase=["ui"], ui_workers=12))
+    result = quality_gate.execute(_args(phase=["ui"], ui_workers=13))
 
     assert result == 2
-    assert "cannot exceed 11" in capsys.readouterr().err
+    assert "cannot exceed 12" in capsys.readouterr().err

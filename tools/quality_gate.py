@@ -32,6 +32,7 @@ UI_TEST_MODULES = (
     "tests/test_the_big_picture_is_drawn_on_canvas.py",
     "tests/test_the_graph_is_alive_and_remembers_the_view.py",
     "tests/test_the_graph_shows_the_path_not_just_the_hit.py",
+    "tests/test_the_graph_shows_two_time_axes_and_parallel_edges.py",
     "tests/test_the_graph_tab_can_be_navigated.py",
 )
 
