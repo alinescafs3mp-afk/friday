@@ -441,6 +441,10 @@ class TransportMixin(BridgeShared):
         items: list[Any] = raw_items if isinstance(raw_items, list) else []
         sent: list[str] = []
         failed: list[str] = []
+        # Строки, которые уже ушли человеку, но чьё подтверждение до бэкенда не
+        # доехало: он честно предлагает их снова, потому что для него они всё ещё
+        # `pending`. Отправить их второй раз — и человек получит дубль пачки.
+        already_delivered = self._inbox.delivered_notification_ids()
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -448,6 +452,10 @@ class TransportMixin(BridgeShared):
             chat_raw = str(item.get("chat_id") or "")
             body = str(item.get("body") or "")
             if not notif_id or not body:
+                continue
+            if notif_id in already_delivered:
+                # Не доставка, а повтор подтверждения: сообщение у человека уже есть.
+                sent.append(notif_id)
                 continue
             # Deny-by-default re-check at the send edge: the bot token can reach
             # any chat, so an outbound message must target an allowed chat only
@@ -500,6 +508,9 @@ class TransportMixin(BridgeShared):
                     }
             try:
                 await self._send_message(telegram, chat_id, body, reply_markup=markup)
+                # Запись ДО добавления в список: список умрёт вместе с процессом,
+                # а человек сообщение уже получил.
+                self._inbox.remember_delivered_notification(notif_id)
                 sent.append(notif_id)
             except Exception as exc:
                 LOGGER.warning("Outbound notification delivery failed (%s)", type(exc).__name__)
@@ -518,23 +529,24 @@ class TransportMixin(BridgeShared):
     ) -> None:
         """Report the batch's outcome, retrying in place before giving up.
 
-        Delivery state lives ONLY in this local list until the ack lands, so a
-        single failed ack means every message of the batch — up to twenty — is
-        still `pending` and gets delivered to the user AGAIN on the next cycle,
-        fifteen seconds later, and on every cycle until an ack succeeds. The
-        window is the whole batch: twenty sends, each a round trip to Telegram.
+        Acking each message right after its send would keep the backend's view
+        current message by message, and is NOT done: the bridge signs its service
+        calls as the owner, so they count against `telegram:user:<owner>` — 30
+        requests per minute by default, shared with the owner's own messages.
+        Twenty acks per drain would spend that budget on bookkeeping and start
+        429-ing real traffic. So one ack per batch, retried three times here.
 
-        Acking each message right after its send would shrink the window to one,
-        and is NOT done: the bridge signs its service calls as the owner, so they
-        count against `telegram:user:<owner>` — 30 requests per minute by default,
-        shared with the owner's own messages. Twenty acks per drain would spend
-        that budget on bookkeeping and start 429-ing real traffic.
+        What a failed ack used to mean: the delivery state lived ONLY in the local
+        `sent` list, so the whole batch — up to twenty messages — stayed `pending`
+        on the backend and was delivered to the person AGAIN fifteen seconds later,
+        and on every cycle until some ack landed.
 
-        So the ack is retried here instead: three attempts inside the drain, which
-        turns "one transient 5xx or one backend restart" into "three failures in a
-        row within two seconds". The complete fix is an `in_flight` lease on the
-        row itself, which is a schema change and needs its own expiry story —
-        deliberately not started at the tail of this work.
+        It no longer means that. The fact of delivery is written into the bridge's
+        own durable queue at the moment of delivery
+        (`remember_delivered_notification`), so the next drain recognises those ids
+        in the backend's pending list and re-acks them instead of re-sending. A
+        successful ack retires the local rows here — after that the backend is the
+        one that remembers.
         """
         last_error: Exception | None = None
         for attempt in range(3):
@@ -547,15 +559,17 @@ class TransportMixin(BridgeShared):
                     signer_chat,
                     signer_chat,
                 )
+                self._inbox.forget_delivered_notifications(sent)
                 return
             except Exception as exc:  # noqa: PERF203 - the retry IS the point here
                 last_error = exc
                 if attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
-        # Loud, because the consequence is user-visible: these messages were
-        # delivered and will be delivered again.
+        # Loud, because it is still a real fault: the backend's queue is not
+        # advancing. What it is NOT any more is user-visible duplication.
         LOGGER.error(
-            "Outbound ack failed after retries: %d delivered notifications will be re-sent (%s)",
+            "Outbound ack failed after retries: %d delivered notifications stay pending "
+            "on the backend and will be re-acked, not re-sent (%s)",
             len(sent),
             type(last_error).__name__,
         )

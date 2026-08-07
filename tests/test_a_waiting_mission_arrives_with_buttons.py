@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.telegram_bridge._transport import TransportMixin
+from friday.telegram_bridge._transport import TransportMixin, _LazyUpdateInbox
 
 
 @pytest.fixture
@@ -25,12 +25,17 @@ def anyio_backend():
 
 
 class _Bridge(TransportMixin):
-    """Только то, что нужно доставке: остальное у моста здесь не участвует."""
+    """Только то, что нужно доставке: остальное у моста здесь не участвует.
 
-    def __init__(self, items: list[dict]) -> None:
+    Очередь — настоящая: обход спрашивает у неё, что уже доставлено, и подменить
+    её значило бы проверять не тот путь. Файл свой на каждую пробу.
+    """
+
+    def __init__(self, items: list[dict], inbox_path) -> None:  # noqa: ANN001
         self._items = items
         self.sent: list[tuple[int, str, dict | None]] = []
         self._warned_no_signer = False
+        self._inbox = _LazyUpdateInbox(str(inbox_path))
 
     # `_signer_chat` — не подменяется, а обслуживается: он ходит в
     # `config.allowed_chat_ids`, и подменить его значило бы проверять не тот путь.
@@ -63,7 +68,7 @@ def _buttons(markup: dict | None) -> list[str]:
 
 
 @pytest.mark.anyio
-async def test_a_mission_notice_carries_the_decision_buttons() -> None:
+async def test_a_mission_notice_carries_the_decision_buttons(tmp_path) -> None:
     """Мутация: убрать ветку `mission` — придёт голый текст, тест краснеет."""
     bridge = _Bridge(
         [
@@ -74,7 +79,8 @@ async def test_a_mission_notice_carries_the_decision_buttons() -> None:
                 "kind": "mission",
                 "dedup_key": "mission:msn_95dcbd2dd38e4d3c",
             }
-        ]
+        ],
+        tmp_path / "queue.sqlite3",
     )
 
     await bridge._drain_outbound(object(), object())
@@ -89,7 +95,7 @@ async def test_a_mission_notice_carries_the_decision_buttons() -> None:
 
 
 @pytest.mark.anyio
-async def test_the_approval_buttons_did_not_change() -> None:
+async def test_the_approval_buttons_did_not_change(tmp_path) -> None:
     """Соседняя ветка не должна пострадать от появления новой."""
     bridge = _Bridge(
         [
@@ -100,7 +106,8 @@ async def test_the_approval_buttons_did_not_change() -> None:
                 "kind": "approval",
                 "dedup_key": "approval:apr_123456",
             }
-        ]
+        ],
+        tmp_path / "queue.sqlite3",
     )
 
     await bridge._drain_outbound(object(), object())
@@ -109,10 +116,19 @@ async def test_the_approval_buttons_did_not_change() -> None:
 
 
 @pytest.mark.anyio
-async def test_an_ordinary_notice_stays_without_buttons() -> None:
+async def test_an_ordinary_notice_stays_without_buttons(tmp_path) -> None:
     """Напоминание — не решение: кнопки там были бы обещанием, которого нет."""
     bridge = _Bridge(
-        [{"id": "n3", "chat_id": "42", "body": "Напоминание: позвонить", "kind": "reminder", "dedup_key": ""}]
+        [
+            {
+                "id": "n3",
+                "chat_id": "42",
+                "body": "Напоминание: позвонить",
+                "kind": "reminder",
+                "dedup_key": "",
+            }
+        ],
+        tmp_path / "queue.sqlite3",
     )
 
     await bridge._drain_outbound(object(), object())
@@ -121,7 +137,7 @@ async def test_an_ordinary_notice_stays_without_buttons() -> None:
 
 
 @pytest.mark.anyio
-async def test_a_forged_identifier_gets_no_buttons() -> None:
+async def test_a_forged_identifier_gets_no_buttons(tmp_path) -> None:
     """Ключ приходит из базы, но проверяется всё равно.
 
     В `callback_data` Telegram отдаёт 64 байта и никакой типизации: подставленная
@@ -136,7 +152,8 @@ async def test_a_forged_identifier_gets_no_buttons() -> None:
                 "kind": "mission",
                 "dedup_key": "mission:../../etc/passwd",
             }
-        ]
+        ],
+        tmp_path / "queue.sqlite3",
     )
 
     await bridge._drain_outbound(object(), object())

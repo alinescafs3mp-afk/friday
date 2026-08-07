@@ -9,6 +9,7 @@ from __future__ import annotations
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.telegram_bridge._base import (
     BATCH_SIZE,
+    DELIVERED_NOTIFICATION_TTL_SEC,
     MAX_ATTEMPTS,
     RETRY_DELAYS_SEC,
     Any,
@@ -94,6 +95,10 @@ class _UpdateInbox:
                 chat_id INTEGER PRIMARY KEY,
                 registered_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS delivered_notifications (
+                notification_id TEXT PRIMARY KEY,
+                delivered_at REAL NOT NULL
+            );
             """
         )
         restrict_sqlite_files(path)
@@ -141,6 +146,15 @@ class _UpdateInbox:
             """CREATE INDEX IF NOT EXISTS idx_updates_ordering
                ON updates(status, ordering_key, update_id)"""
         )
+        # Строка о доставленном уведомлении живёт до подтверждения бэкенду, то
+        # есть считанные секунды. Пережить неделю она может только в одном
+        # случае: подтверждение прошло, а снятие строки не успело (падение между
+        # двумя действиями). Тогда бэкенд этот номер больше не предложит никогда,
+        # и без уборки строка осталась бы здесь навсегда.
+        self._conn.execute(
+            "DELETE FROM delivered_notifications WHERE delivered_at < ?",
+            (time.time() - DELIVERED_NOTIFICATION_TTL_SEC,),
+        )
         self._conn.commit()
 
     def close(self) -> None:
@@ -172,6 +186,40 @@ class _UpdateInbox:
     def is_registered_chat(self, chat_id: int) -> bool:
         row = self._conn.execute("SELECT 1 FROM registered_chats WHERE chat_id=?", (int(chat_id),)).fetchone()
         return row is not None
+
+    def remember_delivered_notification(self, notification_id: str) -> None:
+        """Уведомление ушло человеку — записать это ТАМ, ГДЕ ЭТО ПРОИЗОШЛО.
+
+        Признак доставки жил только в списке в памяти процесса до общего
+        подтверждения в конце пачки. Провалилось подтверждение — на бэкенде все
+        двадцать сообщений по-прежнему `pending`, и следующий оборот доставлял
+        их человеку заново, и так каждые пятнадцать секунд.
+
+        Подтверждать каждое отдельным сетевым вызовом нельзя (бюджет частоты
+        владельца), а вот записать строку в свою же очередь — можно: это
+        локально, стоит одну вставку и переживает перезапуск моста.
+        """
+        self._conn.execute(
+            "INSERT OR IGNORE INTO delivered_notifications(notification_id, delivered_at) VALUES(?, ?)",
+            (str(notification_id), time.time()),
+        )
+        self._conn.commit()
+
+    def delivered_notification_ids(self) -> set[str]:
+        """Номера, уже ушедшие человеку и ещё не подтверждённые бэкенду."""
+        rows = self._conn.execute("SELECT notification_id FROM delivered_notifications").fetchall()
+        return {str(row["notification_id"]) for row in rows}
+
+    def forget_delivered_notifications(self, notification_ids: list[str]) -> None:
+        """Подтверждение дошло — бэкенд помнит сам, локальная строка больше не нужна."""
+        cleaned = [str(value) for value in notification_ids if str(value)]
+        if not cleaned:
+            return
+        self._conn.executemany(
+            "DELETE FROM delivered_notifications WHERE notification_id=?",
+            [(value,) for value in cleaned],
+        )
+        self._conn.commit()
 
     def store(self, update: dict[str, Any]) -> bool:
         update_id = int(update.get("update_id", -1))

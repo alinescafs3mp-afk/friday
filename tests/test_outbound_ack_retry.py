@@ -1,15 +1,14 @@
-"""A failed ack re-sends everything the bridge just delivered.
+"""Подтверждение пачки исходящих: повтор на месте, и слышно, когда не вышло.
 
-`_drain_outbound` delivers up to twenty notifications and then reports the whole
-batch in ONE ack. Delivery state lives only in a local list until that ack lands,
-so a single failed ack leaves every message `pending` — and the user receives all
-twenty again fifteen seconds later, and again, until an ack succeeds.
+`_drain_outbound` доставляет до двадцати уведомлений и отчитывается ОДНИМ
+подтверждением. Подтверждать каждое отдельно — значит потратить бюджет частоты
+владельца (`telegram:user:<owner>`, 30 запросов в минуту, общий с его
+собственными сообщениями) на бухгалтерию, поэтому подтверждение повторяется
+здесь: три попытки внутри оборота.
 
-The ack is retried in place. Per-message acking would shrink the window to one
-message and is deliberately not done: the bridge signs its service calls as the
-owner, so they count against `telegram:user:<owner>` (30/minute by default,
-shared with the owner's own messages), and twenty acks per drain would spend that
-budget on bookkeeping.
+Чем провал подтверждения оборачивался раньше — повторной доставкой всей пачки
+человеку каждые пятнадцать секунд — и почему больше нет, разбирается в
+`test_a_delivered_notification_is_not_delivered_twice.py`.
 """
 
 from __future__ import annotations
@@ -96,7 +95,7 @@ async def test_a_transient_ack_failure_does_not_lose_the_batch(tmp_path):
 
 @pytest.mark.asyncio
 async def test_an_unacked_batch_is_reported_loudly_not_silently(tmp_path, caplog):
-    """When every retry fails, the duplicate delivery to come must be visible."""
+    """Очередь бэкенда не двигается — это неисправность, и её должно быть слышно."""
     bridge = _bridge(tmp_path)
     telegram, backend = _Telegram(), _Backend(ack_failures=99)
     with caplog.at_level("ERROR"):
@@ -108,7 +107,7 @@ async def test_an_unacked_batch_is_reported_loudly_not_silently(tmp_path, caplog
             bridge._inbox.close()  # noqa: SLF001
 
     assert backend.ack_attempts == 3
-    assert any("re-sent" in record.message for record in caplog.records), caplog.text
+    assert any("Outbound ack failed" in record.message for record in caplog.records), caplog.text
 
 
 class _RegisteredChatBackend:
