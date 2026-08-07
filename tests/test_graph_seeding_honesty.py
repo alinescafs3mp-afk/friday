@@ -75,7 +75,7 @@ async def test_a_subject_the_archive_never_heard_of_returns_nothing(storage):
         "квинтэссаж парогубница",
         "sourdough hydration schedule",
     ):
-        result = await searcher.search("alice", question, limit=10, kg=kg)
+        result = await searcher.search("alice", question, limit=10, kg=kg, graph_expansion=True)
         assert result["count"] == 0, (
             f"{question!r} answered with {result['count']} unrelated document(s): "
             f"{[item.get('title') for item in result['results']]}"
@@ -99,7 +99,7 @@ async def test_letter_similarity_is_not_evidence(storage):
     searcher = HybridSearcher(storage, None, record_usage=False)
     kg = KnowledgeGraph(storage)
     for invented in ("переквантовать сизиморбность", "конфигурационность дежурственный"):
-        result = await searcher.search("alice", invented, limit=10, kg=kg, explain=True)
+        result = await searcher.search("alice", invented, limit=10, kg=kg, graph_expansion=True, explain=True)
         assert result["count"] == 0, (
             f"{invented!r} returned {result['count']}: "
             f"{[(i.get('title'), i.get('_lexical_score')) for i in result['results']]}"
@@ -112,7 +112,7 @@ async def test_a_word_shared_with_the_document_still_counts(storage):
     ids = _seed_corpus(storage)
     searcher = HybridSearcher(storage, None, record_usage=False)
     kg = KnowledgeGraph(storage)
-    result = await searcher.search("alice", "конфигурация подписки", limit=10, kg=kg)
+    result = await searcher.search("alice", "конфигурация подписки", limit=10, kg=kg, graph_expansion=True)
     assert ids["vpn"] in {item["id"] for item in result["results"]}
 
 
@@ -134,7 +134,7 @@ async def test_an_asserted_relation_still_carries_a_neighbour(storage):
     kg.create_relation("alice", entities["Казань"], entities["Караул"], RelationType.DEPENDS_ON, weight=1.0)
 
     searcher = HybridSearcher(storage, None, record_usage=False)
-    result = await searcher.search("alice", "Казань", limit=10, kg=kg)
+    result = await searcher.search("alice", "Казань", limit=10, kg=kg, graph_expansion=True)
     found = {item["id"] for item in result["results"]}
     assert ids["kazan"] in found
     assert ids["duty"] in found, "an asserted relation stopped carrying its neighbour"
@@ -146,5 +146,5 @@ async def test_an_inflected_question_still_reaches_its_document(storage):
     ids = _seed_corpus(storage)
     searcher = HybridSearcher(storage, None, record_usage=False)
     kg = KnowledgeGraph(storage)
-    result = await searcher.search("alice", "Казань", limit=10, kg=kg)
+    result = await searcher.search("alice", "Казань", limit=10, kg=kg, graph_expansion=True)
     assert ids["kazan"] in {item["id"] for item in result["results"]}

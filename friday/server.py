@@ -88,7 +88,7 @@ from friday.permissions import (
     AuthorizationService,
     bind_actor,
 )
-from friday.retrieval import EmbeddingBackend, HybridSearcher
+from friday.retrieval import EmbeddingBackend, HybridSearcher, is_relational_query
 from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 from friday.security import verify_bridge_request
 from friday.storage import init_storage, normalize_conversation_mode
@@ -2469,6 +2469,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 q,
                 limit=limit,
                 kg=request.app.state.kg,
+                # Тот же предикат, что у агента (`execution_kernel`), у метрики
+                # (`eval.py`) и у объяснения выдачи. Прежде этот маршрут молчал и
+                # получал `True` по умолчанию: человек в панели искал ОДНИМ
+                # поиском, а Пятница в чате отвечала ДРУГИМ. Цена молчания
+                # замерена на 20 документных эталонах: recall@10 0.35 с
+                # выключенным графом против 0.15 с включённым, плюс +556 мс.
+                # Названный снимок (`as_of`/`known_at`) — явная просьба о графе,
+                # и она включает расширение так же, как у агента.
+                graph_expansion=bool(normalized_as_of or normalized_known_at or is_relational_query(q)),
                 explain=explain,
                 as_of=normalized_as_of,
                 known_at=normalized_known_at,

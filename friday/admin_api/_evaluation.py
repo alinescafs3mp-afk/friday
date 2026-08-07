@@ -108,12 +108,25 @@ async def knowledge_quality_dashboard(
 async def eval_search(
     request: Request, q: str, user_id: str | None = None, limit: int = Query(15, ge=1, le=50)
 ) -> dict[str, Any]:
+    from friday.retrieval import is_relational_query
 
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.eval.read", target)
     state = _services(request)
-    result = await state.hybrid_searcher.search(target, q, limit=limit, kg=state.kg)
+    # Режим ТОТ ЖЕ, что у агента и у метрики: иначе список, которым проверяют
+    # качество, относится к другому поиску. `record_usage=False` — не украшение:
+    # счётчик обращений читается обратно ранжированием, и диагностика двигала бы
+    # ту самую выдачу, которую показывает. Оба правила уже записаны у соседнего
+    # `retrieval_explain`; здесь дорога осталась без них.
+    result = await state.hybrid_searcher.search(
+        target,
+        q,
+        limit=limit,
+        kg=state.kg,
+        graph_expansion=is_relational_query(q),
+        record_usage=False,
+    )
     items = [
         {
             "id": hit.get("id"),

@@ -1,3 +1,80 @@
+## 0.168.0 — 2026-08-07
+
+### Политику графа объявляет вызывающий, а не умолчание
+
+Расширение по графу — уже измеренный отрицательный результат для обычного запроса:
+на 20 документных эталонах живого архива recall@10 **0.35 -> 0.15**, MRR
+0.153 -> 0.063, чистый счёт −4 кейса, ранг ухудшен в 7 случаях против 1
+улучшенного, плюс **+556 мс** (107 -> 662). Отдельный набор из 12 реляционных
+кейсов дал `net_gain=2`, поэтому канал разрешён ровно измеренному языковому
+классу. Дефект был не в логике, а в том, кто принимает решение: `graph_expansion`
+по умолчанию стоял в `True`, то есть режим выбирал тот, кто про него ПРОМОЛЧАЛ.
+
+Из семи дорог, зовущих `HybridSearcher.search`, четыре объявляли режим явно, а три
+молчали и получали граф: публичный `GET /api/search`, админский `eval_search` и
+синтетический прибор `tools/retrieval_bench.py`. Практический смысл расхождения —
+человек в панели искал одним поиском, Пятница в чате отвечала другим, а прибор
+мерил третий и завышал числа за счёт канала, которого в бою нет.
+
+Умолчание перевёрнуто в `False`, и три дороги получили тот же предикат, что у
+агента: обычный запрос — без графа, реляционный либо названный снимок
+(`as_of`/`known_at`) — с графом. Точечная правка трёх мест этого не давала:
+пока умолчание означало «включить», следующая дорога включила бы граф так же молча.
+Теперь молчание означает измеренное поведение, а обратное надо объявить вслух — и
+объявление видно в ревью. Веса ранжирования, классификатор и сам графовый канал не
+менялись.
+
+Побочно вскрылись тесты, которые проверяли графовую дорогу МОЛЧАНИЕМ: 25 вызовов в
+пяти файлах опирались на прежнее умолчание, включая пробы «архив не знает этой темы —
+ответ пустой». Без явного `graph_expansion=True` они проходили бы, ничего не проверяя.
+Каждая теперь объявляет режим.
+
+### Диагностический поиск больше не двигает то, что показывает
+
+`eval_search` не передавал `record_usage=False`, а счётчик обращений читается обратно
+ранжированием: каждое открытие списка меняло ту самую выдачу, которую список
+показывает. Соседний `retrieval_explain` имел правильную форму с 0.154.0 — осталась
+одна дорога.
+
+### Запись о релизе 0.167.0 переехала наверх
+
+Она была дописана в конец `CHANGELOG.md`, тогда как файл идёт от новых к старым:
+последний релиз лежал под пятью с половиной тысячами строк истории.
+
+Обязательные мутации (7 из 7 красные): возврат умолчания в `True`; снятие политики
+у `/api/search`, у `eval_search` и у прибора; подмена предиката на константу `True`
+для обычного запроса и на `False` для реляционного; снятие `record_usage=False`.
+Полный гейт: **4971** не-UI тестов (1 ожидаемый backup skip), UI **23**,
+Ruff/format/mypy/compileall/Bandit/JavaScript — PASS.
+
+## 0.167.0 — 2026-08-07
+
+### Авторский поиск общего архива получил безопасный hybrid
+
+`user_knowledge_search` больше не теряет semantic-only документы выбранного
+человека. Exact `uploaded_by` исходного Raw Object проходит внутри SQL до каждого
+FTS/LIKE, recent/date, whole-document и passage-vector cap. Строки без однозначного
+текстового автора, с malformed, oversized, duplicate-key или tenant-mismatched
+metadata принадлежат никому. Tenant-wide resident cache обходится: фильтрация его
+готового top-k снова позволила бы более сильным чужим векторам вытеснить цель.
+
+Scoped reranker получает detached author-only rows и управляет только порядком и
+конечным числовым score; ID, тело и остальные поля восстанавливаются из canonical
+результата. Это закрывает как foreign sentinel, так и in-place подмену объекта
+callback-ом. Общие graph/entity names и relation history остаются fail-closed до
+появления авторского provenance. Late matching passage теперь доходит до выдержки,
+а не теряется ради шапки документа. Новый путь помечен `scoped_hybrid`; минимальная
+конфигурация без HybridSearcher сохраняет `scoped_lexical` fallback.
+
+Новые uncached SQL, feedback/usage reads, vector scoring и chunk aggregation
+вынесены с event loop. Adversarial review отдельно поймал неверный adaptive plan:
+на synthetic 6000 KO/600 chunks author-count включал parent-first scan за
+**28.6 ms** против **1.1 ms** sparse (~26x). Стоимость снова считается по tenant
+KO index, который план физически проходит; exact author membership остаётся до
+лимита. После исправления целевой набор дал **25 passed**. Финальный canonical
+gate: **4962 passed**, 1 штатный backup-fixture skip; UI **23/23**, Ruff/format,
+mypy, compileall, Bandit HIGH и JavaScript syntax — без ошибок.
+
 ## 0.166.0 — 2026-08-07
 
 ### Чанковый dense-скан больше не сортирует весь корпус
@@ -5595,30 +5672,3 @@ router: 12345
 - Rate limits, strict CORS validation, security headers.
 - Cross-tenant administrative mutations требуют `admin.all_data.manage`.
 - Web fetch блокирует private network targets и проверяет redirects/DNS.
-## 0.167.0 — 2026-08-07
-
-### Авторский поиск общего архива получил безопасный hybrid
-
-`user_knowledge_search` больше не теряет semantic-only документы выбранного
-человека. Exact `uploaded_by` исходного Raw Object проходит внутри SQL до каждого
-FTS/LIKE, recent/date, whole-document и passage-vector cap. Строки без однозначного
-текстового автора, с malformed, oversized, duplicate-key или tenant-mismatched
-metadata принадлежат никому. Tenant-wide resident cache обходится: фильтрация его
-готового top-k снова позволила бы более сильным чужим векторам вытеснить цель.
-
-Scoped reranker получает detached author-only rows и управляет только порядком и
-конечным числовым score; ID, тело и остальные поля восстанавливаются из canonical
-результата. Это закрывает как foreign sentinel, так и in-place подмену объекта
-callback-ом. Общие graph/entity names и relation history остаются fail-closed до
-появления авторского provenance. Late matching passage теперь доходит до выдержки,
-а не теряется ради шапки документа. Новый путь помечен `scoped_hybrid`; минимальная
-конфигурация без HybridSearcher сохраняет `scoped_lexical` fallback.
-
-Новые uncached SQL, feedback/usage reads, vector scoring и chunk aggregation
-вынесены с event loop. Adversarial review отдельно поймал неверный adaptive plan:
-на synthetic 6000 KO/600 chunks author-count включал parent-first scan за
-**28.6 ms** против **1.1 ms** sparse (~26x). Стоимость снова считается по tenant
-KO index, который план физически проходит; exact author membership остаётся до
-лимита. После исправления целевой набор дал **25 passed**. Финальный canonical
-gate: **4962 passed**, 1 штатный backup-fixture skip; UI **23/23**, Ruff/format,
-mypy, compileall, Bandit HIGH и JavaScript syntax — без ошибок.

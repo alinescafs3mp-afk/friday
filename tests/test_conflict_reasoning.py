@@ -151,9 +151,9 @@ async def test_graph_depth_is_configurable_and_respects_the_relational_heuristic
     searcher = HybridSearcher(storage, graph_max_depth=3)
 
     relational = _FakeKG()
-    await searcher.search("alice", "как связаны Orion и PostgreSQL", kg=relational)
+    await searcher.search("alice", "как связаны Orion и PostgreSQL", kg=relational, graph_expansion=True)
     assert relational.depth == 3
 
     plain = _FakeKG()
-    await searcher.search("alice", "расскажи про Orion", kg=plain)
+    await searcher.search("alice", "расскажи про Orion", kg=plain, graph_expansion=True)
     assert plain.depth == 1

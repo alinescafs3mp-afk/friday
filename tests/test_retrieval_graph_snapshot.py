@@ -4,6 +4,12 @@ This is the retrieval/API seam of proposal 26.  Traversal may use full storage
 rows internally, but neither the agent nor ``GET /api/search`` may receive that
 working set, recompute a different path, or silently turn a malformed historical
 date into a current graphless answer.
+
+Every probe here declares ``graph_expansion=True`` out loud.  The parameter used to
+default to ``True``, so these tests exercised the graph channel by SILENCE — and so
+did three production roads that never meant to.  Since proposal 40 the default is
+the measured ordinary behaviour (no expansion), and asking for the graph is an
+explicit act.  A probe about the graph seam must therefore say so.
 """
 
 from __future__ import annotations
@@ -167,7 +173,7 @@ async def test_search_returns_the_same_bounded_temporal_graph_snapshot(storage):
     graph = _SnapshotGraph(knowledge_id)
 
     result = await HybridSearcher(storage, record_usage=False).search(
-        "alice", "Atlas", kg=graph, as_of="2024/03/05"
+        "alice", "Atlas", graph_expansion=True, kg=graph, as_of="2024/03/05"
     )
 
     assert graph.calls[0]["as_of"] == "2024-03-05"
@@ -228,13 +234,14 @@ async def test_temporal_explicit_path_is_not_vetoed_by_text_only_reranking(stora
     temporal = await searcher.search(
         "alice",
         "Atlas",
+        graph_expansion=True,
         kg=_SnapshotGraph(knowledge_id),
         as_of="2024-03-05",
     )
     assert [item["id"] for item in temporal["results"]] == [knowledge_id]
     assert rerank_calls == 0
 
-    current = await searcher.search("alice", "Atlas", kg=_SnapshotGraph(knowledge_id))
+    current = await searcher.search("alice", "Atlas", graph_expansion=True, kg=_SnapshotGraph(knowledge_id))
     assert current["results"] == []
     assert rerank_calls == 1
 
@@ -250,6 +257,7 @@ async def test_temporal_explicit_path_is_not_vetoed_by_text_only_reranking(stora
         untrusted = await searcher.search(
             "alice",
             "Atlas",
+            graph_expansion=True,
             kg=graph,
             as_of="2024-03-05",
         )
@@ -279,6 +287,7 @@ async def test_an_excluded_temporal_path_cannot_disable_reranking_for_other_resu
     result = await searcher.search(
         "alice",
         "BRK.A",
+        graph_expansion=True,
         kg=_SnapshotGraph(protected_id),
         as_of="2024-03-05",
     )
@@ -309,6 +318,7 @@ async def test_a_protected_tail_cannot_disable_reranking_for_the_head(storage):
     result = await searcher.search(
         "alice",
         "Atlas eligible",
+        graph_expansion=True,
         kg=_SnapshotGraph(protected_id, candidate_score=0.21),
         as_of="2024-03-05",
         limit=2,
@@ -596,6 +606,7 @@ async def test_candidate_graph_evidence_is_allowlisted_and_structurally_bounded(
     result = await HybridSearcher(storage, record_usage=False).search(
         "alice",
         "Atlas",
+        graph_expansion=True,
         kg=_EvidenceGraph(knowledge_id),
     )
 
@@ -649,7 +660,7 @@ async def test_invalid_as_of_is_refused_before_graph_enrichment(storage):
 
     with pytest.raises(ValueError, match="Некорректная дата as_of"):
         await HybridSearcher(storage, record_usage=False).search(
-            "alice", "Atlas", kg=graph, as_of="not-a-date"
+            "alice", "Atlas", graph_expansion=True, kg=graph, as_of="not-a-date"
         )
 
     assert graph.context_calls == 0
@@ -679,6 +690,7 @@ async def test_known_at_is_normalized_before_candidates_and_reaches_the_same_sna
     result = await HybridSearcher(storage, record_usage=False).search(
         "alice",
         "Atlas",
+        graph_expansion=True,
         kg=graph,
         known_at="2026-08-04T12:30:00+03:00",
     )
@@ -713,6 +725,7 @@ async def test_invalid_known_at_is_refused_before_history_or_candidate_reads(sto
         await HybridSearcher(storage, record_usage=False).search(
             "alice",
             "Atlas",
+            graph_expansion=True,
             kg=graph,
             known_at="2026-08-04T12:30:00",
         )
@@ -850,6 +863,7 @@ async def test_temporal_graph_refusal_is_not_swallowed_as_optional_enrichment(st
         await HybridSearcher(storage, record_usage=False).search(
             "alice",
             "Atlas",
+            graph_expansion=True,
             kg=_RefusingGraph("unused"),
             known_at="2026-08-04T12:30:00+03:00",
         )
@@ -884,6 +898,7 @@ async def test_any_temporal_traversal_failure_is_fail_closed(storage, monkeypatc
         await HybridSearcher(storage, record_usage=False).search(
             "alice",
             "Atlas",
+            graph_expansion=True,
             kg=_BrokenGraph(knowledge_id),
             **boundaries,
         )
@@ -900,6 +915,7 @@ async def test_current_traversal_failure_keeps_the_legacy_graphless_fallback(sto
     result = await HybridSearcher(storage, record_usage=False).search(
         "alice",
         "Atlas",
+        graph_expansion=True,
         kg=_BrokenGraph(knowledge_id),
     )
 
@@ -952,6 +968,7 @@ async def test_temporal_graph_must_echo_every_attested_boundary(
         await HybridSearcher(storage, record_usage=False).search(
             "alice",
             "Atlas",
+            graph_expansion=True,
             kg=graph,
             as_of="2024-03-05",
             known_at="2026-08-04T12:30:00+03:00",
@@ -1022,6 +1039,7 @@ async def test_repaired_query_is_the_one_traversed_and_published(storage, monkey
     result = await searcher.search(
         "alice",
         "QWERTY_NO_MATCH",
+        graph_expansion=True,
         kg=graph,
         known_at="2026-08-04T12:30:00+03:00",
     )

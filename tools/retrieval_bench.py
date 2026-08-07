@@ -396,10 +396,21 @@ async def index_embeddings(settings: Any, storage: Any, kg: Any, embeddings: Any
 
 async def measure(searcher: Any, kg: Any, user_id: str, k: int) -> dict[str, Any]:
     """Recall@k overall and per query kind, plus the queries that found nothing."""
+    from friday.retrieval import is_relational_query
+
     by_kind: dict[str, list[bool]] = {}
     misses: list[dict[str, str]] = []
     for query, expected, kind in GOLD:
-        hits = await searcher.search(user_id, query, limit=k, kg=kg)
+        # Прибор обязан мерить ТУ дорогу, которая поставляется. Раньше он строил
+        # настоящий `KnowledgeGraph` и передавал его без политики, то есть считал
+        # recall поиска с включённым графом — а обычный запрос в бою идёт без него.
+        hits = await searcher.search(
+            user_id,
+            query,
+            limit=k,
+            kg=kg,
+            graph_expansion=is_relational_query(query),
+        )
         results = hits.get("results", [])
         found = False
         for hit in results[:k]:

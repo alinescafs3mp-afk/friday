@@ -395,7 +395,9 @@ async def test_retrieval_uses_graph_expansion_and_quality_ranking(storage):
     graph.link_knowledge_to_entity(gamma_ko["id"], gamma["id"], "alice")
     graph.link_knowledge_to_entity(noisy["id"], alpha["id"], "alice")
 
-    result = await HybridSearcher(storage).search("alice", "Alpha PostgreSQL", kg=graph, limit=10)
+    result = await HybridSearcher(storage).search(
+        "alice", "Alpha PostgreSQL", kg=graph, graph_expansion=True, limit=10
+    )
     ids = [item["id"] for item in result["results"]]
     assert ids[0] == alpha_ko["id"]
     assert beta_ko["id"] in ids
@@ -407,6 +409,7 @@ async def test_retrieval_uses_graph_expansion_and_quality_ranking(storage):
         "alice",
         "Что связано с Alpha через зависимости?",
         kg=graph,
+        graph_expansion=True,
         limit=10,
     )
     relational_ids = [item["id"] for item in relational["results"]]
@@ -454,11 +457,11 @@ async def test_retrieval_respects_exact_identifiers_and_entity_only_graph_matche
     graph.link_knowledge_to_entity(orion_ko["id"], orion["id"], "alice")
 
     searcher = HybridSearcher(storage)
-    exact = await searcher.search("alice", "BRK.A quote", kg=graph, limit=10)
+    exact = await searcher.search("alice", "BRK.A quote", kg=graph, graph_expansion=True, limit=10)
     assert [item["id"] for item in exact["results"]] == [a_ko["id"]]
     assert exact["results"][0]["_score_components"]["identifier_coverage"] == 1.0
 
-    graph_only = await searcher.search("alice", "Orion", kg=graph, limit=10)
+    graph_only = await searcher.search("alice", "Orion", kg=graph, graph_expansion=True, limit=10)
     assert graph_only["results"][0]["id"] == orion_ko["id"]
     assert graph_only["results"][0]["_field_matches"]["entities"] > 0
     assert graph_only["results"][0]["_graph_score"] > 0

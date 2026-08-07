@@ -57,11 +57,11 @@ async def test_vertical_ingestion_graph_retrieval_and_idempotency(settings, stor
     assert graph.get_stats("alice")["knowledge_object_count"] == 1
 
     searcher = HybridSearcher(storage)
-    result = await searcher.search("alice", "DevFest knowledge", kg=graph)
+    result = await searcher.search("alice", "DevFest knowledge", kg=graph, graph_expansion=True)
     assert result["count"] >= 1
     assert result["results"][0]["id"] == ko["id"]
     assert result["strategy"]["feedback"] is True
-    assert await searcher.search("bob", "DevFest", kg=graph) == {
+    assert await searcher.search("bob", "DevFest", kg=graph, graph_expansion=True) == {
         "query": "DevFest",
         "results": [],
         "count": 0,

@@ -26,7 +26,12 @@ class _SpySearcher:
 @pytest.mark.asyncio
 async def test_score_cases_asks_for_no_graph_expansion(settings, storage):
     """Мутация, которую тест обязан ловить: убрать `graph_expansion=False` из вызова
-    в `_score_cases`. По умолчанию True, поэтому дефект не упадёт нигде, кроме числа."""
+    в `_score_cases`.
+
+    Раньше умолчание было `True`, и такой дефект не падал нигде, кроме числа. С
+    предложения 40 умолчание — измеренное обычное поведение, поэтому МОЛЧАНИЕ здесь
+    уже безопасно; проба всё равно требует объявления вслух, чтобы решение о режиме
+    было видно в этом файле, а не выводилось из чужого умолчания."""
     from friday.eval import _score_cases
 
     storage.ensure_user("alice")
