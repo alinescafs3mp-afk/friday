@@ -133,16 +133,21 @@ async def test_overview_and_database_diagnostics_count_only_public_graph_rows(se
             score=-1.0,
         )
     )
+    # Напоминание принадлежит ДРУГОМУ человеку в этом же арендаторе — то есть
+    # ровно тому случаю, ради которого §30 и писался: общий архив, где чужое
+    # личное не должно показываться. Собственное напоминание владельца арендатора
+    # с 0.198.0 своих же носителей не прячет (§76), и с `person_id='alice'` эта
+    # проба мерила бы уже не приватность, а послабление.
     with storage.transaction() as conn:
         conn.execute(
             """INSERT INTO entity_time(
                    entity_id, user_id, occurred_at, precision, source, updated_at)
-               VALUES(?, 'alice', '2026-08-07T09:00:00Z', 'day', 'reminder:alice', ?)""",
+               VALUES(?, 'alice', '2026-08-07T09:00:00Z', 'day', 'reminder:bob', ?)""",
             (private.id, "2026-08-06T00:00:00Z"),
         )
         conn.execute(
             """INSERT INTO private_entity_owners(entity_id, person_id, privacy_kind, created_at)
-               VALUES(?, 'alice', 'reminder', ?)""",
+               VALUES(?, 'bob', 'reminder', ?)""",
             (private.id, "2026-08-06T00:00:00Z"),
         )
 

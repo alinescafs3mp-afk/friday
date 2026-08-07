@@ -91,7 +91,11 @@ from friday.permissions import (
 from friday.retrieval import EmbeddingBackend, HybridSearcher, is_relational_query
 from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 from friday.security import verify_bridge_request
-from friday.storage import init_storage, normalize_conversation_mode
+from friday.storage import (
+    PrivateMaterialQuarantineError,
+    init_storage,
+    normalize_conversation_mode,
+)
 from friday.storage.models import (
     AuditEntry,
     FeedbackType,
@@ -2244,21 +2248,37 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "reason": "явная просьба поискать в интернете — команда, а не материал",
                     }
                 else:
-                    ingestion_result = await state.ingestion.ingest_text(
-                        actor.user_id,
-                        message,
-                        source="telegram" if actor.source == "telegram-bridge" else "api",
-                        source_ref=source_ref,
-                        force_knowledge=force_knowledge,
-                        metadata={
-                            # Кто прислал текст — тем же ключом, что и у файлов.
-                            "uploaded_by": actor.own_id,
-                            "channel": actor.source,
-                            "chat_id": channel_chat_id,
-                            "telegram_message_id": body.get("telegram_message_id"),
-                            **({"forward": forward_meta} if forward_meta else {}),
-                        },
-                    )
+                    try:
+                        ingestion_result = await state.ingestion.ingest_text(
+                            actor.user_id,
+                            message,
+                            source="telegram" if actor.source == "telegram-bridge" else "api",
+                            source_ref=source_ref,
+                            force_knowledge=force_knowledge,
+                            metadata={
+                                # Кто прислал текст — тем же ключом, что и у файлов.
+                                "uploaded_by": actor.own_id,
+                                "channel": actor.source,
+                                "chat_id": channel_chat_id,
+                                "telegram_message_id": body.get("telegram_message_id"),
+                                **({"forward": forward_meta} if forward_meta else {}),
+                            },
+                        )
+                    except PrivateMaterialQuarantineError:
+                        # Карантин приватного материала — штатный отказ, а не сбой.
+                        # Раньше он доезжал до человека пустым `HTTP 500`: разговор
+                        # обрывался целиком, вопрос оставался без ответа, а в журнале
+                        # не было ни строки. Реплику по-прежнему отвечаем, но честно
+                        # говорим, что запомнить её не вышло.
+                        LOGGER.warning("Text ingestion refused: message references private graph material")
+                        ingestion_result = {
+                            "promoted": False,
+                            "queued_for_review": False,
+                            "action": "refused",
+                            "category": "private_material",
+                            "reason": "текст ссылается на приватный материал и не сохранён",
+                            "private_material_refused": True,
+                        }
 
             result = await state.agent.chat(
                 actor.user_id,
@@ -2288,6 +2308,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     f"{notice}\n\n{previous_warning}" if previous_warning else notice
                 )
                 result["voice_transcript_truncated"] = True
+            if isinstance(ingestion_result, dict) and ingestion_result.get("private_material_refused"):
+                # Молчаливый отказ — это потерянная запись: человек уверен, что
+                # запомнили, а в архиве ничего нет.
+                notice = (
+                    "⚠️ Эту реплику я не сохранила: она задевает приватный материал, "
+                    "и запись оказалась бы невидимой в архиве. Ответила по ней, но в "
+                    "память она не попала."
+                )
+                previous_warning = str(result.get("grounding_warning") or "").strip()
+                result["grounding_warning"] = (
+                    f"{notice}\n\n{previous_warning}" if previous_warning else notice
+                )
             if actor.source == "telegram-bridge" and channel_chat_id:
                 state.storage.set_channel_conversation(
                     actor.own_id,

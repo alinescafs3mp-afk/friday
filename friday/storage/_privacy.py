@@ -10,7 +10,14 @@ from __future__ import annotations
 
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
 
-_INBOX_PUBLIC_JSON_MAX_BYTES = 8_192
+# Предел на JSON предложений Inbox стоял в 128 раз ниже, чем такой же предел у
+# Raw/Knowledge (`_CURRENT_PUBLIC_JSON_MAX_BYTES`), хотя сторожит то же самое —
+# цену обхода `json_tree`. Замер на архиве владельца: медиана 2 436 байт, p99
+# 10 537, максимум 18 217; прежние 8 КиБ отсекали 85 строк из 2071, и вместе с
+# ними становились невидимы 85 Raw Objects. Размер блоба не говорит ничего о том,
+# копирует ли он приватную личность: за пределом честного ответа нет, есть только
+# молчаливая пропажа. Цена выравнивания замерена: полный обход 979.7 → 1097.2 мс.
+_INBOX_PUBLIC_JSON_MAX_BYTES = 1_048_576
 _INBOX_PUBLIC_NOTES_MAX_CHARS = 4_000
 _GRAPH_PUBLIC_JSON_MAX_BYTES = 8_192
 _RELATION_PUBLIC_JSON_MAX_BYTES = 1_048_576
@@ -252,6 +259,10 @@ def _private_entity_material_seeded_cte(
         "closure_carrier_state",
         "closure_dependency_token",
     )
+    own_reminder = _own_tenant_reminder_identity(
+        "closure_dependency_token.id",
+        "closure_carrier_entity.user_id",
+    )
     return f"""WITH RECURSIVE
     closure_material_states AS MATERIALIZED (
         SELECT material_state.*,
@@ -282,6 +293,17 @@ def _private_entity_material_seeded_cte(
             ON closure_carrier_state.id<>closure_dependency.id
            AND closure_carrier_state.material_valid=1
            AND {copied}
+           -- §76: чужое напоминание красит носителя приватным, СВОЁ — нет.
+           -- Без этой строки инструмент напоминаний не мог поставить второе
+           -- напоминание про совещание: новая сущность повторяла имя старой,
+           -- сразу становилась приватной, `create_entity` отказывал, а человеку
+           -- при этом отвечалось «записано». Прямой посев не трогается — само
+           -- напоминание остаётся скрытым.
+           AND NOT EXISTS (
+               SELECT 1 FROM entities closure_carrier_entity
+                WHERE closure_carrier_entity.id=closure_carrier_state.id
+                  AND {own_reminder}
+           )
     )"""
 
 
@@ -408,11 +430,58 @@ def _not_disallowed_private_material_for_person(
     )"""
 
 
+def _own_tenant_reminder_identity(
+    dependency_id_expression: str,
+    tenant_expression: str,
+) -> str:
+    """Носитель повторяет имя СВОЕГО личного напоминания своего же арендатора.
+
+    §30 прячет личное напоминание от ДРУГОГО человека: в общем архиве одного
+    арендатора читают многие. Внутри арендатора самого владельца напоминания
+    другого человека нет — кто вообще может читать этого арендатора, уже решено
+    изоляцией, — и заметка, просто повторившая слова напоминания, не спрятана ни
+    от кого. Замерено на копии живого архива: `108` из `3352` Raw Objects
+    владельца были заперты словами «совещание», «отчёт в пятницу» и «позвонить в
+    автосервис»; новая заметка с любым из них отвергалась, и новое напоминание про
+    совещание тоже — инструмент не мог создать событие с именем события, которое
+    уже знал.
+
+    Условие целиком лежит в `private_entity_own_tenant_reminder`: та же
+    долговечная опора, что у персонального исключения по сущности — ровно один
+    маркер владения, ровно один провенанс расписания, исправное состояние
+    материала. Чужой арендатор, неоднозначное владение и испорченное состояние
+    держат карантин.
+
+    Вид намеренно не смотрит в кэш: это выражение считается в том числе ПОКА
+    строится живое замыкание, когда опубликованного кэша ещё нет, а окружающие
+    предикаты чтения и так закрываются при невалидном кэше. Условие «копирует
+    ЧУЖУЮ приватную личность» здесь тоже не нужно: носитель, копирующий чужое
+    имя, всё равно достаётся замыканием от ТОГО посева, а послабление снимает
+    ровно одно ребро.
+
+    ``tenant_expression`` — code-owned выражение-столбец, не bind-маркер и никогда
+    не данные запроса.
+    """
+
+    return f"""EXISTS (
+        SELECT 1 FROM private_entity_own_tenant_reminder own_tenant_reminder
+         WHERE own_tenant_reminder.entity_id={dependency_id_expression}
+           AND own_tenant_reminder.tenant_id={tenant_expression}
+    )"""
+
+
 def _not_private_text_entity_dependency(
     *expressions: str,
     max_bytes: int,
+    tenant_expression: str = "",
 ) -> str:
-    """Bound text and reject identities of any entity hidden from public graph reads."""
+    """Bound text and reject identities of any entity hidden from public graph reads.
+
+    ``tenant_expression`` names the carrier's tenant. Passing it lets a carrier
+    keep the words of its OWN personal reminder (see
+    ``_own_tenant_reminder_identity``); omitting it keeps the older, fully
+    conservative behaviour for callers with no tenant column at hand.
+    """
 
     if not expressions:
         return "1"
@@ -426,12 +495,18 @@ def _not_private_text_entity_dependency(
                  COALESCE({expression},''), copied_text_entity.name)=1)"""
         for expression in expressions
     )
+    own_reminder = (
+        f"AND NOT {_own_tenant_reminder_identity('copied_text_entity.id', tenant_expression)}"
+        if tenant_expression
+        else ""
+    )
     return f"""(
         {_private_material_cache_valid()}
         AND {bounds}
         AND NOT EXISTS (
             SELECT 1 FROM private_entity_material_closure copied_text_entity
-             WHERE {copies}
+             WHERE ({copies})
+             {own_reminder}
         )
     )"""
 
@@ -442,10 +517,12 @@ def _raw_material_expression(alias: str = "r") -> str:
     content = _not_private_text_entity_dependency(
         f"{alias}.raw_content",
         max_bytes=_CURRENT_PUBLIC_BODY_MAX_BYTES,
+        tenant_expression=f"{alias}.user_id",
     )
     source_ref = _not_private_text_entity_dependency(
         f"{alias}.source_ref",
         max_bytes=_CURRENT_PUBLIC_FIELD_MAX_BYTES,
+        tenant_expression=f"{alias}.user_id",
     )
     metadata = _not_private_bounded_json_dependency(
         f"{alias}.metadata_json",
@@ -481,11 +558,13 @@ def _knowledge_material_expression(alias: str = "k") -> str:
     content = _not_private_text_entity_dependency(
         f"{alias}.content",
         max_bytes=_CURRENT_PUBLIC_BODY_MAX_BYTES,
+        tenant_expression=f"{alias}.user_id",
     )
     card_text = _not_private_text_entity_dependency(
         f"{alias}.title",
         f"{alias}.summary",
         max_bytes=_CURRENT_PUBLIC_FIELD_MAX_BYTES,
+        tenant_expression=f"{alias}.user_id",
     )
     tags = _not_private_bounded_json_dependency(
         f"{alias}.tags_json",
@@ -679,6 +758,7 @@ def _inbox_dependency_expression(
                           )
                    )
                )
+               AND NOT {_own_tenant_reminder_identity("embedded_dependency_entity.id", f"{alias}.user_id")}
         )
         AND NOT EXISTS (
             SELECT 1
@@ -888,6 +968,7 @@ def _not_private_bounded_json_dependency(
                                        CAST(embedded_json_value.key AS TEXT),
                                        embedded_private_entity.name)=1)
                        )
+                       AND NOT {_own_tenant_reminder_identity("embedded_private_entity.id", user_expression)}
                 )
                 AND {embedded_knowledge_guard}
               THEN 1 ELSE 0 END
@@ -1747,6 +1828,7 @@ DROP VIEW IF EXISTS temp.public_raw_material;
 DROP VIEW IF EXISTS temp.private_entity_material_derivative_live;
 DROP VIEW IF EXISTS temp.private_entity_material_closure;
 DROP VIEW IF EXISTS temp.private_entity_material_cached_closure;
+DROP VIEW IF EXISTS temp.private_entity_own_tenant_reminder;
 DROP VIEW IF EXISTS temp.private_entity_material_live;
 DROP VIEW IF EXISTS temp.private_entity_identity_tokens;
 DROP VIEW IF EXISTS temp.private_entity_material_states;
@@ -1785,6 +1867,52 @@ SELECT history_state.id, history_state.version_id, history_state.snapshot_valid,
                   THEN 1 ELSE 0 END AS snapshot_valid
         FROM entity_versions v
   ) history_state;
+
+-- §76: плоский ответ на вопрос «это СВОЁ напоминание своего же арендатора?».
+--
+-- Условие могло бы стоять прямо в предикатах, и первая редакция так и стояла —
+-- но пять вложенных `EXISTS` внутри и без того глубокого выражения пробили
+-- предел разбора: на сборке SQLite с консервативными лимитами (`maximum depth
+-- 30`) представление переставало компилироваться вовсе. Отдельный вид даёт ту же
+-- проверку глубиной в один `EXISTS`.
+--
+-- Арендатор сущности, человек-владелец и провенанс расписания должны совпадать
+-- между собой, поэтому ключом достаточно одного `tenant_id`: потребитель
+-- сравнивает его с арендатором СВОЕГО носителя.
+CREATE TEMP VIEW private_entity_own_tenant_reminder AS
+SELECT own_reminder_entity.id AS entity_id,
+       own_reminder_entity.user_id AS tenant_id
+  FROM entities own_reminder_entity
+  JOIN private_entity_owners own_reminder_owner
+    ON own_reminder_owner.entity_id=own_reminder_entity.id
+   AND own_reminder_owner.person_id=own_reminder_entity.user_id
+   AND own_reminder_owner.privacy_kind='reminder'
+  JOIN entity_time own_reminder_time
+    ON own_reminder_time.entity_id=own_reminder_entity.id
+   AND own_reminder_time.user_id=own_reminder_entity.user_id
+   AND own_reminder_time.source='reminder:' || own_reminder_entity.user_id
+ WHERE NOT EXISTS (
+       SELECT 1 FROM private_entity_owners other_reminder_owner
+        WHERE other_reminder_owner.entity_id=own_reminder_entity.id
+          AND (
+               other_reminder_owner.person_id<>own_reminder_entity.user_id
+               OR other_reminder_owner.privacy_kind<>'reminder'
+          )
+   )
+   AND NOT EXISTS (
+       SELECT 1 FROM entity_time other_reminder_time
+        WHERE other_reminder_time.entity_id=own_reminder_entity.id
+          AND other_reminder_time.source LIKE 'reminder:%'
+          AND (
+               other_reminder_time.user_id<>own_reminder_entity.user_id
+               OR other_reminder_time.source<>'reminder:' || own_reminder_entity.user_id
+          )
+   )
+   AND NOT EXISTS (
+       SELECT 1 FROM private_entity_material_states own_reminder_state
+        WHERE own_reminder_state.id=own_reminder_entity.id
+          AND own_reminder_state.material_valid=0
+   );
 
 CREATE TEMP VIEW private_entity_identity_tokens AS
 SELECT DISTINCT material_state.id AS id, CAST(identity_token.value AS TEXT) AS name

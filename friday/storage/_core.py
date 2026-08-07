@@ -329,6 +329,7 @@ _AUDIT_PRIVACY_MARKER_VALUE = "v3"
 _AUDIT_PRIVACY_PENDING_VALUE = "pending_wal_truncate:v3"
 _AUDIT_PRIVACY_V1_VALUES = frozenset({"v1", "v2", "pending_wal_truncate", "pending_wal_truncate:v2"})
 _AUDIT_PRIVACY_HMAC_KEY = "audit_privacy_hmac_key"
+_PRIVATE_MATERIAL_RULE_MARKER_KEY = "private_material_rule_digest"
 _IDEMPOTENCY_PRIVACY_MARKER_KEY = "idempotency_response_privacy"
 _IDEMPOTENCY_PRIVACY_MARKER_VALUE = "v1"
 _IDEMPOTENCY_PRIVACY_PENDING_VALUE = "pending_wal_truncate:v1"
@@ -1098,6 +1099,47 @@ def _validate_private_material_cache(
         ).fetchone()
     if derivative_mismatch is not None:
         raise sqlite3.DatabaseError("Private derivative cache rebuild did not match live dependencies")
+
+
+def _invalidate_private_material_on_rule_change(conn: sqlite3.Connection) -> None:
+    """Пересчитать кэш приватности, когда изменилось само ПРАВИЛО, а не схема.
+
+    Долговечный кэш — это ответ, посчитанный прежней редакцией правил. Форма
+    таблиц при правке правила не меняется, поэтому номер схемы её не замечает, а
+    открытие с валидным состоянием не пересобирает и не сверяет кэш: старый ответ
+    живёт дальше. Замерено на копии живого архива: без этой отметки послабление
+    §76 не вернуло бы владельцу ни одной из 108 запертых записей — код новый,
+    кэш прежний.
+
+    Отметка — отпечаток текста самих правил, а не число, которое надо не забыть
+    поднять. Любая будущая правка приватного SQL инвалидирует кэш сама.
+    """
+
+    digest = hashlib.sha256(
+        b"".join(
+            statement.encode("utf-8")
+            for statement in (
+                PRIVATE_MATERIAL_PERSISTENT_SCHEMA,
+                PRIVATE_MATERIAL_RUNTIME_SCHEMA,
+                PRIVATE_MATERIAL_CACHE_REBUILD_SQL,
+                PRIVATE_DERIVATIVE_CACHE_REBUILD_SQL,
+            )
+        )
+    ).hexdigest()
+    row = conn.execute(
+        "SELECT value FROM schema_meta WHERE key=?",
+        (_PRIVATE_MATERIAL_RULE_MARKER_KEY,),
+    ).fetchone()
+    if row is not None and str(row[0]) == digest:
+        return
+    # Инвалидируется ВЕРХНЯЯ пара: она пересобирает и производную следом.
+    conn.execute("UPDATE main.private_entity_material_cache_state SET valid=0 WHERE singleton=1")
+    conn.execute("UPDATE main.private_entity_material_derivative_state SET valid=0 WHERE singleton=1")
+    conn.execute(
+        """INSERT INTO schema_meta(key, value, updated_at) VALUES(?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (_PRIVATE_MATERIAL_RULE_MARKER_KEY, digest, utc_now()),
+    )
 
 
 def _refresh_private_derivative_authority(conn: sqlite3.Connection) -> bool:
@@ -2100,6 +2142,7 @@ class CoreMixin(StorageShared):
             # Recheck after BEGIN IMMEDIATE: another opener may have repaired the
             # same global state while this connection waited for the lock.
             conn.execute("BEGIN IMMEDIATE")
+            _invalidate_private_material_on_rule_change(conn)
             material_rebuilt = False
             derivative_rebuilt = False
             material_state = conn.execute(

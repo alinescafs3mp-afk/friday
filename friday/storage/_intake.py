@@ -14,6 +14,7 @@ from friday.storage._base import (
     Any,
     InboxItem,
     InboxStatus,
+    PrivateMaterialQuarantineError,
     PurePosixPath,
     RawObject,
     SourceReferenceConflictError,
@@ -325,7 +326,7 @@ class IntakeMixin(StorageShared):
                     (obj.id, obj.user_id),
                 ).fetchone()
                 if visible is None:
-                    raise ValueError("Raw object fields reference private graph material")
+                    raise PrivateMaterialQuarantineError("Raw object fields reference private graph material")
             return obj
         except sqlite3.IntegrityError:
             existing = self.find_raw_by_source_ref(obj.user_id, obj.source, obj.source_ref)

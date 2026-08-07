@@ -208,6 +208,17 @@ class SourceReferenceConflictError(ValueError):
     """An immutable source reference was reused for different content."""
 
 
+class PrivateMaterialQuarantineError(ValueError):
+    """Текст ссылается на ЧУЖОЙ приватный материал и потому не сохраняется.
+
+    Отказ штатный: такой объект был бы невидим каждому читателю, включая того,
+    кто его прислал, и молча пропал бы. Имя у ошибки появилось потому, что голый
+    `ValueError` доезжал до человека как `HTTP 500` без единой строки в журнале:
+    `install_external_exception_privacy` снимает traceback с `uvicorn.error`, и
+    оператор не мог узнать даже того, что отказ вообще произошёл.
+    """
+
+
 class StorageClosedError(RuntimeError):
     """A database operation was attempted after the process shut its storage down.
 
