@@ -87,9 +87,27 @@ def _file_fate_line(file_ingestion: Any) -> str:
         if vision_total > vision_read > 0
         else ""
     )
+    # Архив разобран не весь: часть членов не поместилась в бюджет распаковки или
+    # оказалась слишком крупной. TAR об этом говорил, ZIP и RAR молчали.
+    archive_files = int(extraction.get("archive_files") or 0)
+    archive_read = int(extraction.get("archive_files_read") or 0)
+    archive_line = (
+        f" В архиве {archive_files} файлов, разобрано {archive_read} — про остальные я ничего не знаю."
+        if extraction.get("archive_truncated") and archive_files > archive_read
+        else ""
+    )
+    # Исходник обрезан ДО разбора: разборщик читал не весь файл. Признак писался
+    # пятью разборщиками и не читался ни одним потребителем.
+    source_clipped = bool(extraction.get("source_truncated_for_parse"))
+    # Причина отказа известна коду; человеку доставалось одинаковое «текст извлечь
+    # не удалось» и для битого файла, и для незнакомого формата — а следующий шаг
+    # у них разный: один пересохранить, другой прислать в другом виде.
+    unsupported = bool(extraction.get("unsupported_format"))
     if file_ingestion.get("promoted"):
         line = "✅ Файл стал знанием — можно спрашивать."
-        if vision_line:
+        if archive_line:
+            line += archive_line
+        elif vision_line:
             line += vision_line
         elif beyond_the_pages:
             line += pages_line
@@ -102,13 +120,19 @@ def _file_fate_line(file_ingestion: Any) -> str:
             pages = int(extraction.get("parse_pages_read") or 0)
             read = f" Прочитано страниц: {pages}." if pages else ""
             line += f" Разбор остановлен по сроку — принято только начало.{read}"
+        elif source_clipped:
+            line += " Файл длиннее, чем берёт разбор, — прочитано его начало."
         return line
     if file_ingestion.get("queued_for_review") or file_ingestion.get("inbox_id"):
         line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
-        if vision_line:
+        if archive_line:
+            line += archive_line
+        elif vision_line:
             line += vision_line
         elif beyond_the_pages:
             line += pages_line
+        elif unsupported:
+            line += " Такой формат я пока не читаю — пришлите его в PDF, DOCX или текстом."
         elif text_missing:
             line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
         elif over_the_cap:
@@ -125,6 +149,8 @@ def _file_fate_line(file_ingestion: Any) -> str:
             pages = int(extraction.get("parse_pages_read") or 0)
             read = f" Прочитано страниц: {pages}." if pages else ""
             line += f" Разбор остановлен по сроку — принято только начало.{read}"
+        elif source_clipped:
+            line += " Файл длиннее, чем берёт разбор, — прочитано его начало."
         return line
     return ""
 

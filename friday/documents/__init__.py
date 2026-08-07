@@ -1287,8 +1287,12 @@ class DocumentExtractor:
             files = [member for member in members if not member.is_dir()]
             parts = [f"ZIP archive: {len(files)} files", *(member.filename for member in files[:100])]
             previewed = 0
+            exhausted = False
             for member in files:
                 if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
+                    # Слишком крупный член — тоже НЕ прочитан, и это тот же класс
+                    # молчаливой потери: раньше он просто пропускался.
+                    exhausted = True
                     continue
                 # Count the decompression, not the success. Incrementing only when a
                 # preview came back meant a member that yields no text — an inner
@@ -1300,6 +1304,7 @@ class DocumentExtractor:
                 # The allowance belongs to the UPLOAD, not to this archive: a nested
                 # member used to start over with a full one.
                 if not budget.take_preview():
+                    exhausted = True
                     break
                 previewed += 1
                 with archive.open(member) as stream:
@@ -1308,10 +1313,18 @@ class DocumentExtractor:
                 preview = self._member_preview(member.filename, data, depth, budget, deadline)
                 if preview:
                     parts.append(preview)
-        return DocumentResult(
-            "\n".join(parts),
-            {"format": "zip", "files": len(files), "previewed_files": previewed},
-        )
+        metadata: dict[str, Any] = {
+            "format": "zip",
+            "files": len(files),
+            "previewed_files": previewed,
+        }
+        if exhausted:
+            # ТАR это говорил, ZIP молчал — при том что ZIP на входе встречается
+            # чаще всех. Человек получал список из тридцати имён и содержимое
+            # двадцати четырёх, и ничто не отличало «прочитано всё» от «прочитана
+            # часть».
+            metadata["archive_budget_exhausted"] = True
+        return DocumentResult("\n".join(parts), metadata)
 
     def _extract_tar(
         self,
@@ -1358,6 +1371,7 @@ class DocumentExtractor:
                     continue
                 stream = archive.extractfile(member)
                 if stream is None:
+                    exhausted = True
                     continue
                 if not budget.take_preview():
                     exhausted = True
@@ -1399,10 +1413,13 @@ class DocumentExtractor:
                 raise ArchiveLimitError("RAR uncompressed size exceeds configured limit")
             parts = [f"RAR archive: {len(files)} files", *(member.filename for member in files[:100])]
             previewed = 0
+            exhausted = False
             for member in files:
                 if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
+                    exhausted = True
                     continue
                 if not budget.take_preview():
+                    exhausted = True
                     break
                 previewed += 1  # decompressions, not successes — see _extract_zip
                 with archive.open(member) as stream:
@@ -1411,9 +1428,14 @@ class DocumentExtractor:
                 preview = self._member_preview(member.filename, data, depth, budget, deadline)
                 if preview:
                     parts.append(preview)
-        return DocumentResult(
-            "\n".join(parts), {"format": "rar", "files": len(files), "previewed_files": previewed}
-        )
+        rar_metadata: dict[str, Any] = {
+            "format": "rar",
+            "files": len(files),
+            "previewed_files": previewed,
+        }
+        if exhausted:
+            rar_metadata["archive_budget_exhausted"] = True
+        return DocumentResult("\n".join(parts), rar_metadata)
 
     def _extract_7z(self, content: bytes) -> DocumentResult:
         try:

@@ -83,6 +83,9 @@ _EXTRACTION_BOOL_FIELDS = (
     "text_truncated",
     "parse_deadline_reached",
     "parse_pages_truncated",
+    "archive_truncated",
+    "source_truncated_for_parse",
+    "unsupported_format",
 )
 _EXTRACTION_COUNT_FIELDS = (
     "chars",
@@ -90,6 +93,8 @@ _EXTRACTION_COUNT_FIELDS = (
     "parse_total_pages",
     "vision_pages_read",
     "vision_pages_total",
+    "archive_files",
+    "archive_files_read",
 )
 
 _PUBLIC_FILE_ROW_FIELDS = ("id", "received_at", "deleted_at")

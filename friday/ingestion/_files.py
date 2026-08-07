@@ -1001,6 +1001,34 @@ class FilesMixin(PipelineShared):
                         # молчание о ней — нет.
                         "vision_pages_total": int((vision or {}).get("pages_total") or 0),
                         "vision_pages_read": int((vision or {}).get("pages_read") or 0),
+                        # Архив разобран не весь: часть членов не поместилась в
+                        # бюджет распаковки или оказалась слишком крупной. TAR об
+                        # этом говорил, ZIP и RAR молчали — при том что ZIP на
+                        # входе встречается чаще всех.
+                        "archive_truncated": bool(
+                            (extraction.metadata or {}).get("archive_budget_exhausted")
+                        ),
+                        "archive_files": int((extraction.metadata or {}).get("files") or 0),
+                        "archive_files_read": int((extraction.metadata or {}).get("previewed_files") or 0),
+                        # Исходник обрезан ДО разбора: разборщик читал не весь
+                        # файл. Признак писался пятью разборщиками и не читался ни
+                        # одним потребителем — обещание без механизма.
+                        "source_truncated_for_parse": bool(
+                            (extraction.metadata or {}).get("source_truncated_for_parse")
+                        ),
+                        # Причина отказа известна коду; человеку доставалось
+                        # только «текст извлечь не удалось», одинаковое и для
+                        # битого файла, и для незнакомого формата.
+                        #
+                        # Картинка и звук сюда НЕ попадают, хотя разбор текста их
+                        # тоже не берёт: их читают другие пути — зрение и
+                        # расшифровка. Сказать про фотографию «пришлите в PDF»
+                        # значило бы соврать о собственных возможностях.
+                        "unsupported_format": (
+                            extraction.error == "unsupported_document_format"
+                            and not mime_type.startswith("image/")
+                            and not looks_like_audio(content_type=mime_type, filename=filename)
+                        ),
                         "vision": {
                             key: value
                             for key, value in (vision or {}).items()
@@ -1092,6 +1120,17 @@ class FilesMixin(PipelineShared):
             # переспросить по нему потом будет нечего.
             "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
             "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
+            # Те же три потери, что и на приёмном пути. Здесь они важнее: материал
+            # не сохраняется, и переспросить по нему потом будет нечего.
+            "archive_truncated": bool((extraction.metadata or {}).get("archive_budget_exhausted")),
+            "archive_files": int((extraction.metadata or {}).get("files") or 0),
+            "archive_files_read": int((extraction.metadata or {}).get("previewed_files") or 0),
+            "source_truncated_for_parse": bool((extraction.metadata or {}).get("source_truncated_for_parse")),
+            "unsupported_format": (
+                extraction.error == "unsupported_document_format"
+                and not safe_mime_type.startswith("image/")
+                and not looks_like_audio(content_type=safe_mime_type, filename=safe_filename)
+            ),
         }
         office_structure = _validated_office_structure(
             getattr(extraction, "office_structure_index", None),
