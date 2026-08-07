@@ -79,6 +79,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("browse", "записи по тегу, проекту или сущности"),
     ("tags", "теги базы с количеством записей"),
     ("profile", "карточка сущности: документы, теги, даты, связи"),
+    ("graph", "как связаны двое: цепочка связей между объектами"),
     ("entity_rename", "переименовать объект: старое имя => новое имя"),
     ("entity_alias", "добавить объекту псевдоним: объект => псевдоним"),
     ("watch", "следить за темой: сообщу, когда появится новое"),
@@ -386,6 +387,7 @@ class BridgeShared:
     _response_reply_markup: Callable[..., Any]
     _send_browse: Callable[..., Any]
     _send_entity_profile: Callable[..., Any]
+    _send_relation_path: Callable[..., Any]
     _send_inbox: Callable[..., Any]
     _send_conflicts: Callable[..., Any]
     _send_relations: Callable[..., Any]

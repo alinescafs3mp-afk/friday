@@ -800,6 +800,83 @@ class ViewsMixin(BridgeShared):
         rows = [buttons[index : index + 3] for index in range(0, len(buttons), 3)]
         return {"inline_keyboard": rows}
 
+    async def _send_relation_path(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        chat_id: int,
+        external_user_id: str,
+        telegram_user: dict[str, Any],
+        argument: str,
+    ) -> None:
+        """«Как связаны Иванов и Заря» — цепочкой связей, прямо в чате.
+
+        На этот вопрос не отвечает карточка ни одного из объектов: он про ребро, а
+        не про узел. В админке путь подсвечивался на картине с самого начала, а в
+        чате графа не было вовсе — при том что закон проекта (`sol/SOL.md` §1.6)
+        требует, чтобы новая возможность работала в чате в первую очередь.
+
+        Разделитель `=>` — тот же, что уже принят у `/entity_rename` и
+        `/entity_alias`: второй язык разбора аргументов означал бы, что человеку
+        надо помнить, какая команда какой понимает.
+        """
+        raw = argument.strip()
+        left, separator, right = raw.partition("=>")
+        if not separator:
+            left, separator, right = raw.partition("->")
+        source, target = left.strip(), right.strip()
+        if not source or not target:
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Использование: /graph первый объект => второй объект\n\n"
+                "Например: /graph Иванов => Заря. Покажу цепочку связей между ними. "
+                "Карточка одного объекта: /profile имя",
+            )
+            return
+        try:
+            data = await self._backend_json(
+                backend,
+                "GET",
+                f"/api/kg/graph-path?source={quote(source, safe='')}&target={quote(target, safe='')}",
+                {"telegram_user": telegram_user},
+                external_user_id,
+                str(chat_id),
+            )
+        except PermanentUpdateError as error:
+            notice = refusal_notice(error)
+            await self._send_message(
+                telegram,
+                chat_id,
+                notice or f"Один из объектов не найден: «{source}» или «{target}». Карточка: /profile имя",
+            )
+            return
+        steps = data.get("path") if isinstance(data.get("path"), list) else []
+        if not data.get("found") or not steps:
+            depth = int(data.get("depth_searched") or 0)
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"Связи между «{source}» и «{target}» не нашлось в пределах {depth} шагов.\n\n"
+                "Совместная встречаемость в путь не входит намеренно: «упомянуты в одном "
+                "документе» — это не связь, и цепочка через неё была бы выдумкой.",
+            )
+            return
+        lines = [f"🔗 Как связаны «{source}» и «{target}» — {len(steps)} шага(ов):"]
+        for index, step in enumerate(steps, start=1):
+            if not isinstance(step, dict):
+                continue
+            begin = str((step.get("from") or {}).get("name") or "?")
+            end = str((step.get("to") or {}).get("name") or "?")
+            relation = str(step.get("relation_type") or "связан")
+            # Стрелка показывает направление УТВЕРЖДЕНИЯ, а не обхода: путь может
+            # идти против него, и человеку это надо видеть.
+            arrow = "→" if step.get("forward") else "←"
+            lines.append(f"{index}. {begin} {arrow}({relation}) {end}")
+        lines.append("")
+        lines.append("Карточка любого из них: /profile имя")
+        await self._send_message(telegram, chat_id, "\n".join(lines))
+
     async def _send_browse(
         self,
         telegram: httpx.AsyncClient,

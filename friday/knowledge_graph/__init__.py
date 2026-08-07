@@ -3245,6 +3245,80 @@ class KnowledgeGraph:
             result.update(confirmed)
         return result
 
+    def find_relation_path(
+        self,
+        user_id: str,
+        source_id: str,
+        target_id: str,
+        *,
+        max_depth: int = 4,
+    ) -> dict[str, Any]:
+        """Кратчайшая цепочка ПОДТВЕРЖДЁННЫХ связей между двумя узлами.
+
+        Это то, ради чего граф — граф, а не список соседей: «как связаны Иванов и
+        проект Заря» нельзя ответить карточкой ни одного из них. В админке путь
+        подсвечивается на картине с самого начала; в чате его не было, а чат по
+        закону проекта (`sol/SOL.md` §1.6) — первый интерфейс.
+
+        Встречаемость в цепочку НЕ входит. Соседство в концентраторе — замеренная
+        не-улика: штатное расписание на полсотни имён связывает все пары этих
+        людей, и путь через него означал бы «оба упомянуты в одном документе», а
+        не «связаны». Молчание об отсутствии пути честнее выдуманной связи.
+
+        Обход идёт по окрестности источника — то есть по тому же коду, который
+        уже держит границу арендатора, мягкие удаления и слияния.
+        """
+
+        depth = max(1, min(int(max_depth), 5))
+        neighbourhood = self.get_entity_graph(user_id, source_id, depth)
+        nodes = {str(node["id"]): node for node in neighbourhood.get("nodes", [])}
+        if source_id not in nodes or target_id not in nodes:
+            return {"found": False, "path": [], "depth_searched": depth}
+        adjacency: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+        for edge in neighbourhood.get("edges", []):
+            # Встречаемость сюда не попадает уже потому, что `include_cooccurrence`
+            # по умолчанию выключен, — но проверка стоит и здесь: умолчание можно
+            # сменить одной строкой, а цена ошибки тут не «лишнее ребро», а
+            # выдуманная связь между людьми.
+            if edge.get("kind") == "cooccurrence":
+                continue
+            left = str(edge.get("source_entity_id") or edge.get("source") or "")
+            right = str(edge.get("target_entity_id") or edge.get("target") or "")
+            if not left or not right:
+                continue
+            adjacency.setdefault(left, []).append((right, edge))
+            adjacency.setdefault(right, []).append((left, edge))
+        came_from: dict[str, tuple[str, Mapping[str, Any]] | None] = {source_id: None}
+        queue: deque[str] = deque([source_id])
+        while queue:
+            current = queue.popleft()
+            if current == target_id:
+                break
+            for neighbour, edge in adjacency.get(current, []):
+                if neighbour in came_from:
+                    continue
+                came_from[neighbour] = (current, edge)
+                queue.append(neighbour)
+        if target_id not in came_from:
+            return {"found": False, "path": [], "depth_searched": depth}
+        steps: list[dict[str, Any]] = []
+        cursor = target_id
+        while came_from.get(cursor):
+            previous, edge = came_from[cursor]  # type: ignore[misc]
+            steps.append(
+                {
+                    "from": {"id": previous, "name": str(nodes.get(previous, {}).get("name") or "")},
+                    "to": {"id": cursor, "name": str(nodes.get(cursor, {}).get("name") or "")},
+                    "relation_type": str(edge.get("relation_type") or ""),
+                    # Направление ребра — свойство утверждения, а не обхода: путь
+                    # может идти против стрелки, и человеку это надо видеть.
+                    "forward": str(edge.get("source_entity_id") or edge.get("source") or "") == previous,
+                }
+            )
+            cursor = previous
+        steps.reverse()
+        return {"found": True, "path": steps, "depth_searched": depth}
+
     def link_knowledge_to_entity(
         self,
         ko_id: str,

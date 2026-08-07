@@ -65,12 +65,12 @@ from friday.server import create_app
 #: Отдаются коды инцидентов и счётчики; строк из переписки там нет по построению.
 #: +2 к 186: GET очереди предложенных связей и POST решения по одной связи —
 #: tenant-scoped Telegram-first review без evidence body и reviewer identity.
-EXPECTED_OPERATIONS = 188
+EXPECTED_OPERATIONS = 189
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
     "/api/admin": 95,
-    "/api/kg": 23,
+    "/api/kg": 24,
     "/api/missions": 4,
 }
 

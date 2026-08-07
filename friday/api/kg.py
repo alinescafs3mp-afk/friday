@@ -944,6 +944,44 @@ async def entity_graph(
     return graph
 
 
+@router.get("/graph-path", tags=["knowledge-graph"])
+async def relation_path(
+    request: Request,
+    source: str = Query(..., min_length=1, max_length=200, description="Имя или id узла-начала"),
+    target: str = Query(..., min_length=1, max_length=200, description="Имя или id узла-конца"),
+    depth: int = Query(4, ge=1, le=5),
+) -> dict[str, Any]:
+    """Как связаны две сущности — цепочкой подтверждённых связей.
+
+    Ответ на такой вопрос нельзя получить карточкой ни одной из них: он про
+    ребро, а не про узел. В админке путь подсвечивается на картине с самого
+    начала; здесь он становится доступен и чату — закон проекта требует, чтобы
+    новая возможность работала в чате в первую очередь.
+
+    Встречаемость в путь не входит: соседство в концентраторе — замеренная
+    не-улика, и цепочка через него означала бы «упомянуты в одном документе».
+    """
+
+    actor = _require(request, "kg.read")
+    kg = request.app.state.kg
+    resolved = []
+    for value in (source, target):
+        entity = await run_blocking(kg.storage.get_entity, str(value).strip(), actor.user_id)
+        if entity is None:
+            entity = await run_blocking(kg.storage.find_entity_by_alias, actor.user_id, str(value).strip())
+        if entity is None:
+            raise HTTPException(status_code=404, detail=f"Объект не найден: {value}")
+        resolved.append(str(entity["id"]))
+    found = await run_blocking(
+        kg.find_relation_path,
+        actor.user_id,
+        resolved[0],
+        resolved[1],
+        max_depth=depth,
+    )
+    return found
+
+
 @router.post("/resolutions/detect", tags=["knowledge-graph"])
 async def detect_duplicates(request: Request) -> dict[str, Any]:
     actor = _require(request, "kg.read")

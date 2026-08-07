@@ -240,6 +240,7 @@ EXPECTED_COMMANDS = {
     "/delete",
     "/export",
     "/help",
+    "/graph",
     "/history",
     "/inbox",
     "/instructions",
@@ -311,7 +312,7 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 74
+EXPECTED_BRIDGE_COUNT = 75
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
@@ -358,6 +359,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_retire_markup_family": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int', message: 'dict[str, Any]', family: 'str') -> 'None'",
     "_search_reply_markup": "(results: 'list[Any]') -> 'dict[str, Any] | None'",
     "_select_media": "(message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'tuple[dict[str, Any] | None, str, str, str]'",
+    "_send_relation_path": (
+        "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', "
+        "external_user_id: 'str', telegram_user: 'dict[str, Any]', argument: 'str') -> 'None'"
+    ),
     "_send_browse": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_conflicts": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_entity_profile": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', name: 'str') -> 'None'",

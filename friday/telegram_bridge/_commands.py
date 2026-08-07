@@ -408,6 +408,8 @@ class CommandsMixin(BridgeShared):
                 "/merges — подтвердить или отклонить объединение дубликатов\n"
                 "/tags — теги базы знаний с количеством записей\n"
                 "/browse тег или название — записи по тегу, проекту или сущности\n"
+                "/profile имя — карточка объекта: документы, теги, даты, связи\n"
+                "/graph первый => второй — как связаны двое: цепочка связей\n"
                 "/search запрос — найти записи по смыслу, без ответа модели\n"
                 "/history запрос — найти реплики в истории переписки\n"
                 "/status — состояние базы\n"
@@ -546,6 +548,9 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/profile":
             await self._send_entity_profile(telegram, backend, chat_id, external_user_id, user, argument)
+            return
+        if command == "/graph":
+            await self._send_relation_path(telegram, backend, chat_id, external_user_id, user, argument)
             return
         if command == "/watch":
             # Монитор — сохранённый вопрос, за которым система следит сама
