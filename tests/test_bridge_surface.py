@@ -371,7 +371,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_voice": "(self, client: 'httpx.AsyncClient', chat_id: 'int', audio_bytes: 'bytes') -> 'None'",
     "_deliver_generated_files": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "_deliver_voice_reply": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
-    "_send_message": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, reply_markup: 'dict[str, Any] | None' = None) -> 'None'",
+    "_send_message": (
+        "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, "
+        "reply_markup: 'dict[str, Any] | None' = None, resume_key: 'int | None' = None) -> 'None'"
+    ),
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_search": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
     "_send_tags": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
@@ -389,6 +392,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
 EXPECTED_INBOX: dict[str, str] = {
     "cache_backend_response": "(self, update_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "close": "(self) -> 'None'",
+    "answer_chunks_sent": "(self, update_id: 'int') -> 'int'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
     "forget_delivered_notifications": "(self, notification_ids: 'list[str]') -> 'None'",
@@ -397,6 +401,9 @@ EXPECTED_INBOX: dict[str, str] = {
     "mark_dead_letter": "(self, update_id: 'int', error: 'str') -> 'None'",
     "mark_failure": "(self, update_id: 'int', error: 'str') -> 'bool'",
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
+    "record_answer_chunks_sent": "(self, update_id: 'int', count: 'int') -> 'None'",
+    "remember_edit_prompt": "(self, prompt_message_id: 'int', knowledge_id: 'str') -> 'None'",
+    "take_edit_prompt": "(self, prompt_message_id: 'int') -> 'str'",
     "remember_delivered_notification": "(self, notification_id: 'str') -> 'None'",
     "remember_registered_chat": "(self, chat_id: 'int') -> 'None'",
     "remove": "(self, update_id: 'int') -> 'None'",

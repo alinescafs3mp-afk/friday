@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.telegram_bridge._base import (
+    _EDIT_TARGET_MEMORY,
     BATCH_SIZE,
     DELIVERED_NOTIFICATION_TTL_SEC,
     MAX_ATTEMPTS,
@@ -99,6 +100,11 @@ class _UpdateInbox:
                 notification_id TEXT PRIMARY KEY,
                 delivered_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS edit_prompts (
+                prompt_message_id INTEGER PRIMARY KEY,
+                knowledge_id TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
             """
         )
         restrict_sqlite_files(path)
@@ -111,6 +117,7 @@ class _UpdateInbox:
             "next_attempt_at": "REAL NOT NULL DEFAULT 0",
             "failed_at": "REAL",
             "ordering_key": "TEXT NOT NULL DEFAULT ''",
+            "chunks_sent": "INTEGER NOT NULL DEFAULT 0",
         }
         for name, definition in additions.items():
             if name not in columns:
@@ -170,6 +177,14 @@ class _UpdateInbox:
                ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
             (str(max(0, int(offset))),),
         )
+        # Своя фиксация, а не чужая. Запись висела в открытой транзакции до
+        # ближайшего `store()` — то есть до СЛЕДУЮЩЕГО обновления. Если его не
+        # случалось (тихий чат, остановка), смещение не доезжало на диск вовсе, и
+        # мост после подъёма перечитывал уже разобранное. Повторной обработки это
+        # не давало (`INSERT OR IGNORE` + удаление отвеченной строки), но
+        # состояние на диске не сходилось с состоянием в памяти — а расхождение,
+        # которое ничего не ломает сегодня, ломает завтра.
+        self._conn.commit()
 
     def remember_registered_chat(self, chat_id: int) -> None:
         """A private chat admitted through open registration, so later gate
@@ -186,6 +201,53 @@ class _UpdateInbox:
     def is_registered_chat(self, chat_id: int) -> bool:
         row = self._conn.execute("SELECT 1 FROM registered_chats WHERE chat_id=?", (int(chat_id),)).fetchone()
         return row is not None
+
+    def remember_edit_prompt(self, prompt_message_id: int, knowledge_id: str) -> None:
+        """«Ответьте на ЭТО сообщение новым текстом» — запомнить, о какой записи речь.
+
+        Приглашение жило в словаре процесса, и перезапуск моста разрывал связь
+        молча: человек отвечал репликой на приглашение, ответ не узнавался как
+        правка и уходил к модели обычным вопросом. Ждать ответа человек может
+        сколько угодно, а мост между тем перезапускается — окно не редкое.
+
+        Держится не больше `_EDIT_TARGET_MEMORY` приглашений: человек либо
+        отвечает вскоре, либо передумал. Лишнее вытесняется по старшинству, как
+        и в прежнем словаре.
+        """
+        self._conn.execute(
+            """INSERT INTO edit_prompts(prompt_message_id, knowledge_id, created_at)
+               VALUES(?, ?, ?)
+               ON CONFLICT(prompt_message_id) DO UPDATE
+                   SET knowledge_id=excluded.knowledge_id, created_at=excluded.created_at""",
+            (int(prompt_message_id), str(knowledge_id), time.time()),
+        )
+        self._conn.execute(
+            """DELETE FROM edit_prompts WHERE prompt_message_id NOT IN (
+                   SELECT prompt_message_id FROM edit_prompts
+                    ORDER BY created_at DESC LIMIT ?
+               )""",
+            (_EDIT_TARGET_MEMORY,),
+        )
+        self._conn.commit()
+
+    def take_edit_prompt(self, prompt_message_id: int) -> str:
+        """Забрать запись, к которой относится ответ, и снять приглашение.
+
+        Забрать, а не прочитать: приглашение одноразовое, и второй ответ на то же
+        сообщение не должен править запись ещё раз.
+        """
+        row = self._conn.execute(
+            "SELECT knowledge_id FROM edit_prompts WHERE prompt_message_id=?",
+            (int(prompt_message_id),),
+        ).fetchone()
+        if row is None:
+            return ""
+        self._conn.execute(
+            "DELETE FROM edit_prompts WHERE prompt_message_id=?",
+            (int(prompt_message_id),),
+        )
+        self._conn.commit()
+        return str(row["knowledge_id"])
 
     def remember_delivered_notification(self, notification_id: str) -> None:
         """Уведомление ушло человеку — записать это ТАМ, ГДЕ ЭТО ПРОИЗОШЛО.
@@ -313,6 +375,33 @@ class _UpdateInbox:
             "pending": counts.get("pending", 0),
             "dead_letter": counts.get("dead_letter", 0),
         }
+
+    def answer_chunks_sent(self, update_id: int) -> int:
+        """Сколько кусков ответа на это обновление человек уже получил.
+
+        Длинный ответ уходит в Telegram несколькими сообщениями. Обрыв сети на
+        третьем куске из пяти — не потеря ответа: строка остаётся в очереди и
+        повторяется, а повтор до сих пор слал ВСЕ куски заново, и первые два
+        приходили человеку дважды.
+        """
+        row = self._conn.execute(
+            "SELECT chunks_sent FROM updates WHERE update_id=?",
+            (int(update_id),),
+        ).fetchone()
+        return int(row["chunks_sent"]) if row else 0
+
+    def record_answer_chunks_sent(self, update_id: int, count: int) -> None:
+        """Отметить кусок ушедшим — СРАЗУ, а не в конце отправки.
+
+        Счётчик живёт на строке обновления и исчезает вместе с ней: успешно
+        отвеченное обновление удаляется целиком, поэтому обнулять его отдельно
+        не нужно и нечего забыть.
+        """
+        self._conn.execute(
+            "UPDATE updates SET chunks_sent=? WHERE update_id=?",
+            (max(0, int(count)), int(update_id)),
+        )
+        self._conn.commit()
 
     def cache_backend_response(self, update_id: int, response: dict[str, Any]) -> None:
         self._conn.execute(

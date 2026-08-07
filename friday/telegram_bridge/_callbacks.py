@@ -10,7 +10,6 @@ from __future__ import annotations
 from contextlib import suppress
 
 from friday.telegram_bridge._base import (
-    _EDIT_TARGET_MEMORY,
     CALLBACK_TARGET_RE,
     LOGGER,
     Any,
@@ -284,9 +283,7 @@ class CallbacksMixin(BridgeShared):
                     "Заголовок и связи останутся прежними.",
                 )
                 if prompt_id:
-                    if len(self._edit_targets) >= _EDIT_TARGET_MEMORY:
-                        self._edit_targets.pop(next(iter(self._edit_targets)), None)
-                    self._edit_targets[prompt_id] = target_id
+                    self._inbox.remember_edit_prompt(prompt_id, target_id)
                 await self._answer_callback(telegram, callback_id, "Жду новый текст")
             elif family == "know" and action in {"del", "delok"}:
                 # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей

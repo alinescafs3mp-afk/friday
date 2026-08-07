@@ -39,30 +39,6 @@ from friday.telegram_bridge._base import (
 )
 from friday.telegram_bridge._markup import to_telegram_html
 from friday.telegram_bridge._queue import _UpdateInbox
-from friday.telemetry.logging import redact_text
-
-
-def _bridge_redactor(config: TelegramConfig):
-    """Remove this bridge's own credentials from a string, exactly and by shape.
-
-    Exact values first — the bot token is not a recognisable shape, it is a
-    specific string, and the URL it lives in (`.../bot<token>/sendMessage`) is
-    what httpx quotes back inside every error. Then the generic redaction, for
-    everything a message might carry that this bridge does not know about.
-    """
-    secrets = tuple(
-        value
-        for value in (config.bot_token, config.bridge_secret, _proxy_password(config.telegram_proxy))
-        if value and len(value) >= 8
-    )
-
-    def redact(value: object) -> str:
-        text = str(value)
-        for secret in secrets:
-            text = text.replace(secret, "[redacted]")
-        return redact_text(text)
-
-    return redact
 
 
 class _LazyUpdateInbox:
@@ -100,9 +76,6 @@ class TransportMixin(BridgeShared):
         # Подписи альбомов по `media_group_id`. Ограничены по числу: группа живёт
         # секунды, а словарь без потолка рос бы всю жизнь процесса.
         self._album_captions: dict[str, str] = {}
-        # Приглашения исправить запись: `message_id` приглашения -> id записи.
-        # Человек отвечает репликой НА приглашение, и ответ адресуется однозначно.
-        self._edit_targets: dict[int, str] = {}
         # Раздача прекращается на остановке, но уже начатое доводится до конца:
         # брошенная задача — это обновление, снятое с очереди и не отвеченное.
         self._stopping = False
@@ -123,9 +96,15 @@ class TransportMixin(BridgeShared):
         # of every HTTPStatusError. Those strings were stored verbatim on the
         # queue row and then surfaced by `jericho doctor`, `jericho status
         # --json` and `GET /api/admin/diagnostics` — the credential printed by
-        # the health check. `install_secret_redaction` covers the LOG handlers;
-        # this covers what is written into the database.
-        self._redact = _bridge_redactor(config)
+        # the health check.
+        #
+        # Что защищает СЕГОДНЯ — два конца, и ни один из них не редактор: в
+        # очередь пишется только ИМЯ КЛАССА исключения (`mark_failure`,
+        # `mark_dead_letter`), а диагностика вдобавок чистит то, что читает, —
+        # на случай строки, записанной прежней сборкой. Здесь же до 0.185.0 жил
+        # третий, никем не вызываемый: `self._redact` присваивался и не
+        # использовался ни разу. Проба у него была, потребителя не было —
+        # ровно тот случай, когда механизм проверен, а подключение нет.
         self._backend_url = config.backend_url.rstrip("/")
         # Last known failing/healthy state per loop, for transition detection.
         self._loop_failing: dict[str, bool] = {}
@@ -926,13 +905,33 @@ class TransportMixin(BridgeShared):
         text: str,
         *,
         reply_markup: dict[str, Any] | None = None,
+        resume_key: int | None = None,
     ) -> None:
+        """Отправить текст, при необходимости несколькими кусками.
+
+        `resume_key` — номер обновления, ответ на которое отправляется. С ним
+        отправка становится ПРОДОЛЖАЕМОЙ: каждый ушедший кусок отмечается в
+        durable-очереди, и повтор после обрыва начинает с места обрыва, а не с
+        начала. Без него (служебные сообщения, подсказки, уведомления) поведение
+        прежнее — такие сообщения короткие и повторяются целиком.
+
+        Продолжение корректно только потому, что ответ ядра КЕШИРУЕТСЯ до первой
+        отправки: повтор режет тот же самый текст и получает те же самые границы.
+        Если бы текст мог измениться между попытками, номер куска ничего не значил
+        бы.
+        """
         # Режем СЫРОЙ текст, размечаем каждый кусок отдельно. Наоборот было бы
         # опаснее: граница в 4096 знаков попала бы внутрь тега, и Telegram
         # отверг бы кусок целиком. При разрыве абзаца пополам жирное начертание
         # в этом месте теряется — это видно, но сообщение доходит.
         chunks = split_for_telegram(text)
+        already_sent = 0
+        if resume_key is not None:
+            already_sent = min(self._inbox.answer_chunks_sent(resume_key), len(chunks))
         for index, chunk in enumerate(chunks):
+            if index < already_sent:
+                # Этот кусок человек уже получил на прошлой попытке.
+                continue
             payload: dict[str, Any] = {
                 "chat_id": chat_id,
                 "text": to_telegram_html(chunk) or chunk,
@@ -943,6 +942,8 @@ class TransportMixin(BridgeShared):
                 payload["reply_markup"] = reply_markup
             response = await self._post_message_chunk(client, payload, chunk)
             response.raise_for_status()
+            if resume_key is not None:
+                self._inbox.record_answer_chunks_sent(resume_key, index + 1)
 
     async def _send_message_returning_id(
         self,

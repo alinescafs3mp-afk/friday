@@ -233,11 +233,18 @@ async def test_a_record_can_be_corrected_by_replying(tmp_path):
         ]
         assert f"know:fix:{DOCUMENT_ID}.5001" in targets, "у записи нет кнопки «Исправить»"
 
-        # 2. Нажали — мост прислал приглашение и запомнил его.
+        # 2. Нажали — мост прислал приглашение и запомнил его В ОЧЕРЕДИ, а не в
+        # памяти процесса: человек может ответить через час, а мост между тем
+        # перезапускается, и потерянная связь молча превратила бы правку в
+        # обычный вопрос к модели.
         await bridge._process_callback_query(telegram, backend, _press(f"know:fix:{DOCUMENT_ID}.5001"))
-        assert bridge._edit_targets, "приглашение не запомнено — ответ будет некуда адресовать"
-        prompt_id = next(iter(bridge._edit_targets))
-        assert bridge._edit_targets[prompt_id] == DOCUMENT_ID
+        # Приглашение отправлено, следом ушёл ответ на нажатие — счётчик уехал на один.
+        prompt_id = telegram.next_id - 1
+        assert bridge._inbox.take_edit_prompt(prompt_id) == DOCUMENT_ID, (
+            "приглашение не запомнено — ответ будет некуда адресовать"
+        )
+        # Забрали ради проверки — вернуть, иначе следующий шаг проверял бы пустоту.
+        bridge._inbox.remember_edit_prompt(prompt_id, DOCUMENT_ID)
 
         # 3. Ответили репликой на приглашение — запись исправлена, а не задан вопрос.
         update = {
@@ -251,6 +258,7 @@ async def test_a_record_can_be_corrected_by_replying(tmp_path):
             },
         }
         await bridge._process_update(telegram, backend, update, cached_response=None)
+        leftover = bridge._inbox.take_edit_prompt(prompt_id)
     finally:
         bridge._inbox.close()
 
@@ -262,7 +270,7 @@ async def test_a_record_can_be_corrected_by_replying(tmp_path):
     assert not any(call.endswith("api/chat") for call in backend.calls), (
         "текст правки уехал к модели как обычный вопрос"
     )
-    assert bridge._edit_targets == {}, "приглашение осталось в памяти после использования"
+    assert leftover == "", "приглашение осталось действующим после использования"
 
 
 @pytest.mark.asyncio

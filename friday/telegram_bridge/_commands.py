@@ -312,7 +312,7 @@ class CommandsMixin(BridgeShared):
         replied_to = message.get("reply_to_message")
         edit_target = ""
         if isinstance(replied_to, dict):
-            edit_target = self._edit_targets.pop(int(replied_to.get("message_id") or 0), "")
+            edit_target = self._inbox.take_edit_prompt(int(replied_to.get("message_id") or 0))
         if edit_target and text:
             await self._backend_json(
                 backend,
@@ -1220,6 +1220,9 @@ class CommandsMixin(BridgeShared):
                 chat_id,
                 self._format_response_message(cached_response),
                 reply_markup=self._response_reply_markup(cached_response, external_user_id=external_user_id),
+                # Повтор после обрыва: куски, уже дошедшие до человека, не уходят
+                # второй раз. Текст тот же самый — он взят из кеша, не из модели.
+                resume_key=int(update["update_id"]),
             )
             await self._deliver_voice_reply(telegram, chat_id, cached_response)
             await self._deliver_generated_files(telegram, chat_id, cached_response)
@@ -1298,6 +1301,9 @@ class CommandsMixin(BridgeShared):
             chat_id,
             self._format_response_message(response),
             reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
+            # Ответ уже в кеше строки очереди (строкой выше), поэтому повтор после
+            # обрыва разрежет тот же текст и продолжит с места обрыва.
+            resume_key=int(update["update_id"]),
         )
         await self._deliver_voice_reply(telegram, chat_id, response)
         await self._deliver_generated_files(telegram, chat_id, response)

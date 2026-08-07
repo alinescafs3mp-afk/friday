@@ -1,19 +1,31 @@
-"""The health check must not print the credential it is checking.
+"""Проверка здоровья не должна печатать credential, который она проверяет.
 
-The Telegram API URL CONTAINS the bot token — `.../bot<token>/sendMessage` — and
-httpx quotes the URL inside every `HTTPStatusError`. That string was stored on
-the queue row verbatim by `mark_failure`/`mark_dead_letter`, and diagnostics then
-surfaced the newest dead-letter error through `jericho doctor`, `jericho status
---json` and `GET /api/admin/diagnostics`.
+Адрес Telegram API СОДЕРЖИТ токен бота — `.../bot<token>/sendMessage`, — а httpx
+цитирует адрес внутри текста каждого `HTTPStatusError`. Эта строка попадала на
+строку очереди как есть (`mark_failure`/`mark_dead_letter`), а диагностика потом
+показывала последнюю ошибку через `jericho doctor`, `jericho status --json` и
+`GET /api/admin/diagnostics`. То есть единственная команда, которую оператор
+запускает, когда что-то сломалось, — и вставляет в отчёт об ошибке — печатала
+токен бота.
 
-So the one command an operator runs when something is broken — and pastes into a
-bug report — printed the bot token. `install_secret_redaction` covers the log
-handlers; it does not cover what is written into a database.
+Защищают ДВА конца, и оба проверяются здесь:
+
+* пишущий — мост кладёт на строку только ИМЯ КЛАССА исключения, не его текст;
+* читающий — диагностика чистит то, что прочитала, на случай строки, записанной
+  прежней сборкой.
+
+До 0.185.0 рядом жил третий, никем не вызываемый: `TelegramBridge._redact`
+присваивался в конструкторе и не использовался ни разу. Проба у него была — вот
+эта, — и она проверяла ФУНКЦИЮ, а не её подключение, поэтому годы молчала о том,
+что подключения нет. Теперь проверяется путь: настоящее исключение с токеном в
+тексте прогоняется через настоящую обработку неудачи, и токен ищется в том, что
+реально легло в базу.
 """
 
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
@@ -31,40 +43,61 @@ def _bridge(tmp_path) -> TelegramBridge:
     )
 
 
-def test_a_telegram_error_does_not_carry_the_token_into_the_queue(tmp_path):
-    bridge = _bridge(tmp_path)
+def _telegram_error() -> httpx.HTTPStatusError:
+    """Ровно та форма, которую строит сам httpx: адрес с токеном внутри текста."""
+    request = httpx.Request("POST", f"https://api.telegram.org/bot{TOKEN}/sendMessage")
+    response = httpx.Response(400, request=request, json={"description": "Bad Request"})
     try:
-        # Exactly the shape httpx produces: the failing URL, token included.
-        request = httpx.Request("POST", f"https://api.telegram.org/bot{TOKEN}/sendMessage")
-        response = httpx.Response(400, request=request, json={"description": "Bad Request"})
-        try:
-            response.raise_for_status()  # the real message, built by httpx itself
-        except httpx.HTTPStatusError as raised:
-            error = raised
-        assert TOKEN in f"{type(error).__name__}: {error}", "the premise: the raw text leaks it"
+        response.raise_for_status()
+    except httpx.HTTPStatusError as raised:
+        return raised
+    raise AssertionError("raise_for_status не бросил на 400")
 
-        redacted = bridge._redact(f"{type(error).__name__}: {error}")  # noqa: SLF001
-        assert TOKEN not in redacted
-        assert "[redacted]" in redacted
-        # Still useful for diagnosis: the failure is named and the endpoint is
-        # recognisable, only the credential is gone.
-        assert "HTTPStatusError" in redacted
+
+def test_the_premise_holds_the_raw_text_really_leaks_the_token() -> None:
+    """Опора всей пробы. Без неё «токена нет в базе» верно и без единой защиты."""
+    error = _telegram_error()
+    assert TOKEN in f"{type(error).__name__}: {error}"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_send_does_not_carry_the_token_into_the_queue(tmp_path):
+    """Настоящий путь неудачи: обновление, ход по нему, запись исхода в очередь."""
+    bridge = _bridge(tmp_path)
+    error = _telegram_error()
+
+    async def _explode(*_args, **_kwargs):
+        raise error
+
+    update = {
+        "update_id": 4242,
+        "message": {
+            "message_id": 1,
+            "chat": {"id": 5001},
+            "from": {"id": 5001, "first_name": "Владелец"},
+            "text": "привет",
+        },
+    }
+    try:
+        bridge._inbox.store(update)  # noqa: SLF001
+        row = next(row for row in bridge._inbox.pending() if int(row["update_id"]) == 4242)  # noqa: SLF001
+        bridge._process_update = _explode  # noqa: SLF001
+        await bridge._run_update(object(), object(), row)  # noqa: SLF001
+        stored = bridge._inbox._conn.execute(  # noqa: SLF001
+            "SELECT last_error FROM updates WHERE update_id=4242"
+        ).fetchone()
+        last_error = str(stored["last_error"])
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
-
-def test_the_bridge_secret_and_proxy_password_go_too(tmp_path):
-    bridge = _bridge(tmp_path)
-    try:
-        text = bridge._redact(f"secret={'B' * 48} token={TOKEN}")  # noqa: SLF001
-        assert "B" * 48 not in text
-        assert TOKEN not in text
-    finally:
-        bridge._inbox.close()  # noqa: SLF001
+    assert TOKEN not in last_error, f"токен бота лёг в очередь: {last_error!r}"
+    assert "api.telegram.org" not in last_error, f"адрес с токеном лёг в очередь: {last_error!r}"
+    # Всё ещё пригодно для разбора: неудача названа.
+    assert "HTTPStatusError" in last_error, last_error
 
 
 def test_diagnostics_redacts_what_it_reads_back(tmp_path):
-    """Belt and braces: a row written by an older build must not leak either."""
+    """Второй конец: строка, записанная прежней сборкой, не должна утечь при чтении."""
     import sqlite3
 
     from friday.diagnostics import _bridge_queue_status
