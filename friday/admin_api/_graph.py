@@ -52,8 +52,8 @@ router = APIRouter()
 # Квадродерево Барнса-Хата убрало это ограничение, и потолок теперь упирается в
 # рисование: один кадр SVG стоит 6.5 мс при 1000 узлах при бюджете 16.7 мс.
 # Поэтому 1000, а не «сколько получится»: выше нужен canvas, и это отдельная работа.
-_MAX_ADMIN_OVERVIEW_NODES = 1_000
-_MAX_ADMIN_OVERVIEW_EDGES = 3_000
+_MAX_ADMIN_OVERVIEW_NODES = 2_500
+_MAX_ADMIN_OVERVIEW_EDGES = 7_500
 _MAX_ADMIN_OVERVIEW_NUMBER = 1_000_000_000.0
 
 
@@ -347,7 +347,7 @@ async def delete_entity_admin(entity_id: str, request: Request, user_id: str) ->
 async def graph_overview(
     request: Request,
     user_id: str,
-    limit: int = Query(120, ge=10, le=1000),
+    limit: int = Query(120, ge=10, le=2500),
     entity_types: str = "",
     relation_types: str = "",
     only_relations: bool = False,

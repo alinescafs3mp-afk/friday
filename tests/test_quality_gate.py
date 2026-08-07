@@ -72,14 +72,14 @@ def test_assistant_instructions_delegate_to_the_canonical_gate() -> None:
         )
 
 
-def test_non_ui_tests_exclude_all_ten_browser_modules() -> None:
+def test_non_ui_tests_exclude_all_eleven_browser_modules() -> None:
     command = quality_gate.non_ui_command(workers=12, python="python")
 
     # Десятый модуль добавлен в 0.169.0 вместе с живой раскладкой графа:
     # `test_the_graph_is_alive_and_remembers_the_view.py`. Число здесь стоит
     # затем, чтобы браузерный модуль нельзя было завести молча и потерять из
     # общего прогона.
-    assert len(quality_gate.UI_TEST_MODULES) == 10
+    assert len(quality_gate.UI_TEST_MODULES) == 11
     assert command.argv[5:8] == ("-n", "12", "--dist=load")
     assert {
         argument.removeprefix("--ignore=") for argument in command.argv if argument.startswith("--ignore=")
@@ -98,10 +98,10 @@ def test_ui_module_inventory_cannot_silently_drift() -> None:
 
 
 def test_ui_tests_use_one_loadscope_worker_per_module() -> None:
-    command = quality_gate.ui_command(report_path="report.xml", workers=10, python="python")
+    command = quality_gate.ui_command(report_path="report.xml", workers=11, python="python")
 
-    assert command.argv[6:9] == ("-n", "10", "--dist=loadscope")
-    assert command.argv[-10:] == quality_gate.UI_TEST_MODULES
+    assert command.argv[6:9] == ("-n", "11", "--dist=loadscope")
+    assert command.argv[-11:] == quality_gate.UI_TEST_MODULES
     assert "--junitxml=report.xml" in command.argv
 
 
@@ -174,7 +174,7 @@ def test_requested_phases_keep_canonical_order() -> None:
 
 
 def test_more_ui_workers_than_modules_is_rejected(capsys) -> None:
-    result = quality_gate.execute(_args(phase=["ui"], ui_workers=11))
+    result = quality_gate.execute(_args(phase=["ui"], ui_workers=12))
 
     assert result == 2
-    assert "cannot exceed 10" in capsys.readouterr().err
+    assert "cannot exceed 11" in capsys.readouterr().err

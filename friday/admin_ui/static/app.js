@@ -554,12 +554,21 @@ const GRAPH_W=1200, GRAPH_H=700;
 // Сколько узлов носят подпись постоянно. Остальные показывают имя по наведению:
 // на тысяче узлов тысяча подписей нечитаема и стоит трети всех элементов DOM.
 const GRAPH_LABELS=60;
-// Потолок картины. Прежние 150 были не решением о том, что показывать, а
-// следствием того, что раскладка не тянула больше: замер боевой функции давал
-// 15 114 мс на 4500 узлах. Барнс-Хат снял это ограничение, и потолок теперь
-// упирается в рисование: один кадр SVG стоит 6.5 мс при 1000 узлах и 27.2 мс при
-// 4500 при бюджете кадра 16.7 мс. Выше тысячи нужен canvas — это отдельная работа.
-const GRAPH_LIMIT=1000;
+// Потолок картины. История ограничителя: сначала это была раскладка (замер
+// боевой функции — 15 114 мс на 4500 узлах, снято Барнсом-Хатом в 0.169.0), потом
+// рисование (кадр SVG 27.2 мс при 4500, снято полотном в 0.181.0). Теперь
+// ограничитель — размер ответа по сети: 2500 узлов и 7500 рёбер это уже сотни
+// килобайт JSON, и следующий шаг требует СВОЕГО замера, а не смелости.
+const GRAPH_LIMIT=2500;
+// С какого размера сцена рисуется на canvas, а не элементами DOM.
+//
+// Порог НЕ про скорость: canvas быстрее на всех размерах (замер в настоящем
+// Chromium — кадр 0.40 мс при 1000 узлах против 6.5 мс у SVG, 0.90 против 27.2
+// при 4500). Он про то, что DOM даёт даром и что приходится писать руками:
+// подсказка `<title>`, наведение через CSS, попадание по узлу без собственного
+// расчёта. На маленькой картине это дешевле поддерживать, на большой — не
+// окупается, и там сцена уходит на полотно.
+const GRAPH_CANVAS_FROM=400;
 const GRAPH_TYPES=['person','organization','location','project','collection','event','concept','document','other'];
 const GRAPH_TYPE_LABELS={person:'человек',organization:'организация',location:'место',
   project:'проект',collection:'коллекция',event:'событие',concept:'понятие',
@@ -723,11 +732,21 @@ function graphMarkup(raw){
   const named=new Set([...nodes].sort((a,b)=>(degree.get(b.id)||0)-(degree.get(a.id)||0))
     .slice(0,GRAPH_LABELS).map(n=>n.id));
   const maxCount=Math.max(1,...nodes.map(x=>x.knowledge_count||0));
+  // Радиус считается ОДИН раз и живёт на узле: его спрашивают и полотно при
+  // рисовании, и попадание курсором. Две копии одной формулы разошлись бы, и
+  // человек мазал бы мимо ровно по краю кружка.
+  nodes.forEach(node=>{node._r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount)});
   const needle=(f.search||'').trim().toLowerCase();
   const matched=new Set(needle?nodes.filter(n=>String(n.name||'').toLowerCase().includes(needle)).map(n=>n.id):[]);
   const anchor=state.graphView==='local'?state.graphFocus:'';
   const onPath=graphPaths(nodes,edges,anchor,matched);
-  const lines=edges.map((e,i)=>{const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
+  // Выше порога сцена уходит на canvas, а в DOM остаётся только СМЫСЛОВОЙ слой:
+  // подсвеченный путь, обводка найденного, кольцо фокуса и подписи. Разделение не
+  // косметическое — путь и найденное это утверждения о графе, и они должны быть
+  // там, где их видно и человеку, и пробе.
+  const heavy=nodes.length>=GRAPH_CANVAS_FROM;
+  state.graphHeavy=heavy;
+  const lines=heavy?'':edges.map((e,i)=>{const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
     const rel=e.kind==='relation';
     const kind=String(e.relation_type||'');
     // Толщина подтверждённой связи следует её весу, а не единице: у слабого
@@ -748,7 +767,7 @@ function graphMarkup(raw){
       +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
       +` stroke="${color}" stroke-width="${(lit?w+2.2:w).toFixed(1)}"${rel&&!lit?'':(lit?'':' stroke-dasharray="3 4"')}`
       +` opacity="${lit?1:rel?0.92:0.4}"><title>${esc(s.name)} → ${esc(t.name)}: ${esc(label)}</title></line>`}).join('');
-  const circles=nodes.map(node=>{const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
+  const circles=heavy?'':nodes.map(node=>{const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
     const kind=GRAPH_COLORS[node.entity_type]?node.entity_type:'other';
     // Найденное подсвечивается кольцом, а не заменой цвета: цвет уже занят типом
     // сущности, и подменять его значило бы соврать про тип ради поиска.
@@ -780,6 +799,27 @@ function graphMarkup(raw){
       +(cutEdges?` и ${edges.length} связей из ${data.edgesMatched}`:'')
       +`${state.graphView==='local'?' — обход остановлен на границе, а не потому, что дальше пусто.'
         :' — самые связанные с документами. Остальные не поместились, а не отсутствуют.'}</div>`:'';
+  // Смысловой слой тяжёлой картины: путь, найденное, фокус и подписи. Всё
+  // остальное — на полотне. Подписи здесь только у названных: рисовать тысячу
+  // имён поверх сцены так же нечитаемо, как и в DOM.
+  const overlay=!heavy?'':(
+    edges.map((e,i)=>{if(!onPath.has(i))return '';
+      const s=byId.get(e.source),t=byId.get(e.target);if(!s||!t)return '';
+      const kind=String(e.relation_type||'');
+      const color=e.kind==='relation'?(RELATION_COLORS[kind]||'#4c9aff'):'#5a6472';
+      return `<line class="gpath" data-edge="${i}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"`
+        +` x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${t.x.toFixed(1)}" y2="${t.y.toFixed(1)}"`
+        +` stroke="${color}" stroke-width="4" opacity="1"/>`}).join('')
+    +nodes.map(node=>{
+      const hit=needle&&String(node.name||'').toLowerCase().includes(needle);
+      const focused=state.graphView==='local'&&node.id===state.graphFocus;
+      if(!hit&&!focused&&!named.has(node.id))return '';
+      const r=7+11*Math.sqrt((node.knowledge_count||0)/maxCount);
+      return `<g class="gmark" data-node="${esc(node.id)}">`
+        +(hit||focused?`<circle cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(r+5).toFixed(1)}" fill="none" stroke="${focused?'#7bc86c':'#ffd166'}" stroke-width="2.5" opacity="0.9"/>`:'')
+        +`<text class="glabel" data-lift="${(r+6).toFixed(1)}" x="${node.x.toFixed(1)}" y="${(node.y-r-6).toFixed(1)}"`
+        +` text-anchor="middle" font-size="12" fill="#c9d1d9">${esc(short(node.name,24))}</text></g>`}).join('')
+  );
   const found=matched.size;
   // Про пути говорится ровно то, что есть: подсвечен путь ОТ ФОКУСА, и только в
   // окрестности узла. На общей картине точки отсчёта нет, и молчать об этом
@@ -790,7 +830,7 @@ function graphMarkup(raw){
       : needle?' Чтобы увидеть пути, откройте окрестность узла — на общей картине точки отсчёта нет.':'');
   const searchNote=needle?`<div class="notice">Найдено на картине: ${found}. Подсвечены жёлтым.${pathNote}</div>`:'';
   return `${capped}${searchNote}<div class="graph-legend">${legend}<span class="muted">сплошная — подтверждённая связь, пунктир — встретились в одном документе; размер — сколько документов</span></div>${relLegend}
-    <div class="graph-canvas" id="graphCanvas"><svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}"><defs><marker id="garrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="context-stroke"/></marker></defs>${lines}${circles}</svg>
+    <div class="graph-canvas" id="graphCanvas">${heavy?`<canvas id="graphScene" width="${GRAPH_W}" height="${GRAPH_H}"></canvas>`:''}<svg id="graphSvg" viewBox="0 0 ${GRAPH_W} ${GRAPH_H}"><defs><marker id="garrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="context-stroke"/></marker></defs>${lines}${circles}${overlay}</svg>
     <div class="graph-hint">колесо — масштаб, тянуть фон — сдвиг, тянуть узел — соседи откликнутся, отпустить — узел закрепится, клик по узлу — карточка и переход к его окрестности</div></div>`;
 }
 
@@ -827,7 +867,62 @@ function bindGraph(){
   const wires=[...svg.querySelectorAll('line')].map(element=>({
     element,a:at.get(element.dataset.a),b:at.get(element.dataset.b),
   })).filter(item=>item.a&&item.b);
+  // Сцена на полотне: рёбра и узлы. Группируем по цвету — смена стиля в canvas
+  // дороже самой линии, а на тринадцати тысячах рёбер это решает.
+  const scene=document.getElementById('graphScene');
+  const ctx=scene?scene.getContext('2d'):null;
+  const drawScene=()=>{
+    if(!ctx)return;
+    const sim=state.graphSim;if(!sim)return;
+    const at=sim.byId, edges=state.graphEdges||[], nodes=state.graphNodes||[];
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,GRAPH_W,GRAPH_H);
+    // Полотно повторяет камеру SVG: иначе слои разъедутся при первом же зуме.
+    ctx.setTransform(view.k,0,0,view.k,-view.x*view.k,-view.y*view.k);
+    const byKind=new Map();
+    for(const edge of edges){
+      const rel=edge.kind==='relation';
+      const key=rel?(RELATION_COLORS[String(edge.relation_type||'')]||'#4c9aff'):'#5a6472';
+      let group=byKind.get(key);
+      if(!group){group={rel,items:[]};byKind.set(key,group)}
+      group.items.push(edge);
+    }
+    for(const [color,group] of byKind){
+      ctx.strokeStyle=color;
+      ctx.globalAlpha=group.rel?0.92:0.4;
+      ctx.lineWidth=group.rel?2:1;
+      ctx.setLineDash(group.rel?[]:[3,4]);
+      ctx.beginPath();
+      for(const edge of group.items){
+        const s=at.get(edge.source), t=at.get(edge.target);
+        if(!s||!t)continue;
+        ctx.moveTo(s.x,s.y);ctx.lineTo(t.x,t.y);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);ctx.globalAlpha=1;
+    const byColour=new Map();
+    for(const node of nodes){
+      const colour=GRAPH_COLORS[node.entity_type]||GRAPH_COLORS.other;
+      let bucket=byColour.get(colour);
+      if(!bucket){bucket=[];byColour.set(colour,bucket)}
+      bucket.push(node);
+    }
+    ctx.strokeStyle='#0a0f18';ctx.lineWidth=1.5;
+    for(const [colour,bucket] of byColour){
+      ctx.fillStyle=colour;
+      ctx.beginPath();
+      for(const node of bucket){
+        const point=at.get(node.id);if(!point)continue;
+        const r=node._r||7;
+        ctx.moveTo(point.x+r,point.y);
+        ctx.arc(point.x,point.y,r,0,6.283185307179586);
+      }
+      ctx.fill();ctx.stroke();
+    }
+  };
   const draw=()=>{
+    drawScene();
     for(const item of painted){
       const x=item.point.x.toFixed(1), y=item.point.y.toFixed(1);
       for(const circle of item.circles){circle.setAttribute('cx',x);circle.setAttribute('cy',y)}
@@ -852,22 +947,37 @@ function bindGraph(){
   const wake=()=>{if(!state.graphFrame)state.graphFrame=requestAnimationFrame(tick)};
   wake();
 
+  // На полотне у сцены нет элементов, поэтому цель нажатия ищется по координатам.
+  // Обход линейный: на 4500 узлах это тысячные доли миллисекунды, а дерево здесь
+  // стоило бы больше, чем экономит.
+  const nodeAt=point=>{
+    const sim=state.graphSim;if(!sim)return '';
+    let best='', bestDistance=Infinity;
+    for(const node of state.graphNodes||[]){
+      const at=sim.byId.get(node.id);if(!at)continue;
+      const dx=at.x-point.x, dy=at.y-point.y;
+      const distance=Math.sqrt(dx*dx+dy*dy);
+      if(distance<=(node._r||7)+4&&distance<bestDistance){best=node.id;bestDistance=distance}
+    }
+    return best;
+  };
   const toSvg=event=>{const rect=canvas.getBoundingClientRect();
     return {x:view.x+(event.clientX-rect.left)/rect.width*(GRAPH_W/view.k),
             y:view.y+(event.clientY-rect.top)/rect.height*(GRAPH_H/view.k)}};
   canvas.addEventListener('wheel',event=>{event.preventDefault();
     const before=toSvg(event);
     view.k=Math.max(0.35,Math.min(6,view.k*(event.deltaY<0?1.15:1/1.15)));
-    const after=toSvg(event);view.x+=before.x-after.x;view.y+=before.y-after.y;apply()},{passive:false});
+    const after=toSvg(event);view.x+=before.x-after.x;view.y+=before.y-after.y;apply();drawScene()},{passive:false});
   canvas.addEventListener('pointerdown',event=>{
     const group=event.target.closest('.gnode');moved=false;
-    drag=group?{node:group.dataset.node,group}:{pan:true,sx:event.clientX,sy:event.clientY,vx:view.x,vy:view.y};
+    const hit=group?group.dataset.node:(state.graphHeavy?nodeAt(toSvg(event)):'');
+    drag=hit?{node:hit,group}:{pan:true,sx:event.clientX,sy:event.clientY,vx:view.x,vy:view.y};
     canvas.classList.add('dragging');canvas.setPointerCapture(event.pointerId)});
   canvas.addEventListener('pointermove',event=>{
     if(!drag)return;moved=true;
     if(drag.pan){const rect=canvas.getBoundingClientRect();
       view.x=drag.vx-(event.clientX-drag.sx)/rect.width*(GRAPH_W/view.k);
-      view.y=drag.vy-(event.clientY-drag.sy)/rect.height*(GRAPH_H/view.k);apply();return}
+      view.y=drag.vy-(event.clientY-drag.sy)/rect.height*(GRAPH_H/view.k);apply();drawScene();return}
     // Перетаскивание — не рисование, а ВВОД В СИМУЛЯЦИЮ: узел под пальцем держится
     // на месте, а соседи откликаются сами. Прежде двигался только сам узел и его
     // собственные линии, и граф читался как нарисованная схема, а не как ткань.
