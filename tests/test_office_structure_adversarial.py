@@ -115,9 +115,19 @@ def test_xlsx_formula_without_a_cached_result_removes_completeness_without_chang
     assert "XLSX-PERSON" not in encoded
 
 
-def test_docx_unread_headers_and_nested_tables_are_declared_incomplete():
+def test_what_is_still_unread_declares_the_document_incomplete():
+    """Колонтитул с 0.190.0 ЧИТАЕТСЯ, вложенная таблица — по-прежнему нет.
+
+    Проба разделена ровно по этой границе: прочитанное обязано оказаться в тексте,
+    непрочитанное обязано отнимать полноту. Прежняя редакция требовала неполноты и
+    от колонтитула — и была права, пока он терялся.
+
+    Второе требование не изменилось вовсе: содержимое документа не должно попадать
+    в САМ ИНДЕКС. Индекс переживает документ в метаданных и решает, какой кусок
+    исходника уйдёт модели; вторая копия текста внутри него — утечка.
+    """
     document = Document()
-    document.sections[0].header.paragraphs[0].text = "PRIVATE-HEADER-SENTINEL"
+    document.sections[0].header.paragraphs[0].text = "HEADER-SENTINEL"
     outer = document.add_table(rows=1, cols=1)
     outer.cell(0, 0).text = "OUTER-CELL"
     nested = outer.cell(0, 0).add_table(rows=1, cols=1)
@@ -126,12 +136,13 @@ def test_docx_unread_headers_and_nested_tables_are_declared_incomplete():
     result = DocumentExtractor().extract(_docx_bytes(document), "unsupported.docx")
     index = _index(result)
 
+    assert "HEADER-SENTINEL" in result.text, "прочитанный колонтитул не доехал до текста"
     assert index["complete"] is False
     reasons = " ".join(index["coverage"]["reasons"])
-    assert "header" in reasons
     assert "nested" in reasons
+    assert "header" not in reasons, f"колонтитул прочитан, но числится утраченным: {reasons}"
     encoded = json.dumps(index, ensure_ascii=False, sort_keys=True)
-    assert "PRIVATE-HEADER-SENTINEL" not in encoded
+    assert "HEADER-SENTINEL" not in encoded
     assert "PRIVATE-NESTED-SENTINEL" not in encoded
 
 

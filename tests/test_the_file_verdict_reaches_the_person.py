@@ -312,14 +312,18 @@ def test_an_archive_gives_up_what_is_inside(pipeline):
     assert "inner.txt" in body
 
 
-def test_a_document_whose_text_lives_in_the_header_says_so(pipeline):
+def test_an_empty_document_says_there_was_nothing_in_it(pipeline):
     """Мутация: убрать `chars` из ответа приёма — тест краснеет.
 
-    Разбор без ошибки — ещё не текст. Пустой .txt и .docx, где всё написанное
-    лежит в колонтитуле, приходят с `success=True` и нулём знаков; человеку
-    говорили просто «ждёт разбора», и он не знал, что содержимого не видно.
+    Разбор без ошибки — ещё не текст. Пустой файл приходит с `success=True` и
+    нулём знаков; человеку говорили просто «ждёт разбора», и он не знал, что
+    содержимого не видно.
+
+    Прежде эту роль играл `.docx`, у которого всё написанное лежало в
+    колонтитуле. С 0.190.0 колонтитул ЧИТАЕТСЯ, и такой документ больше не пуст —
+    что проверяется соседней пробой ниже. Пустым остался пустой.
     """
-    result = _ingest(pipeline, _docx([], header="Только колонтитул"), "header.docx", "")
+    result = _ingest(pipeline, _docx([]), "empty.docx", "")
     assert result["extraction"]["success"] is True, "разбор должен был пройти без ошибки"
     assert result["extraction"]["chars"] == 0
     assert result["promoted"] is False
@@ -327,6 +331,17 @@ def test_a_document_whose_text_lives_in_the_header_says_so(pipeline):
     assert "Текста в файле не оказалось" in line
     # Это НЕ то же самое, что «разобрать не удалось»: там файл нечитаем вовсе.
     assert "Текст извлечь не удалось" not in line
+
+
+def test_a_document_whose_text_lives_in_the_header_is_no_longer_empty(pipeline):
+    """Обратная сторона той же правки: колонтитул стал содержимым.
+
+    На бланке в нём стоят «Согласовано», номер и фамилия исполнителя — документ,
+    состоящий из одного бланка, больше не считается пустым.
+    """
+    result = _ingest(pipeline, _docx([], header="Согласовано: Петров"), "header.docx", "")
+    assert result["extraction"]["chars"] > 0, "колонтитул по-прежнему теряется"
+    assert "Текста в файле не оказалось" not in _file_fate_line(result)
 
 
 @pytest.mark.parametrize(

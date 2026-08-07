@@ -61,6 +61,7 @@ def _docx_bytes(
     interleaved: bool,
     package_note: str = "",
     header_note: str = "",
+    nested_note: str = "",
 ) -> bytes:
     from docx import Document
     from docx.enum.style import WD_STYLE_TYPE
@@ -71,6 +72,12 @@ def _docx_bytes(
     opening.style = custom
     if header_note:
         document.sections[0].header.paragraphs[0].text = header_note
+    if nested_note:
+        # Вложенная таблица — то, что по-прежнему НЕ читается: её содержимое не
+        # попадает в текст, а полноту она отнимает. Ровно то сочетание, которое
+        # нужно этой пробе: разные документы с одинаковым текстом.
+        outer = document.add_table(rows=1, cols=1)
+        outer.cell(0, 0).add_table(rows=1, cols=1).cell(0, 0).text = nested_note
     if interleaved:
         _add_roster(document)
     document.add_paragraph("Synthetic roster closing")
@@ -361,7 +368,7 @@ async def test_equal_incomplete_office_indexes_never_authorize_text_dedup(settin
     first = await pipeline.ingest_file(
         "alice",
         None,
-        _docx_bytes(interleaved=True, header_note="OMITTED-HEADER-ALPHA"),
+        _docx_bytes(interleaved=True, nested_note="OMITTED-NESTED-ALPHA"),
         filename="roster-incomplete-a.docx",
         source_ref="office:incomplete:a",
         force_review=True,
@@ -370,7 +377,7 @@ async def test_equal_incomplete_office_indexes_never_authorize_text_dedup(settin
     second = await pipeline.ingest_file(
         "alice",
         None,
-        _docx_bytes(interleaved=True, header_note="OMITTED-HEADER-BETA"),
+        _docx_bytes(interleaved=True, nested_note="OMITTED-NESTED-BETA"),
         filename="roster-incomplete-b.docx",
         source_ref="office:incomplete:b",
         force_review=True,
@@ -384,6 +391,8 @@ async def test_equal_incomplete_office_indexes_never_authorize_text_dedup(settin
     assert first_raw["raw_content"] == second_raw["raw_content"]
     assert first_index == second_index
     assert first_index["complete"] is False
-    assert "header_footer" in first_index["coverage"]["reasons"]
+    # Причина сменилась вместе с тем, что читается: колонтитул с 0.190.0 читается
+    # и полноты не отнимает, вложенная таблица — по-прежнему нет.
+    assert "nested_table" in first_index["coverage"]["reasons"]
     assert second.get("idempotent_replay") is not True
     assert first_raw["id"] != second_raw["id"]

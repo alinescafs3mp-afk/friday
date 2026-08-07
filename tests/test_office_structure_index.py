@@ -184,7 +184,16 @@ def test_horizontally_merged_person_header_is_header_but_not_an_authoritative_se
     assert xlsx_index["candidate_refs"] == []
 
 
-def test_nested_table_late_header_footer_and_text_box_make_docx_coverage_incomplete():
+def test_a_late_header_and_a_text_box_are_read_while_a_nested_table_is_not():
+    """Граница между «прочитано» и «утрачено» с 0.190.0 проходит здесь.
+
+    Колонтитул ПОЗДНЕГО раздела и надпись внутри рисунка читаются: на бланках там
+    стоят «Согласовано», номер и фамилия исполнителя. Вложенная таблица не
+    читается по-прежнему, и полноту она по-прежнему отнимает.
+
+    Прежняя редакция требовала неполноты от всех трёх — и была права, пока ни одна
+    из частей не читалась.
+    """
     document = Document()
     document.add_paragraph("BODY")
     table = document.add_table(rows=1, cols=1)
@@ -193,24 +202,26 @@ def test_nested_table_late_header_footer_and_text_box_make_docx_coverage_incompl
     second = document.add_section(WD_SECTION.NEW_PAGE)
     second.header.is_linked_to_previous = False
     second.footer.is_linked_to_previous = False
-    second.header.paragraphs[0].text = "LATE-HEADER-OMITTED"
-    second.footer.paragraphs[0].text = "LATE-FOOTER-OMITTED"
+    second.header.paragraphs[0].text = "LATE-HEADER-READ"
+    second.footer.paragraphs[0].text = "LATE-FOOTER-READ"
 
     paragraph = document.add_paragraph("VISIBLE")
     paragraph._p.append(
         parse_xml(
             f"<w:r {nsdecls('w')}><w:pict><w:txbxContent><w:p><w:r>"
-            "<w:t>TEXT-BOX-OMITTED</w:t></w:r></w:p></w:txbxContent></w:pict></w:r>"
+            "<w:t>TEXT-BOX-READ</w:t></w:r></w:p></w:txbxContent></w:pict></w:r>"
         )
     )
 
     result = DocumentExtractor().extract(_docx_bytes(document), "omissions.docx")
     index = result.office_structure_index
     assert index is not None and index["complete"] is False
-    assert {"nested_table", "header_footer", "text_box"} <= set(index["coverage"]["reasons"])
+    assert "nested_table" in set(index["coverage"]["reasons"])
+    assert "header_footer" not in set(index["coverage"]["reasons"])
     assert "NESTED-OMITTED" not in result.text
-    assert "LATE-HEADER-OMITTED" not in result.text
-    assert "TEXT-BOX-OMITTED" not in result.text
+    assert "LATE-HEADER-READ" in result.text
+    assert "LATE-FOOTER-READ" in result.text
+    assert "TEXT-BOX-READ" in result.text
 
 
 def test_tracked_change_and_footnote_part_fail_closed_without_copying_their_text():
@@ -238,10 +249,13 @@ def test_tracked_change_and_footnote_part_fail_closed_without_copying_their_text
 
     result = DocumentExtractor().extract(output.getvalue(), "tracked.docx")
     index = result.office_structure_index
-    assert result.text == "VISIBLE-BODY"
+    # Сноска ЧИТАЕТСЯ с 0.190.0 и приходит с меткой; правка с отслеживанием
+    # изменений — по-прежнему нет, и полноту она по-прежнему отнимает.
+    assert result.text == "VISIBLE-BODY\n[Сноска] FOOTNOTE-OMITTED"
     assert index is not None and index["complete"] is False
     assert "unsupported_body_content" in index["coverage"]["reasons"]
     encoded_index = json.dumps(index, ensure_ascii=False)
+    # Требование, которое НЕ изменилось: сам индекс не носит содержимого.
     assert "TRACKED-OMITTED" not in encoded_index
     assert "FOOTNOTE-OMITTED" not in encoded_index
 

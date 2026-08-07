@@ -157,13 +157,22 @@ def test_data_rows_with_people_words_are_not_misclassified_as_headers(
         "first_page_footer",
     ],
 )
-def test_every_docx_header_footer_variant_revokes_completeness(container_name: str) -> None:
+def test_every_docx_header_footer_variant_is_read_not_declared_lost(container_name: str) -> None:
+    """Прежде эта проба требовала обратного: колонтитул ОТНИМАЛ полноту.
+
+    Требование было верным ровно до тех пор, пока колонтитул не читался: документ,
+    часть которого не прочитана, полным называть нельзя. С 0.190.0 он читается — и
+    та же строка требований звучит наоборот: текст обязан оказаться в документе, а
+    полнота обязана остаться.
+    """
     document = Document()
     document.add_paragraph("VISIBLE-BODY")
     getattr(document.sections[0], container_name).paragraphs[0].text = "AUXILIARY-TEXT"
-    index = _index(DocumentExtractor().extract(_docx_bytes(document), "header-footer.docx"))
-    assert index["complete"] is False
-    assert "header_footer" in index["coverage"]["reasons"]
+    result = DocumentExtractor().extract(_docx_bytes(document), "header-footer.docx")
+    assert "AUXILIARY-TEXT" in result.text, "колонтитул по-прежнему теряется"
+    index = _index(result)
+    assert index["complete"] is True
+    assert "header_footer" not in index["coverage"]["reasons"]
 
 
 @pytest.mark.parametrize(

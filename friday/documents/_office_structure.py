@@ -454,18 +454,86 @@ def _docx_initial_reasons(document: Any) -> set[str]:
     return reasons
 
 
-def _docx_package_reasons(content: bytes) -> set[str]:
-    """Detect OOXML parts omitted by the body-only legacy DOCX projection."""
+#: Сколько знаков разрешено забрать из служебных частей документа.
+#: Колонтитул, сноска и примечание — это подписи и пояснения, а не второй том;
+#: потолок бережёт и запрос к модели, и бюджет текста самого документа.
+_DOCX_AUXILIARY_CHAR_BUDGET = 20_000
+#: Метки, под которыми служебный текст становится видимым человеку и модели.
+#: Без метки «Согласовано: Петров» из колонтитула читалось бы как фраза из текста.
+_DOCX_AUXILIARY_LABELS = {
+    "header_footer": "Колонтитул",
+    "note": "Сноска",
+    "comment": "Примечание",
+    "textbox": "Надпись",
+}
 
-    reasons: set[str] = set()
+
+def _docx_part_visible_text(stream: Any, *, limit: int) -> str:
+    """Видимый текст части OOXML — только настоящие `w:t`, без служебных полей."""
+    pieces: list[str] = []
+    used = 0
+    for _, element in ElementTree.iterparse(stream, events=("end",)):
+        if _local_name(element.tag) in {"t", "delText"}:
+            value = str(element.text or "").strip()
+            if value:
+                pieces.append(value)
+                used += len(value) + 1
+                if used >= limit:
+                    break
+        element.clear()
+    return " ".join(pieces)[:limit]
+
+
+def _docx_textbox_text(stream: Any, *, limit: int) -> str:
+    """Текст надписей: он лежит в `w:txbxContent` внутри тела документа.
+
+    `python-docx` его не отдаёт: `Paragraph.text` собирает только прямые прогоны
+    абзаца, а надпись — отдельный контейнер внутри рисунка. На бланках и схемах
+    именно там стоят подписи, номера и фамилии.
+    """
+    pieces: list[str] = []
+    used = 0
+    inside = 0
+    for event, element in ElementTree.iterparse(stream, events=("start", "end")):
+        name = _local_name(element.tag)
+        if name == "txbxContent":
+            inside += 1 if event == "start" else -1
+            if event == "end":
+                element.clear()
+            continue
+        if event != "end":
+            continue
+        if inside > 0 and name in {"t", "delText"}:
+            value = str(element.text or "").strip()
+            if value:
+                pieces.append(value)
+                used += len(value) + 1
+                if used >= limit:
+                    break
+    return " ".join(pieces)[:limit]
+
+
+def _docx_auxiliary_parts(content: bytes) -> tuple[list[tuple[str, str]], set[str]]:
+    """Служебный текст документа и то, что по-прежнему остаётся непрочитанным.
+
+    Колонтитулы, сноски, примечания и надписи ПОМЕЧАЛИСЬ как утраченные и не
+    извлекались: их наличие делало документ «неполным», а человек не получал ни
+    строчки из них. На бланках там стоят «Согласовано», «Исполнитель», номер и
+    дата — то есть ровно то, что ищут.
+
+    Возвращает пары «метка — текст» в устойчивом порядке и множество причин,
+    которые остаются в силе: диаграммы, встроенные объекты и картинки читать
+    по-прежнему нечем, и молчать об этом нельзя.
+    """
+    chunks: list[tuple[str, str]] = []
+    remaining: set[str] = set()
+    budget = _DOCX_AUXILIARY_CHAR_BUDGET
     try:
         with zipfile.ZipFile(BytesIO(content)) as archive:
-            for name in archive.namelist():
+            names = sorted(archive.namelist())
+            for name in names:
                 normalized = name.lstrip("/").casefold()
-                is_header_footer = bool(re.fullmatch(r"word/(?:header|footer)[0-9]+\.xml", normalized))
-                is_comment = normalized.startswith("word/comments")
-                is_note = normalized in {"word/footnotes.xml", "word/endnotes.xml"}
-                is_auxiliary_part = normalized.startswith(
+                if normalized.startswith(
                     (
                         "word/charts/",
                         "word/drawings/",
@@ -474,33 +542,38 @@ def _docx_package_reasons(content: bytes) -> set[str]:
                         "word/activex/",
                         "word/media/",
                     )
-                )
-                if is_comment or is_auxiliary_part:
-                    # Comments and rendered objects are visible auxiliary
-                    # material even when their XML has no ordinary ``w:t``.
-                    reasons.add("unsupported_body_content")
+                ):
+                    remaining.add("unsupported_body_content")
                     continue
-                if not (is_header_footer or is_note):
+                if budget <= 0:
                     continue
-                found_visible = False
+                if re.fullmatch(r"word/(?:header|footer)[0-9]+\.xml", normalized):
+                    kind = "header_footer"
+                elif normalized in {"word/footnotes.xml", "word/endnotes.xml"}:
+                    kind = "note"
+                elif normalized.startswith("word/comments"):
+                    kind = "comment"
+                elif normalized == "word/document.xml":
+                    with archive.open(name) as stream:
+                        value = _docx_textbox_text(stream, limit=budget)
+                    if value:
+                        chunks.append((_DOCX_AUXILIARY_LABELS["textbox"], value))
+                        budget -= len(value)
+                    continue
+                else:
+                    continue
                 with archive.open(name) as stream:
-                    for _, element in ElementTree.iterparse(stream, events=("end",)):
-                        local_name = _local_name(element.tag)
-                        if (
-                            local_name in _DOCX_FIELD_TAGS
-                            or local_name in _DOCX_VISIBLE_AUXILIARY_TAGS
-                            or (local_name in {"t", "delText"} and str(element.text or "").strip())
-                        ):
-                            found_visible = True
-                            break
-                        element.clear()
-                if found_visible:
-                    reasons.add("header_footer" if is_header_footer else "unsupported_body_content")
+                    value = _docx_part_visible_text(stream, limit=budget)
+                if value:
+                    chunks.append((_DOCX_AUXILIARY_LABELS[kind], value))
+                    budget -= len(value)
     except (OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
-        # The outer Office ZIP validation/parser owns extraction success.  This
-        # auxiliary completeness check fails closed without replacing its text.
-        reasons.add("unsupported_body_content")
-    return reasons
+        # Внешняя проверка ZIP владеет успехом разбора; здесь отказ закрытый:
+        # не прочитали — значит документ неполон, и это сказано.
+        return [], {"unsupported_body_content"}
+    if budget <= 0:
+        remaining.add("unsupported_body_content")
+    return chunks, remaining
 
 
 def _xlsx_package_reasons(
@@ -1167,7 +1240,56 @@ def build_docx_text_and_structure(
         # never force a bounded reader to traverse an otherwise ignored tail.
         reasons.update(_docx_initial_reasons(document))
         if content is not None:
-            reasons.update(_docx_package_reasons(content))
+            # Колонтитулы, сноски, примечания и надписи ЧИТАЮТСЯ, а не только
+            # помечаются утраченными: на бланках там стоят «Согласовано»,
+            # «Исполнитель», номер и дата — то есть ровно то, что ищут. Текст
+            # уходит в тот же построитель, поэтому отпечаток индекса считается по
+            # ПОЛНОМУ тексту: индекс, посчитанный по куску, был бы отброшен
+            # проверкой молча.
+            auxiliary, remaining = _docx_auxiliary_parts(content)
+            # Причина снимается ровно потому, что часть ПРОЧИТАНА. Если чтение
+            # упёрлось в потолок, `remaining` вернёт `unsupported_body_content`, и
+            # документ останется неполным — но уже по другой, честной причине.
+            reasons.discard("header_footer")
+            for label, value in auxiliary:
+                paragraph_ordinal += 1
+                coverage["blocks_seen"] += 1
+                span, clipped = builder.append(f"[{label}] {value}")
+                if clipped:
+                    reasons.add("text_budget")
+                    break
+                if span is None:
+                    continue
+                if len(blocks) >= _MAX_BLOCKS:
+                    reasons.add("index_budget")
+                    continue
+                # Кусок служебного текста — такой же абзац для индекса, как и
+                # абзац тела. Без своей строки в индексе он оставил бы «дыру»
+                # между отрезками, и проверка целостности отбросила бы весь
+                # индекс МОЛЧА — вместе с точным путём по таблицам.
+                blocks.append(
+                    {
+                        "id": f"p{paragraph_ordinal:06d}",
+                        "kind": "paragraph",
+                        "source_order": paragraph_ordinal + table_ordinal - 1,
+                        "text_span": span,
+                        "style_role": "other",
+                        # Один прогон на весь кусок: полный индекс требует, чтобы
+                        # прогоны покрывали отрезок абзаца встык. Начертание у
+                        # служебного текста не снимается — оно ничего не значит
+                        # для поиска и не стоит второго обхода XML.
+                        "runs": [
+                            {
+                                "id": f"p{paragraph_ordinal:06d}:u000001",
+                                "text_span": list(span),
+                                "bold": False,
+                                "italic": False,
+                                "underline": False,
+                            }
+                        ],
+                    }
+                )
+            reasons.update(remaining)
     text = builder.text()
     index = _finalize_index(
         format_name="docx",
