@@ -22,6 +22,7 @@ import re
 import tarfile
 import time
 import zipfile
+from collections.abc import Sequence
 from contextlib import closing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -37,6 +38,37 @@ from friday.documents._office_structure import (
 )
 
 LOGGER = logging.getLogger(__name__)
+#: Чем заменяется собственный credential, найденный в тексте документа.
+#: Замена ВИДНА: молчаливая подмена читалась бы как свойство документа.
+SECRET_PLACEHOLDER = "[секрет удалён]"
+
+
+def _own_secret_values() -> tuple[str, ...]:
+    """Credential этого экземпляра — те, что нельзя показывать модели.
+
+    `secret_hygiene` знает их по имени переменной окружения и держит порог длины,
+    ниже которого совпадение было бы случайным. Он же — offline-доктор, который
+    ищет их в файлах на диске; здесь тот же список используется на входе, где
+    файл ещё только становится текстом.
+    """
+    from friday.secret_hygiene import named_secrets
+
+    return tuple(dict.fromkeys(named_secrets().values()))
+
+
+def _redact_own_secrets(text: str, secrets: Sequence[str]) -> tuple[str, int]:
+    """Убрать из текста собственные credential, сосчитав, сколько раз пришлось."""
+    if not text or not secrets:
+        return text, 0
+    removed = 0
+    for secret in secrets:
+        if not secret or secret not in text:
+            continue
+        removed += text.count(secret)
+        text = text.replace(secret, SECRET_PLACEHOLDER)
+    return text, removed
+
+
 _TEXT_EXTENSIONS = {
     ".txt",
     ".md",
@@ -254,7 +286,19 @@ class DocumentExtractor:
         max_text_chars: int = 2_000_000,
         max_input_bytes: int = 50 * 1024 * 1024,
         parse_budget_sec: float | None = None,
+        secret_values: Sequence[str] | None = None,
     ) -> None:
+        # Собственные credential этого экземпляра. `None` — не «нет секретов», а
+        # «взять из окружения»: умолчание закрытое, потому что забыть его можно
+        # только в одном направлении, и это направление — утечка. Пустой кортеж
+        # выключает проверку явно (так делают пробы самого разбора).
+        #
+        # Зачем это здесь, а не в вызывающем: `extract` — ЕДИНСТВЕННАЯ дорога, по
+        # которой текст файла попадает и в контекст модели, и в архив, и в
+        # поисковый индекс. Ворота на одной из трёх дорог не охраняли бы ничего.
+        self.secret_values: tuple[str, ...] = (
+            _own_secret_values() if secret_values is None else tuple(str(value) for value in secret_values)
+        )
         self.max_archive_entries = max(1, int(max_archive_entries))
         self.max_archive_uncompressed_bytes = max(1024, int(max_archive_uncompressed_bytes))
         self.max_text_chars = max(10_000, int(max_text_chars))
@@ -354,16 +398,24 @@ class DocumentExtractor:
                 f"document_extract_failed:{type(exc).__name__}",
             )
 
-        text = result.text[: self.max_text_chars]
+        # Убрать собственные credential ДО обреза: иначе граница могла бы
+        # разрезать секрет пополам и оставить его половину в тексте.
+        redacted_text, secrets_removed = _redact_own_secrets(result.text, self.secret_values)
+        text = redacted_text[: self.max_text_chars]
         metadata = {
             "filename": safe_name,
             "mime_type": detected_mime,
             "input_bytes": len(content),
             **result.metadata,
         }
-        if len(result.text) > self.max_text_chars:
+        if secrets_removed:
+            # Потеря названа. Молчаливая подмена читалась бы как свойство
+            # документа, а человеку важно знать, что его ключ лежит в файле,
+            # который он только что загрузил в общий архив.
+            metadata["secrets_redacted"] = secrets_removed
+        if len(redacted_text) > self.max_text_chars:
             metadata["text_truncated"] = True
-            metadata["original_text_chars"] = len(result.text)
+            metadata["original_text_chars"] = len(redacted_text)
         # Собственная дата документа снимается ЗДЕСЬ, а не внутри разборщиков, и
         # потому переживает неудачу разбора: скан без текстового слоя, битый docx
         # и файл незнакомого генератора всё равно несут дату, которую записал
