@@ -771,6 +771,7 @@ class DocumentExtractor:
             metadata["delimiter"] = delimiter
             try:
                 rendered_rows: list[str] = []
+                parsed_rows: list[list[str]] = []
                 rendered_chars = 0
                 rows_read = 0
                 for row in csv.reader(io.StringIO(text), delimiter=delimiter):
@@ -778,6 +779,7 @@ class DocumentExtractor:
                         metadata["rows_truncated"] = True
                         break
                     rows_read += 1
+                    parsed_rows.append([cell.strip() for cell in row])
                     rendered = " | ".join(cell.strip() for cell in row)
                     remaining = self.max_text_chars - rendered_chars
                     if remaining <= 0:
@@ -790,6 +792,14 @@ class DocumentExtractor:
                         break
                 text = "\n".join(rendered_rows)
                 metadata["rows_read"] = rows_read
+                # Структура таблицы — тем же построителем, что у `.xlsx`. Только
+                # если разбор дошёл до конца: индекс, построенный по обрезанной
+                # таблице, утверждал бы о ней то, чего в ней нет.
+                if not metadata.get("rows_truncated"):
+                    text, extra, structure = self._csv_structure(parsed_rows, text)
+                    metadata.update(extra)
+                    if structure is not None:
+                        return DocumentResult(text, metadata, office_structure_index=structure)
             except csv.Error:
                 pass
         elif ext == ".xml":
@@ -1020,6 +1030,80 @@ class DocumentExtractor:
             metadata,
             office_structure_index=office_structure_index,
         )
+
+    #: Сколько строк CSV получают ПОЛНУЮ структуру таблицы.
+    #:
+    #: Индекс строится тем же построителем, что у `.xlsx`, а тот работает с
+    #: настоящей книгой — значит книгу надо собрать и сохранить в память. Это
+    #: стоит времени и памяти линейно по строкам, и на выгрузке в сто тысяч строк
+    #: цена перестаёт окупаться. Выше потолка CSV остаётся тем, чем был, — ровным
+    #: текстом с колонками, — и об этом говорится вслух.
+    _CSV_STRUCTURE_MAX_ROWS = 5_000
+
+    def _csv_structure(
+        self, rows: list[list[str]], text: str
+    ) -> tuple[str, dict[str, Any], dict[str, Any] | None]:
+        """Дать CSV ту же структуру таблицы, что есть у `.xlsx`.
+
+        До сих пор структура доезжала до модели только у `.docx` и `.xlsx`: CSV
+        оставался текстом, и точный путь по таблице — «сколько всего позиций»,
+        «перечисли всех» — для него не работал вовсе. При этом CSV это ровно
+        таблица, и терять её структуру только из-за формата файла нечестно.
+
+        Собирается настоящая книга и прогоняется через ТОТ ЖЕ построитель, что и
+        `.xlsx`. Не свой облегчённый разбор: второй построитель индекса разошёлся
+        бы с первым на первой же правке, а индекс проверяется валидатором, который
+        отбрасывает несогласованное МОЛЧА — вместе с точным путём.
+        """
+        # Строки приходят РАЗОБРАННЫМИ, а не разбираются здесь заново из текста:
+        # к этому месту текст уже склеен видом «ячейка | ячейка», и повторный
+        # разбор давал ОДНУ колонку на строку. Индекс при этом получался
+        # валидным и полным — и совершенно бесполезным: ни одной записи, ни
+        # одного кандидата. Поймано сравнением с тем же файлом в `.xlsx`.
+        metadata: dict[str, Any] = {}
+        if not rows:
+            return text, metadata, None
+        if len(rows) > self._CSV_STRUCTURE_MAX_ROWS:
+            # Молчаливого отказа быть не должно: человек, спросивший «сколько
+            # всего», получит обычный ответ модели вместо точного, и знать об
+            # этом он обязан заранее.
+            metadata["office_structure_skipped"] = "too_many_rows"
+            return text, metadata, None
+        try:
+            from openpyxl import Workbook, load_workbook  # type: ignore[import-untyped]
+        except ImportError:
+            metadata["office_structure_skipped"] = "openpyxl_missing"
+            return text, metadata, None
+        try:
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "CSV"
+            for row in rows:
+                sheet.append([cell.strip() for cell in row])
+            buffer = io.BytesIO()
+            workbook.save(buffer)
+            workbook.close()
+            synthetic = buffer.getvalue()
+            values = load_workbook(io.BytesIO(synthetic), read_only=True, data_only=True)
+            formulas = load_workbook(io.BytesIO(synthetic), read_only=True, data_only=False)
+            try:
+                built, index, truncated, _ = build_xlsx_text_and_structure(
+                    values,
+                    formulas,
+                    content=synthetic,
+                    max_text_chars=self.max_text_chars,
+                    max_rows=_MAX_TABULAR_ROWS,
+                )
+            finally:
+                values.close()
+                formulas.close()
+        except Exception as exc:  # noqa: BLE001 — структура необязательна, текст важнее
+            LOGGER.info("CSV structure build failed (%s)", type(exc).__name__)
+            metadata["office_structure_skipped"] = f"build_failed:{type(exc).__name__}"
+            return text, metadata, None
+        if truncated:
+            metadata["text_truncated"] = True
+        return built, metadata, index
 
     def _extract_pptx(self, content: bytes) -> DocumentResult:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:

@@ -17,6 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from friday.agent_runtime._office_attachments import (
+    OFFICE_INTENT_ARBITER_SYSTEM,
     OFFICE_PROMPT_PREFIX,
     OFFICE_STRUCTURE_KEY,
     bounded_raw_file_metadata,
@@ -24,8 +25,10 @@ from friday.agent_runtime._office_attachments import (
     code_owned_office_answer,
     is_trusted_office_attachment,
     looks_like_office_attachment,
+    office_arbiter_applies,
     office_exact_request_detected,
     office_exhaustive_scope,
+    parse_office_intent,
     trusted_office_attachment,
     validate_runtime_office_index,
 )
@@ -3856,6 +3859,19 @@ class AgentRuntime:
             == attachment_expected_count
         )
         office_exact = code_owned_office_answer(clean_message, attachments)
+        if office_exact is None and office_arbiter_applies(clean_message, attachments):
+            # Четыре русские регулярки ловили 19 форм вопроса из 32 (замер
+            # 2026-08-07, `sol/PROPOSALS.md` §75). Пропущенные — не экзотика:
+            # «посчитай людей», «кого он включает», «полный состав команды».
+            # Дописывать пятую регулярку значило бы продолжать угадывать формы;
+            # понимание — работа арбитра. Он вернул 13 пропущенных из 13 и не дал
+            # ни одного ложного срабатывания на двадцати отрицательных.
+            #
+            # Вызов стоит ТОЛЬКО там, где точный ответ вообще возможен: одно
+            # офисное вложение с полной структурой. Медиана вызова 0.18 с.
+            arbitrated = await self._office_intent_arbiter(clean_message)
+            if arbitrated:
+                office_exact = code_owned_office_answer(clean_message, attachments, kind_override=arbitrated)
         if office_exact is not None:
             # Exact Office membership/count is already completely determined by
             # the authenticated structural view.  Do not spend a search or any
@@ -4768,6 +4784,37 @@ class AgentRuntime:
             "knowledge_hits": 0,
             "entity_hits": 0,
         }
+
+    async def _office_intent_arbiter(self, question: str) -> str:
+        """Спросить модель, просят ли полный пересчёт или перечень по всей таблице.
+
+        Понимание вместо перечисления форм. Четыре русские регулярки ловили 19
+        форм вопроса из 32 на корпусе, собранном ДО того, как я посмотрела, что
+        они ловят; пропущенное — не экзотика, а «посчитай людей», «кого он
+        включает», «полный состав команды». Пятая регулярка отодвинула бы границу
+        и не убрала её.
+
+        Арбитр выбирает из ЗАКРЫТОГО списка готовых видов ответа и ничего не
+        сочиняет: сам ответ по-прежнему строится структурой, а не моделью.
+        Непонятная реплика — пустая строка, то есть обычный путь.
+        """
+        if not self.llm or not self.llm.enabled:
+            return ""
+        try:
+            response = await self.llm.chat(
+                [
+                    {"role": "system", "content": OFFICE_INTENT_ARBITER_SYSTEM},
+                    {"role": "user", "content": question},
+                ],
+                temperature=0.0,
+                max_tokens=self.settings.cognition_max_tokens,
+                priority="foreground",
+            )
+        except Exception as exc:  # noqa: BLE001 — отказ арбитра это обычный путь, не поломка
+            LOGGER.info("Office intent arbiter failed (%s)", type(exc).__name__)
+            return ""
+        content = response.get("content") if isinstance(response, dict) else response
+        return parse_office_intent(content)
 
     async def _prepare_context(
         self,

@@ -1093,13 +1093,80 @@ def _unavailable_exact_answer() -> dict[str, Any]:
     }
 
 
+#: Что арбитр обязан вернуть и что означает каждое значение.
+#:
+#: Список ЗАКРЫТ и совпадает с тем, что умеет точный путь: арбитр выбирает из
+#: готовых видов ответа, а не сочиняет намерение. Всё, чего нет в списке, — `none`.
+OFFICE_INTENT_KINDS = frozenset({"count_people", "list_people", "count_records", "list_records"})
+
+OFFICE_INTENT_ARBITER_SYSTEM = (
+    "Ты — арбитр намерения. Человек прислал ТАБЛИЦУ и задал вопрос. Реши, просит "
+    "ли он ПОЛНЫЙ пересчёт или полный перечень по ВСЕЙ таблице.\n\n"
+    "Ответь строго одним JSON-объектом с единственным ключом kind. Допустимые "
+    "значения:\n"
+    '  "count_people"  — сколько ЛЮДЕЙ в таблице целиком;\n'
+    '  "list_people"   — перечислить ВСЕХ людей;\n'
+    '  "count_records" — сколько СТРОК/позиций в таблице целиком;\n'
+    '  "list_records"  — перечислить ВСЕ строки/позиции;\n'
+    '  "none"          — всё остальное.\n\n'
+    "«none» обязательно, если: вопрос про ОДНУ строку или одного человека; "
+    "нужен отбор по признаку («кто из них инженер», «у кого оклад больше»); "
+    "вопрос о самом файле, а не о его строках; обычный разговор. "
+    "Сомневаешься — отвечай none: лишний полный список хуже, чем обычный ответ."
+)
+
+
+def parse_office_intent(raw: Any) -> str:
+    """Вид ответа из реплики арбитра. Всё непонятное — пусто, а не догадка."""
+    text = str(raw or "")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return ""
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return ""
+    kind = str(parsed.get("kind") or "") if isinstance(parsed, Mapping) else ""
+    return kind if kind in OFFICE_INTENT_KINDS else ""
+
+
+def office_arbiter_applies(question: str, attachments: list[dict[str, Any]] | None) -> bool:
+    """Стоит ли вообще спрашивать арбитра — то есть окупится ли вызов модели.
+
+    Спрашиваем ТОЛЬКО когда точный ответ реально возможен: ровно одно вложение,
+    оно офисное, его структура полна и полностью доехала до запроса. Иначе
+    арбитр ответил бы про таблицу, которой нет, и вызов был бы потрачен зря на
+    каждом ходе с любым файлом.
+    """
+    text = _clean_question(question)
+    if not text or office_request_kind(question):
+        return False
+    active_items = [item for item in attachments or [] if isinstance(item, Mapping)]
+    office_items = [item for item in active_items if looks_like_office_attachment(item)]
+    if len(active_items) != 1 or len(office_items) != 1:
+        return False
+    view = office_items[0].get("_office_exact_view")
+    if not isinstance(view, Mapping):
+        return False
+    return view.get("index_complete") is True and view.get("prompt_complete") is True
+
+
 def code_owned_office_answer(
     question: str,
     attachments: list[dict[str, Any]] | None,
+    *,
+    kind_override: str = "",
 ) -> dict[str, Any] | None:
-    """Return a deterministic exact answer, or an explicit fail-closed result."""
+    """Return a deterministic exact answer, or an explicit fail-closed result.
 
-    kind = office_request_kind(question)
+    `kind_override` приходит от арбитра и ТОЛЬКО из закрытого списка видов:
+    арбитр выбирает готовый вид ответа, а не расширяет их множество. Само
+    построение ответа при этом не меняется ни на строку — оно по-прежнему целиком
+    определяется структурой, а не моделью.
+    """
+
+    kind = kind_override if kind_override in OFFICE_INTENT_KINDS else office_request_kind(question)
     if not kind:
         return None
     active_items = [item for item in attachments or [] if isinstance(item, Mapping)]
