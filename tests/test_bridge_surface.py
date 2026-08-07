@@ -293,6 +293,8 @@ EXPECTED_COMMANDS = {
 # почему это нельзя просто повторить. Прежде человек видел только число
 # («действий с НЕИЗВЕСТНЫМ исходом: 3»), по которому нечего проверить, и
 # видел его лишь когда очередь подтверждений пуста.
+# 72 -> 73 в 0.178.0: `_send_message_returning_id` — короткое приглашение, чей
+# `message_id` нужен, чтобы ответ человека адресовался однозначно.
 # 71 -> 72 в 0.176.0: `_album_caption` — подпись альбома, доезжающая до всех его
 # частей; Telegram ставит её ровно у одной.
 # 70 -> 71 в 0.175.0: `_reply_quote` — текст сообщения, на которое человек
@@ -305,7 +307,7 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 72
+EXPECTED_BRIDGE_COUNT = 73
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
@@ -357,6 +359,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_merges": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_relations": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_reminders": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
+    "_send_message_returning_id": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str') -> 'int'",
     "_send_document": "(self, client: 'httpx.AsyncClient', chat_id: 'int', filename: 'str', content_bytes: 'bytes', *, caption: 'str' = '', mime_type: 'str' = 'text/plain; charset=utf-8') -> 'None'",
     "_send_voice": "(self, client: 'httpx.AsyncClient', chat_id: 'int', audio_bytes: 'bytes') -> 'None'",
     "_deliver_generated_files": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",

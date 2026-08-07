@@ -100,6 +100,9 @@ class TransportMixin(BridgeShared):
         # Подписи альбомов по `media_group_id`. Ограничены по числу: группа живёт
         # секунды, а словарь без потолка рос бы всю жизнь процесса.
         self._album_captions: dict[str, str] = {}
+        # Приглашения исправить запись: `message_id` приглашения -> id записи.
+        # Человек отвечает репликой НА приглашение, и ответ адресуется однозначно.
+        self._edit_targets: dict[int, str] = {}
         # Раздача прекращается на остановке, но уже начатое доводится до конца:
         # брошенная задача — это обновление, снятое с очереди и не отвеченное.
         self._stopping = False
@@ -926,6 +929,31 @@ class TransportMixin(BridgeShared):
                 payload["reply_markup"] = reply_markup
             response = await self._post_message_chunk(client, payload, chunk)
             response.raise_for_status()
+
+    async def _send_message_returning_id(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        text: str,
+    ) -> int:
+        """Короткое сообщение, чей `message_id` нужен вызывающему.
+
+        Обычный `_send_message` ничего не возвращает — и правильно: он режет
+        длинный ответ на куски, и «идентификатор сообщения» у такого ответа не
+        один. Здесь текст заведомо короткий: это приглашение ответить репликой, и
+        его идентификатор — то, за что потом цепляется ответ человека.
+        """
+        payload = {
+            "chat_id": chat_id,
+            "text": to_telegram_html(text) or text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        response = await self._post_message_chunk(client, payload, text)
+        response.raise_for_status()
+        body = response.json()
+        result = body.get("result") if isinstance(body, dict) else None
+        return int(result.get("message_id") or 0) if isinstance(result, dict) else 0
 
     #: Сколько раз ждать по просьбе Telegram, прежде чем сдаться.
     _RATE_LIMIT_RETRIES = 3

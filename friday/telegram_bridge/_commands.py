@@ -261,6 +261,31 @@ class CommandsMixin(BridgeShared):
         borrowed_caption = self._album_caption(message)
         if not text:
             text = borrowed_caption
+
+        # Правка записи: человек ответил репликой НА приглашение «пришлите новый
+        # текст». Адресат однозначен даже в чате, где идёт несколько разговоров,
+        # потому что цепляемся за идентификатор конкретного сообщения, а не за
+        # «последнее действие». Ход при этом не идёт к модели вовсе: это правка,
+        # а не вопрос.
+        replied_to = message.get("reply_to_message")
+        edit_target = ""
+        if isinstance(replied_to, dict):
+            edit_target = self._edit_targets.pop(int(replied_to.get("message_id") or 0), "")
+        if edit_target and text:
+            await self._backend_json(
+                backend,
+                "PATCH",
+                f"/api/knowledge/{edit_target}",
+                {"content": text, "telegram_user": user},
+                external_user_id,
+                str(chat_id),
+            )
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Запись исправлена: теперь в ней ваш текст. Заголовок и связи прежние.",
+            )
+            return
         # Command and argument come from the SAME split. They used to disagree: the
         # command was found with `split(maxsplit=1)` (any whitespace, so a newline
         # counted) while the argument was taken with `partition(" ")` (a literal

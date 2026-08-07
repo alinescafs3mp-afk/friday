@@ -8,13 +8,12 @@
 Удаление мягкое и обратимое, но подтверждение всё равно спрашивается: одно
 нажатие мимо не должно уносить запись.
 
-Правка ТЕКСТА записи в этот заход намеренно не делается, и причина не в объёме.
-Она требует захвата следующей реплики как ответа на конкретное сообщение, а
-чтение `reply_to_message` в мосте сейчас отсутствует вовсе (отдельная находка
-разведки). Сделать правку раньше означало бы завести второй механизм ввода и
-выбросить его, когда появится первый.
+Правка ТЕКСТА добавлена позже, в 0.178.0, и порядок был выбран намеренно: она
+требует захвата следующей реплики как ответа на конкретное сообщение, а чтение
+`reply_to_message` появилось только в 0.175.0. Сделать правку раньше означало бы
+завести второй механизм ввода и выбросить его, когда появится первый.
 
-Обязательные мутации перечислены в `sol/PROPOSALS.md` #46.
+Обязательные мутации перечислены в `sol/PROPOSALS.md` #46 и #52.
 """
 
 from __future__ import annotations
@@ -171,3 +170,96 @@ async def test_a_malformed_target_is_refused(tmp_path):
     assert not [call for call in backend.calls if call.startswith("DELETE")], (
         "подделанная цель дошла до удаления"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_record_can_be_corrected_by_replying(tmp_path):
+    """Правка использует ТОТ ЖЕ механизм ответа на реплику, что появился в 0.175.0.
+
+    Это не совпадение и не экономия: заводить ради правки второй способ ввода
+    значило бы выбросить его при первой же встрече с первым. Человек отвечает НА
+    приглашение, поэтому адресат однозначен даже в чате, где идёт несколько
+    разговоров, — цепляемся за идентификатор конкретного сообщения, а не за
+    «последнее действие».
+
+    Мутации: убрать кнопку «Исправить» — краснеет первый assert; не запоминать
+    приглашение — краснеет второй; не звать PATCH — краснеет третий.
+    """
+
+    class _TelegramWithIds:
+        def __init__(self) -> None:
+            self.next_id = 500
+            self.sent: list[dict[str, Any]] = []
+
+        async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            payload = dict(kwargs.get("json") or {})
+            self.sent.append(payload)
+            self.next_id += 1
+            return httpx.Response(
+                200,
+                json={"ok": True, "result": {"message_id": self.next_id}},
+                request=httpx.Request("POST", url),
+            )
+
+    class _PatchBackend:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.bodies: list[dict[str, Any]] = []
+
+        async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+            self.calls.append(f"{method} {url.split('/api/', 1)[-1]}")
+            body = kwargs.get("content")
+            if body:
+                self.bodies.append(json.loads(body))
+            return httpx.Response(
+                200,
+                json={"item": {"id": DOCUMENT_ID, "title": "Заметка", "content": "Текст"}},
+                request=httpx.Request(method, url),
+            )
+
+        async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            return await self.request("POST", url, **kwargs)
+
+    bridge = _bridge(tmp_path)
+    telegram, backend = _TelegramWithIds(), _PatchBackend()
+    try:
+        # 1. Открыли запись — у неё есть кнопка «Исправить».
+        await bridge._process_callback_query(telegram, backend, _press(f"doc:show:{DOCUMENT_ID}"))
+        targets = [
+            button["callback_data"]
+            for payload in telegram.sent
+            for row in (payload.get("reply_markup") or {}).get("inline_keyboard", [])
+            for button in row
+        ]
+        assert f"know:fix:{DOCUMENT_ID}" in targets, "у записи нет кнопки «Исправить»"
+
+        # 2. Нажали — мост прислал приглашение и запомнил его.
+        await bridge._process_callback_query(telegram, backend, _press(f"know:fix:{DOCUMENT_ID}"))
+        assert bridge._edit_targets, "приглашение не запомнено — ответ будет некуда адресовать"
+        prompt_id = next(iter(bridge._edit_targets))
+        assert bridge._edit_targets[prompt_id] == DOCUMENT_ID
+
+        # 3. Ответили репликой на приглашение — запись исправлена, а не задан вопрос.
+        update = {
+            "update_id": 950,
+            "message": {
+                "message_id": 12,
+                "chat": {"id": 5001},
+                "from": {"id": 5001, "first_name": "Владелец"},
+                "text": "Правильный текст записи",
+                "reply_to_message": {"message_id": prompt_id, "text": "Ответьте на ЭТО сообщение"},
+            },
+        }
+        await bridge._process_update(telegram, backend, update, cached_response=None)
+    finally:
+        bridge._inbox.close()
+
+    assert f"PATCH knowledge/{DOCUMENT_ID}" in backend.calls, (
+        f"правка не дошла до маршрута исправления: {backend.calls}"
+    )
+    patched = [body for body in backend.bodies if "content" in body]
+    assert patched and patched[-1]["content"] == "Правильный текст записи"
+    assert not any(call.endswith("api/chat") for call in backend.calls), (
+        "текст правки уехал к модели как обычный вопрос"
+    )
+    assert bridge._edit_targets == {}, "приглашение осталось в памяти после использования"

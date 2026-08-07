@@ -54,6 +54,9 @@ BATCH_SIZE = 20
 #: соединения. Меньше — и возвращается ровно та болезнь, ради которой это
 #: заведено: один долгий ход держит чужие чаты.
 MAX_CONCURRENT_UPDATES = 8
+#: Сколько приглашений «ответьте новым текстом» помнить одновременно.
+#: Человек либо отвечает сразу, либо передумал; десяти хватает с запасом.
+_EDIT_TARGET_MEMORY = 10
 # Telegram counts sendMessage's 4096 in UTF-16 code units, not code points.
 TELEGRAM_TEXT_LIMIT = 4096
 RETRY_DELAYS_SEC = (2.0, 10.0, 30.0, 60.0, 300.0)
@@ -357,6 +360,8 @@ class BridgeShared:
     _reply_quote: Callable[..., Any]
     _album_caption: Callable[..., Any]
     _album_captions: dict[str, str]
+    _edit_targets: dict[int, str]
+    _send_message_returning_id: Callable[..., Any]
     _format_browse_results: Callable[..., Any]
     _format_status: Callable[..., Any]
     _format_timeline: Callable[..., Any]
@@ -407,6 +412,7 @@ __all__ = [
     "LOGGER",
     "MAX_ATTEMPTS",
     "MAX_CONCURRENT_UPDATES",
+    "_EDIT_TARGET_MEMORY",
     "MediaTooLargeError",
     "POLL_TIMEOUT",
     "Path",

@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import suppress
 
 from friday.telegram_bridge._base import (
+    _EDIT_TARGET_MEMORY,
     CALLBACK_TARGET_RE,
     LOGGER,
     Any,
@@ -213,13 +214,35 @@ class CallbacksMixin(BridgeShared):
                 # равно спрашивается: одно нажатие мимо не должно уносить запись.
                 more = self._document_more_markup(document, target_id, 0)
                 rows = list(more["inline_keyboard"]) if more else []
-                rows.append([{"text": "Удалить запись", "callback_data": f"know:del:{target_id}"}])
+                rows.append(
+                    [
+                        {"text": "Исправить", "callback_data": f"know:fix:{target_id}"},
+                        {"text": "Удалить запись", "callback_data": f"know:del:{target_id}"},
+                    ]
+                )
                 await self._send_message(
                     telegram,
                     chat_id,
                     self._format_full_document(document),
                     reply_markup={"inline_keyboard": rows},
                 )
+            elif family == "know" and action == "fix":
+                # Правка использует тот же механизм ответа на реплику, который
+                # появился в 0.175.0, и это не совпадение: заводить ради неё
+                # второй способ ввода значило бы выбросить его при первой же
+                # встрече с первым. Человек отвечает НА приглашение, поэтому
+                # адресат однозначен даже в чате, где идёт несколько разговоров.
+                prompt_id = await self._send_message_returning_id(
+                    telegram,
+                    chat_id,
+                    "Ответьте на ЭТО сообщение новым текстом записи — я заменю им нынешний. "
+                    "Заголовок и связи останутся прежними.",
+                )
+                if prompt_id:
+                    if len(self._edit_targets) >= _EDIT_TARGET_MEMORY:
+                        self._edit_targets.pop(next(iter(self._edit_targets)), None)
+                    self._edit_targets[prompt_id] = target_id
+                await self._answer_callback(telegram, callback_id, "Жду новый текст")
             elif family == "know" and action in {"del", "delok"}:
                 if action == "del":
                     await self._answer_callback(telegram, callback_id, "Точно удалить?")
