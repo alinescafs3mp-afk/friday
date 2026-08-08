@@ -5058,6 +5058,8 @@ def _signed_bridge_headers(
 ) -> dict[str, str]:
     from friday.security import sign_bridge_request
 
+    if re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
+        raise BatteryContractError("bridge_nonce_invalid")
     timestamp = int(time.time())
     return {
         "Content-Type": "application/json",
@@ -5076,6 +5078,10 @@ def _signed_bridge_headers(
             body=body,
         ),
     }
+
+
+def _case_bridge_nonce(case: ExpandedCase) -> str:
+    return _sha256_bytes(f"{case.id}:{case.question_index}".encode())[:32]
 
 
 def _case_document(case: ExpandedCase) -> dict[str, Any] | None:
@@ -6052,7 +6058,7 @@ class _LiveCaseExecutor:
             body=body,
             external_user_id=self.external_user_id,
             chat_id=self.chat_id,
-            nonce=_sha256_bytes(f"{case.id}:{case.question_index}".encode()),
+            nonce=_case_bridge_nonce(case),
         )
         # One and only one harness submission for this sealed case.  Verification,
         # LLM transport retries and fake-Telegram retries happen below that API

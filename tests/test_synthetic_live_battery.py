@@ -202,6 +202,51 @@ def test_live_worker_enters_app_lifespan_before_reading_runtime_state() -> None:
     assert "app.state.storage.close()" not in source
 
 
+def test_live_bridge_headers_use_the_production_nonce_contract() -> None:
+    from friday.security import verify_bridge_request
+
+    secret = "synthetic-bridge-secret-for-a-closed-test"
+    body = b'{"message":"synthetic"}'
+    cases = [*_cases("A"), *_cases("B")]
+    nonces = [battery._case_bridge_nonce(case) for case in cases]
+    assert len(nonces) == len(set(nonces)) == 400
+    assert nonces == [battery._case_bridge_nonce(case) for case in cases]
+    assert all(len(nonce) == 32 and set(nonce) <= set("0123456789abcdef") for nonce in nonces)
+    with pytest.raises(battery.BatteryContractError, match="bridge_nonce_invalid"):
+        battery._signed_bridge_headers(
+            secret,
+            body=body,
+            external_user_id="5001",
+            chat_id="5001",
+            nonce=battery._sha256_bytes(b"A-P01:A-P01-Q01"),
+        )
+    headers = battery._signed_bridge_headers(
+        secret,
+        body=body,
+        external_user_id="5001",
+        chat_id="5001",
+        nonce=nonces[0],
+    )
+
+    nonce = headers["X-Friday-Nonce"]
+    assert len(nonce) == 32
+    assert set(nonce) <= set("0123456789abcdef")
+    identity = verify_bridge_request(
+        secret,
+        timestamp=headers["X-Friday-Timestamp"],
+        method="POST",
+        path="/api/chat",
+        external_user_id="5001",
+        chat_id="5001",
+        nonce=nonce,
+        body=body,
+        signature=headers["X-Friday-Signature"],
+        max_age_sec=90,
+        now=int(headers["X-Friday-Timestamp"]),
+    )
+    assert identity.nonce == nonce
+
+
 def test_tenant_seed_state_maps_all_non_vacuity_counts_once(monkeypatch) -> None:
     snapshots = {
         "main": {
