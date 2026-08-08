@@ -124,6 +124,190 @@ def test_probe_accepts_exact_endpoint_and_request_kwargs(message: str, mode: str
     assert state["transport_delivery_shape_exact"] is True
 
 
+def test_p10_source_rejects_unrequested_bold_in_a_plain_list() -> None:
+    case = _case("A", 1)
+    message = "- **SYN-TELEGRAM-A10-01**\n- второй"
+
+    assert battery._telegram_shape_matches(case, message) is False
+
+
+@pytest.mark.parametrize(
+    ("index", "message"),
+    [
+        (2, "**SYN-TELEGRAM-A10-02**"),
+        (4, "*синтетика* SYN-TELEGRAM-A10-04"),
+        (18, "> SYN-TELEGRAM-A10-18\nпояснение"),
+    ],
+)
+def test_p10_source_accepts_the_exact_requested_style(index: int, message: str) -> None:
+    assert battery._telegram_shape_matches(_case("A", index), message) is True
+
+
+def test_p10_source_accepts_a_plain_list_without_inline_style() -> None:
+    case = _case("A", 1)
+    message = "- SYN-TELEGRAM-A10-01\n- второй"
+
+    assert battery._telegram_shape_matches(case, message) is True
+
+
+def test_a07_source_and_delivery_reject_multiple_terminal_sentences(tmp_path: Path) -> None:
+    message = "Значение 5 больше 3, но меньше 10. <SYN-TELEGRAM-A10-07>. Контроль SYN-A10-07."
+    case = _case("A", 7)
+
+    assert battery._telegram_shape_matches(case, message) is False
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "«Первая фраза.» «Вторая фраза.» <SYN-TELEGRAM-A10-07>",
+        "«(Первая фраза.)» (Вторая фраза.) <SYN-TELEGRAM-A10-07>",
+    ],
+)
+def test_a07_source_and_delivery_count_boundaries_before_closing_delimiters(
+    message: str,
+    tmp_path: Path,
+) -> None:
+    case = _case("A", 7)
+
+    assert battery._telegram_shape_matches(case, message) is False
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Значение 5 больше 3, но меньше 10; <SYN-TELEGRAM-A10-07>; контроль SYN-A10-07.",
+        "Версия build.v1 равна 3.14; <SYN-TELEGRAM-A10-07>.",
+        "Версия build.v1 равна 3.14; <SYN-TELEGRAM-A10-07>",
+        "Результат, т. е. i.e. итог, готов; <SYN-TELEGRAM-A10-07>.",
+    ],
+)
+def test_a07_source_and_delivery_accept_at_most_one_terminal_sentence(
+    message: str,
+    tmp_path: Path,
+) -> None:
+    case = _case("A", 7)
+
+    assert battery._telegram_shape_matches(case, message) is True
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is True
+
+
+@pytest.mark.parametrize(
+    ("battery_id", "index", "message"),
+    [
+        ("B", 9, "1. SYN-TELEGRAM-B10-09\n2. второй"),
+        ("A", 12, "1. SYN-TELEGRAM-A10-12\n2. два\n3. три"),
+        ("B", 15, "1. SYN-TELEGRAM-B10-15\n2. второй"),
+        ("A", 20, "1. SYN-TELEGRAM-A10-20\n2. второй"),
+    ],
+)
+def test_p10_delivery_accepts_numbered_list_when_source_oracle_allows_it(
+    battery_id: str,
+    index: int,
+    message: str,
+    tmp_path: Path,
+) -> None:
+    case = _case(battery_id, index)
+
+    assert battery._telegram_shape_matches(case, message) is True
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is True
+
+
+@pytest.mark.parametrize(
+    ("index", "message"),
+    [
+        (12, "1. SYN-TELEGRAM-A10-12\n2. два\n3. три\nлишнее продолжение"),
+        (20, "1. SYN-TELEGRAM-A10-20\n2. второй\nлишнее продолжение"),
+    ],
+)
+def test_p10_delivery_rejects_an_orphan_line_after_an_exact_list(
+    index: int,
+    message: str,
+    tmp_path: Path,
+) -> None:
+    case = _case("A", index)
+
+    assert battery._telegram_shape_matches(case, message) is False
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is False
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "- Тестовое слово 1\n- Тестовое слово 2\n- Тестовое слово 3 (маркер SYN-TELEGRAM-A10-12)",
+            False,
+        ),
+        ("- SYN-TELEGRAM-A10-12\n- второе\n- третье", True),
+    ],
+)
+def test_p10_delivery_matches_the_source_three_word_list_contract(
+    message: str,
+    expected: bool,
+    tmp_path: Path,
+) -> None:
+    case = _case("A", 12)
+
+    assert battery._telegram_shape_matches(case, message) is expected
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is expected
+
+
+@pytest.mark.parametrize(
+    ("index", "message"),
+    [
+        (
+            8,
+            "> Короткая цитата SYN-TELEGRAM-A10-08\n> Ещё одна короткая строка",
+        ),
+        (
+            13,
+            "Нейтральная Markdown-фраза SYN-TELEGRAM-A10-13\nКороткое продолжение",
+        ),
+        (
+            19,
+            "Безопасный Markdown SYN-TELEGRAM-A10-19\nБез внешней ссылки",
+        ),
+    ],
+)
+def test_p10_source_and_delivery_accept_naturally_compact_two_line_a_shapes(
+    index: int,
+    message: str,
+    tmp_path: Path,
+) -> None:
+    case = _case("A", index)
+
+    assert battery._telegram_shape_matches(case, message) is True
+    state = battery._telegram_transport_probe(message, mode="normal", home=tmp_path)
+
+    assert state["transport_delivery_shape_exact"] is True
+
+
+@pytest.mark.parametrize(
+    ("index", "message"),
+    [
+        (8, "> SYN-TELEGRAM-A10-08\nне цитата"),
+        (13, "SYN-TELEGRAM-A10-13\nдва\nтри"),
+        (19, "SYN-TELEGRAM-A10-19\nдва\nтри"),
+    ],
+)
+def test_p10_compact_shape_relaxation_remains_bounded(index: int, message: str) -> None:
+    assert battery._telegram_shape_matches(_case("A", index), message) is False
+
+
 def test_probe_does_not_replace_process_global_asyncio_sleep() -> None:
     source = inspect.getsource(battery._telegram_transport_probe)
 

@@ -143,7 +143,9 @@ def test_foreign_tenant_digest_covers_direct_and_indirect_owned_rows() -> None:
         INSERT INTO knowledge_objects VALUES('foreign-ko', 'foreign-user', 'secret-v1');
         INSERT INTO knowledge_objects VALUES('main-ko', 'main-user', 'main-v1');
         INSERT INTO custom_presets VALUES('foreign-preset', 'foreign-user', 'Private');
+        INSERT INTO custom_presets VALUES('main-preset', 'main-user', 'Main private');
         INSERT INTO preset_capabilities VALUES('foreign-preset', 'memory.read');
+        INSERT INTO preset_capabilities VALUES('main-preset', 'memory.read');
         INSERT INTO preset_payloads VALUES(
             'foreign-payload',
             '  {"preset_key":"foreign-preset","enabled":true}'
@@ -153,6 +155,7 @@ def test_foreign_tenant_digest_covers_direct_and_indirect_owned_rows() -> None:
     try:
         baseline = battery._tenant_logical_digest(storage, "foreign-user")
         storage.execute("UPDATE knowledge_objects SET content='main-v2' WHERE user_id='main-user'")
+        storage.execute("UPDATE custom_presets SET name='main-v2' WHERE preset_key='main-preset'")
         assert battery._tenant_logical_digest(storage, "foreign-user") == baseline
 
         storage.execute("UPDATE knowledge_objects SET content='destroyed' WHERE user_id='foreign-user'")

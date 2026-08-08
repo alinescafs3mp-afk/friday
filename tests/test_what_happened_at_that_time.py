@@ -310,7 +310,7 @@ def test_the_intent_check_asks_the_model_when_the_pattern_is_silent():
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)  # noqa: SLF001
-    assert "_time_intent_by_arbiter(visible_message)" in source, (
+    assert "_time_intent_by_arbiter(visible_message" in source, (
         "незнакомая формулировка отбрасывается без попытки понять её"
     )
     assert source.index("moment_from_question") < source.index("_time_intent_by_arbiter"), (

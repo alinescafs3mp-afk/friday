@@ -223,6 +223,31 @@ _TEMPORAL_READ_REQUEST = re.compile(
     r"есть\s+ли|" + _PLAN_WORD + r"|событи\w*|лент\w*|календар\w*)\b",
     re.IGNORECASE,
 )
+_ABSOLUTE_TIMELINE_READ_ACT = re.compile(
+    r"^\s*(?:(?:а|и|ну)\s+)?"
+    r"(?:(?:скаж\w*\s*,?\s*|можно\s+(?:ли\s+)?узна\w*\s*,?\s*|"
+    r"мне\s+интересн\w*\s*,?\s*))?"
+    r"(?:как(?:ое|ой|ая|ие)\b|как\s+называ\w*\b|что\b|покаж\w*\b|"
+    r"назов\w*\b|прочит\w*\b|найд\w*\b|сообщ\w*\b|дай\b|привед\w*\b|"
+    r"расскаж\w*\b|перечисл\w*\b)",
+    re.IGNORECASE,
+)
+_ABSOLUTE_TIMELINE_SUBJECT = re.compile(
+    r"\b(?:событи\w*|хронолог\w*)\b|"
+    r"\bвременн\w*\s+(?:лини\w*|индекс\w*)\b|"
+    r"\bкалендарн\w*\s+истори\w*\b|"
+    r"\bсинтетическ\w*\s+(?:лент\w*|архив\w*)\b|"
+    r"\b(?:синтетическ\w*|тестов\w*)\s+(?:факт\w*|запис\w*)\b|"
+    r"\bфакт\w*\s+из\s+(?:синтетическ\w*\s+)?лент\w*\b",
+    re.IGNORECASE,
+)
+_NON_TIMELINE_ABSOLUTE_SUBJECT = re.compile(
+    r"\b(?:погод\w*|новост\w*|курс\w*|цен\w*|стоимост\w*|прогноз\w*|"
+    r"документ\w*|акт(?:а|у|ом|е|ы|ов|ам|ами|ах)?|протокол\w*|"
+    r"приказ\w*|файл\w*|вложени\w*|"
+    r"таблиц\w*|страниц\w*|текст\w*)\b",
+    re.IGNORECASE,
+)
 _QUOTED_TEMPORAL_DATA = re.compile(
     r"«[^»]*»|“[^”]*”|„[^“]*“|\"[^\"]*\"|'[^']*'",
     re.DOTALL,
@@ -263,10 +288,54 @@ def temporal_routing_text(message: str) -> str:
     return " ".join(_QUOTED_TEMPORAL_DATA.sub(" ", text).split())
 
 
+def _explicit_absolute_dates(message: str) -> list[date]:
+    """Valid visible dates whose year is supplied by the asker."""
+
+    text = temporal_routing_text(message)
+    hits: list[date] = []
+    for match in _ISO_DATE.finditer(text):
+        parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if parsed is not None:
+            hits.append(parsed)
+    for match in _RUS_DATE.finditer(text):
+        parsed = (
+            _safe_date(
+                int(match.group(3)),
+                _month_number(match.group(2)),
+                int(match.group(1)),
+            )
+            if match.group(3)
+            else None
+        )
+        if parsed is not None:
+            hits.append(parsed)
+    return hits
+
+
+def _is_absolute_timeline_read_request(message: str) -> bool:
+    """Conservative speech-act boundary for a dated timeline/event read.
+
+    The ordinary temporal request grammar intentionally stays small.  This
+    second path covers neutral event questions (``which event is attached to
+    DATE``) only when the request verb, timeline subject and one fully anchored
+    date all agree.  A date in a document, weather question, quote or statement
+    therefore receives no authority to read the personal timeline.
+    """
+
+    text = temporal_routing_text(message)
+    return bool(
+        _ABSOLUTE_TIMELINE_READ_ACT.search(text)
+        and _ABSOLUTE_TIMELINE_SUBJECT.search(text)
+        and not _NON_TIMELINE_ABSOLUTE_SUBJECT.search(text)
+        and len(_explicit_absolute_dates(text)) == 1
+    )
+
+
 def is_temporal_read_request(message: str) -> bool:
     """Whether the visible utterance itself asks to read a timeline/calendar."""
 
-    return bool(_TEMPORAL_READ_REQUEST.search(temporal_routing_text(message)))
+    text = temporal_routing_text(message)
+    return bool(_TEMPORAL_READ_REQUEST.search(text) or _is_absolute_timeline_read_request(text))
 
 
 def _safe_date(year: int, month: int, day: int) -> date | None:
@@ -839,12 +908,18 @@ def lexical_time_window_kind(message: str, *, today: date | None = None) -> str 
     return None
 
 
-def fast_time_intent(message: str) -> TimeIntent | None:
+def fast_time_intent(message: str, *, today: date | None = None) -> TimeIntent | None:
     """Cheap unambiguous route; semantic misses go to the model arbiter."""
 
     text = temporal_routing_text(message)
     folded = text.casefold()
     if not is_temporal_read_request(text):
+        return None
+    # A strong non-timeline subject wins over generic words such as
+    # ``покажи событие``.  Otherwise a dated document or weather event would
+    # take the older broad ``покажи события`` past route before the conservative
+    # absolute-date classifier gets a chance to reject it.
+    if _NON_TIMELINE_ABSOLUTE_SUBJECT.search(text) and _explicit_absolute_dates(text):
         return None
     past_state = bool(
         re.search(r"\b(?:был|была|было|были)\b", folded)
@@ -865,9 +940,14 @@ def fast_time_intent(message: str) -> TimeIntent | None:
         direction = ""
     else:
         direction = "past" if _PAST.search(text) else "future" if _FUTURE.search(text) else ""
+    if not direction and _is_absolute_timeline_read_request(text):
+        anchored = _explicit_absolute_dates(text)
+        local_today = today or date.today()
+        if len(anchored) == 1 and anchored[0] != local_today:
+            direction = "past" if anchored[0] < local_today else "future"
     if not direction:
         return None
-    kind = lexical_time_window_kind(text)
+    kind = lexical_time_window_kind(text, today=today)
     if kind is None:
         return None
     return TimeIntent(direction, kind)

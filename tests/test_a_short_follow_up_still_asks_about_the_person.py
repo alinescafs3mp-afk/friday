@@ -29,6 +29,7 @@ from friday.agent_runtime import (
     _OUTBOUND_TOOL_NAMES,
     AgentContext,
     AgentRuntime,
+    _is_direct_file_request,
 )
 from tests.test_asking_about_a_person_reaches_the_right_tool import PEOPLE, _runtime
 
@@ -186,15 +187,16 @@ def test_the_archive_hint_is_dropped_when_understanding_says_person() -> None:
 
 
 def test_a_document_request_is_understood_too() -> None:
-    """Владелец предсказал: «подозреваю, с документами та же пежня будет».
+    """Явная просьба о документе узнаётся без доверия широкому вердикту.
 
-    Так и есть: «Собери справку по поверке и сделай из неё документ Word» шаблон
-    не узнаёт. Сборка файла обязана запускаться и по вердикту.
+    Арбитр полезен для понимания темы, но его ``файл`` слишком широк: так он
+    помечает и просьбы отформатировать сообщение для Telegram. Полномочие на
+    поздний ``make_file`` поэтому даёт только видимая просьба создать документ;
+    измеренная владельцем формулировка обязана входить в эту закрытую границу.
     """
-    source = inspect.getsource(AgentRuntime.chat)
-    assert "asked_for_a_file" in source
-    at = source.index("asked_for_a_file = ")
-    assert 'startswith("файл")' in source[at : at + 400], "просьба о файле снова держится на шаблоне"
+
+    assert _is_direct_file_request("Собери справку по поверке и сделай из неё документ Word")
+    assert not _is_direct_file_request("Ответь списком для Telegram")
 
 
 def test_understanding_knows_both_kinds() -> None:

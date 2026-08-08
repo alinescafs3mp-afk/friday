@@ -25,6 +25,8 @@ from friday.permissions import ActorContext, AuthorizationService
 
 _FALSE_OUTSIDE_REPORT = "Я уже заказала курьера к служебному входу."
 _OBJECT_FIRST_FALSE_OUTSIDE_REPORT = "Такси заказала."
+_PASSIVE_TICKET_FALSE_OUTSIDE_REPORT = "Билет уже оформлен. Подтверждение пришло на почту."
+_PRINT_RESULT_FALSE_OUTSIDE_REPORT = "Печать завершена. Бумажная копия готова."
 _REPAIRED_FALSE_OUTSIDE_REPORT = "Курьер вызван и уже едет к служебному входу."
 _BARE_REFUSAL = "Я не могу выполнить это действие."
 _DOCUMENT = {
@@ -270,7 +272,12 @@ def test_a_long_named_file_claim_cannot_escape_the_guard() -> None:
 
 @pytest.mark.parametrize(
     "false_report",
-    [_FALSE_OUTSIDE_REPORT, _OBJECT_FIRST_FALSE_OUTSIDE_REPORT],
+    [
+        _FALSE_OUTSIDE_REPORT,
+        _OBJECT_FIRST_FALSE_OUTSIDE_REPORT,
+        _PASSIVE_TICKET_FALSE_OUTSIDE_REPORT,
+        _PRINT_RESULT_FALSE_OUTSIDE_REPORT,
+    ],
 )
 @pytest.mark.asyncio
 async def test_an_unambiguous_outside_report_and_all_of_its_carriers_are_replaced(

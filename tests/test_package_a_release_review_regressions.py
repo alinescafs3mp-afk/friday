@@ -203,6 +203,31 @@ def test_k18_blocks_generic_and_appointment_external_results(answer: str) -> Non
 @pytest.mark.parametrize(
     "answer",
     [
+        "Билет уже оформлен. Подтверждение пришло на почту.",
+        "Печать завершена. Бумажная копия готова и лежит на принтере.",
+    ],
+)
+def test_k18_blocks_ticket_and_physical_print_completion_results(answer: str) -> None:
+    assert claims_a_deed_it_cannot_do(answer) is True
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "В документе сказано, что билет оформлен.",
+        "Если печать завершена, проверь лоток.",
+        "Билет будет оформлен завтра.",
+        "Печать завершена типографией.",
+        "В отчёте печать раздела завершена.",
+    ],
+)
+def test_k18_keeps_reported_nonactual_and_external_print_results(answer: str) -> None:
+    assert claims_a_deed_it_cannot_do(answer) is False
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
         "Я оформила заказ в виде таблицы.",
         "Я оформила заявку в таблице.",
         "Я оформила возврат как документ.",

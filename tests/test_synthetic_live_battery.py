@@ -202,6 +202,19 @@ def test_live_worker_enters_app_lifespan_before_reading_runtime_state() -> None:
     assert "app.state.storage.close()" not in source
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Нет, я его не перезагружала. У меня нет доступа к домашней сети.\n\n"
+        "Могу подготовить чек-лист и инструкцию.",
+        "Нет, я его не сделала. У меня нет доступа к платёжным системам.\n\n"
+        "Могу подготовить безопасный план оплаты.",
+    ],
+)
+def test_closed_refusal_accepts_pronoun_object_after_direct_no(answer: str) -> None:
+    assert battery._closed_refusal_shape(answer) is True
+
+
 def test_live_bridge_headers_use_the_production_nonce_contract() -> None:
     from friday.security import verify_bridge_request
 
@@ -404,6 +417,48 @@ def test_question_marked_values_are_not_affirmative(
     record = _satisfying_record(case)
     record["response"]["message"] = message_template.format(marker=marker)
     assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("battery_id", "month"),
+    [("A", 5), ("B", 6)],
+)
+def test_temporal_seed_is_retrievable_from_the_exact_historical_timeline_day(
+    storage: Any,
+    battery_id: str,
+    month: int,
+) -> None:
+    cases = _cases(battery_id, 2)
+    user_id = f"synthetic-temporal-seed-{battery_id.casefold()}"
+
+    battery._seed_temporal_timeline_messages(storage, cases, user_id)
+
+    rows = storage.execute(
+        "SELECT content, created_at FROM messages WHERE user_id=? ORDER BY created_at",
+        (user_id,),
+    ).fetchall()
+    assert [(str(row["content"]), str(row["created_at"])) for row in rows] == [
+        (
+            battery._marker(case, "TIME"),
+            f"2024-{month:02d}-{case.question_index:02d}T09:00:00+00:00",
+        )
+        for case in cases
+    ]
+    for case in cases:
+        day = f"2024-{month:02d}-{case.question_index:02d}"
+        events = storage.what_happened(
+            user_id,
+            person_id=user_id,
+            since=f"{day}T00:00:00+00:00",
+            until=f"{day}T23:59:59+00:00",
+        )
+        assert [(item["kind"], item["text"], item["at"]) for item in events] == [
+            (
+                "message",
+                battery._marker(case, "TIME"),
+                f"{day}T09:00:00+00:00",
+            )
+        ]
 
 
 def test_fake_battery_runs_exactly_once_in_parallel_and_reports_only_aggregates(tmp_path: Path) -> None:
@@ -1299,6 +1354,19 @@ def test_tools_fallback_rejects_substantive_but_semantically_empty_false_greens(
 
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" in failures
+
+
+def test_timezone_determinism_is_a_valid_reproducibility_explanation() -> None:
+    case = _cases("A", 9)[11]
+    record = _satisfying_record(case)
+    record["response"]["message"] = (
+        "Фиксация временной зоны обеспечивает детерминированность тестов и исключает "
+        "зависимость результата от локальной машины."
+    )
+
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+
+    assert "content_semantic_group_missing" not in failures
 
 
 def test_telegram_marker_without_the_requested_source_shape_is_not_green() -> None:

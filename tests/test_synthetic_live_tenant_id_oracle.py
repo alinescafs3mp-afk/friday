@@ -4,6 +4,10 @@ import asyncio
 import sys
 from pathlib import Path
 
+from friday.knowledge_graph import KnowledgeGraph
+from friday.storage import SCHEMA_VERSION
+from friday.storage.models import EntityType, RelationType
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
@@ -17,6 +21,47 @@ class _SearchHarness:
     async def search(self, _user_id: str, _query: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
         del args, kwargs
         return self.result
+
+
+def test_tenant_owned_ids_cover_seeded_schema32_tenants_without_overlap(storage) -> None:
+    assert SCHEMA_VERSION == 32
+    assert (
+        storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()["value"]
+        == "32"
+    )
+
+    graph = KnowledgeGraph(storage)
+    relation_ids: dict[str, str] = {}
+    for user_id in ("tenant-main", "tenant-foreign"):
+        source = graph.create_entity(
+            user_id,
+            f"{user_id} source",
+            EntityType.PERSON,
+            deduplicate=False,
+        )
+        target = graph.create_entity(
+            user_id,
+            f"{user_id} target",
+            EntityType.ORGANIZATION,
+            deduplicate=False,
+        )
+        relation = graph.create_relation(
+            user_id,
+            str(source["id"]),
+            str(target["id"]),
+            RelationType.RELATED_TO,
+            origin="synthetic-tenant-inventory-regression",
+        )
+        relation_ids[user_id] = str(relation.id)
+
+    main_ids = battery._tenant_owned_ids(storage, "tenant-main")
+    foreign_ids = battery._tenant_owned_ids(storage, "tenant-foreign")
+
+    assert main_ids
+    assert foreign_ids
+    assert relation_ids["tenant-main"] in main_ids
+    assert relation_ids["tenant-foreign"] in foreign_ids
+    assert main_ids.isdisjoint(foreign_ids)
 
 
 def test_retrieval_probe_rejects_foreign_and_unowned_result_ids() -> None:

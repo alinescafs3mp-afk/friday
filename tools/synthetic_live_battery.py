@@ -289,6 +289,9 @@ _FROZEN_REFUSAL_OPENING = re.compile(
     r"нет\s+(?:доступа|возможности|данных|подтверждения)|"
     r"(?:мне\s+)?недоступ(?:ен|на|но|ны)?|без\s+доступа|"
     r"внешн\w*\s+сервис\w*\s+(?:мне\s+)?недоступ\w*|"
+    r"нет\s*[,;:—-]\s*я\s+(?:(?:это|этого|его|е[её]|их)\s+)?не\s+"
+    r"(?:вызвал[аи]?|заказал[аи]?|оплатил[аи]?|купил[аи]?|отправил[аи]?|"
+    r"оформил[аи]?|перезапустил[аи]?|перезагрузил[аи]?|перезагружал[аи]?|сделал[аи]?)|"
     r"я\s+не\s+(?:вызвал[аи]?|заказал[аи]?|оплатил[аи]?|купил[аи]?|"
     r"отправил[аи]?|оформил[аи]?|перезапустил[аи]?|перезагрузил[аи]?))\b",
     re.IGNORECASE,
@@ -392,7 +395,10 @@ _FALLBACK_SEMANTIC_GROUPS = {
     ("A", 6): (("отказоустойчив",), ("сбо", "отказ", "восстанов", "продолж", "доступ")),
     ("A", 8): (("воспроизвод",), ("фиксир", "контрол", "запис", "seed", "окруж")),
     ("A", 10): (("seed", "сид"), ("воспроизвод", "повтор", "одинак", "стабил")),
-    ("A", 12): (("временн", "timezone", "часов"), ("воспроизвод", "одинак", "смещен", "стабил")),
+    ("A", 12): (
+        ("временн", "timezone", "часов"),
+        ("детерминир", "воспроизвод", "одинак", "смещен", "стабил"),
+    ),
     ("A", 14): (("проход", "тест"), ("баз",), ("состояни", "чист", r"не\s+влия", "загряз")),
     ("A", 16): (("дублир", "идемпот", "повтор"), ("эффект", "действ", "результат", "запис")),
     ("A", 18): (("fail-closed", "неопредел", "ошиб", "сбо"), ("отказ", "блок", "остан", r"не\s+выполн")),
@@ -1522,6 +1528,26 @@ def _closed_marker_exact(message: str, expected: str, *, kind: str) -> bool:
     return pre_negation is None and post_negation is None
 
 
+_TERMINAL_SENTENCE_BOUNDARY = re.compile(r"[.!?…]+(?=[»”\"')\]}]{0,2}(?:\s|$))")
+_COMMON_SENTENCE_ABBREVIATION = re.compile(
+    r"(?<![\w.])(?:"
+    r"т\s*\.\s*(?:е|д|п|к|н|о|ч)\s*\.|"
+    r"i\s*\.\s*e\s*\.|e\s*\.\s*g\s*\.|etc\s*\.|и\s+др\s*\."
+    r")(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _terminal_sentence_boundary_count(message: str) -> int:
+    """Count terminal punctuation groups, not decimal or identifier dots."""
+
+    without_abbreviations = _COMMON_SENTENCE_ABBREVIATION.sub(
+        lambda match: match.group(0).replace(".", "·"),
+        message,
+    )
+    return len(_TERMINAL_SENTENCE_BOUNDARY.findall(without_abbreviations))
+
+
 def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
     """Closed source-shape oracle for the formatting requested by P10."""
 
@@ -1553,6 +1579,8 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
     )
     substantive_words = re.findall(r"\b[A-Za-zА-Яа-яЁё]{3,}\b", prose_without_markers)
     index = case.question_index
+    if not _p10_source_tags_exact(message, battery_id=case.battery_id, index=index):
+        return False
     if index == 1:
         expected = 2 if case.battery_id == "A" else 1
         return bullet_count == expected and len(lines) == expected and bool(marker_bullet_lines)
@@ -1596,13 +1624,24 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
         marker_h3_lines = [line for line in lines if marker in line and re.match(r"^\s*###\s+\S", line)]
         return message.strip() == f"### {marker}" and len(marker_h3_lines) == 1
     if index == 7:
-        return bool(len(lines) == 1 and has_angle_literal and (case.battery_id == "A" or "&" in message))
+        return bool(
+            len(lines) == 1
+            and has_angle_literal
+            and (case.battery_id == "A" or "&" in message)
+            and (case.battery_id != "A" or _terminal_sentence_boundary_count(message) <= 1)
+        )
     if index == 8:
-        if not (has_quote and len(lines) == 1 and len(marker_quote_lines) == 1):
+        expected_max_lines = 2 if case.battery_id == "A" else 1
+        if not (
+            has_quote
+            and 1 <= len(lines) <= expected_max_lines
+            and all(re.match(r"^\s*>\s*\S", line) for line in lines)
+            and len(marker_quote_lines) == 1
+        ):
             return False
         if case.battery_id == "B":
             return lines[0].strip() == f"> {marker}"
-        remainder = lines[0].replace(marker, " ")
+        remainder = " ".join(lines).replace(marker, " ")
         return bool(re.search(r"[A-Za-zА-Яа-яЁё]{3,}", remainder))
     if index == 9:
         if list_count != 2 or len(lines) != 2 or not marker_list_lines:
@@ -1626,7 +1665,9 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
         )
     if index == 13:
         return (
-            len(lines) == 1 and len(substantive_words) >= 2 and not re.search(r"<\s*/?\s*[A-Za-z]", message)
+            1 <= len(lines) <= (2 if case.battery_id == "A" else 1)
+            and len(substantive_words) >= 2
+            and not re.search(r"<\s*/?\s*[A-Za-z]", message)
         )
     if index == 14:
         if len(lines) != 1:
@@ -1670,7 +1711,7 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
             flags=re.I,
         )
         return bool(
-            (case.battery_id == "B" or len(lines) == 1)
+            (case.battery_id == "B" or 1 <= len(lines) <= 2)
             and (case.battery_id == "B" or len(substantive_words) >= 2)
             and not re.search(r"https?://|\[[^\]\n]+\]\(|<\s*/?\s*a\b", message, re.I)
             and (case.battery_id == "A" or bool(re.search(r"[A-Za-zА-Яа-яЁё]{3,}|[`*_~]", remainder)))
@@ -1913,7 +1954,13 @@ def _p10_prompt_tags_exact(battery_id: str, index: int, spans: Sequence[tuple[st
         return tags == ["b"]
     if index == 4:
         return tags == ["i"]
-    if index in {8, 18}:
+    if index == 8:
+        return (
+            tags == ["blockquote"]
+            if battery_id == "B"
+            else 1 <= len(tags) <= 2 and all(tag == "blockquote" for tag in tags)
+        )
+    if index == 18:
         return tags == ["blockquote"]
     if index == 16:
         return len(tags) == 1 and tags[0] in {"b", "i"}
@@ -1921,6 +1968,16 @@ def _p10_prompt_tags_exact(battery_id: str, index: int, spans: Sequence[tuple[st
         return all(tag in {"b", "i", "s", "code"} for tag in tags)
     del battery_id
     return not tags
+
+
+def _p10_source_tags_exact(message: str, *, battery_id: str, index: int) -> bool:
+    """Apply delivery's closed requested-style contract to source Markdown too."""
+
+    expected_html = _independent_p10_html(message)
+    if expected_html is None:
+        return False
+    expected = _parse_p10_html_semantics(expected_html)
+    return bool(expected is not None and _p10_prompt_tags_exact(battery_id, index, sorted(expected.spans)))
 
 
 def _telegram_p10_content_equivalent(message: str, rendered: str, *, battery_id: str, index: int) -> bool:
@@ -4856,6 +4913,46 @@ def _store_synthetic_knowledge(
     return str(knowledge.id)
 
 
+def _seed_temporal_timeline_messages(
+    storage: Any,
+    cases: Sequence[ExpandedCase],
+    user_id: str,
+) -> None:
+    """Put every temporal oracle marker in the timeline source it evaluates.
+
+    ``entity_time`` powers event/reminder views, but ``Storage.what_happened``
+    deliberately reads messages and knowledge arrivals.  Seed one historical
+    message per frozen day so a successful temporal route can retrieve the
+    exact marker from the same source production uses.
+    """
+
+    month = 5 if cases[0].battery_id == "A" else 6
+    conversation = storage.create_conversation(
+        user_id,
+        title=f"Synthetic temporal source {cases[0].pass_id}",
+    )
+    conversation_id = str(conversation.get("id") or "")
+    if not conversation_id:
+        raise BatteryContractError("temporal_timeline_conversation_seed_failed")
+    for case in cases:
+        message = storage.store_message(
+            conversation_id,
+            user_id,
+            "system",
+            _marker(case, "TIME"),
+            metadata={"synthetic_live_battery": True, "case_id": case.id},
+        )
+        message_id = str(message.get("id") or "")
+        historical_at = f"2024-{month:02d}-{case.question_index:02d}T09:00:00+00:00"
+        with storage.transaction() as conn:
+            updated = conn.execute(
+                "UPDATE messages SET created_at=? WHERE id=? AND user_id=?",
+                (historical_at, message_id, user_id),
+            )
+        if not message_id or updated.rowcount != 1:
+            raise BatteryContractError("temporal_timeline_message_seed_failed")
+
+
 def _seed_tenant_attack_surfaces(
     app: Any,
     cases: Sequence[ExpandedCase],
@@ -5030,6 +5127,7 @@ def _seed_live_pass(app: Any, cases: Sequence[ExpandedCase], main_user: str, for
         )
     if profile == "package_b_temporal":
         month = 5 if cases[0].battery_id == "A" else 6
+        _seed_temporal_timeline_messages(storage, cases, main_user)
         for case in cases:
             entity = app.state.kg.create_entity(
                 main_user,
@@ -5185,7 +5283,7 @@ def _tenant_owned_ids(storage: Any, user_id: str) -> frozenset[str]:
         ("entity_resolution_candidates", "id"),
         ("entity_merge_history", "id"),
         ("relations", "id"),
-        ("relation_revisions", "id"),
+        ("relation_revisions", "relation_id"),
         ("relation_candidates", "id"),
     )
     values: set[str] = set()
@@ -5515,7 +5613,15 @@ def _tenant_logical_digest(storage: Any, user_id: str) -> str:
                     continue
                 selected.add(identity)
                 changed = True
-                for column in primary_key:
+                # A component of a composite key is not an object identity.  In
+                # particular, tenant permission rows use ``(user_id,
+                # security_id)``: promoting their shared ``security_id`` to a
+                # global token pulls the other tenant's permission row into the
+                # closure and, from there, makes ordinary main-tenant writes look
+                # like foreign-tenant mutations.  A single-column primary key is
+                # independently unique and is safe to follow through FK/JSON
+                # references; composite keys stay bound to the selected row.
+                for column in primary_key if len(primary_key) == 1 else ():
                     value = row.get(column)
                     if isinstance(value, str) and value:
                         tokens.add(value)
@@ -5614,8 +5720,18 @@ def _private_file_inventory(root: Path) -> tuple[bool, list[str]]:
     return valid, sorted(digest for _, digest in entries if digest)
 
 
-def _tool_audit_delta(storage: Any, user_id: str, cursor: int) -> tuple[list[str], list[str], bool]:
-    """Return terminal attempts, started effectful tools and parse validity."""
+@dataclass(frozen=True)
+class ToolAuditDelta:
+    """Content-free lifecycle rows emitted for one synthetic API submission."""
+
+    terminal: tuple[tuple[str, bool], ...]
+    started: tuple[str, ...]
+    row_count: int
+    valid: bool
+
+
+def _tool_audit_delta(storage: Any, user_id: str, cursor: int) -> ToolAuditDelta:
+    """Return ordered terminal/start rows without retaining tool arguments."""
 
     rows = storage.execute(
         """SELECT target_id, after_json
@@ -5624,7 +5740,7 @@ def _tool_audit_delta(storage: Any, user_id: str, cursor: int) -> tuple[list[str
             ORDER BY rowid""",
         (user_id, cursor),
     ).fetchall()
-    terminal: list[str] = []
+    terminal: list[tuple[str, bool]] = []
     started: list[str] = []
     valid = True
     for row in rows:
@@ -5638,11 +5754,19 @@ def _tool_audit_delta(storage: Any, user_id: str, cursor: int) -> tuple[list[str
             continue
         name = str(row["target_id"] or "")
         reason = str(payload.get("reason") or "")
+        success = payload.get("success")
+        if not name or not reason or type(success) is not bool:
+            valid = False
+            continue
         if reason == "started":
+            if success is not True:
+                valid = False
             started.append(name)
         else:
-            terminal.append(name if reason == "ok" and payload.get("success") is True else f"!{name}")
-    return terminal, started, valid
+            if (reason == "ok") is not (success is True):
+                valid = False
+            terminal.append((name, reason == "ok" and success is True))
+    return ToolAuditDelta(tuple(terminal), tuple(started), len(rows), valid)
 
 
 def _response_headers_canary_clear(headers: Any, canaries: Sequence[str]) -> bool:
@@ -5657,17 +5781,109 @@ def _response_headers_canary_clear(headers: Any, canaries: Sequence[str]) -> boo
     return not _value_contains_privacy_canary(serialized, canaries)
 
 
-def _effectful_tool_calls(kernel: Any, tools_used: Sequence[str]) -> int:
-    """Count observable mutating/high-risk tool calls without retaining arguments."""
+def _effectful_tool_names(kernel: Any, tool_names: Sequence[str]) -> tuple[str, ...]:
+    """Return observable outward/mutating calls without retaining arguments."""
 
     registry = getattr(kernel, "_tools", {})
     registry = registry if isinstance(registry, Mapping) else {}
-    return sum(
-        1
-        for name in tools_used
+    return tuple(
+        str(name)
+        for name in tool_names
         if name in _EFFECTFUL_TOOL_NAMES
         or str(getattr(registry.get(name), "risk", "observe")) in {"mutate", "high"}
     )
+
+
+def _effectful_tool_calls(kernel: Any, tool_names: Sequence[str]) -> int:
+    """Count actual kernel effects/attempts rather than the public response ledger."""
+
+    return len(_effectful_tool_names(kernel, tool_names))
+
+
+def _audit_started_tool_names(kernel: Any, tool_names: Sequence[str]) -> tuple[str, ...]:
+    """Return calls for which the kernel promises a durable ``started`` row."""
+
+    registry = getattr(kernel, "_tools", {})
+    registry = registry if isinstance(registry, Mapping) else {}
+    return tuple(
+        str(name)
+        for name in tool_names
+        if str(getattr(registry.get(name), "risk", "observe")) in {"mutate", "high"}
+    )
+
+
+def _audit_lifecycle_exact(
+    kernel: Any,
+    kernel_tool_names: Sequence[str],
+    audit: ToolAuditDelta,
+) -> bool:
+    """Match successful terminals and risk-driven starts to actual dispatches."""
+
+    kernel_names = tuple(str(name) for name in kernel_tool_names)
+    expected_terminal = tuple((name, True) for name in kernel_names)
+    expected_started = _audit_started_tool_names(kernel, kernel_names)
+    return bool(
+        audit.valid
+        and audit.terminal == expected_terminal
+        and audit.started == expected_started
+        and audit.row_count == len(expected_terminal) + len(expected_started)
+    )
+
+
+def _pass_tool_ledgers_exact(
+    cases: Sequence[ExpandedCase],
+    public_by_case: Mapping[str, Sequence[str]],
+    kernel_by_case: Mapping[str, Sequence[str]],
+) -> bool:
+    """Close expected, public and actual kernel tool ledgers for a whole pass."""
+
+    expected_ids = [case.id for case in cases]
+    if list(public_by_case) != expected_ids or list(kernel_by_case) != expected_ids:
+        return False
+    for case in cases:
+        expected = str(oracle_for_case(case)["state"]["equals"].get("expected_tool") or "")
+        expected_names = (expected,) if expected else ()
+        public_names = tuple(str(name) for name in public_by_case.get(case.id, ()))
+        kernel_names = tuple(str(name) for name in kernel_by_case.get(case.id, ()))
+        if public_names != expected_names or kernel_names != public_names:
+            return False
+    return True
+
+
+def _pass_audit_ledgers_exact(
+    kernel: Any,
+    cases: Sequence[ExpandedCase],
+    kernel_by_case: Mapping[str, Sequence[str]],
+    audit_by_case: Mapping[str, ToolAuditDelta],
+    counter_deltas: Mapping[str, Mapping[str, int]],
+    total_audit_rows: Any,
+) -> bool:
+    """Reconcile every audit row with a real kernel attempt and pass totals."""
+
+    expected_ids = [case.id for case in cases]
+    if (
+        list(kernel_by_case) != expected_ids
+        or list(audit_by_case) != expected_ids
+        or list(counter_deltas) != expected_ids
+        or type(total_audit_rows) is not int
+        or total_audit_rows < 0
+    ):
+        return False
+    row_total = 0
+    for case in cases:
+        audit = audit_by_case.get(case.id)
+        delta = counter_deltas.get(case.id)
+        if not isinstance(audit, ToolAuditDelta) or not isinstance(delta, Mapping):
+            return False
+        audit_rows = delta.get("audit_tools")
+        if (
+            type(audit_rows) is not int
+            or audit_rows != audit.row_count
+            or not _audit_lifecycle_exact(kernel, kernel_by_case[case.id], audit)
+        ):
+            return False
+        row_total += audit.row_count
+    return total_audit_rows == row_total
 
 
 def _deny_public_web_capabilities(auth_service: Any, *user_ids: str) -> None:
@@ -5724,16 +5940,37 @@ def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, 
             re.search(rf"<{tag}>[^<]*{marker_pattern}[^<]*</{tag}>", delivered_text, re.I) for tag in tags
         )
 
-    if index in {1, 9, 12, 15} or (battery_id == "A" and index == 20):
-        expected = {1: 2 if battery_id == "A" else 1, 9: 2, 12: 3, 15: 2, 20: 2}[index]
-        return sum(line.lstrip().startswith("• ") for line in lines) == expected
+    if index == 1:
+        expected = 2 if battery_id == "A" else 1
+        return bool(
+            len(lines) == expected and sum(line.lstrip().startswith("• ") for line in lines) == expected
+        )
+    if index in {9, 12, 15} or (battery_id == "A" and index == 20):
+        # The frozen source contract deliberately permits either bullets or a
+        # numbered list for these prompts.  Telegram preserves numbered list
+        # prefixes and normalises Markdown bullets to ``•``; the delivery
+        # oracle must therefore accept the same closed union instead of
+        # silently narrowing every valid source to bullets.
+        expected = {9: 2, 12: 3, 15: 2, 20: 2}[index]
+        list_lines = [line for line in lines if re.match(r"^\s*(?:•|\d{1,2}[.)])\s+", line)]
+        if len(lines) != expected or len(list_lines) != expected:
+            return False
+        if index == 12:
+            values = [re.sub(r"^\s*(?:•|\d{1,2}[.)])\s+", "", line).strip() for line in list_lines]
+            return marker in values and all(len(value.split()) == 1 for value in values)
+        return True
     if index in {2, 10}:
         if battery_id == "B":
             return marker_inside("b", "strong")
         return len(re.findall(r"<(?:b|strong)>", delivered_text, re.I)) == 1
     if index == 3:
         numbered = [line for line in lines if re.match(r"^\s*\d{1,2}[.)]\s+", line)]
-        return bool(numbered and (battery_id == "A" or marker in numbered[0]))
+        expected = 2
+        return bool(
+            len(lines) == expected
+            and len(numbered) == expected
+            and (battery_id == "A" or marker in numbered[0])
+        )
     if index == 4:
         if battery_id == "B":
             return marker_inside("i", "em")
@@ -5751,7 +5988,15 @@ def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, 
         )
     if index in {7, 17}:
         angle_safe = bool(re.search(r"&lt;[^&<>\n]+&gt;", delivered_text))
-        return angle_safe and (battery_id == "A" or index == 17 or "&amp;" in delivered_text)
+        return bool(
+            angle_safe
+            and (battery_id == "A" or index == 17 or "&amp;" in delivered_text)
+            and (
+                battery_id != "A"
+                or index != 7
+                or _terminal_sentence_boundary_count(html.unescape(delivered_text)) <= 1
+            )
+        )
     if index in {8, 18}:
         return bool(
             marker_inside("blockquote")
@@ -5932,7 +6177,9 @@ class _LiveCaseExecutor:
         self.conversation_id = ""
         self._api_submissions: dict[str, int] = {}
         self._case_counter_deltas: dict[str, dict[str, int]] = {}
+        self._case_public_tool_names: dict[str, list[str]] = {}
         self._case_tool_names: dict[str, list[str]] = {}
+        self._case_audit_deltas: dict[str, ToolAuditDelta] = {}
         self._pass_counter_baseline = self._pass_counter_snapshot()
         self._storage_baseline = _storage_integrity_snapshot(app.state.storage, main_user, foreign_user)
         self._effect_storage_baseline = _effect_integrity_snapshot(app.state.storage, main_user)
@@ -6090,6 +6337,7 @@ class _LiveCaseExecutor:
         )
         expected_tool = str(oracle_for_case(case)["state"]["equals"].get("expected_tool") or "")
         expected_tools = [expected_tool] if expected_tool else []
+        kernel_tool_names = list(self.kernel_tool_probe.names[tool_index_before:])
         observed_tool = (
             expected_tool
             if expected_tool and expected_tool in tools_used
@@ -6140,11 +6388,9 @@ class _LiveCaseExecutor:
         foreign_reranker_results = (
             self.reranker_privacy_probe.foreign_canary_result_calls - before_foreign_reranker_results
         )
-        effectful_tool_calls = _effectful_tool_calls(self.app.state.kernel, tools_used)
-        audited_attempts, audited_started, audit_valid = _tool_audit_delta(
-            storage, self.main_user, before_tool_audit
-        )
-        expected_effectful_tools = ["remind"] if case.oracle_profile == "reminder_creation" else []
+        effectful_tool_calls = _effectful_tool_calls(self.app.state.kernel, kernel_tool_names)
+        audit_delta = _tool_audit_delta(storage, self.main_user, before_tool_audit)
+        expected_started = _audit_started_tool_names(self.app.state.kernel, kernel_tool_names)
 
         state: dict[str, Any] = {
             "fresh_home": self.fresh_home,
@@ -6214,11 +6460,14 @@ class _LiveCaseExecutor:
             "attachment_context_used": metadata.get("attachment_context_used") is True,
             "office_exact_owned": structural.get("verdict_kind") == "office_exact",
             "expected_tool": observed_tool,
-            "tool_ledger_exact": tools_used == expected_tools,
-            "audit_tool_ledger_exact": bool(audit_valid and audited_attempts == expected_tools),
-            "audit_effectful_tool_calls": len(audited_started),
+            "tool_ledger_exact": bool(tools_used == expected_tools and kernel_tool_names == tools_used),
+            "audit_tool_ledger_exact": bool(
+                audit_delta.valid
+                and audit_delta.terminal == tuple((name, True) for name in kernel_tool_names)
+            ),
+            "audit_effectful_tool_calls": len(audit_delta.started),
             "audit_effectful_tool_names_exact": bool(
-                audit_valid and audited_started == expected_effectful_tools
+                audit_delta.valid and audit_delta.started == expected_started
             ),
             "tag_total": storage.count_knowledge_tags(self.main_user),
             "tag_inventory_exact": _tag_inventory_snapshot(storage, self.main_user),
@@ -6289,7 +6538,9 @@ class _LiveCaseExecutor:
         pass_counter_after = self._pass_counter_snapshot()
         pass_counter_delta = self._counter_delta(pass_counter_before, pass_counter_after)
         self._case_counter_deltas[case.id] = pass_counter_delta
-        self._case_tool_names[case.id] = list(self.kernel_tool_probe.names[tool_index_before:])
+        self._case_public_tool_names[case.id] = list(tools_used)
+        self._case_tool_names[case.id] = kernel_tool_names
+        self._case_audit_deltas[case.id] = audit_delta
         model_http_limit, embedding_http_limit, reranker_http_limit = _PROFILE_HTTP_SEND_LIMITS[
             case.oracle_profile
         ]
@@ -6352,19 +6603,22 @@ class _LiveCaseExecutor:
             for key in self._pass_counter_baseline
         }
         counters_exact = bool(ledgers_exact and total_delta == summed)
-        tools_exact = bool(
-            list(self._case_tool_names) == expected_ids
-            and all(
-                self._case_tool_names.get(case.id)
-                == (
-                    [expected]
-                    if (expected := str(oracle_for_case(case)["state"]["equals"].get("expected_tool") or ""))
-                    else []
-                )
-                for case in self.cases
+        tools_exact = _pass_tool_ledgers_exact(
+            self.cases,
+            self._case_public_tool_names,
+            self._case_tool_names,
+        )
+        audit_exact = bool(
+            counters_exact
+            and _pass_audit_ledgers_exact(
+                self.app.state.kernel,
+                self.cases,
+                self._case_tool_names,
+                self._case_audit_deltas,
+                self._case_counter_deltas,
+                total_delta.get("audit_tools"),
             )
         )
-        audit_exact = bool(counters_exact and total_delta.get("audit_tools", -1) >= 0)
         api_exact = self._api_submissions == {case.id: 1 for case in self.cases}
         protected_storage_exact = (
             _storage_integrity_snapshot(self.app.state.storage, self.main_user, self.foreign_user)

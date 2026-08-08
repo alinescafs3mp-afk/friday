@@ -7,7 +7,9 @@ no private archive content or external service is involved.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,6 +21,10 @@ from friday.time_routing import TimeIntent, TimeWindow, build_time_window, fast_
 
 FIXED_TODAY = date(2026, 8, 8)
 FIXED_NOW = datetime(2026, 8, 8, 10, 0, 0)
+_LIVE_A = json.loads(
+    (Path(__file__).parent / "fixtures" / "synthetic_live_battery_a.json").read_text(encoding="utf-8")
+)
+_LIVE_A_P02 = next(item for item in _LIVE_A["passes"] if item["pass_id"] == "A-P02")["questions"]
 
 
 def _tool(name: str) -> dict[str, Any]:
@@ -87,6 +93,145 @@ def _runtime(kernel: _TimezoneKernel) -> AgentRuntime:
     runtime._local_today = lambda: FIXED_TODAY  # type: ignore[method-assign]  # noqa: SLF001
     runtime._local_now = lambda: FIXED_NOW  # type: ignore[method-assign]  # noqa: SLF001
     return runtime
+
+
+@pytest.mark.parametrize(
+    ("question", "day"),
+    [(question, index) for index, question in enumerate(_LIVE_A_P02, start=1)],
+)
+def test_every_frozen_a_p02_event_question_has_one_code_owned_past_day(
+    question: str,
+    day: int,
+) -> None:
+    intent = fast_time_intent(question, today=FIXED_TODAY)
+
+    assert intent == TimeIntent("past", "single_day")
+    assert build_time_window(question, intent, today=FIXED_TODAY) == TimeWindow(
+        f"2024-05-{day:02d}",
+        f"2024-05-{day:02d}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_every_frozen_a_p02_event_question_executes_the_exact_past_tool() -> None:
+    for day, question in enumerate(_LIVE_A_P02, start=1):
+        kernel = _TimezoneKernel()
+        runtime = _runtime(kernel)
+
+        await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+            question,
+            None,
+            [_tool("what_happened"), _tool("upcoming"), _tool("memory_search")],
+            [],
+            [],
+            [],
+            AgentContext(
+                conversation_id="synthetic",
+                user_id="synthetic",
+                outward_verdict=("архив", None),
+            ),
+        )
+
+        assert kernel.calls == [
+            (
+                "what_happened",
+                {
+                    "since": f"2024-05-{day:02d}T00:00:00",
+                    "until": f"2024-05-{day:02d}T23:59:59",
+                    "limit": 40,
+                },
+            )
+        ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        pytest.param(
+            "Переведи фразу «Какое событие было записано 1 мая 2024 года?».",
+            id="quoted-event-question",
+        ),
+        pytest.param(
+            "Покажи событие, описанное в документе от 1 мая 2024 года.",
+            id="dated-document",
+        ),
+        pytest.param(
+            "Какое погодное событие было 1 мая 2024 года?",
+            id="weather-event",
+        ),
+        pytest.param(
+            "Запиши событие в календарь на 1 мая 2024 года.",
+            id="write-action",
+        ),
+        pytest.param(
+            "Синтетическое событие было записано 1 мая 2024 года.",
+            id="declaration",
+        ),
+    ],
+)
+def test_an_absolute_date_without_a_personal_timeline_read_speech_act_stays_closed(
+    question: str,
+) -> None:
+    assert fast_time_intent(question, today=FIXED_TODAY) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Переведи фразу «Какое событие было записано 1 мая 2024 года?».",
+        "Покажи событие, описанное в документе от 1 мая 2024 года.",
+        "Какое погодное событие было 1 мая 2024 года?",
+        "Запиши событие в календарь на 1 мая 2024 года.",
+        "Синтетическое событие было записано 1 мая 2024 года.",
+    ],
+)
+async def test_absolute_date_controls_never_execute_either_timeline_tool(question: str) -> None:
+    kernel = _TimezoneKernel()
+    runtime = _runtime(kernel)
+    tools = [_tool("what_happened"), _tool("upcoming"), _tool("memory_search")]
+
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        question,
+        None,
+        tools,
+        [],
+        [],
+        [],
+        AgentContext(
+            conversation_id="synthetic",
+            user_id="synthetic",
+            outward_verdict=("архив", None),
+        ),
+    )
+
+    assert kernel.calls == []
+    assert [str((tool.get("function") or {}).get("name") or "") for tool in tools] == ["memory_search"]
+
+
+def test_a_neutral_absolute_event_request_derives_future_from_the_local_day() -> None:
+    question = "Какое событие стоит во временной линии 10 сентября 2031 года?"
+    intent = fast_time_intent(question, today=FIXED_TODAY)
+
+    assert intent == TimeIntent("future", "single_day")
+    assert build_time_window(question, intent, today=FIXED_TODAY) == TimeWindow(
+        "2031-09-10",
+        "2031-09-10",
+    )
+
+
+def test_the_document_noun_act_does_not_swallow_the_unrelated_word_activity() -> None:
+    assert fast_time_intent(
+        "Какое событие активности было записано 1 мая 2024 года?",
+        today=FIXED_TODAY,
+    ) == TimeIntent("past", "single_day")
+    assert (
+        fast_time_intent(
+            "Покажи событие из акта от 1 мая 2024 года.",
+            today=FIXED_TODAY,
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(

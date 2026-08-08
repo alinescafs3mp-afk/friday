@@ -64,6 +64,7 @@ from friday.retrieval import best_snippet, is_relational_query
 from friday.storage import FridayStorage, normalize_conversation_mode
 from friday.storage._core import iso_date
 from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id, normalize_known_at
+from friday.text_shape import repair_explicit_text_shape
 from friday.time_routing import (
     TIME_DIRECTIONS,
     TIME_WINDOW_KINDS,
@@ -429,12 +430,209 @@ _ASKS_ABOUT_THE_ARCHIVE = re.compile(
     r")",
     re.IGNORECASE,
 )
-_ASKS_ABOUT_TAGS = re.compile(
-    r"(?:^|\W)(?:как\w*(?:\s+у\s+меня)?\s+тег\w*|список\s+тег\w*|"
-    r"тег\w*\s+(?:есть|в\s+баз\w*)|"
-    r"(?:покажи|выведи|дай|перечисли)\s+(?:доступн\w*\s+)?(?:список\s+)?тег\w*)",
+# ``list_tags`` is a privileged aggregate read, not a general search tool.  A
+# small wording regexp was enough for the first K03 acceptance examples, but it
+# left ordinary synonyms (``метки``, ``taxonomy``, ``label vocabulary``) to the
+# model.  The model then either guessed the inventory from retrieved snippets or
+# called the unrelated ``kg_stats`` aggregate.  Keep the deterministic route
+# deliberately structural: a tag subject, an inventory/listing request and an
+# archive-wide scope must all be visible in the person's unquoted text.
+_TAG_LITERAL_SUBJECT = re.compile(
+    r"\b(?:тег\w*|мет(?:к\w*|ок)|labels?|tags?|taxonomy|list_tags|tag_usage|"
+    r"tag_index)\b",
     re.IGNORECASE,
 )
+_TAG_PLURAL_SUBJECT = re.compile(
+    r"\b(?:тег(?:и|ов|ами|ах)|мет(?:ки|ок|ками|ках)|labels|tags)\b",
+    re.IGNORECASE,
+)
+_TAG_SEMANTIC_SUBJECT = re.compile(
+    r"\b(?:тег\w*|метк\w*|размет\w*|фасет\w*|категори\w*|labels?|tags?|taxonomy)\b",
+    re.IGNORECASE,
+)
+_TAG_INVENTORY_REQUEST = re.compile(
+    r"\b(?:какие|какими|каков\w*|сколько|как\s+(?:выгляд\w*|называ\w*|распредел\w*)|"
+    r"покаж\w*|вывед\w*|дай|перечисл\w*|назов\w*|состав\w*|сформир\w*|"
+    r"отда\w*|верн\w*|опублику\w*|сним\w*|запрос\w*|прочита\w*|счита\w*|"
+    r"вызов\w*|использ\w*|проверь\w*|получи\w*|нуж\w*|show|list|return|read)\b",
+    re.IGNORECASE,
+)
+_TAG_INVENTORY_SHAPE = re.compile(
+    r"\b(?:инвентар\w*|инвентаризац\w*|спис\w*|переч\w*|словар\w*|карт\w*|"
+    r"таблиц\w*|сводк\w*|обзор\w*|распредел\w*|группиров\w*|набор\w*|"
+    r"множеств\w*|частот\w*|употреб\w*|применени\w*|кратност\w*|сч[её]тчик\w*|"
+    r"количеств\w*|числ\w*|называ\w*|snapshot|inventory|taxonomy|vocabulary|"
+    r"list_tags|tag_usage|tag_index|usage_count|multiplicity|frequenc\w*|counts?|distinct|"
+    r"group\s+by|json_each|code-owned|endpoint|tool)\b",
+    re.IGNORECASE,
+)
+_TAG_ARCHIVE_SCOPE = re.compile(
+    r"\b(?:мо\w*|у\s+меня|личн\w*|баз\w*|архив\w*|корпус\w*|хранилищ\w*|"
+    r"знани\w*|запис\w*|объект\w*|пространств\w*|tenant|storage|"
+    r"сохран[её]нн\w*|доступн\w*|тестов\w*|синтетическ\w*|текущ\w*|изолированн\w*)\b",
+    re.IGNORECASE,
+)
+_TAG_EXHAUSTIVE_CUE = re.compile(
+    r"\b(?:вс[еяё]|всех|весь|полн\w*|точн\w*|кажд\w*|целиком|исчерпыва\w*|"
+    r"замкнут\w*|доступн\w*|distinct|три|тр[её]хстрочн\w*)\b",
+    re.IGNORECASE,
+)
+_TAG_LOCAL_SELECTION = re.compile(
+    r"\b(?:приложенн\w*|прикрепл[её]нн\w*|вложени\w*|внутри\s+(?:эт\w*\s+)?"
+    r"(?:файл\w*|документ\w*|таблиц\w*|лист\w*)|(?:эт\w*|текущ\w*)\s+"
+    r"(?:файл\w*|документ\w*|таблиц\w*|лист\w*))\b",
+    re.IGNORECASE,
+)
+_TAG_SPECIFIC_SELECTION = re.compile(
+    r"\b(?:по\s+тегу|с\s+тегом|под\s+тегом|по\s+метке|с\s+меткой|"
+    r"под\s+меткой)\s+[«\"']?[A-Za-zА-Яа-яЁё0-9_-]+\b",
+    re.IGNORECASE,
+)
+_TAG_METALINGUISTIC = re.compile(
+    r"\b(?:фраз\w*|слов\w*|термин\w*|выражени\w*|формулировк\w*|"
+    r"цитат\w*)\b|\b(?:что\s+значит|что\s+означает|почему\s+фраз)\b",
+    re.IGNORECASE,
+)
+_TAG_SCALAR_ONLY = re.compile(
+    r"^\s*(?:сколько[^.!?]{0,80}|(?:каков\w*|назов\w*)\s+"
+    r"(?:(?:общ\w*|точн\w*|итогов\w*)\s+)?(?:числ\w*|количеств\w*)[^.!?]{0,40})"
+    r"\b(?:тег\w*|мет(?:к\w*|ок))\b",
+    re.IGNORECASE,
+)
+_TAG_SCALAR_HAS_INVENTORY_DETAIL = re.compile(
+    r"\b(?:инвентар\w*|спис\w*|переч\w*|названи\w*|называ\w*|кажд\w*|"
+    r"частот\w*|применени\w*|употреб\w*|кратност\w*|сч[её]тчик\w*|"
+    r"usage_count|multiplicity|frequenc\w*)\b",
+    re.IGNORECASE,
+)
+_QUOTED_TEXT = re.compile(r"«[^»\n]*»|\"[^\"\n]*\"|'[^'\n]*'")
+_MULTI_TAG_USAGE_REQUEST = re.compile(
+    r"\bсколько\s+(?:применени\w*|использовани\w*)\s+у\s+"
+    r"[A-Za-zА-Яа-яЁё0-9_-]+\s*,\s*[A-Za-zА-Яа-яЁё0-9_-]+\s+и\s+"
+    r"[A-Za-zА-Яа-яЁё0-9_-]+\b",
+    re.IGNORECASE,
+)
+
+
+def _unquoted_tag_intent_text(message: str) -> str:
+    """Project only visible, unquoted user speech for aggregate routing."""
+
+    return " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
+
+
+def _tag_inventory_controls_are_closed(message: str) -> bool:
+    """Reject filters, local selections, negations and quoted mentions."""
+
+    visible = _classification_text(message)
+    unquoted = _unquoted_tag_intent_text(message)
+    if _NEGATED_INFORMATION_REQUEST.search(visible):
+        return True
+    if _TAG_SCALAR_ONLY.search(unquoted) and not _TAG_SCALAR_HAS_INVENTORY_DETAIL.search(unquoted):
+        return True
+    if _TAG_LOCAL_SELECTION.search(unquoted) or _TAG_SPECIFIC_SELECTION.search(visible):
+        return True
+    # A tag request which exists only inside a quote is a mention, not an
+    # instruction.  Metalinguistic prose is closed even without typography.
+    return bool(
+        (_TAG_LITERAL_SUBJECT.search(visible) and not _TAG_LITERAL_SUBJECT.search(unquoted))
+        or (_TAG_METALINGUISTIC.search(unquoted) and not _TAG_ARCHIVE_SCOPE.search(unquoted))
+    )
+
+
+def _tag_intent_clauses(message: str) -> list[str]:
+    """Split independent requests before applying tag-specific controls."""
+
+    visible = _classification_text(message)
+    clauses = [part.strip() for part in _COUNT_CLAUSE_SPLIT.split(visible) if part.strip()]
+    return clauses or ([visible] if visible else [])
+
+
+def _fast_tag_inventory_clause(message: str) -> bool:
+    if _tag_inventory_controls_are_closed(message):
+        return False
+    visible = _unquoted_tag_intent_text(message)
+    if _MULTI_TAG_USAGE_REQUEST.search(visible) and _TAG_ARCHIVE_SCOPE.search(visible):
+        return True
+    if (
+        re.search(r"\bdistinct\s+count\b", visible, re.IGNORECASE)
+        and re.search(r"\bинвентар\w*\b", visible, re.IGNORECASE)
+        and _TAG_INVENTORY_REQUEST.search(visible)
+    ):
+        return True
+    if (
+        re.search(r"\bкатегори\w*\b", visible, re.IGNORECASE)
+        and _TAG_INVENTORY_REQUEST.search(visible)
+        and _TAG_INVENTORY_SHAPE.search(visible)
+        and (_TAG_ARCHIVE_SCOPE.search(visible) or re.search(r"\bjson_each\b", visible, re.IGNORECASE))
+    ):
+        return True
+    if not _TAG_LITERAL_SUBJECT.search(visible) or not _TAG_INVENTORY_REQUEST.search(visible):
+        return False
+    # ``Сколько всего тегов?`` asks for one unsupported scalar, not the names
+    # and per-tag counts returned by list_tags.  Require a list/map shape, or an
+    # archive-scoped plural request whose wording asks which tags exist.
+    explicit_shape = bool(_TAG_INVENTORY_SHAPE.search(visible))
+    archive_plural = bool(
+        _TAG_ARCHIVE_SCOPE.search(visible) and re.search(r"\b(?:какие|какими)\b", visible, re.IGNORECASE)
+    )
+    direct_plural_listing = bool(
+        _TAG_PLURAL_SUBJECT.search(visible)
+        and re.search(
+            r"\b(?:покаж\w*|вывед\w*|перечисл\w*|назов\w*|дай|верн\w*|"
+            r"опублику\w*|состав\w*|сформир\w*)\b",
+            visible,
+            re.IGNORECASE,
+        )
+    )
+    exhaustive_listing = bool(
+        _TAG_EXHAUSTIVE_CUE.search(visible)
+        and re.search(
+            r"\b(?:покаж\w*|вывед\w*|перечисл\w*|назов\w*|дай|верн\w*|"
+            r"опублику\w*|состав\w*|сформир\w*)\b",
+            visible,
+            re.IGNORECASE,
+        )
+    )
+    return explicit_shape or archive_plural or direct_plural_listing or exhaustive_listing
+
+
+def _fast_tag_inventory_intent(message: str) -> bool:
+    """Recognise one archive-wide tag clause without generative judgement."""
+
+    return _fast_tag_inventory_clause(message) or any(
+        _fast_tag_inventory_clause(clause) for clause in _tag_intent_clauses(message)
+    )
+
+
+def _tag_inventory_semantic_clause(message: str) -> str:
+    """Return one safe unresolved tag clause, never a neighbouring filter."""
+
+    if not _tag_inventory_controls_are_closed(message):
+        visible = _unquoted_tag_intent_text(message)
+        if (
+            _TAG_SEMANTIC_SUBJECT.search(visible)
+            and _TAG_INVENTORY_REQUEST.search(visible)
+            and _TAG_ARCHIVE_SCOPE.search(visible)
+        ):
+            return message
+    for clause in _tag_intent_clauses(message):
+        if _tag_inventory_controls_are_closed(clause):
+            continue
+        visible = _unquoted_tag_intent_text(clause)
+        if (
+            _TAG_SEMANTIC_SUBJECT.search(visible)
+            and _TAG_INVENTORY_REQUEST.search(visible)
+            and _TAG_ARCHIVE_SCOPE.search(visible)
+        ):
+            return clause
+    return ""
+
+
+def _tag_inventory_semantic_candidate(message: str) -> bool:
+    """Whether the closed semantic fallback may consider this request."""
+
+    return bool(_tag_inventory_semantic_clause(message))
+
 
 _ARCHIVE_COUNT_SCOPES = frozenset({"whole_archive", "local_selection", "none"})
 _ARCHIVE_COUNT_METRICS = frozenset(
@@ -950,6 +1148,31 @@ _ASKS_FOR_A_FILE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_DIRECT_FILE_CREATION_CUE = re.compile(
+    r"\b(?:сдела\w*|созда\w*|собер\w*|собра\w*|сформир\w*|подготов\w*|"
+    r"оформ\w*|состав\w*|пришл\w*|отправ\w*|скин\w*|сохран\w*|"
+    r"выда\w*|дай|нуж(?:ен|на|но|ны)|можно)\b",
+    re.IGNORECASE,
+)
+_NEGATED_FILE_CREATION = re.compile(
+    r"^\s*(?:я\s+не\s+(?:прошу|хочу)|не\s+(?:делай|создавай|собирай|"
+    r"формируй|готовь|оформляй|составляй|присылай|отправляй|сохраняй))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_direct_file_request(message: str) -> bool:
+    """Require a visible lexical request to create/deliver a file."""
+
+    visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
+    return bool(
+        visible
+        and not _NEGATED_FILE_CREATION.search(visible)
+        and _DIRECT_FILE_CREATION_CUE.search(visible)
+        and _ASKS_FOR_A_FILE.search(visible)
+    )
+
+
 #: Место, где может стоять просьба поискать: начало сообщения. Дальше первой
 #: фразы это уже упоминание, а не команда.
 _WEB_REQUEST_VERB = (
@@ -2003,7 +2226,8 @@ _OUTSIDE_GENERIC_RESULT_ACTIVE = re.compile(
 _OUTSIDE_GENERIC_RESULT_PASSIVE = re.compile(
     r"(?:"
     r"(?:билет|ед|пицц|цвет|номер\w*\s+(?:в\s+)?(?:отел|гостиниц)|"
-    r"отел|гостиниц|рейс)\w*[^.!?\n]{0,64}(?:заказан|забронирован)\w*|"
+    r"отел|гостиниц|рейс)\w*[^.!?\n]{0,64}"
+    r"(?:заказан|забронирован|оформлен|подтвержден|куплен|приобрет[её]н)\w*|"
     r"(?:заявк|доставк|подписк)\w*[^.!?\n]{0,64}"
     r"(?:подан|оформлен|организован|отмен[её]н|подтвержден)\w*|"
     r"(?:курьер|врач|эвакуатор)\w*[^.!?\n]{0,48}(?:нанят|вызван)\w*|"
@@ -2066,6 +2290,8 @@ _OUTSIDE_DEED_PASSIVE = re.compile(
     rf"(?:билет\w*|товар\w*)[^.!?\n]{{0,64}}(?:куплен\w*|приобрет[её]н\w*)|"
     rf"столик\w*[^.!?\n]{{0,48}}зарезервирован\w*|"
     rf"(?:бумажн\w*\s+копи\w*|документ\w*)[^.!?\n]{{0,64}}распечатан\w*|"
+    rf"(?:печат\w*|распечатк\w*)[^.!?\n]{{0,64}}(?:заверш[её]н\w*|готов\w*)|"
+    rf"бумажн\w*\s+копи\w*[^.!?\n]{{0,64}}готов\w*|"
     rf"(?:электронн\w*\s+письм\w*|e-?mail|письм\w*\s+на\s+внешн\w+\s+адрес\w*)"
     rf"[^.!?\n]{{0,64}}отправлен\w*|"
     rf"(?:посылк\w*|груз\w*)[^.!?\n]{{0,64}}доставлен\w*|"
@@ -2214,6 +2440,7 @@ _OUTSIDE_DEED_EXPLICIT_AGENT = re.compile(
     r"включ[её]н\w*|выключен\w*|"
     r"отключ[её]н\w*|остановлен\w*|перезагружен\w*|перезапущен\w*|"
     r"активирован\w*|запущен\w*|открыт\w*|закрыт\w*|заперт\w*|подтвержден\w*|"
+    r"заверш[её]н\w*|готов\w*|"
     r"отмен[её]н\w*|перенес[её]н\w*|возвращ[её]н\w*|подан\w*|организован\w*|"
     r"нанят\w*|пополнен\w*))\s+"
     r"(?:"
@@ -2221,7 +2448,7 @@ _OUTSIDE_DEED_EXPLICIT_AGENT = re.compile(
     r"(?i:(?:[а-яё-]+(?:ым|им|ой|ей)\s+){0,2}"
     r"(?:инженер|техник|сотрудник|пользовател|клиент|оператор|диспетчер|"
     r"администратор|мастер|врач|курьер|владельц|заказчик|бухгалтер|сервис|"
-    r"магазин|компани|организаци|клиник|площадк)"
+    r"магазин|компани|организаци|клиник|площадк|типограф)"
     r"[а-яё-]*(?:ом|ем|ём|ой|ей|ью|ами|ями))|"
     r"(?i:банк(?:ом|ами))|"
     r"[А-ЯЁ][а-яё-]{2,}(?:ом|ем|ём|ой|ей|ью|ами|ями)"
@@ -4233,6 +4460,235 @@ _ASKS_FOR_A_REMINDER = re.compile(
 )
 
 
+# A narrow, code-owned fast path for the one reminder shape that does not need
+# semantic interpretation: one explicitly quoted body plus one absolute date.
+# It is intentionally about the *shape*, not any test marker or vocabulary in
+# the body.  The ordinary classifier remains responsible for relative dates,
+# unquoted subjects and genuinely ambiguous phrasing.
+_EXACT_REMINDER_MONTHS = {
+    "января": 1,
+    "февраля": 2,
+    "марта": 3,
+    "апреля": 4,
+    "мая": 5,
+    "июня": 6,
+    "июля": 7,
+    "августа": 8,
+    "сентября": 9,
+    "октября": 10,
+    "ноября": 11,
+    "декабря": 12,
+}
+_EXACT_REMINDER_DAY_WORDS = {
+    "первого": 1,
+    "второго": 2,
+    "третьего": 3,
+    "четвертого": 4,
+    "четвёртого": 4,
+    "пятого": 5,
+    "шестого": 6,
+    "седьмого": 7,
+    "восьмого": 8,
+    "девятого": 9,
+    "десятого": 10,
+    "одиннадцатого": 11,
+    "двенадцатого": 12,
+    "тринадцатого": 13,
+    "четырнадцатого": 14,
+    "пятнадцатого": 15,
+    "шестнадцатого": 16,
+    "семнадцатого": 17,
+    "восемнадцатого": 18,
+    "девятнадцатого": 19,
+    "двадцатого": 20,
+    "двадцать первого": 21,
+    "двадцать второго": 22,
+    "двадцать третьего": 23,
+    "двадцать четвертого": 24,
+    "двадцать четвёртого": 24,
+    "двадцать пятого": 25,
+    "двадцать шестого": 26,
+    "двадцать седьмого": 27,
+    "двадцать восьмого": 28,
+    "двадцать девятого": 29,
+    "тридцатого": 30,
+    "тридцать первого": 31,
+}
+_EXACT_REMINDER_DAY_WORD_PATTERN = "|".join(
+    re.escape(value) for value in sorted(_EXACT_REMINDER_DAY_WORDS, key=len, reverse=True)
+)
+_EXACT_REMINDER_MONTH_PATTERN = "|".join(_EXACT_REMINDER_MONTHS)
+_EXACT_REMINDER_RUS_DATE = re.compile(
+    rf"(?<!\w)(?P<day>\d{{1,2}}|{_EXACT_REMINDER_DAY_WORD_PATTERN})\s+"
+    rf"(?P<month>{_EXACT_REMINDER_MONTH_PATTERN})\s+"
+    r"(?P<year>\d{4})(?:\s+года)?\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_NUMERIC_DATE = re.compile(
+    r"(?<!\d)(?:(?P<iso_year>\d{4})-(?P<iso_month>\d{2})-(?P<iso_day>\d{2})|"
+    r"(?P<day>\d{1,2})[./](?P<month>\d{1,2})[./](?P<year>\d{4}))(?!\d)"
+)
+_EXACT_REMINDER_QUOTED_BODY = re.compile(
+    r"(?:«(?P<angle>[^»\r\n]{1,120})»|“(?P<curly>[^”\r\n]{1,120})”|"
+    r'"(?P<straight>[^"\r\n]{1,120})")'
+)
+_EXACT_REMINDER_COMMAND = re.compile(
+    r"\b(?:"
+    r"не\s+дай(?:те)?\s+забыть|не\s+забудь(?:те)?\s+напомнить|"
+    r"напомни(?:те)?|поставь(?:те)?|создай(?:те)?|запланируй(?:те)?|"
+    r"запиши(?:те)?|добавь(?:те)?|сохрани(?:те)?|назначь(?:те)?|"
+    r"сделай(?:те)?|сформируй(?:те)?|зарегистрируй(?:те)?|свяжи(?:те)?|"
+    r"закрой(?:те)?|пусть\b[^.!?\n]{0,96}\bсработает|"
+    r"(?:прошу|мож(?:ешь|ете)|давай(?:те)?|нужно|надо)\s+"
+    r"(?:напомнить|поставить|создать|запланировать|записать|добавить|"
+    r"сохранить|назначить|сделать|сформировать|зарегистрировать)"
+    r")\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_SEMANTICS = re.compile(
+    r"\b(?:напомин\w*|reminder|due|body|событи\w*|запланир\w*|напомн\w*)\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_STRONG_COMMAND = re.compile(
+    r"\b(?:не\s+дай(?:те)?\s+забыть|не\s+забудь(?:те)?\s+напомнить|"
+    r"напомни(?:те)?|поставь(?:те)?|запланируй(?:те)?|назначь(?:те)?|"
+    r"пусть\b[^.!?\n]{0,96}\bсработает)\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_NEGATED = re.compile(
+    r"\bне\s+(?:ставь(?:те)?|создавай(?:те)?|планируй(?:те)?|записывай(?:те)?|"
+    r"добавляй(?:те)?|сохраняй(?:те)?|назначай(?:те)?|формируй(?:те)?)\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_CANCEL = re.compile(
+    r"\b(?:отмен\w*|удал\w*|сним\w*|отключ\w*|перенес\w*|перенести|"
+    r"измени\w*|замени\w*)\b[^.!?\n]{0,96}\b(?:напомин\w*|reminder|событи\w*)\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_QUERY_PREFIX = re.compile(
+    r"^\s*(?:(?:а|и)\s+)?(?:ка(?:к|кое|кие|кую)|когда|где|почему|зачем|"
+    r"сколько|что|есть\s+ли|нужно\s+ли|стоит\s+ли|можно\s+ли)\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_CONDITION = re.compile(
+    r"\b(?:если|при\s+условии|в\s+случае\s+если)\b",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_ALLOWED_PREFIX = re.compile(
+    r"^(?:(?:пожалуйста|прошу|давай(?:те)?|на|к|день|дату|срок)\b|[\s,.:;—-])*$",
+    re.IGNORECASE,
+)
+_EXACT_REMINDER_COMPOUND_TAIL = re.compile(
+    r"(?:^|[,;.!?]\s*|\s+)"
+    r"(?:(?:и|а(?:\s+ещ[её])?|также|заодно)\s+)?"
+    r"(?P<rest>(?:как|что|кто|где|когда|почему|зачем|сколько|"
+    r"расскажи(?:те)?|покажи(?:те)?|проверь(?:те)?|собери(?:те)?|"
+    r"найди(?:те)?|скажи(?:те)?|ответь(?:те)?)\b.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _masked_quoted_spans(text: str, spans: list[tuple[int, int]]) -> str:
+    masked = list(text)
+    for start, end in spans:
+        masked[start:end] = " " * (end - start)
+    return "".join(masked)
+
+
+def _exact_reminder_date(text: str) -> tuple[date, tuple[int, int]] | None:
+    candidates: list[tuple[date, tuple[int, int]]] = []
+    for match in _EXACT_REMINDER_RUS_DATE.finditer(text):
+        raw_day = match.group("day").casefold()
+        day = int(raw_day) if raw_day.isdigit() else _EXACT_REMINDER_DAY_WORDS.get(raw_day)
+        month = _EXACT_REMINDER_MONTHS.get(match.group("month").casefold())
+        try:
+            parsed = date(int(match.group("year")), int(month or 0), int(day or 0))
+        except ValueError:
+            continue
+        candidates.append((parsed, match.span()))
+    for match in _EXACT_REMINDER_NUMERIC_DATE.finditer(text):
+        try:
+            if match.group("iso_year"):
+                parsed = date(
+                    int(match.group("iso_year")),
+                    int(match.group("iso_month")),
+                    int(match.group("iso_day")),
+                )
+            else:
+                parsed = date(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                )
+        except ValueError:
+            continue
+        candidates.append((parsed, match.span()))
+    unique = {(parsed, span) for parsed, span in candidates}
+    return next(iter(unique)) if len(unique) == 1 else None
+
+
+def _exact_reminder_remainder(text: str, *, core_end: int) -> str:
+    """Keep only an unmistakable second request after the exact reminder."""
+
+    tail = text[core_end:].strip()
+    if not tail:
+        return ""
+    match = _EXACT_REMINDER_COMPOUND_TAIL.search(tail)
+    return " ".join(match.group("rest").split())[:600] if match else ""
+
+
+def _exact_absolute_reminder_request(message: str) -> tuple[str, str, str] | None:
+    """Parse an explicit, one-body reminder without asking a classifier.
+
+    The fast path deliberately fails closed on quotation, cancellation,
+    conditionals, multiple dates and compound reminder actions.  Ambiguous
+    shapes continue through the semantic classifier unchanged.
+    """
+
+    body_matches = list(_EXACT_REMINDER_QUOTED_BODY.finditer(message))
+    if len(body_matches) != 1:
+        return None
+    body_match = body_matches[0]
+    body = next((value for value in body_match.groupdict().values() if value is not None), "")
+    body = " ".join(body.split())
+    if not body:
+        return None
+    masked = _masked_quoted_spans(message, [body_match.span()])
+    date_match = _exact_reminder_date(masked)
+    if date_match is None:
+        return None
+    planned, date_span = date_match
+    command = _EXACT_REMINDER_COMMAND.search(masked)
+    if command is None:
+        return None
+    folded_prefix = masked[: command.start()]
+    prefix_without_date = folded_prefix
+    if date_span[0] < command.start():
+        prefix_without_date = (
+            masked[: date_span[0]]
+            + " " * (date_span[1] - date_span[0])
+            + masked[date_span[1] : command.start()]
+        )
+    if not _EXACT_REMINDER_ALLOWED_PREFIX.fullmatch(prefix_without_date):
+        return None
+    if (
+        _EXACT_REMINDER_QUERY_PREFIX.search(masked)
+        or _EXACT_REMINDER_CANCEL.search(masked)
+        or _EXACT_REMINDER_NEGATED.search(masked)
+        or _EXACT_REMINDER_CONDITION.search(masked)
+    ):
+        return None
+    if not (
+        _EXACT_REMINDER_SEMANTICS.search(masked) or _EXACT_REMINDER_STRONG_COMMAND.fullmatch(command.group(0))
+    ):
+        return None
+    core_end = max(body_match.end(), date_span[1])
+    tail = masked[core_end:]
+    if _EXACT_REMINDER_COMMAND.search(tail):
+        return None
+    return body, planned.isoformat(), _exact_reminder_remainder(message, core_end=core_end)
+
+
 #: Сколько знаков разговора уходит в контекст. Окно модели — 32 768 токенов, и в
 #: тяжёлом ходе (описания инструментов ~4650, результат инструмента до 4000,
 #: выдача поиска до 4000, найденные документы) история легко становится тем, из-за
@@ -6005,6 +6461,45 @@ def _citation_notice(
     return ""
 
 
+_TEXT_SHAPE_COMPOSITION_REQUEST = re.compile(
+    r"^\s*(?:"
+    r"ответь|сформируй|дай|напиши|верни|сделай|оформи|подготовь|"
+    r"включи|выдели|помести|отправь|создай|вставь|покажи|подчеркни|"
+    r"передай|экранируй|"
+    r"финальн\w*\s+доставк\w*\s+должн\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_TEXT_SHAPE = re.compile(
+    r"\b(?:markdown|маркдаун|bullet|plain[- ]?text|"
+    r"спис\w*|пункт\w*|шаг\w*|строк\w*|фраз\w*|предложени\w*|подпис\w*|"
+    r"заголов\w*|цитат\w*|жирн\w*|курсив\w*|выделени\w*|подчерк\w*|"
+    r"углов\w*\s+скоб\w*|амперсанд\w*|символ\w*|"
+    r"transport\w*|транспорт\w*|доставк\w*|маркер\w*|идентификатор\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+_TEXT_SHAPE_GUIDANCE = (
+    "В этом ходе человек просит создать текст с явно заданной формой. Соблюди её буквально: "
+    "точное число строк или пунктов, вид списка, заголовок, цитату, выделение, plain text и "
+    "указанные буквальные символы — именно так, как попросили. Markdown-цитата начинается с `> `, "
+    "жирное выделение — с `**`, курсив — с `*`. Если попросили список слов, каждый пункт содержит "
+    "ровно одно слово или один цельный токен. Не добавляй предисловие, отчёт о выполнении или "
+    "лишнюю строку. Указанные идентификаторы и маркеры сохраняй без изменений, не дублируй и "
+    "встраивай внутрь уже запрошенной строки, пункта или цитаты — отдельная строка для маркера "
+    "запрещена. Markdown используй только в запрошенном виде; сырой HTML не вставляй."
+)
+
+
+def _text_shape_guidance_for(message: str) -> str:
+    """A static near-turn reminder for explicit text-composition contracts."""
+
+    candidate = _classification_text(message)
+    if not (_TEXT_SHAPE_COMPOSITION_REQUEST.search(candidate) and _EXPLICIT_TEXT_SHAPE.search(candidate)):
+        return ""
+    return _TEXT_SHAPE_GUIDANCE
+
+
 SYSTEM_PROMPT = """Ты — Friday (по-русски — Пятница), локальная персональная Knowledge OS с высокой, но управляемой инициативой.
 
 Правила:
@@ -6131,6 +6626,10 @@ class AgentContext:
     #: строка в промпте, та же строка вплотную к реплике. Помогает только одно —
     #: не давать модели говорить об этом вовсе.
     structural_answer: str = ""
+    #: How many post-generation ``make_file`` executions were actually started
+    #: in this turn.  Ephemeral only; the public audit ledger is updated from
+    #: the delta around the late builder, including failed executions.
+    late_make_file_attempts: int = 0
     #: Проверяемые результаты напоминаний этого хода. Это отдельный uncapped
     #: lifecycle-state, а не обрезанный список evidence для судьи: седьмой
     #: успешный инструмент не имеет права превратить сделанное напоминание в
@@ -7209,6 +7708,23 @@ class AgentRuntime:
             response["voice_clip"] = None
             response["knowledge_object_ids"] = []
             response["_office_model_claim_rejected"] = True
+        shape_repair_allowed = bool(
+            response.get("_office_exact_owned") is not True
+            and not office_model_claim_rejected
+            and not outside_deed_replaced
+            and not supported_deed_replaced
+            and not archive_status_only_replaced
+            and not response.get("llm_failed")
+        )
+        if shape_repair_allowed:
+            repaired_shape = repair_explicit_text_shape(asked_of_model, content)
+            if repaired_shape != content:
+                LOGGER.info("text-shape: deterministic high-confidence repair applied")
+                content = repaired_shape
+                response["content"] = content
+                # A voice clip was synthesized from the pre-repair body.  It
+                # must not survive beside different visible text.
+                response["voice_clip"] = None
         # A deterministic Office answer is system output, not model speech.  It
         # must never be rewritten by the model judge/repair pair.
         model_said = (
@@ -7456,9 +7972,11 @@ class AgentRuntime:
         # косяк», и он предсказал, что с документами будет то же самое. Так и
         # есть: «Собери справку по поверке и сделай из неё документ Word» шаблон
         # не узнавал. Перечислять формы бесконечно; арбитр видит смысл.
-        asked_for_a_file = bool(_ASKS_FOR_A_FILE.search(clean_message)) or str(
-            (context.outward_verdict or ("", None))[0] or ""
-        ).startswith("файл")
+        # The semantic verdict is only an orientation hint.  In particular,
+        # formatting, Telegram and attachment-reading prompts are often labelled
+        # ``файл`` by the broad arbiter even though the person never requested a
+        # new file.  A late effect therefore needs its own lexical authority.
+        asked_for_a_file = _is_direct_file_request(clean_message)
         # Сборка присланных файлов («собери за 10, 13 и 25 число») здесь НЕ
         # запускается: она стоит раньше, в агентском цикле, чтобы модель говорила
         # о собранном, а не гадала. Сюда доходит только «сочини документ», и оно
@@ -7474,6 +7992,7 @@ class AgentRuntime:
             and not context.asked_for_an_archive
             and not response.get("file_clips")
         ):
+            late_attempts_before = context.late_make_file_attempts
             made = await self._file_for_a_request_that_wanted_one(
                 clean_message,
                 content,
@@ -7481,6 +8000,13 @@ class AgentRuntime:
                 evidence=response.get("tool_evidence") or [],
                 context=context,
             )
+            late_attempts = max(0, context.late_make_file_attempts - late_attempts_before)
+            if late_attempts:
+                ledger = response.get("tools_used")
+                if not isinstance(ledger, list):
+                    ledger = list(ledger) if isinstance(ledger, tuple) else []
+                    response["tools_used"] = ledger
+                ledger.extend("make_file" for _ in range(late_attempts))
             if made:
                 response = {**response, "file_clips": [made]}
         answer_verified = verification_status == VERDICT_PASSED
@@ -9875,6 +10401,28 @@ class AgentRuntime:
                     clause_rest_tokens == clause_tokens for clause_tokens in open_clause_tokens
                 )
                 unsafe_rest = unsafe_rest or repeats_archive_count
+            if "список тегов" in folded_settled or "инвентар" in folded_settled:
+                source_clauses = [
+                    part.strip()
+                    for part in _COUNT_CLAUSE_SPLIT.split(_classification_text(message))
+                    if part.strip()
+                ]
+                open_clause_tokens = [
+                    [token.casefold() for token in re.findall(r"[A-Za-zА-Яа-яЁё0-9]+", part)]
+                    for part in source_clauses
+                    if not _fast_tag_inventory_intent(part) and not _tag_inventory_semantic_candidate(part)
+                ]
+                repeats_tag_inventory = bool(
+                    _fast_tag_inventory_intent(folded_rest) or _tag_inventory_semantic_candidate(folded_rest)
+                )
+                # As with an exact corpus count, the remainder must equal a
+                # real, separate clause from the person.  A plausible substring
+                # of the settled inventory (``метки и частоты``) must not reopen
+                # it for a second generative answer.
+                repeats_tag_inventory = repeats_tag_inventory or not any(
+                    clause_rest_tokens == clause_tokens for clause_tokens in open_clause_tokens
+                )
+                unsafe_rest = unsafe_rest or repeats_tag_inventory
             if (
                 "календар" in folded_settled
                 or "what_happened" in folded_settled
@@ -10364,8 +10912,11 @@ class AgentRuntime:
         завтра в 10 про совещание» надо развести на «что» и «когда», и никакой
         шаблон этого не сделает — человек говорит как придётся.
         """
+        exact_request = _exact_absolute_reminder_request(message)
         kind = str((context.outward_verdict or ("", None))[0] or "")
-        if not (_ASKS_FOR_A_REMINDER.search(message) or kind.startswith("действие")):
+        if exact_request is None and not (
+            _ASKS_FOR_A_REMINDER.search(message) or kind.startswith("действие")
+        ):
             return False
         available = {
             str((tool.get("function") or {}).get("name") or "") for tool in tools if isinstance(tool, dict)
@@ -10373,58 +10924,64 @@ class AgentRuntime:
         if "remind" not in available:
             # Нет права — нет вызова: предварительное выполнение прав не обходит.
             return False
-        if not self.llm.enabled:
-            return False
-        try:
-            answer = await self.llm.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Реши, просят ли ПОСТАВИТЬ НАПОМИНАНИЕ, и верни ОДНУ строку JSON: "
-                            '{"напоминание": "да|нет", "что": "о чём напомнить", '
-                            '"когда": "срок словами человека", "остаток": "о чём ещё спросили"}.\n'
-                            "да — просят напомнить, разбудить, предупредить, не дать забыть: "
-                            "«напомни завтра в 10 про совещание», «не дай забыть про отчёт в "
-                            "пятницу», «поставь напоминание на понедельник».\n"
-                            "нет — спрашивают О напоминаниях («какие у меня напоминания», "
-                            "«что ты мне напоминала»), просят отменить их, либо речь вообще "
-                            "о другом.\n"
-                            "«что» — суть дела без слова «напомни»: «совещание», «отчёт».\n"
-                            "«когда» — срок ТАК, КАК СКАЗАЛ ЧЕЛОВЕК: «завтра в 10 утра», "
-                            "«в пятницу», «через неделю». Ничего не пересчитывай в даты.\n"
-                            "«остаток» — то, о чём человек спросил ПОМИМО просьбы напомнить, "
-                            "его словами. «напомни про отчёт в пятницу, и как там проект» → "
-                            "остаток «как там проект». Если больше ничего не сказано — пустая "
-                            "строка. Поле обязательное: пиши его всегда.\n"
-                            f"{self._today_line().strip()}\n"
-                            "Только JSON, без пояснений."
-                        ),
-                    },
-                    {"role": "user", "content": message[:400]},
-                ],
-                tools=[],
-                temperature=0.0,
-                priority="foreground",
-                max_tokens=CLASSIFIER_MAX_TOKENS,
-            )
-        except Exception as exc:  # noqa: BLE001 — разбор не должен ронять ход
-            LOGGER.warning("reminder-prefetch: разбор не удался (%s)", type(exc).__name__)
-            return False
-        parsed = _extract_json_object(str(answer.get("content") or ""))
-        if not isinstance(parsed, dict):
-            return False
-        if not str(parsed.get("напоминание") or "").strip().casefold().startswith("да"):
-            LOGGER.info("reminder-prefetch: это не просьба напомнить")
-            return False
-        what = " ".join(str(parsed.get("что") or "").split())[:300]
-        when = " ".join(str(parsed.get("когда") or "").split())[:120]
-        # Остаток реплики: то, на что модель ещё будет отвечать. Здесь запасной
-        # вариант ОБЫЧНЫЙ, а не перевёрнутый, как у отказа в правах: дело уже
-        # сделано, и лишняя фраза модели поверх факта безобидна — а потерянный
-        # рядом заданный вопрос нет.
-        rest_of_it = parsed.get("остаток")
-        rest = " ".join(str(rest_of_it).split())[:600] if isinstance(rest_of_it, str) else message
+        if exact_request is not None:
+            # This branch is complete in code: there is no classifier call that
+            # may omit the request, rewrite the body or turn one request into
+            # several tool calls.
+            what, when, rest = exact_request
+        else:
+            if not self.llm.enabled:
+                return False
+            try:
+                answer = await self.llm.chat(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Реши, просят ли ПОСТАВИТЬ НАПОМИНАНИЕ, и верни ОДНУ строку JSON: "
+                                '{"напоминание": "да|нет", "что": "о чём напомнить", '
+                                '"когда": "срок словами человека", "остаток": "о чём ещё спросили"}.\n'
+                                "да — просят напомнить, разбудить, предупредить, не дать забыть: "
+                                "«напомни завтра в 10 про совещание», «не дай забыть про отчёт в "
+                                "пятницу», «поставь напоминание на понедельник».\n"
+                                "нет — спрашивают О напоминаниях («какие у меня напоминания», "
+                                "«что ты мне напоминала»), просят отменить их, либо речь вообще "
+                                "о другом.\n"
+                                "«что» — суть дела без слова «напомни»: «совещание», «отчёт».\n"
+                                "«когда» — срок ТАК, КАК СКАЗАЛ ЧЕЛОВЕК: «завтра в 10 утра», "
+                                "«в пятницу», «через неделю». Ничего не пересчитывай в даты.\n"
+                                "«остаток» — то, о чём человек спросил ПОМИМО просьбы напомнить, "
+                                "его словами. «напомни про отчёт в пятницу, и как там проект» → "
+                                "остаток «как там проект». Если больше ничего не сказано — пустая "
+                                "строка. Поле обязательное: пиши его всегда.\n"
+                                f"{self._today_line().strip()}\n"
+                                "Только JSON, без пояснений."
+                            ),
+                        },
+                        {"role": "user", "content": message[:400]},
+                    ],
+                    tools=[],
+                    temperature=0.0,
+                    priority="foreground",
+                    max_tokens=CLASSIFIER_MAX_TOKENS,
+                )
+            except Exception as exc:  # noqa: BLE001 — разбор не должен ронять ход
+                LOGGER.warning("reminder-prefetch: разбор не удался (%s)", type(exc).__name__)
+                return False
+            parsed = _extract_json_object(str(answer.get("content") or ""))
+            if not isinstance(parsed, dict):
+                return False
+            if not str(parsed.get("напоминание") or "").strip().casefold().startswith("да"):
+                LOGGER.info("reminder-prefetch: это не просьба напомнить")
+                return False
+            what = " ".join(str(parsed.get("что") or "").split())[:300]
+            when = " ".join(str(parsed.get("когда") or "").split())[:120]
+            # Остаток реплики: то, на что модель ещё будет отвечать. Здесь запасной
+            # вариант ОБЫЧНЫЙ, а не перевёрнутый, как у отказа в правах: дело уже
+            # сделано, и лишняя фраза модели поверх факта безобидна — а потерянный
+            # рядом заданный вопрос нет.
+            rest_of_it = parsed.get("остаток")
+            rest = " ".join(str(rest_of_it).split())[:600] if isinstance(rest_of_it, str) else message
         if not what or not when:
             # Без обеих половин напоминание бессмысленно: «напомнить неизвестно о
             # чём» и «напомнить когда-нибудь» одинаково бесполезны. Пусть решает
@@ -10435,6 +10992,11 @@ class AgentRuntime:
                 bool(when),
             )
             return False
+        # Once the request is owned here, the model must not get a second
+        # opportunity to execute it.  Remove every duplicate schema before the
+        # kernel call as well: a timeout or exception may happen after a durable
+        # effect, and retrying that unknown outcome is unsafe.
+        tools[:] = [tool for tool in tools if str((tool.get("function") or {}).get("name") or "") != "remind"]
         try:
             result = await self.kernel.execute("remind", {"what": what, "when": when}, actor=actor)
         except Exception as exc:  # noqa: BLE001 — напоминание не должно ронять ответ
@@ -10457,9 +11019,6 @@ class AgentRuntime:
                 "delivery_scheduled": delivery_scheduled,
             }
         )
-        # Инструмент убирается: иначе модель поставит ВТОРОЕ такое же напоминание,
-        # и человека разбудят дважды. Ровно та же беда, что с двумя архивами.
-        tools[:] = [tool for tool in tools if str((tool.get("function") or {}).get("name") or "") != "remind"]
         # О СДЕЛАННОМ ГОВОРИТ СТРУКТУРА, а не модель.
         #
         # Прежде здесь стояла служебная строка, написанная «фактами в прошедшем
@@ -10665,9 +11224,7 @@ class AgentRuntime:
         # инструменты в этом ходе могли отработать, и основания есть. Замерено:
         # чаще всего срывается сам протокол вызова («bare tool-call markup»), а
         # данные при этом собраны.
-        asked_plainly = str((getattr(context, "outward_verdict", None) or ("", None))[0] or "").startswith(
-            "файл"
-        )
+        asked_plainly = _is_direct_file_request(request)
         if _answer_is_a_question(answer) and not asked_plainly:
             # Модель переспросила — значит просьба расплывчата, и человеку нужен
             # ответ на его уточнение, а не документ из этого уточнения.
@@ -10772,6 +11329,8 @@ class AgentRuntime:
         # Когда ответа не получилось, заголовок берётся из просьбы человека:
         # иначе им становится «Не удалось безопасно завершить вызов инструмента»,
         # и это же попадает в имя файла.
+        if context is not None:
+            context.late_make_file_attempts += 1
         return await self._make_file_from_answer(request, "" if failed else answer, actor, blocks=blocks)
 
     async def _make_file_from_answer(
@@ -11078,6 +11637,46 @@ class AgentRuntime:
             metric = "none"
         return ArchiveCountIntent(scope, metric)
 
+    async def _tag_inventory_intent_by_arbiter(self, message: str) -> bool:
+        """Resolve only a lexically bounded tag-inventory candidate."""
+
+        if _fast_tag_inventory_intent(message):
+            return True
+        semantic_clause = _tag_inventory_semantic_clause(message)
+        if not semantic_clause or not self.llm.enabled:
+            return False
+        try:
+            answer = await self.llm.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Классифицируй просьбу и верни только JSON: "
+                            '{"intent":"tag_inventory|none"}.\n'
+                            "tag_inventory — человек просит полный список меток/тегов "
+                            "личного архива и, возможно, точную частоту каждой. "
+                            "none — конкретный тег, поиск содержимого, теги приложенного "
+                            "файла/таблицы, отрицание, цитата или объяснение термина. "
+                            "Никакого текста и никаких иных значений."
+                        ),
+                    },
+                    {"role": "user", "content": semantic_clause[:500]},
+                ],
+                tools=[],
+                temperature=0.0,
+                max_tokens=CLASSIFIER_MAX_TOKENS,
+            )
+        except Exception as exc:  # noqa: BLE001 — классификатор не роняет ход
+            LOGGER.warning("Tag inventory intent check failed (%s)", type(exc).__name__)
+            return False
+        parsed = _extract_json_object(str(answer.get("content") or ""))
+        return bool(
+            isinstance(parsed, Mapping)
+            and set(parsed) == {"intent"}
+            and str(parsed.get("intent") or "").strip().casefold() == "tag_inventory"
+            and _tag_inventory_semantic_clause(semantic_clause) == semantic_clause
+        )
+
     async def _prefetch_archive_numbers(
         self,
         message: str,
@@ -11100,16 +11699,36 @@ class AgentRuntime:
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
-        # ``kg_stats`` is not a general model capability.  Snapshot the actor's
-        # authorization, then close the capability for the entire model loop;
-        # only a code-settled whole-archive intent may consume the snapshot once.
+        # ``kg_stats`` is never a general model capability. Snapshot the
+        # authorization before closing it; an exact code-owned count may consume
+        # the snapshot once below.
         tools[:] = [
             tool
             for tool in tools
             if str((tool.get("function") or {}).get("name") or tool.get("name") or "") != "kg_stats"
         ]
+        visible_message = _classification_text(message)
+        if _NEGATED_INFORMATION_REQUEST.search(visible_message):
+            if _TAG_LITERAL_SUBJECT.search(visible_message):
+                tools[:] = [
+                    tool
+                    for tool in tools
+                    if str((tool.get("function") or {}).get("name") or tool.get("name") or "") != "list_tags"
+                ]
+            return
+        wants_tags = await self._tag_inventory_intent_by_arbiter(message)
+        tag_capability_is_settled_or_closed = bool(wants_tags or _TAG_LITERAL_SUBJECT.search(visible_message))
+        if tag_capability_is_settled_or_closed:
+            # A tag-related turn either gets one structural inventory or no
+            # inventory at all.  Specific tags, content filters, local
+            # selections and quoted mentions cannot ask the model to reopen it.
+            tools[:] = [
+                tool
+                for tool in tools
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "") != "list_tags"
+            ]
         kind = str((getattr(context, "outward_verdict", None) or ("", None))[0] or "")
-        if kind.startswith(
+        if not wants_tags and kind.startswith(
             (
                 "быт",
                 "действие",
@@ -11128,11 +11747,15 @@ class AgentRuntime:
             # untouched for its own route.
             return
         visible = _archive_count_projection(message)
-        if _NEGATED_INFORMATION_REQUEST.search(visible):
-            return
-        stats_intent = _fast_archive_count_intent(visible)
+        # Per-tag counts are part of the inventory itself.  They are not a
+        # request for the unrelated whole-corpus counters in ``kg_stats``.  A
+        # genuinely separate compound count clause is preserved by
+        # ``_archive_count_projection`` and therefore remains routable.
+        tag_owns_count_clause = bool(wants_tags and _TAG_LITERAL_SUBJECT.search(visible))
+        stats_intent = None if tag_owns_count_clause else _fast_archive_count_intent(visible)
         explicit_whole_shape = bool(
-            _COUNT_INTENT_CUE.search(visible)
+            not tag_owns_count_clause
+            and _COUNT_INTENT_CUE.search(visible)
             and _GLOBAL_COUNT_CUE.search(visible)
             and re.search(
                 r"\b(?:баз|архив|хранилищ|памят|граф|корпус)\w*\b",
@@ -11172,27 +11795,19 @@ class AgentRuntime:
             stats_intent = ArchiveCountIntent("local_selection", "none")
         if (
             stats_intent is None
+            and not tag_owns_count_clause
             and _COUNT_INTENT_CUE.search(visible)
             and (not kind or kind.startswith("архив"))
         ):
             stats_intent = await self._archive_count_intent_by_arbiter(visible)
-        wants_tags = bool(_ASKS_ABOUT_TAGS.search(_classification_text(message)))
-        if wants_tags:
-            # Like ``kg_stats``, this is a code-owned one-shot read.  Once the
-            # intent is clear the model cannot repeat it or replace the exact
-            # inventory with a guessed summary.
-            tools[:] = [
-                tool
-                for tool in tools
-                if str((tool.get("function") or {}).get("name") or tool.get("name") or "") != "list_tags"
-            ]
         settled_parts: list[str] = []
         unknown_whole_metric = bool(
             stats_intent and stats_intent.scope == "whole_archive" and stats_intent.metric == "none"
         )
         if stats_intent is None:
             unknown_whole_metric = bool(
-                _COUNT_INTENT_CUE.search(visible)
+                not tag_owns_count_clause
+                and _COUNT_INTENT_CUE.search(visible)
                 and _GLOBAL_COUNT_CUE.search(visible)
                 and re.search(
                     r"\b(?:баз|архив|хранилищ|памят|граф|корпус)\w*\b",
@@ -11359,12 +11974,17 @@ class AgentRuntime:
         verdict = str(answer.get("content") or "").strip().casefold()
         return "лент" in verdict
 
-    async def _time_intent_by_arbiter(self, message: str) -> TimeIntent | None:
+    async def _time_intent_by_arbiter(
+        self,
+        message: str,
+        *,
+        today: date | None = None,
+    ) -> TimeIntent | None:
         """Return only closed temporal enums; calendar dates stay in code."""
 
         # The same method is also an independently testable closed classifier.
         # Preserve deterministic decisions before asking the semantic fallback.
-        fast = fast_time_intent(message)
+        fast = fast_time_intent(message, today=today)
         if fast is not None:
             return fast
         visible = _classification_text(message).casefold()
@@ -11645,9 +12265,9 @@ class AgentRuntime:
         # windows without inventing calendar dates.
         period = period_from_question(visible_message)
         moment = period[0] if period else moment_from_question(visible_message)
-        intent = fast_time_intent(visible_message)
-        window_source = visible_message
         local_today = self._local_today()
+        intent = fast_time_intent(visible_message, today=local_today)
+        window_source = visible_message
         if (
             moment
             and _ASKS_WHAT_HAPPENED.search(visible_message)
@@ -11682,7 +12302,7 @@ class AgentRuntime:
                 # below in code.
                 window_source = moment
         if intent is None:
-            intent = await self._time_intent_by_arbiter(visible_message)
+            intent = await self._time_intent_by_arbiter(visible_message, today=local_today)
         if intent is None or intent.direction == "none":
             tools[:] = [
                 tool
@@ -12411,7 +13031,7 @@ class AgentRuntime:
         # созвон с подрядчиком» ушло в поисковик строкой «созвон с подрядчиком
         # среда» — и напоминание не поставилось, и дело человека вместе с днём
         # недели оказалось в чужом поисковике.
-        if _ASKS_FOR_A_REMINDER.search(message):
+        if _ASKS_FOR_A_REMINDER.search(message) or _exact_absolute_reminder_request(message) is not None:
             return
         # Вопрос о деятельности УЧАСТНИКА наружу тоже не уходит. Замерено:
         # «Что писал Пегас?» — арбитр счёл это вопросом о внешнем мире, и Пятница
@@ -13191,6 +13811,13 @@ class AgentRuntime:
         #
         # Теперь отказ говорит структура. Место в стеке перестало решать, потому
         # что решать больше нечего: у модели этого хода просто нет.
+        text_shape_guidance = _text_shape_guidance_for(message)
+        if text_shape_guidance:
+            # The reminder is static policy, never a user-controlled system
+            # interpolation.  Keep it adjacent to the turn: measured format-only
+            # prompts otherwise dissolved into a generic transport-status answer
+            # despite the same broad rule near the top of the long system prompt.
+            messages.append({"role": "system", "content": text_shape_guidance})
         messages.append({"role": "user", "content": message})
         return messages
 

@@ -2210,7 +2210,13 @@ async def test_an_arbiter_cannot_widen_the_lexically_proven_window_kind(
         outward_verdict=("архив", None),
     )
 
-    assert fast_time_intent(question) is None
+    fast = fast_time_intent(question, today=FIXED_TODAY)
+    if fast is not None:
+        # A neutral event query with one fully anchored absolute day is now a
+        # code-owned route.  The other lexical shapes still exercise the
+        # hostile arbiter; neither path may widen the proven day/month.
+        assert question == "Расскажи события 1 августа 2026."
+        assert fast == TimeIntent("past", "single_day")
     await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
         question,
         None,
