@@ -41,6 +41,18 @@ class _Kernel:
         class _Result:
             success = outcome
             error = "" if outcome else "нет права"
+            data = (
+                {
+                    "created": True,
+                    "what": str(params.get("what") or "")[:120],
+                    "on": "2026-08-14",
+                    "at": "",
+                    "requested_when": str(params.get("when") or ""),
+                    "delivery_scheduled": True,
+                }
+                if outcome
+                else {"created": False, "reason": "нет права"}
+            )
 
             def to_llm_message(self) -> str:
                 return "Напоминание поставлено."
@@ -101,7 +113,7 @@ def test_the_notice_reads_as_an_answer_if_repeated_verbatim() -> None:
     _, said, _, _ = _ask(runtime, "напомни про отчёт в пятницу")
 
     text = str(said[0]["content"]).lower()
-    assert "уже поставлено" in text, "обещание вместо факта"
+    assert "поставлено" in text, "обещание вместо факта"
     for imperative in ("скажи", "не обещай", "ответь", "переспроси"):
         assert imperative not in text, f"указание самой себе уедет человеку: {imperative}"
 
@@ -184,6 +196,62 @@ def test_a_refusing_tool_does_not_pretend_it_worked() -> None:
 
     assert done is False
     assert said == [] and used == []
+
+
+def test_a_domain_level_reminder_failure_does_not_pretend_it_worked() -> None:
+    """Successful dispatch is not the same as a created reminder."""
+
+    runtime = _runtime(YES)
+
+    async def not_created(tool: str, params: dict, actor=None):  # noqa: ANN001, ARG001
+        class _Result:
+            success = True
+            error = ""
+            data = {"created": False, "reason": "не разобрала дату"}
+
+            def to_llm_message(self) -> str:
+                return "Напоминание не создано."
+
+        return _Result()
+
+    runtime.kernel.execute = not_created
+    done, said, used, _ = _ask(runtime, "напомни про отчёт в пятницу")
+
+    assert done is False
+    assert said == [] and used == []
+
+
+def test_the_structural_notice_uses_only_the_persisted_bounded_subject() -> None:
+    long_subject = "X" * 180
+    runtime = _runtime(
+        f'{{"напоминание": "да", "что": "{long_subject}", "когда": "в пятницу", "остаток": ""}}'
+    )
+
+    done, said, used, _ = _ask(runtime, "напомни про длинный синтетический предмет")
+
+    assert done is True and used == ["remind"]
+    notice = str(said[0]["content"])
+    assert "X" * 120 in notice
+    assert "X" * 121 not in notice
+
+
+def test_an_undeliverable_reminder_is_reported_as_saved_not_promised() -> None:
+    runtime = _runtime(YES)
+    original = runtime.kernel.execute
+
+    async def saved_only(tool: str, params: dict, actor=None):  # noqa: ANN001
+        result = await original(tool, params, actor=actor)
+        result.data["delivery_scheduled"] = False
+        return result
+
+    runtime.kernel.execute = saved_only
+    done, said, used, _ = _ask(runtime, "напомни про отчёт в пятницу")
+
+    assert done is True and used == ["remind"]
+    notice = str(said[0]["content"]).casefold()
+    assert "сохранено" in notice
+    assert "доставка в чат сейчас недоступна" in notice
+    assert "придёт" not in notice
 
 
 def test_the_prefetch_is_wired_into_the_loop() -> None:

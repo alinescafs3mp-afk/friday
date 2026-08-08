@@ -29,6 +29,22 @@ def test_code_stays_code_and_is_escaped() -> None:
     assert result == "<pre><code>if a &lt; b &amp; c:\n    print(**x**)</code></pre>"
 
 
+def test_table_syntax_inside_fenced_code_stays_literal_code() -> None:
+    source = "```text\n| a | b |\n|---|---|\n| c | d |\n```"
+
+    assert to_telegram_html(source) == ("<pre><code>| a | b |\n|---|---|\n| c | d |</code></pre>")
+
+
+def test_inline_code_inside_a_table_stays_literal_inside_one_code_block() -> None:
+    source = "| expr | value |\n|---|---|\n| `a|b` | `a<b` |"
+
+    result = to_telegram_html(source)
+
+    assert result.count("<pre><code>") == 1
+    assert "\x00" not in result
+    assert result == "<pre><code>expr  value\na|b   a&lt;b</code></pre>"
+
+
 def test_inline_code_survives_next_to_prose() -> None:
     assert to_telegram_html("смотри `fgis.gost.ru` там") == "смотри <code>fgis.gost.ru</code> там"
 
@@ -70,6 +86,10 @@ def test_bullets_become_bullets() -> None:
     assert to_telegram_html("- первый\n- второй") == "• первый\n• второй"
 
 
+def test_markdown_quote_becomes_a_telegram_blockquote() -> None:
+    assert to_telegram_html("> синтетическая цитата") == ("<blockquote>синтетическая цитата</blockquote>")
+
+
 def test_empty_input_stays_empty() -> None:
     assert to_telegram_html("   ") == ""
 
@@ -92,7 +112,7 @@ def test_the_sender_falls_back_to_plain_text_on_a_rejection() -> None:
     source = inspect.getsource(TransportMixin._send_message) + inspect.getsource(
         TransportMixin._post_message_chunk
     )
-    assert '"parse_mode": "HTML"' in source, "разметка снова не включена"
+    assert 'payload["parse_mode"] = "HTML"' in source, "разметка снова не включена"
     assert "status_code == 400" in source, "нет запасного пути — отказ разбора съест сообщение"
     assert 'payload.pop("parse_mode"' in source, "повтор идёт с той же разметкой, что и отказала"
 

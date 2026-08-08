@@ -80,7 +80,9 @@ def test_only_the_first_line_of_the_caution_is_spoken() -> None:
 def test_a_short_caution_is_unchanged() -> None:
     """Однострочная оговорка и раньше не мешала — ничего не должно измениться."""
     spoken, _ = _speak("Сам ответ.", warning="⚠️ Проверьте ключевые факты.")
-    assert spoken == "⚠️ Проверьте ключевые факты.\n\nСам ответ."
+    # Проверяем ровно строку, которую получает Piper: ``sanitize_text`` внутри
+    # production-kernel всегда схлопывает пробельные серии перед синтезом.
+    assert spoken == "⚠️ Проверьте ключевые факты. Сам ответ."
 
 
 def test_without_a_caution_only_the_answer_is_spoken() -> None:
@@ -96,7 +98,7 @@ def test_the_detail_limit_is_still_generous_for_the_eyes() -> None:
 def test_the_trim_happens_where_the_voice_is_made() -> None:
     """Проверяется подключённое: сокращение стоит в самой озвучке."""
     source = inspect.getsource(AgentRuntime._voice_of_the_final_answer)
-    assert 'lead.split("\\n", 1)[0]' in source, "в голос снова уходит вся оговорка"
+    assert 'raw_lead or "").split("\\n", 1)[0]' in source, "в голос снова уходит вся оговорка"
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\n"])

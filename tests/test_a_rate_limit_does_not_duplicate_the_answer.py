@@ -167,6 +167,35 @@ async def test_broken_markup_still_falls_back_to_plain_text(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_code_owned_plain_text_never_reaches_telegrams_markup_parser(tmp_path):
+    class _RecordsPayload:
+        def __init__(self) -> None:
+            self.attempts: list[dict[str, Any]] = []
+
+        async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            request = httpx.Request("POST", url)
+            self.attempts.append(dict(kwargs.get("json") or {}))
+            return httpx.Response(200, json={"ok": True, "result": {}}, request=request)
+
+    literal = (
+        "[SYNTHETIC-CELL](https://attacker.invalid/track) | "
+        "**SYNTHETIC-LITERAL** | `RAW-MARKERS` | ~~SYNTHETIC-STATUS~~"
+    )
+    bridge = _bridge(tmp_path)
+    telegram = _RecordsPayload()
+    try:
+        await bridge._send_message(telegram, 5001, literal, text_format="plain")
+    finally:
+        bridge._inbox.close()
+
+    assert len(telegram.attempts) == 1
+    payload = telegram.attempts[0]
+    assert payload["text"] == literal
+    assert "parse_mode" not in payload
+    assert all(tag not in str(payload["text"]) for tag in ("<a", "<b>", "<code>", "<s>"))
+
+
+@pytest.mark.asyncio
 async def test_a_permission_refusal_says_what_is_missing(tmp_path, monkeypatch):
     """«Действие уже недоступно» — правда только для устаревшей кнопки.
 

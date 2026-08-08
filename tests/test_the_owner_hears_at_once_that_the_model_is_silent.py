@@ -46,6 +46,14 @@ class _WorkingModel:
         return {"content": "Готово."}
 
 
+class _BlankModel:
+    enabled = True
+    total_budget_sec = 5.0
+
+    async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
+        return {"content": "   ", "tool_calls": None, "_queue_wait_sec": 0.0}
+
+
 def _owner(storage, settings, chat_id: str = "100500"):
     """Владелец с личным чатом и этот чат — в списке служебных адресатов."""
     storage.ensure_user("boss", preset_key="owner")
@@ -103,6 +111,32 @@ def test_a_working_model_says_nothing(settings, storage) -> None:
     asyncio.run(_chat(agent, user_id))
 
     assert _queued(storage, user_id) == []
+
+
+@pytest.mark.parametrize("enable_tools", [False, True])
+def test_a_blank_generation_is_a_model_failure_not_a_healthy_empty_answer(
+    settings,
+    storage,
+    enable_tools: bool,
+) -> None:
+    user_id, settings = _owner(storage, settings)
+    agent = AgentRuntime(settings, storage)
+    agent.llm = _BlankModel()
+
+    from friday.permissions import ActorContext
+
+    reply = asyncio.run(
+        agent.chat(
+            user_id,
+            "Синтетический вопрос.",
+            actor=ActorContext(user_id=user_id, preset_key="owner", source="test"),
+            enable_tools=enable_tools,
+        )
+    )
+
+    assert str(reply["message"]).strip()
+    assert reply["context"]["llm_failed"] is True
+    assert _queued(storage, user_id), "пустая генерация не подняла оперативную тревогу"
 
 
 async def _chat(agent: AgentRuntime, user_id: str):

@@ -1613,6 +1613,7 @@ class KnowledgeMixin(StorageShared):
             "SELECT e.id, substr(e.name, 1, 240) AS name, e.entity_type, ("
             " SELECT COUNT(*) FROM knowledge_entity_links l"
             " JOIN knowledge_objects k ON k.id = l.knowledge_object_id"
+            " AND k.user_id = l.user_id"
             " WHERE l.entity_id = e.id AND l.user_id = e.user_id"
             " AND l.status='accepted' AND k.deleted_at IS NULL"
             f" AND {_not_private_knowledge_dependency('k')}"  # nosec B608
@@ -1658,7 +1659,8 @@ class KnowledgeMixin(StorageShared):
             " JOIN knowledge_entity_links l"
             "   ON l.entity_id = e.id AND l.user_id = e.user_id AND l.status='accepted'"
             " JOIN knowledge_objects k"
-            "   ON k.id = l.knowledge_object_id AND k.deleted_at IS NULL"
+            "   ON k.id = l.knowledge_object_id AND k.user_id = l.user_id"
+            "  AND k.deleted_at IS NULL"
             f"  AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             f" WHERE {' AND '.join(clauses)}"  # nosec B608
             " GROUP BY e.id ORDER BY knowledge_count DESC, lower(e.name) ASC LIMIT ?",
@@ -2248,6 +2250,7 @@ class KnowledgeMixin(StorageShared):
                 "FROM knowledge_entity_links l JOIN entities e "
                 "ON e.id=l.entity_id AND e.user_id=l.user_id "
                 "JOIN knowledge_objects k ON k.id=l.knowledge_object_id "
+                "AND k.user_id=l.user_id "
                 f"WHERE l.status='accepted' AND e.deleted_at IS NULL "  # nosec B608
                 f"AND {_not_private_entity_material_dependency('e')} "  # nosec B608
                 f"AND {_not_private_knowledge_dependency('k')} "  # nosec B608
@@ -2316,7 +2319,8 @@ class KnowledgeMixin(StorageShared):
                  COUNT(*) AS entities,
                  SUM(CASE WHEN NOT EXISTS (
                        SELECT 1 FROM knowledge_entity_links o
-                       JOIN knowledge_objects k2 ON k2.id=o.knowledge_object_id
+                       JOIN knowledge_objects k2
+                         ON k2.id=o.knowledge_object_id AND k2.user_id=o.user_id
                        WHERE o.user_id=l.user_id AND o.entity_id=l.entity_id
                          AND o.status='accepted' AND k2.deleted_at IS NULL
                          AND {_not_private_knowledge_dependency("k2")}
@@ -2449,7 +2453,8 @@ class KnowledgeMixin(StorageShared):
         """
         row = self.execute(
             f"""SELECT COUNT(*) AS count FROM knowledge_entity_links l
-               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               JOIN knowledge_objects k
+                 ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
                JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
                     AND {_not_private_entity_material_dependency("e")}
                WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
@@ -2473,7 +2478,8 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(
             f"""SELECT k.id, k.importance, k.quality_score, l.confidence AS _link_confidence
                FROM knowledge_entity_links l
-               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               JOIN knowledge_objects k
+                 ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
                JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
                     AND {_not_private_entity_material_dependency("e")}
                WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
@@ -2520,6 +2526,7 @@ class KnowledgeMixin(StorageShared):
                 " ORDER BY k.importance DESC, k.updated_at DESC) AS _rank"
                 " FROM knowledge_entity_links l"
                 " JOIN knowledge_objects k ON k.id=l.knowledge_object_id"
+                " AND k.user_id=l.user_id"
                 " WHERE l.user_id=? AND l.status='accepted' AND k.deleted_at IS NULL"
                 f" AND {_not_private_knowledge_dependency('k')}"
                 f" AND l.entity_id IN ({placeholders})"
@@ -2559,7 +2566,8 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(
             f"""SELECT k.*, l.confidence AS _link_confidence, l.evidence_json AS _link_evidence_json
                FROM knowledge_entity_links l
-               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               JOIN knowledge_objects k
+                 ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
                JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
                     AND {_not_private_entity_material_dependency("e")}
                WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
@@ -2618,7 +2626,8 @@ class KnowledgeMixin(StorageShared):
         rows = self.execute(
             f"""SELECT {self._ENTITY_CARD_COLUMNS}, l.confidence AS _link_confidence
                FROM knowledge_entity_links l
-               JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+               JOIN knowledge_objects k
+                 ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
                JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
                     AND {_not_private_entity_material_dependency("e")}
                WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted' AND k.deleted_at IS NULL
@@ -2654,7 +2663,8 @@ class KnowledgeMixin(StorageShared):
                                ELSE '' END
                      ELSE '' END AS document_date
              FROM knowledge_entity_links l
-              JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+              JOIN knowledge_objects k
+                ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
              WHERE l.user_id=? AND l.entity_id=? AND l.status='accepted'
                AND k.deleted_at IS NULL
                AND {_not_private_knowledge_dependency("k")}
@@ -2668,7 +2678,8 @@ class KnowledgeMixin(StorageShared):
     _ENTITY_SUMMARY_LINKED_TAGS = f"""
         SELECT DISTINCT substr(CAST(je.value AS TEXT),1,{_ENTITY_SUMMARY_TAG_MAX_CHARS}) AS tag
         FROM knowledge_entity_links l
-        JOIN knowledge_objects k ON k.id=l.knowledge_object_id
+        JOIN knowledge_objects k
+          ON k.id=l.knowledge_object_id AND k.user_id=l.user_id
         JOIN json_each(
             CASE WHEN length(CAST(COALESCE(k.tags_json,'') AS BLOB))<={_ENTITY_CARD_TAGS_MAX_BYTES}
                  THEN CASE WHEN json_valid(k.tags_json)
@@ -6378,7 +6389,8 @@ class KnowledgeMixin(StorageShared):
                       (e.knowledge_object_id IS NOT NULL
                        AND COALESCE(e.content_hash, '') = '') AS forced
                FROM knowledge_objects k
-               LEFT JOIN knowledge_embeddings e ON e.knowledge_object_id = k.id
+               LEFT JOIN knowledge_embeddings e
+                 ON e.knowledge_object_id = k.id AND e.user_id = k.user_id
                WHERE """
             + where
             + """
@@ -6419,7 +6431,8 @@ class KnowledgeMixin(StorageShared):
         where, params = self._missing_embedding_filter(model, chunk_scheme, chunk_threshold)
         row = self.execute(
             """SELECT COUNT(*) AS count FROM knowledge_objects k
-               LEFT JOIN knowledge_embeddings e ON e.knowledge_object_id = k.id
+               LEFT JOIN knowledge_embeddings e
+                 ON e.knowledge_object_id = k.id AND e.user_id = k.user_id
                WHERE """
             + where,  # nosec B608
             params,

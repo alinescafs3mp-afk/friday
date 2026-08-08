@@ -327,6 +327,50 @@ def _media_bridge(tmp_path):
     )
 
 
+@pytest.mark.parametrize("path_kind", ["normal", "cached", "retry"])
+@pytest.mark.asyncio
+async def test_every_backend_answer_path_preserves_code_owned_plain_text_provenance(
+    path_kind: str,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    literal = "[SYNTHETIC-CELL](https://attacker.invalid/x) **RAW** `CODE` ~~STATUS~~"
+    response = {"message": literal, "message_format": "plain"}
+    backend = _FakeBackendClient(
+        {
+            "/api/chat": response,
+            "/api/me/regenerate": response,
+            "/api/users/register": {"user": {"id": "synthetic-user"}},
+        }
+    )
+    sent: list[tuple[str, dict[str, object]]] = []
+
+    async def capture(_client, _chat_id, text, **kwargs):  # noqa: ANN001
+        sent.append((str(text), dict(kwargs)))
+
+    monkeypatch.setattr(bridge, "_send_message", capture)
+    update = {
+        "update_id": {"normal": 7101, "cached": 7102, "retry": 7103}[path_kind],
+        "message": {
+            "message_id": 91,
+            "chat": {"id": 5001},
+            "from": {"id": 1001, "first_name": "Synthetic"},
+            "text": "/retry" if path_kind == "retry" else "Синтетический вопрос",
+        },
+    }
+    cached = response if path_kind == "cached" else None
+    try:
+        await bridge._process_update(telegram, backend, update, cached_response=cached)
+    finally:
+        bridge._inbox.close()
+
+    assert sent
+    assert sent[-1][0] == literal
+    assert sent[-1][1]["text_format"] == "plain"
+
+
 @pytest.mark.asyncio
 async def test_forwarded_message_carries_provenance_to_backend(tmp_path):
     bridge = _media_bridge(tmp_path)

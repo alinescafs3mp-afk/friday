@@ -24,6 +24,7 @@ __all__ = [
     "ReportSpec",
     "SUPPORTED_KINDS",
     "render",
+    "sheet_title_from_report_title",
 ]
 
 #: Что умеем отдать. Расширение — часть договора: по нему Telegram выбирает,
@@ -191,31 +192,31 @@ def _render_xlsx(spec: ReportSpec) -> bytes:
     # `\ / * ? : [ ]` — openpyxl на таком заголовке ПАДАЕТ, и человек вместо
     # файла получает сообщение об ошибке. «Отчёт: июль/август» — совершенно
     # обычная просьба.
-    sheet.title = _sheet_title(spec.title)
-    sheet.append([spec.title])
+    sheet.title = sheet_title_from_report_title(spec.title)
+    _append_xlsx_literal_row(sheet, [spec.title])
     sheet["A1"].font = Font(bold=True, size=14)
     if spec.subtitle:
-        sheet.append([spec.subtitle])
+        _append_xlsx_literal_row(sheet, [spec.subtitle])
     sheet.append([])
     widest = len(spec.title)
     for block in spec.blocks:
         if block.kind == "heading":
-            sheet.append([block.text])
+            _append_xlsx_literal_row(sheet, [block.text])
             sheet.cell(row=sheet.max_row, column=1).font = Font(bold=True, size=12)
             widest = max(widest, len(block.text))
         elif block.kind == "bullets":
             for item in block.items:
-                sheet.append([f"• {item}"])
+                _append_xlsx_literal_row(sheet, [f"• {item}"])
                 widest = max(widest, len(item) + 2)
         elif block.kind == "table":
             for index, row in enumerate(block.rows):
-                sheet.append(row)
+                _append_xlsx_literal_row(sheet, row)
                 if index == 0:
                     for column in range(1, len(row) + 1):
                         sheet.cell(row=sheet.max_row, column=column).font = Font(bold=True)
                 widest = max(widest, *(len(str(cell)) for cell in row)) if row else widest
         else:
-            sheet.append([block.text])
+            _append_xlsx_literal_row(sheet, [block.text])
             widest = max(widest, min(len(block.text), 120))
         sheet.append([])
     # Ширина по содержимому: колонка по умолчанию режет текст, и таблица выглядит
@@ -230,7 +231,25 @@ def _render_xlsx(spec: ReportSpec) -> bytes:
 _SHEET_FORBIDDEN = str.maketrans({char: " " for char in "\\/*?:[]"})
 
 
-def _sheet_title(title: str) -> str:
+def _append_xlsx_literal_row(sheet: Any, values: list[str]) -> None:
+    """Write report payload as literal cells, never as executable formulas.
+
+    ``openpyxl`` interprets a string beginning with ``=`` as a formula.  Report
+    content is model/data output, not workbook code; a formula such as
+    ``WEBSERVICE`` could otherwise perform an outbound request when the person
+    opens the attachment.  Setting the cell type after assignment preserves the
+    visible text (without an apostrophe prefix) while serialising it as an
+    inline string.  All strings are forced literal, so ``+``, ``-`` and ``@``
+    are safe as well if the workbook is later converted to CSV.
+    """
+
+    sheet.append(list(values))
+    for cell in sheet[sheet.max_row]:
+        if isinstance(cell.value, str):
+            cell.data_type = "s"
+
+
+def sheet_title_from_report_title(title: str) -> str:
     """Заголовок отчёта — в допустимое имя листа (не длиннее 31 знака)."""
     cleaned = " ".join(str(title or "").translate(_SHEET_FORBIDDEN).split())
     return cleaned[:31].strip() or "Отчёт"

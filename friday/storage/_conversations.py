@@ -444,7 +444,7 @@ class ConversationsMixin(StorageShared):
     def get_channel_conversation(self, user_id: str, channel: str, channel_id: str) -> str | None:
         row = self.execute(
             """SELECT s.conversation_id FROM channel_sessions s
-               JOIN conversations c ON c.id=s.conversation_id
+               JOIN conversations c ON c.id=s.conversation_id AND c.user_id=s.user_id
                WHERE s.user_id=? AND s.channel=? AND s.channel_id=? AND c.is_archived=0""",
             (user_id, channel, channel_id),
         ).fetchone()
@@ -542,21 +542,38 @@ class ConversationsMixin(StorageShared):
         границы к UTC сам — иначе «15 часов» будет чужим часом.
         """
         window = max(1, min(int(limit), 200))
-        # Из базы берётся с запасом, а прореживание идёт уже по собранному: иначе
-        # «равномерная выборка» получалась из первых N строк каждого источника,
-        # то есть снова из начала промежутка. Потолок — чтобы день с тысячами
-        # событий не поднимался в память целиком.
+        # Каждый источник прореживается ВНУТРИ SQLite по всему интервалу. Простое
+        # ``ORDER BY ... ASC LIMIT`` здесь ложно: на дне с 1500 событиями оно
+        # видит только раннее утро, а затем называет row N «последним событием».
+        # NTILE читает весь индексированный диапазон, но возвращает bounded
+        # representative rows плюс настоящий хвост; тела тысяч строк в Python не
+        # поднимаются.
         fetch_window = min(1000, max(window * 8, 200))
         events: list[dict[str, Any]] = []
         for row in self.execute(
-            """SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title
-               FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id
-               WHERE m.user_id=? AND m.created_at >= ? AND m.created_at <= ?
-               ORDER BY m.created_at ASC LIMIT ?""",
+            """WITH ranked AS (
+                   SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title,
+                          ROW_NUMBER() OVER (ORDER BY m.created_at, m.rowid) AS source_row,
+                          COUNT(*) OVER () AS source_total,
+                          NTILE(?) OVER (ORDER BY m.created_at, m.rowid) AS sample_bucket
+                   FROM messages m LEFT JOIN conversations c
+                     ON c.id = m.conversation_id AND c.user_id = m.user_id
+                   WHERE m.user_id=? AND m.created_at >= ? AND m.created_at <= ?
+               ), sampled AS (
+                   SELECT ranked.*,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY sample_bucket ORDER BY source_row
+                          ) AS bucket_row
+                   FROM ranked
+               )
+               SELECT id, conversation_id, role, content, created_at, title
+               FROM sampled
+               WHERE bucket_row=1 OR source_row=source_total
+               ORDER BY created_at, source_row""",
             # Переписка — по ЧЕЛОВЕКУ. Знания ниже — по арендатору: они общие по
             # прямой просьбе владельца. Один параметр на обе границы означал, что
             # участник видел реплики владельца вместо своих (воспроизведено).
-            (person_id or user_id, since, until, fetch_window),
+            (fetch_window, person_id or user_id, since, until),
         ):
             events.append(
                 {
@@ -569,14 +586,32 @@ class ConversationsMixin(StorageShared):
                 }
             )
         for row in self.execute(
-            f"""SELECT k.id, k.title, k.content_type, k.created_at, k.summary, r.source, r.source_ref
-               FROM knowledge_objects k
-               JOIN raw_objects r ON r.id = k.raw_object_id AND r.user_id=k.user_id
-                    AND {_not_private_raw_dependency("r")}
-               WHERE k.user_id=? AND k.deleted_at IS NULL
-                 AND {_not_private_knowledge_dependency("k")}
-                 AND k.created_at >= ? AND k.created_at <= ?
-               ORDER BY k.created_at ASC LIMIT ?""",  # nosec B608
+            f"""WITH source_rows AS (
+                   SELECT k.id, k.title, k.content_type, k.created_at, k.summary,
+                          r.source, r.source_ref, k.rowid AS storage_row
+                   FROM knowledge_objects k
+                   JOIN raw_objects r ON r.id = k.raw_object_id AND r.user_id=k.user_id
+                        AND {_not_private_raw_dependency("r")}
+                   WHERE k.user_id=? AND k.deleted_at IS NULL
+                     AND {_not_private_knowledge_dependency("k")}
+                     AND k.created_at >= ? AND k.created_at <= ?
+               ), ranked AS (
+                   SELECT source_rows.*,
+                          ROW_NUMBER() OVER (ORDER BY created_at, storage_row) AS source_row,
+                          COUNT(*) OVER () AS source_total,
+                          NTILE(?) OVER (ORDER BY created_at, storage_row) AS sample_bucket
+                   FROM source_rows
+               ), sampled AS (
+                   SELECT ranked.*,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY sample_bucket ORDER BY source_row
+                          ) AS bucket_row
+                   FROM ranked
+               )
+               SELECT id, title, content_type, created_at, summary, source, source_ref
+               FROM sampled
+               WHERE bucket_row=1 OR source_row=source_total
+               ORDER BY created_at, source_row""",  # nosec B608
             (user_id, since, until, fetch_window),
         ):
             events.append(

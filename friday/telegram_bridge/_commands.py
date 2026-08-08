@@ -45,6 +45,12 @@ def _split_rename(argument: str) -> tuple[str, str]:
     return left.strip(), right.strip()
 
 
+def _response_text_format(response: dict[str, Any]) -> str:
+    """Carry only the backend's closed, code-owned plain-text provenance."""
+
+    return "plain" if response.get("message_format") == "plain" else "markdown"
+
+
 _MONTHS_RU = {
     "янв": 1,
     "фев": 2,
@@ -466,6 +472,7 @@ class CommandsMixin(BridgeShared):
                 chat_id,
                 self._format_response_message(response),
                 reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
+                text_format=_response_text_format(response),
             )
             await self._deliver_voice_reply(telegram, chat_id, response)
             await self._deliver_generated_files(telegram, chat_id, response)
@@ -1235,6 +1242,7 @@ class CommandsMixin(BridgeShared):
                 chat_id,
                 self._format_response_message(cached_response),
                 reply_markup=self._response_reply_markup(cached_response, external_user_id=external_user_id),
+                text_format=_response_text_format(cached_response),
                 # Повтор после обрыва: куски, уже дошедшие до человека, не уходят
                 # второй раз. Текст тот же самый — он взят из кеша, не из модели.
                 resume_key=int(update["update_id"]),
@@ -1316,6 +1324,7 @@ class CommandsMixin(BridgeShared):
             chat_id,
             self._format_response_message(response),
             reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
+            text_format=_response_text_format(response),
             # Ответ уже в кеше строки очереди (строкой выше), поэтому повтор после
             # обрыва разрежет тот же текст и продолжит с места обрыва.
             resume_key=int(update["update_id"]),

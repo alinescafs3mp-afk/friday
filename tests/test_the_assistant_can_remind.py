@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from friday.execution_kernel import ExecutionKernel
+from friday.execution_kernel import ExecutionKernel, _future_day
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import AuthorizationService
@@ -93,6 +93,19 @@ def test_a_day_that_already_passed_is_refused_honestly(kernel):
     assert result.data.get("hint")
 
 
+def test_a_yearless_calendar_date_means_its_next_occurrence() -> None:
+    """The schema advertises ``3 августа`` without making the model add a year."""
+
+    today = date(2026, 8, 8)
+
+    assert _future_day("3 августа", today=today) == "2027-08-03"
+    assert _future_day("3 августа в 15:00", today=today) == "2027-08-03"
+    # A year the person actually named is never silently rewritten.
+    assert _future_day("3 августа 2026", today=today) == "2026-08-03"
+    # Leap-day lookup skips non-leap years instead of widening or failing.
+    assert _future_day("29 февраля", today=today) == "2028-02-29"
+
+
 def test_an_unparsable_time_says_so_instead_of_inventing_one(kernel):
     result = _remind(kernel, "позвонить", "как-нибудь потом")
     assert result.data["created"] is False
@@ -105,7 +118,63 @@ def test_an_empty_subject_is_refused(kernel):
 
 
 def test_the_hour_survives_in_the_text(kernel):
-    """Рассылка идёт по дням, поэтому час должен остаться словами."""
+    """The exact clock is persisted for the delivery scanner."""
     result = _remind(kernel, "совещание", "завтра в 15:00")
     assert result.data["created"] is True
     assert result.data.get("at") == "15:00"
+    _, actor, storage = kernel
+    from friday.storage._graph import _bounded_visible_timeline_event_rows
+
+    events = _bounded_visible_timeline_event_rows(storage, actor.user_id, actor.own_id)
+    event = next(item for item in events if item["entity_id"] == result.data["entity_id"])
+    assert event["description"] == "friday-reminder-clock:15:00"
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("завтра в 10 утра", "10:00"),
+        ("завтра в 3 дня", "15:00"),
+        ("завтра в 8 вечера", "20:00"),
+        ("завтра в 12 ночи", "00:00"),
+    ],
+)
+def test_spoken_day_periods_are_persisted_as_an_exact_clock(kernel, spoken: str, expected: str):
+    result = _remind(kernel, "проверить расписание", spoken)
+
+    assert result.data["created"] is True
+    assert result.data["at"] == expected
+
+
+def test_an_exact_clock_earlier_today_is_refused(kernel):
+    result = _remind(kernel, "опоздавшее дело", "сегодня в 00:00")
+
+    assert result.data["created"] is False
+    assert "прош" in str(result.data.get("reason") or "").casefold()
+
+
+def test_a_saved_reminder_does_not_claim_chat_delivery_without_a_route(kernel):
+    result = _remind(kernel, "совещание", "завтра")
+
+    assert result.data["created"] is True
+    assert result.data["delivery_scheduled"] is False
+
+
+def test_two_equal_subjects_are_two_scheduled_effects(kernel):
+    first = _remind(kernel, "одинаковая тема", "завтра")
+    second = _remind(kernel, "одинаковая тема", "в понедельник")
+
+    assert first.data["entity_id"] != second.data["entity_id"]
+
+
+def test_the_kernel_returns_exactly_the_subject_it_persisted(kernel):
+    core, actor, storage = kernel
+    subject = "длинная тема " * 30
+    result = asyncio.run(core.execute("remind", {"what": subject, "when": "завтра"}, actor=actor))
+
+    assert len(result.data["what"]) == 120
+    from friday.storage._graph import _bounded_visible_timeline_event_rows
+
+    events = _bounded_visible_timeline_event_rows(storage, actor.user_id, actor.own_id)
+    event = next(item for item in events if item["entity_id"] == result.data["entity_id"])
+    assert event["name"] == result.data["what"]

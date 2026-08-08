@@ -151,7 +151,11 @@ async def test_a_complete_parse_does_not_claim_truncation(settings, storage) -> 
     )
     assert result["extraction"]["parse_deadline_reached"] is False
     stored = _json(storage.get_raw_object(result["raw_object_id"], "alice")["metadata_json"])
-    assert "parse_deadline_reached" not in stored
+    # Versioned extraction receipts preserve the complete first-upload verdict
+    # for exact replay.  An explicit false is still a proven complete parse,
+    # never a truncation claim or an absent/unknown legacy value.
+    assert stored["extraction_receipt_version"] == 1
+    assert stored["parse_deadline_reached"] is False
 
 
 @pytest.mark.asyncio

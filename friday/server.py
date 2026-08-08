@@ -383,6 +383,26 @@ def _current_turn_file_attachment(
         if "text_success" in extraction
         else raw_metadata.get("text_extraction_success") is True
     )
+    text_truncated = bool(extraction.get("text_truncated") or raw_metadata.get("text_truncated"))
+    archive_truncated = bool(extraction.get("archive_truncated") or raw_metadata.get("archive_truncated"))
+    source_truncated_for_parse = bool(
+        extraction.get("source_truncated_for_parse") or raw_metadata.get("source_truncated_for_parse")
+    )
+    empty_text = bool(
+        not text.strip()
+        and native_text_success
+        and (extraction.get("success") is True or raw_metadata.get("extraction_success") is True)
+        and not advisory_only
+        and not text_truncated
+        and not archive_truncated
+        and not source_truncated_for_parse
+        and not (
+            extraction.get("parse_deadline_reached")
+            or raw_metadata.get("parse_deadline_reached")
+            or extraction.get("parse_pages_truncated")
+            or raw_metadata.get("parse_pages_truncated")
+        )
+    )
 
     def nonnegative_metric(name: str) -> int:
         try:
@@ -402,13 +422,25 @@ def _current_turn_file_attachment(
                 ),
                 "extraction_success": True,
                 "extraction_error": "",
-                "text_truncated": bool(extraction.get("text_truncated") or raw_metadata.get("text_truncated"))
+                "text_truncated": text_truncated
                 or (office_index is None and len(text) > _CURRENT_TURN_ATTACHMENT_CHARS),
                 # OCR and speech recognition are useful same-turn context, but
                 # model-generated text is not source truth for verified=True or
                 # a repair pass. The prompt receives an explicit caveat below.
                 "advisory_only": advisory_only,
                 "verification_eligible": bool(native_text_success and not advisory_only),
+            }
+        )
+    elif empty_text:
+        attachment.update(
+            {
+                "transient_text": "",
+                "extraction_success": True,
+                "extraction_error": "",
+                "empty_text": True,
+                "text_truncated": text_truncated,
+                "advisory_only": False,
+                "verification_eligible": True,
             }
         )
     else:
@@ -418,7 +450,7 @@ def _current_turn_file_attachment(
             {
                 "extraction_success": False,
                 "extraction_error": "current_turn_text_unavailable",
-                "text_truncated": False,
+                "text_truncated": text_truncated,
                 "advisory_only": advisory_only,
                 "verification_eligible": False,
             }
@@ -433,6 +465,8 @@ def _current_turn_file_attachment(
                 extraction.get("parse_pages_truncated") or raw_metadata.get("parse_pages_truncated")
             ),
             "parse_total_pages": nonnegative_metric("parse_total_pages"),
+            "archive_truncated": archive_truncated,
+            "source_truncated_for_parse": source_truncated_for_parse,
         }
     )
     if office_index is not None:
@@ -2039,15 +2073,31 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         transient_file.get(OFFICE_STRUCTURE_KEY),
                         private_office_text,
                     )
+                    transient_incomplete = any(
+                        transient_file.get(key)
+                        for key in (
+                            "text_truncated",
+                            "parse_deadline_reached",
+                            "parse_pages_truncated",
+                            "archive_truncated",
+                            "source_truncated_for_parse",
+                        )
+                    )
                     transient_attachment = {
                         "filename": transient_file["filename"],
                         "transient": True,
+                        "persisted": False,
                         "transient_text": (
                             private_office_text
                             if transient_office_index is not None
                             else transient_file["text_preview"]
                         ),
                         "extraction_success": transient_file["extraction_success"],
+                        "empty_text": bool(
+                            transient_file["extraction_success"]
+                            and not private_office_text.strip()
+                            and not transient_incomplete
+                        ),
                         # Всё, что осмотр УЖЕ выяснил про полноту разбора.
                         # Признаки вычислялись и отбрасывались здесь же, в
                         # четырёх ключах из десяти: модель получала огрызок
@@ -2061,6 +2111,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "parse_pages_read": transient_file["parse_pages_read"],
                         "parse_pages_truncated": transient_file["parse_pages_truncated"],
                         "parse_total_pages": transient_file["parse_total_pages"],
+                        "archive_truncated": transient_file["archive_truncated"],
+                        "source_truncated_for_parse": transient_file["source_truncated_for_parse"],
                         "verification_eligible": bool(transient_file["extraction_success"]),
                     }
                     if transient_office_index is not None:

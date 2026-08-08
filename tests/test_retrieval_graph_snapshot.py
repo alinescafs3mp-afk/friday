@@ -924,6 +924,25 @@ async def test_current_traversal_failure_keeps_the_legacy_graphless_fallback(sto
     assert result["graph_context"]["paths"] == []
 
 
+@pytest.mark.asyncio
+async def test_non_mapping_current_traversal_is_not_reported_as_expanded(storage):
+    knowledge_id = _knowledge(storage)
+
+    class _MalformedGraph(_SnapshotGraph):
+        def context_for_query(self, *_args, **_kwargs):
+            return []
+
+    result = await HybridSearcher(storage, record_usage=False).search(
+        "alice",
+        "Atlas",
+        graph_expansion=True,
+        kg=_MalformedGraph(knowledge_id),
+    )
+
+    assert result["count"] == 1
+    assert result["graph_context"]["expanded"] is False
+
+
 @pytest.mark.parametrize(
     ("field", "bad_value"),
     [

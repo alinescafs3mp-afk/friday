@@ -136,7 +136,9 @@ def test_the_loop_cannot_run_twice():
     assert not any("while" in line for line in guard_line), (
         "починка обёрнута в цикл — система будет крутиться, пока проверка не согласится"
     )
-    repair_block = source[source.index("_repair_once(") :][:700]
+    repair_start = source.index("_repair_once(")
+    repair_end = source.index("attachment_expected_count", repair_start)
+    repair_block = source[repair_start:repair_end]
     assert repair_block.count("_verify_response(") == 1, (
         "после починки проверка повторяется больше одного раза"
     )

@@ -1171,6 +1171,17 @@ class _HistoricalToolLLM:
         return {"content": "Исторический снимок проверен.", "tool_calls": None, "_queue_wait_sec": 0.0}
 
 
+def _graph_tool_schemas(*names: str) -> list[dict[str, Any]]:
+    assert names
+    return [
+        {
+            "type": "function",
+            "function": {"name": name, "parameters": {"type": "object"}},
+        }
+        for name in names
+    ]
+
+
 class _HistoricalToolKernel:
     def __init__(self, *, complete: bool = True) -> None:
         self.complete = complete
@@ -1328,7 +1339,7 @@ async def test_agent_loop_refuses_an_incomplete_historical_tool_snapshot(setting
         context,
         "Проверь снимок",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search"),
         attachments=None,
     )
 
@@ -1362,7 +1373,7 @@ async def test_graphless_current_tool_does_not_erase_the_effective_snapshot(sett
         context,
         "Проверь ещё раз",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search"),
         attachments=None,
     )
 
@@ -1390,7 +1401,7 @@ async def test_current_graph_tool_data_is_safe_projected_before_model_evidence(s
         context,
         "Проверь текущий снимок",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search"),
         attachments=None,
     )
 
@@ -1426,7 +1437,7 @@ async def test_agent_loop_refuses_a_tool_that_drops_requested_known_at(settings,
         context,
         "Проверь снимок",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search"),
         attachments=None,
     )
 
@@ -2284,7 +2295,7 @@ async def test_historical_tool_replaces_current_prompt_and_serializes_only_safe_
         context,
         "Проверь снимок",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search"),
         attachments=None,
     )
 
@@ -2462,7 +2473,7 @@ async def test_turn_boundary_is_shared_across_memory_and_entity_tools(
         context,
         "Проверь границу",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search", "entity_lookup"),
         attachments=None,
     )
 
@@ -2503,7 +2514,7 @@ async def test_turn_boundary_rejects_a_different_historical_snapshot_in_a_later_
         context,
         "Проверь две границы",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search"),
         attachments=None,
     )
 
@@ -2559,7 +2570,7 @@ async def test_current_graphful_tool_is_refused_after_historical_boundary(
         context,
         "Не смешивай снимки",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search", "entity_lookup"),
         attachments=None,
     )
 
@@ -2622,7 +2633,7 @@ async def test_historical_graph_is_refused_after_the_first_current_graph_result(
         context,
         "Не смешивай текущий и исторический графы",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search", "entity_lookup"),
         attachments=None,
     )
 
@@ -2682,7 +2693,7 @@ async def test_two_current_graph_results_share_the_current_boundary(
         context,
         "Текущий граф не меняется",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search", "entity_lookup"),
         attachments=None,
     )
 
@@ -2737,7 +2748,7 @@ async def test_graphless_current_result_does_not_bind_before_a_historical_graph(
         context,
         "Сначала ответ без графа, потом исторический снимок",
         ActorContext(user_id="alice", preset_key="owner", source="test"),
-        tools=[{"type": "function"}],
+        tools=_graph_tool_schemas("memory_search", "entity_lookup"),
         attachments=None,
     )
 

@@ -89,7 +89,16 @@ async def _run(settings, storage, llm, kernel):
     actor = ActorContext(user_id="alice", preset_key="owner", source="api")
     context = AgentContext(conversation_id="conv-test", user_id="alice", interaction_mode="dialogue")
     return await agent._agentic_loop(  # noqa: SLF001
-        context, "найди по двум запросам", actor, tools=[{"type": "function"}], attachments=None
+        context,
+        "найди по двум запросам",
+        actor,
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "memory_search", "parameters": {"type": "object"}},
+            }
+        ],
+        attachments=None,
     )
 
 

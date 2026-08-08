@@ -22,7 +22,9 @@ import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
+    _answer_claims_complete_attachment,
     _attachment_evidence_chunks,
+    _attachment_reference_kind,
     _bounded_attachment_projection,
     _requires_complete_attachment_evidence,
 )
@@ -295,7 +297,23 @@ def test_replay_is_bound_to_one_exact_source_message_id_not_caption_equality(set
     assert mismatched == [] and mismatched_expected == 0
 
 
-@pytest.mark.parametrize("message", ["как там дела?", "создай документ Word"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "как там дела?",
+        "создай документ Word",
+        "расскажи про документальное кино",
+        "объясни файловые системы",
+        "покажи вложенные циклы",
+        "повтори таблицу умножения",
+        "расскажи о таблице Менделеева",
+        "расскажи о таблице истинности",
+        "расскажи о документе ООН",
+        "объясни документ RFC 9110",
+        "расскажи о файле hosts",
+        "какие бывают файловые форматы?",
+    ],
+)
 def test_broad_language_after_a_file_does_not_restore_it(settings, storage, message):
     raw = _stored_file(storage, "alice", "STALE-FILE-TEXT", filename="stale.txt")
     runtime = AgentRuntime(settings, storage)
@@ -341,6 +359,12 @@ def test_broad_language_after_a_file_does_not_restore_it(settings, storage, mess
         "Проверь ещё раз.",
         "Посчитай заново.",
         "Почему ты нашла только 10?",
+        "Что внутри файла?",
+        "А что внутри?",
+        "Прочитай его.",
+        "Посмотри его.",
+        "Кто внутри?",
+        "Содержимое?",
     ],
 )
 def test_immediate_file_followups_restore_the_exact_private_source(
@@ -614,10 +638,27 @@ def test_tiny_leading_files_do_not_consume_the_verifier_tail_budget():
         "Итого три.",
         "Ровно 16.",
         "Трое.",
+        "Сотрудников: 3 — Иван, Пётр, Анна.",
+        "Позиций — 16.",
+        "В документе находятся шестнадцать специалистов.",
+        "Кроме них больше людей не указано.",
+        "Других людей не обнаружено.",
+        "Названы Иван, Пётр и Анна, больше людей нет.",
+        "Перечислено 16 должностей.",
+        "Иван, Пётр и Анна — больше имён не нашлось.",
+        "В документе двадцать одна позиция.",
+        "Всего — шестнадцать.",
+        "Количество — 16.",
+        "Это весь список.",
+        "Это весь состав.",
+        "Никого не пропустила.",
+        "Остальных нет.",
+        "Все 16 перечислены.",
     ],
 )
 def test_answer_only_exhaustiveness_language_requires_complete_attachment(answer):
     assert _requires_complete_attachment_evidence("Кто указан в документе?", answer)
+    assert _answer_claims_complete_attachment(answer)
 
 
 @pytest.mark.parametrize(
@@ -626,10 +667,34 @@ def test_answer_only_exhaustiveness_language_requires_complete_attachment(answer
         "Позиция 3 — Иван.",
         "На странице 3 указан Иван.",
         "Показана часть списка.",
+        "На первой странице три человека.",
+        "Первые 3 позиции перечислены.",
+        "В первом разделе 3 сотрудника.",
+        "У Ивана три должности.",
+        "Не все люди перечислены.",
+        "Это не полный список людей.",
+        "Показаны только первые 3 позиции.",
+        "Из 16 позиций видны первые 3.",
+        "В строке 3 указаны два человека.",
+        "На странице 3 указаны два человека.",
+        "На листе 2 три позиции.",
+        "В разделе 4 три сотрудника.",
+        "В колонке А три имени.",
+        "Три человека — только пример, список неполный.",
+        "Три человека; это неполный список.",
+        "Это лишь три человека из списка.",
     ],
 )
 def test_ordinals_and_explicit_partiality_are_not_complete_attachment_claims(answer):
     assert not _requires_complete_attachment_evidence("Кто указан в документе?", answer)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Что внутри файла?", "Покажи содержимое файла.", "О чём документ?"],
+)
+def test_explicit_content_followups_are_file_references(message: str) -> None:
+    assert _attachment_reference_kind(message) == "explicit"
 
 
 @pytest.mark.parametrize(
@@ -702,6 +767,10 @@ async def test_incomplete_attachment_cannot_turn_an_all_or_count_answer_verified
         "Указаны только Иван, Пётр и Анна.",
         "Больше никого в документе нет.",
         "Это полный состав документа.",
+        "Сотрудников: 3 — Иван, Пётр и Анна.",
+        "Позиций — 16.",
+        "Других людей не обнаружено.",
+        "Иван, Пётр и Анна — больше имён не нашлось.",
     ],
 )
 @pytest.mark.asyncio

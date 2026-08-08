@@ -935,6 +935,7 @@ class TransportMixin(BridgeShared):
         *,
         reply_markup: dict[str, Any] | None = None,
         resume_key: int | None = None,
+        text_format: str = "markdown",
     ) -> None:
         """Отправить текст, при необходимости несколькими кусками.
 
@@ -957,16 +958,18 @@ class TransportMixin(BridgeShared):
         already_sent = 0
         if resume_key is not None:
             already_sent = min(self._inbox.answer_chunks_sent(resume_key), len(chunks))
+        plain_text = text_format == "plain"
         for index, chunk in enumerate(chunks):
             if index < already_sent:
                 # Этот кусок человек уже получил на прошлой попытке.
                 continue
             payload: dict[str, Any] = {
                 "chat_id": chat_id,
-                "text": to_telegram_html(chunk) or chunk,
-                "parse_mode": "HTML",
+                "text": chunk if plain_text else (to_telegram_html(chunk) or chunk),
                 "disable_web_page_preview": True,
             }
+            if not plain_text:
+                payload["parse_mode"] = "HTML"
             if reply_markup and index == len(chunks) - 1:
                 payload["reply_markup"] = reply_markup
             response = await self._post_message_chunk(client, payload, chunk)
@@ -1026,7 +1029,7 @@ class TransportMixin(BridgeShared):
 
         for attempt in range(self._RATE_LIMIT_RETRIES):
             response = await client.post(f"{self._api_url}/sendMessage", json=payload)
-            if response.status_code == 400:
+            if response.status_code == 400 and "parse_mode" in payload:
                 # Разметка важна, но доставка важнее. Любая неожиданная
                 # последовательность — незакрытый тег на границе куска, экзотика
                 # из ответа модели — не должна стоить человеку СООБЩЕНИЯ: именно

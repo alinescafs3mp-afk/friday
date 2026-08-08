@@ -88,6 +88,23 @@ def test_removing_a_conversation_keeps_every_word_and_clears_only_the_channel(st
     assert storage.delete_conversation("conv_никогда_не_существовал", "alice")["existed"] is False
 
 
+def test_a_channel_session_cannot_point_into_another_tenants_conversation(storage):
+    storage.ensure_user("alice")
+    storage.ensure_user("bob")
+    own = storage.create_conversation("alice", "Alice chat")
+    foreign = storage.create_conversation("bob", "Bob chat")
+    storage.set_channel_conversation("alice", "telegram", "synthetic-channel", own["id"])
+    with storage.transaction() as conn:
+        conn.execute(
+            """UPDATE channel_sessions SET conversation_id=?
+               WHERE user_id=? AND channel=? AND channel_id=?""",
+            (foreign["id"], "alice", "telegram", "synthetic-channel"),
+        )
+
+    assert storage.get_channel_conversation("alice", "telegram", "synthetic-channel") is None
+    assert storage.get_channel_session("alice", "telegram", "synthetic-channel") is None
+
+
 def test_conversations_manage_capability_scoped_to_real_users(storage):
     from friday.permissions import CORE_CAPABILITIES, ActorContext, AuthorizationService
 

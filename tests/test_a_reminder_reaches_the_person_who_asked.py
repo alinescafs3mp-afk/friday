@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -84,7 +85,7 @@ async def test_the_reminder_goes_to_its_author_not_to_the_archive_owner(settings
     assert actor.user_id == LEGACY_OWNER_USER_ID, "общий архив не включился — тест бессмыслен"
     assert actor.own_id == person
 
-    result = await core.execute("remind", {"what": "забрать пропуск", "when": "завтра"}, actor=actor)
+    result = await core.execute("remind", {"what": "забрать пропуск", "when": "сегодня"}, actor=actor)
     assert result.success and result.data["created"] is True
 
     ctx = ServiceContext(settings=shared, storage=storage, kg=KnowledgeGraph(storage), ingestion=None)
@@ -149,7 +150,7 @@ async def test_without_the_shared_archive_nothing_changes(settings, storage):
     core.bind_services(storage, graph, WebSurfer(plain), IngestionPipeline(plain, storage, graph))
     actor = auth.actor_for_user(person, source="telegram")
 
-    result = await core.execute("remind", {"what": "позвонить в часть", "when": "завтра"}, actor=actor)
+    result = await core.execute("remind", {"what": "позвонить в часть", "when": "сегодня"}, actor=actor)
     assert result.data["created"] is True
 
     ctx = ServiceContext(settings=plain, storage=storage, kg=KnowledgeGraph(storage), ingestion=None)
@@ -157,3 +158,105 @@ async def test_without_the_shared_archive_nothing_changes(settings, storage):
 
     by_chat = _bodies_by_chat(storage)
     assert any("позвонить" in body for body in by_chat.get(OTHER_CHAT, []))
+
+
+@pytest.mark.asyncio
+async def test_an_exact_clock_reminder_is_not_queued_early(settings, storage, monkeypatch):
+    import friday.organs.reminders as reminders_module
+
+    tuned = replace(
+        settings,
+        shared_archive=False,
+        reminders_enabled=True,
+        reminders_lead_days=1,
+        quiet_hours_start=0,
+        quiet_hours_end=0,
+    )
+    person = _seed_person(storage, OTHER_CHAT)
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    core = ExecutionKernel(auth, tuned)
+    core.bind_services(storage, graph, WebSurfer(tuned), IngestionPipeline(tuned, storage, graph))
+    actor = auth.actor_for_user(person, source="telegram")
+    result = await core.execute(
+        "remind",
+        {"what": "точный созвон", "when": "завтра в 15:00"},
+        actor=actor,
+    )
+    assert result.data["created"] is True
+    assert result.data["delivery_scheduled"] is True
+
+    planned = datetime.fromisoformat(str(result.data["on"])).date()
+    zone = ZoneInfo(tuned.local_timezone or "UTC")
+    ctx = ServiceContext(settings=tuned, storage=storage, kg=KnowledgeGraph(storage), ingestion=None)
+
+    monkeypatch.setattr(
+        reminders_module,
+        "local_now",
+        lambda _settings: datetime.combine(planned, time(14, 59), tzinfo=zone),
+    )
+    await scan_reminders(ctx)
+    assert not any("точный созвон" in body for bodies in _bodies_by_chat(storage).values() for body in bodies)
+
+    monkeypatch.setattr(
+        reminders_module,
+        "local_now",
+        lambda _settings: datetime.combine(planned, time(15, 0), tzinfo=zone),
+    )
+    await scan_reminders(ctx)
+    bodies = _bodies_by_chat(storage).get(OTHER_CHAT, [])
+    assert sum("точный созвон" in body for body in bodies) == 1
+    assert any("15:00" in body for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_a_date_only_personal_reminder_is_not_queued_a_day_early(
+    settings,
+    storage,
+    monkeypatch,
+):
+    import friday.organs.reminders as reminders_module
+
+    tuned = replace(
+        settings,
+        shared_archive=False,
+        reminders_enabled=True,
+        reminders_lead_days=1,
+        quiet_hours_start=0,
+        quiet_hours_end=0,
+    )
+    person = _seed_person(storage, OTHER_CHAT)
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    core = ExecutionKernel(auth, tuned)
+    core.bind_services(storage, graph, WebSurfer(tuned), IngestionPipeline(tuned, storage, graph))
+    actor = auth.actor_for_user(person, source="telegram")
+    result = await core.execute(
+        "remind",
+        {"what": "отчёт без часа", "when": "завтра"},
+        actor=actor,
+    )
+    assert result.data["created"] is True
+
+    planned = datetime.fromisoformat(str(result.data["on"])).date()
+    zone = ZoneInfo(tuned.local_timezone or "UTC")
+    ctx = ServiceContext(settings=tuned, storage=storage, kg=KnowledgeGraph(storage), ingestion=None)
+
+    monkeypatch.setattr(
+        reminders_module,
+        "local_now",
+        lambda _settings: datetime.combine(planned - timedelta(days=1), time(23, 59), tzinfo=zone),
+    )
+    await scan_reminders(ctx)
+    assert not any(
+        "отчёт без часа" in body for bodies in _bodies_by_chat(storage).values() for body in bodies
+    )
+
+    monkeypatch.setattr(
+        reminders_module,
+        "local_now",
+        lambda _settings: datetime.combine(planned, time(0, 0), tzinfo=zone),
+    )
+    await scan_reminders(ctx)
+    bodies = _bodies_by_chat(storage).get(OTHER_CHAT, [])
+    assert sum("отчёт без часа" in body for body in bodies) == 1

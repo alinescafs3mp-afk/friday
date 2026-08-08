@@ -19,6 +19,16 @@ import pytest
 
 from friday.tts import Speech, TTSUnavailable, sanitize_text
 
+
+def _speak_tool_schema() -> list[dict[str, object]]:
+    return [
+        {
+            "type": "function",
+            "function": {"name": "speak", "parameters": {"type": "object"}},
+        }
+    ]
+
+
 # --- sanitize_text (pure, no model) ----------------------------------------
 
 
@@ -259,10 +269,65 @@ async def test_agentic_loop_surfaces_the_speak_attachment_as_voice_clip(settings
     )
 
     result = await agent._agentic_loop(
-        context, "Привет, ответь голосом", actor, tools=[{"type": "function"}], attachments=None
+        context,
+        "Привет, ответь голосом",
+        actor,
+        tools=_speak_tool_schema(),
+        attachments=None,
     )
 
     assert result["voice_clip"] == attachment
+
+
+@pytest.mark.asyncio
+async def test_agentic_loop_rejects_a_dispatch_only_speak_success(settings, storage):
+    """A successful dispatch without rendered audio is not deed evidence."""
+    from friday.agent_runtime import AgentContext, AgentRuntime
+    from friday.execution_kernel import ToolResult
+    from friday.permissions import ActorContext
+
+    class _ClaimsVoiceLLM(_SpeaksThenAnswersLLM):
+        async def chat(self, messages, *, temperature=None, max_tokens=None, tools=None):
+            result = await super().chat(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tools,
+            )
+            if self.calls > 1:
+                result["content"] = "Голосовое отправлено."
+            return result
+
+    class _DispatchOnlyKernel:
+        async def execute(self, name, arguments, *, actor=None):  # noqa: ANN001, ARG002
+            assert name == "speak"
+            return ToolResult(
+                name,
+                True,
+                data={"spoken": False, "reason": "voice engine unavailable"},
+                attachment={"kind": "voice", "audio_base64": "dispatch-only"},
+            )
+
+    storage.ensure_user("alice")
+    agent = AgentRuntime(settings, storage, llm=_ClaimsVoiceLLM(), kernel=_DispatchOnlyKernel())
+    actor = ActorContext(user_id="alice", preset_key="owner", source="api")
+    context = AgentContext(
+        conversation_id="conv-test",
+        user_id="alice",
+        conversation_history=[],
+        interaction_mode="dialogue",
+    )
+
+    result = await agent._agentic_loop(
+        context,
+        "Ответь голосом",
+        actor,
+        tools=_speak_tool_schema(),
+        attachments=None,
+    )
+
+    assert result.get("voice_clip") is None
+    assert result.get("tool_evidence") == []
 
 
 @pytest.mark.asyncio
@@ -287,7 +352,11 @@ async def test_agentic_loop_leaves_voice_clip_none_when_speak_was_not_called(set
     )
 
     result = await agent._agentic_loop(
-        context, "просто вопрос", actor, tools=[{"type": "function"}], attachments=None
+        context,
+        "просто вопрос",
+        actor,
+        tools=_speak_tool_schema(),
+        attachments=None,
     )
 
     assert result.get("voice_clip") is None
@@ -334,6 +403,94 @@ async def test_the_clip_carries_the_final_answer_and_its_caveat(settings, storag
 
 
 @pytest.mark.asyncio
+async def test_the_clip_carries_both_distinct_caveats(settings, storage):
+    from friday.agent_runtime import AgentRuntime
+
+    spoken: list[str] = []
+
+    class _Result:
+        success = True
+        attachment = {"kind": "voice", "audio_base64": "final"}
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            spoken.append(str(arguments["text"]))
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.settings = settings
+    await runtime._voice_of_the_final_answer(  # noqa: SLF001
+        {"kind": "voice"},
+        "Содержательный ответ.",
+        warning="Нет оснований в архиве.\nПодробности.",
+        caution="Проверка нашла расхождение.\nЕщё подробности.",
+        actor=None,
+    )
+
+    assert spoken == ["Нет оснований в архиве. Проверка нашла расхождение. Содержательный ответ."]
+
+
+@pytest.mark.asyncio
+async def test_a_quote_only_answer_has_an_audible_source_marker(settings, storage):
+    from friday.agent_runtime import AgentRuntime
+
+    spoken: list[str] = []
+
+    class _Result:
+        success = True
+        attachment = {"kind": "voice", "audio_base64": "final"}
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            spoken.append(str(arguments["text"]))
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.settings = settings
+    await runtime._voice_of_the_final_answer(  # noqa: SLF001
+        {"kind": "voice"},
+        "«Я заказала курьера.»",
+        warning="",
+        caution="",
+        actor=None,
+    )
+
+    assert spoken and spoken[0].startswith("Цитата:")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Я не могу заказать такси. " + ("Подробности без действий. " * 300) + "Могу составить инструкцию.",
+        "Я заказала курьера, " + ("по этому гипотетическому сценарию " * 100) + "возможно.",
+        "Файл отправлен " + ("как часть длинного вопроса " * 100) + "?",
+    ],
+)
+async def test_an_unsafe_truncated_voice_prefix_is_not_synthesised(settings, storage, answer):
+    from dataclasses import replace
+
+    from friday.agent_runtime import AgentRuntime
+
+    class _Kernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
+            raise AssertionError("unsafe audible prefix reached synthesis")
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.settings = replace(settings, tts_max_chars=500)
+
+    assert (
+        await runtime._voice_of_the_final_answer(  # noqa: SLF001
+            {"kind": "voice"}, answer, warning="", caution="", actor=None
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_no_voice_was_asked_for_no_voice_is_made(settings, storage):
     """Контроль: пересинтез не превращает каждый ответ в озвученный."""
     from friday.agent_runtime import AgentRuntime
@@ -357,8 +514,8 @@ async def test_no_voice_was_asked_for_no_voice_is_made(settings, storage):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_resynthesis_keeps_the_clip_that_exists(settings, storage):
-    """Сорвавшийся пересинтез не должен отнимать у человека голос совсем."""
+async def test_a_failed_resynthesis_discards_the_unverified_midturn_clip(settings, storage):
+    """Старый клип нельзя вернуть: он мог нести текст до финальных рубежей."""
     from friday.agent_runtime import AgentRuntime
 
     class _Kernel:
@@ -372,7 +529,7 @@ async def test_a_failed_resynthesis_keeps_the_clip_that_exists(settings, storage
         await runtime._voice_of_the_final_answer(  # noqa: SLF001
             original, "ответ", warning="", caution="", actor=None
         )
-        is original
+        is None
     )
 
 

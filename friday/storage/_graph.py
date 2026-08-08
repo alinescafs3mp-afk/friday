@@ -212,6 +212,9 @@ def _bounded_visible_timeline_event_rows(
     *,
     start: str | None = None,
     end: str | None = None,
+    not_before: str | None = None,
+    exact_since: str | None = None,
+    exact_until: str | None = None,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     """Shared document events plus exactly this person's private reminders."""
@@ -243,6 +246,50 @@ def _bounded_visible_timeline_event_rows(
     if end:
         clauses.append("t.occurred_at<=?")
         params.append(end)
+    if exact_since and exact_until:
+        clauses.append(
+            "((length(t.occurred_at)>10 AND "
+            "replace(substr(t.occurred_at,1,19),' ','T')>=? AND "
+            "replace(substr(t.occurred_at,1,19),' ','T')<=?) OR "
+            "(length(t.occurred_at)<=10 AND "
+            "COALESCE(t.source,'') LIKE 'reminder:%' AND "
+            "substr(COALESCE(e.description,''),1,22)=? AND "
+            "(substr(t.occurred_at,1,10)||'T'||"
+            "substr(COALESCE(e.description,''),23,5)||':00')>=? AND "
+            "(substr(t.occurred_at,1,10)||'T'||"
+            "substr(COALESCE(e.description,''),23,5)||':00')<=?))"
+        )
+        params.extend(
+            [
+                str(exact_since)[:19],
+                str(exact_until)[:19],
+                "friday-reminder-clock:",
+                str(exact_since)[:19],
+                str(exact_until)[:19],
+            ]
+        )
+    elif not_before:
+        current_day = str(not_before)[:10]
+        current_clock = str(not_before)[11:16]
+        clauses.append(
+            "(substr(t.occurred_at,1,10)>? OR "
+            "(substr(t.occurred_at,1,10)=? AND ("
+            "(length(t.occurred_at)>10 AND "
+            "replace(substr(t.occurred_at,1,19),' ','T')>?) OR "
+            "(length(t.occurred_at)<=10 AND ("
+            "COALESCE(t.source,'') NOT LIKE 'reminder:%' OR "
+            "substr(COALESCE(e.description,''),1,22)<>? OR "
+            "substr(COALESCE(e.description,''),23,5)>?)))))"
+        )
+        params.extend(
+            [
+                current_day,
+                current_day,
+                str(not_before)[:19],
+                "friday-reminder-clock:",
+                current_clock,
+            ]
+        )
     params.append(max(1, min(int(limit), 2_000)))
     rows = storage.execute(
         f"""SELECT substr(e.id,1,160) AS entity_id,
@@ -270,6 +317,9 @@ def _count_visible_timeline_events(
     *,
     start: str | None = None,
     end: str | None = None,
+    not_before: str | None = None,
+    exact_since: str | None = None,
+    exact_until: str | None = None,
 ) -> int:
     clauses = [
         "e.entity_type='event'",
@@ -297,6 +347,50 @@ def _count_visible_timeline_events(
     if end:
         clauses.append("t.occurred_at<=?")
         params.append(end)
+    if exact_since and exact_until:
+        clauses.append(
+            "((length(t.occurred_at)>10 AND "
+            "replace(substr(t.occurred_at,1,19),' ','T')>=? AND "
+            "replace(substr(t.occurred_at,1,19),' ','T')<=?) OR "
+            "(length(t.occurred_at)<=10 AND "
+            "COALESCE(t.source,'') LIKE 'reminder:%' AND "
+            "substr(COALESCE(e.description,''),1,22)=? AND "
+            "(substr(t.occurred_at,1,10)||'T'||"
+            "substr(COALESCE(e.description,''),23,5)||':00')>=? AND "
+            "(substr(t.occurred_at,1,10)||'T'||"
+            "substr(COALESCE(e.description,''),23,5)||':00')<=?))"
+        )
+        params.extend(
+            [
+                str(exact_since)[:19],
+                str(exact_until)[:19],
+                "friday-reminder-clock:",
+                str(exact_since)[:19],
+                str(exact_until)[:19],
+            ]
+        )
+    elif not_before:
+        current_day = str(not_before)[:10]
+        current_clock = str(not_before)[11:16]
+        clauses.append(
+            "(substr(t.occurred_at,1,10)>? OR "
+            "(substr(t.occurred_at,1,10)=? AND ("
+            "(length(t.occurred_at)>10 AND "
+            "replace(substr(t.occurred_at,1,19),' ','T')>?) OR "
+            "(length(t.occurred_at)<=10 AND ("
+            "COALESCE(t.source,'') NOT LIKE 'reminder:%' OR "
+            "substr(COALESCE(e.description,''),1,22)<>? OR "
+            "substr(COALESCE(e.description,''),23,5)>?)))))"
+        )
+        params.extend(
+            [
+                current_day,
+                current_day,
+                str(not_before)[:19],
+                "friday-reminder-clock:",
+                current_clock,
+            ]
+        )
     row = storage.execute(
         f"""SELECT COUNT(*) AS count FROM entity_time t
               JOIN entities e ON e.id=t.entity_id AND e.user_id=t.user_id
@@ -3026,7 +3120,8 @@ class GraphMixin(StorageShared):
             "substr(COALESCE(t.occurred_end, ''), 1, 64) AS occurred_end, "
             "substr(COALESCE(t.precision, ''), 1, 40) AS precision, "
             "substr(COALESCE(t.source, ''), 1, 256) AS source "
-            "FROM entity_time t JOIN entities e ON e.id=t.entity_id "
+            "FROM entity_time t JOIN entities e "
+            "ON e.id=t.entity_id AND e.user_id=t.user_id "
             f"WHERE {' AND '.join(clauses)} "  # nosec B608
             "ORDER BY t.occurred_at ASC, e.name ASC, e.id ASC LIMIT ?",
             tuple(params),
@@ -3082,7 +3177,7 @@ class GraphMixin(StorageShared):
             params.append(end)
         row = self.execute(
             "SELECT COUNT(*) AS count FROM entity_time t "
-            "JOIN entities e ON e.id=t.entity_id "
+            "JOIN entities e ON e.id=t.entity_id AND e.user_id=t.user_id "
             f"WHERE {' AND '.join(clauses)}",  # nosec B608
             tuple(params),
         ).fetchone()

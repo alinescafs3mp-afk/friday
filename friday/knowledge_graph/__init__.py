@@ -1245,11 +1245,12 @@ class KnowledgeGraph:
         aliases: list[str] | None = None,
         description: str = "",
         metadata: dict[str, Any] | None = None,
+        deduplicate: bool = True,
     ) -> dict[str, Any]:
         clean_name = " ".join((name or "").split()).strip()
         if not clean_name:
             raise ValueError("Entity name is required")
-        existing = self.find_entity(user_id, clean_name)
+        existing = self.find_entity(user_id, clean_name) if deduplicate else None
         if existing and existing.get("entity_type") == entity_type.value:
             return existing
         entity = Entity(
@@ -3506,26 +3507,45 @@ class KnowledgeGraph:
         )
 
     def get_stats(self, user_id: str) -> dict[str, Any]:
-        return {
-            # Считается, а не меряется длиной выборки: `entities` взяты с потолком
-            # 5000, и выше него это число застывало, продолжая выглядеть точным.
-            # Замер: счётчик 0.9 мс против 16.6 мс у полной выборки — дешевле И честнее.
-            "entity_count": self.storage.count_entities(user_id),
-            "relation_count": _count_visible_relations(self.storage, user_id),
-            "knowledge_object_count": self.storage.count_knowledge_objects(user_id),
-            # Тем же агрегатом, что и `entity_count` выше, и по тем же условиям:
-            # разбивка считалась питоном по странице в 5000 строк и на большем
-            # корпусе застывала, стоя рядом с честным «всего».
-            "entities_by_type": self.storage.count_entities_by_type(user_id),
-            "pending_resolutions": self.storage.count_resolution_candidates(
-                user_id, ResolutionStatus.SUGGESTED
-            ),
-            "pending_inbox": self.storage.count_inbox(user_id, InboxStatus.PENDING),
-            "pending_relation_candidates": self.storage.count_relation_candidates(
-                user_id, status="suggested"
-            ),
-            "pending_conflicts": self.storage.count_knowledge_conflicts(user_id, status="suggested"),
-        }
+        # One response is one SQLite WAL snapshot.  Separate autocommit SELECTs
+        # can otherwise straddle an ingest commit and publish an impossible
+        # combination (for example a promoted knowledge object with the old raw
+        # count).  A deferred read transaction does not advance the relation
+        # write clock and does not block concurrent WAL readers/writers.
+        connection = self.storage.conn
+        owns_snapshot = not connection.in_transaction
+        if owns_snapshot:
+            connection.execute("BEGIN")
+        try:
+            return {
+                # Считается, а не меряется длиной выборки: `entities` взяты с потолком
+                # 5000, и выше него это число застывало, продолжая выглядеть точным.
+                # Замер: счётчик 0.9 мс против 16.6 мс у полной выборки — дешевле И честнее.
+                "entity_count": self.storage.count_entities(user_id),
+                "relation_count": _count_visible_relations(self.storage, user_id),
+                "knowledge_object_count": self.storage.count_knowledge_objects(user_id),
+                # Raw material and original files are distinct from promoted
+                # Knowledge Objects. Both use the same quarantine-aware predicate
+                # as their read surfaces, so hidden existence is not disclosed even
+                # as an aggregate.
+                "raw_object_count": self.storage.count_visible_raw_objects(user_id),
+                "file_count": self.storage.count_visible_raw_objects(user_id, files_only=True),
+                # Тем же агрегатом, что и `entity_count` выше, и по тем же условиям:
+                # разбивка считалась питоном по странице в 5000 строк и на большем
+                # корпусе застывала, стоя рядом с честным «всего».
+                "entities_by_type": self.storage.count_entities_by_type(user_id),
+                "pending_resolutions": self.storage.count_resolution_candidates(
+                    user_id, ResolutionStatus.SUGGESTED
+                ),
+                "pending_inbox": self.storage.count_inbox(user_id, InboxStatus.PENDING),
+                "pending_relation_candidates": self.storage.count_relation_candidates(
+                    user_id, status="suggested"
+                ),
+                "pending_conflicts": self.storage.count_knowledge_conflicts(user_id, status="suggested"),
+            }
+        finally:
+            if owns_snapshot and connection.in_transaction:
+                connection.rollback()
 
     def is_empty(self, user_id: str) -> bool:
         return self.storage.count_knowledge_objects(user_id) == 0 and not self.storage.list_entities(

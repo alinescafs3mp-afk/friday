@@ -95,6 +95,44 @@ class FilesMixin(PipelineShared):
             "inbox_id": existing_inbox.get("id") if existing_inbox else None,
             "knowledge_object": existing_ko,
         }
+        # Exact retries deliberately skip parsing, but the bounded extraction
+        # receipt is durable provenance, not a property of only the first
+        # request.  Restore the same shape consumed by Telegram and the
+        # current-turn attachment projection.  Legacy rows predate the versioned
+        # receipt; retain the two loss flags already shipped for those rows
+        # without inventing success/count values they never stored.
+        if raw_metadata.get("extraction_receipt_version") == 1:
+
+            def receipt_count(name: str) -> int:
+                try:
+                    return max(0, int(raw_metadata.get(name) or 0))
+                except (TypeError, ValueError):
+                    return 0
+
+            replay["extraction"] = {
+                "success": raw_metadata.get("extraction_success") is True,
+                "text_success": raw_metadata.get("text_extraction_success") is True,
+                "chars": receipt_count("extraction_chars"),
+                "text_truncated": raw_metadata.get("text_truncated") is True,
+                "parse_deadline_reached": raw_metadata.get("parse_deadline_reached") is True,
+                "parse_pages_read": receipt_count("parse_pages_read"),
+                "parse_pages_truncated": raw_metadata.get("parse_pages_truncated") is True,
+                "parse_total_pages": receipt_count("parse_total_pages"),
+                "vision_pages_total": receipt_count("vision_pages_total"),
+                "vision_pages_read": receipt_count("vision_pages_read"),
+                "archive_truncated": raw_metadata.get("archive_truncated") is True,
+                "archive_files": receipt_count("archive_files"),
+                "archive_files_read": receipt_count("archive_files_read"),
+                "source_truncated_for_parse": (raw_metadata.get("source_truncated_for_parse") is True),
+                "unsupported_format": raw_metadata.get("unsupported_format") is True,
+            }
+        else:
+            replay_coverage = {
+                "archive_truncated": raw_metadata.get("archive_truncated") is True,
+                "source_truncated_for_parse": (raw_metadata.get("source_truncated_for_parse") is True),
+            }
+            if any(replay_coverage.values()):
+                replay["extraction"] = replay_coverage
         # Повтор обязан вести себя как первый раз. Замерено на живой переписке
         # (2 августа): голосовое распозналось верно —
         # «Привет, пятница!» — и легло в архив, а на второй и третий присыл того
@@ -779,6 +817,8 @@ class FilesMixin(PipelineShared):
             # parser result block; the next same-turn projection and later
             # conversation follow-up must retain the same coverage caveat.
             "text_truncated": text_truncated,
+            "archive_truncated": bool((extraction.metadata or {}).get("archive_budget_exhausted")),
+            "source_truncated_for_parse": bool((extraction.metadata or {}).get("source_truncated_for_parse")),
             "extraction_error": extraction.error if not extraction.success else "",
             "vision_used": bool(vision),
             "vision_review_required": bool(vision),
@@ -805,14 +845,42 @@ class FilesMixin(PipelineShared):
             file_metadata["parse_total_pages"] = int((extraction.metadata or {}).get("total_pages") or 0)
         if media_kind:
             file_metadata["media_kind"] = media_kind
+        # Freeze the complete, bounded extraction receipt beside the Raw Object.
+        # Exact retries deliberately skip parsing; without these code-owned
+        # fields the first upload warned about an unread tail while the replay
+        # silently looked complete.  Counts and booleans only — no parser
+        # exception, source text, or file bytes are copied into the receipt.
+        file_metadata.update(
+            {
+                "extraction_receipt_version": 1,
+                "extraction_chars": len(text_content or ""),
+                "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),
+                "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
+                "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
+                "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
+                "vision_pages_total": int((vision or {}).get("pages_total") or 0),
+                "vision_pages_read": int((vision or {}).get("pages_read") or 0),
+                "archive_files": int((extraction.metadata or {}).get("files") or 0),
+                "archive_files_read": int((extraction.metadata or {}).get("previewed_files") or 0),
+                "unsupported_format": bool(
+                    extraction.error == "unsupported_document_format"
+                    and not mime_type.startswith("image/")
+                    and not looks_like_audio(content_type=mime_type, filename=filename)
+                ),
+            }
+        )
         # Caller metadata is provenance, not a route into code-owned parser
         # state.  Remove the reserved key unconditionally, then append the
         # independently validated structure last.  An invalid/missing parser
         # result therefore means "no index", never "trust the caller's index".
+        # Caller metadata is provenance only.  Merge it first, then let every
+        # parser/storage-derived field win: otherwise a colliding key can
+        # rewrite the durable filename/hash/path or erase an extraction loss
+        # which the first response already reported truthfully.
         raw_metadata = {
+            **supplied_metadata,
             **file_metadata,
             "promotion_assessment": assessment.to_dict(),
-            **supplied_metadata,
         }
         raw_metadata.pop(_OFFICE_STRUCTURE_METADATA_KEY, None)
         raw_metadata.pop(_OFFICE_STRUCTURE_ATTESTATION_KEY, None)

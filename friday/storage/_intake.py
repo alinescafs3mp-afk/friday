@@ -127,6 +127,19 @@ def _bounded_public_inbox_card(item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class IntakeMixin(StorageShared):
+    def count_visible_raw_objects(self, user_id: str, *, files_only: bool = False) -> int:
+        """Count the privacy-safe Raw Object corpus, never a bounded page."""
+
+        file_clause = " AND r.content_type='file'" if files_only else ""
+        row = self.execute(
+            f"""SELECT COUNT(*) AS count FROM raw_objects r
+                  WHERE r.user_id=? AND r.deleted_at IS NULL
+                    AND {_not_private_raw_dependency("r")}
+                    {file_clause}""",  # nosec B608 -- clauses are fixed constants
+            (user_id,),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
     def _raw_from_row(self, row: sqlite3.Row | dict[str, Any]) -> RawObject:
         data = dict(row)
         return RawObject(
@@ -432,10 +445,12 @@ class IntakeMixin(StorageShared):
                 f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
                           snippet(raw_fts, 0, '', '', '…', 24) AS excerpt,
                           (SELECT i2.status FROM inbox i2 WHERE i2.raw_object_id=r.id
+                            AND i2.user_id=r.user_id
                             AND {_not_private_inbox_dependency("i2")}
                             ORDER BY i2.reviewed_at DESC, i2.created_at DESC LIMIT 1) AS inbox_status,
                           (SELECT k.id FROM knowledge_objects k
-                            WHERE k.raw_object_id=r.id AND k.deleted_at IS NULL
+                            WHERE k.raw_object_id=r.id AND k.user_id=r.user_id
+                              AND k.deleted_at IS NULL
                               AND {_not_private_knowledge_dependency("k")}
                             ORDER BY k.version DESC LIMIT 1) AS knowledge_object_id
                    FROM raw_fts
@@ -444,7 +459,8 @@ class IntakeMixin(StorageShared):
                      AND {_not_private_raw_dependency("r")}
                      AND NOT EXISTS (
                          SELECT 1 FROM inbox i
-                          WHERE i.raw_object_id=r.id AND i.status='ignored'
+                          WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                            AND i.status='ignored'
                      )
                      AND raw_fts MATCH ?
                    ORDER BY bm25(raw_fts) ASC, r.received_at DESC
@@ -491,7 +507,11 @@ class IntakeMixin(StorageShared):
 
     def get_inbox_item(self, inbox_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
-            f"""SELECT i.* FROM inbox i WHERE i.id=? AND i.user_id=?
+            f"""SELECT i.* FROM inbox i
+                  JOIN raw_objects r
+                    ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                   AND {_not_private_raw_dependency("r")}
+                 WHERE i.id=? AND i.user_id=?
                   AND {_not_private_inbox_dependency("i")}""",  # nosec B608
             (inbox_id, user_id),
         ).fetchone()
@@ -499,7 +519,11 @@ class IntakeMixin(StorageShared):
 
     def get_inbox_by_raw(self, raw_object_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
-            f"""SELECT i.* FROM inbox i WHERE i.raw_object_id=? AND i.user_id=?
+            f"""SELECT i.* FROM inbox i
+                  JOIN raw_objects r
+                    ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                   AND {_not_private_raw_dependency("r")}
+                 WHERE i.raw_object_id=? AND i.user_id=?
                   AND {_not_private_inbox_dependency("i")}
                  ORDER BY i.created_at DESC LIMIT 1""",  # nosec B608
             (raw_object_id, user_id),
@@ -508,7 +532,11 @@ class IntakeMixin(StorageShared):
 
     def find_inbox_by_raw(self, raw_object_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
-            f"""SELECT i.* FROM inbox i WHERE i.raw_object_id=? AND i.user_id=?
+            f"""SELECT i.* FROM inbox i
+                  JOIN raw_objects r
+                    ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                   AND {_not_private_raw_dependency("r")}
+                 WHERE i.raw_object_id=? AND i.user_id=?
                   AND {_not_private_inbox_dependency("i")}
                  ORDER BY i.created_at DESC LIMIT 1""",  # nosec B608
             (raw_object_id, user_id),
@@ -520,13 +548,20 @@ class IntakeMixin(StorageShared):
         if status:
             row = self.execute(
                 f"""SELECT COUNT(*) AS count FROM inbox i
+                     JOIN raw_objects r
+                       ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                      AND {_not_private_raw_dependency("r")}
                      WHERE i.user_id=? AND i.status=?
                        AND {_not_private_inbox_dependency("i")}""",  # nosec B608
                 (user_id, enum_value(status)),
             ).fetchone()
         else:
             row = self.execute(
-                f"""SELECT COUNT(*) AS count FROM inbox i WHERE i.user_id=?
+                f"""SELECT COUNT(*) AS count FROM inbox i
+                     JOIN raw_objects r
+                       ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                      AND {_not_private_raw_dependency("r")}
+                     WHERE i.user_id=?
                       AND {_not_private_inbox_dependency("i")}""",  # nosec B608
                 (user_id,),
             ).fetchone()
@@ -546,14 +581,22 @@ class IntakeMixin(StorageShared):
         # unique tail, paging over such a batch duplicates and drops rows.
         if status:
             rows = self.execute(
-                f"""SELECT i.* FROM inbox i WHERE i.user_id=? AND i.status=?
+                f"""SELECT i.* FROM inbox i
+                   JOIN raw_objects r
+                     ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                    AND {_not_private_raw_dependency("r")}
+                   WHERE i.user_id=? AND i.status=?
                      AND {_not_private_inbox_dependency("i")}
                    ORDER BY i.created_at DESC, i.rowid DESC LIMIT ? OFFSET ?""",  # nosec B608
                 (user_id, enum_value(status), max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
         else:
             rows = self.execute(
-                f"""SELECT i.* FROM inbox i WHERE i.user_id=?
+                f"""SELECT i.* FROM inbox i
+                   JOIN raw_objects r
+                     ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                    AND {_not_private_raw_dependency("r")}
+                   WHERE i.user_id=?
                      AND {_not_private_inbox_dependency("i")}
                    ORDER BY i.created_at DESC, i.rowid DESC LIMIT ? OFFSET ?""",  # nosec B608
                 (user_id, max(1, min(limit, 1000)), max(0, offset)),

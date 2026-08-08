@@ -382,7 +382,8 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_deliver_voice_reply": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "_send_message": (
         "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, "
-        "reply_markup: 'dict[str, Any] | None' = None, resume_key: 'int | None' = None) -> 'None'"
+        "reply_markup: 'dict[str, Any] | None' = None, resume_key: 'int | None' = None, "
+        "text_format: 'str' = 'markdown') -> 'None'"
     ),
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_search": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",

@@ -64,6 +64,34 @@ def test_the_excel_file_opens_and_keeps_the_table():
     assert any("Бутко" in value for value in values)
 
 
+def test_excel_report_payload_is_always_literal_data():
+    """Model/data strings must never turn into executable workbook formulas."""
+
+    import openpyxl
+
+    dangerous = [
+        '=WEBSERVICE("https://example.invalid/private")',
+        '=HYPERLINK("file:///private/path", "open")',
+        "+SUM(1,2)",
+        "-1+1",
+        "@SUM(1,2)",
+    ]
+    spec = spec_from_payload(
+        dangerous[0],
+        dangerous[1],
+        [
+            {"kind": "heading", "text": dangerous[2]},
+            {"kind": "bullets", "items": [dangerous[3]]},
+            {"kind": "table", "rows": [[dangerous[4], dangerous[0]]]},
+        ],
+    )
+
+    book = openpyxl.load_workbook(io.BytesIO(render("xlsx", spec)), data_only=False)
+    cells = [cell for row in book.active.iter_rows() for cell in row if cell.value is not None]
+    assert all(cell.data_type != "f" for cell in cells)
+    assert set(dangerous).issubset({str(cell.value).removeprefix("• ") for cell in cells})
+
+
 def test_the_pdf_keeps_cyrillic_readable():
     """Мутация: убрать регистрацию DejaVu (вернуть Helvetica) — тест краснеет.
 

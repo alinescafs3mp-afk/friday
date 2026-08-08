@@ -1,0 +1,1257 @@
+{
+  "$schema": "friday.package_b_routing_holdout.v1",
+  "schema_version": 1,
+  "synthetic_only": true,
+  "reference_clock": {
+    "date": "2026-08-08",
+    "timezone": "Europe/Moscow"
+  },
+  "purpose": "Frozen synthetic routing holdout for Package B: K14 temporal routing and K02 whole-archive counts. K01 is evaluated as their shared missing-required-tool symptom.",
+  "privacy": {
+    "contains_live_chat": false,
+    "contains_live_file_text": false,
+    "contains_real_people": false,
+    "contains_real_tenant_ids": false,
+    "contains_model_responses": false
+  },
+  "closed_enums": {
+    "case_group": [
+      "time_positive",
+      "time_control",
+      "global_count_positive",
+      "local_count_control"
+    ],
+    "time_direction": [
+      "past",
+      "future",
+      "none"
+    ],
+    "time_window_kind": [
+      "single_day",
+      "single_hour",
+      "rolling_days",
+      "calendar_week",
+      "calendar_month",
+      "explicit_range",
+      "none"
+    ],
+    "archive_count_scope": [
+      "whole_archive",
+      "local_selection",
+      "none"
+    ],
+    "count_metric": [
+      "all_stats",
+      "knowledge_objects",
+      "raw_objects",
+      "files",
+      "entities",
+      "relations",
+      "none"
+    ],
+    "required_tool": [
+      "what_happened",
+      "upcoming",
+      "kg_stats",
+      "web_research",
+      "remind",
+      "collect_files",
+      "memory_search",
+      "user_activity",
+      "user_knowledge_search",
+      "message_search",
+      "list_tags",
+      "none"
+    ],
+    "route": [
+      "forced_time_prefetch",
+      "forced_archive_stats",
+      "external_freshness",
+      "reminder_action",
+      "file_collection",
+      "ordinary_archive_search",
+      "material_intake",
+      "structural_correction",
+      "general_conversation",
+      "person_activity",
+      "own_message_search",
+      "general_reasoning",
+      "attachment_exact",
+      "archive_filtered_search"
+    ]
+  },
+  "acceptance": {
+    "expected_case_counts": {
+      "time_positive": 25,
+      "time_positive_past": 15,
+      "time_positive_future": 10,
+      "time_control": 20,
+      "global_count_positive": 20,
+      "local_count_control": 20,
+      "total": 85
+    },
+    "questions_must_be_unique": true,
+    "time_positives_require_exactly_one_expected_tool": true,
+    "time_controls_forbid": [
+      "what_happened",
+      "upcoming"
+    ],
+    "global_count_positives_require_exactly_one_expected_tool": true,
+    "local_count_controls_forbid": [
+      "kg_stats"
+    ]
+  },
+  "time_positives": [
+    {
+      "id": "k14_past_001",
+      "group": "time_positive",
+      "question": "Что происходило 14 марта 2025 года?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_002",
+      "group": "time_positive",
+      "question": "Покажи события 7 апреля 2024 года в 16:00.",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_hour",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_003",
+      "group": "time_positive",
+      "question": "Что было вчера?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_004",
+      "group": "time_positive",
+      "question": "Чем занимались позавчера?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_005",
+      "group": "time_positive",
+      "question": "Какие события появились три дня назад?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_006",
+      "group": "time_positive",
+      "question": "Покажи активность за последние три дня.",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "rolling_days",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_007",
+      "group": "time_positive",
+      "question": "Что происходило за минувшие десять суток?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "rolling_days",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_008",
+      "group": "time_positive",
+      "question": "Что было на прошлой неделе?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "calendar_week",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_009",
+      "group": "time_positive",
+      "question": "Дай ленту с начала этой недели до текущего момента.",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "calendar_week",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_010",
+      "group": "time_positive",
+      "question": "Какие события были в прошлом месяце?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "calendar_month",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_011",
+      "group": "time_positive",
+      "question": "Покажи, что происходило с начала текущего месяца.",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "calendar_month",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_012",
+      "group": "time_positive",
+      "question": "Что было с 4 по 9 мая 2025 года?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "explicit_range",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_013",
+      "group": "time_positive",
+      "question": "Покажи события между 2025-06-01 и 2025-06-05.",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "explicit_range",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_014",
+      "group": "time_positive",
+      "question": "Чем занимались в феврале 2025 года?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "calendar_month",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_past_015",
+      "group": "time_positive",
+      "question": "Что уже произошло сегодня?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_001",
+      "group": "time_positive",
+      "question": "Что у меня запланировано на сегодня?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_002",
+      "group": "time_positive",
+      "question": "Какие дела ещё предстоят сегодня вечером?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_003",
+      "group": "time_positive",
+      "question": "Какие планы на завтра?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_004",
+      "group": "time_positive",
+      "question": "Что запланировано на послезавтра?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_005",
+      "group": "time_positive",
+      "question": "Что предстоит в ближайшие три дня?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "rolling_days",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_006",
+      "group": "time_positive",
+      "question": "Покажи планы от сегодня до пятницы.",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "explicit_range",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_007",
+      "group": "time_positive",
+      "question": "Какие события намечены на следующую неделю?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "calendar_week",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_008",
+      "group": "time_positive",
+      "question": "Что ещё стоит в календаре до конца этой недели?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "calendar_week",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_009",
+      "group": "time_positive",
+      "question": "Какие планы на следующий месяц?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "calendar_month",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    },
+    {
+      "id": "k14_future_010",
+      "group": "time_positive",
+      "question": "Что запланировано с 2031-09-10 по 2031-09-15?",
+      "expected": {
+        "time_direction": "future",
+        "time_window_kind": "explicit_range",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "upcoming",
+        "route": "forced_time_prefetch"
+      }
+    }
+  ],
+  "time_controls": [
+    {
+      "id": "k14_control_001",
+      "group": "time_control",
+      "question": "Какая завтра погода в вымышленном городе Северный Луч?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "web_research",
+        "route": "external_freshness",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_002",
+      "group": "time_control",
+      "question": "Какой сегодня курс вымышленной валюты ZED?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "web_research",
+        "route": "external_freshness",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_003",
+      "group": "time_control",
+      "question": "Сколько будет стоить синтетический модуль Кварц-7 на следующей неделе?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "web_research",
+        "route": "external_freshness",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_004",
+      "group": "time_control",
+      "question": "Какие мировые новости вышли вчера?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "web_research",
+        "route": "external_freshness",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_005",
+      "group": "time_control",
+      "question": "Напомни завтра проверить макет Орбита.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "remind",
+        "route": "reminder_action",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_006",
+      "group": "time_control",
+      "question": "Не дай забыть в пятницу обновить синтетический чек-лист.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "remind",
+        "route": "reminder_action",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_007",
+      "group": "time_control",
+      "question": "Собери архивом файлы, которые пришли вчера.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "collect_files",
+        "route": "file_collection",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_008",
+      "group": "time_control",
+      "question": "Упакуй все вложения, полученные в понедельник.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "collect_files",
+        "route": "file_collection",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_009",
+      "group": "time_control",
+      "question": "Что написано в синтетическом акте от 3 июня 2025 года?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "memory_search",
+        "route": "ordinary_archive_search",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_010",
+      "group": "time_control",
+      "question": "Перескажи протокол под названием «Вчерашний контур».",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "memory_search",
+        "route": "ordinary_archive_search",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_011",
+      "group": "time_control",
+      "question": "Синтетическая встреча команды Альфа состоялась вчера в полдень.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "material_intake",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_012",
+      "group": "time_control",
+      "question": "Пересылаю заметку: тестовый стенд включат завтра утром.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "material_intake",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_013",
+      "group": "time_control",
+      "question": "Нет, контрольная дата не понедельник, а вторник.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "structural_correction",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_014",
+      "group": "time_control",
+      "question": "Сегодня я немного устал.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_conversation",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_015",
+      "group": "time_control",
+      "question": "Что посмотреть сегодня вечером для отдыха?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_conversation",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_016",
+      "group": "time_control",
+      "question": "Что участник Бета присылал вчера?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "user_activity",
+        "route": "person_activity",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_017",
+      "group": "time_control",
+      "question": "О чём мы говорили вчера в тестовом диалоге?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "message_search",
+        "route": "own_message_search",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_018",
+      "group": "time_control",
+      "question": "Сколько дней было в феврале 2032 года?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_reasoning",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_019",
+      "group": "time_control",
+      "question": "Каким днём недели будет 1 января 2030 года?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_reasoning",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    },
+    {
+      "id": "k14_control_020",
+      "group": "time_control",
+      "question": "Переведи на русский синтетическую фразу «tomorrow begins today».",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_reasoning",
+        "forbidden_tools": ["what_happened", "upcoming"]
+      }
+    }
+  ],
+  "global_count_positives": [
+    {
+      "id": "k02_global_001",
+      "group": "global_count_positive",
+      "question": "Сколько всего объектов знаний хранится в моей базе?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "knowledge_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_002",
+      "group": "global_count_positive",
+      "question": "Назови общее количество записей в личном архиве.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "knowledge_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_003",
+      "group": "global_count_positive",
+      "question": "Каково число сохранённых знаний у меня?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "knowledge_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_004",
+      "group": "global_count_positive",
+      "question": "Посчитай весь корпус знаний целиком.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "knowledge_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_005",
+      "group": "global_count_positive",
+      "question": "Сколько материалов всего находится в моей памяти?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "raw_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_006",
+      "group": "global_count_positive",
+      "question": "Покажи сводные счётчики моего хранилища.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_007",
+      "group": "global_count_positive",
+      "question": "Дай общую статистику личной базы.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_008",
+      "group": "global_count_positive",
+      "question": "Сколько документов насчитывает весь мой архив?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "knowledge_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_009",
+      "group": "global_count_positive",
+      "question": "Какой общий объём архива в записях?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "knowledge_objects",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_010",
+      "group": "global_count_positive",
+      "question": "Сколько всего файлов сохранено у меня в архиве?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "files",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_011",
+      "group": "global_count_positive",
+      "question": "Назови число загруженных файлов во всём хранилище.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "files",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_012",
+      "group": "global_count_positive",
+      "question": "Сколько сущностей всего построено в моём графе?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "entities",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_013",
+      "group": "global_count_positive",
+      "question": "Каково общее количество узлов графа?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "entities",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_014",
+      "group": "global_count_positive",
+      "question": "Сколько связей всего есть в моём графе?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "relations",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_015",
+      "group": "global_count_positive",
+      "question": "Назови полное число отношений в базе.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "relations",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_016",
+      "group": "global_count_positive",
+      "question": "Сколько знаний, сущностей и связей у меня всего?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_017",
+      "group": "global_count_positive",
+      "question": "Покажи размеры моей базы по основным категориям.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_018",
+      "group": "global_count_positive",
+      "question": "Посчитай всё содержимое архива по видам.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_019",
+      "group": "global_count_positive",
+      "question": "Сколько всего сохранённых материалов и файлов?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    },
+    {
+      "id": "k02_global_020",
+      "group": "global_count_positive",
+      "question": "Дай итоговые количества объектов моего хранилища.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "whole_archive",
+        "count_metric": "all_stats",
+        "required_tool": "kg_stats",
+        "route": "forced_archive_stats"
+      }
+    }
+  ],
+  "local_count_controls": [
+    {
+      "id": "k02_control_001",
+      "group": "local_count_control",
+      "question": "Сколько строк в этой синтетической таблице?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_002",
+      "group": "local_count_control",
+      "question": "Сколько участников перечислено в приложенном тестовом списке?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_003",
+      "group": "local_count_control",
+      "question": "Посчитай позиции на текущем листе учебной книги.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_004",
+      "group": "local_count_control",
+      "question": "Каково число страниц в загруженном макете?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_005",
+      "group": "local_count_control",
+      "question": "Сколько файлов лежит внутри этого учебного ZIP?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_006",
+      "group": "local_count_control",
+      "question": "Сколько объектов упомянуто в этом фрагменте текста?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_007",
+      "group": "local_count_control",
+      "question": "Сколько документов подписал синтетический участник Гамма в июле?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "user_knowledge_search",
+        "route": "archive_filtered_search",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_008",
+      "group": "local_count_control",
+      "question": "Сколько записей подходит под учебный запрос «Кобальт»?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "memory_search",
+        "route": "archive_filtered_search",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_009",
+      "group": "local_count_control",
+      "question": "Сколько заметок отмечено синтетическим тегом «лазурь»?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "list_tags",
+        "route": "archive_filtered_search",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_010",
+      "group": "local_count_control",
+      "question": "Сколько событий произошло вчера?",
+      "expected": {
+        "time_direction": "past",
+        "time_window_kind": "single_day",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "what_happened",
+        "route": "forced_time_prefetch",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_011",
+      "group": "local_count_control",
+      "question": "Сколько сообщений нашлось в нашей беседе про макет Зета?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "message_search",
+        "route": "own_message_search",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_012",
+      "group": "local_count_control",
+      "question": "Сколько файлов относится к синтетической теме «Маяк» за 5 мая 2025 года?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "memory_search",
+        "route": "archive_filtered_search",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_013",
+      "group": "local_count_control",
+      "question": "Сколько сущностей названо в синтетическом документе «Контур-4»?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "memory_search",
+        "route": "archive_filtered_search",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_014",
+      "group": "local_count_control",
+      "question": "Каково общее число персонажей в разделе «Учебная смена»?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_015",
+      "group": "local_count_control",
+      "question": "Посчитай элементы в приведённом ниже синтетическом JSON.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_reasoning",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_016",
+      "group": "local_count_control",
+      "question": "Сколько дней осталось до следующего понедельника?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_reasoning",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_017",
+      "group": "local_count_control",
+      "question": "Сколько сейчас стоит условный датчик Лира-2?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "web_research",
+        "route": "external_freshness",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_018",
+      "group": "local_count_control",
+      "question": "Сколько букв в синтетическом слове «кварц»?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "none",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "general_reasoning",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_019",
+      "group": "local_count_control",
+      "question": "Сколько действий было у синтетического участника Дельта?",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "user_activity",
+        "route": "person_activity",
+        "forbidden_tools": ["kg_stats"]
+      }
+    },
+    {
+      "id": "k02_control_020",
+      "group": "local_count_control",
+      "question": "Посчитай все строки в прикреплённом учебном файле.",
+      "expected": {
+        "time_direction": "none",
+        "time_window_kind": "none",
+        "archive_count_scope": "local_selection",
+        "count_metric": "none",
+        "required_tool": "none",
+        "route": "attachment_exact",
+        "forbidden_tools": ["kg_stats"]
+      }
+    }
+  ]
+}

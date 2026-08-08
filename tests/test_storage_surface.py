@@ -158,7 +158,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # a logical-clock promise before any mutable graph projection is returned.
 # 347 → 348: count_feedback_state counts the same privacy-filtered personal
 # feedback rows as get_feedback_state without turning a bounded page into a total.
-EXPECTED_MEMBER_COUNT = 348
+# 348 → 349: count_visible_raw_objects exposes exact tenant-wide raw/file
+# aggregates through the same privacy boundary as visible knowledge.
+EXPECTED_MEMBER_COUNT = 349
 EXPECTED_SIGNATURES: dict[str, str] = {
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -210,6 +212,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "count_entity_relations": "(self, entity_id: 'str', user_id: 'str | None' = None) -> 'int'",
     "count_feedback_state": "(self, user_id: 'str', *, target_type: 'str | None' = None, target_id: 'str | None' = None, feedback_type: 'str | None' = None, negative_only: 'bool' = False) -> 'int'",
     "count_knowledge_objects": "(self, user_id: 'str', *, uploaded_by: 'str | None' = None) -> 'int'",
+    "count_visible_raw_objects": "(self, user_id: 'str', *, files_only: 'bool' = False) -> 'int'",
     "count_missions": "(self, user_id: 'str', *, statuses: 'Sequence[str] | None' = None) -> 'int'",
     "count_recent_audit": "(self, action: 'str', since: 'str', *, limit: 'int | None' = None) -> 'int'",
     "count_user_vectors": "(self, user_id: 'str', model: 'str', *, before: 'tuple[str, str] | None' = None) -> 'int'",
@@ -885,17 +888,25 @@ def test_denormalized_vector_owner_never_overrides_parent_tenant(storage):
     )
     storage.commit()
 
+    missing = {str(row["id"]) for row in storage.list_knowledge_missing_embedding("m", limit=100)}
+    assert missing == {mismatched, reverse_mismatched}
+    assert storage.count_knowledge_missing_embedding("m") == 2
+
     for tenant in ("owner", "other"):
         sql, _ = _captured_sql(
             storage,
             lambda tenant=tenant: storage.get_user_chunk_embeddings(tenant, "m", 4),
         )
         assert "CROSS JOIN" not in sql
+        vector_page = storage.list_user_vectors_page(tenant, "m")
+        vector_page_ids = {key for key, _, _ in vector_page}
+        assert storage.count_user_vectors(tenant, "m") == len(vector_page_ids) == 1
         for foreign_parent in (mismatched, reverse_mismatched):
             assert foreign_parent not in {key for key, _ in storage.get_user_embeddings(tenant, "m", 4)}
             assert foreign_parent not in {
                 key for key, _ in storage.get_user_embeddings(tenant, "m", 4, limit=10)
             }
+            assert foreign_parent not in vector_page_ids
             assert not [
                 key
                 for key, _ in storage.get_user_chunk_embeddings(tenant, "m", 4)

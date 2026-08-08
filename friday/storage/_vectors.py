@@ -136,6 +136,7 @@ class VectorsMixin(StorageShared):
         clauses = [
             "e.user_id = ?",
             "e.model = ?",
+            "k.user_id = e.user_id",
             "k.deleted_at IS NULL",
             _not_private_knowledge_dependency("k"),
         ]
@@ -166,6 +167,7 @@ class VectorsMixin(StorageShared):
         clauses = [
             "e.user_id = ?",
             "e.model = ?",
+            "k.user_id = e.user_id",
             "k.deleted_at IS NULL",
             _not_private_knowledge_dependency("k"),
         ]

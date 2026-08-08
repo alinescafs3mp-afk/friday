@@ -200,7 +200,16 @@ async def test_a_slow_but_alive_endpoint_cannot_hold_a_slot_for_every_round(sett
     )
 
     result = await agent._agentic_loop(
-        context, "вопрос", actor, tools=[{"type": "function"}], attachments=None
+        context,
+        "вопрос",
+        actor,
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "noop_tool", "parameters": {"type": "object"}},
+            }
+        ],
+        attachments=None,
     )
 
     # 2 round-loop calls + 1 final synthesis call. Without the fix this would run
@@ -254,7 +263,16 @@ async def test_semaphore_queueing_does_not_count_against_a_busy_but_healthy_turn
     )
 
     result = await agent._agentic_loop(
-        context, "вопрос", actor, tools=[{"type": "function"}], attachments=None
+        context,
+        "вопрос",
+        actor,
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "noop_tool", "parameters": {"type": "object"}},
+            }
+        ],
+        attachments=None,
     )
 
     # All 5 research-mode rounds run (queueing excluded) + 1 final synthesis call.

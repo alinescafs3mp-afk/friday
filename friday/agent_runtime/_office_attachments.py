@@ -129,16 +129,51 @@ _SEMANTIC_FILTER = re.compile(
     r"\b(?:работа|состо|вход|занима|руковод|подчин)\w*\s+(?:в|на|у)\b|"
     r"\b(?:с|со)\s+(?:ролью|стажем|именем|фамилией|статусом)\b|"
     r"\b(?:на\s+букву|по\s+имен|по\s+фамил)\w*\b|"
-    r"\bне\s+(?:указан|назван|перечислен|включен|включён)\w*\b)",
+    r"\bне\s+(?:указан|назван|перечислен|включен|включён)\w*\b|"
+    r"\bрол(?:ь|и|ей|ях|ям|ями)\b)",
+    re.IGNORECASE,
+)
+_FILTERED_ENTITY_SELECTION = re.compile(
+    rf"(?:\b(?:кто|кого|какие)\b[^.!?\n]{{0,80}}\b(?:{_PEOPLE_NOUN}|{_RECORD_NOUN})\b|"
+    rf"\b(?:{_PEOPLE_NOUN}|{_RECORD_NOUN})\b[^.!?\n]{{0,80}}"
+    r"\b(?:с\s+ролью|из\s+(?:отдел|департамент)\w*|со\s+статусом)\b)",
+    re.IGNORECASE,
+)
+_WHOLE_SET_MEMBERSHIP = re.compile(
+    r"(?:\b(?:указан|назван|перечислен|упомянут|содерж|наход|представлен|вход)\w*\b|"
+    r"\b(?:во\s+)?вс[её]м\b|\b(?:вс[еёх]|полн\w*|спис\w*|переч\w*|состав\w*|"
+    r"итого|всего)\b)",
+    re.IGNORECASE,
+)
+_ATTACHED_ENTITY_LIST_REQUEST = re.compile(
+    rf"\b(?:скаж|сообщ|напиш|озвуч|вытащ|назов|покаж|перечисл|укаж|привед)\w*"
+    rf"[^.!?\n]{{0,64}}\b{_PEOPLE_NOUN}\b[^.!?\n]{{0,32}}"
+    r"\b(?:из|в)\s+(?:(?:этом|этих|данном)\s+)?(?:файл|документ|таблиц)\w*\b",
+    re.IGNORECASE,
+)
+_DECLARATIVE_ATTACHMENT_PROSE = re.compile(
+    r"^\s*(?:"
+    r"из\s+(?:(?:этого|данного)\s+)?(?:файл|документ|таблиц|вложен)\w*\s+"
+    r"(?:видно|следует|понятно)\b|"
+    r"(?:в|из|по)\s+(?:(?:этом|этой|этих|данном|данной|данных)\s+)?"
+    r"(?:файл|документ|таблиц|вложен)\w*[^.!?\n]{0,48}\b"
+    r"(?:привед[её]н|указан|перечислен|представлен|показан|отмечен|содержится)\w*\b"
+    r")",
     re.IGNORECASE,
 )
 _NON_TABULAR_ROW_SCOPE = re.compile(
     r"\bстрок\w*\s+(?:кода|текст\w*|программ\w*|скрипт\w*|стих\w*)\b",
     re.IGNORECASE,
 )
-_RAW_EXACT_OPERATOR = re.compile(
-    r"\b(?:сколько|количеств|числ|итого|выда|укаж|привед|перечисл|покаж|назов|вывед|"
-    r"скаж|сообщ|напиш|озвуч|вытащ|какие|кто|кого)\w*\b",
+_LOCAL_ATTACHMENT_SCOPE = re.compile(
+    r"(?:\b(?:на|с)\s+(?:перв\w*|втор\w*|треть\w*|последн\w*)\s+"
+    r"(?:страниц|лист)\w*\b|"
+    r"\b(?:на|в)\s+(?:страниц|лист|строк|раздел|колонк)\w*\s+"
+    r"(?:\d{1,6}|[A-Za-zА-ЯЁ])\b|"
+    r"\b(?:страниц|лист|строк|раздел|колонк)\w*\s+(?:\d{1,6}|[A-Za-zА-ЯЁ])\b|"
+    r"\b(?:перв\w*|втор\w*|треть\w*|отдельн\w*)\s+(?:раздел|лист|страниц)\w*\b|"
+    r"\bу\s+[^.!?\n]{1,48}\b(?:должност|роль|позици)\w*\b|"
+    r"\bв\s+(?:названи|заголовк)\w*\b)",
     re.IGNORECASE,
 )
 _TARGET_FRAGMENT = re.compile(
@@ -905,7 +940,12 @@ def office_exhaustive_scope(question: str) -> bool:
     """Whether whole-set Office postconditions apply to this semantic scope."""
 
     text = _clean_question(question)
-    return bool(text and office_attachment_targeted(text) and not _NON_TABULAR_ROW_SCOPE.search(text))
+    return bool(
+        text
+        and office_attachment_targeted(text)
+        and not _NON_TABULAR_ROW_SCOPE.search(text)
+        and not _LOCAL_ATTACHMENT_SCOPE.search(text)
+    )
 
 
 def _raw_office_request_kind(text: str) -> str:
@@ -941,13 +981,26 @@ def office_exact_request_detected(question: str) -> bool:
     """Targeted exact intent, including a compound turn the model must handle."""
 
     text = _clean_question(question)
+    if "?" not in text and _DECLARATIVE_ATTACHMENT_PROSE.search(text):
+        return False
     if office_request_kind(text):
         return True
     return bool(
         text
         and not _NON_TABULAR_ROW_SCOPE.search(text)
+        and not _LOCAL_ATTACHMENT_SCOPE.search(text)
         and office_attachment_targeted(text)
-        and (_raw_office_request_kind(text) or _RAW_EXACT_OPERATOR.search(text))
+        and (
+            (
+                _raw_office_request_kind(text)
+                and (
+                    _SEMANTIC_FILTER.search(text)
+                    or _WHOLE_SET_MEMBERSHIP.search(text)
+                    or _ATTACHED_ENTITY_LIST_REQUEST.search(text)
+                )
+            )
+            or (_SEMANTIC_FILTER.search(text) and _FILTERED_ENTITY_SELECTION.search(text))
+        )
     )
 
 
@@ -955,7 +1008,11 @@ def office_request_kind(question: str) -> str:
     """Closed whole-file intent used only when an Office attachment is active."""
 
     text = _clean_question(question)
-    if _NON_TABULAR_ROW_SCOPE.search(text) or _SEMANTIC_FILTER.search(text):
+    if (
+        _NON_TABULAR_ROW_SCOPE.search(text)
+        or _LOCAL_ATTACHMENT_SCOPE.search(text)
+        or _SEMANTIC_FILTER.search(text)
+    ):
         return ""
     return _closed_office_request_kind(text)
 
@@ -1082,12 +1139,15 @@ def _normalised_literal(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+OFFICE_EXACT_UNAVAILABLE_MESSAGE = (
+    "Не могу надёжно проверить точное количество или полный состав этого файла. "
+    "Прикрепи документ повторно или уточни нужную таблицу либо раздел."
+)
+
+
 def _unavailable_exact_answer() -> dict[str, Any]:
     return {
-        "content": (
-            "Не могу надёжно определить точный состав: у этого Office-файла нет "
-            "полного проверяемого структурного индекса в текущем ходе."
-        ),
+        "content": OFFICE_EXACT_UNAVAILABLE_MESSAGE,
         "status": "unknown",
         "kind": "unavailable",
     }
@@ -1290,6 +1350,7 @@ def code_owned_office_answer(
 
 
 __all__ = [
+    "OFFICE_EXACT_UNAVAILABLE_MESSAGE",
     "OFFICE_PROMPT_PREFIX",
     "OFFICE_STRUCTURE_KEY",
     "OfficePromptBundle",

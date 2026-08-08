@@ -89,6 +89,51 @@ def test_source_search_is_tenant_scoped(storage):
     assert storage.search_raw_objects("bob", PHRASE) == []
 
 
+def test_a_foreign_inbox_row_cannot_hide_or_relabel_an_owned_source(storage):
+    """Every correlated child row must prove the same tenant as its Raw parent."""
+
+    storage.ensure_user("owner")
+    storage.ensure_user("foreign")
+    raw_id = _ingest(storage, "owner", f"tenant correlation {PHRASE}", status=None)
+    foreign_rows = [
+        InboxItem(
+            id=new_id("inbox"),
+            user_id="foreign",
+            raw_object_id=raw_id,
+            status=status,
+            created_at=created_at,
+        ).to_row()
+        for status, created_at in (
+            (InboxStatus.IGNORED, "2026-08-08T00:00:00+00:00"),
+            (InboxStatus.CLASSIFIED, "2026-08-08T00:00:01+00:00"),
+        )
+    ]
+    with storage.transaction() as conn:
+        conn.executemany(
+            """INSERT INTO inbox(id, user_id, raw_object_id, knowledge_object_id, status,
+                   suggested_entity_id, suggested_tags_json, suggestions_json, suggested_action,
+                   promotion_score, quality_score, classification_notes, created_at,
+                   reviewed_at, reviewed_by)
+               VALUES(:id, :user_id, :raw_object_id, :knowledge_object_id, :status,
+                   :suggested_entity_id, :suggested_tags_json, :suggestions_json, :suggested_action,
+                   :promotion_score, :quality_score, :classification_notes, :created_at,
+                   :reviewed_at, :reviewed_by)""",
+            foreign_rows,
+        )
+
+    found = storage.search_raw_objects("owner", PHRASE)
+    owned = next(item for item in found if item["id"] == raw_id)
+    assert owned["inbox_status"] is None
+    for row in foreign_rows:
+        assert storage.get_inbox_item(row["id"], "foreign") is None
+    assert storage.get_inbox_by_raw(raw_id, "foreign") is None
+    assert storage.find_inbox_by_raw(raw_id, "foreign") is None
+    assert storage.count_inbox("foreign") == 0
+    assert storage.list_inbox("foreign") == []
+    assert storage.list_inbox_detailed("foreign") == []
+    assert storage.group_pending_inbox("foreign")["items_total"] == 0
+
+
 def test_raw_replay_keys_cannot_reopen_a_quarantined_source(storage):
     """Source-ref/hash/text-hash replay readers share the full raw dependency guard."""
 

@@ -139,7 +139,9 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # это не личная переписка и не credential identity.
 # 240 → 241: count_feedback_state — новый reader feedback-раздела; для answer
 # разделом служит person, для classification — tenant.
-EXPECTED_USER_ID_METHODS = 241
+# 241 → 242: count_visible_raw_objects считает приватно-доступный tenant-корпус;
+# отдельной личности человека у общей базы здесь нет.
+EXPECTED_USER_ID_METHODS = 242
 
 
 def _methods_taking_user_id() -> set[str]:

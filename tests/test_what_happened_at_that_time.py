@@ -299,21 +299,22 @@ def test_a_weekday_means_the_last_one_that_happened(weekday, expected):
 
 
 def test_the_intent_check_asks_the_model_when_the_pattern_is_silent():
-    """Мутация: убрать `_is_a_timeline_question` из условия — тест краснеет.
+    """Мутация: убрать закрытый временной арбитр — тест краснеет.
 
     Шаблон не может знать всех формулировок; когда время в вопросе уже найдено,
-    а фраза незнакомая, решать должен тот, кто понимает язык.
+    а фраза незнакомая, модель выбирает только направление и вид окна. Даты
+    по-прежнему вычисляет код.
     """
     import inspect
 
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)  # noqa: SLF001
-    assert "_is_a_timeline_question(message)" in source, (
+    assert "_time_intent_by_arbiter(visible_message)" in source, (
         "незнакомая формулировка отбрасывается без попытки понять её"
     )
-    assert source.index("moment_from_question") < source.index("_is_a_timeline_question"), (
-        "модель спрашивается даже когда времени в вопросе нет — это лишний вызов на каждом сообщении"
+    assert source.index("moment_from_question") < source.index("_time_intent_by_arbiter"), (
+        "дешёвый разбор не предшествует закрытому арбитру"
     )
 
 
@@ -364,7 +365,7 @@ def test_the_whole_chain_understands_an_ordinal_day():
 
 
 def test_an_unparsed_moment_never_becomes_an_empty_timeline():
-    """Мутация: убрать ветку `understood is False` — тест краснеет.
+    """Мутация: принять любой правдоподобный payload — тест краснеет.
 
     «Не разобрал дату» и «в этот момент ничего не было» — разные вещи. Второе —
     утверждение о личном архиве человека, которого никто не проверял.
@@ -374,9 +375,9 @@ def test_an_unparsed_moment_never_becomes_an_empty_timeline():
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)  # noqa: SLF001
-    assert 'get("understood") is False' in source, "неразобранный момент подаётся модели как пустая лента"
-    branch = source[source.index('get("understood") is False') :][:900]
-    assert "НЕ утверждай" in branch
+    assert 'get("understood") is True' in source
+    assert "_temporal_payload_is_coherent" in source
+    assert "Не подставляй ноль" in source
 
 
 @pytest.mark.parametrize(

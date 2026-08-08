@@ -18,8 +18,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
-from friday.agent_runtime import AgentRuntime
+from friday.agent_runtime import AgentContext, AgentRuntime
 from friday.permissions import ActorContext
 
 PROMISES_THE_FUTURE = "Хорошо, сейчас поставлю тебе напоминание про отчёт на пятницу."
@@ -43,6 +44,14 @@ class _Kernel:
         class _Result:
             success = True
             error = ""
+            data = {
+                "created": True,
+                "what": str(params.get("what") or ""),
+                "on": "2026-08-14",
+                "at": "",
+                "requested_when": str(params.get("when") or ""),
+                "delivery_scheduled": True,
+            }
             attachment = None
 
             def to_llm_message(self) -> str:
@@ -129,6 +138,60 @@ def test_the_reminder_is_reported_as_done(settings, storage) -> None:
     assert "пятниц" in said.casefold(), "человек не узнал, когда"
 
 
+def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, storage) -> None:
+    """The effect exists even if synthesis dies after the tool call."""
+
+    class _ToolThenDead:
+        enabled = True
+        total_budget_sec = 5.0
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, *, tools=None, **kwargs):  # noqa: ANN001
+            del messages, tools, kwargs
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "reminder-call",
+                            "function": {
+                                "name": "remind",
+                                "arguments": json.dumps({"what": "agentic reminder", "when": "tomorrow"}),
+                            },
+                        }
+                    ],
+                }
+            raise RuntimeError("synthetic terminal transport failure")
+
+    storage.ensure_user("alice", preset_key="owner")
+    kernel = _Kernel()
+    llm = _ToolThenDead()
+    runtime = AgentRuntime(settings, storage, llm=llm, kernel=kernel)
+    context = AgentContext(
+        conversation_id="conv-agentic-reminder",
+        user_id="alice",
+        person_id="alice",
+        answer_mode="general_conversation",
+    )
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    result = asyncio.run(
+        runtime._agentic_loop(  # noqa: SLF001
+            context,
+            "synthetic request",
+            actor,
+            [{"type": "function", "function": {"name": "remind"}}],
+            None,
+        )
+    )
+
+    assert result["llm_failed"] is True
+    assert "agentic reminder" in context.structural_answer
+    assert "Напоминание поставлено" in context.structural_answer
+
+
 def test_the_model_is_not_asked_when_the_deed_is_the_whole_turn(settings, storage) -> None:
     """«Напомни про отчёт в пятницу» — просьба целиком, отвечать больше не на что."""
     llm = _Hostile()
@@ -171,6 +234,8 @@ def test_a_reminder_beside_an_archive_is_not_swallowed(settings, storage) -> Non
 
     class _Packs(_Kernel):
         async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+            if tool == "remind":
+                return await super().execute(tool, params, actor=actor)
             self.calls.append((tool, params))
 
             class _Result:

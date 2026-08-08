@@ -322,6 +322,56 @@ def test_footer_like_terminal_rows_never_become_people(footer_value: str) -> Non
     assert index["candidate_refs"] == []
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        "Total Quality Manager",
+        "Source control enabled",
+        "Prepared by vendor",
+        "Updated firmware",
+        "Data as of service",
+        "Comment pending review",
+    ],
+)
+def test_footer_words_in_a_record_value_do_not_revoke_generic_rows(status: str) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["ID", "Status"])
+    sheet.append(["SYNTHETIC-ROW", status])
+
+    index = _index(DocumentExtractor().extract(_xlsx_bytes(workbook), "status.xlsx"))
+
+    assert index["record_sets"][0]["kind"] == "table_rows"
+    assert index["record_sets"][0]["records_total"] == 1
+
+
+@pytest.mark.parametrize(
+    "footer_value",
+    [
+        "Составил",
+        "Выгружено",
+        "Экспортировано",
+        "Created by",
+        "Prepared",
+        "Отчёт сформирован",
+        "Дата отчёта",
+        "Период отчёта",
+        "Страница",
+    ],
+)
+def test_terminal_report_labels_never_become_people(footer_value: str) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Person", "Role"])
+    sheet.append(["SYNTHETIC-ALICE", "Engineer"])
+    sheet.append([footer_value, "SYNTHETIC-AUTHOR"])
+
+    index = _index(DocumentExtractor().extract(_xlsx_bytes(workbook), "report-footer.xlsx"))
+
+    assert index["record_sets"] == []
+    assert index["candidate_refs"] == []
+
+
 def test_xlsx_cached_formula_is_complete_when_visible_value_is_proven() -> None:
     workbook = Workbook()
     sheet = workbook.active

@@ -1,0 +1,578 @@
+{
+  "$schema": "friday.package_c_document_holdout.v1",
+  "schema_version": 1,
+  "synthetic_only": true,
+  "purpose": "Frozen synthetic Package C holdout for ordinary table exactness (K19), preservation of ordinary attachment answers (K05), human-facing exact-path refusals (K06), and successful empty-file handling (K07).",
+  "privacy": {
+    "contains_live_chat": false,
+    "contains_live_file_text": false,
+    "contains_real_people": false,
+    "contains_real_tenant_ids": false,
+    "contains_model_responses": false
+  },
+  "closed_enums": {
+    "defect": [
+      "K05",
+      "K06",
+      "K07",
+      "K19"
+    ],
+    "format": [
+      "csv",
+      "docx",
+      "txt",
+      "xlsx"
+    ],
+    "exact_kind": [
+      "count_people",
+      "count_records",
+      "list_people",
+      "list_records",
+      "none"
+    ],
+    "record_set_kind": [
+      "person_rows",
+      "table_rows",
+      "none"
+    ],
+    "expected_status": [
+      "passed",
+      "unknown",
+      "model_preserved",
+      "empty_notice"
+    ],
+    "empty_source": [
+      "current_turn",
+      "idempotent_replay",
+      "restored_conversation"
+    ]
+  },
+  "acceptance": {
+    "expected_case_counts": {
+      "k19_ordinary_tables": 8,
+      "k19_controls": 6,
+      "k05_preservation_cases": 10,
+      "k05_rejection_controls": 6,
+      "k06_human_refusals": 4,
+      "k07_empty_cases": 5,
+      "k07_controls": 5,
+      "total": 44
+    },
+    "all_ids_must_be_unique": true,
+    "all_questions_must_be_unique_within_group": true,
+    "ordinary_record_sets_are_code_owned": true,
+    "ordinary_model_answers_are_preserved_byte_for_byte": true,
+    "exact_failures_name_the_user_problem_and_offer_a_next_step": true,
+    "successful_empty_extraction_is_not_an_unreadable_file": true,
+    "banned_user_facing_fragments": [
+      "проверяемым кодовым путём",
+      "структурного индекса",
+      "в текущем ходе",
+      "office-файла"
+    ],
+    "required_empty_notice": "Текста в файле не оказалось"
+  },
+  "k19_ordinary_tables": [
+    {
+      "id": "k19_table_001",
+      "defect": "K19",
+      "format": "xlsx",
+      "filename": "synthetic-status.xlsx",
+      "rows": [
+        ["ID", "Статус"],
+        ["SYN-ROW-01", "новая"],
+        ["SYN-ROW-02", "готово"],
+        ["SYN-ROW-03", "проверка"]
+      ],
+      "question": "Сколько позиций во всей этой таблице?",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "count_records",
+        "record_set_kind": "table_rows",
+        "records_total": 3,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_002",
+      "defect": "K19",
+      "format": "xlsx",
+      "filename": "synthetic-dates.xlsx",
+      "rows": [
+        ["Дата", "Описание"],
+        ["2026-01-11", "SYN-EVENT-ALPHA"],
+        ["2026-01-12", "SYN-EVENT-BETA"],
+        ["2026-01-13", "SYN-EVENT-GAMMA"]
+      ],
+      "question": "Перечисли все позиции из документа.",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "list_records",
+        "record_set_kind": "table_rows",
+        "records_total": 3,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_003",
+      "defect": "K19",
+      "format": "docx",
+      "filename": "synthetic-units.docx",
+      "rows": [
+        ["Номер", "Отдел"],
+        ["SYN-NO-01", "SYN-UNIT-A"],
+        ["SYN-NO-02", "SYN-UNIT-B"]
+      ],
+      "question": "Посчитай все строки в этом файле.",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "count_records",
+        "record_set_kind": "table_rows",
+        "records_total": 2,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_004",
+      "defect": "K19",
+      "format": "docx",
+      "filename": "synthetic-titles.docx",
+      "rows": [
+        ["Title", "Status"],
+        ["SYN-TITLE-A", "draft"],
+        ["SYN-TITLE-B", "ready"]
+      ],
+      "question": "Покажи полный список записей в приложенной таблице.",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "list_records",
+        "record_set_kind": "table_rows",
+        "records_total": 2,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_005",
+      "defect": "K19",
+      "format": "csv",
+      "filename": "synthetic-descriptions.csv",
+      "rows": [
+        ["ID", "Описание"],
+        ["SYN-ID-A", "SYN-DESC-A"],
+        ["SYN-ID-B", "SYN-DESC-B"],
+        ["SYN-ID-C", "SYN-DESC-C"],
+        ["SYN-ID-D", "SYN-DESC-D"]
+      ],
+      "question": "Каково точное количество записей во всём CSV-файле?",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "count_records",
+        "record_set_kind": "table_rows",
+        "records_total": 4,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_006",
+      "defect": "K19",
+      "format": "csv",
+      "filename": "synthetic-date-status.csv",
+      "rows": [
+        ["Date", "Status"],
+        ["2026-02-01", "queued"],
+        ["2026-02-02", "running"],
+        ["2026-02-03", "done"]
+      ],
+      "question": "Выведи все строки из этой таблицы.",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "list_records",
+        "record_set_kind": "table_rows",
+        "records_total": 3,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_007",
+      "defect": "K19",
+      "format": "xlsx",
+      "filename": "synthetic-contacts.xlsx",
+      "rows": [
+        ["Телефон", "Почта"],
+        ["SYN-PHONE-01", "syn-one@example.invalid"],
+        ["SYN-PHONE-02", "syn-two@example.invalid"]
+      ],
+      "question": "Сколько всего позиций указано в документе?",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "count_records",
+        "record_set_kind": "table_rows",
+        "records_total": 2,
+        "person_column": null
+      }
+    },
+    {
+      "id": "k19_table_008",
+      "defect": "K19",
+      "format": "docx",
+      "filename": "synthetic-teams.docx",
+      "rows": [
+        ["Команда", "Описание"],
+        ["SYN-TEAM-A", "SYN-SCOPE-A"],
+        ["SYN-TEAM-B", "SYN-SCOPE-B"],
+        ["SYN-TEAM-C", "SYN-SCOPE-C"]
+      ],
+      "question": "Назови каждую запись из всей таблицы.",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "list_records",
+        "record_set_kind": "table_rows",
+        "records_total": 3,
+        "person_column": null
+      }
+    }
+  ],
+  "k19_controls": [
+    {
+      "id": "k19_control_001",
+      "defect": "K19",
+      "format": "xlsx",
+      "control_type": "person_table_stays_person_owned",
+      "filename": "synthetic-people.xlsx",
+      "rows": [
+        ["ФИО", "Роль"],
+        ["SYNTHETIC-PERSON-01", "SYNTHETIC-ROLE-01"],
+        ["SYNTHETIC-PERSON-02", "SYNTHETIC-ROLE-02"]
+      ],
+      "question": "Сколько людей во всём файле?",
+      "expected": {
+        "status": "passed",
+        "exact_kind": "count_people",
+        "record_set_kind": "person_rows",
+        "records_total": 2
+      }
+    },
+    {
+      "id": "k19_control_002",
+      "defect": "K19",
+      "format": "docx",
+      "control_type": "nonempty_preheader_row",
+      "filename": "synthetic-preheader.docx",
+      "rows": [
+        ["SYNTHETIC-PREAMBLE", ""],
+        ["ID", "Статус"],
+        ["SYN-ID-01", "готово"]
+      ],
+      "question": "Сколько строк во всём документе?",
+      "expected": {
+        "status": "unknown",
+        "exact_kind": "count_records",
+        "record_set_kind": "none"
+      }
+    },
+    {
+      "id": "k19_control_003",
+      "defect": "K19",
+      "format": "xlsx",
+      "control_type": "merged_header",
+      "filename": "synthetic-merged-header.xlsx",
+      "rows": [
+        ["ID", "Статус"],
+        ["SYN-ID-01", "готово"],
+        ["SYN-ID-02", "проверка"]
+      ],
+      "merge": "A1:B1",
+      "question": "Перечисли все записи этого файла.",
+      "expected": {
+        "status": "unknown",
+        "exact_kind": "list_records",
+        "record_set_kind": "none"
+      }
+    },
+    {
+      "id": "k19_control_004",
+      "defect": "K19",
+      "format": "xlsx",
+      "control_type": "blank_gap_then_tail",
+      "filename": "synthetic-gap-tail.xlsx",
+      "rows": [
+        ["ID", "Статус"],
+        ["SYN-ID-01", "готово"],
+        ["", ""],
+        ["SYN-ID-02", "после-пробела"]
+      ],
+      "question": "Какое точное число позиций во всей таблице?",
+      "expected": {
+        "status": "unknown",
+        "exact_kind": "count_records",
+        "record_set_kind": "none"
+      }
+    },
+    {
+      "id": "k19_control_005",
+      "defect": "K19",
+      "format": "csv",
+      "control_type": "unknown_header_schema",
+      "filename": "synthetic-unknown-schema.csv",
+      "rows": [
+        ["SYNTHETIC-COLUMN-A", "SYNTHETIC-COLUMN-B"],
+        ["SYN-VALUE-01", "SYN-VALUE-02"]
+      ],
+      "question": "Сколько записей в этой CSV-таблице?",
+      "expected": {
+        "status": "unknown",
+        "exact_kind": "count_records",
+        "record_set_kind": "none"
+      }
+    },
+    {
+      "id": "k19_control_006",
+      "defect": "K19",
+      "format": "xlsx",
+      "control_type": "nonempty_sibling_sheet",
+      "filename": "synthetic-sibling-sheet.xlsx",
+      "rows": [
+        ["ID", "Статус"],
+        ["SYN-ID-01", "готово"]
+      ],
+      "sibling_rows": [
+        ["SYNTHETIC-UNDECLARED-REGION"]
+      ],
+      "question": "Покажи все позиции во всём файле.",
+      "expected": {
+        "status": "unknown",
+        "exact_kind": "list_records",
+        "record_set_kind": "none"
+      }
+    }
+  ],
+  "k05_preservation_cases": [
+    {
+      "id": "k05_preserve_001",
+      "defect": "K05",
+      "question": "Кратко объясни, что находится в приложенном файле.",
+      "synthetic_model_answer": "В таблице перечислены этапы синтетического процесса.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_002",
+      "defect": "K05",
+      "question": "Сделай обычный обзор структуры вложения.",
+      "synthetic_model_answer": "В файле приведён обзор всех колонок и их назначения.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_003",
+      "defect": "K05",
+      "question": "Опиши общую тему этой таблицы без точного пересчёта.",
+      "synthetic_model_answer": "Таблица перечисляет задачи по датам.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_004",
+      "defect": "K05",
+      "question": "Какая общая закономерность видна во вложении?",
+      "synthetic_model_answer": "Из документа видно, какие позиции отмечены отдельно.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_005",
+      "defect": "K05",
+      "question": "Расскажи о типах значений, не составляя полного списка.",
+      "synthetic_model_answer": "В таблице показано, какие статусы используются в примере.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_006",
+      "defect": "K05",
+      "question": "Нужно смысловое резюме документа, а не построчный вывод.",
+      "synthetic_model_answer": "Документ перечисляет основные категории без оценки полноты.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_007",
+      "defect": "K05",
+      "question": "Объясни назначение колонок в этом примере.",
+      "synthetic_model_answer": "В файле указано, какие свойства относятся к каждой колонке.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_008",
+      "defect": "K05",
+      "question": "Сформулируй наблюдение по данным без заявления о полноте.",
+      "synthetic_model_answer": "По таблице можно перечислить наблюдаемые закономерности.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_009",
+      "defect": "K05",
+      "question": "Чем это вложение полезно как пример схемы?",
+      "synthetic_model_answer": "В документе приведён список полей, а не людей.",
+      "expected_status": "model_preserved"
+    },
+    {
+      "id": "k05_preserve_010",
+      "defect": "K05",
+      "question": "Опиши связь между колонками без извлечения полного набора.",
+      "synthetic_model_answer": "Файл показывает, какие значения связаны с датами.",
+      "expected_status": "model_preserved"
+    }
+  ],
+  "k05_rejection_controls": [
+    {
+      "id": "k05_reject_001",
+      "defect": "K05",
+      "question": "Сколько людей указано во всём файле?",
+      "synthetic_model_answer": "В документе ровно два человека.",
+      "reason": "exact_user_intent"
+    },
+    {
+      "id": "k05_reject_002",
+      "defect": "K05",
+      "question": "Перечисли всех людей из этой таблицы.",
+      "synthetic_model_answer": "В таблице перечислены все люди.",
+      "reason": "exact_user_intent"
+    },
+    {
+      "id": "k05_reject_003",
+      "defect": "K05",
+      "question": "Перечисли сотрудников из отдела SYN-X в файле.",
+      "synthetic_model_answer": "В отделе SYN-X указан один сотрудник.",
+      "reason": "semantic_filter_still_exact"
+    },
+    {
+      "id": "k05_reject_004",
+      "defect": "K05",
+      "question": "Кто из людей в документе имеет роль SYN-ROLE-01?",
+      "synthetic_model_answer": "Подходит только SYNTHETIC-PERSON-01.",
+      "reason": "semantic_filter_still_exact"
+    },
+    {
+      "id": "k05_reject_005",
+      "defect": "K05",
+      "question": "Что главное в этом файле?",
+      "synthetic_model_answer": "Это полный список, других строк нет.",
+      "reason": "answer_claims_complete_set"
+    },
+    {
+      "id": "k05_reject_006",
+      "defect": "K05",
+      "question": "Как устроено это вложение?",
+      "synthetic_model_answer": "В документе ровно две позиции, и это всё.",
+      "reason": "answer_claims_complete_cardinality"
+    }
+  ],
+  "k06_human_refusals": [
+    {
+      "id": "k06_refusal_001",
+      "defect": "K06",
+      "mode": "missing_index",
+      "question": "Сколько строк во всём файле?",
+      "exact_kind": "count_records",
+      "expected_status": "unknown"
+    },
+    {
+      "id": "k06_refusal_002",
+      "defect": "K06",
+      "mode": "incomplete_index",
+      "question": "Перечисли все позиции документа.",
+      "exact_kind": "list_records",
+      "expected_status": "unknown"
+    },
+    {
+      "id": "k06_refusal_003",
+      "defect": "K06",
+      "mode": "multiple_attachments",
+      "question": "Каково точное число записей в этих файлах?",
+      "exact_kind": "count_records",
+      "expected_status": "unknown"
+    },
+    {
+      "id": "k06_refusal_004",
+      "defect": "K06",
+      "mode": "prompt_budget",
+      "question": "Покажи полный перечень строк таблицы.",
+      "exact_kind": "list_records",
+      "expected_status": "unknown"
+    }
+  ],
+  "k07_empty_cases": [
+    {
+      "id": "k07_empty_001",
+      "defect": "K07",
+      "format": "txt",
+      "filename": "synthetic-empty.txt",
+      "source": "current_turn",
+      "question": "Что находится в этом файле?",
+      "expected_status": "empty_notice"
+    },
+    {
+      "id": "k07_empty_002",
+      "defect": "K07",
+      "format": "csv",
+      "filename": "synthetic-empty.csv",
+      "source": "current_turn",
+      "question": "Опиши содержимое этого CSV-файла.",
+      "expected_status": "empty_notice"
+    },
+    {
+      "id": "k07_empty_003",
+      "defect": "K07",
+      "format": "docx",
+      "filename": "synthetic-empty.docx",
+      "source": "current_turn",
+      "question": "Есть ли текст в приложенном документе?",
+      "expected_status": "empty_notice"
+    },
+    {
+      "id": "k07_empty_004",
+      "defect": "K07",
+      "format": "txt",
+      "filename": "synthetic-empty-replay.txt",
+      "source": "idempotent_replay",
+      "question": "Повтори вывод по этому пустому файлу.",
+      "expected_status": "empty_notice"
+    },
+    {
+      "id": "k07_empty_005",
+      "defect": "K07",
+      "format": "txt",
+      "filename": "synthetic-empty-restored.txt",
+      "source": "restored_conversation",
+      "question": "Что было в ранее приложенном пустом файле?",
+      "expected_status": "empty_notice"
+    }
+  ],
+  "k07_controls": [
+    {
+      "id": "k07_control_001",
+      "defect": "K07",
+      "control_type": "unreadable",
+      "filename": "synthetic-unreadable.bin"
+    },
+    {
+      "id": "k07_control_002",
+      "defect": "K07",
+      "control_type": "parse_deadline",
+      "filename": "synthetic-deadline.pdf"
+    },
+    {
+      "id": "k07_control_003",
+      "defect": "K07",
+      "control_type": "pages_truncated",
+      "filename": "synthetic-pages.pdf"
+    },
+    {
+      "id": "k07_control_004",
+      "defect": "K07",
+      "control_type": "advisory_ocr",
+      "filename": "synthetic-advisory.png"
+    },
+    {
+      "id": "k07_control_005",
+      "defect": "K07",
+      "control_type": "nonempty",
+      "filename": "synthetic-nonempty.txt"
+    }
+  ]
+}

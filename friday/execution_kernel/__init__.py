@@ -21,7 +21,7 @@ import zipfile
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -43,6 +43,7 @@ from friday.permissions import (
     current_actor,
 )
 from friday.private_fs import open_private_text_write
+from friday.reminder_schedule import reminder_clock, reminder_clock_description, reminder_when_text
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query
 from friday.storage._core import iso_date
@@ -103,6 +104,21 @@ _MAX_ARCHIVE_FILES = 300
 
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
+
+
+def _storage_read_snapshot(storage: Any, operation: Callable[[], Any]) -> Any:
+    """Run related SELECTs against one deferred WAL snapshot in one thread."""
+
+    connection = storage.conn
+    owns_snapshot = not connection.in_transaction
+    if owns_snapshot:
+        connection.execute("BEGIN")
+    try:
+        return operation()
+    finally:
+        if owns_snapshot and connection.in_transaction:
+            connection.rollback()
+
 
 # Execution scope is code-owned context, not a model/tool argument.  A mission
 # receives only the bounded gather surface below; every other tool remains a
@@ -292,6 +308,21 @@ _MOMENT_RE = re.compile(
     r"(?:\s*[, ]\s*(?:в\s+)?(?P<hour>\d{1,2})(?:[:.](?P<minute>\d{2}))?\s*(?:час\w*|ч|h)?)?\s*$",
     re.IGNORECASE,
 )
+_NORMALIZED_LOCAL_TIMESTAMP = re.compile(
+    r"^(?P<day>\d{4}-\d{2}-\d{2})T(?P<hour>[01]\d|2[0-3]):"
+    r"(?P<minute>[0-5]\d):(?P<second>[0-5]\d)$"
+)
+
+
+def _normalized_local_timestamp(value: str) -> str | None:
+    text = str(value or "").strip()
+    if not _NORMALIZED_LOCAL_TIMESTAMP.fullmatch(text):
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.isoformat(timespec="seconds") if parsed.tzinfo is None else None
 
 
 #: Месяцы прописью — по префиксу, чтобы падеж не имел значения («июля», «июле»).
@@ -386,12 +417,35 @@ def _spoken_day(text: str, *, today: date) -> str | None:
         return None
 
 
-#: Час в словах человека: «в 15:00», «в 15 часов», «к 9». Минуты необязательны.
+#: Час в словах человека: «в 15:00», «в 15 часов», «в 10 утра».
 _CLOCK_IN_TEXT = re.compile(
     r"(?:^|\D)(?:в|к|на)?\s*(?P<hour>[01]?\d|2[0-3])[:.](?P<minute>[0-5]\d)"
-    r"|(?:^|\D)(?:в|к)\s*(?P<hour2>[01]?\d|2[0-3])\s*час",
+    r"|(?:^|\D)(?:в|к)\s*(?P<hour2>[01]?\d|2[0-3])\s*час"
+    r"|(?:^|\D)(?:в|к)\s*(?P<hour3>0?[1-9]|1[0-2])\s*"
+    r"(?P<period>утра|дня|вечера|ночи)\b",
     re.IGNORECASE,
 )
+
+
+def _clock_from_text(value: str) -> str:
+    """Parse the wall-clock forms advertised by the reminder tool schema."""
+
+    match = _CLOCK_IN_TEXT.search(str(value or ""))
+    if not match:
+        return ""
+    hour = int(match.group("hour") or match.group("hour2") or match.group("hour3") or 0)
+    minute = int(match.group("minute") or 0)
+    period = str(match.group("period") or "").casefold()
+    if period in {"дня", "вечера"} and hour < 12:
+        hour += 12
+    elif period == "утра" and hour == 12:
+        hour = 0
+    elif period == "ночи":
+        if hour == 12:
+            hour = 0
+        elif hour >= 6:
+            hour += 12
+    return f"{hour:02d}:{minute:02d}" if 0 <= hour <= 23 and 0 <= minute <= 59 else ""
 
 
 #: Дни недели по-русски → номер в неделе, как их считает `date.weekday()`.
@@ -441,6 +495,34 @@ def _future_day(text: str, *, today: date) -> str | None:
         if name in lowered:
             ahead = (number - today.weekday()) % 7
             return (today + timedelta(days=ahead or 7)).isoformat()
+    # A calendar date without a year denotes its next occurrence for a future
+    # effect.  Falling through to the history-oriented parser below anchored it
+    # to the current year, so ``3 августа`` said on 8 August was rejected as a
+    # past date even though this exact yearless form is advertised by the tool
+    # schema.  An explicitly named year remains authoritative and is allowed to
+    # reach ``_remind``'s ordinary past-date refusal.
+    moment = _MOMENT_RE.match(lowered)
+    spoken = _DAY_MONTH_RE.match(moment.group("date") if moment else lowered)
+    if spoken:
+        day_text, month_word, year_text = spoken.groups()
+        month = next(
+            (number for prefix, number in _MONTHS_RU.items() if month_word.startswith(prefix)),
+            0,
+        )
+        if not month:
+            return None
+        if year_text:
+            try:
+                return date(int(year_text), month, int(day_text)).isoformat()
+            except ValueError:
+                return None
+        for year in range(today.year, today.year + 9):
+            try:
+                candidate = date(year, month, int(day_text))
+            except ValueError:
+                continue
+            if candidate >= today:
+                return candidate.isoformat()
     return None
 
 
@@ -733,6 +815,7 @@ class ToolResult:
             )
         if len(encoded) > 12_000:
             encoded = encoded[:11_900] + "\n… (truncated)"
+            self.truncated = True
         return f"Результат {self.tool_name}:\n{encoded}"
 
 
@@ -2396,7 +2479,8 @@ class ExecutionKernel:
             return {"created": False, "reason": "не сказано, о чём напомнить"}
         # Тот же разбор времени, что у вопросов «что было 26 июля»: одна пара
         # правил на всю систему, иначе «завтра» здесь и там означало бы разное.
-        today = datetime.now(self._zone()).date()
+        local_now = datetime.now(self._zone())
+        today = local_now.date()
         # Сначала будущее — «завтра», «в понедельник», «через неделю»; общий
         # разбор их не знает, он писался для вопросов о прошлом.
         ahead = _future_day(str(when or ""), today=today)
@@ -2411,14 +2495,8 @@ class ExecutionKernel:
         # Час читается из слов человека, а не из штампа: разбор будущего даёт
         # только день, а «в 15:00» человек сказал и ждёт увидеть это в тексте
         # напоминания — рассылка идёт по календарным дням.
-        clock = ""
-        spoken_clock = _CLOCK_IN_TEXT.search(str(when or ""))
-        if spoken_clock:
-            hour = int(spoken_clock.group("hour") or spoken_clock.group("hour2") or 0)
-            minute = int(spoken_clock.group("minute") or 0)
-            if 0 <= hour <= 23 and 0 <= minute <= 59:
-                clock = f"{hour:02d}:{minute:02d}"
-        elif len(stamp) >= 16 and stamp[11:16] != "00:00":
+        clock = _clock_from_text(str(when or ""))
+        if not clock and len(stamp) >= 16 and stamp[11:16] != "00:00":
             clock = stamp[11:16]
         # Напоминание смотрит ВПЕРЁД, а разбор времени писался для вопросов о
         # прошлом («что было в понедельник») и берёт ближайший ПРОШЕДШИЙ день.
@@ -2437,6 +2515,15 @@ class ExecutionKernel:
                     "reason": f"названный день уже прошёл: {occurred_at}",
                     "hint": "Напоминание можно поставить только на будущее.",
                 }
+        if planned == today and clock:
+            hour, minute = (int(part) for part in clock.split(":", 1))
+            scheduled = datetime.combine(planned, time(hour, minute), tzinfo=local_now.tzinfo)
+            if scheduled <= local_now:
+                return {
+                    "created": False,
+                    "reason": f"названное время уже прошло: {planned.isoformat()} {clock}",
+                    "hint": "Назови время в будущем.",
+                }
         # Две записи — одно напоминание, значит одна транзакция.
         #
         # Врозь они давали настоящее половинчатое состояние: `set_event_time`
@@ -2446,8 +2533,17 @@ class ExecutionKernel:
         # записями вне транзакции; остальные девять давно внутри. Найдено
         # внешним разбором (Сол, 2026-08-04) при разборе «тип исключения не
         # доказывает, что эффекта не было».
+        stored_what = text[:120]
         with storage.transaction():
-            entity = knowledge_graph.create_entity(actor.own_id, text[:120], EntityType.EVENT)
+            entity = knowledge_graph.create_entity(
+                actor.own_id,
+                stored_what,
+                EntityType.EVENT,
+                description=reminder_clock_description(clock),
+                # Two reminders with the same words but different dates/times
+                # are two scheduled effects, not one entity to overwrite.
+                deduplicate=False,
+            )
             # Автор напоминания — в источнике временной привязки. В общем архиве
             # (`FRIDAY_SHARED_ARCHIVE`) `actor.user_id` у всех один, и без этой
             # отметки орган рассылки не мог узнать, чья это просьба: замерено — она
@@ -2460,18 +2556,32 @@ class ExecutionKernel:
                 occurred_at,
                 source=f"reminder:{actor.own_id}",
             )
-        # Час не теряется: он остаётся в названии, потому что напоминания
-        # рассылаются по календарным дням — точное время человек прочитает в
-        # тексте, а не пропустит из-за того, что система его выбросила.
+        from friday.organs import may_push_to, resolve_chat_id
+
+        chat_id = resolve_chat_id(storage, actor.own_id)
+        delivery_scheduled = bool(
+            getattr(self.settings, "reminders_enabled", False)
+            and chat_id
+            and may_push_to(self.settings, storage, actor.own_id, chat_id)
+        )
         return {
             "created": True,
-            "what": text[:120],
+            "what": stored_what,
             "on": occurred_at,
             "at": clock,
+            "requested_when": " ".join(str(when or "").split())[:120],
+            "delivery_scheduled": delivery_scheduled,
             "entity_id": entity["id"],
         }
 
-    async def _upcoming(self, *, actor: ActorContext, days: int = 7) -> dict[str, Any]:
+    async def _upcoming(
+        self,
+        *,
+        actor: ActorContext,
+        days: int = 7,
+        since: str = "",
+        until: str = "",
+    ) -> dict[str, Any]:
         """Что человеку предстоит: напоминания и события с датами впереди.
 
         Найдено недельным прогоном 2026-08-02. На «Доброе утро! Какие планы на
@@ -2489,16 +2599,91 @@ class ExecutionKernel:
             _count_visible_timeline_events,
         )
 
-        horizon = max(1, min(int(days or 7), 60))
-        today = datetime.now(self._zone()).date()
-        rows = await run_blocking(
-            _bounded_visible_timeline_event_rows,
+        zone = self._zone()
+        local_now = datetime.now(zone)
+        today = local_now.date()
+        exact_since = exact_until = None
+        if str(since or "").strip() or str(until or "").strip():
+            raw_since = str(since or "").strip()
+            raw_until = str(until or "").strip()
+            date_boundaries = bool(
+                re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_since)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_until)
+            )
+            datetime_boundaries = bool(
+                re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", raw_since)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", raw_until)
+            )
+            try:
+                if date_boundaries:
+                    start_day = date.fromisoformat(raw_since)
+                    end_day = date.fromisoformat(raw_until)
+                elif datetime_boundaries:
+                    start_moment = datetime.fromisoformat(raw_since)
+                    end_moment = datetime.fromisoformat(raw_until)
+                    start_day = start_moment.date()
+                    end_day = end_moment.date()
+                    exact_since, exact_until = raw_since, raw_until
+                else:
+                    raise ValueError("unsupported boundary shape")
+            except ValueError:
+                return {
+                    "understood": False,
+                    "error": (
+                        "Границы календаря должны быть полными ISO-датами или "
+                        "локальными ISO-датами со временем."
+                    ),
+                    "items": [],
+                }
+            invalid = bool(end_day < start_day or (end_day - start_day).days >= 60 or start_day < today)
+            if exact_since is not None and exact_until is not None:
+                local_now_naive = local_now.replace(tzinfo=None)
+                invalid = invalid or end_moment < start_moment or start_moment < local_now_naive
+            if invalid:
+                return {
+                    "understood": False,
+                    "error": ("Интервал календаря неверен, длиннее 60 дней или относится к прошлому."),
+                    "items": [],
+                }
+        else:
+            requested_days = max(1, min(int(days or 7), 60))
+            start_day = today
+            end_day = today + timedelta(days=requested_days - 1)
+        window_days = (end_day - start_day).days + 1
+        not_before = (
+            local_now.replace(tzinfo=None, microsecond=0).isoformat(timespec="seconds")
+            if start_day == today and exact_since is None
+            else None
+        )
+
+        def read_page_and_total() -> tuple[list[dict[str, Any]], int]:
+            rows = _bounded_visible_timeline_event_rows(
+                storage,
+                actor.user_id,
+                actor.own_id,
+                start=start_day.isoformat(),
+                end=f"{end_day.isoformat()}T23:59:59",
+                not_before=not_before,
+                exact_since=exact_since,
+                exact_until=exact_until,
+                limit=100,
+            )
+            total = _count_visible_timeline_events(
+                storage,
+                actor.user_id,
+                actor.own_id,
+                start=start_day.isoformat(),
+                end=f"{end_day.isoformat()}T23:59:59",
+                not_before=not_before,
+                exact_since=exact_since,
+                exact_until=exact_until,
+            )
+            return rows, total
+
+        rows, total = await run_blocking(
+            _storage_read_snapshot,
             storage,
-            actor.user_id,
-            actor.own_id,
-            start=today.isoformat(),
-            end=(today + timedelta(days=horizon)).isoformat(),
-            limit=100,
+            read_page_and_total,
         )
         items = []
         for row in rows:
@@ -2508,14 +2693,18 @@ class ExecutionKernel:
             if source.startswith("reminder:") and source[len("reminder:") :] != actor.own_id:
                 continue
             occurred_at = str(row.get("occurred_at") or "")
-            when = "сегодня" if occurred_at == today.isoformat() else occurred_at
-            if occurred_at == (today + timedelta(days=1)).isoformat():
-                when = "завтра"
+            clock = reminder_clock(row) or (occurred_at[11:16] if len(occurred_at) >= 16 else "")
+            when = reminder_when_text(row, today)
             items.append(
                 {
-                    "what": str(row.get("name") or ""),
+                    # Forty long reminder names otherwise exceed the shared LLM
+                    # payload boundary and get cut in the middle of JSON.  The
+                    # full value remains in storage; this is only the bounded
+                    # reasoning projection, matching timeline event excerpts.
+                    "what": str(row.get("name") or "")[:200],
                     "on": occurred_at,
                     "when": when,
+                    "at": clock,
                     "mine": source.startswith("reminder:"),
                 }
             )
@@ -2523,21 +2712,23 @@ class ExecutionKernel:
         # попало в ответ. Раньше здесь стояла длина собственной выборки (потолок
         # 100, показ 40), то есть размер запроса выдавался за содержимое
         # календаря: «на неделю запланировано 100» при потолке ровно 100.
-        total = await run_blocking(
-            _count_visible_timeline_events,
-            storage,
-            actor.user_id,
-            actor.own_id,
-            start=today.isoformat(),
-            end=(today + timedelta(days=horizon)).isoformat(),
-        )
         shown = items[:40]
         return {
-            "days": horizon,
+            "understood": True,
+            "days": window_days,
+            "asked_about": {
+                "since": exact_since or start_day.isoformat(),
+                "until": exact_until or end_day.isoformat(),
+                "timezone": str(zone),
+            },
             "total": total,
             "shown": len(shown),
             "items": shown,
-            "note": "" if total else f"На ближайшие {horizon} дн. ничего не запланировано.",
+            "note": (
+                ""
+                if total
+                else f"В интервале {start_day.isoformat()} — {end_day.isoformat()} ничего не запланировано."
+            ),
         }
 
     async def _what_happened(
@@ -2561,11 +2752,26 @@ class ExecutionKernel:
         storage = self.storage
         if storage is None:
             raise RuntimeError("Execution kernel storage is not initialized")
-        start_local, start_bad = _moment_bounds(since, edge="since")
-        # Без явного конца названное время означает промежуток вокруг себя, а не
-        # мгновение: «в 15:00» человек спрашивает про пятнадцатый час, и ответ
-        # «за 15:00:00–15:00:59» был бы пустым почти всегда.
-        end_local, end_bad = _moment_bounds(until or since, edge="until", widen=not until)
+        normalized_start = _normalized_local_timestamp(since)
+        normalized_end = _normalized_local_timestamp(until) if until else None
+        start_local: str | None
+        end_local: str | None
+        start_bad: str | None
+        end_bad: str | None
+        if normalized_start and normalized_end:
+            start_local, end_local = normalized_start, normalized_end
+            start_bad = end_bad = None
+            start_value = datetime.fromisoformat(start_local)
+            end_value = datetime.fromisoformat(end_local)
+            duration = end_value - start_value
+            if duration < timedelta(0) or (end_value.date() - start_value.date()).days >= 60:
+                start_bad = "интервал перевёрнут или длиннее 60 дней"
+        else:
+            start_local, start_bad = _moment_bounds(since, edge="since")
+            # Без явного конца названное время означает промежуток вокруг себя, а не
+            # мгновение: «в 15:00» человек спрашивает про пятнадцатый час, и ответ
+            # «за 15:00:00–15:00:59» был бы пустым почти всегда.
+            end_local, end_bad = _moment_bounds(until or since, edge="until", widen=not until)
         if start_bad or end_bad or not start_local or not end_local:
             # Непонятая граница — отказ, а не «показать всё»: молча снятый фильтр
             # выдаёт чужое время за спрошенное.
@@ -2575,31 +2781,64 @@ class ExecutionKernel:
                 "Примеры: «2026-07-26 15:00», «26 июля 2026», «2026-07-26».",
                 "events": [],
             }
+        start_value = datetime.fromisoformat(start_local)
+        end_value = datetime.fromisoformat(end_local)
+        if end_value < start_value or (end_value.date() - start_value.date()).days >= 60:
+            return {
+                "understood": False,
+                "error": "Интервал ленты перевёрнут или длиннее 60 дней.",
+                "events": [],
+            }
         zone = self._zone()
+        local_now = datetime.now(zone).replace(tzinfo=None)
+        if start_value > local_now or end_value.date() > local_now.date():
+            return {
+                "understood": False,
+                "error": "Лента прошлого не принимает границы из будущего.",
+                "events": [],
+            }
+        if end_value > local_now:
+            # A day/week/month ending today denotes its elapsed prefix.  Clip
+            # both the storage boundary and the echoed contract boundary so a
+            # caller can verify exactly what was checked; never read scheduled
+            # rows from the unelapsed tail as if they had happened already.
+            end_value = local_now.replace(microsecond=0)
+            end_local = end_value.isoformat(timespec="seconds")
+        if end_value < start_value:
+            return {
+                "understood": False,
+                "error": "Лента прошлого не принимает границы из будущего.",
+                "events": [],
+            }
         since_utc = datetime.fromisoformat(start_local).replace(tzinfo=zone).astimezone(UTC)
         until_utc = datetime.fromisoformat(end_local).replace(tzinfo=zone).astimezone(UTC)
-        if until_utc < since_utc:
-            since_utc, until_utc = until_utc, since_utc
+
         # Переписка — ЛИЧНАЯ, документы — общие, и это две разные границы.
         # До правки обе шли одним `actor.user_id`: в общем архиве это арендатор, и
         # любой участник, спросивший «что было вчера», получал реплики ВЛАДЕЛЬЦА
         # дословно — с ролью и заголовком разговора, — а своих не видел ни одной.
         # Воспроизведено на изолированном стенде; тот же класс уже чинили в
         # `_message_search` и `_upcoming`.
-        events = await run_blocking(
-            storage.what_happened,
-            actor.user_id,
-            person_id=actor.own_id,
-            since=since_utc.isoformat(),
-            until=until_utc.isoformat(),
-            limit=max(1, min(int(limit), 200)),
-        )
-        totals = await run_blocking(
-            storage.count_what_happened,
-            actor.user_id,
-            person_id=actor.own_id,
-            since=since_utc.isoformat(),
-            until=until_utc.isoformat(),
+        def read_page_and_total() -> tuple[list[dict[str, Any]], dict[str, int]]:
+            events = storage.what_happened(
+                actor.user_id,
+                person_id=actor.own_id,
+                since=since_utc.isoformat(),
+                until=until_utc.isoformat(),
+                limit=max(1, min(int(limit), 200)),
+            )
+            totals = storage.count_what_happened(
+                actor.user_id,
+                person_id=actor.own_id,
+                since=since_utc.isoformat(),
+                until=until_utc.isoformat(),
+            )
+            return events, totals
+
+        events, totals = await run_blocking(
+            _storage_read_snapshot,
+            storage,
+            read_page_and_total,
         )
         for event in events:
             # Человеку — его время, а не UTC: иначе ответ на «в 15 часов» будет
@@ -2611,12 +2850,18 @@ class ExecutionKernel:
             except ValueError:
                 event["at_local"] = str(event["at"])
         events = [_timeline_event_for_llm(event) for event in events]
+        total_events = int(totals.get("total", 0) or 0)
         return {
             "understood": True,
             "asked_about": {"since": start_local, "until": end_local, "timezone": str(zone)},
             "total": totals,
             "shown": len(events),
             "events": events,
+            "coverage": {
+                "complete": len(events) == total_events,
+                "strategy": "complete" if len(events) == total_events else "uniform_interval_sample",
+                "includes_latest": bool(events) or total_events == 0,
+            },
         }
 
     async def _memory_search(
@@ -3788,7 +4033,21 @@ class ExecutionKernel:
         produced an ungrounded answer that failed verification in rehearsal.
         """
         storage, _, _, _ = self._require_services()
-        items = storage.list_knowledge_tags(actor.user_id)
+
+        def read_page_and_total() -> tuple[list[dict[str, Any]], int]:
+            return (
+                storage.list_knowledge_tags(actor.user_id),
+                storage.count_knowledge_tags(actor.user_id),
+            )
+
+        # Page membership, per-tag counts and exact distinct total are one
+        # published fact.  A concurrent import/delete between independent
+        # SELECTs could otherwise produce a payload that never existed.
+        items, total = await run_blocking(
+            _storage_read_snapshot,
+            storage,
+            read_page_and_total,
+        )
         # Показываются САМЫЕ ЧАСТЫЕ, а общее число называется отдельно.
         #
         # Замерено на живом архиве 2026-08-02: полный список занимал 11 075 знаков
@@ -3800,8 +4059,8 @@ class ExecutionKernel:
         return {
             "tags": shown,
             "count": len(shown),
-            "total": len(items),
-            "truncated": len(shown) < len(items),
+            "total": total,
+            "truncated": len(shown) < total,
         }
 
     async def _speak(self, *, actor: ActorContext, text: str) -> dict[str, Any]:
@@ -5145,6 +5404,14 @@ class ExecutionKernel:
                 "days": {
                     "type": "integer",
                     "description": "На сколько дней вперёд смотреть. По умолчанию 7.",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "Точная начальная ISO-дата YYYY-MM-DD; используется вместе с until.",
+                },
+                "until": {
+                    "type": "string",
+                    "description": "Точная конечная ISO-дата YYYY-MM-DD, не дальше 60 дней от since.",
                 },
             },
             [],

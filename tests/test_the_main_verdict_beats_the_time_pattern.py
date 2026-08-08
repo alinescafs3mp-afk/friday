@@ -39,7 +39,21 @@ class _Kernel:
 
         class _Result:
             success = True
-            data: dict = {}
+            data: dict = {
+                "understood": True,
+                "asked_about": {
+                    "since": params.get("since", ""),
+                    "until": params.get("until", ""),
+                },
+                "total": {"messages": 0, "documents": 0, "total": 0},
+                "shown": 0,
+                "events": [],
+                "coverage": {
+                    "complete": True,
+                    "strategy": "complete",
+                    "includes_latest": True,
+                },
+            }
 
             def to_llm_message(self) -> str:
                 return "лента"
@@ -98,7 +112,7 @@ def test_the_verdict_is_checked_before_anything_else() -> None:
     «это вопрос о ленте?» — лишняя секунда там, где ответ уже известен.
     """
     source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)
-    assert source.index('kind.startswith(("быт"') < source.index("period_from_question")
+    assert source.index("kind.startswith(") < source.index("period_from_question")
 
 
 def test_the_context_reaches_the_prefetch() -> None:

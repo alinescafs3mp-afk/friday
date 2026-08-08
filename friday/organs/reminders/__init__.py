@@ -23,6 +23,7 @@ from friday.organs import (
     may_push_to,
     resolve_chat_id,
 )
+from friday.reminder_schedule import reminder_is_due, reminder_when_text
 from friday.storage._graph import _bounded_visible_timeline_event_rows
 
 LOGGER = logging.getLogger(__name__)
@@ -30,12 +31,7 @@ LOGGER = logging.getLogger(__name__)
 
 def _format_reminder(event: dict, today) -> str:
     name = str(event.get("name") or "событие").strip()
-    occurred_at = str(event.get("occurred_at") or "")
-    when = occurred_at
-    if occurred_at == today.isoformat():
-        when = "сегодня"
-    elif occurred_at == (today + timedelta(days=1)).isoformat():
-        when = "завтра"
+    when = reminder_when_text(event, today)
     return f"🔔 Напоминание: «{name}» — {when}."
 
 
@@ -73,7 +69,10 @@ async def scan_reminders(ctx: ServiceContext) -> None:
     if not allowed:
         return
     today = now.date()
-    start = today.isoformat()
+    # Exact-clock reminders missed during a short outage are allowed a bounded
+    # catch-up window. Date-only events are filtered back to the historical
+    # lead window by ``reminder_is_due`` below.
+    start = (today - timedelta(days=7)).isoformat()
     end = (today + timedelta(days=max(0, settings.reminders_lead_days))).isoformat()
 
     enqueued = 0
@@ -93,6 +92,8 @@ async def scan_reminders(ctx: ServiceContext) -> None:
             end=end,
         ):
             if not _belongs_to(event, person=user_id, tenant=tenant):
+                continue
+            if not reminder_is_due(event, now, lead_days=settings.reminders_lead_days):
                 continue
             dedup_key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"
             if ctx.storage.enqueue_notification(

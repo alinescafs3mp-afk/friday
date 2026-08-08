@@ -549,7 +549,7 @@ _MULTI_IDENTIFIER_MIN_COVERAGE = 0.01
 
 _RELATIONAL_QUERY_RE = re.compile(
     r"\b(?:связан\w*|завис\w*|участву\w*|с\s+кем\s+работа\w*|работа\w*\s+над|относ\w*\s+к|"
-    r"част\w*\s+(?:проекта|системы)|через\s+что|между\s+\w+\s+и\s+\w+|"
+    r"част\w*\s+(?:проекта|системы)|через\s+(?:что|граф)|между\s+\w+\s+и\s+\w+|"
     r"related\s+to|depends?\s+on|works?\s+on|part\s+of|connected\s+to|between)\b",
     re.IGNORECASE,
 )
@@ -2322,6 +2322,8 @@ class HybridSearcher:
                 if normalized_known_at:
                     graph_kwargs["known_at"] = normalized_known_at
                 raw_traversed = kg.context_for_query(user_id, clean_query, **graph_kwargs)
+                if not isinstance(raw_traversed, Mapping):
+                    raise TypeError("graph traversal returned no mapping")
                 if normalized_as_of or normalized_known_at:
                     traversed = _validated_temporal_graph_echo(
                         raw_traversed,
@@ -2330,7 +2332,7 @@ class HybridSearcher:
                         history_status=history_status,
                     )
                 else:
-                    traversed = dict(raw_traversed) if isinstance(raw_traversed, Mapping) else {}
+                    traversed = dict(raw_traversed)
                 graph_context = {
                     **traversed,
                     # The searcher's preflight is authoritative for the public

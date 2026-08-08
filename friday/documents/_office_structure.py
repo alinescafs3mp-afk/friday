@@ -177,7 +177,58 @@ _FOOTER_PREFIXES = (
     "grand total",
     "average",
     "среднее",
+    "сумма",
+    "общая сумма",
+    "sum",
     "результат",
+    "примечание",
+    "примечания",
+    "комментарий",
+    "комментарии",
+    "справочно",
+    "note",
+    "notes",
+    "comment",
+    "comments",
+    "remark",
+    "remarks",
+    "источник",
+    "источники",
+    "source",
+    "sources",
+    "данные актуальны",
+    "data as of",
+    "обновлено",
+    "updated",
+    "last updated",
+    "подготовил",
+    "подготовила",
+    "подготовлено",
+    "prepared by",
+    "дата формирования",
+    "дата выгрузки",
+    "сформировано",
+    "сформирован",
+    "проверено",
+    "утверждено",
+    "версия отчёта",
+    "generated",
+    "generated at",
+    "approved",
+    "approved by",
+    "report version",
+    "составил",
+    "выгружено",
+    "экспортировано",
+    "created by",
+    "prepared",
+    "отчет сформирован",
+    "отчёт сформирован",
+    "дата отчета",
+    "дата отчёта",
+    "период отчета",
+    "период отчёта",
+    "страница",
 )
 _DOCX_FIELD_TAGS = frozenset({"fldSimple", "fldChar", "instrText", "delInstrText"})
 _DOCX_VISIBLE_AUXILIARY_TAGS = frozenset(
@@ -297,6 +348,15 @@ def _is_strong_person_header(value: str) -> bool:
 
 def _is_schema_header(value: str) -> bool:
     return _closed_text(value) in _SCHEMA_HEADER_VALUES
+
+
+def _is_schema_header_like(value: str) -> bool:
+    """Recognise a known header with a continuation/pagination qualifier."""
+
+    normalized = _closed_text(value)
+    return any(
+        normalized == header or normalized.startswith(f"{header} ") for header in _SCHEMA_HEADER_VALUES
+    )
 
 
 def _is_footer_value(value: str) -> bool:
@@ -944,7 +1004,133 @@ def _infer_person_records(
                     "basis": "declared_person_column",
                 }
             )
-    return record_sets, candidates
+    return _infer_generic_records(blocks, text, record_sets), candidates
+
+
+def _infer_generic_records(
+    blocks: list[dict[str, Any]],
+    text: str,
+    record_sets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add exact row sets for closed ordinary tables with a known schema header."""
+
+    occupied_blocks = {str(item.get("block_id") or "") for item in record_sets}
+    for block in blocks:
+        if block.get("kind") not in {"table", "sheet"} or block.get("id") in occupied_blocks:
+            continue
+        rows = block.get("rows")
+        if not isinstance(rows, list):
+            continue
+
+        # A failed people-table proof may not be downgraded into an ordinary
+        # row set: doing so would let a malformed person column keep exact row
+        # authority while losing the stronger candidate invariant.
+        if any(
+            _is_person_header(_span_text(text, cell.get("text_span")))
+            for row in rows
+            for cell in _row_nonempty_cells(row, text)
+        ):
+            continue
+        for row in rows:
+            row["role"] = "empty" if not _row_nonempty_cells(row, text) else "unknown"
+
+        header_options: list[tuple[int, dict[str, Any]]] = []
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            cells = [cell for cell in row.get("cells", []) if isinstance(cell, dict)]
+            nonempty = _row_nonempty_cells(row, text)
+            if not nonempty or len(nonempty) != len(cells):
+                continue
+            anchors = [str(cell.get("merge_anchor") or "") for cell in cells]
+            unmerged = bool(
+                all(
+                    anchor and anchor == str(cell.get("id") or "")
+                    for anchor, cell in zip(anchors, cells, strict=True)
+                )
+                and len(anchors) == len(set(anchors))
+            )
+            if unmerged and all(
+                _is_schema_header(_span_text(text, cell.get("text_span"))) for cell in nonempty
+            ):
+                header_options.append((row_index, row))
+        if len(header_options) != 1:
+            continue
+        header_index, header_row = header_options[0]
+        header_row["role"] = "header"
+        if any(_row_nonempty_cells(row, text) for row in rows[:header_index]):
+            continue
+
+        header_columns = [
+            int(cell.get("column") or 0) for cell in header_row.get("cells", []) if isinstance(cell, Mapping)
+        ]
+        if not header_columns or 0 in header_columns or len(header_columns) != len(set(header_columns)):
+            continue
+
+        record_rows: list[dict[str, Any]] = []
+        ambiguous = False
+        region_closed = False
+        data_region = rows[header_index + 1 :]
+        for data_index, row in enumerate(data_region):
+            nonempty = _row_nonempty_cells(row, text)
+            if not nonempty:
+                row["role"] = "empty"
+                if record_rows:
+                    region_closed = True
+                continue
+            cells = [cell for cell in row.get("cells", []) if isinstance(cell, dict)]
+            columns = [int(cell.get("column") or 0) for cell in cells]
+            values = [_span_text(text, cell.get("text_span")) for cell in cells]
+            unmerged = all(str(cell.get("merge_anchor") or "") == str(cell.get("id") or "") for cell in cells)
+            terminal_row = not any(
+                _row_nonempty_cells(later_row, text) for later_row in data_region[data_index + 1 :]
+            )
+            # A footer label is structural: terminal and in the leading field.
+            # Words such as ``Total``, ``Source`` or ``Prepared`` are ordinary
+            # role/status prose in any other cell and must not revoke an exact
+            # record set merely by sharing a prefix with a report annotation.
+            footer_like = bool(terminal_row and values and values[0].strip() and _is_footer_value(values[0]))
+            terminal_numeric_total = bool(
+                any(_is_numeric_aggregate(value) for value in values if value.strip())
+                and terminal_row
+                and all(
+                    not value.strip() or _is_footer_value(value) or _is_numeric_aggregate(value)
+                    for value in values
+                )
+            )
+            if footer_like or terminal_numeric_total:
+                row["role"] = "footer"
+                region_closed = True
+                ambiguous = True
+                continue
+            if (
+                region_closed
+                or not unmerged
+                or columns != header_columns
+                or len(columns) != len(set(columns))
+                or all(_is_schema_header_like(value) for value in values if value.strip())
+            ):
+                row["role"] = "unknown"
+                ambiguous = True
+                continue
+            row["role"] = "record"
+            record_rows.append(row)
+
+        if ambiguous or not record_rows:
+            continue
+        record_sets.append(
+            {
+                "id": f"rs{len(record_sets) + 1:06d}",
+                "block_id": block["id"],
+                "kind": "table_rows",
+                "authoritative": True,
+                "header_row_id": header_row["id"],
+                "record_ids": [row["id"] for row in record_rows],
+                "records_total": len(record_rows),
+                "person_column": None,
+            }
+        )
+    return record_sets
 
 
 def _block_text_span(block: Mapping[str, Any]) -> list[int] | None:
@@ -2133,13 +2319,14 @@ def validate_office_structure_index(index: Mapping[str, Any], text: str) -> dict
         record_ids = item_value.get("record_ids")
         records_total = item_value.get("records_total")
         person_column = item_value.get("person_column")
+        record_set_kind = item_value.get("kind")
         if (
             not isinstance(item_id, str)
             or not _RECORD_SET_ID_RE.fullmatch(item_id)
             or item_id != f"rs{record_set_position:06d}"
             or item_id in record_set_ids
             or block_id not in block_ids
-            or item_value.get("kind") != "person_rows"
+            or record_set_kind not in {"person_rows", "table_rows"}
             or item_value.get("authoritative") is not True
             or header_row_id not in row_lookup
             or row_lookup[header_row_id][0] != block_id
@@ -2148,8 +2335,12 @@ def validate_office_structure_index(index: Mapping[str, Any], text: str) -> dict
             or len(record_ids) != len(set(record_ids))
             or not _is_plain_int(records_total)
             or records_total != len(record_ids)
-            or not _is_plain_int(person_column, minimum=1)
         ):
+            return None
+        if record_set_kind == "person_rows":
+            if not _is_plain_int(person_column, minimum=1):
+                return None
+        elif person_column is not None:
             return None
         for record_id in record_ids:
             if (
@@ -2160,38 +2351,61 @@ def validate_office_structure_index(index: Mapping[str, Any], text: str) -> dict
                 or record_id in authoritative_record_ids
             ):
                 return None
-        header_columns = {cell["column"] for cell in row_lookup[header_row_id][1]["cells"]}
-        if person_column not in header_columns:
-            return None
-        header_person_cells = [
-            cell
-            for cell in row_lookup[header_row_id][1]["cells"]
-            if cell["column"] == person_column
-            and _is_person_header(_span_text(text, cell["text_span"]))
-            and cell["merge_anchor"] == cell["id"]
-        ]
-        if len(header_person_cells) != 1:
-            return None
-        for record_id in record_ids:
-            person_cells = [
+        header_cells = row_lookup[header_row_id][1]["cells"]
+        header_columns = {cell["column"] for cell in header_cells}
+        if record_set_kind == "person_rows":
+            if person_column not in header_columns:
+                return None
+            header_person_cells = [
                 cell
-                for cell in row_lookup[record_id][1]["cells"]
+                for cell in header_cells
                 if cell["column"] == person_column
-                and isinstance(cell["text_span"], list)
-                and cell["text_span"][0] < cell["text_span"][1]
-                and _span_text(text, cell["text_span"]).strip()
+                and _is_person_header(_span_text(text, cell["text_span"]))
                 and cell["merge_anchor"] == cell["id"]
             ]
-            if len(person_cells) != 1:
+            if len(header_person_cells) != 1:
                 return None
-            expected_candidate_cells[record_id] = person_cells[0]["id"]
+            for record_id in record_ids:
+                person_cells = [
+                    cell
+                    for cell in row_lookup[record_id][1]["cells"]
+                    if cell["column"] == person_column
+                    and isinstance(cell["text_span"], list)
+                    and cell["text_span"][0] < cell["text_span"][1]
+                    and _span_text(text, cell["text_span"]).strip()
+                    and cell["merge_anchor"] == cell["id"]
+                ]
+                if len(person_cells) != 1:
+                    return None
+                expected_candidate_cells[record_id] = person_cells[0]["id"]
+        else:
+            if (
+                not header_cells
+                or any(cell["merge_anchor"] != cell["id"] for cell in header_cells)
+                or any(
+                    not _span_text(text, cell["text_span"]).strip()
+                    or not _is_schema_header(_span_text(text, cell["text_span"]))
+                    or _is_person_header(_span_text(text, cell["text_span"]))
+                    for cell in header_cells
+                )
+            ):
+                return None
+            ordered_header_columns = [cell["column"] for cell in header_cells]
+            if len(ordered_header_columns) != len(set(ordered_header_columns)):
+                return None
+            for record_id in record_ids:
+                record_cells = row_lookup[record_id][1]["cells"]
+                if [cell["column"] for cell in record_cells] != ordered_header_columns or any(
+                    cell["merge_anchor"] != cell["id"] for cell in record_cells
+                ):
+                    return None
         record_set_ids.add(item_id)
         authoritative_record_ids.update(record_ids)
         record_sets.append(
             {
                 "id": item_id,
                 "block_id": block_id,
-                "kind": "person_rows",
+                "kind": record_set_kind,
                 "authoritative": True,
                 "header_row_id": header_row_id,
                 "record_ids": list(record_ids),

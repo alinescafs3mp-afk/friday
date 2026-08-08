@@ -251,7 +251,9 @@ def test_rules_and_corrections_do_not_mix(settings, storage) -> None:
     assert agent._corrections("alice") == ["День морской пехоты — 27 ноября"]
 
 
-def test_a_correction_does_not_raise_the_timeline() -> None:
+@pytest.mark.parametrize("kind", ["поправка", "правило", "быт", "действие", "интернет"])
+@pytest.mark.asyncio
+async def test_a_correction_does_not_raise_the_timeline(kind: str) -> None:
     """Дата в поправке не должна поднимать ленту событий.
 
     Живой прогон 2026-08-03: на «нет, не 27 июля, а 27 ноября» человек получил не
@@ -262,11 +264,30 @@ def test_a_correction_does_not_raise_the_timeline() -> None:
     список видов пополнялся, а исключение — нет. Мутация: убрать «поправку» из
     перечня — тест краснеет.
     """
-    source = inspect.getsource(AgentRuntime._prefetch_the_timeline_if_asked)
-    at = source.index("startswith((")
-    guard = source[at : at + 160]
-    for kind in ("поправка", "правило", "быт", "действие", "интернет"):
-        assert f'"{kind}"' in guard, f"вид «{kind}» не защищён от ленты событий"
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    context = AgentContext(
+        conversation_id="synthetic",
+        user_id="synthetic",
+        outward_verdict=(kind, None),
+    )
+    tools = [
+        {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+        for name in ("what_happened", "upcoming", "memory_search")
+    ]
+
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        "нет, не 27 июля, а 27 ноября",
+        None,  # type: ignore[arg-type]
+        tools,
+        [],
+        [],
+        [],
+        context,
+    )
+
+    assert [tool["function"]["name"] for tool in tools] == ["memory_search"], (
+        f"вид «{kind}» не защищён от ленты событий"
+    )
 
 
 def test_the_arbiter_sees_the_answer_being_corrected(settings, storage) -> None:

@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Mapping
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -32,6 +33,9 @@ CLASSIFIER_MAX_TOKENS = 256
 _CONTEXT_SAFETY_TOKENS = 256
 _TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 _TRUNCATION_MARKER = "\n… [контекст сокращён Friday] …\n"
+_MAX_REPORTED_TOOL_NAMES = 64
+_MAX_REPORTED_TOOL_NAME_CHARS = 128
+_TOOL_SCHEMA_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 
 async def _await_http_request(request: Any) -> httpx.Response:
@@ -314,6 +318,43 @@ def _tools_unsupported(body: str) -> bool:
     )
 
 
+def _bounded_tool_schema_names(tools: Any) -> list[str]:
+    """Capability names present in one actual model payload, bounded and content-free.
+
+    This is transport evidence for the caller, not a copy of schemas.  Descriptions,
+    parameters and any values embedded in them never leave the request payload through
+    this signal.  Invalid and excess entries are omitted, which is fail-closed when the
+    caller later checks a model-emitted name against the returned list.
+    """
+
+    if not isinstance(tools, list):
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in tools:
+        if len(names) >= _MAX_REPORTED_TOOL_NAMES:
+            break
+        if not isinstance(item, Mapping) or item.get("type") != "function":
+            continue
+        function = item.get("function")
+        if not isinstance(function, Mapping):
+            continue
+        raw_name = function.get("name")
+        if not isinstance(raw_name, str):
+            continue
+        name = raw_name.strip()
+        if (
+            not name
+            or len(name) > _MAX_REPORTED_TOOL_NAME_CHARS
+            or _TOOL_SCHEMA_NAME_RE.fullmatch(name) is None
+            or name in seen
+        ):
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
 _TOOL_CALL_MARKUP = re.compile(r"<\s*tool_call\s*>.*?(?:<\s*/\s*tool_call\s*>|$)", re.S | re.I)
 
 
@@ -457,7 +498,14 @@ class LLMRouter:
     ) -> dict[str, Any]:
         requested_output = max_tokens if max_tokens is not None else self.max_tokens
         requested_output = max(64, min(int(requested_output), self.settings.profile.max_model_len - 512))
-        tool_chars = len(json.dumps(tools, ensure_ascii=False, default=str)) if tools else 0
+        # A 400 which specifically identified unsupported tool calling is an
+        # endpoint capability result, not a one-request accident.  Keep the
+        # successful schema-less mode for later chats on this router instance;
+        # otherwise every user message pays for the same doomed request first.
+        effective_tools = None if self._tools_refused else tools
+        tool_chars = (
+            len(json.dumps(effective_tools, ensure_ascii=False, default=str)) if effective_tools else 0
+        )
         fitted = _fit_messages_to_context(
             messages,
             max_model_len=self.settings.profile.max_model_len,
@@ -481,8 +529,8 @@ class LLMRouter:
             # заслуживает.
             "stream": False,
         }
-        if tools:
-            payload["tools"] = tools
+        if effective_tools:
+            payload["tools"] = effective_tools
         if self.settings.profile.suppress_model_thinking:
             # This is the supported Qwen path; post-processing below is only a
             # defense-in-depth fallback for non-conforming model responses.
@@ -609,6 +657,11 @@ class LLMRouter:
                     "tool_calls": tool_calls,
                     "finish_reason": finish_reason,
                     "usage": data.get("usage", {}),
+                    # The first request may have been rejected specifically for
+                    # carrying tool schemas and retried without them.  Report the
+                    # capabilities in the payload that ACTUALLY produced this
+                    # response, never the nominal list passed into ``chat``.
+                    "_offered_tool_names": _bounded_tool_schema_names(payload.get("tools")),
                 }
 
             except httpx.HTTPStatusError as exc:
