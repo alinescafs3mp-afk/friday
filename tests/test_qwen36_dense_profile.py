@@ -14,7 +14,7 @@ def test_qwen36_dense_profile_matches_the_multimodal_dispatcher_command(monkeypa
     assert settings.llm_model == "dispatcher"
     assert settings.model_dir == settings.model_root / profile.model_dir_name
     assert profile.max_model_len == 32768
-    assert profile.gpu_memory_utilization == 0.76
+    assert profile.gpu_memory_utilization == 0.78
     assert profile.kv_cache_dtype == "fp8"
     assert profile.max_num_seqs == 1
     assert profile.quantization == "modelopt_mixed"

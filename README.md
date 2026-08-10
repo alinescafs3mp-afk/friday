@@ -232,7 +232,7 @@ VRAM обнаружился при старте, а не на первом по�
 | served model name | `dispatcher` |
 | max model length | `32768` |
 | quantization | `modelopt_mixed` |
-| GPU memory utilization | `0.76` |
+| GPU memory utilization | `0.78` |
 | KV cache dtype | `fp8` |
 | max sequences | `1` |
 | max batched tokens | `4096` |

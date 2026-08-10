@@ -16,7 +16,7 @@ def test_primary_vllm_profile_is_pinned_to_expected_operational_values(settings)
     assert profile.model_dir_name == "qwen3.6-27b-nvfp4-nvidia"
     assert settings.model_dir == settings.model_root / "qwen3.6-27b-nvfp4-nvidia"
     assert profile.max_model_len == 32768
-    assert profile.gpu_memory_utilization == 0.76
+    assert profile.gpu_memory_utilization == 0.78
     assert profile.kv_cache_dtype == "fp8"
     assert profile.max_num_seqs == 1
     assert profile.tokenizer_mode == "auto"

@@ -30,7 +30,7 @@ def test_multimodal_dispatcher_is_pinned_to_the_dense_modelopt_runtime():
     ) in compose
     assert "http://127.0.0.1:${FRIDAY_API_PORT:-8000}/api/health" in compose
     assert "--max-model-len 32768" in compose
-    assert "--gpu-memory-utilization 0.76" in compose
+    assert "--gpu-memory-utilization 0.78" in compose
     assert "--max-num-seqs 1" in compose
     assert "--max-num-batched-tokens 4096" in compose
 

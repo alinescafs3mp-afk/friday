@@ -104,7 +104,7 @@ services:
       --quantization modelopt_mixed
       ${FRIDAY_QWEN_ENFORCE_EAGER:-}
       --max-model-len 32768
-      --gpu-memory-utilization 0.76
+      --gpu-memory-utilization 0.78
       --kv-cache-dtype fp8
       --tokenizer-mode auto
       --safetensors-load-strategy prefetch

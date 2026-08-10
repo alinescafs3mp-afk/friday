@@ -347,9 +347,10 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
     # Leave physical headroom for the co-resident embeddings and reranker
     # services.  At 0.82 the complete Windows/WSL stack entered Unified-Memory
     # paging during a normal Friday prefill even though vLLM stayed healthy.
-    # 0.76 is the lowest verified setting that still admits one full 32K
-    # FP8-KV sequence after CUDA-graph profiling.
-    gpu_memory_utilization=0.76,
+    # With the multimodal encoder profiled and the sidecars already resident,
+    # 0.76 exposed 1.28 GiB of KV cache versus the 1.29 GiB required for one
+    # full 32K request.  0.78 restores a bounded startup margin.
+    gpu_memory_utilization=0.78,
     kv_cache_dtype="fp8",
     max_num_seqs=1,
     cpu_offload_gb=0,
