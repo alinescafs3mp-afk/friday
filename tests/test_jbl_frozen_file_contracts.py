@@ -21,7 +21,6 @@ from docx import Document
 from friday.agent_runtime import (
     _FALSE_CURRENT_MODEL_OUTAGE,
     _PERSON_DOCUMENT_INVENTORY,
-    _PRIVATE_WEB_SEARCH_BLOCKED,
     _WEB_ISOLATION_DEICTIC,
     AgentContext,
     AgentRuntime,
@@ -927,7 +926,7 @@ def test_fresh_public_news_is_an_explicit_web_request_but_local_news_is_not() ->
 
 
 @pytest.mark.asyncio
-async def test_recent_private_file_then_self_contained_fresh_news_uses_isolated_web_only(
+async def test_recent_private_file_then_fresh_news_uses_normal_history_and_web(
     settings,
     storage,
     monkeypatch,
@@ -943,10 +942,7 @@ async def test_recent_private_file_then_self_contained_fresh_news_uses_isolated_
         kernel=kernel,
     )
 
-    async def no_private_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("isolated news called private context preparation")
-
-    monkeypatch.setattr(runtime, "_prepare_context", no_private_prepare)
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
     request = "Покажешь свежие новости за прошедшие сутки?"
     reply = await runtime.chat(
         "alice",
@@ -964,13 +960,13 @@ async def test_recent_private_file_then_self_contained_fresh_news_uses_isolated_
     assert reply["tools_used"] == ["web_research"]
     assert reply["web_evidence_status"] == "sourced"
     exposed = json.dumps(model.calls, ensure_ascii=False)
-    assert "PRIVATE-HISTORY-CANARY" not in exposed
-    assert "PRIVATE-ANSWER-CANARY" not in exposed
+    assert "PRIVATE-HISTORY-CANARY" in exposed
+    assert "PRIVATE-ANSWER-CANARY" in exposed
     assert request in exposed
 
 
 @pytest.mark.asyncio
-async def test_old_private_lineage_allows_only_a_self_contained_isolated_web_turn(
+async def test_old_private_lineage_web_turn_keeps_normal_history(
     settings,
     storage,
     monkeypatch,
@@ -986,10 +982,7 @@ async def test_old_private_lineage_allows_only_a_self_contained_isolated_web_tur
         kernel=kernel,
     )
 
-    async def no_private_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("isolated web called private context preparation")
-
-    monkeypatch.setattr(runtime, "_prepare_context", no_private_prepare)
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
     request = "Найди в интернете температуру кипения воды при нормальном давлении"
     reply = await runtime.chat(
         "alice",
@@ -1007,8 +1000,8 @@ async def test_old_private_lineage_allows_only_a_self_contained_isolated_web_tur
     assert reply["tools_used"] == ["web_research"]
     assert reply["web_evidence_status"] == "sourced"
     exposed = json.dumps(model.calls, ensure_ascii=False)
-    assert "PRIVATE-HISTORY-CANARY" not in exposed
-    assert "PRIVATE-ANSWER-CANARY" not in exposed
+    assert "PRIVATE-HISTORY-CANARY" in exposed
+    assert "PRIVATE-ANSWER-CANARY" in exposed
     assert request in exposed
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
@@ -1027,9 +1020,10 @@ async def test_old_private_lineage_allows_only_a_self_contained_isolated_web_tur
         "Найди в интернете по ранее присланным данным",
     ],
 )
-async def test_old_private_lineage_still_blocks_reference_only_web_requests(
+async def test_old_private_lineage_allows_explicit_reference_only_web_requests(
     settings,
     storage,
+    monkeypatch,
     query_text: str,
 ) -> None:
     storage.ensure_user("alice", preset_key="owner")
@@ -1043,6 +1037,18 @@ async def test_old_private_lineage_still_blocks_reference_only_web_requests(
         kernel=kernel,
     )
 
+    async def prepared(user_id, message, current_conversation_id, **kwargs):  # noqa: ANN001
+        del kwargs
+        return AgentContext(
+            conversation_id=current_conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            conversation_history=[],
+            outward_verdict=("интернет", runtime.web_query_from(message)),
+        )
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepared)
+
     reply = await runtime.chat(
         "alice",
         query_text,
@@ -1050,15 +1056,22 @@ async def test_old_private_lineage_still_blocks_reference_only_web_requests(
         conversation_id=conversation_id,
     )
 
-    assert reply["message"] == _PRIVATE_WEB_SEARCH_BLOCKED
-    assert kernel.calls == [] and model.calls == []
+    assert kernel.calls == [
+        (
+            "web_research",
+            {"query": runtime.web_query_from(query_text), "max_sources": 3},
+        )
+    ]
+    assert model.calls
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "sourced"
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
-    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio
-async def test_recent_attachment_still_allows_a_self_contained_isolated_web_turn(
+async def test_recent_attachment_web_turn_uses_bounded_normal_history(
     settings,
     storage,
 ) -> None:
@@ -1098,6 +1111,7 @@ async def test_recent_attachment_still_allows_a_self_contained_isolated_web_turn
     assert reply["tools_used"] == ["web_research"]
     assert reply["web_evidence_status"] == "sourced"
     exposed = json.dumps(model.calls, ensure_ascii=False)
+    assert "neutral-20" in exposed
     assert "PRIVATE-HISTORY-CANARY" not in exposed
     assert "PRIVATE-ANSWER-CANARY" not in exposed
     assert request in exposed

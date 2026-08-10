@@ -20,12 +20,12 @@ import pytest
 from friday.agent_runtime import (
     _ATTACHMENT_QUERY_NOT_FOUND,
     _ATTACHMENT_QUERY_UNKNOWN,
-    _PRIVATE_WEB_SEARCH_BLOCKED,
     AgentContext,
     AgentRuntime,
     AttachmentRequestProjection,
     _project_attachments_for_request,
 )
+from friday.execution_kernel import ToolResult
 from friday.permissions import AuthorizationService
 from friday.server import _current_turn_file_attachment
 from friday.storage.models import RawObject, new_id
@@ -39,6 +39,7 @@ ACTION_NAMES = (
     "remind",
     "make_file",
     "web_search",
+    "web_research",
     "web_fetch",
     "code_run",
     "data_query",
@@ -190,8 +191,34 @@ class _RecordingKernel:
         ]
 
     async def execute(self, name: str, arguments: Any, *, actor: Any = None) -> Any:
-        del arguments, actor
+        del actor
         self.executed.append(name)
+        if name == "web_research":
+            text = "Synthetic current public fact for SYNTHETIC-WEB-NODE."
+            return ToolResult(
+                name,
+                True,
+                data={
+                    "query": str(arguments.get("query") or ""),
+                    "outbound_attempted": True,
+                    "sources": [
+                        {
+                            "url": "https://public.synthetic.example.com/web-node",
+                            "title": "Synthetic public source",
+                            "text": text,
+                            "text_length": len(text),
+                            "status_code": 200,
+                            "error": "",
+                            "truncated": False,
+                        }
+                    ],
+                    "requested_sources": 1,
+                    "completed_sources": 1,
+                    "failed_sources": 0,
+                    "timed_out_sources": 0,
+                    "search_timed_out": False,
+                },
+            )
         raise AssertionError(f"document query executed action schema: {name}")
 
 
@@ -384,6 +411,7 @@ async def _run_owned_turn(
     attachments: list[dict[str, Any]],
     llm: _DocumentLLM,
     conversation_id: str | None = None,
+    allow_web_prefetch: bool = False,
 ) -> tuple[dict[str, Any], _RecordingKernel, list[list[dict[str, str]]]]:
     authorization = AuthorizationService(storage)
     kernel = _RecordingKernel(authorization)
@@ -400,7 +428,8 @@ async def _run_owned_turn(
         kernel.web_prefetch_attempts += 1
         raise AssertionError("private document query reached web prefetch")
 
-    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_web_prefetch)
+    if not allow_web_prefetch:
+        monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_web_prefetch)
     captured_evidence: list[list[dict[str, str]]] = []
     original_verify = runtime._verify_response  # noqa: SLF001
 
@@ -814,7 +843,7 @@ async def test_exact_document_url_is_inert_but_invented_url_and_provenance_are_r
 
 
 @pytest.mark.asyncio
-async def test_explicit_web_request_with_current_file_is_privacy_blocked_before_schemas(
+async def test_explicit_web_request_with_current_file_reaches_web_research(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -825,7 +854,8 @@ async def test_explicit_web_request_with_current_file_is_privacy_blocked_before_
     )
     raw = _store_owned_file(storage, source)
     attachment = _current_owned_attachment(storage, raw, source)
-    llm = _DocumentLLM("This model response must never be generated.")
+    public_url = "https://public.synthetic.example.com/web-node"
+    llm = _DocumentLLM(f"Синтетический публичный факт: {public_url}")
 
     result, kernel, evidence = await _run_owned_turn(
         settings,
@@ -834,11 +864,15 @@ async def test_explicit_web_request_with_current_file_is_privacy_blocked_before_
         question="Найди в интернете свежие сведения по SYNTHETIC-WEB-NODE из этого файла.",
         attachments=[attachment],
         llm=llm,
+        allow_web_prefetch=True,
     )
 
-    assert result["message"] == _PRIVATE_WEB_SEARCH_BLOCKED
+    assert "Синтетический публичный факт" in result["message"]
+    assert result["web_sources"] == [{"url": public_url, "title": "Synthetic public source"}]
+    assert result["tools_used"] == ["web_research"]
+    assert result["web_evidence_status"] == "sourced"
     metadata = _assistant_metadata(storage, result["conversation_id"])
-    assert metadata["structural"]["private_web_search_blocked"] is True
-    assert llm.calls == [] and evidence == []
-    assert kernel.definition_topics == []
-    _assert_no_action_or_web_carrier(result, llm, kernel)
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+    assert llm.calls and evidence
+    assert kernel.definition_topics
+    assert kernel.executed == ["web_research"]

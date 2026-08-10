@@ -13195,26 +13195,6 @@ class AgentRuntime:
         )
         prior_web_source_followup = bool(prior_web_sources)
         inherited_private_context_lineage = self._history_has_private_context_lineage(prior_history)
-        lineage_history = prior_history
-        lineage_history_complete = True
-        if inherited_private_context_lineage and asks_for_the_web(clean_message):
-            # The prompt tail is only twenty rows, but privacy evidence must not
-            # disappear on the twenty-first fast turn.  A one-thousand-row
-            # owned conversation scan covers the measured 726-row dialogue; if
-            # an even longer tail still cannot prove age, the helper below
-            # fails closed at the oldest fetched timestamp.
-            total_messages = self.storage.count_messages(conversation_id, user_id=user_id)
-            lineage_history_complete = total_messages <= 1000
-            if total_messages > len(prior_history):
-                lineage_history = self.storage.get_conversation_messages(
-                    conversation_id,
-                    user_id=user_id,
-                    limit=min(total_messages, 1000),
-                )
-        recent_attachment_context = self._history_has_recent_attachment_context(
-            lineage_history,
-            history_complete=lineage_history_complete,
-        )
         supplied_attachment_count = sum(1 for item in (attachments or []) if isinstance(item, dict))
         attachment_reference_kind = _attachment_reference_kind(clean_message)
         # A stop order is the emergency path: after conversation ownership and
@@ -13377,27 +13357,11 @@ class AgentRuntime:
             else ([], 0)
         )
         restored_attachment_ids = self._raw_attachment_ids(restored_attachments)
-        isolated_outbound_turn = bool(
-            inherited_private_context_lineage
-            and asks_for_the_web(clean_message)
-            and not _WEB_ISOLATION_DEICTIC.search(_classification_text(clean_message))
-            and not _WEB_ISOLATION_UNRESOLVED_TOPIC.search(_classification_text(clean_message))
-            and not attachment_reference_kind
-            and supplied_attachment_count == 0
-            and not attachments
-            and not replay_had_attachments
-            and not replay_source_message_id
-            and restored_attachment_expected_count == 0
-            and not reply_quote
-            and not ingestion_result
-            and not synthetic_document_notice
-        )
-        if isolated_outbound_turn and recent_attachment_context:
-            # Recency is not derivation.  A self-contained current public query
-            # enters a history-free, web-only chamber even immediately after a
-            # completed file turn; every actual reference/replay/current-file
-            # carrier remains excluded by the closed conditions above.
-            LOGGER.info("web-isolation: recent private attachment history excluded from public turn")
+        # Web tools now use the ordinary same-tenant turn context.  Private
+        # attachment lineage no longer creates a history-free/prefetch-only
+        # chamber; authorization and the web transport's own safety boundaries
+        # remain responsible for what can be read and where URLs may connect.
+        isolated_outbound_turn = False
         archived_source_query = _archived_source_search_query(clean_message)
         archived_source_focus = _archived_source_search_focus(clean_message, archived_source_query)
         archived_source_lookup_turn = bool(
@@ -13641,15 +13605,12 @@ class AgentRuntime:
             and not synthetic_document_notice
             and _requests_to_fabricate_outside_deed(clean_message)
         )
-        private_web_search_blocked = bool(
-            not foreign_private_request
-            and not dangerous_instruction_request
-            and not fabricated_outside_deed_request
-            and not synthetic_document_notice
-            and turn_private_context_lineage
-            and not isolated_outbound_turn
-            and asks_for_the_web(clean_message)
-        )
+        # An explicit request to search the public web is the user's authority
+        # to run the search even when this conversation has attachment lineage
+        # or the current turn refers to an attachment.  Keep the legacy flag in
+        # the response pipeline for metadata compatibility, but do not turn
+        # private lineage into a code-owned refusal.
+        private_web_search_blocked = False
         current_attachment_local = bool(
             not foreign_private_request
             and not dangerous_instruction_request
@@ -13673,11 +13634,13 @@ class AgentRuntime:
             and current_attachment_local
             and authenticated_attachment_scope
             and not attachment_query_closed_answer
+            and not asks_for_the_web(clean_message)
         )
         focused_attachment_turn = bool(
             current_attachment_local
             and authenticated_attachment_scope
             and not attachment_query_closed_answer
+            and not asks_for_the_web(clean_message)
             and (
                 hierarchical_attachment_turn
                 or (
@@ -14173,12 +14136,15 @@ class AgentRuntime:
             or latest_prior_used_attachment
         )
         private_context_lineage = bool(turn_private_context_lineage or attachments)
-        outbound_blocked = bool(
-            topic.startswith("человек")
-            or ((attachment_private_turn or private_context_lineage) and not isolated_outbound_turn)
+        private_outbound_restricted = bool(
+            (attachment_private_turn or private_context_lineage) and not isolated_outbound_turn
         )
-        if outbound_blocked:
-            # Веб-инструменты УБИРАЮТСЯ, а не отговариваются.
+        restricted_outbound_turn = bool(topic.startswith("человек") or private_outbound_restricted)
+        outbound_blocked = False
+        if restricted_outbound_turn:
+            # Person-scoped and attachment-derived turns retain the public web
+            # family.  Code execution and configured data sources remain
+            # unavailable because they can create unrelated outbound channels.
             #
             # Замерено на живом экземпляре 2026-08-03: «А Пегас?» подняла надзор
             # и в том же ходе `web_research` — имя участника ушло в чужой
@@ -14190,10 +14156,16 @@ class AgentRuntime:
             # Вид «человек» означает вопрос про участника этой системы. Ответ на
             # него лежит внутри, а снаружи лежит только чужой бренд с похожим
             # названием — то самое «Пегас Туристик».
+            private_web_tool_names = frozenset({"web_search", "web_research", "web_fetch"})
+            blocked_outbound_names = (
+                _OUTBOUND_TOOL_NAMES
+                if outbound_blocked
+                else _OUTBOUND_TOOL_NAMES.difference(private_web_tool_names)
+            )
             visible_tools = [
                 tool
                 for tool in visible_tools
-                if str((tool.get("function") or {}).get("name") or "") not in _OUTBOUND_TOOL_NAMES
+                if str((tool.get("function") or {}).get("name") or "") not in blocked_outbound_names
             ]
         # Exact person/day inventory is a code-owned read, including its
         # failure modes.  It cannot depend on entering the model/tool loop:
@@ -14453,6 +14425,9 @@ class AgentRuntime:
                 task_kind=whole_document_task,
             )
         elif self.llm.enabled and visible_tools:
+            outbound_tool_allowlist = (
+                frozenset({"web_search", "web_research", "web_fetch"}) if restricted_outbound_turn else None
+            )
             response = await self._agentic_loop(
                 context,
                 asked_of_model,
@@ -14460,6 +14435,7 @@ class AgentRuntime:
                 visible_tools,
                 attachments,
                 outbound_allowed=not outbound_blocked,
+                outbound_tool_allowlist=outbound_tool_allowlist,
             )
         else:
             response = await self._generate_response(generation_context, asked_of_model, attachments)
@@ -14736,6 +14712,7 @@ class AgentRuntime:
             or context.graph_context.get("entities")
             or context.graph_context.get("paths")
             or person_evidence_tools
+            or web_evidence_used
             or attachment_evidence
             or response.get("_office_exact_owned") is True
         )
@@ -17687,7 +17664,15 @@ class AgentRuntime:
         attachments: list[dict[str, Any]] | None,
         *,
         outbound_allowed: bool = True,
+        outbound_tool_allowlist: frozenset[str] | None = None,
     ) -> dict[str, Any]:
+        def outward_tool_is_allowed(tool_name: str) -> bool:
+            if tool_name not in _OUTBOUND_TOOL_NAMES:
+                return True
+            return bool(
+                outbound_allowed and (outbound_tool_allowlist is None or tool_name in outbound_tool_allowlist)
+            )
+
         messages = self._build_initial_messages(context, message, attachments, tool_enabled=True)
         # A current-file turn must not spend the foreground timeout anew on
         # every tool round, final synthesis and clean salvage.  Bound only the
@@ -17733,7 +17718,7 @@ class AgentRuntime:
                 "file_clips": [],
                 "_structural_file_count": 0,
             }
-        if outbound_allowed and not source_lookup_owned:
+        if outward_tool_is_allowed("web_research") and not source_lookup_owned:
             await self._prefetch_the_web_if_asked(
                 message, actor, tools, messages, tools_used, tool_evidence, web_notice, context
             )
@@ -18104,7 +18089,7 @@ class AgentRuntime:
                 and not _ASKS_ABOUT_PERSONAL_STORAGE.search(message)
             )
             for call, openai_call in zip(selected_calls, openai_calls, strict=True):
-                if not outbound_allowed and call.name in _OUTBOUND_TOOL_NAMES:
+                if not outward_tool_is_allowed(call.name):
                     # Privacy denial has stronger semantics than a generic
                     # unoffered capability.  Outbound schemas are intentionally
                     # removed on private turns, but a hallucinated call still
@@ -22216,12 +22201,6 @@ class AgentRuntime:
         # недели оказалось в чужом поисковике.
         if _ASKS_FOR_A_REMINDER.search(message) or _exact_absolute_reminder_request(message) is not None:
             return
-        # Вопрос о деятельности УЧАСТНИКА наружу тоже не уходит. Замерено:
-        # «Что писал Пегас?» — арбитр счёл это вопросом о внешнем мире, и Пятница
-        # рассказала про туроператора «Пегас Туристик». Имя участника совпало с
-        # брендом, а поисковику ушло имя человека из этой системы.
-        if not asked_outright and _ASKS_WHAT_A_PERSON_WROTE.search(message):
-            return
         # Вопросительная форма условием больше не является — здесь по той же
         # причине, что и у арбитра. Владелец 2026-08-03: «некоторые будут её
         # использовать как тупой поисковик». Замерено: «курс доллара» и «цена
@@ -22235,22 +22214,6 @@ class AgentRuntime:
             (verdict or ("", None))[0] or ""
         ).startswith("интернет")
         if not asked_outright and not looks_like_a_request:
-            return
-        # Вердикт посчитан параллельно поиску (см. `_prepare_context`) и нужен
-        # ЗДЕСЬ, до правила «свой архив вперёд чужого интернета».
-        # Та же защита именем, но по ПОНИМАНИЮ, а не по шаблону.
-        #
-        # Замерено на живом экземпляре 2026-08-03, сразу после того как короткая
-        # форма заработала: «А Пегас?» подняла инструмент надзора — и в том же
-        # ходе `web_research`. Шаблон эту форму не ловит, значит и защита выше
-        # молчала, и имя участника ушло в чужой поисковик. Дефект, который уже
-        # чинили («Пегас Туристик»), вернулся через новую дверь: закрыли одну
-        # половину развилки, а вторая осталась на прежнем условии.
-        #
-        # Владелец просил режим полной приватности прямым текстом — имя человека
-        # из этой системы наружу не уходит ни в какой формулировке.
-        if not asked_outright and verdict and str(verdict[0]).startswith("человек"):
-            LOGGER.info("web-prefetch: вопрос о человеке — наружу не идём")
             return
         # Свой архив вперёд чужого интернета. Замерено: «что известно про приказ
         # 214?» уходило в поисковик и возвращалось рассказом о разных нормативных
@@ -22275,14 +22238,6 @@ class AgentRuntime:
                 and _archive_is_weak(context.knowledge_hits)
             )
         ):
-            return
-        # Имя человека из архива наружу не уходит. Найдено сквозным прогоном на
-        # копии живой базы: «что известно про Хасанова?» арбитр счёл вопросом о
-        # внешнем мире, и фамилия сотрудника ушла поисковой строкой в Яндекс.
-        # Ответ при этом пришёл из архива — то есть поход наружу не дал ничего,
-        # кроме утечки. Проверяется структурой, а не моделью: если слово из
-        # вопроса — имя человека в ЭТОМ графе, вопрос личный.
-        if not asked_outright and await self._mentions_someone_from_the_archive(message, actor):
             return
         # «Что было 26 июля в 15 часов» — вопрос о собственной ленте, и время в нём
         # названо прямо. Арбитр на такой вопрос отвечал «интернет» (замерено), а

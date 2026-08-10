@@ -1039,7 +1039,7 @@ async def test_kernel_reports_domain_filter_underfill_without_weakening_it(setti
 
 
 @pytest.mark.asyncio
-async def test_kernel_privacy_gate_sees_raw_idn_before_punycode_leaves(settings, storage) -> None:
+async def test_kernel_sends_canonical_idn_without_archive_name_gate(settings, storage) -> None:
     raw_domain = "Хасанов.рф"
     canonical_domain = normalize_search_site(raw_domain)
     checked: list[str] = []
@@ -1062,12 +1062,12 @@ async def test_kernel_privacy_gate_sees_raw_idn_before_punycode_leaves(settings,
     )
     actor = authorization.actor_for_user("operator", source="test")
 
-    async def local_privacy_gate(text: str, _actor):
+    async def forbidden_archive_name_gate(text: str, _actor):
         checked.append(text)
-        return None
+        raise AssertionError("archive name privacy gate must not run")
 
-    kernel._what_must_not_leave = local_privacy_gate  # type: ignore[method-assign]  # noqa: SLF001
+    kernel._what_must_not_leave = forbidden_archive_name_gate  # type: ignore[attr-defined]  # noqa: SLF001
     await kernel._web_search(actor=actor, query="needle", site=raw_domain)  # noqa: SLF001
 
-    assert checked == ["needle", raw_domain, canonical_domain]
+    assert checked == []
     assert calls == [{"query": "needle", "max_results": 5, "site": canonical_domain}]

@@ -2255,79 +2255,6 @@ def _bound_source_search_payload(payload: dict[str, Any]) -> dict[str, Any]:
 #: именно ушло, владелец потом не узнает.
 _MAX_OUTBOUND_QUERY_CHARS = 200
 
-#: Слова, которые именем человека не бывают. Без них поиск по графу срабатывал бы
-#: на «что» и «известно» в каждом втором вопросе. Список тот же по смыслу, что у
-#: одноимённой проверки в `agent_runtime`, и живёт здесь отдельно намеренно: ядро
-#: не должно зависеть от слоя, который его вызывает.
-_NOT_A_NAME_OUTBOUND = frozenset(
-    {
-        "что",
-        "кто",
-        "где",
-        "когда",
-        "сколько",
-        "какой",
-        "какая",
-        "какие",
-        "какое",
-        "почему",
-        "зачем",
-        "чем",
-        "куда",
-        "откуда",
-        "известно",
-        "расскажи",
-        "покажи",
-        "напомни",
-        "найди",
-        "поищи",
-        "посмотри",
-        "скажи",
-        "можешь",
-        "нужно",
-        "хочу",
-        "пожалуйста",
-        "сегодня",
-        "вчера",
-        "завтра",
-        "сейчас",
-        "потом",
-        "тогда",
-        "документ",
-        "документы",
-        "документов",
-        "файл",
-        "файлы",
-        "база",
-        "базе",
-        "архив",
-        "архиве",
-        "интернет",
-        "интернете",
-        "поиск",
-        "погода",
-        "курс",
-        "новости",
-        "цена",
-        "стоит",
-        "такое",
-        "такой",
-        "этот",
-        "эта",
-        "тебе",
-        "меня",
-        "него",
-        "неё",
-        "нас",
-        "вас",
-        "them",
-        "what",
-        "who",
-        "when",
-        "where",
-    }
-)
-
 
 class ExecutionKernel:
     """One immutable registry; user identity is supplied per invocation."""
@@ -4395,8 +4322,6 @@ class ExecutionKernel:
                 "search_failed": True,
                 "error": "empty_query",
             }
-        raw_site = site
-        raw_include_domains = include_domains
         # Validate before quota accounting and before any provider can see the
         # values.  Error messages are closed strings and never echo a domain.
         site, include_domains, exclude_domains, freshness, lang, region = normalize_search_filters(
@@ -4407,30 +4332,6 @@ class ExecutionKernel:
             lang=lang,
             region=region,
         )
-        refusal = await self._what_must_not_leave(query, actor)
-        if refusal:
-            return {**refusal, "outbound_attempted": False}
-        outbound_domain_forms: list[str] = []
-        if site:
-            outbound_domain_forms.extend((raw_site, site))
-        else:
-            for raw_domain, canonical_domain in zip(
-                raw_include_domains,
-                include_domains,
-                strict=True,
-            ):
-                outbound_domain_forms.extend((raw_domain, canonical_domain))
-        checked_domain_forms: set[str] = set()
-        for domain in outbound_domain_forms:
-            if domain in checked_domain_forms:
-                continue
-            checked_domain_forms.add(domain)
-            # Check both the human spelling and outbound punycode.  Checking
-            # only canonical IDNA would hide a private person's name from the
-            # local privacy classifier before the provider sees its encoding.
-            refusal = await self._what_must_not_leave(domain, actor)
-            if refusal:
-                return {**refusal, "outbound_attempted": False}
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
             return {**exhausted, "query": query, "outbound_attempted": False}
@@ -4586,9 +4487,6 @@ class ExecutionKernel:
                 "search_failed": True,
                 "error": "empty_query",
             }
-        refusal = await self._what_must_not_leave(query, actor)
-        if refusal:
-            return {**refusal, "outbound_attempted": False}
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
             return {**exhausted, "query": query, "sources": [], "outbound_attempted": False}
@@ -4618,8 +4516,8 @@ class ExecutionKernel:
         """Не исчерпан ли суточный выход в интернет. `None` — можно идти.
 
         Ворота стоят на ВСЕХ трёх дорогах (`web_search`, `web_fetch`,
-        `web_research`), а не на одной: `_what_must_not_leave` зовут только две
-        из них, и квота на том же месте охраняла бы через раз.
+        `web_research`), а не на одной: квота на более высоком уровне
+        охраняла бы только часть дорог.
 
         Размер взят замером на живом архиве: пик 135 вызовов на человека за
         сутки, медиана по человеко-дням 76. Потолок 400 — тройной запас над
@@ -4652,73 +4550,6 @@ class ExecutionKernel:
                 "Счёт обнулится в полночь по вашему времени."
             ),
             "note": "Сведений из интернета в этом результате нет: наружу не ходили вовсе.",
-        }
-
-    async def _what_must_not_leave(self, query: str, actor: ActorContext) -> dict[str, Any] | None:
-        """Не уходит ли наружу имя человека из архива. `None` — можно искать.
-
-        Ворота стояли на ОДНОЙ дороге — предвыборке в `agent_runtime`, — а модель
-        зовёт `web_search` и `web_research` напрямую. Замерено на стенде: запрос
-        «что известно про Хасанова Рустама Маратовича?» уходил в поисковик
-        целиком, вместе с фамилией. Проверка при этом существовала и работала —
-        просто мимо неё вела вторая дорога.
-
-        Здесь она стоит в самом инструменте, то есть в единственном месте, через
-        которое наружу идёт всё. Ворота на одной дороге не охраняют ничего.
-
-        Решает СТРУКТУРА, а не модель: слово из запроса совпало с именем человека
-        в этом графе — значит вопрос про своего, и наружу ему не надо. Цена
-        ошибки несимметрична: лишний отказ человек увидит сразу и переспросит, а
-        ушедшую фамилию не вернуть — в журнале останется только хеш запроса.
-        """
-        storage, _, _, _ = self._require_services()
-        if not hasattr(storage, "people_whose_name_starts_with"):
-            LOGGER.warning("Outbound privacy guard is unavailable; web request refused")
-            return self._outbound_privacy_guard_refusal()
-        words = [
-            word.strip(".,!?…«»\"'()[]:;")
-            for word in str(query or "").split()
-            if len(word.strip(".,!?…«»\"'()[]:;")) >= 4
-        ]
-        # Сравнивается ОСНОВА, а не слово целиком: у русских фамилий меняется
-        # окончание. Замерено — прежняя проверка через `search_entities` находила
-        # «Хасанов» и не находила «Хасанова», «Хасанову», «Хасановым»; спрашивают
-        # же обычно в косвенном падеже. Ворота узнавали одну форму из шести.
-        stems = [item[:5] for item in words if item.casefold() not in _NOT_A_NAME_OUTBOUND][:6]
-        if not stems:
-            return None
-        try:
-            found = await run_blocking(storage.people_whose_name_starts_with, actor.user_id, stems)
-        except Exception as exc:  # noqa: BLE001 — проверка не должна ронять ход
-            LOGGER.warning(
-                "Could not check the graph before a web search (%s)",
-                type(exc).__name__,
-            )
-            return self._outbound_privacy_guard_refusal()
-        if found:
-            return {
-                "query": "",
-                "results": [],
-                "refused": True,
-                "reason": (
-                    "В запросе имя человека из архива — наружу такой запрос не "
-                    "уходит. Ответ по нему ищется в своих материалах."
-                ),
-            }
-        return None
-
-    @staticmethod
-    def _outbound_privacy_guard_refusal() -> dict[str, Any]:
-        """Fail closed when the archive privacy check cannot prove a query safe."""
-
-        return {
-            "query": "",
-            "results": [],
-            "refused": True,
-            "reason": (
-                "Не удалось безопасно проверить запрос по архиву, поэтому наружу "
-                "он не отправлен. Попробуйте ещё раз позже."
-            ),
         }
 
     async def _capture_web_sources(

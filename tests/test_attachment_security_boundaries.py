@@ -209,8 +209,17 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
         finally:
             outward_cancelled = True
 
-    async def capture_primary(context, message, actor, tools, attachments, *, outbound_allowed=True):
-        del message, actor, outbound_allowed
+    async def capture_primary(
+        context,
+        message,
+        actor,
+        tools,
+        attachments,
+        *,
+        outbound_allowed=True,
+        outbound_tool_allowlist=None,
+    ):
+        del message, actor, outbound_allowed, outbound_tool_allowlist
         captured["history"] = [dict(item) for item in context.conversation_history]
         captured["tool_names"] = {str((tool.get("function") or {}).get("name") or "") for tool in tools}
         captured["attachments"] = [dict(item) for item in (attachments or [])]
@@ -248,7 +257,7 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     assert "memory_save" in captured["tool_names"]
     assert "entity_create" in captured["tool_names"]
     assert "remind" in captured["tool_names"]
-    assert "web_search" not in captured["tool_names"], "private file text must remain local"
+    assert "web_search" in captured["tool_names"]
     assert captured["attachments"][0]["transient_text"] == "CURRENT-ATTACHMENT-SENTINEL"
 
 
@@ -2443,7 +2452,14 @@ class _OutboundRecordingKernel:
                     "parameters": {"type": "object", "properties": {}},
                 },
             }
-            for name in ("memory_search", "web_search", "web_fetch", "code_run", "data_query")
+            for name in (
+                "memory_search",
+                "web_search",
+                "web_research",
+                "web_fetch",
+                "code_run",
+                "data_query",
+            )
         ]
 
     async def execute(self, name, arguments, *, actor=None):
@@ -2453,7 +2469,7 @@ class _OutboundRecordingKernel:
 
 
 @pytest.mark.asyncio
-async def test_private_attachment_blocks_web_prefetch_and_hallucinated_kernel_calls(
+async def test_private_attachment_allows_only_web_family_outbound_calls(
     settings,
     storage,
     monkeypatch,
@@ -2480,12 +2496,11 @@ async def test_private_attachment_blocks_web_prefetch_and_hallucinated_kernel_ca
             outward_verdict=("интернет", None),
         )
 
-    async def forbidden_prefetch(*args, **kwargs):
+    async def no_prefetch(*args, **kwargs):
         del args, kwargs
-        raise AssertionError("private attachment reached web prefetch")
 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
-    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_prefetch)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_prefetch)
     result = await runtime.chat(
         "alice",
         "найди в интернете указанный во вложении адрес",
@@ -2500,17 +2515,18 @@ async def test_private_attachment_blocks_web_prefetch_and_hallucinated_kernel_ca
         enable_tools=True,
     )
 
-    assert llm.calls == 0
-    assert llm.offered_names == []
-    assert kernel.executed == []
-    assert result["tools_used"] == []
-    assert result["message"] == agent_runtime_module._PRIVATE_WEB_SEARCH_BLOCKED  # noqa: SLF001
+    assert llm.calls == 2
+    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
+    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
+    assert kernel.executed == ["web_search", "web_fetch"]
+    assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
+    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 2
     assert not result.get("web_query_notice")
-    assert prepare_private_lineage == []
+    assert prepare_private_lineage == [True]
 
 
 @pytest.mark.asyncio
-async def test_person_topic_blocks_hallucinated_outbound_calls_before_kernel(
+async def test_person_topic_allows_web_family_but_not_code_or_data(
     settings,
     storage,
     monkeypatch,
@@ -2535,12 +2551,11 @@ async def test_person_topic_blocks_hallucinated_outbound_calls_before_kernel(
             outward_verdict=("человек", None),
         )
 
-    async def forbidden_prefetch(*args, **kwargs):
+    async def no_prefetch(*args, **kwargs):
         del args, kwargs
-        raise AssertionError("person topic reached web prefetch")
 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
-    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_prefetch)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_prefetch)
     result = await runtime.chat(
         "alice",
         "Синтетический профиль",
@@ -2550,21 +2565,16 @@ async def test_person_topic_blocks_hallucinated_outbound_calls_before_kernel(
     )
 
     assert llm.calls == 2
-    assert all(
-        "web_search" not in names
-        and "web_fetch" not in names
-        and "code_run" not in names
-        and "data_query" not in names
-        for names in llm.offered_names
-    )
-    assert kernel.executed == []
+    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
+    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
+    assert kernel.executed == ["web_search", "web_fetch"]
     assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
-    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 4
+    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 2
     assert not result.get("web_query_notice")
 
 
 @pytest.mark.asyncio
-async def test_private_attachment_lineage_blocks_outbound_after_an_unmarked_exchange(
+async def test_private_attachment_lineage_allows_model_selected_web_only(
     settings,
     storage,
     monkeypatch,
@@ -2615,12 +2625,11 @@ async def test_private_attachment_lineage_blocks_outbound_after_an_unmarked_exch
             outward_verdict=("интернет", None),
         )
 
-    async def forbidden_prefetch(*args, **kwargs):
+    async def no_prefetch(*args, **kwargs):
         del args, kwargs
-        raise AssertionError("private lineage reached web prefetch")
 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
-    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_prefetch)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_prefetch)
     result = await runtime.chat(
         "alice",
         "Синтетический новый вопрос",
@@ -2631,11 +2640,9 @@ async def test_private_attachment_lineage_blocks_outbound_after_an_unmarked_exch
     )
 
     assert llm.calls == 2
-    assert kernel.executed == []
-    assert all(
-        not {"web_search", "web_fetch", "code_run", "data_query"}.intersection(names)
-        for names in llm.offered_names
-    )
+    assert kernel.executed == ["web_search", "web_fetch"]
+    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
+    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
     rows = storage.get_conversation_messages(conversation["id"], user_id="alice")
     latest_metadata = json.loads(rows[-1]["metadata_json"])
     assert latest_metadata["private_context_lineage"] is True

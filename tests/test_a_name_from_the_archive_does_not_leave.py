@@ -1,34 +1,4 @@
-"""Фамилия сотрудника не уходит в чужой поисковик — на ЛЮБОЙ дороге и в любом падеже.
-
-Две находки одного замера (2026-08-04, изолированный стенд).
-
-ПЕРВАЯ: ворота стояли на одной дороге. Проверка «есть ли в вопросе имя человека
-из графа» жила в `agent_runtime._prefetch_the_web_if_asked` — то есть на дороге
-предвыборки. Модель зовёт `web_search` и `web_research` НАПРЯМУЮ, и этой дорогой
-запрос уходил целиком. Замерено: «что известно про Хасанова Рустама Маратовича?»
-ушло в поисковик со всеми тремя словами.
-
-ВТОРАЯ, тяжелее: сама проверка узнавала одну форму из шести. Она звала
-`search_entities`, а тот находит только точное совпадение:
-
-    'Хасанов'    → найден
-    'Хасанова'   → НЕ найден
-    'Хасанову'   → НЕ найден
-    'Хасановым'  → НЕ найден
-    'хасан'      → НЕ найден
-    'Маратовича' → НЕ найден
-
-Спрашивают же как раз в косвенном падеже — «про Хасанова». То есть ворота, ради
-которых писался отдельный механизм, срабатывали в меньшинстве случаев.
-
-Теперь сравнивается ОСНОВА (первые пять букв) префиксным поиском по индексу
-`(user_id, entity_type, normalized_name)`, и проверка стоит в самом инструменте —
-в единственном месте, через которое наружу идёт всё.
-
-Ошибка в сторону «лишний отказ» здесь дешевле: человек увидит его сразу и
-переспросит, а ушедшую фамилию не вернуть — в журнале остаётся только хеш
-запроса, и владелец никогда не узнает, что именно ушло.
-"""
+"""Explicit web searches are not blocked by names already present in the archive."""
 
 from __future__ import annotations
 
@@ -91,32 +61,30 @@ def _actor() -> ActorContext:
         "найди Хасанов Рустам Маратович линкедин",
     ],
 )
-@pytest.mark.asyncio
-async def test_no_case_of_the_surname_leaves(kernel_and_wire, question):
-    """Мутация: сравнивать слово целиком вместо основы — тест краснеет."""
+async def test_every_case_of_an_archived_surname_reaches_explicit_web_search(
+    kernel_and_wire,
+    question,
+):
     kernel, went_out = kernel_and_wire
 
     result = await kernel.execute("web_search", {"query": question}, actor=_actor())
 
-    assert went_out == [], f"фамилия ушла в поисковик: {went_out}"
-    assert result.data.get("refused") is True
-    assert "архива" in str(result.data.get("reason") or "")
+    assert went_out == [question]
+    assert result.data.get("refused") is not True
 
 
 @pytest.mark.asyncio
-async def test_the_research_road_is_closed_too(kernel_and_wire):
-    """Обе дороги наружу, а не одна: ворота на одной не охраняют ничего."""
+async def test_the_research_road_is_open_too(kernel_and_wire):
     kernel, went_out = kernel_and_wire
 
     await kernel.execute("web_research", {"query": "что пишут про Хасанова"}, actor=_actor())
 
-    assert went_out == [], f"вторая дорога осталась открытой: {went_out}"
+    assert went_out == ["что пишут про Хасанова"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("guard_mode", ["missing", "broken"])
-async def test_a_broken_privacy_guard_fails_closed(kernel_and_wire, guard_mode):
-    """Недоступный граф — это отказ, а не разрешение отправить запрос наружу."""
+async def test_archive_name_lookup_is_not_a_web_search_dependency(kernel_and_wire, guard_mode):
 
     kernel, went_out = kernel_and_wire
     original_storage = kernel.storage
@@ -153,9 +121,9 @@ async def test_a_broken_privacy_guard_fails_closed(kernel_and_wire, guard_mode):
         actor=_actor(), query="найди приватную справку"
     )
 
-    assert search.get("refused") is True
-    assert research.get("refused") is True
-    assert went_out == [], "сеть вызвана при недоступной проверке приватности"
+    assert search.get("refused") is not True
+    assert research.get("refused") is not True
+    assert went_out == ["проверь приватную справку", "найди приватную справку"]
 
 
 @pytest.mark.asyncio

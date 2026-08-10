@@ -311,7 +311,7 @@ def _source_user_message(storage, response: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_three_complete_bare_docx_summaries_survive_then_news_is_web_isolated(
+async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_history(
     settings,
     storage,
 ) -> None:
@@ -381,13 +381,13 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_is_web_isola
     assert metadata["private_context_lineage"] is True
     assert metadata["structural"].get("private_web_search_blocked") is not True
 
-    assert len(model.calls) == 4
+    assert len(model.calls) > 3
     public_payload = json.dumps(model.calls[-1], ensure_ascii=False)
     outbound_payload = json.dumps(kernel.calls, ensure_ascii=False)
     assert NEWS_REQUEST in public_payload
     assert PUBLIC_FACT in public_payload
-    assert PRIVATE_PREFIX not in public_payload
-    assert "Загружен документ" not in public_payload
+    assert PRIVATE_PREFIX in public_payload
+    assert "Загружен документ" in public_payload
     assert PRIVATE_PREFIX not in outbound_payload
 
 
@@ -608,7 +608,7 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
         ("replayed_attachment", 1, 1),
     ],
 )
-async def test_attachment_derived_news_carriers_remain_privacy_blocked(
+async def test_attachment_derived_news_carriers_can_use_web(
     settings,
     storage,
     carrier: str,
@@ -653,6 +653,7 @@ async def test_attachment_derived_news_carriers_remain_privacy_blocked(
         chat_kwargs["replay_source_message_id"] = str(source["id"])
 
     model_calls_before = len(model.calls)
+    kernel_calls_before = len(kernel.calls)
     assert asks_for_the_web(query) is True
     response = await runtime.chat(
         OWNER,
@@ -662,12 +663,17 @@ async def test_attachment_derived_news_carriers_remain_privacy_blocked(
         **chat_kwargs,
     )
 
-    assert response["tools_used"] == []
-    assert response["web_evidence_status"] == "none"
+    assert response["tools_used"] == ["web_research"]
+    assert response["web_evidence_status"] == "sourced"
     assert response["attachment_context_expected_count"] == expected_count
     assert response["restored_attachment_count"] == expected_restored
-    assert len(model.calls) == model_calls_before
-    assert kernel.calls == []
+    assert len(model.calls) > model_calls_before
+    assert kernel.calls[kernel_calls_before:] == [
+        (
+            "web_research",
+            {"query": runtime.web_query_from(query), "max_sources": 3},
+        )
+    ]
     metadata = _stored_metadata(storage, response)
-    assert metadata["structural"]["private_web_search_blocked"] is True
-    assert metadata["structural"]["model_spoke"] is False
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+    assert metadata["structural"]["model_spoke"] is True

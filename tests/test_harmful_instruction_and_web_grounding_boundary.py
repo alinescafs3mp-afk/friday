@@ -14,7 +14,6 @@ import pytest
 
 from friday.agent_runtime import (
     _DANGEROUS_INSTRUCTIONS_REFUSAL,
-    _PRIVATE_WEB_SEARCH_BLOCKED,
     _WEB_EVIDENCE_MISSING,
     AgentContext,
     AgentRuntime,
@@ -402,7 +401,7 @@ async def test_actionable_recipe_in_a_missed_model_answer_is_discarded(
 
 
 @pytest.mark.asyncio
-async def test_private_file_lineage_blocks_explicit_web_search_before_context_or_model(
+async def test_private_file_lineage_does_not_block_an_explicit_web_search(
     settings,
     storage,
     monkeypatch,
@@ -424,29 +423,56 @@ async def test_private_file_lineage_blocks_explicit_web_search_before_context_or
         "Документ разобран.",
         metadata={"private_context_lineage": True, "attachment_context_used": True},
     )
-    router = _NeverRouter()
-    kernel = _NoToolKernel(definitions_forbidden=True)
-    runtime = AgentRuntime(replace(settings, verify_answers=True), storage, llm=router, kernel=kernel)
+    source_url = "https://public.synthetic.example.com/current"
+    source_text = "Synthetic current public fact."
+    surfer = _SyntheticWebSurfer(
+        {
+            "sources": [
+                {
+                    "url": source_url,
+                    "title": "Synthetic public source",
+                    "text": source_text,
+                }
+            ]
+        }
+    )
+    kernel = _bound_web_kernel(settings, storage, surfer)
+    router = _WebPathRouter(
+        path="prefetch",
+        answer=f"Синтетический факт подтверждён: {source_url}",
+        query="unused-on-isolated-prefetch",
+    )
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=router, kernel=kernel)
 
-    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("private web request reached retrieval or an arbiter")
+    request = "Что пишут в интернете про событие за последние сутки?"
 
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    async def prepared(user_id, message, current_conversation_id, **kwargs):  # noqa: ANN001
+        return AgentContext(
+            conversation_id=current_conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            conversation_history=list(kwargs.get("prior_history") or []),
+            outward_verdict=("интернет", runtime.web_query_from(message)),
+        )
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepared)
 
     reply = await runtime.chat(
         "alice",
-        "Что пишут в интернете про событие за последние сутки?",
+        request,
         actor=_actor(),
         conversation_id=conversation_id,
     )
 
-    assert reply["message"] == _PRIVATE_WEB_SEARCH_BLOCKED
-    assert reply["tools_used"] == []
-    assert router.calls == 0
-    assert kernel.definition_calls == 0
+    assert surfer.queries == [runtime.web_query_from(request)]
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "sourced"
+    assert router.calls
+    exposed = json.dumps(router.calls, ensure_ascii=False)
+    assert "Документ разобран." in exposed
     metadata = _stored_metadata(storage, reply)
-    assert metadata["structural"]["private_web_search_blocked"] is True
-    assert metadata["web_evidence_used"] is False
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+    assert metadata["web_evidence_used"] is True
 
 
 @pytest.mark.asyncio
