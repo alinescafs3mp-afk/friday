@@ -14,22 +14,38 @@ def _load_patcher():
     return module
 
 
-def test_vllm_derivative_is_pinned_and_compose_builds_it():
-    dockerfile = Path("docker/vllm-asyncio/Dockerfile").read_text(encoding="utf-8")
+def test_multimodal_dispatcher_is_pinned_to_the_dense_modelopt_runtime():
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
-    assert "vllm/vllm-openai:v0.25.1@sha256:" in dockerfile
-    assert "docker/vllm-asyncio/patch_serve.py" in dockerfile
-    assert "dockerfile: docker/vllm-asyncio/Dockerfile" in compose
     dispatcher_block = compose.split("  dispatcher:", 1)[1].split("\n  backend:", 1)[0]
-    assert dispatcher_block.count("\n    build:") == 1
+    assert "vllm/vllm-openai@sha256:2238154357" in dispatcher_block
+    assert "--model /models/qwen3.6-27b-nvfp4-nvidia" in dispatcher_block
+    assert "--quantization modelopt_mixed" in dispatcher_block
+    assert "--no-language-model-only" in dispatcher_block
+    assert "--language-model-only" not in dispatcher_block.replace("--no-language-model-only", "")
+    assert '--limit-mm-per-prompt \'{"image":4,"video":0}\'' in dispatcher_block
+    assert "--skip-mm-profiling" not in dispatcher_block
     assert ("FRIDAY_LLM_BASE_URL: ${FRIDAY_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}") in compose
     assert (
         "FRIDAY_EMBEDDINGS_BASE_URL: ${FRIDAY_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}"
     ) in compose
     assert "http://127.0.0.1:${FRIDAY_API_PORT:-8000}/api/health" in compose
     assert "--max-model-len 32768" in compose
-    assert "--gpu-memory-utilization 0.90" in compose
+    assert "--gpu-memory-utilization 0.76" in compose
+    assert "--max-num-seqs 1" in compose
     assert "--max-num-batched-tokens 4096" in compose
+
+
+def test_every_bootstrap_surface_selects_the_multimodal_dense_profile():
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    example = Path(".env.example").read_text(encoding="utf-8")
+    cli = Path("friday/cli.py").read_text(encoding="utf-8")
+    entrypoint = Path("docker/entrypoint.sh").read_text(encoding="utf-8")
+
+    expected = "qwen36-27b-nvfp4-nvidia"
+    assert f"FRIDAY_PROFILE: ${{FRIDAY_PROFILE:-{expected}}}" in compose
+    assert f"FRIDAY_PROFILE={expected}" in example
+    assert f"FRIDAY_PROFILE={expected}" in cli
+    assert "/runtime/models/qwen3.6-27b-nvfp4-nvidia" in entrypoint
 
 
 def test_compose_propagates_security_and_resource_limits():

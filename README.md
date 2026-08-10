@@ -80,7 +80,8 @@ Telegram → подписанный durable bridge → Conversation + mode
 - HTTP body limit действует на фактически полученные байты, включая chunked transfer, до аутентификации и JSON/multipart parsing; proxy headers принимаются только от явно доверенного непосредственного proxy-hop.
 - Online backup SQLite включает `integrity_check`, SHA-256 manifest и повторную верификацию; вместе с БД он сохраняет append-only историю отношений и её completeness floor. Tenant export включает только принадлежащие этому пользователю `relation_revisions`. `restore-backup` требует остановленного backend через эксклюзивный lease, повторно сверяет staged copy, заменяет БД атомарно и возвращает точные DB/WAL/SHM при сбое; для уже повреждённой активной БД сохраняется отдельный явно непроверенный recovery bundle. Markdown-vault пишет атомарно и использует Windows-safe пути.
 - Workers обслуживают всех активных tenants: lifecycle, entity-resolution candidates, vault, ежедневный backup, SQLite optimize, read-only quality report и bounded advisory Inbox refinement. Каждая задача публикует состояние, длительность, следующий запуск, timeout и consecutive failures для `status`, `doctor` и Admin UI.
-- Сохранён локальный vLLM-профиль `qwen3.6-35b-a3b-nvfp4`, fail-closed tool-call protocol и редактирование секретов в логах.
+- Локальный multimodal vLLM-профиль закреплён за `qwen3.6-27b-nvfp4-nvidia`;
+  fail-closed tool-call protocol и редактирование секретов в логах сохранены.
 
 ## Быстрый запуск на Windows
 
@@ -106,7 +107,7 @@ jericho init --home D:\jericho
 Полный snapshot модели должен находиться здесь:
 
 ```text
-D:\jericho\models\qwen3.6-35b-a3b-nvfp4\
+D:\jericho\models\qwen3.6-27b-nvfp4-nvidia\
 ```
 
 Веса в архив намеренно не включены. Каталог должен содержать модельные файлы и конфигурацию, пригодные для загрузки vLLM.
@@ -206,7 +207,10 @@ docker compose logs -f dispatcher
 docker compose logs -f telegram
 ```
 
-Compose сам собирает закреплённый image `friday/vllm-openai:v0.25.1-asyncio-e4f88a8` из `docker/vllm-asyncio/Dockerfile`. Базовый vLLM-образ закреплён по digest, а небольшая fail-closed правка применяется только при полном совпадении SHA-256 исходного файла. Отдельная ручная сборка при первом запуске не нужна; её можно выполнить командой `docker compose --profile llm build dispatcher`.
+Compose запускает закреплённый по digest vLLM nightly с поддержкой ModelOpt
+Qwen3.5/3.6 VLM. Сборка локального image не нужна. Dispatcher запускается без
+`--language-model-only`; MM profiling намеренно не пропускается, чтобы дефицит
+VRAM обнаружился при старте, а не на первом пользовательском изображении.
 
 ## Обновление существующей установки
 
@@ -220,24 +224,27 @@ Compose сам собирает закреплённый image `friday/vllm-open
 
 ## Параметры vLLM
 
-Профиль `qwen36-vl` закрепляет следующие значения:
+Профиль `qwen36-27b-nvfp4-nvidia` закрепляет следующие значения:
 
 | Параметр | Значение |
 |---|---:|
-| model | `models/qwen3.6-35b-a3b-nvfp4` |
+| model | `models/qwen3.6-27b-nvfp4-nvidia` |
 | served model name | `dispatcher` |
 | max model length | `32768` |
-| GPU memory utilization | `0.90` |
+| quantization | `modelopt_mixed` |
+| GPU memory utilization | `0.76` |
 | KV cache dtype | `fp8` |
-| max sequences | `16` |
+| max sequences | `1` |
 | max batched tokens | `4096` |
 | tokenizer mode | `auto` |
-| multimodal limits | `image=4`, `video=1` |
+| multimodal limits | `image=4`, `video=0` |
 | prefix caching | включён |
-| MM profiling | пропускается |
+| MM profiling | включён |
 | MM processor cache | `4.0 GiB` |
 
-Поля `FRIDAY_QWEN_QUANT_ARGS`, `FRIDAY_QWEN_ENFORCE_EAGER` и `FRIDAY_QWEN_EXTRA_ARGS` оставлены для конкретной сборки vLLM/GPU, поскольку точные quantization-флаги зависят от формата локального snapshot.
+Поля `FRIDAY_QWEN_ENFORCE_EAGER` и `FRIDAY_QWEN_EXTRA_ARGS` оставлены для
+аварийной диагностики конкретного GPU. Quantization закреплён прямо в команде:
+подмена ModelOpt loader через окружение больше не допускается.
 
 ## Telegram
 

@@ -20,7 +20,7 @@ x-backend-environment: &backend-environment
   # The container has no `.env` of its own (both are in .dockerignore) and must not
   # go looking for one on a path inherited from the host.
   FRIDAY_ENV_FILE: ""
-  FRIDAY_PROFILE: ${FRIDAY_PROFILE:-qwen36-vl}
+  FRIDAY_PROFILE: ${FRIDAY_PROFILE:-qwen36-27b-nvfp4-nvidia}
   FRIDAY_LLM_BASE_URL: ${FRIDAY_DOCKER_LLM_BASE_URL:-http://dispatcher:8001/v1}
   FRIDAY_LLM_MODEL: ${FRIDAY_LLM_MODEL:-dispatcher}
   FRIDAY_LLM_ENABLED: ${FRIDAY_LLM_ENABLED:-1}
@@ -93,31 +93,31 @@ x-backend-volumes: &backend-volumes
 services:
   dispatcher:
     profiles: ["llm"]
-    build:
-      context: .
-      dockerfile: docker/vllm-asyncio/Dockerfile
-    image: ${FRIDAY_VLLM_IMAGE:-friday/vllm-openai:v0.25.1-asyncio-e4f88a8}
+    image: ${FRIDAY_VLLM_IMAGE:-vllm/vllm-openai@sha256:2238154357f576523db1df2866cbf591734d70db8f6d50b9a7897f3c60e18940}
     container_name: jericho-dispatcher
     restart: unless-stopped
     ipc: host
     command: >-
-      --model /models/qwen3.6-35b-a3b-nvfp4
+      --model /models/qwen3.6-27b-nvfp4-nvidia
       --served-model-name ${FRIDAY_LLM_MODEL:-dispatcher}
       --dtype auto
-      ${FRIDAY_QWEN_QUANT_ARGS:-}
+      --quantization modelopt_mixed
       ${FRIDAY_QWEN_ENFORCE_EAGER:-}
       --max-model-len 32768
-      --gpu-memory-utilization 0.90
+      --gpu-memory-utilization 0.76
       --kv-cache-dtype fp8
       --tokenizer-mode auto
       --safetensors-load-strategy prefetch
       --enable-prefix-caching
-      --max-num-seqs 16
-      --skip-mm-profiling
+      --max-num-seqs 1
+      ${FRIDAY_QWEN_EXTRA_ARGS:-}
+      --no-language-model-only
       --mm-processor-cache-gb 4.0
       --max-num-batched-tokens 4096
-      --limit-mm-per-prompt '{"image":4,"video":1}'
-      ${FRIDAY_QWEN_EXTRA_ARGS:-}
+      --limit-mm-per-prompt '{"image":4,"video":0}'
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder
+      --enable-auto-tool-choice
       --host 0.0.0.0
       --port 8001
     environment:

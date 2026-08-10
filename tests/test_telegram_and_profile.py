@@ -21,12 +21,12 @@ def test_primary_vllm_profile_is_pinned_to_expected_operational_values(settings)
     assert profile.max_num_seqs == 1
     assert profile.tokenizer_mode == "auto"
     assert profile.quantization == "modelopt_mixed"
-    assert profile.vision_capable is False
-    assert profile.vllm_extra_args.language_model_only is True
+    assert profile.vision_capable is True
+    assert profile.vllm_extra_args.language_model_only is False
     assert profile.vllm_extra_args.skip_mm_profiling is False
-    assert profile.vllm_extra_args.mm_processor_cache_gb is None
+    assert profile.vllm_extra_args.mm_processor_cache_gb == 4.0
     assert profile.vllm_extra_args.max_num_batched_tokens == 4096
-    assert profile.vllm_extra_args.limit_mm_per_prompt is None
+    assert profile.vllm_extra_args.limit_mm_per_prompt == '{"image":4,"video":0}'
     assert profile.vllm_extra_args.reasoning_parser == "qwen3"
     assert profile.vllm_extra_args.tool_call_parser == "qwen3_coder"
 

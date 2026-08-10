@@ -9,6 +9,6 @@ mkdir -p \
   /runtime/data/exports \
   /runtime/cache \
   /runtime/logs \
-  /runtime/models/qwen3.6-35b-a3b-nvfp4
+  /runtime/models/qwen3.6-27b-nvfp4-nvidia
 
 exec "$@"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from friday.config import PROFILES, load_settings, profile_public_dict
 
 
-def test_qwen36_dense_profile_matches_the_deployed_text_only_runtime(monkeypatch, tmp_path):
+def test_qwen36_dense_profile_matches_the_multimodal_dispatcher_command(monkeypatch, tmp_path):
     monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("FRIDAY_PROFILE", "qwen36-27b-nvfp4-nvidia")
     settings = load_settings()
@@ -19,25 +19,25 @@ def test_qwen36_dense_profile_matches_the_deployed_text_only_runtime(monkeypatch
     assert profile.max_num_seqs == 1
     assert profile.quantization == "modelopt_mixed"
     assert profile.tokenizer_mode == "auto"
-    assert profile.vision_capable is False
+    assert profile.vision_capable is True
     assert profile.suppress_model_thinking is True
 
     extra = profile.vllm_extra_args
-    assert extra.language_model_only is True
+    assert extra.language_model_only is False
     assert extra.skip_mm_profiling is False
-    assert extra.mm_processor_cache_gb is None
-    assert extra.limit_mm_per_prompt is None
+    assert extra.mm_processor_cache_gb == 4.0
+    assert extra.limit_mm_per_prompt == '{"image":4,"video":0}'
     assert extra.max_num_batched_tokens == 4096
     assert extra.reasoning_parser == "qwen3"
     assert extra.tool_call_parser == "qwen3_coder"
     assert extra.enable_auto_tool_choice is True
 
 
-def test_qwen36_dense_profile_exposes_quantization_without_a_vision_claim():
+def test_qwen36_dense_profile_exposes_quantization_and_vision():
     public = profile_public_dict(PROFILES["qwen36-27b-nvfp4-nvidia"])
 
     assert public["quantization"] == "modelopt_mixed"
-    assert public["vision_capable"] is False
+    assert public["vision_capable"] is True
     assert public["vllm_image"] == (
         "vllm/vllm-openai@sha256:2238154357f576523db1df2866cbf591734d70db8f6d50b9a7897f3c60e18940"
     )

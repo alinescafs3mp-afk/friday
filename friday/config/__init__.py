@@ -330,17 +330,15 @@ PROFILES: dict[str, RuntimeProfile] = {
 }
 
 
-# Dense, aligned Qwen3.6 served as a text-only model.  The checkpoint is
-# multimodal at the Transformers level, so ``language_model_only`` is an
-# essential part of the runtime identity rather than a product capability
-# claim.  The pinned vLLM nightly is the first verified local image whose
-# ModelOptMixedPrecisionConfig parses this checkpoint's FP8 + W4A16_NVFP4 map.
+# Dense, aligned multimodal Qwen3.6.  The pinned vLLM nightly is the first
+# verified local image whose ModelOptMixedPrecisionConfig parses this
+# checkpoint's FP8 + W4A16_NVFP4 map.  MM profiling deliberately remains on:
+# with co-resident embedding/reranker services an honest startup failure is
+# safer than a late image-request OOM hidden by ``--skip-mm-profiling``.
 PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
     name="qwen36-27b-nvfp4-nvidia",
     title="Qwen3.6 27B NVIDIA NVFP4",
-    description=(
-        "Aligned dense Qwen3.6 27B served text-only from NVIDIA's mixed FP8/W4A16 NVFP4 checkpoint."
-    ),
+    description=("Aligned multimodal Qwen3.6 27B from NVIDIA's mixed FP8/W4A16 NVFP4 checkpoint."),
     model_dir_name="qwen3.6-27b-nvfp4-nvidia",
     eager_mode=False,
     max_steps=24,
@@ -359,21 +357,26 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
     tokenizer_mode="auto",
     quantization="modelopt_mixed",
     vllm_image=("vllm/vllm-openai@sha256:2238154357f576523db1df2866cbf591734d70db8f6d50b9a7897f3c60e18940"),
-    vision_capable=False,
+    vision_capable=True,
     suppress_model_thinking=True,
     vllm_extra_args=VllmExtraArgs(
-        language_model_only=True,
+        language_model_only=False,
+        mm_processor_cache_gb=4.0,
         max_num_batched_tokens=4096,
         reasoning_parser="qwen3",
         tool_call_parser="qwen3_coder",
         enable_auto_tool_choice=True,
+        limit_mm_per_prompt='{"image":4,"video":0}',
     ),
-    certification="certified",
-    interactive_certified=True,
+    certification="pending_multimodal_smoke",
+    interactive_certified=False,
     default_recommended=True,
     research_only=False,
     readiness_deadline_sec=900.0,
-    certification_reason=("Verified on the deployed Blackwell host at 32K context with FP8 KV cache."),
+    certification_reason=(
+        "Text path verified on the deployed Blackwell host at 32K with FP8 KV; "
+        "multimodal boot and image smoke must pass after the operator starts the revised dispatcher."
+    ),
     menu_visible=True,
     requires_experimental_opt_in=False,
 )
