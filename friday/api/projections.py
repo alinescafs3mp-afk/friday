@@ -11,11 +11,17 @@ contract.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import hmac
+import json
 import math
 import re
 from collections.abc import Mapping
 from typing import Any
 
+from friday.generated_files import generated_file_descriptor
 from friday.raw_metadata import bounded_raw_file_metadata
 
 _INGESTION_ACTIONS = frozenset({"promote", "review", "transient", "unknown"})
@@ -235,13 +241,30 @@ def _copy_typed_fields(
             target[key] = value
 
 
-def public_conversation_message(row: Mapping[str, Any]) -> dict[str, Any]:
+def public_conversation_message(
+    row: Mapping[str, Any],
+    *,
+    storage: Any = None,
+    resource_user_id: str = "",
+    resource_owner_id: str = "",
+) -> dict[str, Any]:
     """Publish message text and envelope, never its internal metadata blob."""
 
     public = {key: row[key] for key in ("role", "content", "created_at") if key in row}
     message_id = row.get("id")
     if is_public_opaque_id(message_id, "msg"):
         public["id"] = message_id
+    metadata = _bounded_message_metadata(row.get("metadata_json"))
+    generated = metadata.get("generated_files") if metadata else None
+    if isinstance(generated, list):
+        descriptors = _project_generated_descriptors(
+            generated,
+            storage=storage,
+            resource_user_id=resource_user_id,
+            resource_owner_id=resource_owner_id,
+        )
+        if descriptors:
+            public["files"] = descriptors
     return public
 
 
@@ -417,4 +440,105 @@ def public_chat_ingestion(
             if isinstance(file_ingestion, Mapping)
             else None
         )
+    files = public.get("files")
+    if isinstance(files, list):
+        public["files"] = _project_generated_response_files(
+            files,
+            storage=storage,
+            resource_user_id=resource_user_id,
+            resource_owner_id=resource_owner_id,
+        )
     return public
+
+
+def _project_generated_response_files(
+    items: list[Any],
+    *,
+    storage: Any,
+    resource_user_id: str,
+    resource_owner_id: str,
+) -> list[dict[str, Any]]:
+    projected: list[dict[str, Any]] = []
+    for value in items[:16]:
+        if not isinstance(value, Mapping):
+            continue
+        item = dict(value)
+        raw_id = item.get("id")
+        claimed_handle = any(
+            key in item for key in ("id", "raw_object_id", "download_url", "sha256", "size_bytes")
+        )
+        descriptor = generated_file_descriptor(
+            storage,
+            raw_id,
+            tenant_id=resource_user_id,
+            person_id=resource_owner_id,
+        )
+        # Handles are authority-bearing fields. An old cache or a compromised
+        # tool result cannot publish them without a fresh ownership lookup.
+        for key in ("id", "raw_object_id", "download_url", "sha256", "size_bytes"):
+            item.pop(key, None)
+        if descriptor is None:
+            # A cached inline response is not an authority.  Once its durable
+            # handle is deleted/revoked, replay must not resurrect the bytes.
+            if not claimed_handle:
+                encoded = item.get("content_base64")
+                if isinstance(encoded, str):
+                    try:
+                        base64.b64decode(encoded, validate=True)
+                    except (ValueError, TypeError, binascii.Error):
+                        continue
+                    projected.append(item)
+            continue
+        item.update(descriptor)
+        encoded = item.get("content_base64")
+        if isinstance(encoded, str):
+            try:
+                payload = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError, binascii.Error):
+                item.pop("content_base64", None)
+            else:
+                digest = hashlib.sha256(payload).hexdigest()
+                if len(payload) != descriptor["size_bytes"] or not hmac.compare_digest(
+                    digest, descriptor["sha256"]
+                ):
+                    item.pop("content_base64", None)
+        projected.append(item)
+    return projected
+
+
+def _project_generated_descriptors(
+    items: list[Any],
+    *,
+    storage: Any,
+    resource_user_id: str,
+    resource_owner_id: str,
+) -> list[dict[str, Any]]:
+    projected: list[dict[str, Any]] = []
+    for value in items[:16]:
+        if not isinstance(value, Mapping):
+            continue
+        descriptor = generated_file_descriptor(
+            storage,
+            value.get("id"),
+            tenant_id=resource_user_id,
+            person_id=resource_owner_id,
+        )
+        if descriptor is not None:
+            projected.append(descriptor)
+    return projected
+
+
+def _bounded_message_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        return {}
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeError:
+        return {}
+    if len(encoded) > 1024 * 1024:
+        return {}
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

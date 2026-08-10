@@ -258,7 +258,15 @@ async def conversation_messages(
         user_id=actor.own_id,
         limit=limit,
     )
-    public_items = [public_conversation_message(item) for item in items]
+    public_items = [
+        public_conversation_message(
+            item,
+            storage=request.app.state.storage,
+            resource_user_id=actor.user_id,
+            resource_owner_id=actor.own_id,
+        )
+        for item in items
+    ]
     return {"items": public_items, "count": len(public_items)}
 
 

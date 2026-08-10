@@ -100,6 +100,10 @@ class _UpdateInbox:
                 notification_id TEXT PRIMARY KEY,
                 delivered_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS delivered_generated_files (
+                delivery_key TEXT PRIMARY KEY,
+                delivered_at REAL NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS edit_prompts (
                 prompt_message_id INTEGER PRIMARY KEY,
                 knowledge_id TEXT NOT NULL,
@@ -160,6 +164,10 @@ class _UpdateInbox:
         # и без уборки строка осталась бы здесь навсегда.
         self._conn.execute(
             "DELETE FROM delivered_notifications WHERE delivered_at < ?",
+            (time.time() - DELIVERED_NOTIFICATION_TTL_SEC,),
+        )
+        self._conn.execute(
+            "DELETE FROM delivered_generated_files WHERE delivered_at < ?",
             (time.time() - DELIVERED_NOTIFICATION_TTL_SEC,),
         )
         self._conn.commit()
@@ -280,6 +288,23 @@ class _UpdateInbox:
         self._conn.executemany(
             "DELETE FROM delivered_notifications WHERE notification_id=?",
             [(value,) for value in cleaned],
+        )
+        self._conn.commit()
+
+    def generated_file_was_delivered(self, delivery_key: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM delivered_generated_files WHERE delivery_key=?",
+            (str(delivery_key),),
+        ).fetchone()
+        return row is not None
+
+    def remember_generated_file_delivery(self, delivery_key: str) -> None:
+        """Checkpoint one successful sendDocument before the update can retry."""
+
+        self._conn.execute(
+            """INSERT OR IGNORE INTO delivered_generated_files(delivery_key, delivered_at)
+               VALUES(?, ?)""",
+            (str(delivery_key), time.time()),
         )
         self._conn.commit()
 

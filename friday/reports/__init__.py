@@ -153,6 +153,25 @@ def render(kind: str, spec: ReportSpec) -> bytes:
 
 def _render_docx(spec: ReportSpec) -> bytes:
     from docx import Document  # type: ignore[import-untyped]
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT  # type: ignore[import-untyped]
+    from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-untyped]
+    from docx.oxml import OxmlElement  # type: ignore[import-untyped]
+    from docx.oxml.ns import qn  # type: ignore[import-untyped]
+    from docx.shared import Pt  # type: ignore[import-untyped]
+
+    def shade(cell: Any, fill: str) -> None:
+        properties = cell._tc.get_or_add_tcPr()
+        element = properties.find(qn("w:shd"))
+        if element is None:
+            element = OxmlElement("w:shd")
+            properties.append(element)
+        element.set(qn("w:fill"), fill)
+
+    def repeat_as_header(row: Any) -> None:
+        properties = row._tr.get_or_add_trPr()
+        element = OxmlElement("w:tblHeader")
+        element.set(qn("w:val"), "true")
+        properties.append(element)
 
     document = Document()
     document.add_heading(spec.title, level=0)
@@ -164,17 +183,30 @@ def _render_docx(spec: ReportSpec) -> bytes:
         elif block.kind == "bullets":
             for item in block.items:
                 document.add_paragraph(item, style="List Bullet")
-        elif block.kind == "table" and block.rows:
+        elif block.kind == "table" and any(block.rows):
             columns = max(len(row) for row in block.rows)
             table = document.add_table(rows=0, cols=columns)
             table.style = "Table Grid"
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            table.autofit = True
             for index, row in enumerate(block.rows):
                 cells = table.add_row().cells
-                for column, value in enumerate(row[:columns]):
-                    cells[column].text = value
+                for column in range(columns):
+                    cells[column].text = row[column] if column < len(row) else ""
+                    cells[column].vertical_alignment = (
+                        WD_CELL_VERTICAL_ALIGNMENT.CENTER if index == 0 else (WD_CELL_VERTICAL_ALIGNMENT.TOP)
+                    )
+                    paragraph = cells[column].paragraphs[0]
+                    paragraph.paragraph_format.space_after = Pt(0)
                     if index == 0:
-                        for run in cells[column].paragraphs[0].runs:
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        shade(cells[column], "D9EAF7")
+                        for run in paragraph.runs:
                             run.bold = True
+                    elif index % 2 == 0:
+                        shade(cells[column], "F4F8FB")
+                if index == 0:
+                    repeat_as_header(table.rows[-1])
         else:
             document.add_paragraph(block.text)
     buffer = io.BytesIO()
@@ -184,7 +216,8 @@ def _render_docx(spec: ReportSpec) -> bytes:
 
 def _render_xlsx(spec: ReportSpec) -> bytes:
     from openpyxl import Workbook  # type: ignore[import-untyped]
-    from openpyxl.styles import Font  # type: ignore[import-untyped]
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side  # type: ignore[import-untyped]
+    from openpyxl.utils import get_column_letter  # type: ignore[import-untyped]
 
     book = Workbook()
     sheet = book.active
@@ -194,34 +227,81 @@ def _render_xlsx(spec: ReportSpec) -> bytes:
     # обычная просьба.
     sheet.title = sheet_title_from_report_title(spec.title)
     _append_xlsx_literal_row(sheet, [spec.title])
-    sheet["A1"].font = Font(bold=True, size=14)
+    sheet["A1"].font = Font(bold=True, color="FFFFFF", size=14)
+    sheet["A1"].fill = PatternFill("solid", fgColor="1F4E78")
     if spec.subtitle:
         _append_xlsx_literal_row(sheet, [spec.subtitle])
     sheet.append([])
-    widest = len(spec.title)
+    section_rows: set[int] = set()
+    table_ranges: list[tuple[int, int, int]] = []
     for block in spec.blocks:
         if block.kind == "heading":
             _append_xlsx_literal_row(sheet, [block.text])
             sheet.cell(row=sheet.max_row, column=1).font = Font(bold=True, size=12)
-            widest = max(widest, len(block.text))
+            section_rows.add(sheet.max_row)
         elif block.kind == "bullets":
             for item in block.items:
                 _append_xlsx_literal_row(sheet, [f"• {item}"])
-                widest = max(widest, len(item) + 2)
-        elif block.kind == "table":
-            for index, row in enumerate(block.rows):
-                _append_xlsx_literal_row(sheet, row)
-                if index == 0:
-                    for column in range(1, len(row) + 1):
-                        sheet.cell(row=sheet.max_row, column=column).font = Font(bold=True)
-                widest = max(widest, *(len(str(cell)) for cell in row)) if row else widest
+        elif block.kind == "table" and any(block.rows):
+            columns = max(len(row) for row in block.rows)
+            start_row = 0
+            for row in block.rows:
+                padded = list(row[:columns]) + [""] * (columns - len(row))
+                _append_xlsx_literal_row(sheet, padded)
+                if not start_row:
+                    start_row = sheet.max_row
+            table_ranges.append((start_row, sheet.max_row, columns))
         else:
             _append_xlsx_literal_row(sheet, [block.text])
-            widest = max(widest, min(len(block.text), 120))
         sheet.append([])
-    # Ширина по содержимому: колонка по умолчанию режет текст, и таблица выглядит
-    # сломанной ещё до того, как её прочитали.
-    sheet.column_dimensions["A"].width = min(max(widest + 2, 20), 120)
+
+    thin = Side(style="thin", color="B8C4CE")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    body_alignment = Alignment(wrap_text=True, vertical="top")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in sheet.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            cell.alignment = body_alignment
+            cell.border = border
+    for row_index in section_rows:
+        cell = sheet.cell(row=row_index, column=1)
+        cell.fill = PatternFill("solid", fgColor="D9EAF7")
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for start_row, end_row, columns in table_ranges:
+        for row_index in range(start_row, end_row + 1):
+            for column in range(1, columns + 1):
+                cell = sheet.cell(row=row_index, column=column)
+                cell.border = border
+                cell.alignment = body_alignment
+                if row_index == start_row:
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill("solid", fgColor="1F4E78")
+                    cell.alignment = header_alignment
+                elif (row_index - start_row) % 2 == 0:
+                    cell.fill = PatternFill("solid", fgColor="F4F8FB")
+
+    # Ширина считается для каждой занятой колонки, а не только для A. Верхняя
+    # граница оставляет таблицу обозримой: длинный текст переносится внутри
+    # ячейки, а не растягивает лист на несколько экранов.
+    for column in range(1, sheet.max_column + 1):
+        longest = 0
+        for cell in sheet[get_column_letter(column)]:
+            if cell.value is None:
+                continue
+            longest = max(longest, max((len(line) for line in str(cell.value).splitlines()), default=0))
+        sheet.column_dimensions[get_column_letter(column)].width = min(max(longest + 2, 12), 48)
+
+    if table_ranges:
+        # У листа один автофильтр, поэтому выбираем самую содержательную таблицу.
+        start_row, end_row, columns = max(
+            table_ranges,
+            key=lambda bounds: ((bounds[1] - bounds[0] + 1) * bounds[2], bounds[2]),
+        )
+        sheet.freeze_panes = f"A{start_row + 1}"
+        sheet.auto_filter.ref = f"A{start_row}:{get_column_letter(columns)}{end_row}"
+
     buffer = io.BytesIO()
     book.save(buffer)
     return buffer.getvalue()
@@ -274,9 +354,38 @@ def _pdf_font() -> tuple[str, str]:
     return "FridayText", "FridayText-Bold"
 
 
+def _pdf_table_widths(rows: list[list[str]], available_width: float) -> list[float]:
+    """Fit every table column inside the printable page width.
+
+    ReportLab otherwise derives width from unbroken content and a wide table can
+    silently leave the page.  Relative content lengths still decide which
+    columns get more room, while very long values wrap instead of monopolising
+    the sheet.
+    """
+
+    columns = max((len(row) for row in rows), default=1)
+    desired: list[float] = []
+    for column in range(columns):
+        longest = max(
+            (
+                max((len(line) for line in row[column].splitlines()), default=0)
+                for row in rows
+                if column < len(row)
+            ),
+            default=0,
+        )
+        desired.append((min(max(longest, 6), 42) * 4.6) + 12)
+    total = sum(desired) or 1.0
+    if total <= available_width:
+        return desired
+    scale = available_width / total
+    return [width * scale for width in desired]
+
+
 def _render_pdf(spec: ReportSpec) -> bytes:
+    from reportlab.lib import colors  # type: ignore[import-untyped]
     from reportlab.lib.enums import TA_LEFT  # type: ignore[import-untyped]
-    from reportlab.lib.pagesizes import A4  # type: ignore[import-untyped]
+    from reportlab.lib.pagesizes import A4, landscape  # type: ignore[import-untyped]
     from reportlab.lib.styles import ParagraphStyle  # type: ignore[import-untyped]
     from reportlab.lib.units import mm  # type: ignore[import-untyped]
     from reportlab.platypus import (  # type: ignore[import-untyped]
@@ -293,11 +402,24 @@ def _render_pdf(spec: ReportSpec) -> bytes:
     body = ParagraphStyle("body", fontName=font, fontSize=10.5, leading=15, alignment=TA_LEFT)
     heading = ParagraphStyle("heading", fontName=bold_font, fontSize=13, leading=18, spaceBefore=8)
     title_style = ParagraphStyle("title", fontName=bold_font, fontSize=18, leading=24, spaceAfter=6)
+    table_body = ParagraphStyle("table-body", parent=body, fontSize=8.5, leading=11)
+    table_header = ParagraphStyle(
+        "table-header",
+        parent=table_body,
+        fontName=bold_font,
+        textColor=colors.white,
+    )
+
+    widest_table = max(
+        (max((len(row) for row in block.rows), default=0) for block in spec.blocks if block.kind == "table"),
+        default=0,
+    )
+    page_size = landscape(A4) if widest_table >= 6 else A4
 
     buffer = io.BytesIO()
     document = SimpleDocTemplate(
         buffer,
-        pagesize=A4,
+        pagesize=page_size,
         leftMargin=18 * mm,
         rightMargin=18 * mm,
         topMargin=18 * mm,
@@ -319,16 +441,31 @@ def _render_pdf(spec: ReportSpec) -> bytes:
                     start="•",
                 )
             )
-        elif block.kind == "table" and block.rows:
-            data = [[Paragraph(_escape(cell), body) for cell in row] for row in block.rows]
-            table = Table(data, hAlign="LEFT")
+        elif block.kind == "table" and any(block.rows):
+            columns = max(len(row) for row in block.rows)
+            normalised = [list(row[:columns]) + [""] * (columns - len(row)) for row in block.rows]
+            data = [
+                [Paragraph(_escape(cell), table_header if row_index == 0 else table_body) for cell in row]
+                for row_index, row in enumerate(normalised)
+            ]
+            table = Table(
+                data,
+                colWidths=_pdf_table_widths(normalised, document.width),
+                repeatRows=1,
+                hAlign="LEFT",
+                splitByRow=1,
+            )
             table.setStyle(
                 TableStyle(
                     [
-                        ("FONTNAME", (0, 0), (-1, 0), bold_font),
-                        ("GRID", (0, 0), (-1, -1), 0.4, (0.6, 0.6, 0.6)),
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F8FB")]),
+                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B8C4CE")),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("BACKGROUND", (0, 0), (-1, 0), (0.93, 0.93, 0.93)),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                     ]
                 )
             )

@@ -1471,17 +1471,41 @@ _FILE_CREATION_META_QUESTION = re.compile(
     r"подготов\w*|оформ\w*|состав\w*|выгруз\w*|экспорт\w*|конверт\w*|"
     r"преобраз\w*|генерир\w*|сгенерир\w*)\b|"
     r"(?:(?:ты|пятниц\w*)\s+)?(?:умеешь|можешь|способна|поддерживаешь)\s+ли\b|"
-    r"можно\s+ли\b)",
+    r"можно\s+ли\b|"
+    r"^\s*(?:объясни|расскажи)[^.!?\n]{0,40}\bкак\b|"
+    r"^\s*покажи[^.!?\n]{0,40}\b(?:пример|команд)\w*\b|"
+    r"^\s*что\s+нужно\b[^.!?\n]{0,60}\bчтобы\b|"
+    r"^\s*(?:(?:ты|пятниц\w*)\s+)?(?:умеешь|поддерживаешь)\b|"
+    r"^\s*есть\s+ли\s+возможность\b|"
+    r"^\s*(?:расскажи\s+про|объясни)\s+"
+    r"(?:экспорт|конвертаци|создани|генераци)\w*\b|"
+    r"^\s*что\s+такое\s+(?:экспорт|конвертаци|создани|генераци)\w*\b|"
+    r"\bкак\s+(?:сдела\w*|созда\w*|сформир\w*|оформ\w*|"
+    r"выгруз\w*|экспорт\w*|конверт\w*|преобраз\w*|генерир\w*)\b)",
+    re.IGNORECASE,
+)
+_FILE_CREATION_HOW_QUESTION = re.compile(
+    r"^[^.!?\n]{0,120}\bкак\s+"
+    r"(?:сдела\w*|созда\w*|сформир\w*|оформ\w*|выгруз\w*|"
+    r"экспорт\w*|конверт\w*|преобраз\w*|генерир\w*)\b",
     re.IGNORECASE,
 )
 _FILE_CREATION_NARRATION = re.compile(
     r"^\s*(?:я|мы|он|она|они)\s+(?:уже\s+)?(?:сделал|создал|собрал|"
     r"сформировал|подготовил|оформил|составил|выгрузил|экспортировал|"
-    r"конвертировал|преобразовал|сгенерировал)(?:а|и)?\b",
+    r"конвертировал|преобразовал|сгенерировал)(?:а|и)?\b|"
+    r"^\s*(?:[^.!?,;:\n]+\s+){0,4}(?:попросил\w*|просил\w*|сказал\w*)\b|"
+    r"^\s*в\s+(?:инструкц|письм|текст|стат)\w*\s+сказан\w*\b",
     re.IGNORECASE,
 )
 _FILE_CREATION_AFTER_NARRATION = re.compile(
-    r"[,;:—-]\s*(?:(?:а|и|теперь|затем|пожалуйста)\s+){0,2}"
+    r"(?:[,;:—-]|[.!?]\s+)\s*(?:(?:а|и|теперь|затем|пожалуйста)\s+){0,2}"
+    r"(?:сделай|создай|собери|сформируй|подготовь|оформи|составь|выгрузи|"
+    r"экспортируй|конвертируй|преобразуй|сгенерируй|пришли|отправь|сохрани)\b",
+    re.IGNORECASE,
+)
+_FILE_CREATION_AFTER_COORDINATOR = re.compile(
+    r"\b(?:и(?:\s+(?:теперь|затем|потом))?|затем|потом)\s+"
     r"(?:сделай|создай|собери|сформируй|подготовь|оформи|составь|выгрузи|"
     r"экспортируй|конвертируй|преобразуй|сгенерируй|пришли|отправь|сохрани)\b",
     re.IGNORECASE,
@@ -1489,10 +1513,37 @@ _FILE_CREATION_AFTER_NARRATION = re.compile(
 _DIRECT_TABLE_FILE_OBJECT = re.compile(
     r"\b(?:сдела\w*|созда\w*|собер\w*|собра\w*|сформир\w*|подготов\w*|"
     r"оформ\w*|состав\w*|выгруз\w*|экспорт\w*|конверт\w*|преобраз\w*|"
-    r"генерир\w*|сгенерир\w*|пришл\w*|отправ\w*|сохран\w*)\b(?:"
+    r"генерир\w*|сгенерир\w*|пришл\w*|отправ\w*|сохран\w*|дай|нужн\w*)\b(?:"
     r"[^.!?\n]{0,80}\b(?:в\s+виде|как)\s+таблиц\w*\b|"
     r"(?:\s+(?!(?:по|из|с|на\s+основе)\b)\w+)"
     r"{0,4}\s+таблиц\w*\b)",
+    re.IGNORECASE,
+)
+
+
+def _has_later_file_creation_clause(message: str) -> bool:
+    """A later imperative must carry its own file output authority."""
+
+    for pattern in (_FILE_CREATION_AFTER_NARRATION, _FILE_CREATION_AFTER_COORDINATOR):
+        for match in pattern.finditer(message):
+            tail = message[match.start() :]
+            if _ASKS_FOR_A_FILE.search(tail) or _DIRECT_TABLE_FILE_OBJECT.search(tail):
+                return True
+    return False
+
+
+_FILE_SOURCE_READING_TASK = re.compile(
+    r"\b(?:сводк|анализ|вывод|пересказ|ответ)\w*[^.!?\n]{0,40}"
+    r"\b(?:по|из|с)\s+(?:pdf|пдф|word|ворд\w*|excel|эксел\w*|docx?|xlsx?)\b|"
+    r"\b(?:сводк|анализ|вывод|пересказ|ответ)\w*[^.!?\n]{0,30}"
+    r"\b(?:pdf|пдф|word|ворд\w*|excel|эксел\w*|docx?|xlsx?)[-\s]+(?:файл|документ|таблиц)\w*|"
+    r"\b(?:сводк|анализ|вывод|пересказ|ответ)\w*\s+"
+    r"(?:pdf|пдф|word|ворд\w*|excel|эксел\w*|docx?|xlsx?)\b|"
+    r"\bсписок\w*[^.!?\n]{0,40}\b(?:по|из|с)\s+"
+    r"(?:pdf|пдф|word|ворд\w*|excel|эксел\w*|docx?|xlsx?)\b|"
+    r"\bсписок\w*[^.!?\n]{0,40}\bв\s+"
+    r"(?:pdf|пдф|word|ворд\w*|excel|эксел\w*|docx?|xlsx?)[-\s]+"
+    r"(?:файл|документ|таблиц)\w*",
     re.IGNORECASE,
 )
 
@@ -1501,12 +1552,21 @@ def _is_direct_file_request(message: str) -> bool:
     """Require a visible lexical request to create/deliver a file."""
 
     visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
+    if not visible:
+        return False
+    later_command = _has_later_file_creation_clause(visible)
+    if (
+        _FILE_CREATION_META_QUESTION.search(visible) or _FILE_CREATION_HOW_QUESTION.search(visible)
+    ) and not later_command:
+        return False
+    if _NEGATED_FILE_CREATION.search(visible) and not later_command:
+        return False
+    if _FILE_CREATION_NARRATION.search(visible) and not later_command:
+        return False
+    if _FILE_SOURCE_READING_TASK.search(visible) and not later_command:
+        return False
     return bool(
-        visible
-        and not _NEGATED_FILE_CREATION.search(visible)
-        and not _FILE_CREATION_META_QUESTION.search(visible)
-        and (not _FILE_CREATION_NARRATION.search(visible) or _FILE_CREATION_AFTER_NARRATION.search(visible))
-        and _DIRECT_FILE_CREATION_CUE.search(visible)
+        _DIRECT_FILE_CREATION_CUE.search(visible)
         and (_ASKS_FOR_A_FILE.search(visible) or _DIRECT_TABLE_FILE_OBJECT.search(visible))
     )
 
@@ -5514,74 +5574,68 @@ _FALSE_CURRENT_MODEL_OUTAGE = re.compile(
 )
 # A parsed current attachment is a measured runtime fact.  A successful model
 # answer has no authority to deny that the bytes/text were supplied or to ask
-# for the same complete file again.  Keep the detector on the leading answer
-# assertion and on whole-file access claims; difficulty reading one field or a
-# genuinely incomplete parse is a different, truthful outcome.
+# for the same complete file again.  The detector below is multi-signal rather
+# than a single brittle phrase list: live models rephrase whole-file refusals
+# freely, while field-level uncertainty stays a truthful outcome.
+_FALSE_READABLE_FILE_NOUN = re.compile(
+    r"\b(?:pdf(?:-?файл\w*)?|файл\w*|документ\w*|вложен\w*|скан\w*|приложен\w*|image|jpeg|jpg|png)\b",
+    re.IGNORECASE,
+)
+_FALSE_READABLE_REUPLOAD = re.compile(
+    r"(?:"
+    r"(?:пришлите|загрузите|отправьте|прикрепите|перешлите)\s+"
+    r"(?:(?:пожалуйста|её|его|их|это|этот|ваш|свою?|свою|pdf(?:-?файл\w*)?|"
+    r"файл\w*|документ\w*|вложен\w*|скан\w*)\s+){0,4}"
+    r"(?:снова|заново|повторно|ещ[её]\s+раз|целиком|полностью)\b|"
+    r"(?:повторите|сделайте\s+повторн\w*)\s+загрузк\w*\b|"
+    r"\bзагруз\w*\s+(?:файл\w*|документ\w*|pdf|скан\w*|вложен\w*)\s+"
+    r"(?:снова|заново|повторно|ещ[её]\s+раз)\b|"
+    r"\bпопробуйте\s+загрузить\b"
+    r")",
+    re.IGNORECASE,
+)
+_FALSE_READABLE_ACCESS_DENIAL = re.compile(
+    r"(?:"
+    r"(?:не\s+(?:могу|умею|способ(?:ен|на)|получается|уда[её]тся)|"
+    r"не\s+удалось|не\s+получилось|нет\s+возможности)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:открыть|прочитать|просмотреть|увидеть|разобрать|распознать|"
+    r"извлечь|получить\s+доступ)\b|"
+    r"(?:открыть|прочитать|просмотреть|увидеть|разобрать|распознать|"
+    r"извлечь)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:не\s+(?:могу|умею|способ(?:ен|на)|получается|уда[её]тся)|"
+    r"не\s+удалось|не\s+получилось)\b|"
+    r"(?:не\s+(?:вижу|виден\w*|доступ\w*|отобража\w*|открыва\w*|чита\w*|"
+    r"передан\w*|получен\w*)|"
+    r"недоступ\w*)\b|"
+    r"(?:нет|отсутствует)\s+доступа\b|"
+    r"(?:содержим\w+|текст\w*|данн\w*)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:недоступ\w*|не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
+    r"не\s+чита\w*|не\s+получен\w*)\b|"
+    r"(?:pdf(?:-?файл\w*)?|файл\w*|документ\w*|вложен\w*|скан\w*)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:недоступ\w*|не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
+    r"не\s+чита\w*|не\s+откры\w*|не\s+передан\w*|не\s+получен\w*)\b"
+    r")",
+    re.IGNORECASE,
+)
+_FALSE_READABLE_FIELD_LEVEL_ONLY = re.compile(
+    r"(?:"
+    r"\b(?:одн\w*\s+)?(?:цифр\w*|символ\w*|букв\w*|знак\w*)\b|"
+    r"\b(?:строк\w*|граф\w*|ячейк\w*|пол[ея]\w*|позици\w*)\b|"
+    r"\bне\s+(?:могу|удалось|получается)\s+"
+    r"(?:разобрать|разглядеть|прочитать|распознать)\s+"
+    r"(?:одн\w+|эт\w+|данн\w+|конкретн\w+)\b|"
+    r"\bнечётк\w*\b|\bразмыт\w*\b|\bплохо\s+видн\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+# Kept as a thin compatibility surface for tests that still import the name.
+# Prefer `_is_false_readable_attachment_refusal` at every production boundary.
 _FALSE_READABLE_ATTACHMENT_REFUSAL = re.compile(
-    r"\A\s*(?:⚠️?\s*)?(?:(?:(?:к\s+сожалению|увы)\s*[,;:—-]?|"
-    r"(?:извините|простите)\s*[,;:—-]?\s*(?:но\s+)?)\s*)?(?:"
-    r"(?:я\s+)?не\s+(?:могу|умею|способ(?:ен|на))\s+"
-    r"(?:(?:напрямую|самостоятельно|здесь|в\s+этом\s+чате)\s+)?"
-    r"(?:открыть|прочитать|просмотреть|увидеть|"
-    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?|"
-    r"получить\s+доступ\s+к)"
-    r"(?:\s+(?:или|и)\s+(?:открыть|прочитать|просмотреть|увидеть))?\s+"
-    r"(?:(?:содержим\w+|текст\w*|данн\w+)\s+)?"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:я\s+)?не\s+(?:вижу|получил(?:а)?|имею\s+доступ\s+к)\s+"
-    r"(?:(?:содержим\w+|текст\w*|данн\w+)\s+)?"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:у\s+меня|здесь)\s+нет\s+доступа\s+к\s+"
-    r"(?:(?:этому|вашему|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файлу)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:у\s+меня\s+нет|я\s+не\s+имею)\s+возможности\s+"
-    r"(?:открыть|прочитать|просмотреть|увидеть)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:не\s+удалось|не\s+получилось)\s+"
-    r"(?:открыть|прочитать|просмотреть|увидеть|"
-    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:мне\s+)?(?:не\s+доступ\w*|не\s+отобража\w*|не\s+передан\w*|"
-    r"не\s+получен\w*|не\s+откр\w*|не\s+чита\w*|не\s+виден\w*)\b|"
-    r"(?:мне\s+)?(?:недоступен|не\s+(?:доступен|виден|отображается|"
-    r"открывается|читается))\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:содержим\w+|текст\w*|данн\w+)\s+"
-    r"(?:(?:этого|вашего|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файла)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:мне\s+)?(?:не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
-    r"не\s+получен\w*|не\s+чита\w*)\b|"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?|имею)\s*[,;:—-]?\s*"
-    r"(?:(?:но|однако)\s+)?"
-    r"(?:открыть|прочитать|просмотреть|увидеть|"
-    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:я\s+)?не\s+(?:могу|умею|способ(?:ен|на))\b|"
-    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?|имею)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b[^.!?\n]{0,40}\b(?:"
-    r"не\s+(?:могу|умею|способ(?:ен|на))\s+"
-    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
-    r"(?:его|их|это|содержим\w*)|"
-    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
-    r"(?:его|их|это|содержим\w*)\s+(?:я\s+)?"
-    r"не\s+(?:могу|умею|способ(?:ен|на))\b)|"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?)\b\s*(?:[.!?]\s*)?"
-    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
-    r"(?:его|их|это|содержим\w*)\s+(?:я\s+)?"
-    r"не\s+(?:могу|умею|способ(?:ен|на))\b|"
-    r"(?:пришлите|загрузите|отправьте|прикрепите)\s+"
-    r"(?:(?:этот|ваш|его|pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+){0,3}"
-    r"(?:снова|заново|повторно|ещ[её]\s+раз|целиком|полностью)\b)",
+    r"(?:" + _FALSE_READABLE_ACCESS_DENIAL.pattern + r"|" + _FALSE_READABLE_REUPLOAD.pattern + r")",
     re.IGNORECASE,
 )
 _ASKS_ABOUT_MODEL_OUTAGE = re.compile(
@@ -5604,6 +5658,53 @@ _UNREADABLE_ATTACHMENT_ANSWER = (
 
 def _refusal_classification_text(answer: str) -> str:
     return " ".join(_leading_model_assertion(str(answer or "")).split())
+
+
+def _is_false_readable_attachment_refusal(answer: str) -> bool:
+    """Whether a model answer falsely denies access to an already-parsed file.
+
+    Source truth belongs to the parser: when coverage is complete and readable
+    evidence exists, the model may struggle with a field, but it may not claim
+    the whole file is missing or demand a reupload.  Detection is multi-signal
+    (file noun + access denial, or any reupload request for the file) so natural
+    paraphrases cannot walk around a single brittle phrase list.
+    """
+
+    text = _refusal_classification_text(answer)
+    if not text:
+        return False
+    # Pure field-level uncertainty is truthful and must not become a whole-file
+    # recovery loop.  A reupload demand still overrides this carve-out.
+    field_level = bool(
+        re.search(
+            r"(?:"
+            r"\bне\s+(?:могу|удалось|получается)\s+"
+            r"(?:разобрать|разглядеть|прочитать|распознать)\s+"
+            r"(?:одн\w+\s+)?(?:цифр\w*|символ\w*|букв\w*|знак\w*|пол[ея]\w*|строк\w*)\b|"
+            r"\b(?:одн\w+\s+)?(?:цифр\w*|символ\w*)\s+в\s+строк\w*\b|"
+            r"\bнечётк\w*\s+(?:цифр\w*|пол[ея]\w*|строк\w*)\b"
+            r")",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    asks_reupload = bool(_FALSE_READABLE_REUPLOAD.search(text))
+    denies_access = bool(_FALSE_READABLE_ACCESS_DENIAL.search(text))
+    mentions_file = bool(_FALSE_READABLE_FILE_NOUN.search(text))
+    deictic_file = bool(re.search(r"\b(?:его|её|их|это|этот|ваш)\b", text, re.IGNORECASE))
+    if (
+        field_level
+        and not asks_reupload
+        and not re.search(
+            r"\b(?:весь|целиком|полностью)\b",
+            text,
+            re.IGNORECASE,
+        )
+    ):
+        return False
+    if asks_reupload and (mentions_file or denies_access or deictic_file):
+        return True
+    return bool(denies_access and (mentions_file or deictic_file))
 
 
 def _capability_refusal_match(answer: str) -> re.Match[str] | None:
@@ -8325,9 +8426,19 @@ def _attachment_has_verifiable_content(item: Mapping[str, Any]) -> bool:
     a separately verified visual-source contract exists.  Other explicitly
     ineligible text is withheld by the same positive gate: a synthesis model
     cannot bootstrap evidence which the extractor refused to authenticate.
+
+    Missing ``verification_eligible`` must not resurrect a failed extraction:
+    default-True only applies when the extractor did not mark the file closed
+    as unreadable.
     """
 
-    return bool(item.get("verification_eligible", True) is not False and not item.get("advisory_only"))
+    if item.get("advisory_only") is True:
+        return False
+    if item.get("verification_eligible") is False:
+        return False
+    if item.get("extraction_success") is False:
+        return False
+    return item.get("verification_eligible", True) is not False
 
 
 def _attachment_needs_full_source_prepass(
@@ -10271,6 +10382,25 @@ _DIRECT_FILE_WEB_SOURCE = re.compile(
     r"\bиз\s+(?:того,?\s+что\s+)?(?:найд\w*|обнаруж\w*|получ\w*)\s+"
     r"(?:в|из)\s+(?:интернет\w*|сети|веб\w*|web\b)|"
     r"\b(?:интернет|веб|web)[-\s]+(?:поиск|источник|данн|информац|материал|результат)\w*"
+    r"|\bиз\s+(?:интернет\w*|сети|веб\w*|web\b)"
+    r"|\b(?:найд\w*|поищ\w*|возьм\w*|собер\w*|получ\w*)"
+    r"[^.!?\n]{0,70}\b(?:в|из)\s+(?:интернет\w*|сети|веб\w*|web\b)"
+    # A URL is web authority only when the person names it as an input source.
+    # Merely asking to print a company URL in a document must not trigger a
+    # fetch or replace an otherwise self-contained file request with research.
+    r"|\b(?:на\s+основе|по\s+(?:данн|материал)\w*|из)\s+"
+    r"(?:(?:этой|этого|данной|данного)\s+)?"
+    r"(?:(?:веб|web)[-\s]*)?(?:страниц|сайт|url|ссылк)\w*"
+    r"[^.!?\n]{0,30}https?://[^\s<>()]+"
+    r"|\b(?:на\s+основе\s+)?"
+    r"(?:данн|информац|материал|результат)\w*\s+"
+    r"(?:(?:с|на)\s+)?(?:(?:веб|web)[-\s]*)?"
+    r"(?:сайт|портал|страниц)\w*"
+    r"|\b(?:по|из|на\s+основе)\s+"
+    r"(?:(?:этой|этого|этому|данной|данного|данному)\s+)?"
+    r"(?:(?:веб|web)[-\s]*)?(?:сайт|портал|страниц)\w*"
+    r"|\b(?:изуч\w*|прочит\w*|проанализ\w*|проверь\w*)\s+"
+    r"(?:страниц\w*\s+)?https?://[^\s<>()]+"
     r")",
     re.IGNORECASE,
 )
@@ -10280,8 +10410,7 @@ _WEB_FILE_QUERY_FILLER = re.compile(
     r"состав\w*|выгруз\w*|экспорт\w*|конверт\w*|преобраз\w*|генерир\w*|"
     r"сгенерир\w*|пришл\w*|отправ\w*|сохран\w*|красив\w*|готов\w*|"
     r"word|ворд\w*|docx?|excel|эксел\w*|эксель\w*|xlsx?|pdf|пдф\w*|png|"
-    r"таблиц\w*|отч[её]т\w*|справк\w*|документ\w*|файл\w*|книг\w*|поиск\w*|"
-    r"данн\w*|информац\w*|материал\w*|результат\w*"
+    r"таблиц\w*|отч[её]т\w*|справк\w*|документ\w*|файл\w*|книг\w*|поиск\w*"
     r")(?=$|\W)",
     re.IGNORECASE,
 )
@@ -14845,7 +14974,10 @@ class AgentRuntime:
             and not empty_attachment_answer
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
-            and not attachment_query_closed_answer
+            # Prefer the explicit "will not guess" contract over a generic
+            # query-scan UNKNOWN when every selected file has zero readable
+            # evidence.  Query-closed answers do not forbid fabrication as
+            # clearly, and live scans previously escaped through that branch.
         )
         partially_unreadable_attachment_answer = bool(
             attachment_expected_count > 1
@@ -14854,7 +14986,9 @@ class AgentRuntime:
             and 0 < attachment_readable_count < attachment_expected_count
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
-            and not attachment_query_closed_answer
+            # Same priority as the fully-unreadable branch: partial sets must
+            # not fall through to a weaker query-closed path that still invites
+            # model synthesis about the unread siblings.
         )
         foreign_private_request = _requests_foreign_private_data(clean_message)
         dangerous_instruction_request = bool(
@@ -15868,7 +16002,7 @@ class AgentRuntime:
             and not response.get("llm_failed")
             and attachment_coverage_complete
             and attachment_readable_count > 0
-            and _FALSE_READABLE_ATTACHMENT_REFUSAL.search(_refusal_classification_text(content))
+            and _is_false_readable_attachment_refusal(content)
         )
         if readable_attachment_refusal:
             # The parser, not the answering model, owns file availability.  Give
@@ -15898,9 +16032,7 @@ class AgentRuntime:
                 retried.get("_model_generated") is True
                 and not retried.get("llm_failed")
                 and retried_content
-                and not _FALSE_READABLE_ATTACHMENT_REFUSAL.search(
-                    _refusal_classification_text(retried_content)
-                )
+                and not _is_false_readable_attachment_refusal(retried_content)
             )
             if retry_accepted:
                 content = retried_content
@@ -17100,7 +17232,7 @@ class AgentRuntime:
             and not response.get("llm_failed")
             and attachment_coverage_complete
             and attachment_readable_count > 0
-            and _FALSE_READABLE_ATTACHMENT_REFUSAL.search(_refusal_classification_text(str(model_said or "")))
+            and _is_false_readable_attachment_refusal(str(model_said or ""))
         )
         if late_false_readable_attachment_refusal:
             false_readable_attachment_refusal_replaced = True
@@ -21184,8 +21316,29 @@ class AgentRuntime:
         от сообщения после чистки ничего не осталось, ищем по нему целиком —
         пустой запрос хуже шумного.
         """
+        direct_web_file = _direct_file_request_uses_the_web(message)
+        if direct_web_file:
+            url_match = re.search(r"https?://[^\s<>()]+", message, flags=re.IGNORECASE)
+            if url_match:
+                return url_match.group(0).rstrip(".,;:!?")[:140]
+            # In ``сделай Excel, найдя цены в интернете`` the
+            # shared source classifier intentionally owns the whole relation,
+            # but deleting that relation would also delete its subject.  Freeze
+            # the bounded object before carrier cleanup.
+            inline_subject = re.search(
+                r"\b(?:найд\w*|поищ\w*|возьм\w*|получ\w*)\s+"
+                r"(?P<subject>[^,.!?;\n]{1,100}?)\s+\b(?:в|из)\s+"
+                r"(?:интернет\w*|сети|веб\w*|web\b)",
+                message,
+                flags=re.IGNORECASE,
+            )
+            if inline_subject:
+                subject = " ".join(inline_subject.group("subject").split()).strip(" ,.:;—-")
+                if subject:
+                    return subject[:140]
+
         cleaned = message
-        if _direct_file_request_uses_the_web(message):
+        if direct_web_file:
             # The provider needs the research subject, not carrier directives
             # such as ``сделай красивый Excel по данным из интернета``.  The
             # explicit source phrase grants the web call above; here it and the
@@ -21194,6 +21347,30 @@ class AgentRuntime:
             cleaned = _WEB_FILE_QUERY_FILLER.sub(" ", cleaned)
         cleaned = _WEB_REQUEST_FILLER.sub(" ", cleaned)
         cleaned = " ".join(cleaned.replace(",", " ").split()).strip(" ,.:;—-")
+        # Removing the file carrier often leaves only its coordinator at one
+        # edge (``цены и сделай Excel`` -> ``цены и``).  That word is not a
+        # search subject.  Interior conjunctions remain intact: ``цены и курс``
+        # is meaningful.
+        cleaned = re.sub(
+            r"^(?:(?:а|и|затем|потом|теперь)\s+)+|"
+            r"\s+(?:(?:а|и|затем|потом|теперь)\s*)+$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
+        cleaned = re.sub(r"^(?:с|из)\s+(?=\S)", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"^(?:данн|информац|материал|результат)\w*\s+(?:о|об|про)\s+",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"\s+(?:данн|информац|материал|результат)\w*$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
         cleaned = re.sub(r"^(?:о|об|про|по\s+теме)\s+", "", cleaned, flags=re.IGNORECASE)
         cleaned = cleaned or " ".join(message.split())
         # Тот же потолок, что и у строки от арбитра, и по той же причине: это
@@ -25598,15 +25775,37 @@ _FILE_CONVERSION_TARGET = re.compile(
     rf"\b(?:в|как)\s+(?:(?:формат|файл)\w*\s+)?(?P<format>{_FILE_FORMAT_TOKEN})(?!\w)",
     re.IGNORECASE,
 )
-_FILE_SOURCE_FORMAT_CLAUSE = re.compile(
-    rf"\b(?:из|с|на\s+основе|по\s+данн\w*\s*(?:из|в)?|"
-    rf"по\s+материал\w*\s*(?:из|в)?|используя)\s+"
-    rf"(?:[\w.-]+\s+){{0,2}}?(?:"
-    rf"(?:таблиц|документ|файл|книг)\w*(?:[-\s]+{_FILE_FORMAT_TOKEN})?|"
-    rf"{_FILE_FORMAT_TOKEN}(?:[-\s]+(?:файл|документ|таблиц|книг)\w*)?|"
-    rf"[^\s,;]+\.(?:docx?|xlsx?|pdf|png)"
-    rf")",
+_FILE_CONTRAST_TARGET = re.compile(
+    rf"\bне\s+(?:в\s+)?{_FILE_FORMAT_TOKEN}\s*,?\s+"
+    rf"(?:а|но)\s+(?:в\s+)?(?P<format>{_FILE_FORMAT_TOKEN})(?!\w)",
     re.IGNORECASE,
+)
+_FILE_SOURCE_FORMAT_CLAUSES = (
+    # Explicit source introducers.  Consume through the source format itself,
+    # including a filename: leaving ``report.docx`` behind makes the input look
+    # like the requested output.
+    re.compile(
+        rf"\b(?:из|с|на\s+основе|на\s+базе|на\s+основании|"
+        rf"по\s+данн\w*(?:\s+(?:из|в))?|по\s+материал\w*(?:\s+(?:из|в))?|"
+        rf"используя|используй|возьми)\s+"
+        rf"(?:(?!\b(?:и|а|затем|потом)\b(?:\s+\w+){{0,3}}\s+"
+        rf"{_FILE_OUTPUT_ACTION}\b)[^,.!?;\n]){{0,80}}?"
+        rf"(?:{_FILE_FORMAT_TOKEN}(?:[-\s]+(?:файл|документ|таблиц|книг)\w*)?|"
+        rf"[^\s,;.!?]+\.(?:docx?|xlsx?|pdf|png))(?!\w)",
+        re.IGNORECASE,
+    ),
+    # ``по Word-файлу`` and ``по этому PDF`` are source complements;
+    # ``по продажам в Excel`` is not, so the format must follow ``по`` closely.
+    re.compile(
+        rf"\bпо\s+(?:(?:этому|данному|исходному)\s+)?"
+        rf"(?:{_FILE_FORMAT_TOKEN})(?:[-\s]+(?:файл|документ|таблиц|книг)\w*)?(?!\w)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:исходник|источник)\w*\s*(?:—|-|:|это)?\s*"
+        rf"(?:{_FILE_FORMAT_TOKEN})(?!\w)",
+        re.IGNORECASE,
+    ),
 )
 _FILE_EXPLICIT_TARGET_PATTERNS = (
     re.compile(
@@ -25626,6 +25825,7 @@ _FILE_EXPLICIT_TARGET_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+_FILE_STRONG_TARGET = _FILE_EXPLICIT_TARGET_PATTERNS[0]
 _GENERIC_TABLE_OUTPUT = re.compile(
     rf"(?:\b{_FILE_OUTPUT_ACTION}\b[^.!?\n]{{0,80}}?\bтаблиц\w*\b|"
     rf"\b(?:дай|нужн\w*)\b[^.!?\n]{{0,40}}?\bтаблиц\w*\b)",
@@ -25653,11 +25853,33 @@ def _file_kind_from_request(request: str) -> str:
     """
 
     lowered = " ".join(str(request or "").split()).casefold()
+    contrast = list(_FILE_CONTRAST_TARGET.finditer(lowered))
+    if contrast:
+        return _file_kind_from_format_token(contrast[-1].group("format"))
     conversion = list(_FILE_CONVERSION_TARGET.finditer(lowered))
     if conversion:
         return _file_kind_from_format_token(conversion[-1].group("format"))
 
-    output_text = _FILE_SOURCE_FORMAT_CLAUSE.sub(" ", lowered)
+    # Resolve a format attached to the nearest explicit output action before
+    # deleting source clauses.  This preserves a later instruction such as
+    # ``...и оформи её в Word`` even when an earlier ``из/на основе`` phrase
+    # begins the source description.  At the same time, a format that is
+    # itself inside ``из файла в формате Word`` remains an input and is not an
+    # output target.
+    source_spans = [
+        match.span() for pattern in _FILE_SOURCE_FORMAT_CLAUSES for match in pattern.finditer(lowered)
+    ]
+    strong_targets = [
+        match
+        for match in _FILE_STRONG_TARGET.finditer(lowered)
+        if not any(start <= match.start("format") < end for start, end in source_spans)
+    ]
+    if strong_targets:
+        return _file_kind_from_format_token(strong_targets[-1].group("format"))
+
+    output_text = lowered
+    for pattern in _FILE_SOURCE_FORMAT_CLAUSES:
+        output_text = pattern.sub(" ", output_text)
     candidates: list[tuple[int, str]] = []
     for pattern in _FILE_EXPLICIT_TARGET_PATTERNS:
         for match in pattern.finditer(output_text):
@@ -25839,6 +26061,35 @@ def _title_from_text(text: str) -> str:
     return ""
 
 
+def _markdown_table_row(line: str, *, allow_single: bool = False) -> list[str] | None:
+    """Parse one Markdown pipe row without mistaking ordinary prose for a table."""
+
+    visible = str(line or "").strip()
+    if "|" not in visible or visible.startswith("```"):
+        return None
+    if visible.startswith("|"):
+        visible = visible[1:]
+    if visible.endswith("|") and not visible.endswith(r"\|"):
+        visible = visible[:-1]
+    cells = re.split(r"(?<!\\)\|", visible)
+    if len(cells) < 2 and not allow_single:
+        return None
+    return [cell.replace(r"\|", "|").strip() for cell in cells]
+
+
+def _markdown_table_separator(row: list[str] | None) -> bool:
+    return bool(
+        row and len(row) >= 2 and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in row)
+    )
+
+
+def _tab_table_row(line: str) -> list[str] | None:
+    cells = str(line or "").rstrip("\r\n").split("\t")
+    if len(cells) < 2:
+        return None
+    return [_clean_markup(cell) for cell in cells]
+
+
 def _blocks_from_text(text: str) -> list[dict[str, Any]]:
     """Текст ответа — в блоки документа.
 
@@ -25856,8 +26107,55 @@ def _blocks_from_text(text: str) -> list[dict[str, Any]]:
             blocks.append({"kind": "bullets", "items": bullets})
             bullets = []
 
-    for raw_line in str(text or "").splitlines():
+    raw_lines = str(text or "").splitlines()
+    index = 0
+    while index < len(raw_lines):
+        raw_line = raw_lines[index]
+        header = _markdown_table_row(raw_line)
+        separator = _markdown_table_row(raw_lines[index + 1]) if index + 1 < len(raw_lines) else None
+        if (
+            header is not None
+            and _markdown_table_separator(separator)
+            and len(separator or ()) == len(header)
+        ):
+            flush()
+            header = [_clean_markup(cell) for cell in header]
+            rows = [header]
+            index += 2
+            while index < len(raw_lines):
+                row = _markdown_table_row(raw_lines[index], allow_single=True)
+                if row is None or _markdown_table_separator(row):
+                    break
+                row = [_clean_markup(cell) for cell in row]
+                columns = max(len(header), len(row))
+                if len(header) < columns:
+                    header.extend([""] * (columns - len(header)))
+                    for previous in rows[1:]:
+                        previous.extend([""] * (columns - len(previous)))
+                rows.append(row + [""] * (columns - len(row)))
+                index += 1
+            blocks.append({"kind": "table", "rows": rows})
+            continue
+
+        tab_header = _tab_table_row(raw_line)
+        tab_second = _tab_table_row(raw_lines[index + 1]) if index + 1 < len(raw_lines) else None
+        if tab_header is not None and tab_second is not None:
+            flush()
+            rows = [tab_header, tab_second]
+            index += 2
+            while index < len(raw_lines):
+                row = _tab_table_row(raw_lines[index])
+                if row is None:
+                    break
+                rows.append(row)
+                index += 1
+            columns = max(len(row) for row in rows)
+            rows = [row + [""] * (columns - len(row)) for row in rows]
+            blocks.append({"kind": "table", "rows": rows})
+            continue
+
         line = _clean_markup(raw_line)
+        index += 1
         if not line:
             flush()
             continue

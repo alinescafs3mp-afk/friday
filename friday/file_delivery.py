@@ -109,6 +109,62 @@ def read_authorized_file_in_transaction(
     if row is None:
         raise FileRecordUnavailable
 
+    return _read_authorized_row(row, root, max_bytes=max_bytes)
+
+
+def read_authorized_generated_file(
+    storage: Any,
+    root: Path,
+    raw_id: str,
+    tenant_id: str,
+    person_id: str,
+    *,
+    max_bytes: int | None = None,
+) -> AuthorizedFileBytes:
+    """Read one generated output owned by the exact authenticated person.
+
+    A shared archive intentionally gives several people the same ``tenant_id``.
+    Generated outputs belong to the conversation participant, so tenant scope by
+    itself is insufficient here; both durable ownership markers must match.
+    """
+
+    with storage.transaction() as conn:
+        row = conn.execute(
+            f"""SELECT r.id, r.user_id, r.source_ref, r.metadata_json, r.content_hash
+                  FROM raw_objects r
+                 WHERE r.id=? AND r.user_id=? AND r.content_type='generated_file'
+                   AND r.deleted_at IS NULL
+                   AND json_valid(r.metadata_json)
+                   AND json_extract(r.metadata_json, '$.generated_artifact')=1
+                   AND json_extract(r.metadata_json, '$.generated_for')=?
+                   AND json_extract(r.metadata_json, '$.generated_tenant')=?
+                   AND {_not_private_raw_dependency("r")}""",  # nosec B608 - fixed SQL fragments
+            (str(raw_id), str(person_id), str(person_id), str(tenant_id)),
+        ).fetchone()
+        if row is None:
+            raise FileRecordUnavailable
+        metadata = _metadata_object(row["metadata_json"])
+        expected_digest = str(metadata.get("sha256") or "")
+        if not expected_digest or not hmac.compare_digest(str(row["content_hash"] or ""), expected_digest):
+            raise FileRecordUnavailable
+        stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+        expected_size = metadata.get("size_bytes")
+        if (
+            isinstance(expected_size, bool)
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+            or len(stored.content) != expected_size
+        ):
+            raise AuthorizedFileReadError(stored.filename, "файл не прошёл проверку размера")
+        return stored
+
+
+def _read_authorized_row(
+    row: Any,
+    root: Path,
+    *,
+    max_bytes: int | None,
+) -> AuthorizedFileBytes:
     metadata = _metadata_object(row["metadata_json"])
     filename = _safe_filename(metadata.get("filename") or row["source_ref"] or "download")
     stored_path = metadata.get("stored_path")
@@ -232,4 +288,5 @@ __all__ = [
     "attachment_content_disposition",
     "read_authorized_file",
     "read_authorized_file_in_transaction",
+    "read_authorized_generated_file",
 ]

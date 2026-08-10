@@ -1027,6 +1027,45 @@ async def test_a_failed_voice_delivery_does_not_break_the_turn(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_generated_file_delivery_keeps_exact_multipart_bytes_and_checkpoints(tmp_path):
+    """A cached Telegram update resumes after sendDocument without duplicating it."""
+
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    file_bytes = b"PK\x03\x04xlsx\x00with-exact-binary-bytes"
+    mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    response = {
+        "message": "Таблица готова.",
+        "files": [
+            {
+                "id": "raw_0123456789abcdef",
+                "kind": "document",
+                "filename": "Люди.xlsx",
+                "mime_type": mime_type,
+                "content_base64": base64.b64encode(file_bytes).decode("ascii"),
+            }
+        ],
+    }
+    try:
+        await bridge._deliver_generated_files(telegram, 5001, response)
+        document_calls = [payload for url, payload in telegram.calls if url.endswith("/sendDocument")]
+        assert len(document_calls) == 1
+        assert document_calls[0]["data"] == {"chat_id": "5001", "caption": ""}
+        filename, delivered, delivered_mime = document_calls[0]["files"]["document"]
+        assert filename == "Люди.xlsx"
+        assert delivered == file_bytes
+        assert delivered_mime == mime_type
+
+        # This is the cached-response road after a process restart.
+        bridge._inbox.close()
+        bridge = _media_bridge(tmp_path)
+        await bridge._deliver_generated_files(telegram, 5001, response)
+        assert len([url for url, _ in telegram.calls if url.endswith("/sendDocument")]) == 1
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_search_command_lists_knowledge_without_llm(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()

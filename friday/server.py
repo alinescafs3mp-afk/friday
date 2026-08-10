@@ -68,6 +68,7 @@ from friday.execution_kernel import ExecutionKernel
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
+from friday.generated_files import persist_generated_response_files
 from friday.http_errors import relation_history_http_detail
 from friday.ingestion import (
     IdempotencyConflictError,
@@ -118,6 +119,22 @@ _REALM_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 # a trace id, plain enough that it cannot smuggle a header or a log line.
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _SERVER_REQUEST_ID_RE = re.compile(r"[0-9a-f]{24}")
+
+
+def _public_chat_for_actor(
+    result: dict[str, Any],
+    *,
+    storage: Any,
+    actor: ActorContext,
+) -> dict[str, Any]:
+    """Project a chat result through the exact authenticated person boundary."""
+
+    return public_chat_ingestion(
+        result,
+        storage=storage,
+        resource_user_id=actor.user_id,
+        resource_owner_id=actor.own_id,
+    )
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -1674,7 +1691,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         if claim["status"] == "replay":
             cached = claim.get("response") or {}
-            return {**cached, "idempotent_replay": True}
+            return _public_chat_for_actor(
+                {**cached, "idempotent_replay": True},
+                storage=state.storage,
+                actor=actor,
+            )
         if claim["status"] == "conflict":
             raise HTTPException(
                 status_code=409,
@@ -1709,6 +1730,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # or newer private file merely because the words match.
                 replay_source_message_id=str(last_user.get("id") or ""),
             )
+            result = await asyncio.to_thread(
+                persist_generated_response_files,
+                state.storage,
+                state.settings.files_dir,
+                result,
+                tenant_id=actor.user_id,
+                person_id=actor.own_id,
+                max_bytes=state.settings.max_upload_bytes,
+            )
             if had_attachments and not bool(result.get("attachment_context_available")):
                 # Legacy/transient-вложения физически негде взять. Persisted
                 # файл, напротив, AgentRuntime уже восстановил внутри личного
@@ -1731,9 +1761,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     result["conversation_id"],
                     mode=str(result.get("context", {}).get("interaction_mode") or "dialogue"),
                 )
-            if not state.storage.idempotency_complete(actor.own_id, request_key, lease_token, result):
+            public_result = _public_chat_for_actor(
+                result,
+                storage=state.storage,
+                actor=actor,
+            )
+            if not state.storage.idempotency_complete(actor.own_id, request_key, lease_token, public_result):
                 raise RuntimeError("Lost regenerate idempotency lease before response commit")
-            return result
+            return public_result
         except BaseException:
             if lease_token:
                 state.storage.idempotency_release(actor.own_id, request_key, lease_token)
@@ -2089,11 +2124,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             if claim["status"] == "replay":
                 cached = claim.get("response") or {}
-                return public_chat_ingestion(
+                return _public_chat_for_actor(
                     {**cached, "idempotent_replay": True},
                     storage=state.storage,
-                    resource_user_id=actor.user_id,
-                    resource_owner_id=actor.own_id,
+                    actor=actor,
                 )
             if claim["status"] == "conflict":
                 raise HTTPException(
@@ -2421,6 +2455,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # архив как слова человека, и в классификатор, решающий про граф.
                 reply_to=str(body.get("reply_to") or "").strip() or None,
             )
+            # ``make_file`` keeps inline base64 for existing clients, but the
+            # durable authority is an exact-byte, person-owned artifact.  Freeze
+            # it before the HTTP/idempotency response is published so refreshes
+            # can recover the link from assistant-message history.
+            result = await asyncio.to_thread(
+                persist_generated_response_files,
+                state.storage,
+                state.settings.files_dir,
+                result,
+                tenant_id=actor.user_id,
+                person_id=actor.own_id,
+                max_bytes=state.settings.max_upload_bytes,
+            )
             if voice_transcript_truncated:
                 notice = (
                     "⚠️ Длинное голосовое распознано не полностью: в текущий ответ вошло "
@@ -2454,11 +2501,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             result["ingestion"] = ingestion_result
             if file_ingestion:
                 result["file_ingestion"] = file_ingestion
-            public_result = public_chat_ingestion(
+            public_result = _public_chat_for_actor(
                 result,
                 storage=state.storage,
-                resource_user_id=actor.user_id,
-                resource_owner_id=actor.own_id,
+                actor=actor,
             )
             if source_ref and not state.storage.idempotency_complete(
                 actor.own_id, source_ref, lease_token, public_result

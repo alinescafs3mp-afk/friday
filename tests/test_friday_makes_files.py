@@ -64,6 +64,49 @@ def test_the_excel_file_opens_and_keeps_the_table():
     assert any("Бутко" in value for value in values)
 
 
+def test_a_large_excel_table_is_complete_filterable_and_visually_structured():
+    """A 300-row source remains real cells, including a late requested row."""
+
+    import openpyxl
+
+    rows = [["Позиция", "Фамилия", "Примечание"]]
+    rows.extend(
+        [str(position), f"Человек {position}", f"Проверяемая строка {position}: " + ("подробности " * 8)]
+        for position in range(1, 301)
+    )
+    spec = spec_from_payload("Реестр", "", [{"kind": "table", "rows": rows}])
+
+    book = openpyxl.load_workbook(io.BytesIO(render("xlsx", spec)))
+    sheet = book.active
+    header_row = next(cell.row for cell in sheet["A"] if cell.value == "Позиция")
+    last_row = header_row + 300
+
+    assert sheet.cell(header_row + 288, 1).value == "288"
+    assert sheet.cell(header_row + 288, 2).value == "Человек 288"
+    assert sheet.freeze_panes == f"A{header_row + 1}"
+    assert sheet.auto_filter.ref == f"A{header_row}:C{last_row}"
+
+    header = sheet.cell(header_row, 1)
+    assert header.font.bold is True
+    assert header.fill.fill_type == "solid"
+    assert header.fill.fgColor.rgb.endswith("1F4E78")
+    assert header.alignment.horizontal == "center"
+    assert header.alignment.wrap_text is True
+
+    for row in sheet.iter_rows(min_row=header_row, max_row=last_row, min_col=1, max_col=3):
+        for cell in row:
+            assert {
+                cell.border.left.style,
+                cell.border.right.style,
+                cell.border.top.style,
+                cell.border.bottom.style,
+            } == {"thin"}
+            assert cell.alignment.wrap_text is True
+            assert cell.alignment.vertical == "top" or cell.row == header_row
+    for column in ("A", "B", "C"):
+        assert 12 <= sheet.column_dimensions[column].width <= 48
+
+
 def test_excel_report_payload_is_always_literal_data():
     """Model/data strings must never turn into executable workbook formulas."""
 
@@ -92,6 +135,25 @@ def test_excel_report_payload_is_always_literal_data():
     assert set(dangerous).issubset({str(cell.value).removeprefix("• ") for cell in cells})
 
 
+def test_the_word_table_has_a_repeating_shaded_header():
+    import docx
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+
+    document = docx.Document(io.BytesIO(render("docx", _spec())))
+    table = document.tables[0]
+    header = table.rows[0]
+
+    assert header._tr.xpath("./w:trPr/w:tblHeader")
+    for cell in header.cells:
+        shading = cell._tc.xpath("./w:tcPr/w:shd")
+        assert shading and shading[0].get(qn("w:fill")) == "D9EAF7"
+        assert cell.vertical_alignment == WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        assert cell.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
+        assert all(run.bold for run in cell.paragraphs[0].runs)
+
+
 def test_the_pdf_keeps_cyrillic_readable():
     """Мутация: убрать регистрацию DejaVu (вернуть Helvetica) — тест краснеет.
 
@@ -106,6 +168,23 @@ def test_the_pdf_keeps_cyrillic_readable():
     assert "Отчёт по документам" in text
     assert "Основные выводы" in text
     assert "Штатное расписание обновлено 30 июля" in text
+
+
+def test_a_wide_multipage_pdf_table_fits_landscape_and_repeats_its_header():
+    import pypdf
+
+    header = [f"Колонка {column}" for column in range(1, 9)]
+    rows = [header]
+    rows.extend([f"Строка {position}, поле {column}" for column in range(1, 9)] for position in range(1, 121))
+    spec = spec_from_payload("Большой реестр", "", [{"kind": "table", "rows": rows}])
+
+    reader = pypdf.PdfReader(io.BytesIO(render("pdf", spec)))
+    assert len(reader.pages) > 1
+    assert float(reader.pages[0].mediabox.width) > float(reader.pages[0].mediabox.height)
+    for page in reader.pages:
+        text = " ".join((page.extract_text() or "").split())
+        assert "Колонка 1" in text
+        assert "Колонка 8" in text
 
 
 def test_the_picture_is_a_real_image_with_room_for_the_text():
@@ -452,10 +531,11 @@ def test_a_ragged_table_does_not_break_any_format():
         assert payload, f"{kind}: пустой файл"
 
 
-def test_an_empty_table_is_skipped_not_crashed():
+@pytest.mark.parametrize("rows", [[], [[]]])
+def test_an_empty_table_is_skipped_not_crashed(rows):
     from friday import reports
 
-    spec = reports.ReportSpec(title="Пусто", blocks=[reports.Block("table", rows=[])])
+    spec = reports.ReportSpec(title="Пусто", blocks=[reports.Block("table", rows=rows)])
     for kind in sorted(reports.SUPPORTED_KINDS):
         assert reports.render(kind, spec)
 

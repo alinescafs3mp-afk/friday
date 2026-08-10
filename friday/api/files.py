@@ -20,6 +20,7 @@ from friday.file_delivery import (
     FileRecordUnavailable,
     attachment_content_disposition,
     read_authorized_file,
+    read_authorized_generated_file,
 )
 from friday.storage._privacy import _not_private_raw_dependency
 
@@ -94,13 +95,24 @@ async def download_file(raw_id: str, request: Request):
     actor = _require(request, "files.read")
     state = request.app.state
     try:
-        stored = await run_in_threadpool(
-            read_authorized_file,
-            state.storage,
-            state.settings.files_dir,
-            raw_id,
-            actor.user_id,
-        )
+        try:
+            stored = await run_in_threadpool(
+                read_authorized_generated_file,
+                state.storage,
+                state.settings.files_dir,
+                raw_id,
+                actor.user_id,
+                actor.own_id,
+                max_bytes=state.settings.max_upload_bytes,
+            )
+        except FileRecordUnavailable:
+            stored = await run_in_threadpool(
+                read_authorized_file,
+                state.storage,
+                state.settings.files_dir,
+                raw_id,
+                actor.user_id,
+            )
     except (FileRecordUnavailable, AuthorizedFileReadError):
         raise HTTPException(status_code=404, detail="Файл не найден") from None
     # File bytes leaving the system are always audited.

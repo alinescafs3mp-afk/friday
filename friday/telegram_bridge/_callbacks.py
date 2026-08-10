@@ -7,6 +7,8 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import binascii
+import hashlib
 import ipaddress
 import re
 import unicodedata
@@ -1321,9 +1323,9 @@ class CallbacksMixin(BridgeShared):
         уходит документом, а не голосом и не текстом: у `sendDocument` есть имя и
         расширение, по которым человек его откроет.
 
-        Как и голос — по возможности: сбой доставки не должен превращать удачный
-        текстовый ответ в ошибку. Но, в отличие от голоса, о неудаче говорится
-        человеку: он ПРОСИЛ файл и молчания не поймёт.
+        Доставка возобновляемая: успешный sendDocument сразу получает локальный
+        checkpoint, а transient-сбой оставляет update в очереди. Повтор поэтому
+        досылает этот файл, не дублируя уже доставленные документы.
         """
         files = response.get("files")
         if not isinstance(files, list):
@@ -1336,10 +1338,24 @@ class CallbacksMixin(BridgeShared):
                 continue
             try:
                 payload = base64.b64decode(encoded, validate=True)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, binascii.Error):
                 LOGGER.warning("make_file: вложение не разобралось")
                 continue
             filename = str(item.get("filename") or "report.bin")
+            artifact_id = str(item.get("id") or "").strip()
+            if not artifact_id:
+                artifact_id = hashlib.sha256(
+                    payload
+                    + b"\0"
+                    + filename.encode("utf-8", errors="replace")
+                    + b"\0"
+                    + str(item.get("mime_type") or "").encode("ascii", errors="replace")
+                ).hexdigest()
+            delivery_key = hashlib.sha256(
+                f"{int(chat_id)}:{artifact_id}".encode("utf-8", errors="strict")
+            ).hexdigest()
+            if self._inbox.generated_file_was_delivered(delivery_key):
+                continue
             try:
                 await self._send_document(
                     telegram,
@@ -1350,12 +1366,12 @@ class CallbacksMixin(BridgeShared):
                 )
             except Exception as exc:
                 LOGGER.warning("make_file: sendDocument не удался (%s)", type(exc).__name__)
-                with suppress(Exception):
-                    await self._send_message(
-                        telegram,
-                        chat_id,
-                        f"Файл «{filename}» собран, но отправить его не удалось. Попробуйте попросить ещё раз.",
-                    )
+                # Leave the durable update pending. The text reply has its own
+                # chunk checkpoint and successful files are checkpointed below,
+                # so retry resumes at this exact document instead of asking the
+                # model to rebuild it or duplicating earlier documents.
+                raise
+            self._inbox.remember_generated_file_delivery(delivery_key)
 
     async def _answer_callback(
         self,
