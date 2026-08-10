@@ -5479,74 +5479,68 @@ _FALSE_CURRENT_MODEL_OUTAGE = re.compile(
 )
 # A parsed current attachment is a measured runtime fact.  A successful model
 # answer has no authority to deny that the bytes/text were supplied or to ask
-# for the same complete file again.  Keep the detector on the leading answer
-# assertion and on whole-file access claims; difficulty reading one field or a
-# genuinely incomplete parse is a different, truthful outcome.
+# for the same complete file again.  The detector below is multi-signal rather
+# than a single brittle phrase list: live models rephrase whole-file refusals
+# freely, while field-level uncertainty stays a truthful outcome.
+_FALSE_READABLE_FILE_NOUN = re.compile(
+    r"\b(?:pdf(?:-?файл\w*)?|файл\w*|документ\w*|вложен\w*|скан\w*|приложен\w*|image|jpeg|jpg|png)\b",
+    re.IGNORECASE,
+)
+_FALSE_READABLE_REUPLOAD = re.compile(
+    r"(?:"
+    r"(?:пришлите|загрузите|отправьте|прикрепите|перешлите)\s+"
+    r"(?:(?:пожалуйста|её|его|их|это|этот|ваш|свою?|свою|pdf(?:-?файл\w*)?|"
+    r"файл\w*|документ\w*|вложен\w*|скан\w*)\s+){0,4}"
+    r"(?:снова|заново|повторно|ещ[её]\s+раз|целиком|полностью)\b|"
+    r"(?:повторите|сделайте\s+повторн\w*)\s+загрузк\w*\b|"
+    r"\bзагруз\w*\s+(?:файл\w*|документ\w*|pdf|скан\w*|вложен\w*)\s+"
+    r"(?:снова|заново|повторно|ещ[её]\s+раз)\b|"
+    r"\bпопробуйте\s+загрузить\b"
+    r")",
+    re.IGNORECASE,
+)
+_FALSE_READABLE_ACCESS_DENIAL = re.compile(
+    r"(?:"
+    r"(?:не\s+(?:могу|умею|способ(?:ен|на)|получается|уда[её]тся)|"
+    r"не\s+удалось|не\s+получилось|нет\s+возможности)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:открыть|прочитать|просмотреть|увидеть|разобрать|распознать|"
+    r"извлечь|получить\s+доступ)\b|"
+    r"(?:открыть|прочитать|просмотреть|увидеть|разобрать|распознать|"
+    r"извлечь)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:не\s+(?:могу|умею|способ(?:ен|на)|получается|уда[её]тся)|"
+    r"не\s+удалось|не\s+получилось)\b|"
+    r"(?:не\s+(?:вижу|виден\w*|доступ\w*|отобража\w*|открыва\w*|чита\w*|"
+    r"передан\w*|получен\w*)|"
+    r"недоступ\w*)\b|"
+    r"(?:нет|отсутствует)\s+доступа\b|"
+    r"(?:содержим\w+|текст\w*|данн\w*)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:недоступ\w*|не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
+    r"не\s+чита\w*|не\s+получен\w*)\b|"
+    r"(?:pdf(?:-?файл\w*)?|файл\w*|документ\w*|вложен\w*|скан\w*)\s+"
+    r"(?:[^.!?\n]{0,40}\s+)?"
+    r"(?:недоступ\w*|не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
+    r"не\s+чита\w*|не\s+откры\w*|не\s+передан\w*|не\s+получен\w*)\b"
+    r")",
+    re.IGNORECASE,
+)
+_FALSE_READABLE_FIELD_LEVEL_ONLY = re.compile(
+    r"(?:"
+    r"\b(?:одн\w*\s+)?(?:цифр\w*|символ\w*|букв\w*|знак\w*)\b|"
+    r"\b(?:строк\w*|граф\w*|ячейк\w*|пол[ея]\w*|позици\w*)\b|"
+    r"\bне\s+(?:могу|удалось|получается)\s+"
+    r"(?:разобрать|разглядеть|прочитать|распознать)\s+"
+    r"(?:одн\w+|эт\w+|данн\w+|конкретн\w+)\b|"
+    r"\bнечётк\w*\b|\bразмыт\w*\b|\bплохо\s+видн\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+# Kept as a thin compatibility surface for tests that still import the name.
+# Prefer `_is_false_readable_attachment_refusal` at every production boundary.
 _FALSE_READABLE_ATTACHMENT_REFUSAL = re.compile(
-    r"\A\s*(?:⚠️?\s*)?(?:(?:(?:к\s+сожалению|увы)\s*[,;:—-]?|"
-    r"(?:извините|простите)\s*[,;:—-]?\s*(?:но\s+)?)\s*)?(?:"
-    r"(?:я\s+)?не\s+(?:могу|умею|способ(?:ен|на))\s+"
-    r"(?:(?:напрямую|самостоятельно|здесь|в\s+этом\s+чате)\s+)?"
-    r"(?:открыть|прочитать|просмотреть|увидеть|"
-    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?|"
-    r"получить\s+доступ\s+к)"
-    r"(?:\s+(?:или|и)\s+(?:открыть|прочитать|просмотреть|увидеть))?\s+"
-    r"(?:(?:содержим\w+|текст\w*|данн\w+)\s+)?"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:я\s+)?не\s+(?:вижу|получил(?:а)?|имею\s+доступ\s+к)\s+"
-    r"(?:(?:содержим\w+|текст\w*|данн\w+)\s+)?"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:у\s+меня|здесь)\s+нет\s+доступа\s+к\s+"
-    r"(?:(?:этому|вашему|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файлу)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:у\s+меня\s+нет|я\s+не\s+имею)\s+возможности\s+"
-    r"(?:открыть|прочитать|просмотреть|увидеть)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:не\s+удалось|не\s+получилось)\s+"
-    r"(?:открыть|прочитать|просмотреть|увидеть|"
-    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:мне\s+)?(?:не\s+доступ\w*|не\s+отобража\w*|не\s+передан\w*|"
-    r"не\s+получен\w*|не\s+откр\w*|не\s+чита\w*|не\s+виден\w*)\b|"
-    r"(?:мне\s+)?(?:недоступен|не\s+(?:доступен|виден|отображается|"
-    r"открывается|читается))\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
-    r"(?:содержим\w+|текст\w*|данн\w+)\s+"
-    r"(?:(?:этого|вашего|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файла)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:мне\s+)?(?:не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
-    r"не\s+получен\w*|не\s+чита\w*)\b|"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?|имею)\s*[,;:—-]?\s*"
-    r"(?:(?:но|однако)\s+)?"
-    r"(?:открыть|прочитать|просмотреть|увидеть|"
-    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:я\s+)?не\s+(?:могу|умею|способ(?:ен|на))\b|"
-    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?|имею)\s+"
-    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b[^.!?\n]{0,40}\b(?:"
-    r"не\s+(?:могу|умею|способ(?:ен|на))\s+"
-    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
-    r"(?:его|их|это|содержим\w*)|"
-    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
-    r"(?:его|их|это|содержим\w*)\s+(?:я\s+)?"
-    r"не\s+(?:могу|умею|способ(?:ен|на))\b)|"
-    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
-    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?)\b\s*(?:[.!?]\s*)?"
-    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
-    r"(?:его|их|это|содержим\w*)\s+(?:я\s+)?"
-    r"не\s+(?:могу|умею|способ(?:ен|на))\b|"
-    r"(?:пришлите|загрузите|отправьте|прикрепите)\s+"
-    r"(?:(?:этот|ваш|его|pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+){0,3}"
-    r"(?:снова|заново|повторно|ещ[её]\s+раз|целиком|полностью)\b)",
+    r"(?:" + _FALSE_READABLE_ACCESS_DENIAL.pattern + r"|" + _FALSE_READABLE_REUPLOAD.pattern + r")",
     re.IGNORECASE,
 )
 _ASKS_ABOUT_MODEL_OUTAGE = re.compile(
@@ -5569,6 +5563,53 @@ _UNREADABLE_ATTACHMENT_ANSWER = (
 
 def _refusal_classification_text(answer: str) -> str:
     return " ".join(_leading_model_assertion(str(answer or "")).split())
+
+
+def _is_false_readable_attachment_refusal(answer: str) -> bool:
+    """Whether a model answer falsely denies access to an already-parsed file.
+
+    Source truth belongs to the parser: when coverage is complete and readable
+    evidence exists, the model may struggle with a field, but it may not claim
+    the whole file is missing or demand a reupload.  Detection is multi-signal
+    (file noun + access denial, or any reupload request for the file) so natural
+    paraphrases cannot walk around a single brittle phrase list.
+    """
+
+    text = _refusal_classification_text(answer)
+    if not text:
+        return False
+    # Pure field-level uncertainty is truthful and must not become a whole-file
+    # recovery loop.  A reupload demand still overrides this carve-out.
+    field_level = bool(
+        re.search(
+            r"(?:"
+            r"\bне\s+(?:могу|удалось|получается)\s+"
+            r"(?:разобрать|разглядеть|прочитать|распознать)\s+"
+            r"(?:одн\w+\s+)?(?:цифр\w*|символ\w*|букв\w*|знак\w*|пол[ея]\w*|строк\w*)\b|"
+            r"\b(?:одн\w+\s+)?(?:цифр\w*|символ\w*)\s+в\s+строк\w*\b|"
+            r"\bнечётк\w*\s+(?:цифр\w*|пол[ея]\w*|строк\w*)\b"
+            r")",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    asks_reupload = bool(_FALSE_READABLE_REUPLOAD.search(text))
+    denies_access = bool(_FALSE_READABLE_ACCESS_DENIAL.search(text))
+    mentions_file = bool(_FALSE_READABLE_FILE_NOUN.search(text))
+    deictic_file = bool(re.search(r"\b(?:его|её|их|это|этот|ваш)\b", text, re.IGNORECASE))
+    if (
+        field_level
+        and not asks_reupload
+        and not re.search(
+            r"\b(?:весь|целиком|полностью)\b",
+            text,
+            re.IGNORECASE,
+        )
+    ):
+        return False
+    if asks_reupload and (mentions_file or denies_access or deictic_file):
+        return True
+    return bool(denies_access and (mentions_file or deictic_file))
 
 
 def _capability_refusal_match(answer: str) -> re.Match[str] | None:
@@ -8290,9 +8331,19 @@ def _attachment_has_verifiable_content(item: Mapping[str, Any]) -> bool:
     a separately verified visual-source contract exists.  Other explicitly
     ineligible text is withheld by the same positive gate: a synthesis model
     cannot bootstrap evidence which the extractor refused to authenticate.
+
+    Missing ``verification_eligible`` must not resurrect a failed extraction:
+    default-True only applies when the extractor did not mark the file closed
+    as unreadable.
     """
 
-    return bool(item.get("verification_eligible", True) is not False and not item.get("advisory_only"))
+    if item.get("advisory_only") is True:
+        return False
+    if item.get("verification_eligible") is False:
+        return False
+    if item.get("extraction_success") is False:
+        return False
+    return item.get("verification_eligible", True) is not False
 
 
 def _attachment_needs_full_source_prepass(
@@ -14776,7 +14827,10 @@ class AgentRuntime:
             and not empty_attachment_answer
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
-            and not attachment_query_closed_answer
+            # Prefer the explicit "will not guess" contract over a generic
+            # query-scan UNKNOWN when every selected file has zero readable
+            # evidence.  Query-closed answers do not forbid fabrication as
+            # clearly, and live scans previously escaped through that branch.
         )
         partially_unreadable_attachment_answer = bool(
             attachment_expected_count > 1
@@ -14785,7 +14839,9 @@ class AgentRuntime:
             and 0 < attachment_readable_count < attachment_expected_count
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
-            and not attachment_query_closed_answer
+            # Same priority as the fully-unreadable branch: partial sets must
+            # not fall through to a weaker query-closed path that still invites
+            # model synthesis about the unread siblings.
         )
         foreign_private_request = _requests_foreign_private_data(clean_message)
         dangerous_instruction_request = bool(
@@ -15799,7 +15855,7 @@ class AgentRuntime:
             and not response.get("llm_failed")
             and attachment_coverage_complete
             and attachment_readable_count > 0
-            and _FALSE_READABLE_ATTACHMENT_REFUSAL.search(_refusal_classification_text(content))
+            and _is_false_readable_attachment_refusal(content)
         )
         if readable_attachment_refusal:
             # The parser, not the answering model, owns file availability.  Give
@@ -15829,9 +15885,7 @@ class AgentRuntime:
                 retried.get("_model_generated") is True
                 and not retried.get("llm_failed")
                 and retried_content
-                and not _FALSE_READABLE_ATTACHMENT_REFUSAL.search(
-                    _refusal_classification_text(retried_content)
-                )
+                and not _is_false_readable_attachment_refusal(retried_content)
             )
             if retry_accepted:
                 content = retried_content
@@ -17031,7 +17085,7 @@ class AgentRuntime:
             and not response.get("llm_failed")
             and attachment_coverage_complete
             and attachment_readable_count > 0
-            and _FALSE_READABLE_ATTACHMENT_REFUSAL.search(_refusal_classification_text(str(model_said or "")))
+            and _is_false_readable_attachment_refusal(str(model_said or ""))
         )
         if late_false_readable_attachment_refusal:
             false_readable_attachment_refusal_replaced = True
