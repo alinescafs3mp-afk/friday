@@ -31,6 +31,7 @@ from friday.agent_runtime import (
     _OwnedAttachment,
     _project_attachments_for_request,
     _reconcile_attachment_web_literals,
+    _valid_person_document_inventory_data,
     asks_for_the_web,
 )
 from friday.agent_runtime._office_attachments import (
@@ -101,9 +102,16 @@ class _NeverModel:
 class _InventoryKernel:
     authorization = _AllowAll()
 
-    def __init__(self, *, available: bool = True, malformed: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        malformed: bool = False,
+        person_name: str = "JBL",
+    ) -> None:
         self.available = available
         self.malformed = malformed
+        self.person_name = person_name
         self.calls: list[dict[str, Any]] = []
 
     def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
@@ -119,7 +127,7 @@ class _InventoryKernel:
                 tool,
                 True,
                 {
-                    "человек": "JBL",
+                    "человек": self.person_name,
                     "период": {"с": params["since"], "по": params["until"]},
                     "документов с подтверждённым автором": 0,
                     "документов без отметки автора": 0,
@@ -131,7 +139,7 @@ class _InventoryKernel:
             tool,
             True,
             {
-                "человек": "JBL",
+                "человек": self.person_name,
                 "период": {"с": params["since"], "по": params["until"]},
                 "документов с подтверждённым автором": 2,
                 "документов без отметки автора": 0,
@@ -189,6 +197,83 @@ async def test_named_day_inventory_and_its_completeness_followup_are_code_owned(
     stored = storage.get_message(str(second["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     assert metadata["structural"]["person_document_inventory"] is True
+
+
+@pytest.mark.asyncio
+async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_schema(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user("alice", preset_key="user", display_name="Алиса")
+    kernel = _InventoryKernel(available=False, person_name="Алиса")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    actor = ActorContext(user_id="alice", preset_key="user", source="test")
+
+    first = await runtime.chat(
+        "alice",
+        "Какие я тебе документы скидывал?",
+        actor=actor,
+    )
+    repeated = await runtime.chat(
+        "alice",
+        "И всё?",
+        actor=actor,
+        conversation_id=first["conversation_id"],
+    )
+
+    assert len(kernel.calls) == 2
+    assert all(
+        call
+        == {
+            "person": "alice",
+            "since": None,
+            "until": None,
+            "limit": 200,
+            "offset": 0,
+            "documents_only": True,
+        }
+        for call in kernel.calls
+    )
+    for reply in (first, repeated):
+        assert "участник не определён" not in reply["message"].casefold()
+        assert "за всё время" in reply["message"].casefold()
+        assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
+        assert reply["tools_used"] == ["user_activity"]
+    assert "Проверила выборку повторно" in repeated["message"]
+
+    for temporal_request in (
+        "Какие документы я скидывал в июле?",
+        "Какие документы я скидывал в 2025?",
+        "Какие документы я скидывал в первом квартале?",
+    ):
+        scoped = await runtime.chat("alice", temporal_request, actor=actor)
+        assert len(kernel.calls) == 2, f"{temporal_request!r} was silently widened to all time"
+        assert "неизвест" in scoped["message"].casefold()
+
+
+def test_all_time_inventory_requires_explicit_period_keys() -> None:
+    assert not _valid_person_document_inventory_data(
+        {
+            "период": {},
+            "документов с подтверждённым автором": 0,
+            "документов без отметки автора": 0,
+            "документы": [],
+            "пагинация": {
+                "смещение": 0,
+                "показано": 0,
+                "из подтверждённых": 0,
+                "подтверждённый перечень показан полностью": True,
+                "следующее смещение": None,
+            },
+        },
+        expected_since=None,
+        expected_until=None,
+    )
 
 
 @pytest.mark.asyncio
@@ -525,7 +610,11 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
         synthetic_document_notice=True,
     )
 
-    assert reply["message"] == draft
+    if incomplete:
+        assert reply["message"].endswith(draft)
+        assert "Не весь исходный материал" in reply["message"]
+    else:
+        assert reply["message"] == draft
     assert reply["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
     assert "пришлите" not in reply["message"].casefold()
     assert reply["attachment_context_readable_count"] == 1

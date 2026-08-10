@@ -2589,8 +2589,15 @@ class ExecutionKernel:
                 },
             )
             return ToolResult(name, False, error="Tool is unavailable in this execution scope")
+        self_document_inventory = bool(
+            name == "user_activity"
+            and arguments.get("documents_only") is True
+            and str(arguments.get("person") or "") == actor.own_id
+            and not arguments.get("analysis")
+        )
+        effective_security_id = "files.read" if self_document_inventory else tool.security_id
         try:
-            self.authorization.require(actor, tool.security_id)
+            self.authorization.require(actor, effective_security_id)
         except AuthorizationError:
             await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error="Authorization denied")
@@ -2610,7 +2617,7 @@ class ExecutionKernel:
         # инструмент — независимо от класса риска самого инструмента. Это и есть
         # смысл пометки: право говорит «этому актору можно», а пометка — «но не
         # молча». Раньше поле не читал никто, и объявление его роняло старт.
-        if self._capability_requires_person(tool.security_id):
+        if self._capability_requires_person(effective_security_id):
             return await self._request_approval(actor, name, arguments or {}, details)
         needs_person = HIGH_RISK_TOOLS.get(name)
         if tool.risk == "high" and needs_person is None:
@@ -5642,11 +5649,13 @@ class ExecutionKernel:
         distinction is easiest to lose.
         """
         storage, _, _, _ = self._require_services()
-        include_content = bool(
-            self.authorization and self.authorization.authorize(actor, "admin.all_data.read").allowed
-        )
         matches = resolve_person(storage.list_users(limit=5000), person)
-        chosen = unambiguous(matches)
+        self_document_request = bool(documents_only and person == actor.own_id and not analysis)
+        chosen = (
+            next((match for match in matches if match.user_id == actor.own_id), None)
+            if self_document_request
+            else unambiguous(matches)
+        )
         if chosen is None:
             # Nobody, or more than one. Either way the caller decides, not this tool.
             #
@@ -5675,12 +5684,23 @@ class ExecutionKernel:
                 "reason": "ambiguous" if matches else "not_found",
             }
 
+        self_document_inventory = bool(documents_only and chosen.user_id == actor.own_id)
+        include_content = bool(
+            self.authorization
+            and (
+                self.authorization.authorize(actor, "admin.all_data.read").allowed
+                or (self_document_inventory and self.authorization.authorize(actor, "files.read").allowed)
+            )
+        )
+
         # Право надзора говорит «можно смотреть чужое», но не «можно смотреть
         # ЛЮБОГО». Владелец просил заводить каждого написавшего с полными
         # правами — значит право надзора есть у всех, и без этой проверки любой
         # участник читал бы деятельность любого другого.
-        if hierarchy_is_configured(storage) and not may_oversee(
-            storage, actor.own_id, chosen.user_id, owner_id=LEGACY_OWNER_USER_ID
+        if (
+            chosen.user_id != actor.own_id
+            and hierarchy_is_configured(storage)
+            and not may_oversee(storage, actor.own_id, chosen.user_id, owner_id=LEGACY_OWNER_USER_ID)
         ):
             storage.log_audit(
                 AuditEntry(

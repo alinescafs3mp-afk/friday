@@ -69,6 +69,38 @@ def test_the_person_hears_about_the_unread_part_of_the_archive() -> None:
     assert "остальные" in line, line
 
 
+def test_one_partly_parsed_archive_member_is_not_reported_as_whole() -> None:
+    """Preview count is not a completeness count for nested parsers."""
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        # The child CSV reaches its row ceiling while remaining below the
+        # archive member-byte ceiling.  It was decompressed, but not read whole.
+        archive.writestr("many.csv", "\n" * 100_001)
+    result = DocumentExtractor(secret_values=()).extract(
+        buffer.getvalue(),
+        "one-partial-member.zip",
+        "application/zip",
+    )
+    assert result.metadata["archive_budget_exhausted"] is True
+    assert result.metadata["files"] == result.metadata["previewed_files"] == 1
+
+    line = _file_fate_line(
+        {
+            "promoted": True,
+            "extraction": {
+                "success": True,
+                "archive_truncated": True,
+                "archive_files": result.metadata["files"],
+                "archive_files_read": result.metadata["previewed_files"],
+            },
+        }
+    )
+    assert "разобран не целиком" in line, line
+    assert "прочитан только частично" in line, line
+    assert line != "✅ Файл стал знанием — можно спрашивать."
+
+
 def test_the_person_hears_that_only_the_beginning_was_parsed() -> None:
     line = _file_fate_line(
         {

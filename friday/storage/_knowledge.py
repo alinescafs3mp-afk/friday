@@ -45,6 +45,7 @@ from friday.storage._base import (
 )
 from friday.storage._privacy import (
     _exact_uploader_knowledge_dependency,
+    _not_audio_document,
     _not_private_entity_material_dependency,
     _not_private_knowledge_dependency,
     _not_private_knowledge_structure_dependency,
@@ -1859,6 +1860,7 @@ class KnowledgeMixin(StorageShared):
             "   ON k.raw_object_id = r.id AND k.user_id=r.user_id AND k.deleted_at IS NULL"
             f"  AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             " WHERE r.user_id=? AND r.deleted_at IS NULL AND r.content_type='file'"
+            f"   AND {_not_audio_document('r')}"  # nosec B608
             f"   AND {_not_private_raw_dependency('r')}"  # nosec B608
             f"   AND date(datetime(r.received_at, ?)) IN ({placeholders})"  # nosec B608 - только плейсхолдеры
             " ORDER BY r.received_at ASC LIMIT ?",
@@ -1905,6 +1907,7 @@ class KnowledgeMixin(StorageShared):
         row = self.execute(
             "SELECT COUNT(*) AS count FROM raw_objects r"
             " WHERE r.user_id=? AND r.deleted_at IS NULL AND r.content_type='file'"
+            f"   AND {_not_audio_document('r')}"  # nosec B608
             f"   AND {_not_private_raw_dependency('r')}"  # nosec B608
             f"   AND date(datetime(r.received_at, ?)) IN ({placeholders})",  # nosec B608 - placeholders
             (user_id, shift, *wanted),

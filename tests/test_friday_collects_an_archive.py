@@ -54,7 +54,17 @@ def _kernel(settings, storage) -> ExecutionKernel:
     return kernel
 
 
-def _put_file(settings, storage, user: str, *, name: str, when: str, body: bytes) -> str:
+def _put_file(
+    settings,
+    storage,
+    user: str,
+    *,
+    name: str,
+    when: str,
+    body: bytes,
+    mime_type: str = "application/octet-stream",
+    media_kind: str = "",
+) -> str:
     """Положить файл так же, как это делает приём: байты на диск, запись в базу."""
     relative = f"{user}/{name}"
     target = settings.files_dir / relative
@@ -71,7 +81,8 @@ def _put_file(settings, storage, user: str, *, name: str, when: str, body: bytes
             "filename": name,
             "stored_path": relative,
             "size_bytes": len(body),
-            "mime_type": "application/octet-stream",
+            "mime_type": mime_type,
+            **({"media_kind": media_kind} if media_kind else {}),
         },
         received_at=when,
         created_at=when,
@@ -168,6 +179,51 @@ async def test_the_archive_carries_the_original_files(settings, storage) -> None
         names = sorted(archive.namelist())
         assert names == ["Отчёт.docx", "Смета.xlsx"], f"в архиве {names}"
         assert archive.read("Отчёт.docx") == b"A" * 500, "содержимое подменилось"
+
+
+@pytest.mark.anyio
+async def test_collect_documents_excludes_voice_from_zip_and_exact_count(settings, storage) -> None:
+    storage.ensure_user("alice", preset_key="admin")
+    _put_file(
+        settings,
+        storage,
+        "alice",
+        name="Отчёт.pdf",
+        when="2026-07-29T10:00:00+00:00",
+        body=b"document",
+        mime_type="application/pdf",
+        media_kind="document",
+    )
+    _put_file(
+        settings,
+        storage,
+        "alice",
+        name="Голосовое.ogg",
+        when="2026-07-29T10:01:00+00:00",
+        body=b"voice",
+        mime_type="audio/ogg",
+        media_kind="voice",
+    )
+    storage.commit()
+
+    ordinary_activity = storage.user_activity("alice", files_only=False, limit=10)
+    assert {row.get("filename") for row in ordinary_activity} == {"Отчёт.pdf", "Голосовое.ogg"}
+
+    kernel = _kernel(settings, storage)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+    result = await kernel.execute("collect_files", {"days": ["2026-07-29"]}, actor=actor)
+
+    assert result.success, result.error
+    assert result.data["collected"] is True
+    assert result.data["files_in_archive"] == 1
+    assert result.data["found_total"] == 1
+    assert result.attachment
+
+    import base64
+
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(result.attachment["content_base64"]))) as archive:
+        assert archive.namelist() == ["Отчёт.pdf"]
+        assert archive.read("Отчёт.pdf") == b"document"
 
 
 @pytest.mark.anyio

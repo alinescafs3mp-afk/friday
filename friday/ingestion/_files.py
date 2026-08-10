@@ -65,6 +65,17 @@ _STRUCTURED_OFFICE_MIME_TYPES = frozenset(
 )
 
 
+def _text_extraction_was_truncated(metadata: Mapping[str, Any]) -> bool:
+    """Normalize generic text loss without hiding a more specific PDF limit."""
+
+    specific_parse_limit = bool(metadata.get("parse_deadline_reached") or metadata.get("pages_truncated"))
+    return bool(
+        metadata.get("text_truncated")
+        or metadata.get("rows_truncated")
+        or (metadata.get("extraction_truncated") and not specific_parse_limit)
+    )
+
+
 def _validated_office_structure(value: Any, text: str) -> dict[str, Any] | None:
     """Validate only mappings; absent parser/legacy metadata is ordinary None."""
 
@@ -540,7 +551,8 @@ class FilesMixin(PipelineShared):
         # Признак не вычисляется здесь заново: разборщик уже обрезал текст своим
         # потолком и честно записал это в метаданные — вычисление на этой стороне
         # всегда давало False, потому что мерило уже обрезанное.
-        text_truncated = bool((extraction.metadata or {}).get("text_truncated"))
+        extraction_metadata = extraction.metadata or {}
+        text_truncated = _text_extraction_was_truncated(extraction_metadata)
         if len(text_content) > self.settings.max_extracted_text_chars:
             text_content = text_content[: self.settings.max_extracted_text_chars]
             text_truncated = True
@@ -1181,13 +1193,13 @@ class FilesMixin(PipelineShared):
             # extractor result above is handed to AgentRuntime.  Keep the parser's
             # own loss bit separate so a 100k no-save text can be mapped in full
             # without claiming completeness for an extractor-capped source.
-            "_runtime_source_truncated": bool((extraction.metadata or {}).get("text_truncated")),
+            "_runtime_source_truncated": _text_extraction_was_truncated(extraction.metadata or {}),
             # One prompt-level truth covers either loss: the transient preview
             # may be shorter than the extractor result, or the extractor itself
             # may already have stopped at its text budget.  In both cases the
             # model must not make a whole-document claim from the visible text.
             "text_truncated": len(extraction.text) > limit
-            or bool((extraction.metadata or {}).get("text_truncated")),
+            or _text_extraction_was_truncated(extraction.metadata or {}),
             # Deadline/page ceilings remain distinct because their metrics let
             # the prompt explain how much of the document was actually read.
             "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),

@@ -2,8 +2,9 @@
 
 `user_activity` is the only tool that reads across accounts, so:
 
-* it is gated on `admin.all_data.read` like every other tool is gated, which means
-  an ordinary account cannot call it at all;
+* cross-account reads are gated on `admin.activity.read`; the sole narrow
+  exception is an exact documents-only read of the authenticated account under
+  its ordinary `files.read` capability;
 * the read is written to the audit log against the ACCOUNT it was about, not merely
   the tool's name — «кто-то смотрел активность» is not a record of anything;
 * the account it resolved to comes back in the answer. `resolve_person` tolerates
@@ -102,6 +103,103 @@ async def test_an_ordinary_account_cannot_look_at_anyone(kernel):
 
     assert result.success is False
     assert "denied" in result.error.casefold() or "not allowed" in result.error.casefold()
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_account_can_inventory_only_its_own_documents(kernel):
+    runtime, auth, storage = kernel
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id="usr_ivan",
+        source="upload",
+        source_ref=new_id("src"),
+        raw_content="OWN-DOCUMENT-CONTENT",
+        content_type="file",
+        content_hash=hashlib.sha256(b"own-document").hexdigest(),
+        metadata_json={"filename": "own-document.pdf"},
+    )
+    storage.store_raw_object(raw)
+    storage.commit()
+    ivan = auth.actor_for_user("usr_ivan", source="test")
+
+    own_documents = await runtime.execute(
+        "user_activity",
+        {"person": ivan.own_id, "documents_only": True},
+        actor=ivan,
+    )
+    own_general_activity = await runtime.execute(
+        "user_activity",
+        {"person": ivan.own_id},
+        actor=ivan,
+    )
+    someone_else = await runtime.execute(
+        "user_activity",
+        {"person": "usr_anna", "documents_only": True},
+        actor=ivan,
+    )
+
+    assert own_documents.success is True, own_documents.error
+    assert own_documents.data["документов с подтверждённым автором"] == 1
+    assert own_documents.data["документы"][0]["что"] == "own-document.pdf"
+    assert own_general_activity.success is False
+    assert someone_else.success is False
+
+
+@pytest.mark.asyncio
+async def test_shared_tenant_account_inventories_its_own_documents_not_the_tenants(
+    settings,
+    storage,
+):
+    tenant = "shared-tenant"
+    ivan_id = "shared-ivan"
+    anna_id = "shared-anna"
+    storage.ensure_user(tenant, preset_key="owner")
+    storage.ensure_user(ivan_id, preset_key="user", display_name="Иван")
+    storage.ensure_user(anna_id, preset_key="user", display_name="Анна")
+    # An unrelated alias may equal the authenticated stable id.  Self binding
+    # comes from authentication, not fuzzy directory ambiguity.
+    storage.ensure_user("alias-collision", preset_key="user", display_name=ivan_id)
+
+    def document(filename: str, *, uploaded_by: str) -> None:
+        storage.store_raw_object(
+            RawObject(
+                id=new_id("raw"),
+                user_id=tenant,
+                source="upload",
+                source_ref=new_id("src"),
+                raw_content=filename,
+                content_type="file",
+                content_hash=hashlib.sha256(filename.encode()).hexdigest(),
+                metadata_json={"filename": filename, "uploaded_by": uploaded_by},
+            )
+        )
+
+    document("ivan-only.pdf", uploaded_by=ivan_id)
+    document("anna-private.pdf", uploaded_by=anna_id)
+    storage.commit()
+
+    auth = AuthorizationService(storage, shared_tenant=tenant)
+    graph = KnowledgeGraph(storage)
+    runtime = ExecutionKernel(auth, settings)
+    runtime.bind_services(storage, graph, object(), IngestionPipeline(settings, storage, graph))
+    ivan = auth.actor_for_user(ivan_id, source="test")
+
+    own_documents = await runtime.execute(
+        "user_activity",
+        {"person": ivan.own_id, "documents_only": True},
+        actor=ivan,
+    )
+    someone_else = await runtime.execute(
+        "user_activity",
+        {"person": anna_id, "documents_only": True},
+        actor=ivan,
+    )
+
+    assert ivan.user_id == tenant and ivan.own_id == ivan_id
+    assert own_documents.success is True, own_documents.error
+    assert own_documents.data["документов с подтверждённым автором"] == 1
+    assert [row["что"] for row in own_documents.data["документы"]] == ["ivan-only.pdf"]
+    assert someone_else.success is False
 
 
 @pytest.mark.asyncio

@@ -54,6 +54,17 @@ class _TruncatingExtractor:
         return {"success": False, "text": ""}
 
 
+class _GenericTextBudgetExtractor(_TruncatingExtractor):
+    """A non-page parser stopped at its generic extracted-text ceiling."""
+
+    def extract(self, *args, **kwargs):
+        del args, kwargs
+        return DocumentResult(
+            "Начало большой презентации.",
+            {"format": "pptx", "extraction_truncated": True},
+        )
+
+
 def test_the_upload_extractor_is_built_with_a_parse_budget(settings, storage) -> None:
     """Мутация: убрать `parse_budget_sec` из `CoreMixin.__init__` — тест краснеет."""
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
@@ -174,3 +185,23 @@ async def test_the_transient_preview_separates_its_two_truncations(settings, sto
     assert preview["parse_deadline_reached"] is True
     assert preview["parse_pages_read"] == 12
     assert preview["text_truncated"] is False, "предпросмотр влез целиком — обрезки предпросмотра тут нет"
+
+
+@pytest.mark.asyncio
+async def test_generic_extractor_loss_reaches_the_transient_attachment(
+    settings, storage, monkeypatch
+) -> None:
+    import friday.ingestion._core as core
+
+    monkeypatch.setattr(core, "DocumentExtractor", _GenericTextBudgetExtractor)
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+
+    preview = await pipeline.inspect_file_transient(
+        b"synthetic-presentation",
+        filename="large.pptx",
+        mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+    assert preview["_runtime_source_truncated"] is True
+    assert preview["text_truncated"] is True
+    assert preview["parse_deadline_reached"] is False

@@ -94,3 +94,32 @@ def test_a_plain_archive_still_previews_its_members(tmp_path):
     assert result.metadata["previewed_files"] == 5
     assert result.text.count("\n--- ") == 5
     assert "Заметка номер 4" in result.text
+
+
+def test_one_readable_zip_member_is_not_silently_cut_at_20k() -> None:
+    tail = "ZIP-MEMBER-TAIL-SENTINEL"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("only.txt", "ZIP-HEAD\n" + "x" * 25_000 + "\n" + tail)
+
+    result = DocumentExtractor().extract(buffer.getvalue(), "one-long-note.zip")
+
+    assert result.success is True
+    assert tail in result.text
+    assert result.metadata.get("archive_budget_exhausted") is not True
+    assert result.metadata.get("text_truncated") is not True
+
+
+def test_an_oversized_tar_member_is_reported_as_unread() -> None:
+    buffer = io.BytesIO()
+    payload = b"x" * (_PREVIEW_CAP_BYTES + 1)
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        info = tarfile.TarInfo("oversized.txt")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+
+    result = DocumentExtractor().extract(buffer.getvalue(), "one-oversized-member.tar")
+
+    assert result.success is True
+    assert result.metadata["archive_budget_exhausted"] is True
+    assert result.metadata["previewed_files"] == 0

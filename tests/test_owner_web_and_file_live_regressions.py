@@ -446,7 +446,11 @@ async def test_old_attachment_lineage_beyond_prompt_tail_still_allows_only_curre
     public_payload = json.dumps(model.calls[-1], ensure_ascii=False)
     assert PRIVATE_PREFIX not in public_payload
     assert "PRIVATE-HISTORICAL-ANSWER-CANARY" not in public_payload
-    assert "SYNTHETIC-CLEAN-USER" not in public_payload
+    # Same-tenant public-web turns now keep ordinary dialogue history instead
+    # of entering a history-free privacy chamber.  The expired attachment bytes
+    # themselves are still absent because they were not restored for this turn.
+    assert "SYNTHETIC-CLEAN-USER" in public_payload
+    assert "SYNTHETIC-CLEAN-ASSISTANT" in public_payload
     assert PRIVATE_PREFIX not in json.dumps(kernel.calls, ensure_ascii=False)
 
 
@@ -546,7 +550,8 @@ async def test_readable_incomplete_docx_is_partial_then_exact_followup_is_unknow
         conversation_id=str(uploaded["conversation_id"]),
     )
 
-    assert exact["message"] == OFFICE_EXACT_UNAVAILABLE_MESSAGE
+    assert exact["message"].endswith(OFFICE_EXACT_UNAVAILABLE_MESSAGE)
+    assert "Не весь исходный материал" in exact["message"]
     assert exact["verification_status"] == "unknown"
     assert exact["verified"] is False
     assert exact["restored_attachment_count"] == 1
@@ -554,7 +559,10 @@ async def test_readable_incomplete_docx_is_partial_then_exact_followup_is_unknow
     assert exact["attachment_context_readable_count"] == 1
     assert exact["attachment_coverage_complete"] is False
     assert exact["tools_used"] == []
-    assert len(model.calls) == calls_after_partial
+    # The mandatory whole-source prepass may still analyse every readable byte;
+    # the exact-set guard owns the final UNKNOWN and discards any exhaustive
+    # model claim when the structural source is incomplete.
+    assert len(model.calls) > calls_after_partial
     assert kernel.calls == []
     metadata = _stored_metadata(storage, exact)
     assert metadata["structural"]["verdict_kind"] == "office_exact"
@@ -595,6 +603,42 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
     assert kernel.calls == []
     metadata = _stored_metadata(storage, response)
     assert metadata["structural"].get("private_web_search_blocked") is not True
+
+
+@pytest.mark.asyncio
+async def test_same_sentence_document_summary_and_web_request_executes_public_research(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    request = "Обобщи весь документ и поищи актуальные данные в интернете."
+    assert asks_for_the_web(request) is True
+    document = _store_generic_text(storage)
+    model = _ScriptedModel({document.marker: "Синтетическая локальная сводка."})
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=kernel,
+    )
+
+    response = await runtime.chat(
+        OWNER,
+        request,
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+
+    assert response["tools_used"] == ["web_research"]
+    assert response["web_evidence_status"] == "sourced"
+    assert response["attachment_context_expected_count"] == 1
+    assert kernel.calls == [
+        (
+            "web_research",
+            {"query": runtime.web_query_from(request), "max_sources": 3},
+        )
+    ]
 
 
 @pytest.mark.asyncio

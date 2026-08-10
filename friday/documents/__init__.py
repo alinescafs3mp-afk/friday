@@ -439,6 +439,17 @@ class DocumentExtractor:
             "input_bytes": len(content),
             **result.metadata,
         }
+        # Parsers historically used three names for the same generic loss of
+        # extractable text.  Normalize them here so every persistent/transient
+        # adapter carries one truthful bit.  Keep deadline/page ceilings
+        # distinct: their measured diagnostics are more useful than a generic
+        # “text budget” warning and already make the source incomplete.
+        if metadata.get("rows_truncated") or (
+            metadata.get("extraction_truncated")
+            and not metadata.get("parse_deadline_reached")
+            and not metadata.get("pages_truncated")
+        ):
+            metadata["text_truncated"] = True
         if secrets_removed:
             # Потеря названа. Молчаливая подмена читалась бы как свойство
             # документа, а человеку важно знать, что его ключ лежит в файле,
@@ -1399,11 +1410,30 @@ class DocumentExtractor:
         depth: int,
         budget: _ArchiveBudget,
         deadline: float | None = None,
-    ) -> str:
+    ) -> tuple[str, bool]:
         result = self.extract(data, name, _depth=depth + 1, _budget=budget, _deadline=deadline)
-        if not result.success or not result.text:
-            return ""
-        return f"\n--- {name} ---\n{result.text[:20_000]}"
+        if not result.success:
+            return "", False
+        metadata = result.metadata or {}
+        complete = not any(
+            metadata.get(flag)
+            for flag in (
+                "text_truncated",
+                "extraction_truncated",
+                "rows_truncated",
+                "source_truncated_for_parse",
+                "parse_deadline_reached",
+                "pages_truncated",
+                "archive_budget_exhausted",
+            )
+        )
+        if not result.text:
+            return "", complete
+        # A member is already bounded to 128 KiB before this recursive parse,
+        # and the outer extractor applies its global text ceiling.  The former
+        # 20k slice therefore bought no safety: it only hid the tail of an
+        # otherwise readable member and discarded the fact of that loss.
+        return f"\n--- {name} ---\n{result.text}", complete
 
     def _extract_zip(
         self, content: bytes, depth: int, budget: _ArchiveBudget, deadline: float | None = None
@@ -1436,7 +1466,15 @@ class DocumentExtractor:
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 budget.spend_bytes(len(data))
-                preview = self._member_preview(member.filename, data, depth, budget, deadline)
+                preview, member_complete = self._member_preview(
+                    member.filename,
+                    data,
+                    depth,
+                    budget,
+                    deadline,
+                )
+                if not member_complete:
+                    exhausted = True
                 if preview:
                     parts.append(preview)
         metadata: dict[str, Any] = {
@@ -1494,6 +1532,7 @@ class DocumentExtractor:
                     exhausted = True
                     break
                 if member_size > _MAX_MEMBER_PREVIEW_BYTES:
+                    exhausted = True
                     continue
                 stream = archive.extractfile(member)
                 if stream is None:
@@ -1505,7 +1544,15 @@ class DocumentExtractor:
                 previewed += 1  # decompressions, not successes — see _extract_zip
                 with stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
-                preview = self._member_preview(member.name, data, depth, budget, deadline)
+                preview, member_complete = self._member_preview(
+                    member.name,
+                    data,
+                    depth,
+                    budget,
+                    deadline,
+                )
+                if not member_complete:
+                    exhausted = True
                 if preview:
                     previews.append(preview)
             parts = [f"TAR archive: {file_count} files", *names, *previews]
@@ -1551,7 +1598,15 @@ class DocumentExtractor:
                 with archive.open(member) as stream:
                     data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
                 budget.spend_bytes(len(data))
-                preview = self._member_preview(member.filename, data, depth, budget, deadline)
+                preview, member_complete = self._member_preview(
+                    member.filename,
+                    data,
+                    depth,
+                    budget,
+                    deadline,
+                )
+                if not member_complete:
+                    exhausted = True
                 if preview:
                     parts.append(preview)
         rar_metadata: dict[str, Any] = {
@@ -1578,9 +1633,19 @@ class DocumentExtractor:
             names = [str(getattr(entry, "filename", "")) for entry in entries]
         # Listing is intentional: py7zr extraction APIs write to a target path in
         # several versions.  Friday does not permit archive members on disk.
+        metadata: dict[str, Any] = {
+            "format": "7z",
+            "files": len(names),
+            "previewed_files": 0,
+        }
+        if names:
+            # This parser deliberately exposes only the member listing.  Say
+            # so in the same loss channel as every other archive rather than
+            # presenting filenames as fully read member contents.
+            metadata["archive_budget_exhausted"] = True
         return DocumentResult(
             "\n".join([f"7z archive: {len(names)} files", *names[:100]]),
-            {"format": "7z", "files": len(names), "previewed_files": 0},
+            metadata,
         )
 
     @staticmethod

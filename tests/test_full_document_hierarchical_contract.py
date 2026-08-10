@@ -10,20 +10,29 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 from dataclasses import replace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
+    _attachment_source_complete,
     _attachment_whole_document_task,
+    _bounded_attachment_projection,
     _OwnedAttachment,
 )
+from friday.agent_runtime._office_attachments import (
+    OFFICE_STRUCTURE_KEY,
+    trusted_office_attachment,
+)
+from friday.documents import DocumentExtractor
 from friday.execution_kernel import ExecutionKernel
 from friday.permissions import AuthorizationService
 from friday.storage.models import RawObject, new_id
@@ -42,6 +51,43 @@ def _owned(filename: str, text: str, **flags: Any) -> _OwnedAttachment:
             "extraction_success": True,
             "verification_eligible": True,
             **flags,
+        }
+    )
+
+
+def _synthetic_300_row_xlsx(*, multiline_before_target: bool = False) -> dict[str, Any]:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "SYNTHETIC-300"
+    sheet.append(["Позиция", "Значение"])
+    for position in range(1, 301):
+        value = "ROW-288-SENTINEL" if position == 288 else f"VALUE-{position:03d}"
+        if multiline_before_target and position == 2:
+            value = "MULTI\nLINE"
+        sheet.append([f"ITEM-{position:03d}", value])
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    extracted = DocumentExtractor().extract(stream.getvalue(), "synthetic-300.xlsx")
+    assert extracted.success is True and isinstance(extracted.office_structure_index, dict)
+    return trusted_office_attachment(
+        {
+            "filename": "synthetic-300.xlsx",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
+@pytest.mark.parametrize("loss_flag", ["extraction_truncated", "rows_truncated"])
+def test_generic_extractor_loss_is_never_complete_attachment_evidence(loss_flag: str) -> None:
+    assert not _attachment_source_complete(
+        {
+            "extraction_success": True,
+            "verification_eligible": True,
+            loss_flag: True,
         }
     )
 
@@ -113,6 +159,7 @@ class _HierarchyLLM:
                     "B_TAIL",
                     "C_HEAD",
                     "C_TAIL",
+                    "ROW-288-SENTINEL",
                     INJECTION,
                 )
                 if marker in text
@@ -168,7 +215,7 @@ async def _run(
     monkeypatch: pytest.MonkeyPatch,
     *,
     question: str,
-    attachments: list[_OwnedAttachment],
+    attachments: list[dict[str, Any]],
     llm: _HierarchyLLM,
     kernel: ExecutionKernel | None = None,
 ) -> dict[str, Any]:
@@ -314,6 +361,268 @@ async def test_natural_short_content_request_cannot_certify_a_24k_prefix_as_the_
 )
 def test_natural_open_document_intents_enter_the_whole_source_route(question: str) -> None:
     assert _attachment_whole_document_task(question, file_count=1) in {"summary", "analysis"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Прочитай файл целиком.",
+        "Изучи этот документ.",
+        "Ознакомься со всем документом.",
+        "Расскажи, что там в файле.",
+        "Вот файл, посмотри внимательно.",
+        "Посмотри внимательно.",
+        "Что там?",
+        "Сформируй ответ по контрольному условию ZETA-77.",
+    ],
+)
+async def test_ordinary_read_wording_maps_the_complete_source_instead_of_its_prefix(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+) -> None:
+    assert _attachment_whole_document_task(question, file_count=1) == ""
+    source = "READ_HEAD\n" + "m" * 49_000 + "\nREAD_MIDDLE\n" + "t" * 50_000 + "\nREAD_TAIL"
+    llm = _HierarchyLLM("Ответ опирается на READ_HEAD, READ_MIDDLE и READ_TAIL.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question=question,
+        attachments=[_owned("ordinary-read-100k.txt", source)],
+        llm=llm,
+    )
+
+    payloads = _chunk_payloads(llm)
+    _assert_exact_coverage(payloads, [("ordinary-read-100k.txt", source)])
+    assert any("READ_MIDDLE" in str(item["text"]) for item in payloads)
+    assert any("READ_TAIL" in str(item["text"]) for item in payloads)
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
+
+
+@pytest.mark.parametrize("multiline_before_target", [False, True])
+@pytest.mark.asyncio
+async def test_a_300_row_xlsx_exposes_record_288_even_when_office_prompt_stops_near_the_head(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    multiline_before_target: bool,
+) -> None:
+    attachment = _synthetic_300_row_xlsx(multiline_before_target=multiline_before_target)
+    bounded = _bounded_attachment_projection([attachment])
+    assert bounded[0]["_office_prompt_complete"] is False
+    assert "ROW-288-SENTINEL" not in str(bounded[0].get("_office_prompt_serialized") or "")
+
+    question = "Что на 288 позиции?"
+    assert _attachment_whole_document_task(question, file_count=1) == ""
+    llm = _HierarchyLLM("На 288-й позиции находится ROW-288-SENTINEL.")
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question=question,
+        attachments=[attachment],
+        llm=llm,
+    )
+
+    payloads = _chunk_payloads(llm)
+    assert payloads
+    row = next(
+        row
+        for payload in payloads
+        for row in payload.get("ordered_rows", [])
+        if row.get("record_position") == 288
+    )
+    source_line = 291 if multiline_before_target else 290
+    assert row == {
+        "source_line": source_line,
+        "source_row": 289,
+        "record_position": 288,
+        "sheet": "SYNTHETIC-300",
+        "text": "ITEM-288 | ROW-288-SENTINEL",
+    }
+    synthesis, verification = _canonical_map_blocks(llm)
+    assert synthesis == verification and "ROW-288-SENTINEL" in synthesis[0]
+    final_evidence = _payload(synthesis[0], MAP_PREFIX)
+    assert final_evidence["requested_record_positions"] == [288]
+    assert final_evidence["ordered_row_matches"] == [
+        {
+            "file_index": 1,
+            "filename": "synthetic-300.xlsx",
+            "sheet": "SYNTHETIC-300",
+            "source_line": source_line,
+            "source_row": 289,
+            "record_position": 288,
+            "text": "ITEM-288 | ROW-288-SENTINEL",
+            "text_complete": True,
+        }
+    ]
+    assert final_evidence["ordered_row_matches_capped"] is False
+    assert result["message"] == "На 288-й позиции находится ROW-288-SENTINEL."
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_incomplete_office_prompt_counts_all_300_rows_without_requesting_a_reupload(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attachment = _synthetic_300_row_xlsx()
+    bounded = _bounded_attachment_projection([attachment])
+    assert bounded[0]["_office_index_complete"] is False
+    llm = _HierarchyLLM("В документе 300 позиций.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Сколько всего записей в документе?",
+        attachments=[attachment],
+        llm=llm,
+    )
+
+    payloads = _chunk_payloads(llm)
+    _assert_exact_coverage(
+        payloads,
+        [("synthetic-300.xlsx", str(attachment["transient_text"]))],
+    )
+    ordered_rows = [row for payload in payloads for row in payload.get("ordered_rows", [])]
+    assert [row["record_position"] for row in ordered_rows if row["record_position"] > 0] == list(
+        range(1, 301)
+    )
+    # The total is rendered from the code-owned ordered record carrier, so no
+    # synthesis/verifier model call is needed for this exact cardinality.
+    assert _canonical_map_blocks(llm) == ([], [])
+    assert result["message"] == "В документе 300 позиций."
+    assert "пришл" not in result["message"].casefold()
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_focused"),
+    [
+        ("Разберись с ZETA-77 и напомни завтра сверить вывод.", False),
+        ("Обобщи весь документ целиком.", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_full_source_prepass_keeps_the_ordinary_agentic_tool_route(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+    expected_focused: bool,
+) -> None:
+    owner = "synthetic-prepass-tool-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    auth = AuthorizationService(storage)
+
+    class ToolKernel:
+        authorization = auth
+
+        def get_tool_definitions(self, actor: Any, *, topic: str = "") -> list[dict[str, Any]]:
+            del actor, topic
+            return [
+                {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+                for name in (
+                    "remind",
+                    "web_search",
+                    "web_research",
+                    "web_fetch",
+                    "code_run",
+                    "data_query",
+                )
+            ]
+
+    kernel = ToolKernel()
+    llm = _HierarchyLLM("Синтетический ответ после полного чтения.")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_archive)
+    captured: dict[str, Any] = {}
+
+    async def capture_agentic(
+        context: AgentContext,
+        message: str,
+        actor: Any,
+        tools: list[dict[str, Any]],
+        attachments: list[dict[str, Any]] | None,
+        *,
+        outbound_allowed: bool = True,
+        outbound_tool_allowlist: frozenset[str] | None = None,
+    ) -> dict[str, Any]:
+        del message, actor, attachments, outbound_allowed, outbound_tool_allowlist
+        captured["bundle"] = context.attachment_hierarchy_bundle
+        captured["focused"] = context.focused_attachment_turn
+        captured["tools"] = {
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
+        }
+        return {
+            "content": "Синтетический ответ после полного чтения.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_agentic_loop", capture_agentic)
+    source = "TOOL_HEAD\n" + "x" * 49_000 + "\nTOOL_MIDDLE\n" + "y" * 50_000 + "\nTOOL_TAIL"
+    result = await runtime.chat(
+        owner,
+        question,
+        actor=auth.actor_for_user(owner, source="test"),
+        attachments=[_owned("tool-route-100k.txt", source)],
+        enable_tools=True,
+    )
+
+    _assert_exact_coverage(_chunk_payloads(llm), [("tool-route-100k.txt", source)])
+    assert isinstance(captured["bundle"], agent_runtime_module._AttachmentHierarchyBundle)
+    assert captured["focused"] is expected_focused
+    assert "remind" in captured["tools"]
+    assert "web_search" in captured["tools"]
+    assert result["attachment_coverage_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_lexical_match_does_not_hide_a_distant_document_rule(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = (
+        "GLOBAL-RULE-AT-HEAD: multiply the requested value by 9.\n"
+        + "x" * 72_000
+        + "\nZETA-77=5\n"
+        + "y" * 25_000
+        + "\nRULE-TAIL"
+    )
+    llm = _HierarchyLLM("По общему правилу документа: 5 × 9 = 45.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Найди ZETA-77 и вычисли по правилу документа.",
+        attachments=[_owned("rule-and-target.txt", source)],
+        llm=llm,
+    )
+
+    payloads = _chunk_payloads(llm)
+    _assert_exact_coverage(payloads, [("rule-and-target.txt", source)])
+    mapped = "".join(str(item["text"]) for item in payloads)
+    assert "GLOBAL-RULE-AT-HEAD" in mapped
+    assert "ZETA-77=5" in mapped
+    assert "RULE-TAIL" in mapped
+    assert result["message"] == "По общему правилу документа: 5 × 9 = 45."
 
 
 @pytest.mark.parametrize(
@@ -601,6 +910,50 @@ async def test_hierarchy_uses_one_unrenewed_primary_deadline(
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False
     assert "загруз" not in result["message"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_full_source_prepass_and_reduction_leave_a_fresh_answer_deadline(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Map/reduce has its own cap and cannot consume the answer-stage budget."""
+
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_FINAL_EVIDENCE_CHARS", 800)
+    llm = _HierarchyLLM("Синтетический итог после отдельного prepass.")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+    context = AgentContext(
+        conversation_id="synthetic-prepass-deadline",
+        user_id="synthetic-prepass-deadline-owner",
+        person_id="synthetic-prepass-deadline-owner",
+        current_attachment_present=True,
+    )
+    source = "PREPASS_HEAD\n" + "p" * 99_970 + "\nPREPASS_TAIL"
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(
+        context,
+        "Изучи весь документ.",
+        [_owned("prepass-deadline-100k.txt", source)],
+        task_kind="request",
+    )
+
+    assert bundle.records_available is True
+    assert complete is True
+    assert any(
+        str(item.get("content") or "").startswith(REDUCE_PREFIX)
+        for call in llm.calls
+        for item in call["messages"]
+    )
+    assert context.attachment_prepass_deadline is not None
+    assert context.attachment_primary_deadline is None
+    primary_deadline = runtime._ensure_attachment_primary_deadline(context)
+    assert primary_deadline is not None
+    assert primary_deadline > context.attachment_prepass_deadline
 
 
 @pytest.mark.asyncio

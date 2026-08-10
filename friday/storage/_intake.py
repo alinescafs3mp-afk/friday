@@ -30,6 +30,7 @@ from friday.storage._base import (
 )
 from friday.storage._knowledge import _fts_terms
 from friday.storage._privacy import (
+    _not_audio_document,
     _not_private_inbox_dependency,
     _not_private_knowledge_dependency,
     _not_private_raw_dependency,
@@ -130,7 +131,7 @@ class IntakeMixin(StorageShared):
     def count_visible_raw_objects(self, user_id: str, *, files_only: bool = False) -> int:
         """Count the privacy-safe Raw Object corpus, never a bounded page."""
 
-        file_clause = " AND r.content_type='file'" if files_only else ""
+        file_clause = f" AND r.content_type='file' AND {_not_audio_document('r')}" if files_only else ""
         row = self.execute(
             f"""SELECT COUNT(*) AS count FROM raw_objects r
                   WHERE r.user_id=? AND r.deleted_at IS NULL

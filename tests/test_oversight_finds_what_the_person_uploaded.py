@@ -217,3 +217,59 @@ def test_a_personal_archive_is_untouched(storage):
     items = storage.user_activity("alice", limit=50)
 
     assert [str(item.get("filename") or "") for item in items] == ["её.pdf"]
+
+
+def test_document_inventory_excludes_voice_and_audio_before_count_and_pagination(storage):
+    storage.ensure_user(TENANT, preset_key="owner")
+    storage.ensure_user(IVAN, preset_key="user")
+
+    def store(
+        filename: str,
+        *,
+        uploaded_by: str | None,
+        raw_content_type: str = "file",
+        **metadata: str,
+    ) -> None:
+        payload = filename.encode()
+        values: dict[str, str] = {"filename": filename, **metadata}
+        if uploaded_by is not None:
+            values["uploaded_by"] = uploaded_by
+        storage.store_raw_object(
+            RawObject(
+                id=new_id("raw"),
+                user_id=TENANT,
+                source="telegram",
+                source_ref=new_id("src"),
+                raw_content=filename,
+                content_type=raw_content_type,
+                content_hash=hashlib.sha256(payload).hexdigest(),
+                metadata_json=values,
+            )
+        )
+
+    store("report.pdf", uploaded_by=IVAN, mime_type="application/pdf", media_kind="document")
+    store("telegram-voice-1.ogg", uploaded_by=IVAN, mime_type="audio/ogg", media_kind="voice")
+    store("legacy-recording.ogg", uploaded_by=IVAN)
+    store("recording.bin", uploaded_by=IVAN, mime_type="audio/mpeg")
+    store("legacy-audio.bin", uploaded_by=IVAN, raw_content_type="audio")
+    store("unattributed-voice.ogg", uploaded_by=None, media_kind="voice")
+    storage.commit()
+
+    items = storage.user_activity(TENANT, uploaded_by=IVAN, files_only=True, limit=50)
+    summary = storage.user_activity_summary(TENANT, uploaded_by=IVAN, files_only=True)
+
+    assert [item.get("filename") for item in items] == ["report.pdf"]
+    assert summary["arrivals"] == 1
+    assert storage.arrivals_without_an_author(TENANT, files_only=True) == 0
+    assert storage.count_visible_raw_objects(TENANT, files_only=True) == 1
+
+    # Audio remains ordinary activity evidence; it is excluded only from the
+    # semantic document/file inventory.
+    all_activity = storage.user_activity(TENANT, uploaded_by=IVAN, files_only=False, limit=50)
+    assert {item.get("filename") for item in all_activity} == {
+        "report.pdf",
+        "telegram-voice-1.ogg",
+        "legacy-recording.ogg",
+        "recording.bin",
+        "legacy-audio.bin",
+    }

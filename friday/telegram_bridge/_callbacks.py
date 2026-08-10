@@ -304,11 +304,13 @@ def _file_fate_line(file_ingestion: Any) -> str:
     # оказалась слишком крупной. TAR об этом говорил, ZIP и RAR молчали.
     archive_files = int(extraction.get("archive_files") or 0)
     archive_read = int(extraction.get("archive_files_read") or 0)
-    archive_line = (
-        f" В архиве {archive_files} файлов, разобрано {archive_read} — про остальные я ничего не знаю."
-        if extraction.get("archive_truncated") and archive_files > archive_read
-        else ""
-    )
+    archive_line = ""
+    if extraction.get("archive_truncated"):
+        archive_line = (
+            f" В архиве {archive_files} файлов, разобрано {archive_read} — про остальные я ничего не знаю."
+            if archive_files > archive_read
+            else (" Архив разобран не целиком: как минимум один файл внутри прочитан только частично.")
+        )
     # Исходник обрезан ДО разбора: разборщик читал не весь файл. Признак писался
     # пятью разборщиками и не читался ни одним потребителем.
     source_clipped = bool(extraction.get("source_truncated_for_parse"))

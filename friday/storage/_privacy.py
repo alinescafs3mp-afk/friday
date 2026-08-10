@@ -30,6 +30,49 @@ _CURRENT_PUBLIC_FIELD_MAX_BYTES = 1_048_576
 _CURRENT_PUBLIC_JSON_MAX_BYTES = 1_048_576
 
 
+def _not_audio_document(alias: str = "r") -> str:
+    """SQL predicate excluding voice/audio carriers from document inventories.
+
+    Telegram stores a voice note as a Raw Object with ``content_type='file'``;
+    that transport fact does not turn it into a document.  Prefer the explicit
+    media kind and MIME type, then retain a suffix fallback for legacy rows
+    which predate those metadata fields.
+    """
+
+    metadata = f"{alias}.metadata_json"
+    filename = f"lower(COALESCE(json_extract({metadata},'$.filename'),''))"
+    mime = (
+        "lower(COALESCE("
+        f"NULLIF(json_extract({metadata},'$.mime_type'),''),"
+        f"NULLIF(json_extract({metadata},'$.mime'),''),"
+        f"NULLIF(json_extract({metadata},'$.content_type'),''),''))"
+    )
+    media_kind = f"lower(COALESCE(json_extract({metadata},'$.media_kind'),''))"
+    raw_content_type = f"lower(COALESCE({alias}.content_type,''))"
+    audio_suffixes = (
+        ".ogg",
+        ".oga",
+        ".opus",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".wav",
+        ".flac",
+        ".wma",
+        ".aif",
+        ".aiff",
+        ".amr",
+    )
+    suffix_guard = " AND ".join(f"{filename} NOT LIKE '%{suffix}'" for suffix in audio_suffixes)
+    return (
+        f"({raw_content_type} NOT IN ('voice','audio') "
+        f"AND {raw_content_type} NOT LIKE 'audio/%' "
+        f"AND {raw_content_type} NOT LIKE 'voice/%' "
+        f"AND {media_kind} NOT IN ('voice','audio') "
+        f"AND {mime} NOT LIKE 'audio/%' AND {suffix_guard})"
+    )
+
+
 def _private_material_cache_valid() -> str:
     """Cheap authority-state guard shared by every generic material surface."""
 

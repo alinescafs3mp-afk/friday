@@ -18,6 +18,7 @@ from typing import Any
 
 from friday.storage._base import StorageShared
 from friday.storage._privacy import (
+    _not_audio_document,
     _not_private_inbox_dependency,
     _not_private_knowledge_dependency,
     _not_private_raw_dependency,
@@ -118,6 +119,7 @@ class OversightMixin(StorageShared):
                 f"({prefix}content_type='file' OR "
                 f"COALESCE(json_extract({prefix}metadata_json,'$.filename'),'') <> '')"
             )
+            clauses.append(_not_audio_document(raw_alias))
         return " AND ".join(clauses), params
 
     def arrivals_without_an_author(

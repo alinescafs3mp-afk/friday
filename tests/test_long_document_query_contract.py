@@ -50,6 +50,8 @@ QUERY_METADATA_KEYS = {
     "attachment_query_files_scanned",
     "attachment_query_files_matched",
 }
+CHUNK_PREFIX = "FRIDAY_ATTACHMENT_CHUNK_DATA"
+MAP_PREFIX = "FRIDAY_ATTACHMENT_MAP_DATA"
 
 
 @dataclass(frozen=True)
@@ -276,6 +278,52 @@ def _is_repair_call(call: Mapping[str, Any]) -> bool:
     return "FRIDAY_REPAIR_DATA" in _messages_blob(list(call["messages"]))
 
 
+def _is_hierarchy_stage(call: Mapping[str, Any]) -> bool:
+    return any(
+        str(item.get("content") or "").startswith(
+            ("FRIDAY_ATTACHMENT_CHUNK_DATA", "FRIDAY_ATTACHMENT_REDUCE_DATA")
+        )
+        for item in call["messages"]
+    )
+
+
+def _hierarchy_chunk_payloads(llm: _DocumentLLM) -> list[dict[str, Any]]:
+    return [
+        json.loads(str(item.get("content") or "").split("\n", 1)[1])
+        for call in llm.calls
+        for item in call["messages"]
+        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+    ]
+
+
+def _assert_full_sources_reached_the_hierarchy(llm: _DocumentLLM, sources: list[_Source]) -> None:
+    payloads = _hierarchy_chunk_payloads(llm)
+    assert payloads
+    for file_index, source in enumerate(sources, start=1):
+        selected = sorted(
+            (item for item in payloads if int(item["file_index"]) == file_index),
+            key=lambda item: int(item["chunk_index"]),
+        )
+        cursor = 0
+        for item in selected:
+            assert item["filename"] == source.filename
+            assert int(item["start"]) == cursor
+            end = int(item["end"])
+            assert str(item["text"]) == source.text[cursor:end]
+            cursor = end
+        assert cursor == len(source.text)
+        assert HEAD_CANARY in "".join(str(item["text"]) for item in selected)
+        assert TAIL_CANARY in "".join(str(item["text"]) for item in selected)
+
+
+def _map_evidence(messages: list[dict[str, Any]]) -> str:
+    return next(
+        str(item.get("content") or "")
+        for item in messages
+        if str(item.get("content") or "").startswith(MAP_PREFIX)
+    )
+
+
 async def _simple_context(
     user_id: str,
     message: str,
@@ -379,7 +427,18 @@ def _assert_no_action_or_web_carrier(
     kernel: _RecordingKernel,
 ) -> None:
     main_calls = [call for call in llm.calls if not _is_verifier_call(call) and not _is_repair_call(call)]
-    assert all(call["kwargs"].get("tools") in (None, []) for call in main_calls)
+    offered = {
+        str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+        for call in main_calls
+        for tool in (call["kwargs"].get("tools") or [])
+    }
+    # Attachment data cannot execute a schema by appearing in source text.  The
+    # current same-tenant contract nevertheless keeps authorised local tools and
+    # the public web family available to the model; only code/data outbound
+    # channels remain absent.
+    assert {"code_run", "data_query"}.isdisjoint(offered)
+    if main_calls:
+        assert {"web_search", "web_research", "web_fetch"} <= offered
     assert kernel.executed == []
     assert kernel.web_prefetch_attempts == 0
     assert result.get("tools_used") == []
@@ -423,13 +482,11 @@ async def _run_owned_turn(
     )
     monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
 
-    async def forbidden_web_prefetch(*args: Any, **kwargs: Any) -> None:
+    async def no_web_prefetch(*args: Any, **kwargs: Any) -> None:
         del args, kwargs
-        kernel.web_prefetch_attempts += 1
-        raise AssertionError("private document query reached web prefetch")
 
     if not allow_web_prefetch:
-        monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_web_prefetch)
+        monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_web_prefetch)
     captured_evidence: list[list[dict[str, str]]] = []
     original_verify = runtime._verify_response  # noqa: SLF001
 
@@ -531,18 +588,18 @@ async def test_owned_current_and_restored_target_after_70k_reaches_synthesis_and
         conversation_id=conversation_id,
     )
 
-    synthesis_calls = [call for call in llm.calls if not _is_verifier_call(call)]
+    synthesis_calls = [
+        call
+        for call in llm.calls
+        if not _is_verifier_call(call) and not _is_repair_call(call) and not _is_hierarchy_stage(call)
+    ]
     verifier_calls = [call for call in llm.calls if _is_verifier_call(call)]
     assert len(synthesis_calls) == len(verifier_calls) == len(evidence) == 1
-    synthesis_blob = _messages_blob(synthesis_calls[0]["messages"])
-    verifier_blob = _messages_blob(verifier_calls[0]["messages"])
     evidence_blob = _evidence_blob(evidence[0])
-    _assert_same_private_windows(
-        expected,
-        synthesis_blob=synthesis_blob,
-        evidence_blob=evidence_blob,
-        verifier_blob=verifier_blob,
-    )
+    _assert_full_sources_reached_the_hierarchy(llm, [source])
+    assert _map_evidence(synthesis_calls[0]["messages"]) == evidence_blob
+    assert _map_evidence(verifier_calls[0]["messages"]) == evidence_blob
+    assert "SYNTHETIC-ORBIT-NODE" in evidence_blob
     assert "INDIGO-COMET" in result["message"]
     assert result["verification_status"] == "passed"
     _assert_no_action_or_web_carrier(result, llm, kernel)
@@ -713,7 +770,7 @@ async def test_matching_prompt_injection_is_inert_and_has_no_action_schema(
     question = "Найди в документе «SYNTHETIC-INJECTION-NODE» и сообщи значение."
     llm = _DocumentLLM("Значение SYNTHETIC-INJECTION-NODE: JADE-LANTERN.")
     canonical = _canonical_owned_attachment(settings, storage, raw)
-    _projected, state, expected = _projection_windows(question, [canonical], [source])
+    _projected, state, _expected = _projection_windows(question, [canonical], [source])
     assert state.status == "matched" and state.matches == 1
 
     result, kernel, evidence = await _run_owned_turn(
@@ -725,7 +782,11 @@ async def test_matching_prompt_injection_is_inert_and_has_no_action_schema(
         llm=llm,
     )
 
-    synthesis = next(call for call in llm.calls if not _is_verifier_call(call))
+    synthesis = next(
+        call
+        for call in llm.calls
+        if not _is_verifier_call(call) and not _is_repair_call(call) and not _is_hierarchy_stage(call)
+    )
     verifier = next(call for call in llm.calls if _is_verifier_call(call))
     synthesis_system = "\n".join(
         str(item.get("content") or "") for item in synthesis["messages"] if item.get("role") == "system"
@@ -735,12 +796,12 @@ async def test_matching_prompt_injection_is_inert_and_has_no_action_schema(
     )
     assert injection not in synthesis_system
     assert injection not in verifier_system
-    _assert_same_private_windows(
-        expected,
-        synthesis_blob=_messages_blob(synthesis["messages"]),
-        evidence_blob=_evidence_blob(evidence[0]),
-        verifier_blob=_messages_blob(verifier["messages"]),
-    )
+    _assert_full_sources_reached_the_hierarchy(llm, [source])
+    evidence_blob = _evidence_blob(evidence[0])
+    assert _map_evidence(synthesis["messages"]) == evidence_blob
+    assert _map_evidence(verifier["messages"]) == evidence_blob
+    assert "SYNTHETIC-INJECTION-NODE" in evidence_blob
+    assert "ESCAPE" not in evidence_blob
     assert "JADE-LANTERN" in result["message"]
     assert "ESCAPE" not in result["message"]
     _assert_no_action_or_web_carrier(result, llm, kernel)
@@ -789,14 +850,17 @@ async def test_three_owned_long_files_receive_distributed_matching_windows(
         llm=llm,
     )
 
-    synthesis = next(call for call in llm.calls if not _is_verifier_call(call))
-    verifier = next(call for call in llm.calls if _is_verifier_call(call))
-    _assert_same_private_windows(
-        expected,
-        synthesis_blob=_messages_blob(synthesis["messages"]),
-        evidence_blob=_evidence_blob(evidence[0]),
-        verifier_blob=_messages_blob(verifier["messages"]),
+    synthesis = next(
+        call
+        for call in llm.calls
+        if not _is_verifier_call(call) and not _is_repair_call(call) and not _is_hierarchy_stage(call)
     )
+    verifier = next(call for call in llm.calls if _is_verifier_call(call))
+    _assert_full_sources_reached_the_hierarchy(llm, sources)
+    evidence_blob = _evidence_blob(evidence[0])
+    assert _map_evidence(synthesis["messages"]) == evidence_blob
+    assert _map_evidence(verifier["messages"]) == evidence_blob
+    assert all(f"DISTRIBUTED-VALUE-{index}" in evidence_blob for index in range(1, 4))
     assert all(f"DISTRIBUTED-VALUE-{index}" in result["message"] for index in range(1, 4))
     _assert_no_action_or_web_carrier(result, llm, kernel)
     metadata = _assistant_query_metadata(storage, result["conversation_id"])

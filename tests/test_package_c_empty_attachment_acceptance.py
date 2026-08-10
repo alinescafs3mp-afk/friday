@@ -324,7 +324,8 @@ async def test_k07_restored_unread_tail_never_becomes_a_proven_empty_file(
         enable_tools=False,
     )
 
-    assert reply["message"] == f"SYNTHETIC-INCOMPLETE-{signal}"
+    assert "Не весь исходный материал" in reply["message"]
+    assert reply["message"].endswith(f"SYNTHETIC-INCOMPLETE-{signal}")
     assert "Текста в файле не оказалось" not in reply["message"]
 
 

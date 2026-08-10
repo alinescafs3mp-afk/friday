@@ -127,6 +127,7 @@ def test_large_csv_is_streamed_into_a_bounded_result():
     assert len(result.text) <= 10_000
     assert result.metadata["rows_read"] < 20_000
     assert result.metadata["rows_truncated"] is True
+    assert result.metadata["text_truncated"] is True
 
 
 def test_xlsx_stops_at_text_budget_without_quadratic_assembly():

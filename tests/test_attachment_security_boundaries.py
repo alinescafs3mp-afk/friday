@@ -129,7 +129,14 @@ class _LocalAttachmentToolKernel:
                     "parameters": {"type": "object", "properties": {}},
                 },
             }
-            for name in ("memory_save", "entity_create", "remind", "web_search")
+            for name in (
+                "memory_save",
+                "entity_create",
+                "remind",
+                "web_search",
+                "web_research",
+                "web_fetch",
+            )
         ]
 
     async def execute(self, name, arguments, *, actor=None):  # pragma: no cover - loop is patched
@@ -221,6 +228,7 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     ):
         del message, actor, outbound_allowed, outbound_tool_allowlist
         captured["history"] = [dict(item) for item in context.conversation_history]
+        captured["focused"] = context.focused_attachment_turn
         captured["tool_names"] = {str((tool.get("function") or {}).get("name") or "") for tool in tools}
         captured["attachments"] = [dict(item) for item in (attachments or [])]
         return {"content": "Синтетический ответ по текущему файлу.", "tools_used": []}
@@ -232,16 +240,18 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     result = await asyncio.wait_for(
         runtime.chat(
             "alice",
-            "сохрани выводы",
+            "обобщи текущий документ",
             actor=auth.actor_for_user("alice", source="test"),
             conversation_id=conversation["id"],
             attachments=[
-                {
-                    "filename": "current.txt",
-                    "transient_text": "CURRENT-ATTACHMENT-SENTINEL",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+                agent_runtime_module._OwnedAttachment(
+                    {
+                        "filename": "current.txt",
+                        "transient_text": "CURRENT-ATTACHMENT-SENTINEL",
+                        "extraction_success": True,
+                        "verification_eligible": True,
+                    }
+                )
             ],
             enable_tools=True,
         ),
@@ -252,12 +262,15 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     assert small_talk_calls == 0, "a current file cannot be mistaken for short small-talk"
     assert outward_calls in {0, 1}
     assert outward_calls == 0 or outward_cancelled, "timed-out optional work was left running"
+    assert captured["focused"] is True
     assert any("PRIOR-QUESTION-SENTINEL" in str(item.get("content") or "") for item in captured["history"])
     assert any("PRIOR-ANSWER-SENTINEL" in str(item.get("content") or "") for item in captured["history"])
     assert "memory_save" in captured["tool_names"]
     assert "entity_create" in captured["tool_names"]
     assert "remind" in captured["tool_names"]
     assert "web_search" in captured["tool_names"]
+    assert "web_research" in captured["tool_names"]
+    assert "web_fetch" in captured["tool_names"]
     assert captured["attachments"][0]["transient_text"] == "CURRENT-ATTACHMENT-SENTINEL"
 
 
@@ -1578,6 +1591,7 @@ def test_broad_language_after_a_file_does_not_restore_it(settings, storage, mess
         "Посчитай заново.",
         "Почему ты нашла только 10?",
         "Что внутри файла?",
+        "Что на 288 позиции?",
         "А что внутри?",
         "Прочитай его.",
         "Посмотри его.",
@@ -1931,6 +1945,11 @@ def test_explicitly_partial_summary_question_does_not_require_complete_attachmen
 )
 def test_explicit_content_followups_are_file_references(message: str) -> None:
     assert _attachment_reference_kind(message) == "explicit"
+
+
+@pytest.mark.parametrize("message", ["Что на 288 позиции?", "А что в строке номер 47?"])
+def test_ordinal_followups_are_bounded_references_to_the_last_used_attachment(message: str) -> None:
+    assert _attachment_reference_kind(message) == "deictic"
 
 
 @pytest.mark.parametrize(
@@ -2526,6 +2545,70 @@ async def test_private_attachment_allows_only_web_family_outbound_calls(
 
 
 @pytest.mark.asyncio
+async def test_focused_attachment_keeps_model_selected_web_without_person_or_timeline_prefetch(
+    settings,
+    storage,
+    monkeypatch,
+):
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    kernel = _OutboundRecordingKernel(auth)
+    llm = _HallucinatedOutboundLLM()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=llm,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    prepared: list[AgentContext] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        context = AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            current_attachment_present=True,
+        )
+        prepared.append(context)
+        return context
+
+    async def no_web_prefetch(*args, **kwargs):
+        del args, kwargs
+
+    async def forbidden_private_prefetch(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("focused attachment broadened into person/timeline activity")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_web_prefetch)
+    monkeypatch.setattr(runtime, "_prefetch_person_activity", forbidden_private_prefetch)
+    monkeypatch.setattr(runtime, "_prefetch_the_timeline_if_asked", forbidden_private_prefetch)
+    result = await runtime.chat(
+        "alice",
+        "Обобщи текущий документ.",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[
+            agent_runtime_module._OwnedAttachment(
+                {
+                    "filename": "private.txt",
+                    "transient_text": "PRIVATE-FILE-SENTINEL",
+                    "extraction_success": True,
+                    "verification_eligible": True,
+                }
+            )
+        ],
+        enable_tools=True,
+    )
+
+    assert prepared and prepared[0].focused_attachment_turn is True
+    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
+    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
+    assert kernel.executed == ["web_search", "web_fetch"]
+    assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
+
+
+@pytest.mark.asyncio
 async def test_person_topic_allows_web_family_but_not_code_or_data(
     settings,
     storage,
@@ -2749,12 +2832,11 @@ async def test_private_lineage_survives_a_crash_after_oversized_user_persistence
             outward_verdict=("интернет", None),
         )
 
-    async def forbidden_prefetch(*args, **kwargs):
+    async def no_prefetch(*args, **kwargs):
         del args, kwargs
-        raise AssertionError("crash-persisted private lineage reached web prefetch")
 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
-    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_prefetch)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_prefetch)
     result = await runtime.chat(
         "alice",
         "synthetic next turn",
@@ -2766,11 +2848,9 @@ async def test_private_lineage_survives_a_crash_after_oversized_user_persistence
 
     assert seen_lineage == [True]
     assert llm.calls == 2
-    assert kernel.executed == []
-    assert all(
-        not {"web_search", "web_fetch", "code_run", "data_query"}.intersection(names)
-        for names in llm.offered_names
-    )
+    assert kernel.executed == ["web_search", "web_fetch"]
+    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
+    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
     assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
     final_rows = storage.get_conversation_messages(conversation["id"], user_id="alice")
     next_user_metadata = json.loads(final_rows[-2]["metadata_json"])
