@@ -488,6 +488,56 @@ class IntakeMixin(StorageShared):
             return []
         return [dict(row) for row in rows]
 
+    def search_raw_objects_in_set(
+        self,
+        user_id: str,
+        query: str,
+        raw_ids: list[str],
+        *,
+        limit: int = 64,
+    ) -> list[dict[str, Any]]:
+        """FTS over an already-authorized Raw-id set, scoped before SQL LIMIT."""
+
+        text = " ".join((query or "").split()).strip()
+        ordered_ids = list(dict.fromkeys(str(raw_id or "").strip() for raw_id in raw_ids if raw_id))[:1_000]
+        if not text or not ordered_ids or not self._fts_available:
+            return []
+        terms = _fts_terms(text)
+        if not terms:
+            return []
+        match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+        found: dict[str, dict[str, Any]] = {}
+        page_size = max(1, min(int(limit), 100))
+        try:
+            for offset in range(0, len(ordered_ids), 400):
+                batch = ordered_ids[offset : offset + 400]
+                placeholders = ",".join("?" for _item in batch)
+                rows = self.execute(
+                    f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                              bm25(raw_fts) AS rank
+                           FROM raw_fts
+                           JOIN raw_objects r ON r.rowid=raw_fts.rowid
+                          WHERE r.user_id=? AND r.deleted_at IS NULL
+                            AND r.id IN ({placeholders})
+                            AND {_not_private_raw_dependency("r")}
+                            AND NOT EXISTS (
+                                SELECT 1 FROM inbox i
+                                 WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                                   AND i.status='ignored'
+                            )
+                            AND raw_fts MATCH ?
+                          ORDER BY rank ASC, r.received_at DESC
+                          LIMIT ?""",  # nosec B608
+                    (user_id, *batch, match_query, page_size),
+                ).fetchall()
+                for row in rows:
+                    found[str(row["id"])] = dict(row)
+        except sqlite3.OperationalError:
+            return []
+        return sorted(found.values(), key=lambda item: (float(item.get("rank") or 0.0), str(item["id"])))[
+            :page_size
+        ]
+
     def get_raw_object(self, raw_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         if user_id is None:
             row = self.execute(
@@ -502,6 +552,35 @@ class IntakeMixin(StorageShared):
                 (raw_id, user_id),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_raw_object_descriptors(
+        self,
+        raw_ids: list[str],
+        user_id: str,
+        *,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]:
+        """Batch the same body-free descriptor read while preserving caller order."""
+
+        ordered = list(dict.fromkeys(str(raw_id or "").strip() for raw_id in raw_ids if raw_id))[
+            : max(1, min(int(limit), 1_000))
+        ]
+        if not ordered:
+            return []
+        found: dict[str, dict[str, Any]] = {}
+        for offset in range(0, len(ordered), 400):
+            batch = ordered[offset : offset + 400]
+            placeholders = ",".join("?" for _item in batch)
+            rows = self.execute(
+                f"""SELECT r.id, r.user_id, r.content_type, r.metadata_json, r.received_at
+                      FROM raw_objects r
+                     WHERE r.user_id=? AND r.deleted_at IS NULL
+                       AND r.id IN ({placeholders})
+                       AND {_not_private_raw_dependency("r")}""",  # nosec B608
+                (user_id, *batch),
+            ).fetchall()
+            found.update((str(row["id"]), dict(row)) for row in rows)
+        return [found[raw_id] for raw_id in ordered if raw_id in found]
 
     def store_inbox_item(self, item: InboxItem) -> InboxItem:
         self.ensure_user(item.user_id)

@@ -61,6 +61,57 @@ def _pending_file(
     return raw
 
 
+def _record_upload(storage, conversation_id: str, user_id: str, raw: RawObject, caption: str) -> None:
+    storage.store_message(
+        conversation_id,
+        user_id,
+        "user",
+        caption,
+        metadata={
+            "had_attachments": True,
+            "attachment_count": 1,
+            "attachment_origin": "upload",
+            "conversation_attachment_raw_ids": [raw.id],
+        },
+    )
+    storage.store_message(
+        conversation_id,
+        user_id,
+        "assistant",
+        f"прочитан {caption}",
+        metadata={"attachment_context_used": True},
+    )
+
+
+def _current_attachment(raw: RawObject) -> dict[str, object]:
+    metadata = raw.metadata_json if isinstance(raw.metadata_json, dict) else {}
+    return {
+        "raw_object_id": raw.id,
+        "filename": str(metadata.get("filename") or "attachment"),
+        "transient_text": raw.raw_content,
+        "extraction_success": True,
+    }
+
+
+def _patch_attachment_generation(runtime, monkeypatch):  # noqa: ANN001
+    seen: list[tuple[str, list[dict]]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context
+        snapshot = [dict(item) for item in (attachments or [])]
+        seen.append((str(message), snapshot))
+        names = [str(item.get("filename") or "attachment") for item in snapshot]
+        return {"content": "Синтетический ответ: " + ", ".join(names), "tools_used": []}
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    return seen
+
+
 class _EnabledButUnusedLLM:
     enabled = True
     model = "attachment-test"
@@ -276,6 +327,831 @@ def test_only_budgeted_history_can_restore_an_attachment(settings, storage):
         allow_file_read=True,
     )
     assert restored == [] and expected == 0
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_indices"),
+    [
+        ("Что указано в файле «alpha-plan.txt»?", [0]),
+        ("Что сказано в первом загруженном файле?", [0]),
+        ("Что сказано во втором документе?", [1]),
+        ("Что сказано в последнем файле?", [2]),
+        ("Сравни файлы «alpha-plan.txt» и «beta-budget.txt»", [0, 1]),
+        ("Сравни первый и третий загруженные файлы", [0, 2]),
+        ("Обобщи все загруженные файлы", [0, 1, 2]),
+    ],
+)
+def test_conversation_catalog_resolves_names_ordinals_and_sets(
+    settings,
+    storage,
+    query,
+    expected_indices,
+):
+    files = [
+        _pending_file(storage, "alice", "alice", "ALPHA-ONLY", filename="alpha-plan.txt"),
+        _pending_file(storage, "alice", "alice", "BETA-ONLY", filename="beta-budget.txt"),
+        _pending_file(storage, "alice", "alice", "GAMMA-LATEST", filename="gamma-latest.txt"),
+    ]
+    runtime = AgentRuntime(settings, storage)
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", files[0], "alpha")
+    storage.store_message(conversation["id"], "alice", "user", "обычный вопрос между загрузками")
+    storage.store_message(conversation["id"], "alice", "assistant", "обычный ответ")
+    _record_upload(storage, conversation["id"], "alice", files[1], "beta")
+    _record_upload(storage, conversation["id"], "alice", files[2], "gamma")
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        query,
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    expected_ids = [files[index].id for index in expected_indices]
+    assert [item["raw_object_id"] for item in restored] == expected_ids
+    assert expected == len(expected_ids)
+    exposed = json.dumps(restored, ensure_ascii=False)
+    for index, raw in enumerate(files):
+        if index not in expected_indices:
+            assert raw.raw_content not in exposed
+
+
+@pytest.mark.parametrize(
+    ("filenames", "query", "expected_indices", "expected_count"),
+    [
+        (["report.pdf", "old-report.pdf", "third.txt"], "Что в report.pdf?", [0], 1),
+        (["report.pdf", "old-report.pdf", "third.txt"], "Что в old-report.pdf?", [1], 1),
+        (["report.pdf", "annual report.pdf", "third.txt"], "Что в annual report.pdf?", [1], 1),
+        (
+            ["report.pdf", "annual report.pdf", "third.txt"],
+            "Сравни annual report.pdf и report.pdf",
+            [0, 1],
+            2,
+        ),
+        (
+            ["report.pdf", "old-report.pdf", "third.txt"],
+            "Сравни report.pdf и третий файл",
+            [0, 2],
+            2,
+        ),
+        (["plain.txt", "first-report.txt", "third.txt"], "Что в first-report.txt?", [1], 1),
+        (["one.txt", "two.txt", "three.txt"], "Сравни 1-й и 3-й файлы", [0, 2], 2),
+        (["one.txt", "two.txt", "three.txt"], "Сравни файлы №1 и №3", [0, 2], 2),
+        (
+            ["one.txt", "two.txt", "three.txt", "four.txt"],
+            "Обобщи первые 2 файла",
+            [0, 1],
+            2,
+        ),
+        (
+            ["one.txt", "two.txt", "three.txt", "four.txt"],
+            "Обобщи последние 2 файла",
+            [2, 3],
+            2,
+        ),
+        (["one.txt", "two.txt", "three.txt"], "Что в пятом файле?", [], 1),
+        (["one.txt", "two.txt", "three.txt"], "Что в файле №99?", [], 1),
+    ],
+)
+def test_catalog_selector_boundaries_ranges_and_mixed_references(
+    settings,
+    storage,
+    filenames,
+    query,
+    expected_indices,
+    expected_count,
+):
+    files = [
+        _pending_file(
+            storage,
+            "alice",
+            "alice",
+            f"CATALOG-CONTENT-{index}",
+            filename=filename,
+        )
+        for index, filename in enumerate(filenames)
+    ]
+    runtime = AgentRuntime(settings, storage)
+    conversation = storage.create_conversation("alice")
+    for raw in files:
+        _record_upload(storage, conversation["id"], "alice", raw, str(raw.id))
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        query,
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert [item["raw_object_id"] for item in restored] == [files[index].id for index in expected_indices]
+    assert expected == expected_count
+    exposed = json.dumps(restored, ensure_ascii=False)
+    for index, raw in enumerate(files):
+        if index not in expected_indices:
+            assert raw.raw_content not in exposed
+
+
+def test_indirect_content_clue_selects_the_unique_older_file(settings, storage):
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ORION-77 — срок согласования 14 дней\nTARGET-TAIL",
+        filename="old-contract.txt",
+    )
+    decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LATEST-DECOY-WITHOUT-THE-ANCHOR",
+        filename="latest.txt",
+    )
+    runtime = AgentRuntime(settings, storage)
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", target, "old")
+    _record_upload(storage, conversation["id"], "alice", decoy, "latest")
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "Обобщи тот из моих файлов, где встречается «ORION-77»",
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert expected == 1
+    assert [item["raw_object_id"] for item in restored] == [target.id]
+    assert "TARGET-TAIL" in restored[0]["transient_text"]
+    assert "LATEST-DECOY" not in json.dumps(restored, ensure_ascii=False)
+
+
+def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
+    document = _pending_file(storage, "shared", "alice", "OWN-DOCUMENT", filename="report.pdf")
+    voice = _pending_file(storage, "shared", "alice", "VOICE-TRANSCRIPT", filename="voice.ogg")
+    voice.metadata_json.update({"media_kind": "voice", "mime_type": "audio/ogg"})
+    storage.execute(
+        "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+        (json.dumps(voice.metadata_json), voice.id),
+    )
+    foreign = _pending_file(storage, "shared", "bob", "FOREIGN-DOCUMENT", filename="foreign.pdf")
+    runtime = AgentRuntime(settings, storage)
+    conversation = storage.create_conversation("alice")
+    for raw in (document, voice, foreign):
+        _record_upload(storage, conversation["id"], "alice", raw, raw.id)
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "Обобщи все загруженные файлы",
+        history,
+        tenant_id="shared",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert expected == 1
+    assert [item["raw_object_id"] for item in restored] == [document.id]
+    assert "VOICE-TRANSCRIPT" not in json.dumps(restored, ensure_ascii=False)
+    assert "FOREIGN-DOCUMENT" not in json.dumps(restored, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_named_pair_becomes_the_exact_deictic_active_set(
+    settings,
+    storage,
+    monkeypatch,
+):
+    alpha = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ALPHA-PAIR-ONLY",
+        filename="alpha-plan.txt",
+    )
+    beta = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "BETA-PAIR-ONLY",
+        filename="beta-budget.txt",
+    )
+    gamma = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "GAMMA-LATEST-MUST-STAY-OUT",
+        filename="gamma-latest.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    for raw in (alpha, beta, gamma):
+        _record_upload(storage, conversation["id"], "alice", raw, str(raw.id))
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    selected = await runtime.chat(
+        "alice",
+        "Сравни файлы alpha-plan.txt и beta-budget.txt",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+    continued = await runtime.chat(
+        "alice",
+        "А что в них?",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    expected_ids = [alpha.id, beta.id]
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [
+        expected_ids,
+        expected_ids,
+    ]
+    assert selected["restored_attachment_count"] == 2
+    assert continued["restored_attachment_count"] == 2
+    assert selected["attachment_context_expected_count"] == 2
+    assert continued["attachment_context_expected_count"] == 2
+    assert "GAMMA-LATEST-MUST-STAY-OUT" not in json.dumps(seen, ensure_ascii=False)
+
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    selected_row = next(
+        row
+        for row in rows
+        if row.get("role") == "user" and row.get("content") == "Сравни файлы alpha-plan.txt и beta-budget.txt"
+    )
+    selected_metadata = json.loads(str(selected_row.get("metadata_json") or "{}"))
+    assert selected_metadata["conversation_attachment_raw_ids"] == expected_ids
+
+
+@pytest.mark.asyncio
+async def test_both_files_reuses_the_previously_selected_pair(
+    settings,
+    storage,
+    monkeypatch,
+):
+    alpha = _pending_file(storage, "alice", "alice", "ALPHA-SELECTED", filename="alpha.txt")
+    beta = _pending_file(storage, "alice", "alice", "BETA-SELECTED", filename="beta.txt")
+    latest = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LATEST-UNSELECTED",
+        filename="latest.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    for raw in (alpha, beta, latest):
+        _record_upload(storage, conversation["id"], "alice", raw, str(raw.id))
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    await runtime.chat(
+        "alice",
+        "Сравни alpha.txt и beta.txt",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+    both = await runtime.chat(
+        "alice",
+        "Сравни оба файла",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    expected_ids = [alpha.id, beta.id]
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [
+        expected_ids,
+        expected_ids,
+    ]
+    assert both["restored_attachment_count"] == 2
+    assert both["attachment_context_expected_count"] == 2
+    assert "LATEST-UNSELECTED" not in json.dumps(seen, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "prior_filename"),
+    [
+        ("Сравни этот файл с alpha-plan.txt", "alpha-plan.txt"),
+        ("Сравни с report.pdf", "report.pdf"),
+    ],
+)
+async def test_current_file_can_be_compared_with_one_exact_named_prior_file(
+    settings,
+    storage,
+    monkeypatch,
+    query,
+    prior_filename,
+):
+    alpha = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ALPHA-PRIOR-ONLY",
+        filename=prior_filename,
+    )
+    beta = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "BETA-PRIOR-DECOY",
+        filename="beta-budget.txt",
+    )
+    gamma = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "GAMMA-CURRENT-ONLY",
+        filename="gamma-current.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", alpha, "alpha")
+    _record_upload(storage, conversation["id"], "alice", beta, "beta")
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(gamma)],
+        enable_tools=False,
+    )
+
+    expected_ids = [alpha.id, gamma.id]
+    assert len(seen) == 1
+    assert [item["raw_object_id"] for item in seen[0][1]] == expected_ids
+    assert result["restored_attachment_count"] == 1
+    assert result["attachment_context_expected_count"] == 2
+    assert result["attachment_context_readable_count"] == 2
+    exposed = json.dumps(seen, ensure_ascii=False)
+    assert "ALPHA-PRIOR-ONLY" in exposed
+    assert "GAMMA-CURRENT-ONLY" in exposed
+    assert "BETA-PRIOR-DECOY" not in exposed
+
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    comparison_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
+    comparison_metadata = json.loads(str(comparison_row.get("metadata_json") or "{}"))
+    assert comparison_metadata["conversation_attachment_raw_ids"] == expected_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Сравни alpha-plan.txt и beta-budget.txt",
+        "Сравни первые 2 файла",
+    ],
+)
+async def test_complete_selector_does_not_add_an_unrequested_current_file(
+    settings,
+    storage,
+    monkeypatch,
+    query,
+):
+    alpha = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ALPHA-EXPLICIT-ONLY",
+        filename="alpha-plan.txt",
+    )
+    beta = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "BETA-EXPLICIT-ONLY",
+        filename="beta-budget.txt",
+    )
+    current = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "CURRENT-MUST-NOT-BE-ADDED",
+        filename="current.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", alpha, "alpha")
+    _record_upload(storage, conversation["id"], "alice", beta, "beta")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(current)],
+        enable_tools=False,
+    )
+
+    expected_ids = [alpha.id, beta.id]
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [expected_ids]
+    assert result["attachment_context_expected_count"] == 2
+    assert result["restored_attachment_count"] == 2
+    assert "CURRENT-MUST-NOT-BE-ADDED" not in json.dumps(seen, ensure_ascii=False)
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    request_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
+    metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
+    assert metadata["conversation_attachment_raw_ids"] == expected_ids
+    assert metadata["conversation_uploaded_raw_ids"] == [current.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "expected_target", "expected_restored"),
+    [
+        ("Что в report.pdf?", "prior", 1),
+        ("Что в current.txt?", "current", 0),
+    ],
+)
+async def test_explicit_name_replaces_an_unrequested_current_attachment(
+    settings,
+    storage,
+    monkeypatch,
+    query,
+    expected_target,
+    expected_restored,
+):
+    prior = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "PRIOR-REPORT-ONLY",
+        filename="report.pdf",
+    )
+    current = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "CURRENT-FILE-ONLY",
+        filename="current.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", prior, "prior report")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(current)],
+        enable_tools=False,
+    )
+
+    expected = prior if expected_target == "prior" else current
+    excluded = current if expected_target == "prior" else prior
+    assert len(seen) == 1
+    assert [item["raw_object_id"] for item in seen[0][1]] == [expected.id]
+    assert result["restored_attachment_count"] == expected_restored
+    assert result["attachment_context_expected_count"] == 1
+    exposed = json.dumps(seen, ensure_ascii=False)
+    assert expected.raw_content in exposed
+    assert excluded.raw_content not in exposed
+
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    request_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
+    request_metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
+    assert request_metadata["conversation_attachment_raw_ids"] == [expected.id]
+
+
+@pytest.mark.asyncio
+async def test_uploaded_current_file_stays_in_catalog_when_prior_file_is_the_active_selection(
+    settings,
+    storage,
+    monkeypatch,
+):
+    prior = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "PRIOR-REPORT-TWO-TURN",
+        filename="report.pdf",
+    )
+    current = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "CURRENT-TWO-TURN",
+        filename="current.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", prior, "prior report")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    selected_prior = await runtime.chat(
+        "alice",
+        "Что в report.pdf?",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(current)],
+        enable_tools=False,
+    )
+    selected_current = await runtime.chat(
+        "alice",
+        "Что в current.txt?",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [
+        [prior.id],
+        [current.id],
+    ]
+    assert selected_prior["restored_attachment_count"] == 1
+    assert selected_current["restored_attachment_count"] == 1
+    assert selected_prior["attachment_context_expected_count"] == 1
+    assert selected_current["attachment_context_expected_count"] == 1
+    assert "CURRENT-TWO-TURN" not in json.dumps(seen[0], ensure_ascii=False)
+    assert "PRIOR-REPORT-TWO-TURN" not in json.dumps(seen[1], ensure_ascii=False)
+
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    prior_query_row = next(
+        row for row in rows if row.get("role") == "user" and row.get("content") == "Что в report.pdf?"
+    )
+    current_query_row = next(
+        row for row in rows if row.get("role") == "user" and row.get("content") == "Что в current.txt?"
+    )
+    prior_metadata = json.loads(str(prior_query_row.get("metadata_json") or "{}"))
+    current_metadata = json.loads(str(current_query_row.get("metadata_json") or "{}"))
+    assert prior_metadata["conversation_attachment_raw_ids"] == [prior.id]
+    assert prior_metadata["conversation_uploaded_raw_ids"] == [current.id]
+    assert current_metadata["conversation_attachment_raw_ids"] == [current.id]
+    assert "conversation_uploaded_raw_ids" not in current_metadata
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_indirect_content_clue_fails_closed_but_a_no_hit_topic_is_ordinary(
+    settings,
+    storage,
+    monkeypatch,
+):
+    first = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ORION-77 FIRST-PRIVATE-MATCH",
+        filename="first-orion.txt",
+    )
+    second = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ORION-77 SECOND-PRIVATE-MATCH",
+        filename="second-orion.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    for raw in (first, second):
+        _record_upload(storage, conversation["id"], "alice", raw, str(raw.id))
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    ambiguous = await runtime.chat(
+        "alice",
+        "Что по ORION-77?",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+    weather = await runtime.chat(
+        "alice",
+        "Что по погоде?",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [(message, attachments) for message, attachments in seen] == [
+        ("Что по погоде?", []),
+    ]
+    assert ambiguous["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" in ambiguous["message"].casefold()
+    assert weather["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" not in weather["message"].casefold()
+    assert "FIRST-PRIVATE-MATCH" not in json.dumps([ambiguous, weather, seen], ensure_ascii=False)
+    assert "SECOND-PRIVATE-MATCH" not in json.dumps([ambiguous, weather, seen], ensure_ascii=False)
+
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    ambiguous_row = next(
+        row for row in rows if row.get("role") == "user" and row.get("content") == "Что по ORION-77?"
+    )
+    ambiguous_metadata = json.loads(str(ambiguous_row.get("metadata_json") or "{}"))
+    assert "conversation_attachment_raw_ids" not in ambiguous_metadata
+
+
+@pytest.mark.asyncio
+async def test_two_current_files_satisfy_both_without_adding_a_prior_file(
+    settings,
+    storage,
+    monkeypatch,
+):
+    prior = _pending_file(storage, "alice", "alice", "PRIOR-MUST-STAY-OUT", filename="prior.txt")
+    current_one = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "CURRENT-ONE",
+        filename="current-one.txt",
+    )
+    current_two = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "CURRENT-TWO",
+        filename="current-two.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", prior, "prior")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        "Сравни оба файла",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(current_one), _current_attachment(current_two)],
+        enable_tools=False,
+    )
+
+    expected_ids = [current_one.id, current_two.id]
+    assert len(seen) == 1
+    assert [item["raw_object_id"] for item in seen[0][1]] == expected_ids
+    assert result["restored_attachment_count"] == 0
+    assert result["attachment_context_expected_count"] == 2
+    assert "PRIOR-MUST-STAY-OUT" not in json.dumps(seen, ensure_ascii=False)
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    request_row = next(
+        row for row in rows if row.get("role") == "user" and row.get("content") == "Сравни оба файла"
+    )
+    request_metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
+    assert request_metadata["conversation_attachment_raw_ids"] == expected_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_unrelated_catalog", [False, True])
+async def test_package_json_without_an_exact_private_match_is_an_ordinary_question(
+    settings,
+    storage,
+    monkeypatch,
+    with_unrelated_catalog,
+):
+    conversation = storage.create_conversation("alice")
+    if with_unrelated_catalog:
+        unrelated = _pending_file(
+            storage,
+            "alice",
+            "alice",
+            "PRIVATE-UNRELATED-FILE",
+            filename="private-notes.txt",
+        )
+        _record_upload(storage, conversation["id"], "alice", unrelated, "unrelated")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        "Как устроен package.json?",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert len(seen) == 1 and seen[0][1] == []
+    assert result["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" not in result["message"].casefold()
+    assert "PRIVATE-UNRELATED-FILE" not in json.dumps(seen, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "filenames"),
+    [
+        ("Что в файле missing.xyz?", ["alpha-plan.txt", "beta-budget.txt", "latest.txt"]),
+        ("Что в файле report.txt?", ["report.txt", "report.txt", "latest.txt"]),
+        ("Что в пятом файле?", ["one.txt", "two.txt", "latest.txt"]),
+        ("Что в файле №99?", ["one.txt", "two.txt", "latest.txt"]),
+        ("Что в файле voice.ogg?", ["voice.ogg", "report.pdf", "latest.txt"]),
+    ],
+)
+async def test_unknown_or_duplicate_filename_never_falls_back_to_latest_file(
+    settings,
+    storage,
+    monkeypatch,
+    query,
+    filenames,
+):
+    first = _pending_file(storage, "alice", "alice", "FIRST-PRIVATE", filename=filenames[0])
+    second = _pending_file(storage, "alice", "alice", "SECOND-PRIVATE", filename=filenames[1])
+    latest = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LATEST-MUST-NEVER-REACH-GENERATION",
+        filename=filenames[2],
+    )
+    conversation = storage.create_conversation("alice")
+    for raw in (first, second, latest):
+        _record_upload(storage, conversation["id"], "alice", raw, str(raw.id))
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    generated: list[list[dict]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
+
+    async def forbidden_generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        generated.append([dict(item) for item in (attachments or [])])
+        raise AssertionError("an unresolved filename reached response generation")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert generated == []
+    assert result["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" in result["message"].casefold()
+    assert "LATEST-MUST-NEVER-REACH-GENERATION" not in json.dumps(result, ensure_ascii=False)
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    request_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
+    request_metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
+    assert "conversation_attachment_raw_ids" not in request_metadata
 
 
 def test_exact_replay_restores_a_caption_for_regenerate(settings, storage):

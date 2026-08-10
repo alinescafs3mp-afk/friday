@@ -11,7 +11,7 @@ import re
 import time
 import unicodedata
 import urllib.parse
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
@@ -180,7 +180,9 @@ _ATTACHMENT_CONTEXT_CHARS = 24_000
 # envelope, not permission to include an unbounded file.
 _FOCUSED_ATTACHMENT_CONTEXT_CHARS = 72_000
 _ATTACHMENT_EVIDENCE_CHUNK_CHARS = 4_000
-_CONVERSATION_ATTACHMENT_MAX_FILES = 3
+_CONVERSATION_ATTACHMENT_MAX_FILES = 12
+_CONVERSATION_ATTACHMENT_CATALOG_MAX_FILES = 64
+_CONVERSATION_ATTACHMENT_HISTORY_LIMIT = 1_000
 # Open-ended work over a source larger than the ordinary prompt envelope uses
 # an explicit hierarchy.  Leaf spans are contiguous (no sampling and no gaps),
 # while their model-authored notes are bounded before the final synthesis.
@@ -284,6 +286,7 @@ _ATTACHMENT_QUERY_UNKNOWN = (
 
 
 _CONVERSATION_ATTACHMENT_RAW_IDS = "conversation_attachment_raw_ids"
+_CONVERSATION_UPLOADED_RAW_IDS = "conversation_uploaded_raw_ids"
 _RAW_OBJECT_ID_RE = re.compile(r"^raw_[A-Za-z0-9_-]{1,72}$")
 _ATTACHMENT_CROSS_CONTEXT_REQUEST = re.compile(
     r"(?:\b(?:предыдущ|прошл|раньше|друг(?:ой|ие|их)|соседн)\w*\s+"
@@ -6316,6 +6319,80 @@ _EXPLICIT_ATTACHMENT_REFERENCE = re.compile(
     r")",
     re.IGNORECASE,
 )
+# A selector is syntax, not an extractor allowlist.  Any bounded ASCII suffix
+# may name an upload; authorization/hydration later decides whether the object
+# is a supported document and explicitly excludes audio carriers.
+_ATTACHMENT_FILE_EXTENSION = r"(?:[A-Za-z0-9]{1,16})"
+_ATTACHMENT_BARE_FILENAME_REFERENCE = re.compile(
+    rf"(?<![\w./\\-])(?P<filename>[\w@+(),\[\]-]+(?:\.[\w@+(),\[\]-]+)*\."
+    rf"{_ATTACHMENT_FILE_EXTENSION})(?![\w.-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_QUOTED_FILENAME_REFERENCE = re.compile(
+    rf"[«\"'](?P<filename>[^«»\"'/\\\r\n]{{1,180}}\.{_ATTACHMENT_FILE_EXTENSION})[»\"']",
+    re.IGNORECASE,
+)
+_ATTACHMENT_FILENAME_REFERENCE = re.compile(
+    rf"(?:[«\"'][^«»\"'/\\\r\n]{{1,180}}\.{_ATTACHMENT_FILE_EXTENSION}[»\"']|"
+    rf"(?<![\w./\\-])[\w@+(),\[\]-]+(?:\.[\w@+(),\[\]-]+)*\."
+    rf"{_ATTACHMENT_FILE_EXTENSION}(?![\w.-]))",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COMPARISON_ACTION = re.compile(
+    r"\b(?:сравн|сопостав|свер|различ|отлич|разниц|compare|contrast|differences?|similarities)\w*",
+    re.IGNORECASE,
+)
+_ATTACHMENT_IMPLICIT_CURRENT_COMPARISON = re.compile(
+    r"(?:"
+    r"\b(?:этот|текущ)\w*\b|"
+    r"\b(?:сравн|сопостав|свер)\w*\s+(?:его\s+)?(?:с|со)\b|"
+    r"\b(?:чем\s+)?(?:отлич|различ)\w*\s+(?:от|с|со)\b|"
+    r"\b(?:найд\w*\s+)?(?:отлич|разниц)\w*\s+(?:от|с|со)\b|"
+    r"\b(?:compare|contrast)\b\s+(?:it\s+)?(?:with|against)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ATTACHMENT_ORDINAL_TOKEN = re.compile(
+    r"\b(?:перв\w*|втор\w*|трет\w*|четв[её]рт\w*|пят\w*|шест\w*|"
+    r"седьм\w*|восьм\w*|девят\w*|десят\w*|одиннадцат\w*|двенадцат\w*|"
+    r"предпоследн\w*|предыдущ\w*|последн\w*|first|second|third|fourth|"
+    r"fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|previous|"
+    r"penultimate|last)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_WORD_ORDINAL_PHRASE = re.compile(
+    rf"{_ATTACHMENT_ORDINAL_TOKEN.pattern}"
+    rf"(?:\s*(?:,|и|and)\s*{_ATTACHMENT_ORDINAL_TOKEN.pattern})*\s+"
+    rf"(?:(?:загруженн|присланн|отправленн|прикрепл[её]нн|uploaded)\w*\s+)*"
+    rf"{_ATTACHMENT_REFERENCE_NOUN}\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_BOTH_REFERENCE = re.compile(
+    rf"\b(?:оба|обе|обоих|обеих|both)\b[^.!?\n]{{0,80}}{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,80}}\b(?:оба|обе|обоих|обеих|both)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_ALL_REFERENCE = re.compile(
+    rf"\b(?:вс[её]|всех|all)\b[^.!?\n]{{0,80}}{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,80}}\b(?:вс[её]|всех|all)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_SELECTIVE_REFERENCE = re.compile(
+    rf"(?:"
+    rf"\b(?:тот|этот|один)\b[^.!?\n]{{0,80}}\b(?:из|среди)\b[^.!?\n]{{0,80}}"
+    rf"{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,100}}\b(?:где|котор)\w*\b|"
+    rf"\b(?:из|среди)\b[^.!?\n]{{0,80}}{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b(?:предыдущ|предпоследн|перв|втор|трет|четв[её]рт|последн)\w*\b"
+    rf"[^.!?\n]{{0,100}}{_ATTACHMENT_REFERENCE_NOUN}\b"
+    rf")",
+    re.IGNORECASE,
+)
+_INDIRECT_ATTACHMENT_TOPIC_REFERENCE = re.compile(
+    r"^\s*(?:а\s+)?(?:что|как|какие|какой|какая|кто|где|сколько)\s+"
+    r"(?:по|про|насч[её]т)\s+\S",
+    re.IGNORECASE,
+)
 _NON_ATTACHMENT_REFERENCE = re.compile(
     r"\b(?:"
     r"таблиц(?:а|ы|е|у|ей)\s+(?:"
@@ -6454,7 +6531,7 @@ _ATTACHMENT_PARTIAL_SCOPE_REQUEST = re.compile(
 )
 _MULTI_ATTACHMENT_SUMMARY_COUNT = re.compile(
     r"\b(?:(?:эти|вс[её]|последн\w*|недавн\w*)\s+)?"
-    r"(?P<count>\d{1,2}|два|две|двух|три|тр[её]х|тр[её]м|"
+    r"(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
     r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
     r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|эти)\w*\s+){0,3}"
     r"(?:файл|документ|вложен|таблиц)\w*\b",
@@ -6487,6 +6564,9 @@ def _attachment_count_value(raw: str) -> int | None:
     words = {
         "оба": 2,
         "обе": 2,
+        "обоих": 2,
+        "обеих": 2,
+        "both": 2,
         "два": 2,
         "две": 2,
         "двух": 2,
@@ -6533,7 +6613,7 @@ def _multi_attachment_summary_count(message: str) -> int | None:
 
 
 _MULTI_ATTACHMENT_COMPARISON_COUNT = re.compile(
-    r"\b(?P<count>\d{1,2}|оба|обе|два|две|двух|три|тр[её]х|тр[её]м|"
+    r"\b(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
     r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
     r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|эти)\w*\s+){0,3}"
     r"(?:файл|документ|вложен|таблиц)\w*\b",
@@ -6677,7 +6757,7 @@ def _bounded_json_mapping(value: Any, *, max_chars: int = 65_536) -> dict[str, A
 
 
 def _attachment_reference_kind(message: str) -> str:
-    """Return ``explicit``, ``deictic`` or ``""`` for a possible file follow-up.
+    """Return ``explicit``, ``deictic``, ``indirect`` or ``""`` for a file hint.
 
     An explicit noun phrase may deliberately reach back through the bounded
     conversation window.  A deictic/list continuation is weaker and callers
@@ -6692,8 +6772,20 @@ def _attachment_reference_kind(message: str) -> str:
         return ""
     if _EXPLICIT_ATTACHMENT_REFERENCE.search(text):
         return "explicit"
+    if _ATTACHMENT_FILENAME_REFERENCE.search(text):
+        return "explicit"
+    if (
+        _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
+        or _ATTACHMENT_BOTH_REFERENCE.search(text)
+    ):
+        return "explicit"
+    if _ATTACHMENT_ALL_REFERENCE.search(text) or _ATTACHMENT_SELECTIVE_REFERENCE.search(text):
+        return "explicit"
     if _DEICTIC_ATTACHMENT_CONTINUATION.search(text):
         return "deictic"
+    if _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(text):
+        return "indirect"
     if _ATTACHMENT_RECORD_POSITION.search(text):
         # “Что на 288 позиции?” names no standalone public subject; immediately
         # after a file-backed answer it is a bounded pointer into that same
@@ -6714,6 +6806,304 @@ def _attachment_reference_kind(message: str) -> str:
     ):
         return "explicit"
     return ""
+
+
+_ATTACHMENT_ORDINAL_PREFIXES: tuple[tuple[str, int], ...] = (
+    ("одиннадцат", 10),
+    ("двенадцат", 11),
+    ("четверт", 3),
+    ("четвёрт", 3),
+    ("седьм", 6),
+    ("восьм", 7),
+    ("девят", 8),
+    ("десят", 9),
+    ("перв", 0),
+    ("втор", 1),
+    ("трет", 2),
+    ("пят", 4),
+    ("шест", 5),
+    ("first", 0),
+    ("second", 1),
+    ("third", 2),
+    ("fourth", 3),
+    ("fifth", 4),
+    ("sixth", 5),
+    ("seventh", 6),
+    ("eighth", 7),
+    ("ninth", 8),
+    ("tenth", 9),
+    ("eleventh", 10),
+    ("twelfth", 11),
+)
+_ATTACHMENT_NUMERIC_ORDINAL_SUFFIX = r"(?:\s*[-–—]\s*(?:й|я|е|ой|ей)|(?:st|nd|rd|th))"
+_ATTACHMENT_NUMERIC_ORDINAL_CORE = rf"\d{{1,3}}{_ATTACHMENT_NUMERIC_ORDINAL_SUFFIX}"
+_ATTACHMENT_NUMERIC_ORDINAL_TOKEN = re.compile(
+    rf"\b(?P<number>\d{{1,3}}){_ATTACHMENT_NUMERIC_ORDINAL_SUFFIX}\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_NUMERIC_ORDINAL_LIST = re.compile(
+    rf"\b{_ATTACHMENT_NUMERIC_ORDINAL_CORE}\b"
+    rf"(?:\s*(?:,|и|and)\s*\b{_ATTACHMENT_NUMERIC_ORDINAL_CORE}\b)*\s+"
+    rf"(?:(?:загруженн|присланн|отправленн|прикрепл[её]нн|uploaded)\w*\s+)*"
+    rf"{_ATTACHMENT_REFERENCE_NOUN}\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_NOUN_NUMERIC_ORDINAL = re.compile(
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\s+(?:номер\s+|№\s*|no\.?\s*)?\d{{1,3}}\b"
+    rf"(?:\s*(?:,|и|and)\s*(?:номер\s+|№\s*|no\.?\s*)?\d{{1,3}}\b)*",
+    re.IGNORECASE,
+)
+_ATTACHMENT_NUMERIC_ORDINAL = re.compile(
+    rf"(?:{_ATTACHMENT_NUMERIC_ORDINAL_LIST.pattern}|{_ATTACHMENT_NOUN_NUMERIC_ORDINAL.pattern})",
+    re.IGNORECASE,
+)
+_ATTACHMENT_AUDIO_SUFFIXES = (
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".mp3",
+    ".m4a",
+    ".aac",
+    ".wav",
+    ".flac",
+    ".wma",
+    ".aif",
+    ".aiff",
+    ".amr",
+)
+_ATTACHMENT_REFERENCE_STOP_PREFIXES = (
+    "файл",
+    "документ",
+    "вложен",
+    "таблиц",
+    "загруз",
+    "присла",
+    "отправ",
+    "прикреп",
+    "сравн",
+    "сопостав",
+    "обобщ",
+    "прочит",
+    "посмотр",
+    "покаж",
+    "расскаж",
+    "указан",
+    "встреча",
+    "котор",
+    "перв",
+    "втор",
+    "трет",
+    "послед",
+    "предыдущ",
+    "этот",
+    "того",
+    "тот",
+    "моих",
+    "среди",
+    "where",
+    "which",
+    "file",
+    "document",
+    "attachment",
+    "compare",
+    "summar",
+)
+_ATTACHMENT_REFERENCE_STOP_WORDS = frozenset(
+    {
+        "что",
+        "как",
+        "где",
+        "кто",
+        "какие",
+        "какой",
+        "какая",
+        "про",
+        "при",
+        "для",
+        "или",
+        "между",
+        "собой",
+        "есть",
+        "всего",
+        "всех",
+        "обоих",
+        "этих",
+        "them",
+        "both",
+        "about",
+        "from",
+        "with",
+    }
+)
+
+
+def _normalized_attachment_selector(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value or "")).casefold().replace("ё", "е").split())
+
+
+def _attachment_filename_mentions(message: str) -> tuple[str, ...]:
+    """Exact filename-shaped selectors, with quoted spaces but no fuzzy substrings."""
+
+    found: list[tuple[int, str]] = []
+    quoted_spans: list[tuple[int, int]] = []
+    for match in _ATTACHMENT_QUOTED_FILENAME_REFERENCE.finditer(str(message or "")):
+        quoted_spans.append(match.span())
+        found.append((match.start(), _normalized_attachment_selector(match.group("filename"))))
+    for match in _ATTACHMENT_BARE_FILENAME_REFERENCE.finditer(str(message or "")):
+        if any(start <= match.start() and match.end() <= end for start, end in quoted_spans):
+            continue
+        found.append((match.start(), _normalized_attachment_selector(match.group("filename"))))
+    found.sort(key=lambda item: item[0])
+    return tuple(dict.fromkeys(name for _offset, name in found if name))
+
+
+def _attachment_filename_has_private_lead(message: str) -> bool:
+    """Whether filename syntax explicitly points to a supplied/uploaded file."""
+
+    text = str(message or "")
+    matches = [
+        *list(_ATTACHMENT_QUOTED_FILENAME_REFERENCE.finditer(text)),
+        *list(_ATTACHMENT_BARE_FILENAME_REFERENCE.finditer(text)),
+    ]
+    for match in matches:
+        prefix = _normalized_attachment_selector(text[max(0, match.start() - 120) : match.start()])
+        if re.search(
+            rf"(?:"
+            rf"\b(?:в|из|по|про|с)(?:\s+(?:этом|том|ранее|присланн\w*|загруженн\w*|"
+            rf"{_ATTACHMENT_REFERENCE_NOUN}))*|"
+            rf"\b(?:открой|прочитай|прочти|посмотри|проверь|разбери)\w*"
+            rf")$",
+            prefix,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _attachment_count_range_side(message: str) -> str:
+    """`first N` / `last N`, ignoring ordinal-looking filename text."""
+
+    chars = list(str(message or ""))
+    for matcher in (_ATTACHMENT_QUOTED_FILENAME_REFERENCE, _ATTACHMENT_BARE_FILENAME_REFERENCE):
+        for match in matcher.finditer(str(message or "")):
+            chars[match.start() : match.end()] = " " * (match.end() - match.start())
+    folded = _normalized_attachment_selector("".join(chars))
+    if re.search(r"\b(?:перв|first)\w*\b", folded):
+        return "first"
+    if re.search(r"\b(?:последн|last|recent)\w*\b", folded):
+        return "last"
+    return ""
+
+
+def _attachment_requested_catalog_indices(
+    message: str,
+    *,
+    total: int,
+    current_supplied: bool = False,
+) -> tuple[tuple[int, ...], int]:
+    """Resolve bounded file ordinals against stable upload chronology."""
+
+    selector_chars = list(str(message or ""))
+    for matcher in (_ATTACHMENT_QUOTED_FILENAME_REFERENCE, _ATTACHMENT_BARE_FILENAME_REFERENCE):
+        for match in matcher.finditer(str(message or "")):
+            selector_chars[match.start() : match.end()] = " " * (match.end() - match.start())
+    selector_text = "".join(selector_chars)
+    if total <= 0:
+        requested = (
+            sum(
+                1
+                for phrase in _ATTACHMENT_NUMERIC_ORDINAL_LIST.finditer(selector_text)
+                for _ordinal in _ATTACHMENT_NUMERIC_ORDINAL_TOKEN.finditer(phrase.group(0))
+            )
+            + len(tuple(_ATTACHMENT_NOUN_NUMERIC_ORDINAL.finditer(selector_text)))
+            + sum(
+                1
+                for phrase in _ATTACHMENT_WORD_ORDINAL_PHRASE.finditer(selector_text)
+                for _ordinal in _ATTACHMENT_ORDINAL_TOKEN.finditer(phrase.group(0))
+            )
+        )
+        return (), requested
+    folded = _normalized_attachment_selector(selector_text)
+    indices: list[int] = []
+    invalid = 0
+
+    def add(index: int) -> None:
+        nonlocal invalid
+        if 0 <= index < total and index not in indices:
+            indices.append(index)
+        elif not 0 <= index < total:
+            invalid += 1
+
+    for phrase in _ATTACHMENT_NUMERIC_ORDINAL_LIST.finditer(folded):
+        for match in _ATTACHMENT_NUMERIC_ORDINAL_TOKEN.finditer(phrase.group(0)):
+            try:
+                add(int(match.group("number")) - 1)
+            except ValueError:  # pragma: no cover - regex emits digits only
+                continue
+    for phrase in _ATTACHMENT_NOUN_NUMERIC_ORDINAL.finditer(folded):
+        for match in re.finditer(r"\d{1,3}", phrase.group(0)):
+            try:
+                add(int(match.group(0)) - 1)
+            except ValueError:  # pragma: no cover - regex emits digits only
+                continue
+    for phrase in _ATTACHMENT_WORD_ORDINAL_PHRASE.finditer(folded):
+        for match in _ATTACHMENT_ORDINAL_TOKEN.finditer(phrase.group(0)):
+            token = match.group(0)
+            if token.startswith(("предпослед", "penultimate")):
+                add(total - 2)
+                continue
+            if token.startswith(("предыдущ", "previous")):
+                add(total - 1 if current_supplied else total - 2)
+                continue
+            if token.startswith(("послед", "last")):
+                add(total - 1)
+                continue
+            for prefix, index in _ATTACHMENT_ORDINAL_PREFIXES:
+                if token.startswith(prefix):
+                    add(index)
+                    break
+    return tuple(indices), invalid
+
+
+def _attachment_reference_terms(message: str) -> tuple[str, ...]:
+    """Content clues for an indirect file selector, never general retrieval."""
+
+    folded = _normalized_attachment_selector(message)
+    quoted = [
+        _normalized_attachment_selector(match.group(0)[1:-1])
+        for match in _QUOTED_TEXT.finditer(folded)
+        if len(_normalized_attachment_selector(match.group(0)[1:-1])) >= 3
+    ]
+    words: list[str] = []
+    for match in re.finditer(r"[\w@.+/-]{3,}", folded):
+        token = match.group(0).strip("._-/+")
+        if (
+            len(token) < 3
+            or token in _ATTACHMENT_REFERENCE_STOP_WORDS
+            or token.isdigit()
+            or any(token.startswith(prefix) for prefix in _ATTACHMENT_REFERENCE_STOP_PREFIXES)
+        ):
+            continue
+        words.append(token)
+    return tuple(dict.fromkeys([*quoted, *words]))[:12]
+
+
+def _raw_file_is_audio(content_type: str, metadata: Mapping[str, Any]) -> bool:
+    raw_kind = str(content_type or "").strip().casefold()
+    media_kind = str(metadata.get("media_kind") or "").strip().casefold()
+    mime = (
+        str(metadata.get("mime_type") or metadata.get("mime") or metadata.get("content_type") or "")
+        .strip()
+        .casefold()
+    )
+    filename = str(metadata.get("filename") or "").strip().casefold()
+    return bool(
+        raw_kind in {"audio", "voice"}
+        or raw_kind.startswith(("audio/", "voice/"))
+        or media_kind in {"audio", "voice"}
+        or mime.startswith("audio/")
+        or filename.endswith(_ATTACHMENT_AUDIO_SUFFIXES)
+    )
 
 
 def _requires_complete_attachment_evidence(question: str, answer: str) -> bool:
@@ -13061,6 +13451,23 @@ class AgentRuntime:
                 result.append(raw_id)
         return result
 
+    @classmethod
+    def _message_catalog_attachment_ids(cls, message: Mapping[str, Any]) -> list[str]:
+        """Active selection plus immutable files actually uploaded on this turn."""
+
+        result = cls._message_attachment_ids(message)
+        if str(message.get("role") or "") != "user":
+            return result
+        metadata = _bounded_json_mapping(message.get("metadata_json"), max_chars=16_384)
+        values = metadata.get(_CONVERSATION_UPLOADED_RAW_IDS)
+        if not isinstance(values, list):
+            return result
+        for value in values[:_CONVERSATION_ATTACHMENT_MAX_FILES]:
+            raw_id = str(value or "").strip()
+            if _RAW_OBJECT_ID_RE.fullmatch(raw_id) and raw_id not in result:
+                result.append(raw_id)
+        return result
+
     @staticmethod
     def _message_had_attachments(message: Mapping[str, Any]) -> bool:
         if str(message.get("role") or "") != "user":
@@ -13074,6 +13481,327 @@ class AgentRuntime:
             return False
         metadata = _bounded_json_mapping(message.get("metadata_json"), max_chars=65_536)
         return metadata.get("attachment_context_used") is True
+
+    def _conversation_document_catalog(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+        additional_raw_ids: Sequence[str] = (),
+    ) -> list[dict[str, str]]:
+        """Body-free, uploader-scoped file catalog in stable upload chronology."""
+
+        raw_ids: list[str] = []
+        for item in history:
+            for raw_id in self._message_catalog_attachment_ids(item):
+                if raw_id not in raw_ids:
+                    raw_ids.append(raw_id)
+        for raw_id in additional_raw_ids:
+            candidate = str(raw_id or "").strip()
+            if _RAW_OBJECT_ID_RE.fullmatch(candidate) and candidate not in raw_ids:
+                raw_ids.append(candidate)
+        descriptors = self.storage.get_raw_object_descriptors(
+            raw_ids,
+            tenant_id,
+            limit=_CONVERSATION_ATTACHMENT_HISTORY_LIMIT,
+        )
+        descriptor_by_id = {str(item.get("id") or ""): item for item in descriptors}
+        catalog: list[dict[str, str]] = []
+        for raw_id in raw_ids:
+            descriptor = descriptor_by_id.get(raw_id)
+            if not descriptor or str(descriptor.get("content_type") or "") != "file":
+                continue
+            metadata = bounded_raw_file_metadata(descriptor.get("metadata_json"))
+            if str(metadata.get("uploaded_by") or "") != person_id or _raw_file_is_audio(
+                str(descriptor.get("content_type") or ""), metadata
+            ):
+                continue
+            catalog.append(
+                {
+                    "raw_object_id": raw_id,
+                    "filename": str(metadata.get("filename") or "attachment")[:260],
+                }
+            )
+        return catalog
+
+    def _hydrate_conversation_document_ids(
+        self,
+        raw_ids: list[str],
+        *,
+        tenant_id: str,
+        person_id: str,
+        max_files: int = _CONVERSATION_ATTACHMENT_MAX_FILES,
+    ) -> list[dict[str, Any]]:
+        hydrated: list[dict[str, Any]] = []
+        for raw_id in raw_ids[: max(1, min(max_files, _CONVERSATION_ATTACHMENT_CATALOG_MAX_FILES))]:
+            attachment = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            if attachment is not None:
+                hydrated.append(attachment)
+        return hydrated
+
+    def _resolve_conversation_attachment_reference(
+        self,
+        message: str,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+        already_supplied_count: int,
+        reference_kind: str,
+        additional_raw_ids: Sequence[str] = (),
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Resolve names, ordinals, sets and indirect clues without newest-file fallback."""
+
+        catalog = self._conversation_document_catalog(
+            history,
+            tenant_id=tenant_id,
+            person_id=person_id,
+            additional_raw_ids=additional_raw_ids,
+        )
+        catalog_ids = [item["raw_object_id"] for item in catalog]
+        if not catalog:
+            has_attachment_lineage = any(
+                self._message_attachment_ids(item) or self._message_had_attachments(item) for item in history
+            )
+            requests_all = bool(
+                _requests_all_attachment_set(message) or _ATTACHMENT_ALL_REFERENCE.search(message)
+            )
+            return (
+                [],
+                1 if has_attachment_lineage and reference_kind != "indirect" and not requests_all else 0,
+            )
+
+        latest_ids: list[str] = []
+        latest_expected = 0
+        for item in reversed(history):
+            active_ids = [raw_id for raw_id in self._message_attachment_ids(item) if raw_id in catalog_ids]
+            if active_ids or self._message_had_attachments(item):
+                latest_ids = active_ids
+                metadata = _bounded_json_mapping(item.get("metadata_json"), max_chars=16_384)
+                try:
+                    latest_expected = max(0, min(int(metadata.get("attachment_count") or 0), 100))
+                except (TypeError, ValueError):
+                    latest_expected = 0
+                latest_expected = max(latest_expected, len(active_ids))
+                break
+
+        folded = _normalized_attachment_selector(message)
+        name_groups: dict[str, list[str]] = {}
+        for item in catalog:
+            name = _normalized_attachment_selector(item["filename"])
+            if name:
+                name_groups.setdefault(name, []).append(item["raw_object_id"])
+
+        # Known names with spaces are accepted without quotes, but matches are
+        # token-bound and longest-first.  Therefore `report.pdf` is never found
+        # inside `old-report.pdf`, the bug that used to select both files.
+        known_candidates: list[tuple[int, int, str]] = []
+        for name in name_groups:
+            for match in re.finditer(rf"(?<![\w.-]){re.escape(name)}(?![\w.-])", folded):
+                known_candidates.append((match.start(), match.end(), name))
+        accepted_known: list[tuple[int, int, str]] = []
+        for start, end, name in sorted(
+            known_candidates,
+            key=lambda item: (-(item[1] - item[0]), item[0]),
+        ):
+            if any(
+                not (end <= used_start or start >= used_end) for used_start, used_end, _ in accepted_known
+            ):
+                continue
+            accepted_known.append((start, end, name))
+        known_mentions = [name for _start, _end, name in sorted(accepted_known, key=lambda item: item[0])]
+        parsed_mentions = list(_attachment_filename_mentions(message))
+        if known_mentions:
+            parsed_mentions = [
+                mention
+                for mention in parsed_mentions
+                if not any(known.endswith(f" {mention}") for known in known_mentions)
+            ]
+        requested_names = list(dict.fromkeys([*known_mentions, *parsed_mentions]))
+        selected_indices: set[int] = set()
+        unresolved = 0
+        for name in requested_names:
+            group = name_groups.get(name, [])
+            if len(group) != 1:
+                unresolved += max(1, len(group))
+                continue
+            selected_indices.add(catalog_ids.index(group[0]))
+
+        ordinal_indices, invalid_ordinals = _attachment_requested_catalog_indices(
+            message,
+            total=len(catalog),
+            current_supplied=already_supplied_count > 0,
+        )
+        selected_indices.update(ordinal_indices)
+        multi_count = _multi_attachment_open_task_count(message)
+        range_side = _attachment_count_range_side(message) if multi_count is not None else ""
+        strict_filename_context = bool(
+            _EXPLICIT_ATTACHMENT_REFERENCE.search(message)
+            or _ATTACHMENT_COMPARISON_ACTION.search(message)
+            or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+            or _attachment_filename_has_private_lead(message)
+        )
+        if unresolved and (strict_filename_context or known_mentions):
+            return [], unresolved + len(selected_indices)
+        if invalid_ordinals:
+            return [], invalid_ordinals + len(selected_indices)
+        if multi_count is not None and range_side and not requested_names:
+            needed = max(0, multi_count - max(0, already_supplied_count))
+            selected_ids = (
+                catalog_ids[:needed] if range_side == "first" else catalog_ids[-needed:] if needed else []
+            )
+            return (
+                self._hydrate_conversation_document_ids(
+                    selected_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                ),
+                needed,
+            )
+        if selected_indices:
+            selected_ids = [catalog_ids[index] for index in sorted(selected_indices)]
+            hydrated = self._hydrate_conversation_document_ids(
+                selected_ids,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            return hydrated, len(selected_ids)
+        if requested_names:
+            # A filename-shaped public subject such as `package.json` is not by
+            # itself proof that the person meant a private upload.  Exact known
+            # names resolve above; unknown names fail closed only when the turn
+            # also says file/upload/compare.
+            return [], 0
+
+        requests_all = bool(
+            _requests_all_attachment_set(message) or _ATTACHMENT_ALL_REFERENCE.search(message)
+        )
+
+        if _ATTACHMENT_BOTH_REFERENCE.search(message):
+            if already_supplied_count:
+                expected = max(0, 2 - already_supplied_count)
+                selected_ids = latest_ids[-expected:] if expected else []
+            elif len(latest_ids) == 2:
+                selected_ids = latest_ids
+                expected = 2
+            elif len(catalog) == 2:
+                selected_ids = catalog_ids
+                expected = 2
+            else:
+                return [], 2
+            return (
+                self._hydrate_conversation_document_ids(
+                    selected_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                ),
+                expected,
+            )
+
+        if requests_all:
+            expected = len(catalog)
+            return (
+                self._hydrate_conversation_document_ids(
+                    catalog_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                ),
+                expected,
+            )
+
+        if multi_count is not None:
+            needed = max(0, multi_count - max(0, already_supplied_count))
+            selected_ids = catalog_ids[-needed:] if needed else []
+            return (
+                self._hydrate_conversation_document_ids(
+                    selected_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                ),
+                needed,
+            )
+
+        terms = _attachment_reference_terms(message)
+        selective = bool(
+            _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+            or (_ATTACHMENT_COMPARISON_ACTION.search(message) and len(catalog) > 1)
+            or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(message))
+        )
+        if terms and selective:
+            filename_hit_ids = [
+                item["raw_object_id"]
+                for item in catalog
+                if any(term in _normalized_attachment_selector(item["filename"]) for term in terms)
+            ]
+            search_rows = self.storage.search_raw_objects_in_set(
+                tenant_id,
+                " ".join(terms),
+                catalog_ids,
+                limit=_CONVERSATION_ATTACHMENT_CATALOG_MAX_FILES,
+            )
+            hit_ids = list(
+                dict.fromkeys(
+                    [
+                        *filename_hit_ids,
+                        *[
+                            str(item.get("id") or "")
+                            for item in search_rows
+                            if isinstance(item, Mapping) and str(item.get("id") or "") in catalog_ids
+                        ],
+                    ]
+                )
+            )
+            if len(hit_ids) > _CONVERSATION_ATTACHMENT_CATALOG_MAX_FILES:
+                return [], len(hit_ids)
+            hydrated_hits = self._hydrate_conversation_document_ids(
+                hit_ids,
+                tenant_id=tenant_id,
+                person_id=person_id,
+                max_files=_CONVERSATION_ATTACHMENT_CATALOG_MAX_FILES,
+            )
+            scored: list[tuple[int, dict[str, Any]]] = []
+            for item in hydrated_hits:
+                haystack = _normalized_attachment_selector(
+                    f"{item.get('filename') or ''}\n{item.get('transient_text') or ''}"
+                )
+                score = sum(1 for term in terms if term in haystack)
+                if score:
+                    scored.append((score, item))
+            if scored:
+                best = max(score for score, _item in scored)
+                winners = [item for score, item in scored if score == best]
+                if len(winners) == 1:
+                    return winners, 1
+                return [], len(winners)
+            return ([], 0) if reference_kind == "indirect" else ([], 1)
+
+        if _ATTACHMENT_COMPARISON_ACTION.search(message) and len(catalog) > 1:
+            selected_ids = latest_ids if len(latest_ids) > 1 else catalog_ids
+            expected = len(selected_ids)
+            return (
+                self._hydrate_conversation_document_ids(
+                    selected_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                ),
+                expected,
+            )
+
+        if selective:
+            return [], 1
+        return (
+            self._hydrate_conversation_document_ids(
+                latest_ids,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            ),
+            latest_expected if latest_ids else 0,
+        )
 
     @classmethod
     def _history_has_private_context_lineage(cls, history: list[dict[str, Any]]) -> bool:
@@ -13216,6 +13944,7 @@ class AgentRuntime:
         replay_source_message_id: str | None = None,
         allow_file_read: bool = False,
         already_supplied_count: int = 0,
+        additional_raw_ids: Sequence[str] = (),
     ) -> tuple[list[dict[str, Any]], int]:
         """Recent same-conversation files, only for an actual follow-up.
 
@@ -13243,106 +13972,13 @@ class AgentRuntime:
             else:
                 return [], 0
         else:
-            multi_count = _multi_attachment_open_task_count(message)
-            all_active = _requests_all_attachment_set(message)
-            if multi_count is not None or all_active:
-                # An explicit count, or "all uploaded files", names the active
-                # contiguous upload episode rather than merely its newest turn.
-                # Missing pointers, duplicates and unowned Raw Objects never
-                # authorize backfilling through an unrelated user turn.
-                needed_count = (
-                    multi_count - max(0, already_supplied_count) if multi_count is not None else None
-                )
-                if needed_count is not None and needed_count <= 0:
-                    return [], 0
-                accounted = 0
-                now = datetime.now(UTC)
-                raw_id_groups: list[list[str]] = []
-                for item in reversed(recent):
-                    if str(item.get("role") or "") != "user":
-                        continue
-                    active_ids = self._message_attachment_ids(item)
-                    had_attachments = self._message_had_attachments(item)
-                    if not active_ids and not had_attachments:
-                        # One active episode is contiguous in user turns.  An
-                        # unrelated question closes it; do not walk through that
-                        # boundary and collect arbitrary older documents.
-                        if all_active:
-                            break
-                        return [], int(needed_count or 0)
-                    origin_metadata = _bounded_json_mapping(item.get("metadata_json"), max_chars=16_384)
-                    attachment_origin = str(origin_metadata.get("attachment_origin") or "")
-                    if attachment_origin in {"replay", "restored"}:
-                        # A prior file follow-up carries authorised pointers so
-                        # regenerate and deictic continuation remain safe, but
-                        # it is neither a new upload slot nor the end of the
-                        # original contiguous upload episode.  Walk through the
-                        # code-owned continuation to the upload rows beneath it.
-                        continue
-                    if attachment_origin != "upload":
-                        # Replayed/restored pointers preserve safety lineage but
-                        # are not independent upload slots.  Only a code-owned
-                        # origin marker can enter a multi-file active episode.
-                        if all_active:
-                            break
-                        return [], int(needed_count or 0)
-                    try:
-                        created = datetime.fromisoformat(
-                            str(item.get("created_at") or "").replace("Z", "+00:00")
-                        )
-                        age = now - created.astimezone(UTC) if created.tzinfo is not None else None
-                        if age is None or age < timedelta(0) or age > _MULTI_ATTACHMENT_HISTORY_MAX_AGE:
-                            if all_active:
-                                break
-                            return [], int(needed_count or 0)
-                    except (TypeError, ValueError):
-                        if all_active:
-                            break
-                        return [], int(needed_count or 0)
-                    metadata = _bounded_json_mapping(item.get("metadata_json"), max_chars=16_384)
-                    try:
-                        declared = max(0, min(int(metadata.get("attachment_count") or 0), 100))
-                    except (TypeError, ValueError):
-                        declared = 0
-                    declared = max(declared, len(active_ids), 1 if had_attachments else 0)
-                    if needed_count is not None and accounted + declared > needed_count:
-                        return [], needed_count
-                    accounted += declared
-                    raw_id_groups.append(active_ids)
-                    if needed_count is not None and accounted == needed_count:
-                        break
-                if needed_count is None:
-                    needed_count = accounted
-                if needed_count <= 0:
-                    return [], 0
-                # History was scanned newest-first; restore the episode in the
-                # chronology the person uploaded it, while retaining within-turn
-                # order.  Deduplication never backfills an older fourth file.
-                for group in reversed(raw_id_groups):
-                    for raw_id in group:
-                        if raw_id not in raw_ids:
-                            raw_ids.append(raw_id)
-                if not allow_file_read:
-                    return [], needed_count
-                restored_set = [
-                    attachment
-                    for raw_id in raw_ids
-                    if (
-                        attachment := self._owned_file_attachment(
-                            raw_id,
-                            tenant_id=tenant_id,
-                            person_id=person_id,
-                        )
-                    )
-                    is not None
-                ]
-                # A short, missing, duplicate or unowned set is returned only as
-                # bounded evidence of how much is really available; the caller
-                # compares it with ``multi_count`` and settles UNKNOWN without a
-                # model.  Crucially, no older item is used to fill the gap.
-                return restored_set, needed_count
             reference_kind = _attachment_reference_kind(message)
-            if not reference_kind:
+            if not (
+                reference_kind
+                or _multi_attachment_open_task_count(message) is not None
+                or _requests_all_attachment_set(message)
+                or _ATTACHMENT_ALL_REFERENCE.search(message)
+            ):
                 return [], 0
             if reference_kind == "deictic":
                 previous_assistant = next(
@@ -13351,16 +13987,34 @@ class AgentRuntime:
                 )
                 if previous_assistant is None or not self._message_used_attachment(previous_assistant):
                     return [], 0
-            for item in reversed(recent):
-                active_ids = self._message_attachment_ids(item)
-                if active_ids or self._message_had_attachments(item):
-                    # One attachment-bearing turn is one active set.  A newer
-                    # file (including no-save/unreadable with no usable pointer)
-                    # replaces the previous set.  Never fall back merely because
-                    # the newest set fails closed.
-                    source_message = item
-                    raw_ids = active_ids[:_CONVERSATION_ATTACHMENT_MAX_FILES]
-                    break
+            if not allow_file_read:
+                return [], 1
+            catalog_selector = bool(
+                _ATTACHMENT_FILENAME_REFERENCE.search(message)
+                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(message)
+                or _ATTACHMENT_NUMERIC_ORDINAL.search(message)
+                or _ATTACHMENT_BOTH_REFERENCE.search(message)
+                or _ATTACHMENT_ALL_REFERENCE.search(message)
+                or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+                or _ATTACHMENT_COMPARISON_REQUEST.search(message)
+                or _multi_attachment_open_task_count(message) is not None
+                or _requests_all_attachment_set(message)
+                or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(message))
+            )
+            resolution_history = history if catalog_selector else recent
+            if not catalog_selector and not any(
+                self._message_attachment_ids(item) for item in resolution_history
+            ):
+                return [], 0
+            return self._resolve_conversation_attachment_reference(
+                message,
+                resolution_history,
+                tenant_id=tenant_id,
+                person_id=person_id,
+                already_supplied_count=already_supplied_count,
+                reference_kind=reference_kind,
+                additional_raw_ids=additional_raw_ids,
+            )
 
         if source_message is not None:
             metadata = _bounded_json_mapping(source_message.get("metadata_json"), max_chars=16_384)
@@ -13598,31 +14252,125 @@ class AgentRuntime:
         # that, regenerate of «кто ещё там?» would bind to the duplicate text
         # row, find no attachment marker and silently answer without the file.
         multi_attachment_requested_count = _multi_attachment_open_task_count(clean_message)
-        all_attachment_set_requested = _requests_all_attachment_set(clean_message)
+        all_attachment_set_requested = bool(
+            _requests_all_attachment_set(clean_message) or _ATTACHMENT_ALL_REFERENCE.search(clean_message)
+        )
+        strict_attachment_selector = bool(
+            _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
+            or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
+            or _ATTACHMENT_SELECTIVE_REFERENCE.search(clean_message)
+            or _attachment_filename_mentions(clean_message)
+        )
+        current_prior_selector = bool(
+            supplied_attachment_count
+            and (
+                _ATTACHMENT_IMPLICIT_CURRENT_COMPARISON.search(clean_message)
+                or (
+                    re.search(r"\b(?:этот|текущ)\w*\b", clean_message, re.IGNORECASE)
+                    and re.search(r"\b(?:и|вместе\s+с)\b", clean_message, re.IGNORECASE)
+                )
+            )
+            and (
+                _attachment_filename_mentions(clean_message)
+                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
+                or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
+                or _ATTACHMENT_BOTH_REFERENCE.search(clean_message)
+                or _ATTACHMENT_SELECTIVE_REFERENCE.search(clean_message)
+            )
+        )
         restore_prior_for_current_multi = bool(
             supplied_attachment_count
             and (
                 all_attachment_set_requested
+                or current_prior_selector
                 or (
                     multi_attachment_requested_count is not None
                     and supplied_attachment_count < multi_attachment_requested_count
+                    and not strict_attachment_selector
                 )
             )
         )
+        # A filename, ordinal or content clue selects from one catalog that
+        # includes the current upload as its newest member.  Such a selector is
+        # authoritative: `Что в report.pdf?` must not be silently answered from
+        # an unrelated file attached to the same Telegram turn.  Comparison
+        # syntax such as `Сравни с report.pdf` still keeps the current upload as
+        # the implicit other side below.
+        current_catalog_selector = bool(
+            supplied_attachment_count
+            and not synthetic_document_notice
+            and (strict_attachment_selector or attachment_reference_kind == "indirect")
+        )
+        selector_replaces_current = bool(current_catalog_selector and not restore_prior_for_current_multi)
+        attachment_catalog_history = prior_history
+        if (
+            may_read_files
+            and not replay_source_message_id
+            and (
+                attachment_reference_kind
+                or multi_attachment_requested_count is not None
+                or all_attachment_set_requested
+                or current_prior_selector
+            )
+        ):
+            # This wider window is a code-only Raw-id catalog.  It never enters
+            # the model history; selected files are re-authorized and projected
+            # below through the ordinary attachment path.
+            attachment_catalog_history = self.storage.get_conversation_messages(
+                conversation_id,
+                user_id=user_id,
+                limit=_CONVERSATION_ATTACHMENT_HISTORY_LIMIT,
+            )
         restored_attachments, restored_attachment_expected_count = (
             self._restore_conversation_attachments(
                 clean_message,
-                prior_history,
+                attachment_catalog_history,
                 tenant_id=tenant_id,
                 person_id=person_id,
                 replay_source_message_id=replay_source_message_id,
                 allow_file_read=may_read_files,
-                already_supplied_count=supplied_attachment_count,
+                already_supplied_count=(0 if current_catalog_selector else supplied_attachment_count),
+                additional_raw_ids=(current_attachment_ids if current_catalog_selector else ()),
             )
-            if not supplied_attachment_count or restore_prior_for_current_multi
+            if (not supplied_attachment_count or restore_prior_for_current_multi or selector_replaces_current)
             else ([], 0)
         )
         restored_attachment_ids = self._raw_attachment_ids(restored_attachments)
+        if all_attachment_set_requested and multi_attachment_requested_count is None:
+            multi_attachment_requested_count = min(
+                supplied_attachment_count + restored_attachment_expected_count,
+                100,
+            )
+        distinct_selected_ids = list(
+            dict.fromkeys(
+                restored_attachment_ids
+                if selector_replaces_current
+                else [*restored_attachment_ids, *current_attachment_ids]
+            )
+        )
+        current_overlap = len(set(restored_attachment_ids).intersection(current_attachment_ids))
+        restored_history_attachment_count = max(
+            0,
+            len(restored_attachment_ids) - current_overlap,
+        )
+        selected_expected_count = (
+            restored_attachment_expected_count
+            if selector_replaces_current
+            else supplied_attachment_count + restored_attachment_expected_count - current_overlap
+            if restore_prior_for_current_multi
+            else restored_attachment_expected_count
+        )
+        attachment_resolution_failed = bool(
+            may_read_files
+            and restored_attachment_expected_count
+            and (
+                not supplied_attachment_count or restore_prior_for_current_multi or selector_replaces_current
+            )
+            and (strict_attachment_selector or attachment_reference_kind == "indirect")
+            and multi_attachment_requested_count is None
+            and not all_attachment_set_requested
+            and len(distinct_selected_ids) < selected_expected_count
+        )
         # Web tools now use the ordinary same-tenant turn context.  Private
         # attachment lineage no longer creates a history-free/prefetch-only
         # chamber; authorization and the web transport's own safety boundaries
@@ -13661,7 +14409,19 @@ class AgentRuntime:
         if supplied_attachment_count:
             user_metadata = {
                 "had_attachments": True,
-                "attachment_count": min(supplied_attachment_count, 100),
+                "attachment_count": min(
+                    (
+                        restored_attachment_expected_count
+                        if selector_replaces_current and not attachment_resolution_failed
+                        else supplied_attachment_count
+                    )
+                    + (
+                        restored_attachment_expected_count
+                        if restore_prior_for_current_multi and not attachment_resolution_failed
+                        else 0
+                    ),
+                    100,
+                ),
                 # Closed provenance used by bounded multi-upload restoration.
                 # A follow-up carrying restored pointers is not a new upload.
                 "attachment_origin": "upload",
@@ -13676,29 +14436,38 @@ class AgentRuntime:
                 "attachment_count": replay_attachment_count,
                 "attachment_origin": "replay",
             }
-        elif restored_attachment_expected_count:
+        elif restored_attachment_expected_count and not attachment_resolution_failed:
             user_metadata = {
                 "had_attachments": True,
                 "attachment_count": restored_attachment_expected_count,
                 "attachment_origin": "restored",
             }
-        if current_attachment_ids:
+        resolved_turn_attachment_ids = (
+            restored_attachment_ids
+            if selector_replaces_current and not attachment_resolution_failed
+            else []
+            if selector_replaces_current
+            else list(dict.fromkeys([*restored_attachment_ids, *current_attachment_ids]))
+            if restore_prior_for_current_multi
+            else current_attachment_ids or replay_attachment_ids or restored_attachment_ids
+        )[:_CONVERSATION_ATTACHMENT_MAX_FILES]
+        if resolved_turn_attachment_ids:
             # Pointer only.  The excerpt, filename, parser details and path stay
             # out of durable message metadata.  The pointer is useful solely
             # through the same-person/same-conversation checks above and below.
             user_metadata = {
                 **(user_metadata or {}),
-                _CONVERSATION_ATTACHMENT_RAW_IDS: current_attachment_ids,
+                _CONVERSATION_ATTACHMENT_RAW_IDS: resolved_turn_attachment_ids,
             }
-        elif replay_attachment_ids:
+        if current_attachment_ids:
+            # Keep upload provenance separate from the active selected set.  A
+            # turn may attach `current.txt` while explicitly asking about an
+            # older `report.pdf`; the next exact reference must still be able
+            # to find either file, while a bare `а в нём?` follows only the
+            # selected report pointer above.
             user_metadata = {
                 **(user_metadata or {}),
-                _CONVERSATION_ATTACHMENT_RAW_IDS: replay_attachment_ids,
-            }
-        elif restored_attachment_ids:
-            user_metadata = {
-                **(user_metadata or {}),
-                _CONVERSATION_ATTACHMENT_RAW_IDS: restored_attachment_ids,
+                _CONVERSATION_UPLOADED_RAW_IDS: current_attachment_ids,
             }
         if turn_private_context_lineage:
             # This row is the crash-safe continuation of the security state.
@@ -13724,14 +14493,25 @@ class AgentRuntime:
             clean_message,
             metadata=user_metadata,
         )
-        # A current upload replaces older conversational files.  Without a new
-        # upload, restore at most three recent files only for a turn that points
-        # back at them; ordinary questions receive no old attachment text.
-        active_attachment_set = (
-            [*restored_attachments, *attachment_list]
+        # A current upload remains the default source.  Explicit comparison or
+        # set references may add resolved earlier files; without any reference,
+        # ordinary questions still receive no ambient old attachment text.
+        active_candidates = (
+            restored_attachments
+            if selector_replaces_current
+            else [*restored_attachments, *attachment_list]
             if restore_prior_for_current_multi
             else attachment_list or restored_attachments
         )
+        active_attachment_set: list[dict[str, Any]] = []
+        active_raw_ids: set[str] = set()
+        for item in active_candidates:
+            raw_id = str(item.get("raw_object_id") or "") if isinstance(item, Mapping) else ""
+            if raw_id and raw_id in active_raw_ids:
+                continue
+            if raw_id:
+                active_raw_ids.add(raw_id)
+            active_attachment_set.append(item)
         whole_document_task = (
             "summary"
             if synthetic_document_notice and active_attachment_set
@@ -13762,7 +14542,9 @@ class AgentRuntime:
             active_attachment_set,
         )
         attachment_expected_count = (
-            min(supplied_attachment_count + restored_attachment_expected_count, 100)
+            min(restored_attachment_expected_count, 100)
+            if selector_replaces_current
+            else min(selected_expected_count, 100)
             if restore_prior_for_current_multi
             else min(supplied_attachment_count, 100)
             if supplied_attachment_count
@@ -13848,10 +14630,17 @@ class AgentRuntime:
         )
         multi_attachment_incomplete_answer = (
             f"Не могу надёжно обобщить все {multi_attachment_requested_count} документа: "
-            f"в текущем ограниченном эпизоде доступны "
+            f"в выбранном наборе доступны "
             f"{attachment_readable_count} из {multi_attachment_requested_count}. "
             "Полнота набора неизвестна; повторно пришлите только действительно недостающие документы."
             if multi_attachment_incomplete and multi_attachment_requested_count is not None
+            else ""
+        )
+        attachment_resolution_failed_answer = (
+            "Не удалось однозначно определить нужный ранее загруженный файл или набор файлов. "
+            "Укажите точное имя файла либо его номер в порядке загрузки; последний файл "
+            "автоматически подставлен не будет."
+            if attachment_resolution_failed
             else ""
         )
         attachment_query_closed_answer = (
@@ -14127,6 +14916,18 @@ class AgentRuntime:
                 web_evidence_status=prior_web_status,
                 web_sources=list(prior_web_sources),
                 web_evidence_scope=prior_web_scope,
+            )
+        elif attachment_resolution_failed:
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=attachment_resolution_failed_answer,
+                open_remainder="",
+                remainder_known=True,
+                current_attachment_present=bool(supplied_attachment_count),
             )
         elif multi_attachment_incomplete:
             # The explicit cardinality names the whole active set.  A missing,
@@ -14413,7 +15214,7 @@ class AgentRuntime:
             supplied_attachment_count
             or attachments
             or replay_had_attachments
-            or attachment_reference_kind == "explicit"
+            or restored_attachment_expected_count
             or (attachment_reference_kind == "deictic" and latest_prior_used_attachment)
             or latest_prior_used_attachment
         )
@@ -16736,7 +17537,7 @@ class AgentRuntime:
             "attachment_query_scan_complete": attachment_request_projection.scan_complete,
             "attachment_query_files_scanned": attachment_request_projection.files_scanned,
             "attachment_query_files_matched": attachment_request_projection.files_matched,
-            "restored_attachment_count": len(restored_attachments),
+            "restored_attachment_count": restored_history_attachment_count,
             "context": {
                 "kb_size": context.kb_size,
                 "entities": context.entity_count,
@@ -16764,7 +17565,7 @@ class AgentRuntime:
                 "attachment_context_readable_count": attachment_readable_count,
                 "attachment_coverage_complete": attachment_coverage_complete,
                 "attachment_verification_complete": attachment_verification_complete,
-                "restored_attachment_count": len(restored_attachments),
+                "restored_attachment_count": restored_history_attachment_count,
             },
         }
 
