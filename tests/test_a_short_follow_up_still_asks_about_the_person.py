@@ -165,7 +165,7 @@ def test_the_model_is_not_even_offered_the_web_for_a_person_question() -> None:
     поиск) — уговорами это не лечится, только тем, чего нет в списке.
     """
     source = inspect.getsource(AgentRuntime.chat)
-    assert 'or topic.startswith("человек")' in source
+    assert 'topic.startswith("человек")' in source
     at = source.index("if outbound_blocked")
     guard = source[at : at + 1800]
     assert "_OUTBOUND_TOOL_NAMES" in guard, "модель снова получила закрытые инструменты"

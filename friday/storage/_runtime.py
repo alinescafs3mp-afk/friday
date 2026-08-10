@@ -11,12 +11,15 @@ from friday.storage._base import (
     RUNTIME_EVENT_CAP,
     UTC,
     Any,
+    DeletedAccountError,
     Sequence,
     StorageShared,
     _json_load,
     datetime,
+    deleted_account_tombstone_key,
     hmac,
     json,
+    known_runtime_key_owners,
     new_id,
     re,
     timedelta,
@@ -463,10 +466,34 @@ class RuntimeMixin(StorageShared):
     def record_event(self, event_type: str, payload: dict[str, Any] | None = None) -> str:
         """Append one operational event and trim the journal to its cap."""
         event_id = new_id("evt")
+        event_payload = payload or {}
+        owners: set[str] = set()
+        user_id = event_payload.get("user_id")
+        if isinstance(user_id, str) and user_id not in {"", "*"}:
+            owners.add(user_id)
+        user_ids = event_payload.get("user_ids")
+        if isinstance(user_ids, list):
+            owners.update(item for item in user_ids if isinstance(item, str) and item)
+        if str(event_type) == "graph.entities_pruned" and not owners:
+            raise ValueError("graph.entities_pruned requires an explicit user_ids scope")
         with self.transaction() as conn:
+            for owner in owners:
+                try:
+                    tombstone_key = deleted_account_tombstone_key(owner)
+                except ValueError:
+                    if str(event_type) == "graph.entities_pruned":
+                        raise
+                    continue
+                if conn.execute(
+                    "SELECT 1 FROM runtime_kv WHERE key=?",
+                    (tombstone_key,),
+                ).fetchone():
+                    raise DeletedAccountError(
+                        "Operational history cannot be published for a permanently deleted account"
+                    )
             conn.execute(
                 "INSERT INTO runtime_events(id, event_type, payload, created_at) VALUES(?,?,?,?)",
-                (event_id, str(event_type)[:64], json.dumps(payload or {}, ensure_ascii=False), utc_now()),
+                (event_id, str(event_type)[:64], json.dumps(event_payload, ensure_ascii=False), utc_now()),
             )
             # Trim by row count rather than age: age alone lets a burst blow the table
             # up inside the retention window, and a count is what bounds disk.
@@ -522,6 +549,14 @@ class RuntimeMixin(StorageShared):
 
     def kv_set(self, key: str, value: str) -> None:
         with self.transaction() as conn:
+            for owner in known_runtime_key_owners(str(key)):
+                if conn.execute(
+                    "SELECT 1 FROM runtime_kv WHERE key=?",
+                    (deleted_account_tombstone_key(owner),),
+                ).fetchone():
+                    raise DeletedAccountError(
+                        "Runtime state cannot be published for a permanently deleted account"
+                    )
             conn.execute(
                 """INSERT INTO runtime_kv(key, value, updated_at) VALUES(?, ?, ?)
                    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
@@ -542,6 +577,11 @@ class RuntimeMixin(StorageShared):
 
         key = f"quota:{name}:{user_id}:{day}"
         with self.transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM runtime_kv WHERE key=?",
+                (deleted_account_tombstone_key(user_id),),
+            ).fetchone():
+                raise DeletedAccountError("Counters cannot be published for a permanently deleted account")
             row = conn.execute(
                 """INSERT INTO runtime_kv(key, value, updated_at) VALUES(?, '1', ?)
                    ON CONFLICT(key) DO UPDATE SET

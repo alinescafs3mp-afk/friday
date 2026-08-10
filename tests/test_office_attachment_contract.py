@@ -198,7 +198,7 @@ async def test_one_canonical_json_block_is_shared_by_synthesis_judge_and_repair(
     evidence = _attachment_evidence_chunks([attachment])
     assert [item["output"] for item in evidence] == [serialized]
 
-    judge = _CaptureLLM('{"ok": true, "score": 1.0, "issues": []}')
+    judge = _CaptureLLM('{"ok": true, "request_satisfied": true, "score": 1.0, "issues": []}')
     runtime.llm = judge
     verdict = await runtime._verify_response(  # noqa: SLF001
         "сколько позиций?",

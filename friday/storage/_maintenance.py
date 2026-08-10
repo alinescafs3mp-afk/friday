@@ -16,6 +16,7 @@ from friday.private_fs import (
     restrict_sqlite_files,
 )
 from friday.storage._base import (
+    ACCOUNT_DELETION_ELIGIBILITY_PREFIX,
     LOGGER,
     SCHEMA_VERSION,
     UTC,
@@ -789,6 +790,20 @@ class MaintenanceMixin(StorageShared):
                     f"integrity={health.get('integrity_check')}, "
                     f"foreign_keys={len(health.get('foreign_key_violations') or [])}"
                 )
+            # Telegram queue/files/vault are intentionally NOT rolled back with
+            # SQLite.  A clean-history marker from the older snapshot therefore
+            # cannot still prove that no external activity happened after it.
+            # Invalidate all such proofs before certifying the restored database;
+            # newly admin-created local accounts receive a fresh marker normally.
+            with self.transaction() as conn:
+                eligibility_cursor = conn.execute(
+                    "DELETE FROM runtime_kv WHERE substr(key,1,?)=?",
+                    (
+                        len(ACCOUNT_DELETION_ELIGIBILITY_PREFIX),
+                        ACCOUNT_DELETION_ELIGIBILITY_PREFIX,
+                    ),
+                )
+                invalidated_deletion_eligibility = max(0, int(eligibility_cursor.rowcount))
             return {
                 "ok": True,
                 "restored_from": backup_name,
@@ -808,6 +823,7 @@ class MaintenanceMixin(StorageShared):
                 },
                 "integrity_check": health["integrity_check"],
                 "foreign_key_violations": len(health.get("foreign_key_violations") or []),
+                "invalidated_deletion_eligibility": invalidated_deletion_eligibility,
             }
         except BaseException as restore_error:
             self.close()

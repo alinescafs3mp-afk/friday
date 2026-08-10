@@ -40,6 +40,15 @@ from friday.telegram_bridge._base import (
 from friday.telegram_bridge._markup import to_telegram_html
 from friday.telegram_bridge._queue import _UpdateInbox
 
+# Long polling normally returns within ``POLL_TIMEOUT`` and even a failed round
+# sleeps for no more than ``BACKOFF_MAX``.  A substantially larger silence means
+# the coroutine is wedged inside a socket/backend transition rather than merely
+# waiting for Telegram.  The exception intentionally escapes ``run`` so the
+# already configured systemd ``Restart=on-failure`` creates fresh HTTP clients.
+_POLL_WATCHDOG_INTERVAL_SEC = 15.0
+_POLL_WATCHDOG_STALE_SEC = max(180.0, POLL_TIMEOUT + BACKOFF_MAX + 60.0)
+_TRANSITION_JOURNAL_TIMEOUT_SEC = 5.0
+
 
 class _LazyUpdateInbox:
     """Delay every SQLite touch until the bridge owns its process lease."""
@@ -117,6 +126,7 @@ class TransportMixin(BridgeShared):
         # кто может об этом сказать (sentinel живёт ВНУТРИ backend и молчит с ним).
         self._backend_down_since = 0.0
         self._backend_down_warned_at = 0.0
+        self._poll_heartbeat_at = time.monotonic()
 
     async def run(self) -> None:
         install_secret_redaction(
@@ -177,6 +187,7 @@ class TransportMixin(BridgeShared):
                 await asyncio.gather(
                     self._poll_loop(telegram, backend),
                     self._outbound_loop(telegram, backend),
+                    self._poll_watchdog(),
                 )
         finally:
             self._inbox.close()
@@ -261,16 +272,19 @@ class TransportMixin(BridgeShared):
             # full URL, and the bot token lives in Telegram URLs.
             payload["error_type"] = type(error).__name__
         try:
-            await self._backend_json(
-                backend,
-                "POST",
-                "/api/events",
-                {
-                    "event_type": f"bridge.{loop_name}_{'failed' if failing else 'recovered'}",
-                    "payload": payload,
-                },
-                signer,
-                signer,
+            await asyncio.wait_for(
+                self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/events",
+                    {
+                        "event_type": f"bridge.{loop_name}_{'failed' if failing else 'recovered'}",
+                        "payload": payload,
+                    },
+                    signer,
+                    signer,
+                ),
+                timeout=_TRANSITION_JOURNAL_TIMEOUT_SEC,
             )
         except Exception as exc:
             LOGGER.debug("Could not journal bridge %s transition (%s)", loop_name, type(exc).__name__)
@@ -315,9 +329,11 @@ class TransportMixin(BridgeShared):
     async def _poll_loop(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:
         backoff = 1.0
         while self._running:
+            self._poll_heartbeat_at = time.monotonic()
             try:
                 await self._drain_inbox(telegram, backend)
                 updates = await self._get_updates(telegram)
+                self._poll_heartbeat_at = time.monotonic()
                 for update in updates:
                     self._inbox.store(update)
                     self._offset = max(self._offset, int(update["update_id"]) + 1)
@@ -326,6 +342,7 @@ class TransportMixin(BridgeShared):
                     await self._drain_inbox(telegram, backend)
                 backoff = 1.0
                 await self._journal_transition(backend, "poll", failing=False)
+                self._poll_heartbeat_at = time.monotonic()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -333,6 +350,23 @@ class TransportMixin(BridgeShared):
                 await self._journal_transition(backend, "poll", failing=True, error=exc)
                 await asyncio.sleep(backoff)
                 backoff = min(BACKOFF_MAX, backoff * 2)
+
+    async def _poll_watchdog(self) -> None:
+        """Crash a formally live bridge whose Telegram poll made no progress.
+
+        HTTP timeouts cover ordinary network failures, while this guard covers
+        the rarer half-dead state: the process and event loop still exist, but a
+        coroutine never returns.  Durable inbox rows and the persisted offset
+        make a process restart lossless and preferable to silent bot downtime.
+        """
+
+        while self._running:
+            await asyncio.sleep(_POLL_WATCHDOG_INTERVAL_SEC)
+            age = time.monotonic() - self._poll_heartbeat_at
+            if age <= _POLL_WATCHDOG_STALE_SEC:
+                continue
+            LOGGER.error("Telegram bridge poll watchdog expired after %.0fs", age)
+            raise RuntimeError("telegram_poll_watchdog_expired")
 
     async def _outbound_loop(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:
         """Drain the backend outbound queue and deliver each message to Telegram."""

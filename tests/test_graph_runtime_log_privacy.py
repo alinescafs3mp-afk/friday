@@ -180,18 +180,39 @@ async def test_web_capture_failure_logs_neither_url_nor_exception(
 
     kernel = _kernel(settings, storage, ingestion=FailingIngestion())
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
-    url = f"https://example.invalid/private/{sentinel}?token={sentinel}"
+    # Stay inside the public-source URL bound so the test reaches the intended
+    # ingestion-exception logger. Oversized URLs are rejected before ingestion.
+    url_secret = sentinel[:96]
+    url = f"https://synthetic.example.com/private/{url_secret}?token={url_secret}"
     with caplog.at_level(logging.WARNING, logger="friday.execution_kernel"):
         captured = await kernel._capture_web_sources(  # noqa: SLF001
             actor,
             sentinel,
-            {"sources": [{"url": url, "title": sentinel, "text": "x" * 500}]},
+            {
+                "sources": [
+                    {
+                        "url": url,
+                        "title": sentinel,
+                        "text": "x" * 500,
+                        "text_length": 500,
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                ],
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+            },
         )
 
     assert captured == []
     assert caplog.records
     assert all(sentinel not in record.getMessage() for record in caplog.records)
-    assert all("example.invalid" not in record.getMessage() for record in caplog.records)
+    assert all(url_secret not in record.getMessage() for record in caplog.records)
+    assert all("synthetic.example.com" not in record.getMessage() for record in caplog.records)
     assert all(record.exc_info is None for record in caplog.records)
 
 

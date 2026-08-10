@@ -103,7 +103,7 @@ def test_a_database_at_this_schema_migrates_forward_and_keeps_its_data(version, 
     finally:
         before.close()
 
-    storage = FridayStorage(replace(settings, database_path=database))
+    storage = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
         assert int(marker[0]) == SCHEMA_VERSION, f"schema {version} did not migrate to {SCHEMA_VERSION}"

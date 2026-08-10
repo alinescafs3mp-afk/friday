@@ -40,6 +40,8 @@ from friday.agent_runtime import _is_small_talk
         # `test_a_short_consent_continues_the_previous_turn`.
         "проверка связи",
         "проверка",
+        "приём",
+        "ПРИЕМ!",
         "тест",
         "раз два три",
         "как дела?",
@@ -143,7 +145,7 @@ def test_an_explicit_web_request_skips_the_archive_search():
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prepare_context)  # noqa: SLF001
-    assert "_ASKS_FOR_THE_WEB.search(message)" in source
+    assert "looking_outward = asks_for_the_web(message)" in source
     assert "context.small_talk or looking_outward" in source, (
         "явная просьба поискать в интернете по-прежнему обыскивает архив"
     )

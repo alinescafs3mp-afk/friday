@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import re
 import secrets
+import stat
 import unicodedata
 import zlib
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
+from pathlib import Path
 
 from friday.audit_privacy import (
     decode_audit_privacy_key,
@@ -44,6 +46,7 @@ from friday.storage._base import (
     _snapshot,
     audit_generated_id_exists,
     contextmanager,
+    deleted_account_tombstone_key,
     hashlib,
     json,
     new_id,
@@ -67,6 +70,54 @@ _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
 # Tests and clock adapters replace ``datetime`` to control wall time. Timestamp
 # parsing must remain the real stdlib implementation under that substitution.
 _TIMESTAMP_DATETIME = datetime
+
+_OLDEST_MIGRATABLE_DATABASE_SCHEMA = 13
+_REQUIRED_SCHEMA_META_COLUMNS = frozenset({"key", "value", "updated_at"})
+_REQUIRED_USERS_COLUMNS = frozenset(
+    {
+        "id",
+        "source",
+        "external_id",
+        "display_name",
+        "username",
+        "preset_key",
+        "status",
+        "metadata_json",
+        "created_at",
+        "updated_at",
+        "last_seen_at",
+    }
+)
+
+
+def _required_database_fingerprint(path: Path) -> tuple[int, int]:
+    """Prove that the authoritative database path is one nonempty regular file."""
+
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise sqlite3.OperationalError("required Friday database is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+        raise sqlite3.OperationalError("required Friday database is unavailable or empty")
+    return int(metadata.st_dev), int(metadata.st_ino)
+
+
+def _required_database_has_friday_schema(conn: sqlite3.Connection) -> bool:
+    """Recognize every supported Friday schema without writing to the image."""
+
+    meta_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(schema_meta)")}
+    user_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(users)")}
+    if not (meta_columns >= _REQUIRED_SCHEMA_META_COLUMNS and user_columns >= _REQUIRED_USERS_COLUMNS):
+        return False
+    try:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+        version = int(str(row[0]).strip()) if row is not None else -1
+    except (IndexError, TypeError, ValueError, sqlite3.DatabaseError):
+        return False
+    # The migration fixtures cover every released schema from 13 onward.  A
+    # lower/missing marker has no audited upgrade path; a newer marker belongs
+    # to code this process does not understand.  Reject both before WAL/DDL.
+    return _OLDEST_MIGRATABLE_DATABASE_SCHEMA <= version <= SCHEMA_VERSION
 
 
 def _unicode_casefold(value: Any) -> str | None:
@@ -2072,14 +2123,42 @@ class CoreMixin(StorageShared):
                 delay = min(delay * 1.8, 0.5)
 
     def _open_once(self) -> sqlite3.Connection:
-        prepare_private_sqlite(self._db_path)
+        must_exist = bool(self.settings.database_must_exist)
+        required_fingerprint: tuple[int, int] | None = None
+        if must_exist:
+            # load_settings() validates the selected image, but validation and
+            # first use are separated by startup work.  Plain sqlite3.connect()
+            # carries O_CREAT semantics and would silently replace a database
+            # removed in that window with an empty one.  URI ``mode=rw`` is the
+            # SQLite-level no-create guarantee at the actual open boundary.  It
+            # does not, however, reject an existing zero-byte image: SQLite is
+            # willing to initialise that file.  Revalidate size/inode here and
+            # again after connecting, before any PRAGMA or migration may write.
+            required_fingerprint = _required_database_fingerprint(self._db_path)
+            restrict_sqlite_files(self._db_path)
+            database_target = f"{self._db_path.resolve(strict=False).as_uri()}?mode=rw"
+        else:
+            prepare_private_sqlite(self._db_path)
+            database_target = str(self._db_path)
         # check_same_thread=False so close() can shut every thread's connection
         # down from the shutdown/restore thread; cross-thread *use* is prevented
         # structurally (the conn property only ever hands back the caller thread's
         # own connection via threading.local), not by the sqlite thread check.
-        conn = sqlite3.connect(str(self._db_path), check_same_thread=False, timeout=10.0)
+        conn = sqlite3.connect(
+            database_target,
+            check_same_thread=False,
+            timeout=10.0,
+            uri=must_exist,
+        )
         conn.row_factory = sqlite3.Row
         try:
+            if must_exist:
+                if _required_database_fingerprint(self._db_path) != required_fingerprint:
+                    raise sqlite3.OperationalError("required Friday database changed during open")
+                if not _required_database_has_friday_schema(conn):
+                    raise sqlite3.OperationalError(
+                        "required Friday database has no recognizable Friday schema"
+                    )
             # Per-connection configuration — applied to EVERY thread's connection.
             # busy_timeout must precede WAL negotiation; sqlite3's connect timeout
             # alone does not reliably protect that PRAGMA on every platform. WAL is
@@ -2985,6 +3064,18 @@ class CoreMixin(StorageShared):
             ).fetchall()
             tenant_ids.update(str(row[0]) for row in rows if row[0])
         for user_id in sorted(tenant_ids):
+            # Audit history is intentionally retained after a hard deletion.  It
+            # must not become a provisioning source on the next schema upgrade.
+            # The opaque tombstone is the durable authority for that distinction.
+            try:
+                deletion_key = deleted_account_tombstone_key(user_id)
+            except ValueError:
+                deletion_key = ""
+            if (
+                deletion_key
+                and conn.execute("SELECT 1 FROM runtime_kv WHERE key=?", (deletion_key,)).fetchone()
+            ):
+                continue
             conn.execute(
                 """INSERT OR IGNORE INTO users(
                        id, source, external_id, display_name, username, preset_key, status,

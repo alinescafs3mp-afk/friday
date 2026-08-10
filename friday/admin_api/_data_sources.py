@@ -27,9 +27,9 @@ from friday.admin_api._deps import (
     _require,
     _services,
     _target_user,
-    asyncio,
 )
 from friday.data_sources import DataSource, SourceUnavailableError, describe_source
+from friday.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -125,6 +125,6 @@ async def data_source_schema(name: str, request: Request, user_id: str = "") -> 
     try:
         # Чужая база по сети: держать на ней event loop нельзя, соседние
         # разговоры ждут. Тот же приём, что у обхода графа.
-        return await asyncio.to_thread(describe_source, source, dsn)
+        return await run_blocking(describe_source, source, dsn)
     except SourceUnavailableError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

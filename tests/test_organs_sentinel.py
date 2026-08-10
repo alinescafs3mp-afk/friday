@@ -16,7 +16,14 @@ from datetime import UTC, datetime
 import pytest
 
 from friday.organs import ServiceContext, build_registry
-from friday.organs.sentinel import SentinelOrgan, _format_alert, scan_health
+from friday.organs.sentinel import (
+    _GENERATION_AWAIT_TIMEOUT_SEC,
+    _GENERATION_PROBE_TIMEOUT_SEC,
+    SentinelOrgan,
+    _format_alert,
+    scan_health,
+    watch_generation,
+)
 
 
 def _sentinel_settings(*, quiet_start: int = 0, quiet_end: int = 0):
@@ -135,7 +142,272 @@ def test_registry_includes_sentinel_worker(settings):
     registry = build_registry(settings)
     assert any(isinstance(o, SentinelOrgan) for o in registry.organs)
     ctx = ServiceContext(settings=settings, storage=None, kg=None, ingestion=None)
-    assert any(w.name == "sentinel_watch" for w in registry.workers(ctx))
+    workers = {worker.name: worker for worker in registry.workers(ctx)}
+    assert "sentinel_watch" in workers
+    assert "sentinel_generation_watch" in workers
+
+    generation = workers["sentinel_generation_watch"]
+    assert generation.run_immediately is True
+    assert generation.interval_sec <= 60
+    assert generation.interval_sec + generation.timeout_sec <= 95
+    assert generation.timeout_sec > _GENERATION_AWAIT_TIMEOUT_SEC
+
+
+def test_generation_watchdog_interval_is_bounded_by_its_detection_contract(monkeypatch):
+    from friday.config import load_settings
+
+    monkeypatch.setenv("FRIDAY_SENTINEL_GENERATION_INTERVAL_SEC", "999")
+    assert load_settings().sentinel_generation_interval_sec == 60
+
+    monkeypatch.setenv("FRIDAY_SENTINEL_GENERATION_INTERVAL_SEC", "1")
+    assert load_settings().sentinel_generation_interval_sec == 30
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_alerts_without_running_full_diagnostics(
+    storage,
+    monkeypatch,
+):
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(
+        _sentinel_settings(),
+        sentinel_check_llm=True,
+        llm_enabled=True,
+        sentinel_generation_interval_sec=60,
+    )
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    probe_calls: list[tuple[str, str, float]] = []
+
+    def failed_probe(base_url: str, model: str, *, timeout: float, **_kwargs):
+        probe_calls.append((base_url, model, timeout))
+        return {"generates": False, "seconds": timeout, "error": "synthetic timeout"}
+
+    monkeypatch.setattr(sentinel, "_llm_generates", failed_probe)
+    monkeypatch.setattr(
+        sentinel,
+        "collect_diagnostics",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("the lightweight watchdog ran full diagnostics")
+        ),
+    )
+    ctx = ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None)
+
+    await watch_generation(ctx)
+    await watch_generation(ctx)
+
+    assert probe_calls == [
+        (settings.llm_base_url, settings.llm_model, _GENERATION_PROBE_TIMEOUT_SEC),
+        (settings.llm_base_url, settings.llm_model, _GENERATION_PROBE_TIMEOUT_SEC),
+    ]
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 1, "a persistent stall must remain one owner alert per episode"
+    assert pending[0]["chat_id"] == "5001"
+    assert pending[0]["kind"] == "sentinel"
+    assert "не отвечает" in str(pending[0]["body"])
+    assert "ручная проверка" in str(pending[0]["body"])
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_owns_a_deadline_and_alerts_when_the_probe_never_returns(
+    storage,
+    monkeypatch,
+):
+    import asyncio
+
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+
+    async def blocked_probe(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(sentinel, "run_blocking", blocked_probe)
+    monkeypatch.setattr(sentinel, "_GENERATION_AWAIT_TIMEOUT_SEC", 0.02)
+
+    await watch_generation(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 1
+    assert "не отвечает" in str(pending[0]["body"])
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_deduplicates_an_episode_but_realerts_after_recovery(
+    storage,
+    monkeypatch,
+):
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    outcomes = [False, True, False]
+
+    def scripted_probe(*_args, **_kwargs):
+        generates = outcomes.pop(0)
+        return {"generates": generates, "seconds": 0.2 if generates else 25.0}
+
+    monkeypatch.setattr(sentinel, "_llm_generates", scripted_probe)
+    ctx = ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None)
+
+    await watch_generation(ctx)  # healthy -> failed: episode 1
+    first = storage.list_pending_notifications(limit=100)
+    assert len(first) == 1
+    first_key = str(first[0]["dedup_key"])
+    assert first_key.startswith("sentinel:llm_not_generating:episode:")
+
+    # The heavy scan sees the same continuous outage and must share the exact
+    # episode key instead of producing a second daily-dedup alert.
+    monkeypatch.setattr(
+        sentinel,
+        "collect_diagnostics",
+        lambda *_args, **_kwargs: {
+            "actions": [
+                {
+                    "code": "llm_not_generating",
+                    "severity": "error",
+                    "title": "Synthetic duplicate",
+                }
+            ]
+        },
+    )
+    await scan_health(ctx)
+    assert len(storage.list_pending_notifications(limit=100)) == 1
+
+    await watch_generation(ctx)  # failed -> healthy closes episode 1
+    await watch_generation(ctx)  # healthy -> failed: episode 2
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 2
+    keys = [str(item["dedup_key"]) for item in pending]
+    assert keys[0] == first_key
+    assert keys[1].startswith("sentinel:llm_not_generating:episode:")
+    assert keys[1] != first_key
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_is_not_suppressed_by_an_old_daily_alert(
+    storage,
+    monkeypatch,
+):
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    owner = _seed_telegram_user(storage, "5001", preset_key="owner")
+    day = datetime.now().astimezone().date().isoformat()
+    assert storage.enqueue_notification(
+        owner,
+        "5001",
+        "Old daily sentinel alert",
+        kind="sentinel",
+        dedup_key=f"sentinel:llm_not_generating:{day}",
+    )
+    monkeypatch.setattr(
+        sentinel,
+        "_llm_generates",
+        lambda *_args, **_kwargs: {"generates": False, "seconds": 25.0},
+    )
+
+    await watch_generation(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 2
+    assert any(str(item["dedup_key"]).startswith("sentinel:llm_not_generating:episode:") for item in pending)
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_is_silent_for_a_working_model(storage, monkeypatch):
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    monkeypatch.setattr(
+        sentinel,
+        "_llm_generates",
+        lambda *_args, **_kwargs: {"generates": True, "seconds": 0.2},
+    )
+
+    await watch_generation(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"sentinel_enabled": False, "sentinel_check_llm": True, "llm_enabled": True},
+        {"sentinel_enabled": True, "sentinel_check_llm": False, "llm_enabled": True},
+        {"sentinel_enabled": True, "sentinel_check_llm": True, "llm_enabled": False},
+        {
+            "sentinel_enabled": True,
+            "sentinel_check_llm": True,
+            "llm_enabled": True,
+            "telegram_allowed_chat_ids": [],
+            "telegram_owner_chat_ids": [],
+        },
+    ],
+)
+async def test_generation_watchdog_never_probes_when_it_cannot_alert(
+    storage,
+    monkeypatch,
+    overrides: dict,
+):
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), **overrides)
+    calls = 0
+
+    def probe(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {"generates": False, "seconds": 25.0}
+
+    monkeypatch.setattr(sentinel, "_llm_generates", probe)
+
+    await watch_generation(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+
+    assert calls == 0
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_probe_does_not_freeze_the_event_loop(storage, monkeypatch):
+    import asyncio
+    import time
+
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+
+    def slow_healthy_probe(*_args, **_kwargs):
+        time.sleep(0.4)
+        return {"generates": True, "seconds": 0.4}
+
+    monkeypatch.setattr(sentinel, "_llm_generates", slow_healthy_probe)
+    worst = 0.0
+    running = True
+
+    async def heartbeat() -> None:
+        nonlocal worst
+        last = time.perf_counter()
+        while running:
+            await asyncio.sleep(0.01)
+            now = time.perf_counter()
+            worst = max(worst, now - last)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0.05)
+    try:
+        await watch_generation(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
+    finally:
+        running = False
+        await beat
+
+    assert worst < 0.2, f"the event loop stalled for {worst:.2f}s during the generation probe"
 
 
 # --- who may be told, and what may be said --------------------------------

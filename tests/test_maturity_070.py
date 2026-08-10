@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 
 import pytest
 from PIL import Image
 
+from friday.config import PROFILES
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.storage import SCHEMA_VERSION
@@ -381,7 +383,12 @@ async def test_bounded_local_vision_creates_advisory_inbox_item(settings, storag
     image = Image.new("RGB", (640, 360), "white")
     data = BytesIO()
     image.save(data, format="PNG")
-    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), FakeVisionLLM())
+    pipeline = IngestionPipeline(
+        replace(settings, profile=PROFILES["qwen36-vl"]),
+        storage,
+        KnowledgeGraph(storage),
+        FakeVisionLLM(),
+    )
     result = await pipeline.ingest_file(
         "alice",
         None,
@@ -423,7 +430,12 @@ async def test_vision_exception_text_is_not_persisted_or_returned(settings, stor
     image = Image.new("RGB", (64, 64), "white")
     data = BytesIO()
     image.save(data, format="PNG")
-    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), FailingVisionLLM())
+    pipeline = IngestionPipeline(
+        replace(settings, profile=PROFILES["qwen36-vl"]),
+        storage,
+        KnowledgeGraph(storage),
+        FailingVisionLLM(),
+    )
     result = await pipeline.ingest_file(
         "alice",
         None,
@@ -590,7 +602,7 @@ async def test_ungrounded_vision_confidence_is_capped_and_remains_advisory(setti
     data = BytesIO()
     image.save(data, format="PNG")
     pipeline = IngestionPipeline(
-        settings,
+        replace(settings, profile=PROFILES["qwen36-vl"]),
         storage,
         KnowledgeGraph(storage),
         UngroundedVisionLLM(),

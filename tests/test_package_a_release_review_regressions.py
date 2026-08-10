@@ -539,6 +539,38 @@ def test_an_unconfirmed_supported_deed_offers_only_a_user_reachable_next_step() 
 
 
 @pytest.mark.parametrize(
+    "answer",
+    [
+        "Вот список документов за сегодня: alpha.docx и beta.pdf.",
+        "Да, вижу: вот этот документ есть в базе.",
+        "Вот какие документы были присланы сегодня.",
+        "Держите перечень документов из личной ленты.",
+    ],
+)
+def test_archive_answer_is_not_mistaken_for_a_delivered_file(answer: str) -> None:
+    assert (
+        _claims_an_unconfirmed_supported_deed(
+            answer,
+            has_file=False,
+            reminder_succeeded=False,
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("answer", ["Вот файл.", "Вот этот документ.", "Держите готовый PDF."])
+def test_bare_file_handoff_still_requires_a_real_carrier(answer: str) -> None:
+    assert (
+        _claims_an_unconfirmed_supported_deed(
+            answer,
+            has_file=False,
+            reminder_succeeded=False,
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
     ("answer", "delivery_scheduled", "expected_unconfirmed"),
     [
         ("Напоминание сохранено: отчёт, завтра.", False, False),

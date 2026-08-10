@@ -15,8 +15,9 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,11 +37,92 @@ UI_TEST_MODULES = (
     "tests/test_the_graph_tab_can_be_navigated.py",
 )
 
+# A shell used to operate Friday commonly exports absolute runtime paths.  A
+# pytest process must not inherit any of them: collection imports happen before
+# per-test fixtures can replace ``FRIDAY_HOME``, and one eager settings import
+# would otherwise be enough to open the live database.  Remove both the current
+# and compatibility names so the isolated home remains the only path authority.
+_RUNTIME_PATH_SELECTOR_SUFFIXES = (
+    "BACKEND_CA_FILE",
+    "BACKUPS_DIR",
+    "BACKUP_ENCRYPTION_KEY_FILE",
+    "BACKUP_MIRROR_DIR",
+    "CACHE_DIR",
+    "DATA_DIR",
+    "EXPORTS_DIR",
+    "FILES_DIR",
+    "LOG_DIR",
+    "MEMORY_VAULT_DIR",
+    "MODEL_ROOT",
+    "SSL_CERTFILE",
+    "SSL_KEYFILE",
+    "STATE_DIR",
+    "TTS_DOWNLOAD_ROOT",
+    "WHISPER_DOWNLOAD_ROOT",
+)
+_RUNTIME_ENV_PREFIXES = ("FRIDAY_", "JERICHO_")
+
 
 @dataclass(frozen=True)
 class GateCommand:
     name: str
     argv: tuple[str, ...]
+    environment: Mapping[str, str] | None = field(default=None, repr=False, compare=False)
+
+
+def _command_with_environment(
+    command: GateCommand,
+    environment: Mapping[str, str],
+) -> GateCommand:
+    return GateCommand(command.name, command.argv, environment)
+
+
+def _private_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
+
+
+@contextmanager
+def _isolated_test_environment() -> Iterator[dict[str, str]]:
+    """Yield one private, non-live environment for pytest collection and runs."""
+
+    with tempfile.TemporaryDirectory(prefix="friday-quality-home-") as temporary:
+        scratch = Path(temporary).resolve()
+        scratch.chmod(0o700)
+        home = scratch / "home"
+        config = home / "config"
+        _private_directory(home)
+        _private_directory(config)
+        env_file = config / "empty.env"
+        descriptor = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
+        env_file.chmod(0o600)
+
+        environment = dict(os.environ)
+        for prefix in _RUNTIME_ENV_PREFIXES:
+            for suffix in _RUNTIME_PATH_SELECTOR_SUFFIXES:
+                environment.pop(prefix + suffix, None)
+        home_value = str(home)
+        env_file_value = str(env_file)
+        environment.update(
+            {
+                # Set both names: a test which deliberately removes the current
+                # name must still fall back to the same scratch boundary, never
+                # to an operator setting inherited from the launching shell.
+                "FRIDAY_HOME": home_value,
+                "JERICHO_HOME": home_value,
+                "FRIDAY_ENV_FILE": env_file_value,
+                "JERICHO_ENV_FILE": env_file_value,
+                # Empty is the documented "derive from STATE_DIR" database
+                # selector.  Keeping the key present also prevents an env file
+                # loaded by a test from silently restoring an absolute path.
+                "FRIDAY_DATABASE_PATH": "",
+                "JERICHO_DATABASE_PATH": "",
+                "FRIDAY_DATABASE_MUST_EXIST": "0",
+                "JERICHO_DATABASE_MUST_EXIST": "0",
+            }
+        )
+        yield environment
 
 
 def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
@@ -150,7 +232,12 @@ def _display_command(argv: Sequence[str]) -> str:
 def run_command(command: GateCommand) -> int:
     print(f"\n[{command.name}]\n$ {_display_command(command.argv)}", flush=True)
     try:
-        completed = subprocess.run(command.argv, cwd=ROOT, check=False)
+        completed = subprocess.run(
+            command.argv,
+            cwd=ROOT,
+            check=False,
+            env=dict(command.environment) if command.environment is not None else None,
+        )
     except OSError as exc:
         print(f"FAILED: cannot execute {command.argv[0]}: {exc}", file=sys.stderr)
         return 126
@@ -261,24 +348,32 @@ def execute(
             elif runner(command) != 0:
                 return 1
 
-    if "tests" in phases:
-        command = non_ui_command(workers=args.workers)
-        if args.dry_run:
-            print(f"[{command.name}] {_display_command(command.argv)}")
-        elif runner(command) != 0:
-            return 1
+    dynamic_phases = {"tests", "ui"}.intersection(phases)
+    environment_context = (
+        _isolated_test_environment() if dynamic_phases and not args.dry_run else nullcontext(None)
+    )
+    with environment_context as test_environment:
+        if "tests" in phases:
+            command = non_ui_command(workers=args.workers)
+            if test_environment is not None:
+                command = _command_with_environment(command, test_environment)
+            if args.dry_run:
+                print(f"[{command.name}] {_display_command(command.argv)}")
+            elif runner(command) != 0:
+                return 1
 
-    if "ui" in phases:
-        if args.dry_run:
+        if "ui" in phases and args.dry_run:
             print("[Playwright preflight] launch headless Chromium")
             command = ui_command(report_path="<temporary>/ui-results.xml", workers=args.ui_workers)
             print(f"[{command.name}] {_display_command(command.argv)}")
-        else:
+        elif "ui" in phases:
             if not browser_preflight():
                 return 1
             with tempfile.TemporaryDirectory(prefix="friday-quality-gate-") as tmp_dir:
                 report_path = Path(tmp_dir) / "ui-results.xml"
                 command = ui_command(report_path=report_path, workers=args.ui_workers)
+                if test_environment is not None:
+                    command = _command_with_environment(command, test_environment)
                 if runner(command) != 0:
                     return 1
                 try:

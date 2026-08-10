@@ -30,17 +30,18 @@ All extension points are optional; the defaults contribute nothing.
 ```python
 from friday.organs import Organ, OrganWorker, ServiceContext
 
+
 class MyOrgan(Organ):
     name = "my_organ"
     version = "1.0"
 
-    def capabilities(self):        # -> Sequence[CapabilityDefinition]
+    def capabilities(self):  # -> Sequence[CapabilityDefinition]
         return ()
 
-    def workers(self, ctx):        # -> Sequence[OrganWorker]
+    def workers(self, ctx):  # -> Sequence[OrganWorker]
         return ()
 
-    def router(self):              # -> APIRouter | None
+    def router(self):  # -> APIRouter | None
         return None
 ```
 
@@ -62,7 +63,7 @@ takes down another worker).
 ```python
 OrganWorker(
     name="my_scan",
-    run=my_scan,                 # async def my_scan(ctx): ...
+    run=my_scan,  # async def my_scan(ctx): ...
     interval_sec=900.0,
     enabled=ctx.settings.my_feature_enabled,
     run_immediately=False,
@@ -110,10 +111,10 @@ the bridge drains the queue and delivers it.
 ```python
 ctx.storage.enqueue_notification(
     user_id,
-    chat_id,                     # resolve from the user's metadata
+    chat_id,  # resolve from the user's metadata
     "🔔 текст сообщения",
     kind="reminder",
-    dedup_key=f"reminder:{event_id}:{date}",   # makes a periodic scan idempotent
+    dedup_key=f"reminder:{event_id}:{date}",  # makes a periodic scan idempotent
 )
 ```
 
@@ -133,6 +134,7 @@ In `friday/organs/__init__.py`, add your organ to `build_registry`:
 def build_registry(settings):
     from friday.organs.reminders import RemindersOrgan
     from friday.organs.my_organ import MyOrgan
+
     return OrganRegistry([RemindersOrgan(), MyOrgan()])
 ```
 
@@ -179,16 +181,23 @@ UID / bookmark URL / Message-ID). Mail is parsed from the original BYTES
 correctly — follow that pattern for any format whose encoding is
 self-described.
 
-**`sentinel`** (`friday/organs/sentinel/`) — self-monitoring: a single worker
-that reuses the read-only `collect_diagnostics` powering the admin panel and
-pushes an alert when a real fault appears (a worker crash-looping, the backend
-not refreshing state, a missing/invalid backup, an unreachable vLLM). It writes
-nothing and derives nothing new — it forwards the diagnostics' own `actions`
-(severity `error`/`warning`) as messages, deduplicated per issue per day so a
-persistent fault never becomes a stream. The reference for an organ that
+**`sentinel`** (`friday/organs/sentinel/`) — self-monitoring with two separate
+cost classes. The regular worker reuses the read-only `collect_diagnostics`
+powering the admin panel and pushes an alert when a real fault appears (a worker
+crash-looping, the backend not refreshing state, a missing/invalid backup, an
+unreachable vLLM). A lightweight worker independently asks for one generated
+token and does no database, filesystem or secret-hygiene scan; its bounded
+cadence catches an inference path which accepts connections but stops completing
+chat requests. Neither worker restarts a service. Sentinel writes nothing to the
+graph and derives no user knowledge. Ordinary alerts are deduplicated per issue
+per day; generation stalls use persisted outage episodes, so a persistent stall
+never becomes a stream while a new stall after observed recovery alerts again.
+The reference for an organ that
 **observes existing system state** and reports it, rather than computing over
 the knowledge graph. Config: `FRIDAY_SENTINEL_ENABLED`, `_INTERVAL_SEC`,
-`_CHECK_LLM` (active vLLM port probe).
+`_CHECK_LLM`, and `_GENERATION_INTERVAL_SEC` (30–60 seconds; the whole probe
+worker has a 35-second budget, so worst-case enqueue is bounded at 95 seconds
+and leaves headroom for the normal outbound queue to deliver the alert).
 
 Аудитория и содержание у sentinel уже́, чем у остальных органов, и это часть контракта:
 

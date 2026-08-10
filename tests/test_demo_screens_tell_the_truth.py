@@ -245,14 +245,36 @@ def test_an_unreadable_source_is_not_offered_as_a_link():
 
     lines = _web_source_lines(
         {
+            "outbound_attempted": True,
             "sources": [
-                {"url": "https://ok.example", "title": "Прочиталось"},
-                {"url": "https://bad.example", "title": "Не открылось", "error": "timeout"},
-            ]
+                {
+                    "url": "https://ok.synthetic.example.com",
+                    "title": "Прочиталось",
+                    "text": "Эта страница дала факт для ответа.",
+                    "text_length": len("Эта страница дала факт для ответа."),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                },
+                {
+                    "url": "https://bad.synthetic.example.com",
+                    "title": "Не открылось",
+                    "text": "",
+                    "text_length": 0,
+                    "status_code": None,
+                    "error": "timeout",
+                    "truncated": False,
+                },
+            ],
+            "requested_sources": 2,
+            "completed_sources": 2,
+            "timed_out_sources": 0,
+            "failed_sources": 1,
+            "search_timed_out": False,
         }
     )
-    assert "ok.example" in lines
-    assert "bad.example" not in lines
+    assert "ok.synthetic.example.com" in lines
+    assert "bad.synthetic.example.com" not in lines
 
 
 def test_long_lines_are_wrapped_in_every_part_of_a_picture():

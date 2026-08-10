@@ -7,8 +7,18 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi import APIRouter
 
+from friday.account_deletion import (
+    AccountDeletionBlocked,
+    AccountDeletionConflict,
+    _mark_account_deletion_history_clean,
+    delete_account,
+    preflight_account_deletion,
+)
+from friday.account_gate import AccountDrainTimeout, AccountGateClosed
 from friday.admin_api._deps import (
     MAX_API_TOKEN_TTL_SECONDS,
     Any,
@@ -29,9 +39,12 @@ from friday.admin_api._deps import (
     secrets,
     validate_user_id,
 )
+from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
 from friday.oversight_scope import hierarchy_is_configured, may_oversee, supervisor_of
 from friday.people import resolve_person, unambiguous
 from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.storage import DeletedAccountError
+from friday.workers._blocking import wait_until_idle_async
 
 router = APIRouter()
 
@@ -82,6 +95,36 @@ def _redact_user_metadata(user: dict[str, Any]) -> dict[str, Any]:
     return {"metadata_json": json.dumps(safe, ensure_ascii=False), "metadata_redacted": True}
 
 
+def _protect_hard_delete(request: Request, user: dict[str, Any]) -> None:
+    """Keep self, owner and code-owned service accounts out of the destructive path."""
+
+    actor = request.state.actor
+    user_id = str(user.get("id") or "")
+    if user_id == actor.own_id:
+        raise HTTPException(status_code=409, detail="Нельзя удалить учётную запись текущего администратора")
+    if user_id == LEGACY_OWNER_USER_ID or str(user.get("preset_key") or "") == "owner":
+        raise HTTPException(status_code=403, detail="Учётную запись владельца нельзя удалить")
+    metadata = _json_value(user.get("metadata_json"), {})
+    is_system = str(user.get("source") or "").casefold() == "system" or bool(
+        isinstance(metadata, dict) and metadata.get("system_account") is True
+    )
+    if is_system:
+        raise HTTPException(status_code=403, detail="Системную учётную запись нельзя удалить")
+
+
+def _require_hard_delete_enabled(request: Request) -> None:
+    """Keep the unfinished restore/tombstone protocol off the live admin surface."""
+
+    if not bool(getattr(_services(request).settings, "account_hard_delete_enabled", False)):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Безвозвратное удаление временно недоступно: старая резервная копия "
+                "может восстановить удалённую учётную запись"
+            ),
+        )
+
+
 @router.get("/users")
 async def list_users(
     request: Request,
@@ -121,6 +164,7 @@ async def list_users(
         "total": state.storage.count_users(),
         "limit": limit,
         "offset": offset,
+        "hard_delete_enabled": bool(getattr(state.settings, "account_hard_delete_enabled", False)),
     }
 
 
@@ -141,6 +185,42 @@ async def resolve_user_name(request: Request, name: str = Query(min_length=1)) -
         "matches": [match.to_dict() for match in matches],
         "unambiguous": winner.to_dict() if winner else None,
     }
+
+
+@router.get("/users/{user_id}/deletion")
+async def user_deletion_preflight(user_id: str, request: Request) -> dict[str, Any]:
+    """Prove whether this exact disabled account can be erased without guessing."""
+
+    _require(request, "admin.users.manage")
+    _require_hard_delete_enabled(request)
+    state = _services(request)
+    user = state.storage.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    _protect_hard_delete(request, user)
+    state.auth_service.require_delegable_account(request.state.actor, user_id)
+    # The report contains counts and account shape, not content, but it is still
+    # a cross-account administrative read.  Audit before taking the fingerprint
+    # so this very row is part of the reviewed snapshot rather than making every
+    # subsequent DELETE look stale.
+    _audit_cross_tenant_read(
+        request,
+        "admin.user.deletion.preflight",
+        user_id,
+        content="counts",
+    )
+    try:
+        maintenance_available = bool(
+            not state.settings.workers_enabled
+            and getattr(request.app.state, "account_activity_gate", None) is not None
+        )
+        return preflight_account_deletion(
+            state.storage,
+            user_id,
+            quiescence_available=maintenance_available,
+        )
+    except LookupError as exc:  # a concurrent delete between the two reads
+        raise HTTPException(status_code=404, detail="Пользователь не найден") from exc
 
 
 @router.get("/users/{user_id}/activity")
@@ -273,6 +353,11 @@ async def link_identity(request: Request) -> dict[str, Any]:
     before = state.storage.resolve_identity(source, external_id)
     try:
         link = state.storage.link_identity(source, external_id, target, linked_by=actor.user_id)
+    except DeletedAccountError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Этот способ входа принадлежал навсегда удалённой учётной записи",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _audit(
@@ -312,15 +397,22 @@ async def create_user(request: Request) -> dict[str, Any]:
     _protect_owner_target(request, user_id)
     _require_delegable_preset(request, preset_key)
     before = state.storage.get_user(user_id)
-    user = state.storage.ensure_user(
-        user_id,
-        source=str(body.get("source") or "admin"),
-        external_id=str(body.get("external_id") or ""),
-        display_name=str(body.get("display_name") or ""),
-        username=str(body.get("username") or ""),
-        preset_key=preset_key,
-        metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
-    )
+    try:
+        user = state.storage.ensure_user(
+            user_id,
+            source=str(body.get("source") or "admin"),
+            external_id=str(body.get("external_id") or ""),
+            display_name=str(body.get("display_name") or ""),
+            username=str(body.get("username") or ""),
+            preset_key=preset_key,
+            metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+        )
+    except DeletedAccountError as exc:
+        raise HTTPException(
+            status_code=409, detail="Этот ID принадлежал навсегда удалённой учётной записи"
+        ) from exc
+    if before is None:
+        _mark_account_deletion_history_clean(state.storage, user_id)
     state.auth_service.set_user_preset(user_id, preset_key, acting_actor=actor)
     user = state.storage.get_user(user_id) or user
     _audit(request, "admin.user.upsert", "user", user_id, before=before, after=user)
@@ -442,6 +534,92 @@ async def update_user(user_id: str, request: Request) -> dict[str, Any]:
     after = state.storage.update_user(user_id, **updates)
     _audit(request, "admin.user.update", "user", user_id, before=before, after=after)
     return {"user": after}
+
+
+@router.delete("/users/{user_id}")
+async def hard_delete_user(user_id: str, request: Request) -> dict[str, Any]:
+    """Permanently erase one disabled account after an exact typed confirmation."""
+
+    actor = _require(request, "admin.users.manage")
+    _require_hard_delete_enabled(request)
+    state = _services(request)
+    user = state.storage.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    _protect_hard_delete(request, user)
+    body = await _request_json(request)
+    if body.get("confirmation") != user_id:
+        raise HTTPException(status_code=400, detail="Для удаления введите точный ID пользователя")
+    fingerprint = str(body.get("fingerprint") or "").strip().casefold()
+    if len(fingerprint) != 64 or any(char not in "0123456789abcdef" for char in fingerprint):
+        raise HTTPException(status_code=400, detail="Сначала выполните предварительную проверку удаления")
+
+    def reauthorize() -> None:
+        fresh = state.storage.get_user(actor.own_id)
+        if not fresh or str(fresh.get("status") or "") != "active":
+            raise AccountDeletionConflict("Полномочия администратора изменились; войдите заново")
+        fresh_actor = replace(actor, preset_key=str(fresh.get("preset_key") or "user"))
+        state.auth_service.require(fresh_actor, "admin.users.manage")
+        state.auth_service.require_delegable_account(fresh_actor, user_id)
+
+    gate = getattr(request.app.state, "account_activity_gate", None)
+    maintenance_available = bool(not state.settings.workers_enabled and gate is not None)
+    drain_lease = None
+    deletion_contour = None
+    try:
+        if maintenance_available and gate is not None:
+            # HTTP admission covers in-process routes; this host-local contour
+            # also excludes CLI export/backup/read passes which can otherwise
+            # materialise a pre-deletion snapshot outside the main database.
+            deletion_contour = ProcessLease(
+                state.settings.state_dir / "account-deletion.lock",
+                protocol="friday.account-deletion.v1",
+            )
+            deletion_contour.acquire()
+            drain_lease = await gate.close_world_and_drain(
+                user_id,
+                exclude_token=getattr(request.state, "account_admission_token", None),
+                timeout=30.0,
+            )
+            stranded = await wait_until_idle_async(30.0)
+            if stranded:
+                raise AccountDrainTimeout("Blocking HTTP work did not drain")
+        outcome = delete_account(
+            state.storage,
+            user_id,
+            expected_fingerprint=fingerprint,
+            actor_user_id=actor.own_id,
+            ip_address=getattr(request.state, "audit_ip", ""),
+            request_id=getattr(request.state, "request_id", ""),
+            authorization_check=reauthorize,
+            quiescence_verified=maintenance_available,
+        )
+        if drain_lease is not None:
+            await drain_lease.commit()
+        return outcome
+    except (AccountGateClosed, AccountDrainTimeout) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Не удалось остановить активные запросы удаляемого аккаунта",
+        ) from exc
+    except RuntimeLeaseError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Дождитесь завершения локального экспорта, резервного копирования или обслуживания",
+        ) from exc
+    except AccountDeletionBlocked as exc:
+        reasons = "; ".join(str(item.get("message") or "") for item in exc.report.get("blockers", []))
+        raise HTTPException(
+            status_code=409,
+            detail=f"Удаление заблокировано проверкой: {reasons or 'обновите план удаления'}",
+        ) from exc
+    except AccountDeletionConflict as exc:
+        raise HTTPException(status_code=409, detail=f"Удаление не выполнено: {exc}") from exc
+    finally:
+        if drain_lease is not None:
+            await drain_lease.release()
+        if deletion_contour is not None:
+            deletion_contour.release()
 
 
 @router.post("/users/{user_id}/preset")

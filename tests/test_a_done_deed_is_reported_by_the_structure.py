@@ -139,7 +139,14 @@ def test_the_reminder_is_reported_as_done(settings, storage) -> None:
 
 
 def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, storage) -> None:
-    """The effect exists even if synthesis dies after the tool call."""
+    """An explicitly authorized effect survives failed terminal synthesis.
+
+    Reminder authority is lexical now: an unrelated request may not make the
+    model-created ``remind`` call that this older seam used to inject.  Exercise
+    the production path instead — the dedicated reminder classifier confirms
+    the explicit request, the kernel persists it, and only the independent
+    remainder's terminal synthesis fails.
+    """
 
     class _ToolThenDead:
         enabled = True
@@ -153,16 +160,15 @@ def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, st
             self.calls += 1
             if self.calls == 1:
                 return {
-                    "content": "",
-                    "tool_calls": [
+                    "content": json.dumps(
                         {
-                            "id": "reminder-call",
-                            "function": {
-                                "name": "remind",
-                                "arguments": json.dumps({"what": "agentic reminder", "when": "tomorrow"}),
-                            },
-                        }
-                    ],
+                            "напоминание": "да",
+                            "что": "agentic reminder",
+                            "когда": "tomorrow",
+                            "остаток": "ответь на независимый вопрос",
+                        },
+                        ensure_ascii=False,
+                    )
                 }
             raise RuntimeError("synthetic terminal transport failure")
 
@@ -180,7 +186,7 @@ def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, st
     result = asyncio.run(
         runtime._agentic_loop(  # noqa: SLF001
             context,
-            "synthetic request",
+            "напомни про agentic reminder tomorrow и ответь на независимый вопрос",
             actor,
             [{"type": "function", "function": {"name": "remind"}}],
             None,
@@ -188,6 +194,7 @@ def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, st
     )
 
     assert result["llm_failed"] is True
+    assert kernel.calls == [("remind", {"what": "agentic reminder", "when": "tomorrow"})]
     assert "agentic reminder" in context.structural_answer
     assert "Напоминание поставлено" in context.structural_answer
 

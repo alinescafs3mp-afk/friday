@@ -1648,6 +1648,16 @@ def _actor() -> ActorContext:
             id="tags-before-count",
         ),
         pytest.param(
+            "Покажи теги, затем скажи, сколько всего файлов в архиве.",
+            "тег",
+            id="tags-before-count-with-modifier",
+        ),
+        pytest.param(
+            "Скажи, сколько всего файлов в архиве, а потом покажи теги.",
+            "тег",
+            id="count-before-tags-with-modifier",
+        ),
+        pytest.param(
             "Что было вчера? И сколько всего объектов знаний в моей базе?",
             "вчера",
             id="time-before-count",
@@ -1709,6 +1719,26 @@ def test_a_compound_global_count_projection_excludes_the_unrelated_clause(
             "list_tags",
             {},
             id="tags-then-count",
+        ),
+        pytest.param(
+            "Покажи теги, затем скажи, сколько всего файлов в архиве.",
+            "",
+            "files",
+            "none",
+            "none",
+            "list_tags",
+            {},
+            id="tags-then-count-with-modifier",
+        ),
+        pytest.param(
+            "Скажи, сколько всего файлов в архиве, а потом покажи теги.",
+            "",
+            "files",
+            "none",
+            "none",
+            "list_tags",
+            {},
+            id="count-then-tags-with-modifier",
         ),
         pytest.param(
             "Что было вчера? И сколько всего объектов знаний в моей базе?",
@@ -1802,13 +1832,21 @@ async def test_compound_global_counts_execute_once_then_preserve_only_the_other_
         assert all({"what_happened", "upcoming"}.isdisjoint(offered) for offered in llm.main_tools)
 
 
+@pytest.mark.parametrize("tag_first", [False, True], ids=["local-before-tags", "tags-before-local"])
 @pytest.mark.asyncio
-async def test_local_selection_with_a_legitimate_compound_tail_cannot_model_call_global_stats(
+async def test_local_selection_compound_tail_survives_without_global_stats_authority(
+    tag_first: bool,
     settings: Any,
     storage: Any,
 ) -> None:
     case = FIXTURE["local_count_controls"][7]
-    message = case["question"] + " И покажи доступные теги."
+    local_question = case["question"].rstrip("?.!")
+    if tag_first:
+        expected_remainder = local_question[:1].lower() + local_question[1:]
+        message = f"Покажи доступные теги и заодно {expected_remainder}."
+    else:
+        expected_remainder = local_question
+        message = case["question"] + " И покажи доступные теги."
     llm = _HostileAgentLoopLLM(
         case,
         [("kg_stats", {}), ("list_tags", {})],
@@ -1830,11 +1868,12 @@ async def test_local_selection_with_a_legitimate_compound_tail_cannot_model_call
     )
 
     assert kernel.calls == [("list_tags", {})]
-    assert llm.main_tools == []
+    assert llm.main_tools and all(offered == [] for offered in llm.main_tools)
     assert "synthetic — 1" in context.structural_answer
     assert context.remainder_known is True
-    assert context.open_remainder == ""
-    assert result["content"] == ""
+    assert context.open_remainder == expected_remainder
+    assert not any("Часть просьбы человека уже решена" in call for call in llm.calls)
+    assert result["content"] == "Синтетический остаток обработан."
 
 
 @pytest.mark.asyncio

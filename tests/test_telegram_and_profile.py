@@ -13,17 +13,22 @@ from friday.telegram_bridge import _UpdateInbox
 
 def test_primary_vllm_profile_is_pinned_to_expected_operational_values(settings):
     profile = settings.profile
-    assert profile.model_dir_name == "qwen3.6-35b-a3b-nvfp4"
-    assert settings.model_dir == settings.model_root / "qwen3.6-35b-a3b-nvfp4"
+    assert profile.model_dir_name == "qwen3.6-27b-nvfp4-nvidia"
+    assert settings.model_dir == settings.model_root / "qwen3.6-27b-nvfp4-nvidia"
     assert profile.max_model_len == 32768
-    assert profile.gpu_memory_utilization == 0.90
+    assert profile.gpu_memory_utilization == 0.76
     assert profile.kv_cache_dtype == "fp8"
-    assert profile.max_num_seqs == 16
+    assert profile.max_num_seqs == 1
     assert profile.tokenizer_mode == "auto"
-    assert profile.vllm_extra_args.skip_mm_profiling is True
-    assert profile.vllm_extra_args.mm_processor_cache_gb == 4.0
+    assert profile.quantization == "modelopt_mixed"
+    assert profile.vision_capable is False
+    assert profile.vllm_extra_args.language_model_only is True
+    assert profile.vllm_extra_args.skip_mm_profiling is False
+    assert profile.vllm_extra_args.mm_processor_cache_gb is None
     assert profile.vllm_extra_args.max_num_batched_tokens == 4096
-    assert json.loads(profile.vllm_extra_args.limit_mm_per_prompt or "{}") == {"image": 4, "video": 1}
+    assert profile.vllm_extra_args.limit_mm_per_prompt is None
+    assert profile.vllm_extra_args.reasoning_parser == "qwen3"
+    assert profile.vllm_extra_args.tool_call_parser == "qwen3_coder"
 
 
 def test_telegram_queue_persists_offset_deduplicates_and_survives_reopen(tmp_path):
@@ -1400,16 +1405,14 @@ async def test_why_names_its_sources_instead_of_bare_labels(tmp_path):
         bridge._inbox.close()
 
 
-def test_the_file_fate_reaches_the_chat():
-    """Бэкенд честно возвращал file_ingestion с каждым файлом — и ни бридж, ни
-    модель его не читали. Владелец отправлял документ и не знал, стал тот
-    знанием или завис в Inbox, а это разные следующие шаги."""
+def test_file_lifecycle_status_stays_out_of_ordinary_chat_but_warnings_survive():
+    """Inbox bookkeeping belongs to /inbox; answer reliability still belongs in chat."""
     from friday.telegram_bridge import TelegramBridge
 
     promoted = TelegramBridge._format_response_message(
         {"message": "Принял.", "file_ingestion": {"promoted": True}}
     )
-    assert "стал знанием" in promoted
+    assert promoted == "Принял."
 
     queued = TelegramBridge._format_response_message(
         {
@@ -1422,16 +1425,138 @@ def test_the_file_fate_reaches_the_chat():
             },
         }
     )
-    assert "/inbox" in queued
+    assert "/inbox" not in queued
+    assert "ждёт разбора" not in queued
     assert "не удалось" in queued  # нечитаемый файл называет себя
+
+    readable_queued = TelegramBridge._format_response_message(
+        {
+            "message": "Принял.",
+            "file_ingestion": {
+                "promoted": False,
+                "queued_for_review": True,
+                "inbox_id": "in_2",
+                "extraction": {"success": True, "text_success": True, "chars": 12},
+            },
+        }
+    )
+    assert readable_queued == "Принял."
 
     transient = TelegramBridge._format_response_message(
         {"message": "Принял.", "file_ingestion": {"action": "transient", "promoted": False}}
     )
-    assert "НЕ сохранён" in transient
+    assert transient == "Принял."
+
+    transient_unreadable = TelegramBridge._format_response_message(
+        {
+            "message": "Не смогла разобрать файл.",
+            "file_ingestion": {
+                "action": "transient",
+                "promoted": False,
+                "extraction_success": False,
+            },
+        }
+    )
+    assert "НЕ сохранён" not in transient_unreadable
+    assert "Текст извлечь не удалось" in transient_unreadable
+
+    transient_truncated = TelegramBridge._format_response_message(
+        {
+            "message": "Краткая сводка.",
+            "file_ingestion": {
+                "action": "transient",
+                "promoted": False,
+                "extraction_success": True,
+                "text_truncated": True,
+            },
+        }
+    )
+    assert "НЕ сохранён" not in transient_truncated
+    assert "принято начало" in transient_truncated
+
+    transient_deadline = TelegramBridge._format_response_message(
+        {
+            "message": "Краткая сводка.",
+            "file_ingestion": {
+                "action": "transient",
+                "promoted": False,
+                "extraction_success": True,
+                "parse_deadline_reached": True,
+                "parse_pages_read": 3,
+            },
+        }
+    )
+    assert "НЕ сохранён" not in transient_deadline
+    assert "остановлен по сроку" in transient_deadline
+    assert "3" in transient_deadline
+
+    voice_warning = TelegramBridge._format_response_message(
+        {
+            "message": "Не расслышала.",
+            "file_ingestion": {"queued_for_review": True, "voice_unrecognised": True},
+        }
+    )
+    assert "Голос не распознался" in voice_warning
+    assert "сохранила запись" not in voice_warning
 
     plain = TelegramBridge._format_response_message({"message": "Ответ."})
     assert "стал знанием" not in plain and "/inbox" not in plain
+
+
+@pytest.mark.parametrize(
+    ("reliability", "warning"),
+    [
+        ({"extraction_success": False}, "Текст извлечь не удалось"),
+        ({"extraction_success": True, "empty_text": True}, "Текста в файле не оказалось"),
+        ({"extraction_success": True, "text_truncated": True}, "принято начало"),
+        (
+            {
+                "extraction_success": True,
+                "parse_pages_truncated": True,
+                "parse_pages_read": 3,
+                "parse_total_pages": 9,
+            },
+            "прочитано 3",
+        ),
+        (
+            {
+                "extraction_success": True,
+                "parse_deadline_reached": True,
+                "parse_pages_read": 3,
+            },
+            "остановлен по сроку",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "lifecycle",
+    [
+        {"action": "transient", "promoted": False, "queued_for_review": False},
+        {"action": "promote", "promoted": True, "queued_for_review": False},
+        {"action": "review", "promoted": False, "queued_for_review": True},
+        {"action": "unknown", "promoted": False, "queued_for_review": False},
+    ],
+)
+def test_attachment_reliability_warning_is_independent_from_lifecycle(
+    reliability: dict[str, object],
+    warning: str,
+    lifecycle: dict[str, object],
+):
+    """Even a stale lifecycle verdict cannot turn a partial file into a whole one."""
+    from friday.telegram_bridge import TelegramBridge
+
+    rendered = TelegramBridge._format_response_message(
+        {
+            "message": "Результат разбора.",
+            "file_ingestion": {**lifecycle, **reliability},
+        }
+    )
+
+    assert warning in rendered
+    assert "стал знанием" not in rendered
+    assert "ждёт разбора" not in rendered
+    assert "/inbox" not in rendered
+    assert "НЕ сохранён" not in rendered
 
 
 def _ux_bridge(tmp_path):
@@ -1708,6 +1833,47 @@ async def test_a_living_backend_resets_the_watchdog(tmp_path):
         assert bridge._backend_down_since == 0.0
         assert not [u for u, _ in telegram.calls if u.endswith("/sendMessage")]
     finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_transition_journal_cannot_stall_the_poll_loop(monkeypatch, tmp_path):
+    """Best-effort telemetry must not inherit the full foreground chat timeout."""
+    from friday.telegram_bridge import _transport
+
+    bridge = _ux_bridge(tmp_path)
+
+    async def never_returns(*args, **kwargs):
+        del args, kwargs
+        await __import__("asyncio").Event().wait()
+
+    monkeypatch.setattr(_transport, "_TRANSITION_JOURNAL_TIMEOUT_SEC", 0.01)
+    monkeypatch.setattr(bridge, "_backend_json", never_returns)
+    bridge._loop_failing["poll"] = False
+    started = time.monotonic()
+    try:
+        await bridge._journal_transition(object(), "poll", failing=True, error=TimeoutError())
+        assert time.monotonic() - started < 0.25
+        assert bridge._loop_failing["poll"] is True
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stale_poll_heartbeat_crashes_for_the_service_supervisor(monkeypatch, tmp_path):
+    """A half-dead process must exit so systemd can reopen sockets and resume its durable queue."""
+    from friday.telegram_bridge import _transport
+
+    bridge = _ux_bridge(tmp_path)
+    monkeypatch.setattr(_transport, "_POLL_WATCHDOG_INTERVAL_SEC", 0.001)
+    monkeypatch.setattr(_transport, "_POLL_WATCHDOG_STALE_SEC", 0.001)
+    bridge._running = True
+    bridge._poll_heartbeat_at = time.monotonic() - 1.0
+    try:
+        with pytest.raises(RuntimeError, match="telegram_poll_watchdog_expired"):
+            await bridge._poll_watchdog()
+    finally:
+        bridge._running = False
         bridge._inbox.close()
 
 

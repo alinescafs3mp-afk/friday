@@ -17,6 +17,11 @@ from fastapi.testclient import TestClient
 
 from friday.server import create_app
 
+# Hard delete is deliberately absent from the live surface until its restore
+# protocol is complete.  Its read-shaped preflight therefore fails closed before
+# it can disclose (or audit) another account's deletion inventory.
+_INTENTIONALLY_UNAVAILABLE_READS = {"/api/admin/users/{user_id}/deletion": 503}
+
 
 def _actions(storage) -> list[str]:
     return [row["action"] for row in storage.list_audit_log(None, limit=100)]
@@ -230,6 +235,7 @@ def test_every_admin_read_of_another_account_is_audited(settings, monkeypatch, t
         checked: list[str] = []
         unaudited: list[str] = []
         unreachable: list[str] = []
+        unavailable_seen: list[str] = []
 
         def audit_count() -> int:
             row = storage.execute("SELECT COUNT(*) AS c FROM audit_log").fetchone()
@@ -255,6 +261,10 @@ def test_every_admin_read_of_another_account_is_audited(settings, monkeypatch, t
             before = audit_count()
             response = client.get(concrete, params={"user_id": "victim", "q": "проба"}, headers=owner)
             if response.status_code >= 400:
+                expected_status = _INTENTIONALLY_UNAVAILABLE_READS.get(path)
+                if response.status_code == expected_status:
+                    unavailable_seen.append(path)
+                    continue
                 # A route that could not be reached is not evidence of anything, so it
                 # is reported rather than skipped: silence here is what let the graph
                 # route sit unaudited.
@@ -268,6 +278,10 @@ def test_every_admin_read_of_another_account_is_audited(settings, monkeypatch, t
     assert not unaudited, f"these read another account without an audit row: {unaudited}"
     assert any("{" in path for path in checked), (
         "no parameterised route was exercised — the seeding broke and the exemption is back"
+    )
+    assert set(unavailable_seen) == set(_INTENTIONALLY_UNAVAILABLE_READS), (
+        "the explicit hard-delete preflight quarantine drifted: "
+        f"expected {sorted(_INTENTIONALLY_UNAVAILABLE_READS)}, saw {sorted(unavailable_seen)}"
     )
     assert not unreachable, (
         "these admin reads could not be exercised, so nothing is known about their auditing "

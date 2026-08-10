@@ -46,7 +46,7 @@ async def test_every_runtime_classifier_has_the_shared_output_ceiling(settings) 
     context = AgentContext(conversation_id="conv_synthetic", user_id="synthetic")
     context.outward_verdict = ("действие", None)
     await runtime._prefetch_a_reminder_if_asked(  # noqa: SLF001
-        "синтетическое напоминание",
+        "Напомни завтра о синтетическом отчёте",
         context,
         None,  # type: ignore[arg-type] -- the negative verdict never reaches the kernel
         [{"function": {"name": "remind"}}],

@@ -15,10 +15,14 @@ repeat that at the largest scale yet.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
+import pytest
 from fastapi.testclient import TestClient
 
+from friday.execution_kernel import ExecutionKernel, _source_anchor_context_projection
+from friday.permissions import AuthorizationService
 from friday.server import create_app
 from friday.storage.models import (
     Entity,
@@ -67,6 +71,493 @@ def test_source_text_is_searchable_and_the_verdict_is_obeyed(storage):
     assert orphan in found
     # The verdict stands.
     assert rejected not in found, "search resurrected material the reviewer rejected"
+
+
+@pytest.mark.asyncio
+async def test_explicit_agent_source_search_reads_pending_owned_file_but_not_rejected(
+    settings,
+    storage,
+):
+    owner = "source-tool-owner"
+    neighbour = "source-tool-neighbour"
+    storage.ensure_user(owner, preset_key="owner")
+    storage.ensure_user(neighbour, preset_key="owner")
+    target = "Иванов — ведущий инженер по эксплуатации"
+    kept = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-kept",
+        raw_content=("служебное вступление\n" * 80) + target,
+        content_type="file",
+        metadata_json={"filename": "штатное расписание.docx"},
+    )
+    rejected = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-rejected",
+        raw_content=f"отклонённая копия: {target}",
+        content_type="file",
+        metadata_json={"filename": "отклонено.docx"},
+    )
+    foreign = RawObject(
+        id=new_id("raw"),
+        user_id=neighbour,
+        source="upload",
+        source_ref="opaque-foreign",
+        raw_content=f"чужой материал: {target}",
+        content_type="file",
+        metadata_json={"filename": "чужое.docx"},
+    )
+    for raw in (kept, rejected, foreign):
+        storage.store_raw_object(raw)
+    storage.store_inbox_item(
+        InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=kept.id, status=InboxStatus.PENDING)
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=owner,
+            raw_object_id=rejected.id,
+            status=InboxStatus.IGNORED,
+        )
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=neighbour,
+            raw_object_id=foreign.id,
+            status=InboxStatus.PENDING,
+        )
+    )
+
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+    result = await kernel.execute(
+        "source_search",
+        {"query": "Иванов должность", "limit": 20},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True
+    assert result.data["shown"] == 1
+    assert result.data["coverage"] == {
+        "complete": True,
+        "limit": 20,
+        "candidates_scanned": 1,
+        "candidate_cap": 100,
+        "focus_conjunctive": False,
+        "focus_match_found": False,
+        "focus_fallback_contextual": False,
+        "ignored_excluded": True,
+    }
+    [item] = result.data["results"]
+    assert item["raw_object_id"] == kept.id
+    assert item["title"] == "штатное расписание.docx"
+    assert item["review_status"] == "pending"
+    assert item["promoted"] is False
+    assert target in item["excerpt"]
+    assert rejected.id not in str(result.data)
+    assert foreign.id not in str(result.data)
+
+
+@pytest.mark.asyncio
+async def test_source_search_requires_knowledge_read(settings, storage):
+    storage.ensure_user("source-guest", preset_key="guest")
+    authorization = AuthorizationService(storage)
+    authorization.deny_permission("source-guest", "knowledge.read")
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": PHRASE},
+        actor=authorization.actor_for_user("source-guest", source="test"),
+    )
+
+    assert result.success is False
+
+
+def test_source_search_is_detailed_for_file_work_and_withheld_from_small_talk(settings, storage):
+    storage.ensure_user("source-routing-owner", preset_key="owner")
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+    actor = authorization.actor_for_user("source-routing-owner", source="test")
+
+    file_tools = {
+        str((item.get("function") or {}).get("name") or "")
+        for item in kernel.get_tool_definitions(actor, topic="файл")
+    }
+    household_tools = {
+        str((item.get("function") or {}).get("name") or "")
+        for item in kernel.get_tool_definitions(actor, topic="быт")
+    }
+
+    assert "source_search" in file_tools
+    assert "source_search" not in household_tools
+
+
+@pytest.mark.asyncio
+async def test_source_search_page_reaches_the_model_without_tail_truncation(settings, storage):
+    owner = "source-page-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    for index in range(20):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=owner,
+            source="upload",
+            source_ref=f"source-{index}",
+            raw_content=(f"PAGE-SOURCE-{index:02d} {PHRASE} " + "длинное окружение " * 120),
+            content_type="file",
+            metadata_json={"filename": f"Материал {index:02d}.docx"},
+        )
+        storage.store_raw_object(raw)
+        storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=raw.id))
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": PHRASE, "limit": 20},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+    rendered = result.to_llm_message()
+
+    assert result.success is True
+    assert result.data["shown"] == 20
+    assert result.data["coverage"]["complete"] is False
+    assert len(rendered) < 12_000
+    assert "Материал 00.docx" in rendered
+    assert "Материал 19.docx" in rendered
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_source_search_uses_a_separate_focus_without_broadening_retrieval(settings, storage):
+    owner = "source-focus-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    target = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-focus-target",
+        raw_content=("Иванов\n" * 1_000) + "Иванов — ведущий инженер по эксплуатации\n",
+        content_type="file",
+        metadata_json={"filename": "synthetic-focus-target.docx"},
+    )
+    predicate_noise = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-focus-noise",
+        raw_content="Должность: посторонний предикат без искомой фамилии",
+        content_type="file",
+        metadata_json={"filename": "synthetic-focus-noise.docx"},
+    )
+    anchor_noise = [
+        RawObject(
+            id=new_id("raw"),
+            user_id=owner,
+            source="upload",
+            source_ref=f"opaque-anchor-noise-{index}",
+            raw_content="Иванов\n" * 200,
+            content_type="file",
+            metadata_json={"filename": f"synthetic-anchor-noise-{index:02d}.docx"},
+        )
+        for index in range(30)
+    ]
+    for raw in (target, predicate_noise, *anchor_noise):
+        storage.store_raw_object(raw)
+        storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=raw.id))
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True
+    assert result.data["query"] == "Иванов"
+    assert result.data["focus"] == "Иванов должность"
+    assert result.data["shown"] == 1
+    assert result.data["coverage"]["focus_match_found"] is False
+    assert result.data["coverage"]["focus_fallback_contextual"] is True
+    [item] = result.data["results"]
+    assert item["raw_object_id"] == target.id
+    assert "Иванов — ведущий инженер по эксплуатации" in item["excerpt"]
+    assert item["focus_match_kind"] == "anchor_context"
+    assert predicate_noise.id not in str(result.data)
+    assert all(noise.id not in str(result.data) for noise in anchor_noise)
+
+
+@pytest.mark.asyncio
+async def test_source_search_never_cross_joins_a_far_predicate_in_the_same_document(settings, storage):
+    owner = "source-same-window-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    source = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-same-window",
+        raw_content=("Иванов\n" * 1_000)
+        + ("нейтральный раздел без кадровых сведений\n" * 100)
+        + "Петров\nДолжность: генеральный директор\n",
+        content_type="file",
+        metadata_json={"filename": "synthetic-same-window.docx"},
+    )
+    storage.store_raw_object(source)
+    storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=source.id))
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True
+    assert result.data["shown"] == 0
+    assert result.data["results"] == []
+    assert "Петров" not in str(result.data)
+    assert "генеральный директор" not in str(result.data)
+    assert result.data["coverage"]["focus_match_found"] is False
+
+
+@pytest.mark.asyncio
+async def test_source_search_context_boilerplate_cannot_page_out_an_implicit_value(settings, storage):
+    owner = "source-context-rank-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    target = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-context-target",
+        raw_content="Иванов — ведущий инженер по эксплуатации",
+        content_type="file",
+        metadata_json={"filename": "target.docx"},
+    )
+    storage.store_raw_object(target)
+    storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=target.id))
+    for index in range(30):
+        noise = RawObject(
+            id=new_id("raw"),
+            user_id=owner,
+            source="upload",
+            source_ref=f"opaque-context-noise-{index}",
+            raw_content=(
+                "Список сотрудников организации: Иванов. "
+                "Дополнительные сведения об обязанностях отсутствуют полностью."
+            ),
+            content_type="file",
+            metadata_json={"filename": f"noise-{index:02d}.docx"},
+        )
+        storage.store_raw_object(noise)
+        storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=noise.id))
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True
+    assert any(item["raw_object_id"] == target.id for item in result.data["results"])
+    assert "ведущий инженер по эксплуатации" in str(result.data)
+
+
+@pytest.mark.asyncio
+async def test_source_search_maximum_metadata_page_remains_valid_untruncated_json(
+    settings,
+    storage,
+    monkeypatch,
+):
+    owner = "source-envelope-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    rows = [
+        {
+            "id": f"raw-{index:02d}-" + ("r" * 70),
+            "content_type": "application/synthetic-" + ("x" * 58),
+            "received_at": "2026-08-10T00:00:00.000000+00:00-extra",
+            "inbox_status": "pending-review-state-" + ("s" * 19),
+            "knowledge_object_id": None,
+            "_raw_metadata": {"filename": f"Материал-{index:02d}-" + ("т" * 248)},
+            "_raw_content": ("Иванов " + ("контекст " * 42) + f"Должность: ведущий инженер {index:02d}"),
+        }
+        for index in range(10)
+    ]
+
+    def fake_search_raw_objects(user_id, query, *, limit, include_content):
+        assert user_id == owner
+        assert query == "Иванов"
+        assert limit == 100
+        assert include_content is True
+        return rows
+
+    monkeypatch.setattr(storage, "search_raw_objects", fake_search_raw_objects)
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+    rendered = result.to_llm_message()
+
+    assert result.success is True
+    assert result.truncated is False
+    assert len(rendered.removeprefix("Результат source_search:\n")) < 12_000
+    parsed = json.loads(rendered.removeprefix("Результат source_search:\n"))
+    assert parsed["shown"] == 10
+    assert len(parsed["results"]) == 10
+    assert "Должность: ведущий инженер 09" in parsed["results"][-1]["excerpt"]
+    assert parsed["results"][-1]["focus_match_kind"] == "full"
+
+
+@pytest.mark.parametrize(
+    ("source_name", "query", "expected"),
+    [
+        ("Иванов", "иванов", True),
+        ("Иванова", "иванов", True),
+        ("Иванову", "иванов", True),
+        ("Ивановым", "иванов", True),
+        ("Ивановский", "иванов", False),
+        ("Иванович", "иванов", False),
+        ("Петровский", "петровск", True),
+        ("Петровского", "петровск", True),
+        ("Петровскому", "петровск", True),
+        ("Петровским", "петровск", True),
+    ],
+)
+def test_source_anchor_uses_closed_surname_forms(source_name, query, expected):
+    excerpt, matched, context = _source_anchor_context_projection(
+        query,
+        f"{query} должност",
+        f"{source_name}\nДолжность: ведущий инженер",
+        max_chars=600,
+    )
+
+    assert bool(excerpt) is expected
+    if expected:
+        assert source_name in excerpt
+        assert matched == 2
+        assert context >= 2
+
+
+@pytest.mark.parametrize(
+    ("focus", "text"),
+    [
+        ("иванов рол", "Иванов\nПароль: PRIVATE-VALUE"),
+        ("иванов рол", "Иванов\nКонтроль: PRIVATE-VALUE"),
+        ("иванов позици", "Иванов\nПозиционирование продукта"),
+        ("иванов должност", "Иванов\nДолжностная инструкция"),
+    ],
+)
+def test_source_focus_does_not_match_unrelated_token_substrings(focus, text):
+    excerpt, matched, _context = _source_anchor_context_projection(
+        "иванов",
+        focus,
+        text,
+        max_chars=600,
+    )
+
+    assert "Иванов" in excerpt
+    assert matched == 1
+
+
+def test_source_projection_preserves_original_offsets_and_table_record_boundaries():
+    unicode_text = (
+        ("ﬁ" * 500) + ("before " * 30) + "\nИванов\nДолжность: ведущий инженер\n" + ("after " * 1_000)
+    )
+    excerpt, matched, context = _source_anchor_context_projection(
+        "иванов",
+        "иванов должност",
+        unicode_text,
+        max_chars=600,
+    )
+    assert "Иванов\nДолжность: ведущий инженер" in excerpt
+    assert matched == 2
+    assert context >= 2
+
+    table = "\n".join(
+        ["Фамилия | Примечание | Должность"]
+        + [f"Петров-{index:02d} | заметка | генеральный директор" for index in range(20)]
+        + ["Иванов | " + ("длинное примечание " * 80) + " | Должность: ведущий инженер"]
+        + [f"Сидоров-{index:02d} | заметка | начальник отдела" for index in range(20)]
+    )
+    excerpt, matched, context = _source_anchor_context_projection(
+        "иванов",
+        "иванов должност",
+        table,
+        max_chars=480,
+    )
+    assert excerpt == "Фамилия | Должность\nИванов | Должность: ведущий инженер"
+    assert matched == 2
+    assert context >= 2
+    assert "Петров" not in excerpt
+    assert "Сидоров" not in excerpt
+
+    for implicit_table in (
+        "Иванов | ведущий инженер",
+        "ФИО | Штатная единица\nИванов | ведущий инженер",
+    ):
+        excerpt, matched, context = _source_anchor_context_projection(
+            "иванов",
+            "иванов должност",
+            implicit_table,
+            max_chars=480,
+        )
+        assert "Иванов" in excerpt
+        assert "ведущий инженер" in excerpt
+        assert matched == 1
+        assert context >= 2
+
+
+def test_source_projection_accepts_a_safe_preceding_field_but_not_a_neighbour_record():
+    excerpt, matched, context = _source_anchor_context_projection(
+        "иванов",
+        "иванов должност",
+        "Должность: ведущий инженер\nИванов",
+        max_chars=600,
+    )
+    assert excerpt == "Должность: ведущий инженер\nИванов"
+    assert matched == 2
+    assert context >= 2
+
+    hostile, hostile_matched, hostile_context = _source_anchor_context_projection(
+        "иванов",
+        "иванов должност",
+        "Петров\nДолжность: генеральный директор\nИванов",
+        max_chars=600,
+    )
+    assert hostile == "Иванов"
+    assert hostile_matched == 1
+    assert hostile_context == 0
+
+
+def test_source_projection_rejects_a_field_label_without_a_value():
+    excerpt, matched, context = _source_anchor_context_projection(
+        "иванов",
+        "иванов должност",
+        "Иванов\nДолжность:",
+        max_chars=600,
+    )
+    assert excerpt == "Иванов\nДолжность:"
+    assert matched == 2
+    assert context == 0
 
 
 def test_a_soft_deleted_source_is_not_reachable(storage):
@@ -240,19 +731,23 @@ def test_the_index_is_only_ever_read_through_the_filtered_helper():
     assert readers == ["search_raw_objects"], f"a second reader of raw_fts appeared: {readers}"
 
 
-def test_the_agent_and_the_retriever_cannot_reach_source_text():
-    """Source text is provenance, not recall.
+def test_source_text_only_reaches_the_agent_through_the_explicit_filtered_tool():
+    """Source text never becomes ambient recall; one explicit tool may read it.
 
-    The place where resurrected material would do the most damage is an agent
-    quoting it as fact, so the helper is deliberately absent from HybridSearcher,
-    the agent context builder and the tool registry.
+    Pending uploads must be searchable when the person asks about an uploaded
+    source, but they must not silently enter HybridSearcher or every prompt.  The
+    execution kernel is the single capability-gated bridge and still calls the
+    verdict-aware helper which excludes ignored/private material.
     """
     from pathlib import Path
 
     root = Path(__file__).parent.parent / "friday"
-    for relative in ("retrieval/__init__.py", "agent_runtime/__init__.py", "execution_kernel/__init__.py"):
+    for relative in ("retrieval/__init__.py", "agent_runtime/__init__.py"):
         source = (root / relative).read_text(encoding="utf-8")
         assert "search_raw_objects" not in source, f"{relative} reached into source text"
+    kernel = (root / "execution_kernel" / "__init__.py").read_text(encoding="utf-8")
+    assert kernel.count("storage.search_raw_objects") == 1
+    assert '"source_search"' in kernel
 
 
 def test_source_search_over_http_excludes_rejected_material(settings):
@@ -271,6 +766,8 @@ def test_source_search_over_http_excludes_rejected_material(settings):
         body = response.json()
         assert [item["id"] for item in body["items"]] == [kept]
         assert body["excludes"] == "ignored"
+        assert "_raw_content" not in str(body)
+        assert "_raw_metadata" not in str(body)
 
         # Unauthenticated callers get nothing.
         assert client.get("/api/knowledge/sources", params={"q": PHRASE}).status_code == 401

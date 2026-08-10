@@ -29,8 +29,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from friday import __version__
+from friday.account_gate import AccountActivityGate, AccountGateClosed
 from friday.admin_api import router as admin_router
-from friday.agent_runtime import AgentRuntime, asks_for_the_web
+from friday.agent_runtime import AgentRuntime, _OwnedAttachment, asks_for_the_web
 from friday.agent_runtime._office_attachments import (
     OFFICE_STRUCTURE_KEY,
     bounded_raw_file_metadata,
@@ -92,7 +93,10 @@ from friday.retrieval import EmbeddingBackend, HybridSearcher, is_relational_que
 from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 from friday.security import verify_bridge_request
 from friday.storage import (
+    DeletedAccountError,
     PrivateMaterialQuarantineError,
+    deleted_account_tombstone_key,
+    deleted_identity_tombstone_key,
     init_storage,
     normalize_conversation_mode,
 )
@@ -105,7 +109,7 @@ from friday.storage.models import (
 )
 from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
-from friday.workers._blocking import run_blocking, wait_until_idle
+from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
 
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
@@ -413,17 +417,13 @@ def _current_turn_file_attachment(
     if text.strip():
         attachment.update(
             {
-                # Valid Office spans are resolved once later under a shared
-                # whole-record budget.  Keep the exact string only in this
-                # private in-memory descriptor until then; legacy files retain
-                # their historical prefix projection.
-                "transient_text": (
-                    text if office_index is not None else text[:_CURRENT_TURN_ATTACHMENT_CHARS]
-                ),
+                # Keep the extractor-bounded source only in this server-owned
+                # in-memory descriptor. AgentRuntime selects one bounded
+                # request-aware projection before synthesis and verification.
+                "transient_text": text,
                 "extraction_success": True,
                 "extraction_error": "",
-                "text_truncated": text_truncated
-                or (office_index is None and len(text) > _CURRENT_TURN_ATTACHMENT_CHARS),
+                "text_truncated": text_truncated,
                 # OCR and speech recognition are useful same-turn context, but
                 # model-generated text is not source truth for verified=True or
                 # a repair pass. The prompt receives an explicit caveat below.
@@ -472,7 +472,7 @@ def _current_turn_file_attachment(
     if office_index is not None:
         attachment[OFFICE_STRUCTURE_KEY] = office_index
         return trusted_office_attachment(attachment)
-    return attachment
+    return _OwnedAttachment(attachment)
 
 
 def _request_hostname(value: str) -> str | None:
@@ -834,7 +834,47 @@ async def _authenticate(request: Request) -> ActorContext:
         # искал в аккаунте, у которого нет ни одного документа, и получал честное
         # «ничего не нашлось» о корпусе, лежащем рядом под другим арендатором.
         derived_id = _telegram_user_id(settings, identity.external_user_id)
-        linked_id = state.storage.resolve_identity("telegram", identity.external_user_id)
+        if (
+            state.storage.kv_get(deleted_identity_tombstone_key("telegram", identity.external_user_id))
+            is not None
+        ):
+            raise AuthenticationError("User account was permanently deleted")
+        try:
+            linked_id = state.storage.resolve_identity("telegram", identity.external_user_id)
+        except ValueError as exc:
+            raise AuthenticationError("Telegram identity authority is inconsistent") from exc
+        # ``telegram_owner_chat_ids`` names the installation owner only when the
+        # signed sender is speaking in that same private chat.  On a fresh DB the
+        # canonical API owner already exists, but its Telegram identity did not:
+        # messages/sessions/idempotency were consequently written under the
+        # synthetic ``telegram:...`` account while raw material and tools used the
+        # shared canonical tenant.  Bind before constructing ActorContext, so every
+        # downstream write observes one person id from the first request onward.
+        #
+        # A configured group is deliberately excluded (sender != chat): otherwise
+        # any member of an owner-listed group would become the canonical owner.
+        # ``allow_rebind=False`` makes the read/create decision atomic and refuses
+        # a conflicting explicit account link instead of stealing it.
+        configured_owner_identity = bool(
+            in_private_chat and sender_number in settings.telegram_owner_chat_ids
+        )
+        if configured_owner_identity:
+            if linked_id is None:
+                try:
+                    state.storage.link_identity(
+                        "telegram",
+                        identity.external_user_id,
+                        LEGACY_OWNER_USER_ID,
+                        linked_by=LEGACY_OWNER_USER_ID,
+                        allow_rebind=False,
+                    )
+                except DeletedAccountError as exc:
+                    raise AuthenticationError("User account was permanently deleted") from exc
+                except ValueError as exc:
+                    raise AuthenticationError("Configured owner identity could not be bound") from exc
+                linked_id = state.storage.resolve_identity("telegram", identity.external_user_id)
+            if linked_id != LEGACY_OWNER_USER_ID:
+                raise AuthenticationError("Configured owner identity conflicts with another account")
         user_id = linked_id or derived_id
         existing = state.storage.get_user(user_id)
         # Allowlisting a GROUP chat handed an account with the full 'user' preset to
@@ -904,17 +944,23 @@ async def _authenticate(request: Request) -> ActorContext:
             # `CASE WHEN excluded.source<>''`, то есть дефолт молча переписал бы
             # 'api-token' владельца. Пустая строка — единственный способ сказать
             # «не трогай это поле». `preset_key` в UPDATE не участвует вовсе.
-            state.storage.ensure_user(user_id, source="", metadata=metadata)
+            try:
+                state.storage.ensure_user(user_id, source="", metadata=metadata)
+            except DeletedAccountError as exc:
+                raise AuthenticationError("User account was permanently deleted") from exc
         else:
-            state.storage.ensure_user(
-                user_id,
-                source="telegram",
-                external_id=identity.external_user_id,
-                display_name=display_name,
-                username=str(telegram_user.get("username") or ""),
-                preset_key=preset_for_new_account,
-                metadata=metadata,
-            )
+            try:
+                state.storage.ensure_user(
+                    user_id,
+                    source="telegram",
+                    external_id=identity.external_user_id,
+                    display_name=display_name,
+                    username=str(telegram_user.get("username") or ""),
+                    preset_key=preset_for_new_account,
+                    metadata=metadata,
+                )
+            except DeletedAccountError as exc:
+                raise AuthenticationError("User account was permanently deleted") from exc
             # First-time self-registration only: existing was None, no identity
             # link, and the account received the deliberately narrow newcomer
             # preset (private chat admitted solely by open registration). A
@@ -1107,7 +1153,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             agent = AgentRuntime(settings, storage, llm, kernel)
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
-            memory_vault = MemoryVault(settings.memory_vault_dir)
+            memory_vault = MemoryVault(
+                settings.memory_vault_dir,
+                account_is_deleted=lambda user_id: (
+                    storage.kv_get(deleted_account_tombstone_key(user_id)) is not None
+                ),
+            )
 
             # Organs (JOP): register their capabilities, mount their routers, and
             # feed their background workers into the supervisor. All additive.
@@ -1218,6 +1269,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     )
     application.state.settings = settings
     application.state.rate_limiter = SlidingWindowLimiter()
+    application.state.account_activity_gate = AccountActivityGate()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -1374,8 +1426,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # anything ``call_next`` raises, and the credentials are known good
                 # exactly here.
                 request.state.actor = actor
-                with bind_actor(actor):
-                    response = await call_next(request)
+                try:
+                    async with request.app.state.account_activity_gate.hold(actor.own_id) as admission_token:
+                        request.state.account_admission_token = admission_token
+                        activity_token = current_activity.set("http")
+                        try:
+                            with bind_actor(actor):
+                                response = await call_next(request)
+                        finally:
+                            current_activity.reset(activity_token)
+                except AccountGateClosed:
+                    response = JSONResponse(
+                        {"detail": "Account is closed for deletion"},
+                        status_code=409,
+                    )
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -2066,15 +2130,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         filename=filename,
                         mime_type=mime_type,
                     )
-                    private_office_text = str(
-                        transient_file.get("_office_source_text") or transient_file.get("text_preview") or ""
+                    private_source_text = str(
+                        transient_file.get("_office_source_text")
+                        or transient_file.get("_runtime_source_text")
+                        or transient_file.get("text_preview")
+                        or ""
                     )
                     transient_office_index = validate_runtime_office_index(
                         transient_file.get(OFFICE_STRUCTURE_KEY),
-                        private_office_text,
+                        private_source_text,
                     )
+                    runtime_source_truncated = bool(transient_file.get("_runtime_source_truncated"))
                     transient_incomplete = any(
-                        transient_file.get(key)
+                        runtime_source_truncated if key == "text_truncated" else transient_file.get(key)
                         for key in (
                             "text_truncated",
                             "parse_deadline_reached",
@@ -2087,15 +2155,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "filename": transient_file["filename"],
                         "transient": True,
                         "persisted": False,
-                        "transient_text": (
-                            private_office_text
-                            if transient_office_index is not None
-                            else transient_file["text_preview"]
-                        ),
+                        # Whole extractor text stays process-private and exists for
+                        # this turn only. AgentRuntime either maps every span for a
+                        # whole-document task or selects bounded lookup windows.
+                        "transient_text": private_source_text,
                         "extraction_success": transient_file["extraction_success"],
                         "empty_text": bool(
                             transient_file["extraction_success"]
-                            and not private_office_text.strip()
+                            and not private_source_text.strip()
                             and not transient_incomplete
                         ),
                         # Всё, что осмотр УЖЕ выяснил про полноту разбора.
@@ -2106,7 +2173,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         # сохраняется, значит переспросить по нему потом
                         # нечего: другого случая сказать правду не будет.
                         "extraction_error": transient_file["extraction_error"],
-                        "text_truncated": transient_file["text_truncated"],
+                        "text_truncated": runtime_source_truncated,
                         "parse_deadline_reached": transient_file["parse_deadline_reached"],
                         "parse_pages_read": transient_file["parse_pages_read"],
                         "parse_pages_truncated": transient_file["parse_pages_truncated"],
@@ -2118,6 +2185,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     if transient_office_index is not None:
                         transient_attachment[OFFICE_STRUCTURE_KEY] = transient_office_index
                         transient_attachment = trusted_office_attachment(transient_attachment)
+                    else:
+                        transient_attachment = _OwnedAttachment(transient_attachment)
                     attachments.append(transient_attachment)
                     file_ingestion = {
                         key: value
@@ -2126,6 +2195,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         not in {
                             "text_preview",
                             "_office_source_text",
+                            "_runtime_source_text",
+                            "_runtime_source_truncated",
                             OFFICE_STRUCTURE_KEY,
                         }
                     }

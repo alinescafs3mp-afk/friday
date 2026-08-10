@@ -404,7 +404,14 @@ class IntakeMixin(StorageShared):
                     changed += 1
         return {"scanned": scanned, "changed": changed}
 
-    def search_raw_objects(self, user_id: str, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    def search_raw_objects(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int = 20,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
         """Full-text search over SOURCE text, obeying the Inbox verdict.
 
         `raw_objects` holds the original ingested characters; the Knowledge Object
@@ -432,6 +439,11 @@ class IntakeMixin(StorageShared):
         a review row. A join then produced the object once per row and let it
         through whenever any one of them was not the rejection. Any rejection hides
         it; that is the direction to be wrong in.
+
+        ``include_content`` is an internal atomic projection for the explicit
+        agent tool.  Keeping the source body in this same filtered SELECT avoids a
+        second-read race with an Inbox rejection.  Public API/CLI callers leave it
+        false and never receive the private ``_raw_*`` fields.
         """
         text = " ".join((query or "").split()).strip()
         if not text or not self._fts_available:
@@ -441,8 +453,12 @@ class IntakeMixin(StorageShared):
             return []
         match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
         try:
+            content_projection = (
+                ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
+            )
             rows = self.execute(
-                f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at
+                          {content_projection},
                           snippet(raw_fts, 0, '', '', '…', 24) AS excerpt,
                           (SELECT i2.status FROM inbox i2 WHERE i2.raw_object_id=r.id
                             AND i2.user_id=r.user_id

@@ -72,11 +72,23 @@ _FILE_BOOL_FIELDS = (
     "voice_unrecognised",
     "voice_transcript_truncated",
     "extraction_success",
+    "empty_text",
     "text_truncated",
     "parse_deadline_reached",
     "parse_pages_truncated",
+    "archive_truncated",
+    "source_truncated_for_parse",
+    "unsupported_format",
 )
-_FILE_COUNT_FIELDS = ("size_bytes", "parse_pages_read", "parse_total_pages")
+_FILE_COUNT_FIELDS = (
+    "size_bytes",
+    "parse_pages_read",
+    "parse_total_pages",
+    "vision_pages_read",
+    "vision_pages_total",
+    "archive_files",
+    "archive_files_read",
+)
 _EXTRACTION_BOOL_FIELDS = (
     "success",
     "text_success",

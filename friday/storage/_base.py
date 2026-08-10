@@ -219,6 +219,17 @@ class PrivateMaterialQuarantineError(ValueError):
     """
 
 
+class DeletedAccountError(ValueError):
+    """An explicitly erased account identifier must never be provisioned again.
+
+    Hard deletion removes every access row, including the identity link that used
+    to lead here.  Without a durable tombstone, the next Telegram update would
+    derive the same account id and ``ensure_user`` would silently recreate it.  A
+    hash-keyed row in ``runtime_kv`` keeps the identifier unavailable without
+    retaining another live account row.
+    """
+
+
 class StorageClosedError(RuntimeError):
     """A database operation was attempted after the process shut its storage down.
 
@@ -231,6 +242,23 @@ class StorageClosedError(RuntimeError):
 
 
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}$")
+DELETED_ACCOUNT_TOMBSTONE_PREFIX = "deleted_account:v1:"
+DELETED_IDENTITY_TOMBSTONE_PREFIX = "deleted_identity:v1:"
+ACCOUNT_DELETION_ELIGIBILITY_PREFIX = "account_deletion_eligible:v1:"
+ACCOUNT_EXTERNAL_IDENTITY_HISTORY_PREFIX = "account_external_identity_history:v1:"
+_ACCOUNT_RUNTIME_EXACT_USER_PREFIXES = (
+    "dedup:scan:",
+    "entity_dedup:cursor:",
+    "eval:ablation:",
+    "eval:chunk_ab:",
+    "eval:last_report:",
+    "eval:last_run:",
+    "graph:mention_backfill:",
+    "workers:knowledge_quality:",
+    "workers:lifecycle:",
+)
+_ACCOUNT_RUNTIME_LENGTH_NAMESPACES = ("candidate", "present", "validation", "winner")
+_ACCOUNT_RUNTIME_QUOTA_NAMES = ("web",)
 CONVERSATION_MODES = {"dialogue", "knowledge_work", "research"}
 
 
@@ -242,6 +270,93 @@ def validate_user_id(user_id: str) -> str:
             "user_id must be 1-200 characters using letters, digits, dot, underscore, colon, @, +, or -"
         )
     return value
+
+
+def normalize_identity_source(source: str) -> str:
+    """Canonical authority key for an external identity provider name."""
+
+    value = unicodedata.normalize("NFC", str(source or "").strip()).casefold()
+    return unicodedata.normalize("NFC", value)
+
+
+def deleted_account_tombstone_key(user_id: str) -> str:
+    """Opaque durable key which prevents a hard-deleted id from reappearing."""
+
+    canonical = validate_user_id(user_id)
+    digest = hashlib.sha256(("friday-deleted-account\0" + canonical).encode("utf-8")).hexdigest()
+    return DELETED_ACCOUNT_TOMBSTONE_PREFIX + digest
+
+
+def deleted_identity_tombstone_key(source: str, external_id: str) -> str:
+    """Opaque durable key which prevents a revoked login from being reattached."""
+
+    canonical_source = normalize_identity_source(source)
+    canonical_external_id = str(external_id or "").strip()
+    if not canonical_source or not canonical_external_id:
+        raise ValueError("source and external_id are required")
+    material = f"friday-deleted-identity\0{canonical_source}\0{canonical_external_id}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return DELETED_IDENTITY_TOMBSTONE_PREFIX + digest
+
+
+def account_deletion_eligibility_key(user_id: str) -> str:
+    """Opaque proof that this account was born inside the coordinated contour."""
+
+    canonical = validate_user_id(user_id)
+    digest = hashlib.sha256(("friday-account-deletion-eligibility\0" + canonical).encode("utf-8")).hexdigest()
+    return ACCOUNT_DELETION_ELIGIBILITY_PREFIX + digest
+
+
+def account_external_identity_history_key(user_id: str) -> str:
+    """Opaque, irreversible marker for external/Telegram account history."""
+
+    canonical = validate_user_id(user_id)
+    digest = hashlib.sha256(
+        ("friday-account-external-identity-history\0" + canonical).encode("utf-8")
+    ).hexdigest()
+    return ACCOUNT_EXTERNAL_IDENTITY_HISTORY_PREFIX + digest
+
+
+def known_runtime_key_owners(key: str) -> set[str]:
+    """Decode owners only for closed, code-written account runtime formats."""
+
+    def valid_owner(value: str) -> str | None:
+        try:
+            return validate_user_id(value)
+        except ValueError:
+            return None
+
+    root = "graph:mention_backfill:"
+    for namespace in _ACCOUNT_RUNTIME_LENGTH_NAMESPACES:
+        prefix = f"{root}{namespace}:"
+        if not key.startswith(prefix):
+            continue
+        owners: set[str] = set()
+        simple_owner = valid_owner(key[len(root) :])
+        if simple_owner:
+            owners.add(simple_owner)
+        remainder = key[len(prefix) :]
+        length_text, separator, payload = remainder.partition(":")
+        if separator and len(length_text) == 8 and length_text.isdigit():
+            owner_length = int(length_text)
+            owner = payload[:owner_length]
+            if payload[owner_length : owner_length + 1] == ":":
+                structured_owner = valid_owner(owner)
+                if structured_owner:
+                    owners.add(structured_owner)
+        return owners
+
+    for name in _ACCOUNT_RUNTIME_QUOTA_NAMES:
+        match = re.fullmatch(rf"quota:{re.escape(name)}:(.+):(\d{{4}}-\d{{2}}-\d{{2}})", key)
+        if match:
+            quota_owner = valid_owner(match.group(1))
+            return {quota_owner} if quota_owner else set()
+
+    for prefix in _ACCOUNT_RUNTIME_EXACT_USER_PREFIXES:
+        if key.startswith(prefix):
+            exact_prefix_owner = valid_owner(key[len(prefix) :])
+            return {exact_prefix_owner} if exact_prefix_owner else set()
+    return set()
 
 
 def normalize_conversation_mode(mode: str | None) -> str:

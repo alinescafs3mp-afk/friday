@@ -258,7 +258,8 @@ async def test_retry_of_a_generated_notice_stays_a_generated_notice(settings, mo
     запроса, где ход создавался, поэтому на повторе имя чужого файла с
     реляционной фразой («Загружен документ: с кем работал иван отчёт.pdf»)
     судилось классификатором как настоящий вопрос — и включало графовое
-    расширение, которого первый ход не получал. При одном и том же тексте.
+    расширение. Теперь bare upload сильнее изолирован: backend-caption не
+    запускает архивный поиск вовсе ни на первом ходе, ни на повторе.
 
     Мутация: убрать `synthetic_document_notice=` из вызова `chat` в
     `/api/me/regenerate` (или перестать писать метку на ход) — тест обязан
@@ -298,7 +299,7 @@ async def test_retry_of_a_generated_notice_stays_a_generated_notice(settings, mo
             headers=headers,
         )
         assert first.status_code == 200, first.text
-        assert calls and calls[0].get("graph_expansion") is False, "первый ход уже пошёл не так"
+        assert calls == [], "backend-authored bare upload не должен искать в архиве"
 
         calls.clear()
         again = client.post(
@@ -308,7 +309,4 @@ async def test_retry_of_a_generated_notice_stays_a_generated_notice(settings, mo
         )
         assert again.status_code == 200, again.text
 
-    assert calls, "повтор не позвал поиск — проба проверяет не то"
-    assert calls[0].get("graph_expansion") is False, (
-        "на повторе сгенерированное уведомление о файле снова судится как вопрос человека"
-    )
+    assert calls == [], "на повторе сгенерированное уведомление о файле снова судится как вопрос человека"

@@ -75,14 +75,19 @@ def test_the_sanitiser_also_runs_after_the_final_synthesis():
     """
     import inspect
 
-    from friday import agent_runtime
+    from friday.agent_runtime import AgentRuntime
 
-    source = inspect.getsource(agent_runtime)
-    synthesis = source[source.index("final_turn = classify_tool_turn") :][:900]
+    source = inspect.getsource(AgentRuntime._agentic_loop)  # noqa: SLF001
+    start = source.index("final_turn = classify_tool_turn")
+    end = source.index('LOGGER.warning("Final synthesis returned bare tool-call markup")', start)
+    synthesis = source[start:end]
     assert "_strip_tool_call_markup(final_turn.text)" in synthesis, (
         "итог синтеза после инструментов уходит человеку без очистки"
     )
-    assert '"content": clean' in synthesis, "очистка вычисляется, но человеку отдаётся неочищенный текст"
+    assert "accepted_final = context.deferred_web_file_body or clean" in synthesis
+    assert '"content": accepted_final' in synthesis, (
+        "очистка вычисляется, но человеку отдаётся неочищенный текст"
+    )
 
 
 def test_the_protocol_parser_still_sees_raw_markup():

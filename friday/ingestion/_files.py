@@ -1173,6 +1173,15 @@ class FilesMixin(PipelineShared):
             "extraction_success": bool(extraction.success),
             "extraction_error": extraction.error if not extraction.success else "",
             "text_preview": extraction.text[:limit],
+            # Process-private whole extractor result for the request-aware
+            # current-turn projector. The server removes this key before any
+            # API/idempotency receipt is built.
+            "_runtime_source_text": extraction.text,
+            # Preview clipping is not source loss once the process-private whole
+            # extractor result above is handed to AgentRuntime.  Keep the parser's
+            # own loss bit separate so a 100k no-save text can be mapped in full
+            # without claiming completeness for an extractor-capped source.
+            "_runtime_source_truncated": bool((extraction.metadata or {}).get("text_truncated")),
             # One prompt-level truth covers either loss: the transient preview
             # may be shorter than the extractor result, or the extractor itself
             # may already have stopped at its text budget.  In both cases the

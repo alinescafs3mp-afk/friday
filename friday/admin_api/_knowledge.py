@@ -27,13 +27,13 @@ from friday.admin_api._deps import (
     _require,
     _services,
     _target_user,
-    asyncio,
     purge_knowledge,
 )
 from friday.api.kg import _entity_audit_fingerprint, _public_container_card
 from friday.id_provenance import mark_verified_id
 from friday.mentions import mention_spans
 from friday.storage.models import EntityType
+from friday.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -153,7 +153,7 @@ async def list_all_containers(request: Request, user_id: str | None = None) -> d
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.containers.read", target)
-    raw_items = await asyncio.to_thread(_services(request).kg.list_containers, target)
+    raw_items = await run_blocking(_services(request).kg.list_containers, target)
     items = [_public_container_card(item) for item in raw_items]
     return {
         "user_id": target,
@@ -435,7 +435,7 @@ async def knowledge_entity_mentions(knowledge_id: str, request: Request, user_id
     # of accepted entity cards.  Keep that CPU work off the serving event loop; the
     # matcher itself bounds candidate rescans to the first public page plus overlap
     # halo, but parsing the source text is necessarily linear in its size.
-    spans = await asyncio.to_thread(mention_spans, str(knowledge.get("content") or ""), named)
+    spans = await run_blocking(mention_spans, str(knowledge.get("content") or ""), named)
     return {
         "knowledge_object_id": knowledge_id,
         "items": [
@@ -484,7 +484,7 @@ async def entity_suggestion_groups(
             continue
         scanned += 1
         content = str(knowledge.get("content") or knowledge.get("summary") or "")
-        suggestions = await asyncio.to_thread(
+        suggestions = await run_blocking(
             state.ingestion._entity_suggestions,  # noqa: SLF001
             target,
             content,
@@ -630,7 +630,7 @@ async def decide_entity_suggestion_group(request: Request) -> dict[str, Any]:
         # Подтверждение человеком — самый качественный сигнал; пересчёт связей
         # сущность↔сущность идёт off-loop по каждому затронутому документу.
         for knowledge_id in document_ids:
-            await asyncio.to_thread(state.kg.suggest_relations_for_knowledge, user_id, knowledge_id)
+            await run_blocking(state.kg.suggest_relations_for_knowledge, user_id, knowledge_id)
     return {
         "entity": entity,
         "entity_created": created,
@@ -665,7 +665,7 @@ async def list_entity_suggestions(knowledge_id: str, request: Request, user_id: 
         raise HTTPException(status_code=404, detail="Объект знания не найден")
 
     content = str(knowledge.get("content") or knowledge.get("summary") or "")
-    suggestions = await asyncio.to_thread(
+    suggestions = await run_blocking(
         state.ingestion._entity_suggestions,  # noqa: SLF001
         user_id,
         content,
@@ -757,7 +757,7 @@ async def accept_entity_suggestion(knowledge_id: str, request: Request) -> dict[
             "entity_created": created,
         },
     )
-    relations = await asyncio.to_thread(state.kg.suggest_relations_for_knowledge, user_id, knowledge_id)
+    relations = await run_blocking(state.kg.suggest_relations_for_knowledge, user_id, knowledge_id)
     return {
         "entity": entity,
         "entity_created": created,
@@ -802,7 +802,7 @@ async def review_knowledge_entity_link(link_id: str, request: Request) -> dict[s
     # переоткрывает то, что человек уже отверг.
     relations: list[dict[str, Any]] = []
     if status == "accepted":
-        relations = await asyncio.to_thread(
+        relations = await run_blocking(
             _services(request).kg.suggest_relations_for_knowledge,
             user_id,
             str(link.get("knowledge_object_id") or ""),

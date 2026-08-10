@@ -195,4 +195,6 @@ def test_a_person_question_wins_over_the_owners_own_timeline() -> None:
     person_at = source.index("_prefetch_person_activity(")
     timeline_at = source.index("_prefetch_the_timeline_if_asked(")
     assert person_at < timeline_at, "лента владельца снова отвечает раньше вопроса о человеке"
-    assert "if not about_a_person:" in source, "лента поднимается даже когда вопрос был про человека"
+    assert "if not source_lookup_owned and not about_a_person:" in source, (
+        "лента поднимается даже когда вопрос был про человека"
+    )

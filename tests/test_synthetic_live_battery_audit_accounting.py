@@ -212,6 +212,45 @@ def test_pass_tools_reject_hidden_failed_prefetch_and_unreported_late_file_call(
     )
 
 
+def test_expected_tool_observation_rejects_missing_extra_and_reordered_inventories() -> None:
+    assert battery._observed_expected_tool("what_happened", []) == "__missing_or_unexpected__"
+    assert (
+        battery._observed_expected_tool("list_tags", ["kg_stats", "list_tags"]) == "__missing_or_unexpected__"
+    )
+    assert (
+        battery._observed_expected_tool("list_tags", ["list_tags", "kg_stats"]) == "__missing_or_unexpected__"
+    )
+    assert battery._observed_expected_tool("", ["remind"]) == "__missing_or_unexpected__"
+    assert battery._observed_expected_tool("list_tags", ["list_tags"]) == "list_tags"
+    assert battery._observed_expected_tool("", []) == ""
+
+
+def test_pass_tools_reject_expected_tool_accompanied_by_an_extra_public_call() -> None:
+    cases = _cases(4)
+    public_by_case: dict[str, list[str]] = {}
+    for case in cases:
+        expected = str(battery.oracle_for_case(case)["state"]["equals"]["expected_tool"] or "")
+        public_by_case[case.id] = [expected] if expected else []
+    kernel_by_case = {case_id: list(names) for case_id, names in public_by_case.items()}
+    public_by_case[cases[0].id].insert(0, "kg_stats")
+    kernel_by_case[cases[0].id].insert(0, "kg_stats")
+
+    assert battery._pass_tool_ledgers_exact(cases, public_by_case, kernel_by_case) is False
+
+
+def test_pass_tools_reject_a_missing_expected_semantic_call() -> None:
+    cases = _cases(2)
+    public_by_case: dict[str, list[str]] = {}
+    for case in cases:
+        expected = str(battery.oracle_for_case(case)["state"]["equals"]["expected_tool"] or "")
+        public_by_case[case.id] = [expected] if expected else []
+    kernel_by_case = {case_id: list(names) for case_id, names in public_by_case.items()}
+    public_by_case[cases[0].id] = []
+    kernel_by_case[cases[0].id] = []
+
+    assert battery._pass_tool_ledgers_exact(cases, public_by_case, kernel_by_case) is False
+
+
 def test_pass_audit_reconciliation_accepts_exact_two_row_mutator_lifecycles_only() -> None:
     cases = _cases(8)
     kernel_by_case = {case.id: ["remind"] for case in cases}

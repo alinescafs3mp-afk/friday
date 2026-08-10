@@ -51,10 +51,11 @@ async def search_sources(
     measured on this installation, 93% of everything ingested. This answers "which
     file did I read that in", which is a provenance question, not a recall one.
 
-    Deliberately NOT wired into `HybridSearcher`, the agent context or any tool:
-    source text is evidence about where something came from, and the place where
-    resurrecting rejected material would do the most damage is an agent quoting it
-    as fact. Material the reviewer marked IGNORED is excluded — see
+    Deliberately not wired into `HybridSearcher` or ambient agent context: source
+    text is evidence about where something came from, not background memory for
+    every conversation.  The agent may reach the same filtered helper only through
+    its explicit `source_search` capability when a person asks to inspect an
+    uploaded source. Material the reviewer marked IGNORED is excluded — see
     `storage.search_raw_objects`.
     """
     actor = _require(request, "knowledge.read")

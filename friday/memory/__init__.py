@@ -13,7 +13,7 @@ import logging
 import os
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,10 @@ _UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 # mathematical bold) is 240 bytes on its own, so a title a user can produce by
 # accident made every later object in the vault unwritable.
 _SLUG_BYTE_BUDGET = 200
+
+
+class VaultAccountWriteBlocked(RuntimeError):
+    """The durable account tombstone forbids recreating its file projection."""
 
 
 def _clip_bytes(value: str, limit: int) -> str:
@@ -74,11 +78,29 @@ def _yaml_scalar(value: Any) -> str:
 class MemoryVault:
     """Atomically mirror knowledge objects as Markdown files."""
 
-    def __init__(self, vault_dir: Path) -> None:
+    def __init__(
+        self,
+        vault_dir: Path,
+        *,
+        account_is_deleted: Callable[[str], bool] | None = None,
+    ) -> None:
         self._vault_dir = Path(vault_dir).resolve()
         self._users_dir = self._vault_dir / "users"
+        self._account_is_deleted = account_is_deleted
         ensure_private_directory(self._vault_dir)
         ensure_private_directory(self._users_dir)
+
+    def _assert_account_writable(self, user_id: str) -> None:
+        if self._account_is_deleted is None:
+            return
+        try:
+            deleted = bool(self._account_is_deleted(user_id))
+        except Exception as exc:
+            raise VaultAccountWriteBlocked(
+                "Account deletion state could not be verified; vault write refused"
+            ) from exc
+        if deleted:
+            raise VaultAccountWriteBlocked("Permanently deleted account cannot be synced")
 
     def _user_dir(self, user_id: str) -> Path:
         return self._users_dir / _safe_component(user_id)
@@ -140,11 +162,15 @@ class MemoryVault:
         if not ko_id or not user_id:
             return None
 
+        self._assert_account_writable(user_id)
+        content = self._render_markdown(ko)
+        self._assert_account_writable(user_id)
         user_dir = self._user_dir(user_id)
         ensure_private_directory(user_dir)
+        self._assert_account_writable(user_id)
         self._ensure_readme(user_dir, user_id)
+        self._assert_account_writable(user_id)
         filepath = self._note_path(user_dir, ko)
-        content = self._render_markdown(ko)
 
         # An unchanged note is not rewritten. The sync loop renders the WHOLE
         # corpus every five minutes, and mkstemp + fsync + replace for every
@@ -168,6 +194,7 @@ class MemoryVault:
                 handle.write(content)
                 handle.flush()
                 os.fsync(handle.fileno())
+            self._assert_account_writable(user_id)
             os.replace(temp_path, filepath)
             # A retitled object gets a new name; without this its old file stays
             # behind as a stale twin that read_vault would return alongside it.

@@ -14,13 +14,17 @@
 
 Почему это исключение из правила «набор не урезаем, только сокращаем описания».
 Правило принято осознанно, и довод у него настоящий: «напомни завтра» посреди
-болтовни — законный случай, и отнимать `remind` по догадке о теме нельзя. Здесь
-догадки нет: вердикт вынес арбитр, и на ЭТОМ ЖЕ ходу по нему уже выброшены
-найденные документы. Оставлять модели возможность добрать их инструментом —
-значит спорить с собой внутри одного хода.
+болтовни — законный случай. Поэтому базовый бытовой профиль сохраняет `remind`,
+чтобы явная просьба дошла до детерминированного prefetch. Но один семантический
+вердикт «быт» не является полномочием на эффект: на обычной реплике runtime
+снимает схему `remind` до основного хода модели. Здесь догадки нет: вердикт вынес
+арбитр, и на ЭТОМ ЖЕ ходу по нему уже выброшены найденные документы. Оставлять
+модели возможность добрать их инструментом — значит спорить с собой внутри
+одного хода.
 
-Поэтому отнимается ровно то, что читает архив. Всё, ради чего правило
-существует, остаётся: `remind`, `speak`, `make_file`, `memory_save`.
+Поэтому у основной модели отнимается всё, чего текущая реплика явно не
+разрешила: читатели архива и `remind`. Остальные бытовые способности остаются:
+`speak`, `make_file`, `memory_save`.
 """
 
 from __future__ import annotations
@@ -158,7 +162,59 @@ def test_small_talk_is_treated_as_household(settings, storage, kernel) -> None:
     assert offered, "модель не получила инструментов вовсе — проверять нечего"
     for tool in ("what_happened", "memory_search", "user_activity"):
         assert tool not in offered, f"на бытовой реплике модели предложен {tool}"
-    assert "remind" in offered, "болтовня лишилась напоминаний — правка отняла способность"
+    assert "remind" not in offered, "бытовой вердикт выдал модели полномочие на скрытый эффект"
+
+
+def test_an_explicit_reminder_inside_short_household_speech_is_executed(
+    settings, storage, kernel, monkeypatch
+) -> None:
+    """Явные слова о напоминании сохраняют способность до хода основной модели."""
+    import asyncio
+
+    from friday.agent_runtime import AgentRuntime
+    from friday.execution_kernel import ToolResult
+    from friday.permissions import ActorContext
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    async def _execute(tool, params, actor=None):  # noqa: ANN001, ARG001
+        calls.append((str(tool), dict(params)))
+        assert tool == "remind"
+        return ToolResult(
+            "remind",
+            True,
+            {
+                "created": True,
+                "what": params["what"],
+                "on": "2026-08-09",
+                "at": "",
+                "requested_when": params["when"],
+                "delivery_scheduled": True,
+            },
+        )
+
+    class _LLM:
+        enabled = True
+        total_budget_sec = 30.0
+
+        async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
+            asked = " ".join(str(item.get("content") or "") for item in messages)
+            if "РАЗГОВОР или ЗАПРОС" in asked:
+                return {"content": "РАЗГОВОР"}
+            if "Реши, просят ли ПОСТАВИТЬ НАПОМИНАНИЕ" in asked:
+                return {"content": ('{"напоминание":"да","что":"отдохнуть","когда":"завтра","остаток":""}')}
+            raise AssertionError("явная просьба напомнить дошла до основной модели")
+
+    storage.ensure_user("alice", preset_key="owner")
+    monkeypatch.setattr(kernel, "execute", _execute)
+    agent = AgentRuntime(settings, storage, kernel=kernel)
+    agent.llm = _LLM()
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    response = asyncio.run(agent.chat("alice", "напомни завтра отдохнуть", actor=actor))
+
+    assert response["tools_used"] == ["remind"]
+    assert calls == [("remind", {"what": "отдохнуть", "when": "завтра"})]
 
 
 def test_the_household_kind_also_shortens_descriptions(kernel, owner_actor) -> None:

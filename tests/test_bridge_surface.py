@@ -298,6 +298,9 @@ EXPECTED_COMMANDS = {
 # видел его лишь когда очередь подтверждений пуста.
 # 73 -> 74 в 0.179.0: `_offer_access_to_owner` — обещание `/start` про расширение
 # доступа получило исполнителя: владелец узнаёт о новичке и жмёт одну кнопку.
+# 77 -> 78: `_poll_watchdog` выводит формально живой, но зависший long-poll
+# из процесса, чтобы systemd открыл свежие HTTP-соединения и продолжил
+# сохранённую очередь.
 # 72 -> 73 в 0.178.0: `_send_message_returning_id` — короткое приглашение, чей
 # `message_id` нужен, чтобы ответ человека адресовался однозначно.
 # 71 -> 72 в 0.176.0: `_album_caption` — подпись альбома, доезжающая до всех его
@@ -312,7 +315,7 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 77
+EXPECTED_BRIDGE_COUNT = 78
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
@@ -343,6 +346,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_notify_dead_letter": "(self, telegram: 'httpx.AsyncClient', update: 'dict[str, Any]', *, permanent: 'bool') -> 'None'",
     "_outbound_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_poll_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
+    "_poll_watchdog": "(self) -> 'None'",
     "_prepare_document": "(self, telegram: 'httpx.AsyncClient', message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
     "_post_message_chunk": "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str') -> 'httpx.Response'",

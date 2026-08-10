@@ -188,10 +188,30 @@ def _existing_database(state_dir: Path) -> Path:
     здесь стоит проверка, а не безусловное новое имя.
     """
     preferred = state_dir / "friday.sqlite3"
-    if preferred.exists():
-        return preferred
     legacy = state_dir / "jericho.sqlite3"
-    if legacy.exists():
+    preferred_exists = preferred.exists()
+    legacy_exists = legacy.exists()
+    if preferred_exists and legacy_exists:
+        try:
+            if preferred.samefile(legacy):
+                return preferred
+        except OSError:
+            pass
+        preferred_size = preferred.stat().st_size
+        legacy_size = legacy.stat().st_size
+        if preferred_size == 0 and legacy_size > 0:
+            return legacy
+        if legacy_size == 0 and preferred_size > 0:
+            return preferred
+        if preferred_size == 0 and legacy_size == 0:
+            return preferred
+        raise RuntimeError(
+            "Both friday.sqlite3 and jericho.sqlite3 contain data; "
+            "set FRIDAY_DATABASE_PATH explicitly before starting Friday."
+        )
+    if preferred_exists:
+        return preferred
+    if legacy_exists:
         return legacy
     return preferred
 
@@ -237,6 +257,9 @@ class RuntimeProfile:
     kv_offloading_gb: int
     vllm_extra_args: VllmExtraArgs = field(default_factory=VllmExtraArgs)
     tokenizer_mode: str = "slow"
+    # Explicit vLLM quantization selector. Mixed ModelOpt checkpoints must not be
+    # allowed to fall back to the older FP8-only ``modelopt`` loader.
+    quantization: str | None = None
     vllm_image: str = "vllm/vllm-openai:latest"
     vision_capable: bool = False
     suppress_model_thinking: bool = False
@@ -297,7 +320,7 @@ PROFILES: dict[str, RuntimeProfile] = {
         ),
         certification="certified",
         interactive_certified=True,
-        default_recommended=True,
+        default_recommended=False,
         research_only=False,
         readiness_deadline_sec=900.0,
         certification_reason="Primary Friday runtime profile.",
@@ -305,6 +328,55 @@ PROFILES: dict[str, RuntimeProfile] = {
         requires_experimental_opt_in=False,
     )
 }
+
+
+# Dense, aligned Qwen3.6 served as a text-only model.  The checkpoint is
+# multimodal at the Transformers level, so ``language_model_only`` is an
+# essential part of the runtime identity rather than a product capability
+# claim.  The pinned vLLM nightly is the first verified local image whose
+# ModelOptMixedPrecisionConfig parses this checkpoint's FP8 + W4A16_NVFP4 map.
+PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
+    name="qwen36-27b-nvfp4-nvidia",
+    title="Qwen3.6 27B NVIDIA NVFP4",
+    description=(
+        "Aligned dense Qwen3.6 27B served text-only from NVIDIA's mixed FP8/W4A16 NVFP4 checkpoint."
+    ),
+    model_dir_name="qwen3.6-27b-nvfp4-nvidia",
+    eager_mode=False,
+    max_steps=24,
+    temperature=0.25,
+    max_model_len=32768,
+    # Leave physical headroom for the co-resident embeddings and reranker
+    # services.  At 0.82 the complete Windows/WSL stack entered Unified-Memory
+    # paging during a normal Friday prefill even though vLLM stayed healthy.
+    # 0.76 is the lowest verified setting that still admits one full 32K
+    # FP8-KV sequence after CUDA-graph profiling.
+    gpu_memory_utilization=0.76,
+    kv_cache_dtype="fp8",
+    max_num_seqs=1,
+    cpu_offload_gb=0,
+    kv_offloading_gb=0,
+    tokenizer_mode="auto",
+    quantization="modelopt_mixed",
+    vllm_image=("vllm/vllm-openai@sha256:2238154357f576523db1df2866cbf591734d70db8f6d50b9a7897f3c60e18940"),
+    vision_capable=False,
+    suppress_model_thinking=True,
+    vllm_extra_args=VllmExtraArgs(
+        language_model_only=True,
+        max_num_batched_tokens=4096,
+        reasoning_parser="qwen3",
+        tool_call_parser="qwen3_coder",
+        enable_auto_tool_choice=True,
+    ),
+    certification="certified",
+    interactive_certified=True,
+    default_recommended=True,
+    research_only=False,
+    readiness_deadline_sec=900.0,
+    certification_reason=("Verified on the deployed Blackwell host at 32K context with FP8 KV cache."),
+    menu_visible=True,
+    requires_experimental_opt_in=False,
+)
 
 
 def profile_public_dict(profile: RuntimeProfile) -> dict[str, object]:
@@ -321,6 +393,7 @@ def profile_public_dict(profile: RuntimeProfile) -> dict[str, object]:
         "kv_cache_dtype": profile.kv_cache_dtype,
         "max_num_seqs": profile.max_num_seqs,
         "tokenizer_mode": profile.tokenizer_mode,
+        "quantization": profile.quantization,
         "vllm_image": profile.vllm_image,
         "vision_capable": profile.vision_capable,
         "certification": profile.certification,
@@ -346,6 +419,10 @@ class FridaySettings:
     model_dir: Path
     state_dir: Path
     database_path: Path
+    # Production recovery may pin one authoritative SQLite image.  In that
+    # mode a vanished path is an outage, never permission to bootstrap an empty
+    # replacement between configuration validation and sqlite3.connect().
+    database_must_exist: bool
     files_dir: Path
     memory_vault_dir: Path
     backups_dir: Path
@@ -360,6 +437,10 @@ class FridaySettings:
     # When set, mirror copies are AES-256 encrypted with this key file
     # (system `openssl`); local copies stay plain for fast restore.
     backup_encryption_key_file: Path | None
+    # Experimental coordinated account erasure. Disabled until tombstones live
+    # outside the SQLite image that restore replaces; otherwise an old backup can
+    # resurrect both the account and every credential removed with it.
+    account_hard_delete_enabled: bool
 
     llm_base_url: str
     llm_model: str
@@ -591,6 +672,10 @@ class FridaySettings:
     sentinel_enabled: bool
     sentinel_interval_sec: int
     sentinel_check_llm: bool
+    #: Lightweight one-token generation watchdog cadence.  Kept separate from
+    #: ``sentinel_interval_sec`` so fast inference-stall detection never turns
+    #: the full filesystem/database diagnostics into a once-a-minute scan.
+    sentinel_generation_interval_sec: int
     # Inject the derived user model (people/projects/interests) into the
     # agent's untrusted context payload so answers can be personal.
     profile_in_context: bool
@@ -745,10 +830,12 @@ class FridaySettings:
                 "eval_k": self.eval_k,
             },
             "data": {
+                "database_must_exist": self.database_must_exist,
                 "purge_retention_days": self.purge_retention_days,
                 "ingestion_review_policy": self.ingestion_review_policy,
                 "backup_mirror_configured": self.backup_mirror_dir is not None,
                 "backup_encryption_configured": self.backup_encryption_key_file is not None,
+                "account_hard_delete_enabled": self.account_hard_delete_enabled,
             },
             "graph": {"max_depth": self.graph_max_depth},
             "api": {"host": self.api_host, "port": self.api_port, "tls": self.api_tls_enabled},
@@ -781,6 +868,7 @@ class FridaySettings:
                 "sentinel_enabled": self.sentinel_enabled,
                 "sentinel_interval_sec": self.sentinel_interval_sec,
                 "sentinel_check_llm": self.sentinel_check_llm,
+                "sentinel_generation_interval_sec": self.sentinel_generation_interval_sec,
                 "profile_in_context": self.profile_in_context,
                 "quiet_hours": [self.quiet_hours_start, self.quiet_hours_end],
             },
@@ -796,7 +884,7 @@ class FridaySettings:
 def load_settings(profile_name: str | None = None) -> FridaySettings:
     load_local_env_file()
     home = default_home().resolve()
-    selected_name = str(profile_name or env("FRIDAY_PROFILE", "qwen36-vl"))
+    selected_name = str(profile_name or env("FRIDAY_PROFILE", "qwen36-27b-nvfp4-nvidia"))
     profile = PROFILES.get(selected_name)
     if profile is None:
         valid = ", ".join(sorted(PROFILES))
@@ -808,6 +896,21 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
     # The requested model location is <project>/models/<model-name>.
     model_root = Path(env("FRIDAY_MODEL_ROOT", home / "models")).expanduser().resolve()
     state_dir = Path(env("FRIDAY_STATE_DIR", data_dir / "state")).expanduser().resolve()
+    database_override = env("FRIDAY_DATABASE_PATH", "").strip()
+    database_path = (
+        Path(database_override).expanduser().resolve() if database_override else _existing_database(state_dir)
+    )
+    database_must_exist = _bool_env("FRIDAY_DATABASE_MUST_EXIST", False)
+    if database_must_exist:
+        try:
+            database_is_usable = database_path.is_file() and database_path.stat().st_size > 0
+        except OSError:
+            database_is_usable = False
+        if not database_is_usable:
+            raise RuntimeError(
+                "The configured Friday database must already exist and contain data; "
+                "refusing to create a replacement database."
+            )
     llm_base_url = env("FRIDAY_LLM_BASE_URL", "http://127.0.0.1:8001/v1").rstrip("/")
 
     ssl_certfile = env("FRIDAY_SSL_CERTFILE", "").strip()
@@ -833,7 +936,8 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         model_root=model_root,
         model_dir=model_root / profile.model_dir_name,
         state_dir=state_dir,
-        database_path=Path(env("FRIDAY_DATABASE_PATH", _existing_database(state_dir))).expanduser().resolve(),
+        database_path=database_path,
+        database_must_exist=database_must_exist,
         files_dir=Path(env("FRIDAY_FILES_DIR", data_dir / "files")).expanduser().resolve(),
         memory_vault_dir=Path(env("FRIDAY_MEMORY_VAULT_DIR", data_dir / "memory-vault"))
         .expanduser()
@@ -850,6 +954,9 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
             if env("FRIDAY_BACKUP_ENCRYPTION_KEY_FILE", "").strip()
             else None
         ),
+        # Code-owned quarantine: this must not be an operator/env escape hatch.
+        # Restore replaces the SQLite image which currently owns the tombstones.
+        account_hard_delete_enabled=False,
         llm_base_url=llm_base_url,
         llm_model=env("FRIDAY_LLM_MODEL", "dispatcher"),
         llm_enabled=_bool_env("FRIDAY_LLM_ENABLED", True),
@@ -1038,13 +1145,23 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         chronicle_enabled=_bool_env("FRIDAY_CHRONICLE_ENABLED", True),
         chronicle_interval_sec=_int_env("FRIDAY_CHRONICLE_INTERVAL_SEC", 86400, minimum=300),
         sentinel_enabled=_bool_env("FRIDAY_SENTINEL_ENABLED", True),
-        # Пятнадцать минут вместо часа — решение владельца 2026-08-03, после
-        # живого отказа: он длился двадцать минут, то есть часовой обход мог не
-        # застать его вовсе. Проба стоит один токен, и шесть таких в час — цена,
-        # несопоставимая с тем, что человек в это время получает испорченные
-        # ответы и уходит.
+        # Пятнадцать минут вместо часа — решение владельца 2026-08-03 после
+        # живого отказа: часовой ПОЛНЫЙ диагностический обход мог не застать его
+        # вовсе. Быстрая однотокенная проверка теперь живёт на отдельной частоте
+        # ниже и не превращает тяжёлый обход в ежеминутный.
         sentinel_interval_sec=_int_env("FRIDAY_SENTINEL_INTERVAL_SEC", 900, minimum=60),
         sentinel_check_llm=_bool_env("FRIDAY_SENTINEL_CHECK_LLM", True),
+        # The generation probe itself has a 25-second socket deadline and a
+        # 30-second coroutine deadline.  Capping this interval at 60 seconds
+        # preserves the watchdog's product contract:
+        # the worker has a 35-second total budget (including alert enqueue), so
+        # an outage beginning just after a healthy tick is handled in at most
+        # 60 + 35 = 95 seconds, with headroom for the outbound queue to drain.
+        # Full diagnostics remain on their separate 15-minute cadence above.
+        sentinel_generation_interval_sec=min(
+            60,
+            _int_env("FRIDAY_SENTINEL_GENERATION_INTERVAL_SEC", 60, minimum=30),
+        ),
         profile_in_context=_bool_env("FRIDAY_PROFILE_IN_CONTEXT", True),
         quiet_hours_start=_int_env("FRIDAY_QUIET_HOURS_START", 22, minimum=0),
         quiet_hours_end=_int_env("FRIDAY_QUIET_HOURS_END", 8, minimum=0),

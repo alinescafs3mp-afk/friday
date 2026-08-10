@@ -72,6 +72,7 @@ class OversightMixin(StorageShared):
         *,
         alias: str = "",
         uploaded_by: str | None = None,
+        files_only: bool = False,
     ) -> tuple[str, list[Any]]:
         """The window every oversight read shares, built once.
 
@@ -107,10 +108,25 @@ class OversightMixin(StorageShared):
         if uploaded_by is not None:
             clauses.append(f"json_extract({prefix}metadata_json,'$.uploaded_by') = ?")
             params.append(str(uploaded_by or ""))
+        if files_only:
+            # A document inventory is narrower than the general activity feed.
+            # Text notes can also be Raw Objects, so counting every arrival would
+            # make an exact question about uploaded files silently include chat
+            # text.  Filename is kept as the compatibility signal for older
+            # ingesters which did not yet use ``content_type='file'``.
+            clauses.append(
+                f"({prefix}content_type='file' OR "
+                f"COALESCE(json_extract({prefix}metadata_json,'$.filename'),'') <> '')"
+            )
         return " AND ".join(clauses), params
 
     def arrivals_without_an_author(
-        self, user_id: str, since: str | None = None, until: str | None = None
+        self,
+        user_id: str,
+        since: str | None = None,
+        until: str | None = None,
+        *,
+        files_only: bool = False,
     ) -> int:
         """Сколько материалов в окне пришло БЕЗ признака автора.
 
@@ -119,7 +135,7 @@ class OversightMixin(StorageShared):
         неизвестного происхождения. Пустота и неизвестность — разные ответы, и
         человек, принимающий решение о сотруднике, обязан видеть разницу.
         """
-        where, params = self._arrival_window(user_id, since, until)
+        where, params = self._arrival_window(user_id, since, until, files_only=files_only)
         row = self.execute(
             f"SELECT COUNT(*) AS n FROM raw_objects WHERE {where} "  # nosec B608
             "AND COALESCE(json_extract(metadata_json,'$.uploaded_by'),'') = ''",
@@ -169,6 +185,7 @@ class OversightMixin(StorageShared):
         offset: int = 0,
         include_content: bool = True,
         uploaded_by: str = "",
+        files_only: bool = False,
     ) -> list[dict[str, Any]]:
         """One account's arrivals, newest first, with what became of each.
 
@@ -193,7 +210,12 @@ class OversightMixin(StorageShared):
         a file. `content_chars` and `size_bytes` stay: a size is not a content.
         """
         where, params = self._arrival_window(
-            user_id, since, until, alias="r", uploaded_by=uploaded_by or None
+            user_id,
+            since,
+            until,
+            alias="r",
+            uploaded_by=uploaded_by or None,
+            files_only=files_only,
         )
         params.extend([max(1, min(limit, 1000)), max(0, offset)])
         # ``where`` holds fixed predicates only; every value is bound.
@@ -299,6 +321,7 @@ class OversightMixin(StorageShared):
         since: str | None = None,
         until: str | None = None,
         uploaded_by: str = "",
+        files_only: bool = False,
     ) -> dict[str, Any]:
         """Counts and spans for one account, without carrying any of the content.
 
@@ -307,7 +330,13 @@ class OversightMixin(StorageShared):
         totals sitting next to a windowed `arrivals`, so picking «7 дней» moved one
         card and left three showing the account's whole history in the same type.
         """
-        where, params = self._arrival_window(user_id, since, until, uploaded_by=uploaded_by or None)
+        where, params = self._arrival_window(
+            user_id,
+            since,
+            until,
+            uploaded_by=uploaded_by or None,
+            files_only=files_only,
+        )
 
         # ``where`` holds fixed predicates only; every value is bound.
         totals = self.execute(

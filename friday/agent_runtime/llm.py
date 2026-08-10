@@ -30,6 +30,14 @@ RETRY_MAX_DELAY = 30.0
 #: verifier deliberately keeps its own larger explicit budget; this ceiling is
 #: only for classifier call sites.
 CLASSIFIER_MAX_TOKENS = 256
+#: A full read timeout proves more than a fast connection failure: the server
+#: accepted a generation request and then produced no response for the entire
+#: configured deadline.  One Friday turn can make several classifier/main/
+#: verifier calls, so immediately asking the same silent endpoint again merely
+#: multiplies the person's wait.  Keep the breaker local to this router process;
+#: expiry performs the next real probe naturally, without a separate health
+#: request or background task.
+SILENT_ENDPOINT_COOLDOWN_SEC = 300.0
 _CONTEXT_SAFETY_TOKENS = 256
 _TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 _TRUNCATION_MARKER = "\n… [контекст сокращён Friday] …\n"
@@ -408,6 +416,9 @@ class LLMRouter:
         self._background_sem = asyncio.Semaphore(1)
         # Помним отказ эндпоинта от инструментов, чтобы не платить за него каждый раз.
         self._tools_refused = False
+        # Monotonic deadline after a proven full read timeout.  Fast transport
+        # failures do not open it: a restarted endpoint is worth retrying.
+        self._silent_until = 0.0
         # Видели ли мы у этого профиля рассуждение вслух. Пока не видели, обрыв
         # по длине означает обрезанный ОТВЕТ, а не незакрытый монолог, и стирать
         # его нельзя — см. `_strip_thinking`.
@@ -485,7 +496,34 @@ class LLMRouter:
             # slow, and cuts a healthy, busy deployment short for the wrong
             # reason.
             queue_wait_sec = time.monotonic() - queue_started
-            result = await self._chat_impl(messages, temperature, max_tokens, tools)
+            remaining_silence = self._silent_until - time.monotonic()
+            if remaining_silence > 0:
+                LOGGER.warning(
+                    "LLM endpoint is in silent cooldown for another %.0fs; skipping request",
+                    remaining_silence,
+                )
+                raise LLMUnavailableError("LLM endpoint is in silent cooldown")
+            # Once the cooldown expires, admit exactly one half-open recovery
+            # probe.  Other foreground slots must not fan out four identical
+            # long requests before that probe has established recovery.
+            half_open_probe = self._silent_until > 0
+            if half_open_probe:
+                self._silent_until = float("inf")
+            try:
+                result = await self._chat_impl(
+                    messages,
+                    temperature,
+                    max_tokens,
+                    tools,
+                    half_open_probe=half_open_probe,
+                )
+            except BaseException:
+                # A full ReadTimeout replaces the sentinel with a fresh finite
+                # deadline inside `_chat_impl`.  Fast failures and cancellation
+                # prove no continued silence, so allow a later ordinary call.
+                if half_open_probe and self._silent_until == float("inf"):
+                    self._silent_until = 0.0
+                raise
         result["_queue_wait_sec"] = queue_wait_sec
         return result
 
@@ -543,6 +581,8 @@ class LLMRouter:
         temperature: float | None,
         max_tokens: int | None,
         tools: list[dict[str, Any]] | None,
+        *,
+        half_open_probe: bool = False,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(messages, temperature, max_tokens, tools)
         last_error: Exception | None = None
@@ -563,10 +603,20 @@ class LLMRouter:
         # несколько вызовов модели, и до этого ни один из них не был измерен —
         # чинить приходилось бы вслепую.
         call_started = time.monotonic()
+
+        def _ensure_retry_allowed() -> None:
+            remaining_silence = self._silent_until - time.monotonic()
+            owns_half_open_sentinel = half_open_probe and self._silent_until == float("inf")
+            if remaining_silence > 0 and not owns_half_open_sentinel:
+                LOGGER.warning("LLM endpoint became silent during retry; skipping request")
+                raise LLMUnavailableError("LLM endpoint is in silent cooldown")
+
         for attempt in range(MAX_RETRIES):
             if attempt and time.monotonic() >= deadline:
                 LOGGER.warning("LLM budget of %.0fs is spent; not retrying", self.total_budget_sec)
                 break
+            if attempt:
+                _ensure_retry_allowed()
             try:
                 timeout = httpx.Timeout(self.timeout_sec, connect=15.0)
                 async with httpx.AsyncClient(
@@ -602,6 +652,11 @@ class LLMRouter:
                             for key, value in payload.items()
                             if key not in {"tools", "tool_choice"}
                         }
+                        # This fallback is a second HTTP request.  A sibling may
+                        # have proved the endpoint silent while the rejected
+                        # schema request was in flight, so consult the shared
+                        # breaker before sending the schema-less retry.
+                        _ensure_retry_allowed()
                         response = await _await_http_request(
                             client.post(f"{self.base_url}/chat/completions", json=payload)
                         )
@@ -652,6 +707,7 @@ class LLMRouter:
                     len(payload.get("tools") or []),
                     safe_finish_reason,
                 )
+                self._silent_until = 0.0
                 return {
                     "content": content,
                     "tool_calls": tool_calls,
@@ -687,6 +743,7 @@ class LLMRouter:
                 # две секунды нередко попадает в поднявшийся сервер. Поэтому
                 # разделены именно эти два случая, а не «сеть» целиком.
                 last_error = exc
+                self._silent_until = time.monotonic() + SILENT_ENDPOINT_COOLDOWN_SEC
                 LOGGER.warning(
                     "LLM read timeout after %.0fs; not retrying a silent endpoint", self.timeout_sec
                 )

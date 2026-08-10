@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
 
+from friday.agent_runtime import _temporal_payload_is_coherent
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
@@ -26,6 +28,31 @@ def temporal_kernel(settings, storage):
         IngestionPipeline(settings, storage, graph),
     )
     return kernel, authorization.actor_for_user("synthetic-owner", source="test")
+
+
+def test_empty_setting_uses_a_named_machine_zone_that_survives_payload_validation(
+    temporal_kernel,
+    monkeypatch,
+) -> None:
+    kernel, _actor = temporal_kernel
+    monkeypatch.setenv("TZ", "Europe/Moscow")
+    kernel.settings = replace(kernel.settings, local_timezone="")
+
+    zone = kernel._zone()  # noqa: SLF001
+    assert getattr(zone, "key", "") == "Europe/Moscow"
+    payload = {
+        "understood": True,
+        "asked_about": {
+            "since": "2026-08-09T10:00:00",
+            "until": "2026-08-09T10:59:59",
+            "timezone": str(zone),
+        },
+        "shown": 0,
+        "total": {"messages": 0, "documents": 0, "total": 0},
+        "events": [],
+        "coverage": {"complete": True, "strategy": "complete", "includes_latest": True},
+    }
+    assert _temporal_payload_is_coherent("what_happened", payload)
 
 
 @pytest.mark.asyncio

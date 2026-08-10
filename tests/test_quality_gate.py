@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import os
+import stat
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from tools import quality_gate
 
@@ -49,6 +55,120 @@ def test_static_gate_checks_the_current_package_and_high_bandit_only() -> None:
         "friday/admin_ui/static/app.js",
     )
     assert all("jericho" not in argument for command in commands for argument in command.argv)
+    assert all(command.environment is None for command in commands)
+
+
+def test_run_command_passes_an_explicit_environment_to_the_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = argv
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(quality_gate.subprocess, "run", fake_run)
+    command = quality_gate.GateCommand("probe", ("python", "-V"), {"ONLY": "scratch"})
+
+    assert quality_gate.run_command(command) == 0
+    assert captured["env"] == {"ONLY": "scratch"}
+    assert captured["cwd"] == quality_gate.ROOT
+    assert captured["check"] is False
+
+
+def test_pytest_phases_share_one_private_non_live_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for prefix in quality_gate._RUNTIME_ENV_PREFIXES:
+        monkeypatch.setenv(prefix + "HOME", "/sentinel/live-home")
+        monkeypatch.setenv(prefix + "ENV_FILE", "/sentinel/live.env")
+        monkeypatch.setenv(prefix + "DATABASE_PATH", "/sentinel/live.sqlite3")
+        monkeypatch.setenv(prefix + "DATABASE_MUST_EXIST", "1")
+        for suffix in quality_gate._RUNTIME_PATH_SELECTOR_SUFFIXES:
+            monkeypatch.setenv(prefix + suffix, f"/sentinel/{suffix.casefold()}")
+
+    observed_homes: set[Path] = set()
+    observed_commands: list[str] = []
+
+    def runner(command: quality_gate.GateCommand) -> int:
+        observed_commands.append(command.name)
+        environment = command.environment
+        assert environment is not None
+        home = Path(environment["FRIDAY_HOME"])
+        env_file = Path(environment["FRIDAY_ENV_FILE"])
+        observed_homes.add(home)
+        assert environment["JERICHO_HOME"] == str(home)
+        assert environment["JERICHO_ENV_FILE"] == str(env_file)
+        assert environment["FRIDAY_DATABASE_PATH"] == ""
+        assert environment["JERICHO_DATABASE_PATH"] == ""
+        assert environment["FRIDAY_DATABASE_MUST_EXIST"] == "0"
+        assert environment["JERICHO_DATABASE_MUST_EXIST"] == "0"
+        assert home.is_dir()
+        assert env_file.is_file()
+        assert env_file.is_relative_to(home)
+        if os.name != "nt":
+            assert stat.S_IMODE(home.stat().st_mode) == 0o700
+            assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+        for prefix in quality_gate._RUNTIME_ENV_PREFIXES:
+            for suffix in quality_gate._RUNTIME_PATH_SELECTOR_SUFFIXES:
+                assert prefix + suffix not in environment
+        report_argument = next(
+            (argument for argument in command.argv if argument.startswith("--junitxml=")),
+            "",
+        )
+        if report_argument:
+            Path(report_argument.partition("=")[2]).write_text(
+                '<testsuite tests="1" skipped="0"/>',
+                encoding="utf-8",
+            )
+        return 0
+
+    result = quality_gate.execute(
+        _args(phase=["tests", "ui"], workers=1, ui_workers=1),
+        command_runner=runner,
+        preflight=lambda: True,
+    )
+
+    assert result == 0
+    assert observed_commands == ["non-UI tests", "UI tests"]
+    assert len(observed_homes) == 1
+    assert all(not home.exists() for home in observed_homes)
+
+
+def test_eager_settings_import_derives_the_database_from_the_scratch_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRIDAY_HOME", "/sentinel/live-home")
+    monkeypatch.setenv("FRIDAY_STATE_DIR", "/sentinel/live-state")
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", "/sentinel/live.sqlite3")
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
+    monkeypatch.setenv("FRIDAY_ENV_FILE", "/sentinel/live.env")
+    for prefix in quality_gate._RUNTIME_ENV_PREFIXES:
+        monkeypatch.setenv(prefix + "SSL_CERTFILE", "/sentinel/live-server.crt")
+        monkeypatch.setenv(prefix + "SSL_KEYFILE", "/sentinel/live-server.key")
+        monkeypatch.setenv(prefix + "BACKEND_CA_FILE", "/sentinel/live-backend-ca.crt")
+
+    with quality_gate._isolated_test_environment() as environment:
+        probe = (
+            "import os; "
+            "from pathlib import Path; "
+            "from friday.config import load_settings; "
+            "settings = load_settings(); "
+            "home = Path(os.environ['FRIDAY_HOME']).resolve(); "
+            "assert settings.home == home; "
+            "assert settings.state_dir.is_relative_to(home); "
+            "assert settings.database_path.is_relative_to(home); "
+            "assert settings.ssl_certfile == ''; "
+            "assert settings.ssl_keyfile == ''; "
+            "assert settings.backend_ca_file == ''"
+        )
+        subprocess.run(  # noqa: S603 - fixed local interpreter/import probe
+            [sys.executable, "-c", probe],
+            cwd=quality_gate.ROOT,
+            env=environment,
+            check=True,
+        )
 
 
 def test_assistant_instructions_delegate_to_the_canonical_gate() -> None:

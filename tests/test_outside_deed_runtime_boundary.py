@@ -662,6 +662,45 @@ async def test_an_unsupported_file_completion_is_replaced_before_the_late_builde
 
 
 @pytest.mark.asyncio
+async def test_archive_list_answer_is_not_replaced_as_a_file_handoff(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    answer = "Вот список документов за сегодня: alpha.docx и beta.pdf."
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            outward_verdict=("архив", None),
+            answer_mode="personal_knowledge",
+            asked_for_an_archive=True,
+        )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": answer, "tools_used": []}
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Покажи архивную подборку за сегодня.",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == answer
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"].get("output_guards", {}).get("supported_deed_replaced") is None
+
+
+@pytest.mark.asyncio
 async def test_a_false_model_deed_does_not_erase_a_true_structural_deed(
     settings,
     storage,

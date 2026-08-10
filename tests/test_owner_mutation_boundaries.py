@@ -41,6 +41,11 @@ _OBJECT_SCOPED_WRITERS = (
     "DELETE /api/admin/identities/{source}/{external_id}",
 )
 
+# Account hard delete is code-owned disabled until its restore/tombstone
+# protocol is complete.  This route therefore fails closed before the ordinary
+# owner-target guard; keep that one explicit quarantine out of the live walk.
+_INTENTIONALLY_UNAVAILABLE_WRITERS = {"DELETE /api/admin/users/{user_id}": 503}
+
 
 def _issue(storage, user_id: str, preset: str, secret: str) -> dict:
     storage.ensure_user(user_id, source="api-token", display_name=user_id, preset_key=preset)
@@ -262,6 +267,7 @@ def test_every_admin_mutation_against_owner_is_forbidden(settings):
         leaked: list[str] = []
         unreachable: list[str] = []
         object_scoped_seen: list[str] = []
+        unavailable_seen: list[str] = []
 
         for method, path, endpoint in _admin_mutating_routes(app):
             label = f"{method} {path}"
@@ -289,6 +295,10 @@ def test_every_admin_mutation_against_owner_is_forbidden(settings):
             body = _probe_body(owner_id)
             response = client.request(method, concrete, headers=admin, params=params, json=body)
 
+            expected_status = _INTENTIONALLY_UNAVAILABLE_WRITERS.get(label)
+            if response.status_code == expected_status:
+                unavailable_seen.append(label)
+                continue
             # 403 is the only success for this inventory. 401 means the actor was not
             # authenticated as admin; 404/400 after the guard would mean the guard did
             # not run and the handler reached storage.
@@ -303,6 +313,10 @@ def test_every_admin_mutation_against_owner_is_forbidden(settings):
         assert checked, "no admin mutation with a tenant user_id was exercised — the walk is broken"
         assert not leaked, (
             f"delegated admin could act on the owner account through these routes (expected 403): {leaked}"
+        )
+        assert set(unavailable_seen) == set(_INTENTIONALLY_UNAVAILABLE_WRITERS), (
+            "the explicit hard-delete route quarantine drifted: "
+            f"expected {sorted(_INTENTIONALLY_UNAVAILABLE_WRITERS)}, saw {sorted(unavailable_seen)}"
         )
         assert not unreachable, (
             "these owner-mutation routes could not be exercised — seed placeholders "

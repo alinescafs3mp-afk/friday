@@ -7,7 +7,11 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import ipaddress
+import re
+import unicodedata
 from contextlib import suppress
+from urllib.parse import urlunsplit
 
 from friday.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
@@ -19,7 +23,195 @@ from friday.telegram_bridge._base import (
     httpx,
     quote,
     refusal_notice,
+    urlsplit,
 )
+
+_FILE_PROMOTED_STATUS = "✅ Файл стал знанием — можно спрашивать."
+_FILE_REVIEW_STATUS = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
+_FILE_TRANSIENT_STATUS = "📄 Файл разобран, но по вашей просьбе НЕ сохранён."
+_VOICE_UNRECOGNISED_CHAT_WARNING = (
+    "🎤 Голос не распознался — слов в записи не разобрала. "
+    "Повторите текстом или наговорите ещё раз поближе к микрофону."
+)
+_LEGACY_NUMERIC_IPV4 = re.compile(
+    r"(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)){0,3}",
+    re.IGNORECASE,
+)
+_PRIVATE_DNS_SUFFIXES = (
+    ".alt",
+    ".corp",
+    ".example",
+    ".home",
+    ".home.arpa",
+    ".internal",
+    ".invalid",
+    ".lan",
+    ".local",
+    ".localdomain",
+    ".localhost",
+    ".onion",
+    ".test",
+)
+_UNOWNED_AUTOLINK = re.compile(
+    r"(?<![`@\w])(?:"
+    r"(?:www\.)?(?:[\w](?:[\w-]{0,61}[\w])?\.)+[\w-]{2,63}|"
+    r"(?:\d{1,3}\.){3}\d{1,3}|"
+    r"\[[0-9A-Fa-f:]{2,45}\]"
+    r")(?::\d{1,5})?(?:[/?#][^\s<>\[\]{}()]*)?(?![`\w])",
+    re.IGNORECASE,
+)
+
+
+def _neutralize_unowned_autolinks(text: str) -> str:
+    """Keep dotted facts visible while preventing a second clickable source."""
+
+    return _UNOWNED_AUTOLINK.sub(lambda match: f"`{match.group(0)}`", str(text or ""))
+
+
+def _canonical_web_source_identity(parsed: Any, hostname: str, port: int | None) -> str:
+    """Normalize aliases before the five-source transport limit is applied."""
+
+    unreserved = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    def normalize_component(value: str) -> str:
+        return re.sub(
+            r"%([0-9A-Fa-f]{2})",
+            lambda match: (
+                decoded
+                if (decoded := chr(int(match.group(1), 16))) in unreserved
+                else f"%{match.group(1).upper()}"
+            ),
+            value,
+        )
+
+    def remove_dot_segments(path: str) -> str:
+        absolute = path.startswith("/")
+        trailing = path.endswith(("/.", "/.."))
+        output: list[str] = []
+        for segment in path.split("/"):
+            if segment == ".":
+                continue
+            if segment == "..":
+                if output and output[-1] != ".." and not (absolute and len(output) == 1 and output[0] == ""):
+                    output.pop()
+                elif not absolute:
+                    output.append(segment)
+                continue
+            output.append(segment)
+        result = "/".join(output)
+        if absolute and not result.startswith("/"):
+            result = f"/{result}"
+        if absolute and not result:
+            result = "/"
+        if trailing and result != "/" and not result.endswith("/"):
+            result = f"{result}/"
+        return result
+
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None and not (
+        (parsed.scheme.casefold() == "http" and port == 80)
+        or (parsed.scheme.casefold() == "https" and port == 443)
+    ):
+        netloc = f"{netloc}:{port}"
+    raw_path = normalize_component(parsed.path or "/")
+    path = remove_dot_segments(raw_path)
+    return urlunsplit((parsed.scheme.casefold(), netloc, path, normalize_component(parsed.query), ""))
+
+
+def _web_source_chat_lines(value: Any) -> list[str]:
+    """Validate the backend's bounded source ledger at the last transport hop."""
+
+    if not isinstance(value, list):
+        return []
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in value[:5]:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if (
+            not url
+            or len(url) > 2_048
+            or any(
+                char.isspace() or ord(char) == 127 or unicodedata.category(char).startswith("C")
+                for char in url
+            )
+            or "\\" in url
+        ):
+            continue
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port
+        except ValueError:
+            continue
+        if (
+            parsed.scheme.casefold() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            continue
+        raw_hostname = parsed.hostname.rstrip(".").casefold()
+        if not raw_hostname or "%" in raw_hostname:
+            continue
+        try:
+            hostname = raw_hostname.encode("idna").decode("ascii").rstrip(".").casefold()
+        except UnicodeError:
+            continue
+        if (
+            not hostname
+            or hostname in {"home.arpa", "localhost", "localhost.localdomain"}
+            or hostname.endswith(_PRIVATE_DNS_SUFFIXES)
+        ):
+            continue
+        try:
+            address = ipaddress.ip_address(hostname.strip("[]"))
+        except ValueError:
+            if _LEGACY_NUMERIC_IPV4.fullmatch(hostname) or "." not in hostname:
+                continue
+        else:
+            if not address.is_global or address.is_multicast or address.is_reserved:
+                continue
+        identity = _canonical_web_source_identity(parsed, hostname, port)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        display_netloc = f"[{hostname}]" if ":" in hostname else hostname
+        if port is not None:
+            display_netloc = f"{display_netloc}:{port}"
+        url = urlunsplit(
+            (
+                parsed.scheme.casefold(),
+                display_netloc,
+                parsed.path,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+        raw_title = str(item.get("title") or "")
+        title = "" if any(unicodedata.category(char).startswith("C") for char in raw_title) else raw_title
+        title = " ".join(title.split())[:120]
+        # This function returns Markdown input.  A source title is a plain label,
+        # never a second formatting surface controlled by a web page.
+        for token in "[]()*_~`<>":
+            title = title.replace(token, " ")
+        title = " ".join(title.split())
+        # The whole destination is stashed by the Markdown renderer before any
+        # emphasis pass.  Encode only delimiter bytes which could change link
+        # balancing; ordinary official URLs with underscores remain intact.
+        destination = (
+            url.replace("`", "%60")
+            .replace("[", "%5B")
+            .replace("]", "%5D")
+            .replace("(", "%28")
+            .replace(")", "%29")
+        )
+        # A page-controlled title must never disguise the destination host
+        # ("Central Bank" pointing at an unrelated domain).  Keep the useful
+        # title, but always expose the canonical host in the clickable label.
+        label = f"{title} — {hostname}" if title else hostname
+        lines.append(f"- [{label}]({destination})")
+    return lines
 
 
 def _file_fate_line(file_ingestion: Any) -> str:
@@ -32,12 +224,11 @@ def _file_fate_line(file_ingestion: Any) -> str:
     """
     if not isinstance(file_ingestion, dict):
         return ""
-    if file_ingestion.get("action") == "transient":
-        return "📄 Файл разобран, но по вашей просьбе НЕ сохранён."
     # Приёмный путь кладёт исход разбора ВЛОЖЕННЫМ словарём `extraction`, а
-    # верхнеуровневый `extraction_success` производит только осмотр без
-    # сохранения (`inspect_file_transient`) — и тот уходит веткой выше. То есть
-    # предупреждение «текст извлечь не удалось» было физически недостижимо:
+    # верхнеуровневый `extraction_success` производит осмотр без сохранения
+    # (`inspect_file_transient`). Ниже обе транспортные формы сводятся до выбора
+    # lifecycle-статуса. Раньше предупреждение «текст извлечь не удалось» было
+    # физически недостижимо:
     # проверено прогоном настоящего `ingest_file` на .png и на .ogg. Человек
     # присылал картинку или наговаривал вопрос, который не расслышали, и получал
     # «📥 Файл ждёт разбора в /inbox» — ни слова о том, что содержимого не видно.
@@ -46,8 +237,28 @@ def _file_fate_line(file_ingestion: Any) -> str:
             "🎤 Голос не распознался — я сохранила запись, но слов в ней не разобрала. "
             "Повторите текстом или наговорите ещё раз поближе к микрофону."
         )
-    extraction = file_ingestion.get("extraction")
-    extraction = extraction if isinstance(extraction, dict) else {}
+    nested_extraction = file_ingestion.get("extraction")
+    extraction = dict(nested_extraction) if isinstance(nested_extraction, dict) else {}
+    # No-save inspection returns these facts flat.  Normal ingestion nests them
+    # under ``extraction``.  Merge only the same bounded public fields so both
+    # transport shapes produce one truthful warning without exposing parser
+    # diagnostics or content.
+    for key in (
+        "text_truncated",
+        "parse_deadline_reached",
+        "parse_pages_truncated",
+        "parse_pages_read",
+        "parse_total_pages",
+        "vision_pages_read",
+        "vision_pages_total",
+        "archive_truncated",
+        "archive_files",
+        "archive_files_read",
+        "source_truncated_for_parse",
+        "unsupported_format",
+    ):
+        if key not in extraction and key in file_ingestion:
+            extraction[key] = file_ingestion[key]
     text_missing = (
         file_ingestion.get("extraction_success") is False
         or extraction.get("success") is False
@@ -56,7 +267,9 @@ def _file_fate_line(file_ingestion: Any) -> str:
     # Разбор без ошибки — ещё не текст. Пустой .txt и .docx, где всё написанное
     # лежит в колонтитуле, приходят с `success=True` и нулём знаков: человеку
     # говорили просто «ждёт разбора», и он не знал, что содержимого не видно.
-    nothing_came_out = not text_missing and extraction.get("chars") == 0
+    nothing_came_out = bool(file_ingestion.get("empty_text")) or (
+        not text_missing and extraction.get("chars") == 0
+    )
     partial = bool(extraction.get("parse_deadline_reached"))
     # Текст не поместился в потолок: принято начало, остальное отброшено.
     over_the_cap = bool(extraction.get("text_truncated"))
@@ -103,56 +316,70 @@ def _file_fate_line(file_ingestion: Any) -> str:
     # не удалось» и для битого файла, и для незнакомого формата — а следующий шаг
     # у них разный: один пересохранить, другой прислать в другом виде.
     unsupported = bool(extraction.get("unsupported_format"))
+    # Reliability is independent from the lifecycle verdict.  In particular,
+    # a stale or contradictory backend receipt must not make an unreadable or
+    # partial file look whole merely because it says ``promoted`` (and an
+    # ``unknown`` action must not hide the warning either).  Build the warning
+    # once, then add whichever lifecycle prefix belongs to the receipt.
+    warning = ""
+    if archive_line:
+        warning = archive_line
+    elif vision_line:
+        warning = vision_line
+    elif beyond_the_pages:
+        warning = pages_line
+    elif unsupported:
+        warning = " Такой формат я пока не читаю — пришлите его в PDF, DOCX или текстом."
+    elif text_missing:
+        warning = " Текст извлечь не удалось: я вижу файл, но не его содержимое."
+    elif over_the_cap:
+        warning = (
+            " Документ длиннее, чем помещается целиком, — принято начало;"
+            " по концу файла спрашивать бесполезно."
+        )
+    elif nothing_came_out:
+        warning = " Текста в файле не оказалось — разбор прошёл, а содержимого нет."
+    elif partial:
+        # Успех и полнота — разные вещи: разбор, оборванный по сроку, приходит
+        # с `success=True` и частичным текстом. Флаг для этого случая писался
+        # в ответ, но не читался ни одним потребителем.
+        pages = int(extraction.get("parse_pages_read") or 0)
+        read = f" Прочитано страниц: {pages}." if pages else ""
+        warning = f" Разбор остановлен по сроку — принято только начало.{read}"
+    elif source_clipped:
+        warning = " Файл длиннее, чем берёт разбор, — прочитано его начало."
+
+    if file_ingestion.get("action") == "transient":
+        return f"{_FILE_TRANSIENT_STATUS}{warning}"
     if file_ingestion.get("promoted"):
-        line = "✅ Файл стал знанием — можно спрашивать."
-        if archive_line:
-            line += archive_line
-        elif vision_line:
-            line += vision_line
-        elif beyond_the_pages:
-            line += pages_line
-        elif over_the_cap:
-            line += (
-                " Документ длиннее, чем помещается целиком, — принято начало;"
-                " по концу файла спрашивать бесполезно."
-            )
-        elif partial:
-            pages = int(extraction.get("parse_pages_read") or 0)
-            read = f" Прочитано страниц: {pages}." if pages else ""
-            line += f" Разбор остановлен по сроку — принято только начало.{read}"
-        elif source_clipped:
-            line += " Файл длиннее, чем берёт разбор, — прочитано его начало."
-        return line
+        return f"{_FILE_PROMOTED_STATUS}{warning}"
     if file_ingestion.get("queued_for_review") or file_ingestion.get("inbox_id"):
-        line = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
-        if archive_line:
-            line += archive_line
-        elif vision_line:
-            line += vision_line
-        elif beyond_the_pages:
-            line += pages_line
-        elif unsupported:
-            line += " Такой формат я пока не читаю — пришлите его в PDF, DOCX или текстом."
-        elif text_missing:
-            line += " Текст извлечь не удалось: я вижу файл, но не его содержимое."
-        elif over_the_cap:
-            line += (
-                " Документ длиннее, чем помещается целиком, — принято начало;"
-                " по концу файла спрашивать бесполезно."
-            )
-        elif nothing_came_out:
-            line += " Текста в файле не оказалось — разбор прошёл, а содержимого нет."
-        elif partial:
-            # Успех и полнота — разные вещи: разбор, оборванный по сроку, приходит
-            # с `success=True` и частичным текстом. Флаг для этого случая писался
-            # в ответ, но не читался ни одним потребителем.
-            pages = int(extraction.get("parse_pages_read") or 0)
-            read = f" Прочитано страниц: {pages}." if pages else ""
-            line += f" Разбор остановлен по сроку — принято только начало.{read}"
-        elif source_clipped:
-            line += " Файл длиннее, чем берёт разбор, — прочитано его начало."
-        return line
-    return ""
+        return f"{_FILE_REVIEW_STATUS}{warning}"
+    return warning.strip()
+
+
+def _file_chat_warning_line(file_ingestion: Any) -> str:
+    """Only a user-impacting file warning, never Inbox/lifecycle bookkeeping.
+
+    The full receipt remains available to the dedicated Inbox/Admin surfaces.
+    Ordinary conversation should contain the answer and facts that affect its
+    reliability (for example, an unreadable or truncated attachment), but not
+    internal state announcements such as "waiting in /inbox" or "became
+    knowledge".  Deriving the warning from the same formatter keeps the two
+    surfaces consistent without copying the fairly involved extraction logic.
+    """
+
+    if not isinstance(file_ingestion, dict):
+        return ""
+    if file_ingestion.get("voice_unrecognised"):
+        return _VOICE_UNRECOGNISED_CHAT_WARNING
+    fate = _file_fate_line(file_ingestion)
+    for status in (_FILE_PROMOTED_STATUS, _FILE_REVIEW_STATUS, _FILE_TRANSIENT_STATUS):
+        if fate == status:
+            return ""
+        if fate.startswith(status):
+            return fate[len(status) :].strip()
+    return fate
 
 
 class CallbacksMixin(BridgeShared):
@@ -969,7 +1196,37 @@ class CallbacksMixin(BridgeShared):
 
     @staticmethod
     def _format_response_message(response: dict[str, Any]) -> str:
+        raw_message = response.get("message")
+        web_sources = _web_source_chat_lines(response.get("web_sources"))
+        exact_shape_has_companion = bool(
+            any(
+                str(response.get(field) or "").strip()
+                for field in (
+                    "grounding_warning",
+                    "regenerate_notice",
+                    "verification_caution",
+                    "web_query_notice",
+                    "citation_notice",
+                )
+            )
+            or response.get("citations")
+            or web_sources
+            or _file_chat_warning_line(response.get("file_ingestion"))
+        )
+        if (
+            response.get("exact_text_shape_owned") is True
+            and isinstance(raw_message, str)
+            and raw_message
+            and not exact_shape_has_companion
+        ):
+            # The runtime proved a context-empty, closed surface contract and
+            # already rejected every truth/safety companion.  Banners and
+            # notices are otherwise useful, but here even one extra line would
+            # falsify the requested exact shape.
+            return raw_message
         message = str(response.get("message") or "Готово.").strip() or "Готово."
+        if web_sources:
+            message = _neutralize_unowned_autolinks(message)
         raw_context = response.get("context")
         context: dict[str, Any] = dict(raw_context) if isinstance(raw_context, dict) else {}
         mode = str(context.get("interaction_mode") or "dialogue")
@@ -992,12 +1249,14 @@ class CallbacksMixin(BridgeShared):
         regen_notice = str(response.get("regenerate_notice") or "").strip()
         if regen_notice and regen_notice != warning:
             body = f"{regen_notice}\n\n{body}"
-        fate = _file_fate_line(response.get("file_ingestion"))
-        if fate:
-            body = f"{body}\n\n{fate}"
+        file_warning = _file_chat_warning_line(response.get("file_ingestion"))
+        if file_warning:
+            body = f"{body}\n\n{file_warning}"
         caution = str(response.get("verification_caution") or "").strip()
         if caution:
             body = f"{body}\n\n{caution}"
+        if web_sources:
+            body = f"{body}\n\nИсточники:\n" + "\n".join(web_sources)
         # Что ушло в поисковик — рядом с ответом, а не в журнале.
         web_notice = str(response.get("web_query_notice") or "").strip()
         if web_notice:

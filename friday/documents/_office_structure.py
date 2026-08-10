@@ -16,6 +16,7 @@ import json
 import re
 import unicodedata
 import zipfile
+from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from io import BytesIO
@@ -112,6 +113,12 @@ _DOCX_COORDINATE_RE = re.compile(r"R[1-9][0-9]{0,6}C[1-9][0-9]{0,5}")
 _XLSX_COORDINATE_RE = re.compile(r"[A-Z]{1,3}[1-9][0-9]{0,6}")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _WORDPROCESSINGML_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_OFFICE_RELATIONSHIP_NAMESPACES = frozenset(
+    {
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "http://purl.oclc.org/ooxml/officeDocument/relationships",
+    }
+)
 
 _STRONG_PERSON_HEADER_VALUES = frozenset(
     {
@@ -264,6 +271,136 @@ _DOCX_UNSUPPORTED_CONTAINERS = frozenset(
         "Fallback",
     }
 )
+_DOCX_EMPTY_PARAGRAPH_DIRECT_CHILDREN = frozenset(
+    {
+        "pPr",
+        # Proofing and permission range markers do not render content by
+        # themselves.  They are neutral only in a paragraph with no run or
+        # relationship-bearing descendant; see
+        # ``_docx_paragraph_is_structurally_empty``.
+        "proofErr",
+        "permStart",
+        "permEnd",
+    }
+)
+_DOCX_EMPTY_PARAGRAPH_ALLOWED_TAGS = _DOCX_EMPTY_PARAGRAPH_DIRECT_CHILDREN | frozenset(
+    {
+        "p",
+        # CT_PPr paragraph properties.
+        "pStyle",
+        "keepNext",
+        "keepLines",
+        "pageBreakBefore",
+        "framePr",
+        "widowControl",
+        "numPr",
+        "suppressLineNumbers",
+        "pBdr",
+        "shd",
+        "tabs",
+        "suppressAutoHyphens",
+        "kinsoku",
+        "wordWrap",
+        "overflowPunct",
+        "topLinePunct",
+        "autoSpaceDE",
+        "autoSpaceDN",
+        "bidi",
+        "adjustRightInd",
+        "snapToGrid",
+        "spacing",
+        "ind",
+        "contextualSpacing",
+        "mirrorIndents",
+        "suppressOverlap",
+        "jc",
+        "textDirection",
+        "textAlignment",
+        "textboxTightWrap",
+        "outlineLvl",
+        "divId",
+        "cnfStyle",
+        "rPr",
+        "sectPr",
+        "pPrChange",
+        # Nested numbering, border, tab, and section properties.
+        "ilvl",
+        "numId",
+        "numberingChange",
+        "top",
+        "left",
+        "bottom",
+        "right",
+        "between",
+        "bar",
+        "tab",
+        "headerReference",
+        "footerReference",
+        "footnotePr",
+        "endnotePr",
+        "type",
+        "pgSz",
+        "pgMar",
+        "paperSrc",
+        "pgBorders",
+        "lnNumType",
+        "pgNumType",
+        "cols",
+        "formProt",
+        "vAlign",
+        "noEndnote",
+        "titlePg",
+        "rtlGutter",
+        "docGrid",
+        "printerSettings",
+        "sectPrChange",
+        # CT_RPr formatting for the paragraph mark.  These are properties,
+        # never a content-bearing ``w:r``.
+        "rStyle",
+        "rFonts",
+        "b",
+        "bCs",
+        "i",
+        "iCs",
+        "caps",
+        "smallCaps",
+        "strike",
+        "dstrike",
+        "outline",
+        "shadow",
+        "emboss",
+        "imprint",
+        "noProof",
+        "vanish",
+        "webHidden",
+        "color",
+        "w",
+        "kern",
+        "position",
+        "sz",
+        "szCs",
+        "highlight",
+        "u",
+        "effect",
+        "bdr",
+        "fitText",
+        "vertAlign",
+        "rtl",
+        "cs",
+        "em",
+        "lang",
+        "eastAsianLayout",
+        "specVanish",
+        "rPrChange",
+        # Property-only revision markers.  Their parent is checked below.
+        "ins",
+        "del",
+        "moveFrom",
+        "moveTo",
+    }
+)
+_DOCX_EMPTY_PARAGRAPH_REVISION_MARKERS = frozenset({"ins", "del", "moveFrom", "moveTo"})
+_DOCX_EMPTY_PARAGRAPH_REVISION_PARENTS = frozenset({"rPr", "numPr"})
 _XLSX_HEADER_FOOTER_TAGS = frozenset(
     {
         "oddHeader",
@@ -330,6 +467,65 @@ def _local_name(tag: Any) -> str:
 def _xml_namespace(tag: Any) -> str:
     value = str(tag or "")
     return value[1:].split("}", 1)[0] if value.startswith("{") and "}" in value else ""
+
+
+def _has_office_relationship_attribute(element: Any) -> bool:
+    return any(
+        _xml_namespace(name) in _OFFICE_RELATIONSHIP_NAMESPACES for name in getattr(element, "attrib", {})
+    )
+
+
+def _docx_paragraph_is_structurally_empty(element: Any) -> bool:
+    """Prove that a body paragraph carries no content absent from ``.text``.
+
+    A blank ``Paragraph.text`` is not enough: an empty-looking paragraph can
+    still carry a drawing, a field, an embedded object, a break, a bookmark, or
+    a relationship-backed hyperlink.  Only paragraph properties and inert
+    proofing/permission markers are neutral.  Property descendants are allowed
+    because Word stores revision metadata there, but the same payload and
+    relationship checks apply recursively so malformed OOXML cannot hide an
+    object inside ``pPr``.
+    """
+
+    if _local_name(getattr(element, "tag", "")) != "p":
+        return False
+    try:
+        children = list(element.iterchildren())
+        descendants = list(element.iter())
+    except (AttributeError, TypeError):
+        return False
+    if any(
+        _local_name(getattr(child, "tag", "")) not in _DOCX_EMPTY_PARAGRAPH_DIRECT_CHILDREN
+        for child in children
+    ):
+        return False
+    for node in descendants:
+        local_name = _local_name(getattr(node, "tag", ""))
+        parent = getattr(node, "getparent", lambda: None)()
+        if (
+            _xml_namespace(getattr(node, "tag", "")) != _WORDPROCESSINGML_NAMESPACE
+            or local_name not in _DOCX_EMPTY_PARAGRAPH_ALLOWED_TAGS
+            or (
+                local_name in _DOCX_EMPTY_PARAGRAPH_REVISION_MARKERS
+                and _local_name(getattr(parent, "tag", "")) not in _DOCX_EMPTY_PARAGRAPH_REVISION_PARENTS
+            )
+            or _has_office_relationship_attribute(node)
+            or str(getattr(node, "text", "") or "").strip()
+            or str(getattr(node, "tail", "") or "").strip()
+        ):
+            return False
+    return True
+
+
+def _docx_structurally_empty_paragraphs(body: Any) -> set[Any]:
+    try:
+        return {
+            node
+            for node in body.iter()
+            if _local_name(getattr(node, "tag", "")) == "p" and _docx_paragraph_is_structurally_empty(node)
+        }
+    except (AttributeError, TypeError):
+        return set()
 
 
 def _closed_text(value: Any) -> str:
@@ -458,13 +654,23 @@ def _positive_ooxml_int(value: Any) -> bool:
         return bool(str(value or "").strip())
 
 
-def _docx_initial_reasons(document: Any) -> set[str]:
+def _docx_initial_reasons(
+    document: Any,
+    structurally_empty_paragraphs: set[Any] | None = None,
+) -> set[str]:
     reasons: set[str] = set()
     body = document.element.body
+    neutral_paragraphs = _docx_structurally_empty_paragraphs(body)
+    neutral_paragraphs.update(structurally_empty_paragraphs or set())
+    neutral_nodes = {node for paragraph in neutral_paragraphs for node in paragraph.iter()}
     for child in body.iterchildren():
+        if child in neutral_paragraphs:
+            continue
         if _local_name(child.tag) not in {"p", "tbl", "sectPr"}:
             reasons.add("unsupported_body_content")
     for node in body.iter():
+        if node in neutral_nodes:
+            continue
         local_name = _local_name(getattr(node, "tag", ""))
         if (
             local_name in _DOCX_UNSUPPORTED_CONTAINERS
@@ -1287,15 +1493,26 @@ def build_docx_text_and_structure(
     builder = _LegacyTextBuilder(max(0, int(max_text_chars)))
     coverage = _new_coverage()
     reasons: set[str] = set()
+    structurally_empty_paragraphs: set[Any] = set()
     source_orders = _body_source_orders(document)
     blocks: list[dict[str, Any]] = []
     text_stopped = False
     paragraph_ordinal = 0
 
     for paragraph in document.paragraphs:
+        paragraph_element = paragraph._element
+        if _docx_paragraph_is_structurally_empty(paragraph_element):
+            structurally_empty_paragraphs.add(paragraph_element)
+            continue
         paragraph_ordinal += 1
         coverage["blocks_seen"] += 1
         value = str(paragraph.text or "").strip()
+        if not value:
+            # ``Paragraph.text`` can be empty while a run, field, object,
+            # bookmark, break, or relationship-backed wrapper still exists.
+            # Only the structural proof above may turn a blank projection into
+            # a neutral body separator.
+            reasons.add("unsupported_body_content")
         if "\n" in value or "\r" in value:
             reasons.add("unsupported_body_content")
         span: list[int] | None = None
@@ -1328,6 +1545,19 @@ def build_docx_text_and_structure(
             # bounding latency, this keeps malformed or exotic content in an
             # unread tail from changing a successful truncated extraction.
             break
+
+    if not text_stopped and structurally_empty_paragraphs:
+        neutral_orders = sorted(
+            source_orders[element] for element in structurally_empty_paragraphs if element in source_orders
+        )
+
+        def semantic_source_order(raw_order: int) -> int:
+            return raw_order - bisect_left(neutral_orders, raw_order)
+
+        for element, raw_order in list(source_orders.items()):
+            source_orders[element] = semantic_source_order(raw_order)
+        for block in blocks:
+            block["source_order"] = semantic_source_order(int(block["source_order"]))
 
     table_ordinal = 0
     held_xml_cells: list[Any] = []
@@ -1424,7 +1654,7 @@ def build_docx_text_and_structure(
         # Completeness scans are intentionally after the legacy text projection.
         # They can only remove authority from a fully read document; they must
         # never force a bounded reader to traverse an otherwise ignored tail.
-        reasons.update(_docx_initial_reasons(document))
+        reasons.update(_docx_initial_reasons(document, structurally_empty_paragraphs))
         if content is not None:
             # Колонтитулы, сноски, примечания и надписи ЧИТАЮТСЯ, а не только
             # помечаются утраченными: на бланках там стоят «Согласовано»,

@@ -10,16 +10,17 @@ Measured on this supervisor before the guard existed: a task whose blocking call
 seven seconds under a five-second timeout reached **two concurrent threads**, with the
 task reporting ``running`` while an orphan from the previous tick was still writing.
 
-The counter is incremented and decremented INSIDE the thread, so it reflects what is
-actually still executing rather than what the event loop believes. The task name comes
-from a context variable because ``to_thread`` copies the caller's context into the
-thread, which is the only channel that survives the same cancellation.
+The counter is incremented before executor submission and decremented INSIDE the
+thread.  That covers both queued and physically running work, even after the awaiting
+request is cancelled.  The task/activity name comes from a context variable copied
+into the thread, which is the only channel that survives the same cancellation.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextvars
+import functools
 import threading
 import time
 from collections.abc import Callable
@@ -29,6 +30,11 @@ T = TypeVar("T")
 
 # Set by the supervisor around each task invocation; read inside worker threads.
 current_task: contextvars.ContextVar[str] = contextvars.ContextVar("jericho_worker_task", default="")
+# Set by authenticated HTTP admission while a route is executing.  A cancelled
+# request may release its ASGI lease while its executor thread keeps running;
+# this context is copied at submission so account deletion can drain the physical
+# work rather than the now-gone coroutine.
+current_activity: contextvars.ContextVar[str] = contextvars.ContextVar("jericho_request_activity", default="")
 
 _lock = threading.Lock()
 _in_flight: dict[str, int] = {}
@@ -63,26 +69,81 @@ def wait_until_idle(timeout: float, *, poll_interval: float = 0.05) -> dict[str,
         time.sleep(poll_interval)
 
 
+async def wait_until_idle_async(timeout: float, *, poll_interval: float = 0.05) -> dict[str, int]:
+    """Event-loop-friendly drain used while HTTP admission is globally closed."""
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, float(timeout))
+    while True:
+        remaining = snapshot()
+        if not remaining or loop.time() >= deadline:
+            return remaining
+        await asyncio.sleep(max(0.001, float(poll_interval)))
+
+
+def _register(task_name: str) -> None:
+    with _lock:
+        _in_flight[task_name] = _in_flight.get(task_name, 0) + 1
+
+
+def _complete(task_name: str) -> None:
+    with _lock:
+        remaining = _in_flight.get(task_name, 1) - 1
+        if remaining > 0:
+            _in_flight[task_name] = remaining
+        else:
+            _in_flight.pop(task_name, None)
+
+
 def _tracked(task_name: str, function: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     if task_name:
-        with _lock:
-            _in_flight[task_name] = _in_flight.get(task_name, 0) + 1
+        _register(task_name)
     try:
         return function(*args, **kwargs)
     finally:
         if task_name:
-            with _lock:
-                remaining = _in_flight.get(task_name, 1) - 1
-                if remaining > 0:
-                    _in_flight[task_name] = remaining
-                else:
-                    _in_flight.pop(task_name, None)
+            _complete(task_name)
+
+
+def _run_registered(
+    task_name: str,
+    context: contextvars.Context,
+    function: Callable[[], T],
+) -> T:
+    """Run one already-registered submission and clear it on physical completion."""
+
+    try:
+        return context.run(function)
+    finally:
+        _complete(task_name)
 
 
 async def run_blocking(function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     """``asyncio.to_thread`` that admits when its thread outlives the await.
 
-    A drop-in replacement everywhere a worker offloads storage work. Outside a worker
-    (no task in context) it behaves exactly like ``asyncio.to_thread``.
+    A drop-in replacement everywhere a worker or admitted HTTP request offloads
+    storage work.  Registration happens before executor submission, closing the
+    queued-job window; the executor wrapper clears it only after real completion.
     """
-    return await asyncio.to_thread(_tracked, current_task.get(), function, *args, **kwargs)
+
+    task_name = current_task.get() or current_activity.get()
+    if not task_name:
+        return await asyncio.to_thread(function, *args, **kwargs)
+    call = functools.partial(function, *args, **kwargs)
+    context = contextvars.copy_context()
+    _register(task_name)
+    try:
+        future = asyncio.get_running_loop().run_in_executor(
+            None,
+            _run_registered,
+            task_name,
+            context,
+            call,
+        )
+    except BaseException:
+        _complete(task_name)
+        raise
+    # Shield prevents task cancellation from cancelling a queued executor future:
+    # either the wrapper runs and clears the registration, or submission itself
+    # failed and the branch above cleared it synchronously.
+    return await asyncio.shield(future)

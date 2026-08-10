@@ -8,6 +8,7 @@ import calendar
 import hashlib
 import inspect
 import io
+import ipaddress
 import json
 import logging
 import os
@@ -16,14 +17,16 @@ import signal
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import urllib.parse
 import zipfile
-from collections.abc import Awaitable, Callable, Mapping
+from collections import Counter
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
 
 from friday.failures import safe_failure_text
@@ -81,6 +84,255 @@ if TYPE_CHECKING:
 
 #: Ниже этого объёма страница знанием не становится — сохранять нечего.
 _WEB_CAPTURE_MIN_CHARS = 200
+_WEB_REPORT_FAILURE_FLAGS = frozenset({"search_failed", "search_timed_out", "refused", "quota_exhausted"})
+_LEGACY_NUMERIC_IPV4 = re.compile(
+    r"(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)){0,3}",
+    re.IGNORECASE,
+)
+_PRIVATE_DNS_SUFFIXES = (
+    ".alt",
+    ".corp",
+    ".example",
+    ".home",
+    ".home.arpa",
+    ".internal",
+    ".invalid",
+    ".lan",
+    ".local",
+    ".localdomain",
+    ".localhost",
+    ".onion",
+    ".test",
+)
+
+
+def _capturable_public_web_url(value: Any) -> str:
+    """One safe public URL for durable Raw/Inbox provenance, without DNS."""
+
+    url = str(value or "").strip()
+    if (
+        not url
+        or len(url) > 2_048
+        or any(
+            char.isspace() or ord(char) == 127 or unicodedata.category(char).startswith("C") for char in url
+        )
+        or "\\" in url
+    ):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return ""
+    raw_hostname = parsed.hostname.rstrip(".").casefold()
+    if not raw_hostname or "%" in raw_hostname:
+        return ""
+    try:
+        hostname = raw_hostname.encode("idna").decode("ascii").rstrip(".").casefold()
+    except UnicodeError:
+        return ""
+    if (
+        not hostname
+        or hostname in {"home.arpa", "localhost", "localhost.localdomain"}
+        or hostname.endswith(_PRIVATE_DNS_SUFFIXES)
+    ):
+        return ""
+    try:
+        address = ipaddress.ip_address(hostname.strip("[]"))
+    except ValueError:
+        if _LEGACY_NUMERIC_IPV4.fullmatch(hostname) or "." not in hostname:
+            return ""
+    else:
+        if not address.is_global or address.is_multicast or address.is_reserved:
+            return ""
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme.casefold(),
+            netloc,
+            parsed.path,
+            parsed.query,
+            parsed.fragment,
+        )
+    )
+
+
+def _canonical_capturable_web_url_key(url: str) -> str:
+    """Canonical identity for deduplicating already-safe public sources."""
+
+    safe = _capturable_public_web_url(url)
+    if not safe:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(safe)
+        port = parsed.port
+    except ValueError:
+        return ""
+    host = str(parsed.hostname or "").casefold()
+    if not host:
+        return ""
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None and not (
+        (parsed.scheme.casefold() == "http" and port == 80)
+        or (parsed.scheme.casefold() == "https" and port == 443)
+    ):
+        netloc = f"{netloc}:{port}"
+
+    unreserved = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    def normalize_component(value: str) -> str:
+        return re.sub(
+            r"%([0-9A-Fa-f]{2})",
+            lambda match: (
+                chr(int(match.group(1), 16))
+                if chr(int(match.group(1), 16)) in unreserved
+                else f"%{match.group(1).upper()}"
+            ),
+            value,
+        )
+
+    def remove_dot_segments(path: str) -> str:
+        absolute = path.startswith("/")
+        trailing = path.endswith(("/.", "/.."))
+        output: list[str] = []
+        for segment in path.split("/"):
+            if segment == ".":
+                continue
+            if segment == "..":
+                if output and output[-1] != ".." and not (absolute and len(output) == 1 and output[0] == ""):
+                    output.pop()
+                elif not absolute:
+                    output.append(segment)
+                continue
+            output.append(segment)
+        result = "/".join(output)
+        if absolute and not result.startswith("/"):
+            result = f"/{result}"
+        if absolute and not result:
+            result = "/"
+        if trailing and result != "/" and not result.endswith("/"):
+            result = f"{result}/"
+        return result
+
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme.casefold(),
+            netloc,
+            remove_dot_segments(normalize_component(parsed.path or "/")),
+            normalize_component(parsed.query),
+            "",
+        )
+    )
+
+
+def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
+    """Project only readable public sources before durable ingestion begins."""
+
+    if not isinstance(report, Mapping):
+        return []
+    failure_values = [report.get(flag) for flag in _WEB_REPORT_FAILURE_FLAGS if flag in report]
+    if (
+        any(not isinstance(value, bool) for value in failure_values)
+        or any(value is True for value in failure_values)
+        or str(report.get("error") or "").strip()
+    ):
+        return []
+    raw_sources = report.get("sources")
+    if not isinstance(raw_sources, list) or not raw_sources:
+        return []
+    if not {
+        "requested_sources",
+        "completed_sources",
+        "failed_sources",
+        "timed_out_sources",
+        "search_timed_out",
+    }.issubset(report):
+        # This function runs before the runtime projector.  A source-shaped
+        # legacy mapping without the production research completeness contract
+        # must not become a durable Raw/Inbox row presented as a whole page.
+        return []
+    numeric_fields = (
+        report.get("requested_sources"),
+        report.get("completed_sources"),
+        report.get("failed_sources"),
+        report.get("timed_out_sources"),
+    )
+    normalized_numeric_fields: list[int] = []
+    for value in numeric_fields:
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return []
+        normalized_numeric_fields.append(value)
+    requested, completed, failed, timed_out = normalized_numeric_fields
+    if (
+        completed != len(raw_sources)
+        or requested == 0
+        or failed + timed_out > requested
+        or requested > completed + failed + timed_out
+    ):
+        return []
+    projected: list[dict[str, Any]] = []
+    seen_sources: set[str] = set()
+    for raw in raw_sources:
+        if not isinstance(raw, Mapping):
+            continue
+        if not {"text_length", "status_code", "error", "truncated"}.issubset(raw):
+            continue
+        url = _capturable_public_web_url(raw.get("url"))
+        raw_text = raw.get("text")
+        text = raw_text.strip() if isinstance(raw_text, str) else ""
+        status_code = raw.get("status_code")
+        valid_status = (
+            isinstance(status_code, int) and not isinstance(status_code, bool) and 200 <= status_code < 300
+        )
+        truncated = raw.get("truncated")
+        text_length = raw.get("text_length")
+        valid_length = (
+            isinstance(text_length, int) and not isinstance(text_length, bool) and text_length >= len(text)
+        )
+        if (
+            not url
+            or len(text) < _WEB_CAPTURE_MIN_CHARS
+            or str(raw.get("error") or "").strip()
+            or not valid_status
+            or not isinstance(truncated, bool)
+            or not valid_length
+            or not isinstance(raw.get("error"), str)
+        ):
+            continue
+        identity = _canonical_capturable_web_url_key(url)
+        if not identity or identity in seen_sources:
+            continue
+        seen_sources.add(identity)
+        raw_title = str(raw.get("title") or raw.get("search_title") or url)
+        title = (
+            ""
+            if any(unicodedata.category(char).startswith("C") for char in raw_title)
+            else " ".join(raw_title.split())[:240]
+        )
+        projected.append(
+            {
+                **dict(raw),
+                "url": url,
+                "title": title or url,
+                "text": text,
+                # A larger declared original length means the body is a known
+                # prefix even when a legacy/provider row forgot to set its
+                # boolean truncation flag.  Persist the conservative truth so
+                # the archive never later presents that prefix as complete.
+                "truncated": bool(truncated or (isinstance(text_length, int) and text_length > len(text))),
+            }
+        )
+    return projected
+
 
 #: Потолок собранного файла. Telegram принимает и больше, но отчёт на десятки
 #: мегабайт — это не отчёт, а выгрузка, и её место не во вложении к реплике.
@@ -104,6 +356,42 @@ _MAX_ARCHIVE_FILES = 300
 
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
+
+
+def _machine_zone() -> Any:
+    """Return the machine zone as a named ``ZoneInfo`` whenever possible.
+
+    ``datetime.now().astimezone().tzinfo`` is often a fixed-offset object whose
+    string is only ``MSK``/``EDT``.  Temporal tools persist that string in their
+    contract, while the runtime validates it through ``ZoneInfo``; abbreviations
+    are not IANA keys and an otherwise complete timeline is discarded.  Resolve
+    the canonical machine name before falling back to a fixed offset.
+    """
+
+    candidates: list[str] = []
+    configured = str(os.environ.get("TZ") or "").strip().lstrip(":")
+    if configured and not configured.startswith("/"):
+        candidates.append(configured)
+    try:
+        timezone_file = Path("/etc/timezone").read_text(encoding="utf-8")[:256].strip()
+    except (OSError, UnicodeError):
+        timezone_file = ""
+    if timezone_file:
+        candidates.append(timezone_file)
+    try:
+        localtime = Path("/etc/localtime").resolve(strict=True)
+        zone_root = Path("/usr/share/zoneinfo").resolve(strict=True)
+        relative = localtime.relative_to(zone_root).as_posix()
+    except (OSError, ValueError):
+        relative = ""
+    if relative:
+        candidates.append(relative)
+    for name in dict.fromkeys(candidates):
+        try:
+            return ZoneInfo(name)
+        except (KeyError, ValueError):
+            continue
+    return datetime.now().astimezone().tzinfo or UTC
 
 
 def _storage_read_snapshot(storage: Any, operation: Callable[[], Any]) -> Any:
@@ -878,6 +1166,48 @@ def _person_answer_for_llm(answer: dict[str, Any], *, zone: Any) -> dict[str, An
         )
     if answer.get("denied"):
         return {"человек": name, "отказано": True, "причина": answer.get("reason")}
+    if answer.get("documents_only") is True:
+        # This is an inventory projection, not a semantic sample.  Keep the
+        # exact code-owned count beside explicit page coverage, and keep
+        # unattributed files separate: they make the author-level total UNKNOWN
+        # rather than zero or complete.
+        files = [row for row in (answer.get("items") or []) if isinstance(row, dict)]
+        try:
+            known_total = max(0, int(summary.get("arrivals") or 0))
+        except (TypeError, ValueError):
+            known_total = 0
+        try:
+            offset = max(0, int(answer.get("offset") or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
+            unattributed = max(0, int(answer.get("arrivals_without_an_author") or 0))
+        except (TypeError, ValueError):
+            unattributed = 0
+        shown = len(files)
+        next_offset = offset + shown if offset + shown < known_total else None
+        return {
+            "человек": name,
+            "доступ": "полный" if str(answer.get("content") or "") == "full" else "без содержания",
+            "период": {"с": summary.get("since"), "по": summary.get("until")},
+            "документов с подтверждённым автором": known_total,
+            "документы": [
+                {
+                    "когда": local(str(row.get("at") or "")),
+                    "что": row.get("title") or row.get("filename") or "",
+                }
+                for row in files
+            ],
+            "пагинация": {
+                "смещение": offset,
+                "показано": shown,
+                "из подтверждённых": known_total,
+                "подтверждённый перечень показан полностью": next_offset is None,
+                "следующее смещение": next_offset,
+            },
+            "документов без отметки автора": unattributed,
+            "полнота по автору": "неизвестна" if unattributed else "полная",
+        }
     # Файлы упоминаются ТОЛЬКО когда они есть: ноль загрузок у человека, который
     # просто переписывается, — это норма, а не отсутствие данных.
     files = answer.get("items") or []
@@ -1320,6 +1650,601 @@ def _memory_graph_context_for_llm(
 # на второй вызов. Прежде сюда уходили тела документов, и одного среднего (16 565
 # знаков на этом архиве) хватало, чтобы переполнить бюджет целиком.
 _TOOL_EXCERPT_CHARS = 600
+_SOURCE_SEARCH_QUERY_CHARS = 240
+_SOURCE_SEARCH_FOCUS_CHARS = 480
+_SOURCE_SEARCH_CANDIDATE_CAP = 100
+_SOURCE_SEARCH_COMPACT_DATA_CHARS = 7_700
+_SOURCE_SEARCH_PRETTY_DATA_CHARS = 11_500
+_SOURCE_SEARCH_TOKEN = re.compile(r"[\w@.+/-]{2,}", re.UNICODE)
+_SOURCE_SIMPLE_SURNAME = re.compile(r"[а-я]{4,}(?:ов|ев|ин|ын)$")
+_SOURCE_ADJECTIVE_SURNAME = re.compile(r"[а-я]{4,}(?:ск|цк)(?:ий)?$")
+_SOURCE_SIMPLE_SURNAME_ENDINGS = frozenset({"", "а", "у", "е", "ы", "и", "ым", "ом", "ой"})
+_SOURCE_ADJECTIVE_SURNAME_ENDINGS = frozenset(
+    {"ий", "ого", "ому", "им", "ом", "ая", "ой", "ую", "ие", "их", "ими"}
+)
+_SOURCE_CLOSED_FOCUS_FORMS: dict[str, frozenset[str]] = {
+    "должност": frozenset({"должность", "должности", "должностью", "должностей", "должностям", "должностях"}),
+    "позици": frozenset({"позиция", "позиции", "позицию", "позицией", "позиций", "позициям", "позициях"}),
+    "рол": frozenset({"роль", "роли", "ролью", "ролей", "ролям", "ролями", "ролях"}),
+    "код": frozenset({"код", "кода", "коду", "кодом", "коде", "коды", "кодов", "кодам", "кодах"}),
+    "значени": frozenset(
+        {"значение", "значения", "значению", "значением", "значений", "значениям", "значениях"}
+    ),
+    "строк": frozenset({"строка", "строки", "строку", "строкой", "строк", "строкам", "строках"}),
+    "узл": frozenset({"узел", "узла", "узлу", "узлом", "узле", "узлы", "узлов", "узлам", "узлах"}),
+}
+_SOURCE_TABLE_HEADER_SUBJECTS = frozenset(
+    {"фамилия", "фио", "имя", "сотрудник", "работник", "person", "employee", "name", "surname"}
+)
+
+
+def _source_normalized_token(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold().replace("ё", "е").strip()
+    return normalized if any(char.isalnum() for char in normalized) else ""
+
+
+def _source_anchor_matches_token(term: str, token: str) -> bool:
+    """Closed token-aware match for a literal/id or a Russian surname case."""
+
+    anchor = _source_normalized_token(term)
+    candidate = _source_normalized_token(token)
+    if not anchor or not candidate:
+        return False
+    if candidate == anchor:
+        return True
+    if _SOURCE_SIMPLE_SURNAME.fullmatch(anchor):
+        return candidate.startswith(anchor) and candidate[len(anchor) :] in _SOURCE_SIMPLE_SURNAME_ENDINGS
+    adjective = _SOURCE_ADJECTIVE_SURNAME.fullmatch(anchor)
+    if adjective:
+        stem = anchor[:-2] if anchor.endswith("ий") else anchor
+        return candidate.startswith(stem) and candidate[len(stem) :] in _SOURCE_ADJECTIVE_SURNAME_ENDINGS
+    return False
+
+
+def _source_focus_matches_token(term: str, token: str, *, query_terms: tuple[str, ...]) -> bool:
+    normalized = _source_normalized_token(term)
+    candidate = _source_normalized_token(token)
+    if normalized in query_terms:
+        return _source_anchor_matches_token(normalized, candidate)
+    closed = _SOURCE_CLOSED_FOCUS_FORMS.get(normalized)
+    if closed is not None:
+        return candidate in closed
+    if normalized in {"endpoint", "node", "position", "role", "code", "value", "line", "title", "surname"}:
+        return candidate in {normalized, f"{normalized}s"}
+    return candidate == normalized
+
+
+def _source_table_header_candidate(line: str) -> str:
+    candidate = str(line or "").strip()
+    if (
+        not candidate
+        or " | " not in candidate
+        or ":" in candidate
+        or any(char.isdigit() for char in candidate)
+    ):
+        return ""
+    first_cell = candidate.split(" | ", 1)[0]
+    first_tokens = {
+        _source_normalized_token(match.group(0)) for match in _SOURCE_SEARCH_TOKEN.finditer(first_cell)
+    }
+    return candidate if first_tokens & _SOURCE_TABLE_HEADER_SUBJECTS else ""
+
+
+def _source_table_record_projection(
+    header: str,
+    row: str,
+    *,
+    query: str,
+    focus: str,
+    query_terms: tuple[str, ...],
+    focus_terms: tuple[str, ...],
+    max_chars: int,
+) -> str:
+    """Project one extracted table record without neighbouring rows or cells."""
+
+    row_cells = [cell.strip() for cell in row.split(" | ")]
+    header_cells = [cell.strip() for cell in header.split(" | ")] if header else []
+
+    def tokens(value: str) -> tuple[str, ...]:
+        return tuple(
+            _source_normalized_token(match.group(0)) for match in _SOURCE_SEARCH_TOKEN.finditer(value)
+        )
+
+    selected: set[int] = set()
+    focus_selected: set[int] = set()
+    non_anchor_focus = tuple(term for term in focus_terms if term not in query_terms)
+    for index, cell in enumerate(row_cells):
+        cell_tokens = tokens(cell)
+        if any(_source_anchor_matches_token(term, token) for term in query_terms for token in cell_tokens):
+            selected.add(index)
+        header_tokens = tokens(header_cells[index]) if index < len(header_cells) else ()
+        if any(
+            _source_focus_matches_token(term, token, query_terms=query_terms)
+            for term in non_anchor_focus
+            for token in (*cell_tokens, *header_tokens)
+        ):
+            selected.add(index)
+            focus_selected.add(index)
+    if not selected:
+        return ""
+    if not focus_selected:
+        # Every cell belongs to this one authenticated record.  When the source
+        # expresses a value without the requested canonical field label (for
+        # example ``Иванов | ведущий инженер``), retain the bounded row rather
+        # than reducing it to the surname and inviting a guess.
+        selected.update(range(len(row_cells)))
+    ordered = sorted(selected)
+    projected_row = " | ".join(row_cells[index] for index in ordered)
+    projected_header = (
+        " | ".join(header_cells[index] for index in ordered if index < len(header_cells))
+        if header_cells
+        else ""
+    )
+    passage = f"{projected_header}\n{projected_row}" if projected_header else projected_row
+    if len(passage) <= max_chars:
+        return passage
+
+    # Extremely large cells are clipped independently so both the required
+    # anchor and the requested field/value survive the bounded projection.
+    header_budget = len(projected_header) + 1 if projected_header else 0
+    row_budget = max(80, max_chars - header_budget - max(0, len(ordered) - 1) * 3)
+    share = max(40, row_budget // max(1, len(ordered)))
+    clipped_cells: list[str] = []
+    for index in ordered:
+        cell = row_cells[index]
+        cell_tokens = tokens(cell)
+        has_anchor = any(
+            _source_anchor_matches_token(term, token) for term in query_terms for token in cell_tokens
+        )
+        clipped_cells.append(
+            best_snippet(query if has_anchor else focus, cell, max_chars=share) if len(cell) > share else cell
+        )
+    clipped_row = " | ".join(clipped_cells)
+    return (f"{projected_header}\n{clipped_row}" if projected_header else clipped_row)[:max_chars]
+
+
+def _source_anchor_context_projection(
+    query: str,
+    focus: str,
+    text: str,
+    *,
+    max_chars: int,
+) -> tuple[str, int, int]:
+    """Return one anchor-bound passage and scores computed from that passage.
+
+    ``query`` alone selects owned candidates.  ``focus`` may choose a useful
+    occurrence inside a candidate, but it cannot join a surname near the start
+    of a document to somebody else's field/value near the end: focus scores are
+    calculated only over the exact bounded passage returned to the model.
+    """
+
+    body = str(text or "").strip()
+    if not body:
+        return "", 0, 0
+    query_terms = tuple(
+        dict.fromkeys(
+            _source_normalized_token(match.group(0))
+            for match in _SOURCE_SEARCH_TOKEN.finditer(str(query or ""))
+        )
+    )[:8]
+    focus_terms = tuple(
+        dict.fromkeys(
+            _source_normalized_token(match.group(0))
+            for match in _SOURCE_SEARCH_TOKEN.finditer(str(focus or query))
+        )
+    )[:12]
+
+    def passage_tokens(passage: str) -> tuple[str, ...]:
+        return tuple(
+            _source_normalized_token(match.group(0)) for match in _SOURCE_SEARCH_TOKEN.finditer(passage)
+        )
+
+    def score_passage(passage: str) -> tuple[int, int, frozenset[str]]:
+        tokens = passage_tokens(passage)
+        matched_focus = sum(
+            any(_source_focus_matches_token(term, token, query_terms=query_terms) for token in tokens)
+            for term in focus_terms
+        )
+        context_terms = frozenset(
+            token
+            for token in tokens
+            if len(token) >= 3
+            and not any(_source_anchor_matches_token(term, token) for term in query_terms)
+            and token not in _SOURCE_TABLE_HEADER_SUBJECTS
+            and not any(
+                _source_focus_matches_token(term, token, query_terms=query_terms)
+                for term in focus_terms
+                if term not in query_terms
+            )
+        )
+        return matched_focus, len(context_terms), context_terms
+
+    if not query_terms:
+        passage = body[:max_chars].rstrip()
+        if len(body) > max_chars:
+            passage += "…"
+        matched_focus, context_terms, _context_vocabulary = score_passage(passage)
+        return passage, matched_focus, context_terms
+
+    # Fast path for extractor tables.  A row is already a closed record, so the
+    # first exact anchor+field+value record is sufficient evidence for a bounded
+    # page and there is no reason to score every later row.  This also prevents
+    # an all-anchor 20k-row table from becoming quadratic or monopolising the
+    # event loop before the worker offload below returns.
+    if " | " in body:
+        table_header = ""
+        table_fallback: tuple[str, int, int] | None = None
+        for line in body.splitlines():
+            if " | " not in line:
+                table_header = ""
+                continue
+            stripped_line = line.strip()
+            if not table_header:
+                table_header = _source_table_header_candidate(stripped_line)
+            line_tokens = tuple(
+                _source_normalized_token(match.group(0))
+                for match in _SOURCE_SEARCH_TOKEN.finditer(stripped_line)
+            )
+            if not any(
+                _source_anchor_matches_token(term, token) for term in query_terms for token in line_tokens
+            ):
+                continue
+            header = "" if table_header == stripped_line else table_header
+            passage = _source_table_record_projection(
+                header,
+                stripped_line,
+                query=query,
+                focus=focus,
+                query_terms=query_terms,
+                focus_terms=focus_terms,
+                max_chars=max_chars,
+            )
+            matched_focus, context_terms, _context_vocabulary = score_passage(passage)
+            if context_terms <= 0:
+                continue
+            if focus_terms and matched_focus == len(focus_terms):
+                return passage, matched_focus, context_terms
+            if table_fallback is None:
+                table_fallback = (passage, matched_focus, context_terms)
+        if table_fallback is not None:
+            return table_fallback
+
+    # Tokenise each original line once.  Positions remain offsets into ``body``;
+    # no length-changing Unicode normalization is ever used for slicing.
+    line_rows: list[tuple[int, int, str, tuple[tuple[int, int, str], ...]]] = []
+    vocabulary_counts: Counter[str] = Counter()
+    cursor = 0
+    for raw_line in body.splitlines(keepends=True) or [body]:
+        line_end = cursor + len(raw_line)
+        line_text = raw_line.rstrip("\r\n")
+        tokens = tuple(
+            (cursor + match.start(), cursor + match.end(), _source_normalized_token(match.group(0)))
+            for match in _SOURCE_SEARCH_TOKEN.finditer(line_text)
+        )
+        vocabulary_counts.update(token for _lo, _hi, token in tokens)
+        line_rows.append((cursor, cursor + len(line_text), line_text, tokens))
+        cursor = line_end
+    if not line_rows:
+        return "", 0, 0
+
+    table_headers: dict[int, str] = {}
+    active_table_header = ""
+    previous_was_table = False
+    for line_index, (_line_lo, _line_hi, line_text, _tokens) in enumerate(line_rows):
+        is_table_row = " | " in line_text
+        if not is_table_row:
+            active_table_header = ""
+            previous_was_table = False
+            continue
+        if not previous_was_table:
+            active_table_header = _source_table_header_candidate(line_text)
+        table_headers[line_index] = active_table_header
+        previous_was_table = True
+
+    best: tuple[int, int, float, int, int, str] | None = None
+
+    def consider(passage: str, position: int) -> None:
+        nonlocal best
+        passage = passage.strip()
+        if not passage:
+            return
+        passage_anchor = any(
+            _source_anchor_matches_token(term, token)
+            for token in passage_tokens(passage)
+            for term in query_terms
+        )
+        if not passage_anchor:
+            return
+        matched_focus, context_count, context_vocabulary = score_passage(passage)
+        full_focus = bool(focus_terms) and matched_focus == len(focus_terms)
+        rarity = sum(1.0 / max(1, vocabulary_counts[token]) for token in context_vocabulary)
+        candidate = (int(full_focus), matched_focus, rarity, context_count, -position, passage)
+        if best is None or candidate[:5] > best[:5]:
+            best = candidate
+
+    for line_index, (line_lo, _line_hi, line_text, tokens) in enumerate(line_rows):
+        anchor_tokens = [
+            (lo, hi)
+            for lo, hi, token in tokens
+            if any(_source_anchor_matches_token(term, token) for term in query_terms)
+        ]
+        if not anchor_tokens:
+            continue
+        if " | " in line_text:
+            # Extracted table rows are indivisible records.  Return the one
+            # anchor-bearing row, optionally with its code-owned header, never
+            # neighbouring people's values.
+            header = table_headers.get(line_index, "")
+            if header == line_text.strip():
+                header = ""
+            passage = _source_table_record_projection(
+                header,
+                line_text.strip(),
+                query=query,
+                focus=focus,
+                query_terms=query_terms,
+                focus_terms=focus_terms,
+                max_chars=max_chars,
+            )
+            consider(passage, line_lo)
+            continue
+
+        # A normal extracted line is already a useful record.  A following
+        # field/value line is admitted only when it carries a requested focus
+        # field (or the anchor line itself is just the name); this covers common
+        # two-line key/value records without sweeping in an arbitrary window.
+        passage = line_text.strip()
+        non_anchor_focus = tuple(term for term in focus_terms if term not in query_terms)
+        if line_index > 0:
+            previous_text = line_rows[line_index - 1][2].strip()
+            previous_tokens = tuple(token for _lo, _hi, token in line_rows[line_index - 1][3])
+            previous_has_focus = any(
+                _source_focus_matches_token(term, token, query_terms=query_terms)
+                for term in non_anchor_focus
+                for token in previous_tokens
+            )
+            previous_starts_record = line_index == 1 or not line_rows[line_index - 2][2].strip()
+            if previous_text and previous_has_focus and previous_starts_record:
+                combined = f"{previous_text}\n{passage}".strip()
+                if len(combined) <= max_chars:
+                    passage = combined
+        if line_index + 1 < len(line_rows):
+            next_text = line_rows[line_index + 1][2].strip()
+            next_tokens = tuple(token for _lo, _hi, token in line_rows[line_index + 1][3])
+            next_has_focus = any(
+                _source_focus_matches_token(term, token, query_terms=query_terms)
+                for term in non_anchor_focus
+                for token in next_tokens
+            )
+            if next_text and next_has_focus:
+                combined = f"{passage}\n{next_text}".strip()
+                if len(combined) <= max_chars:
+                    passage = combined
+        if len(passage) <= max_chars:
+            consider(passage, line_lo)
+            continue
+
+        # A single very long paragraph has no record boundary.  Inspect a
+        # bounded deterministic reservoir: first/last anchors plus anchors
+        # nearest requested field tokens.  This is independent of occurrence
+        # count and keeps the event loop cost linear in source size.
+        positions = [lo - line_lo for lo, _hi in anchor_tokens]
+        selected_positions = {positions[0], positions[-1]}
+        if len(positions) > 2:
+            stride = max(1, len(positions) // 30)
+            selected_positions.update(positions[::stride][:32])
+        for _lo, _hi, token in tokens:
+            if not any(
+                _source_focus_matches_token(term, token, query_terms=query_terms)
+                for term in focus_terms
+                if term not in query_terms
+            ):
+                continue
+            relative = _lo - line_lo
+            nearest = min(positions, key=lambda value: abs(value - relative))
+            selected_positions.add(nearest)
+        for relative in sorted(selected_positions):
+            start = max(0, relative - max(24, max_chars // 4))
+            end = min(len(line_text), start + max_chars)
+            start = max(0, end - max_chars)
+            while (
+                start > 0
+                and start < len(line_text)
+                and line_text[start - 1].isalnum()
+                and line_text[start].isalnum()
+            ):
+                start += 1
+            while (
+                end < len(line_text)
+                and end > start
+                and line_text[end - 1].isalnum()
+                and line_text[end].isalnum()
+            ):
+                end -= 1
+            consider(line_text[start:end], line_lo + relative)
+
+    if best is None:
+        return "", 0, 0
+    return best[5], best[1], best[3]
+
+
+def _source_anchor_context_excerpt(query: str, text: str, *, max_chars: int) -> str:
+    """Compatibility wrapper for callers that need only the passage."""
+
+    passage, _matched_focus, _context_terms = _source_anchor_context_projection(
+        query,
+        query,
+        text,
+        max_chars=max_chars,
+    )
+    return passage
+
+
+def _bound_source_search_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep a source page valid JSON through both ToolResult projections."""
+
+    rows = payload.get("results")
+    if not isinstance(rows, list):
+        return payload
+    query = str(payload.get("query") or "")
+    focus = str(payload.get("focus") or query)
+    focus_terms = tuple(
+        dict.fromkeys(
+            _source_normalized_token(match.group(0)) for match in _SOURCE_SEARCH_TOKEN.finditer(focus)
+        )
+    )[:12]
+    query_terms = frozenset(
+        _source_normalized_token(match.group(0)) for match in _SOURCE_SEARCH_TOKEN.finditer(query)
+    )
+    explicit_focus = any(isinstance(row, Mapping) and "focus_terms_total" in row for row in rows)
+
+    def refresh_coverage() -> None:
+        if not explicit_focus:
+            return
+        coverage = payload.get("coverage")
+        if not isinstance(coverage, dict):
+            return
+        coverage["focus_match_found"] = any(
+            isinstance(row, Mapping) and row.get("focus_match_kind") == "full" for row in rows
+        )
+        coverage["focus_fallback_contextual"] = any(
+            isinstance(row, Mapping)
+            and row.get("focus_match_kind") == "anchor_context"
+            and type(row.get("anchor_context_terms")) is int
+            and row["anchor_context_terms"] > 0
+            for row in rows
+        )
+
+    def fits() -> bool:
+        refresh_coverage()
+        return (
+            len(json.dumps(payload, ensure_ascii=False)) <= _SOURCE_SEARCH_COMPACT_DATA_CHARS
+            and len(json.dumps(payload, ensure_ascii=False, indent=2)) <= _SOURCE_SEARCH_PRETTY_DATA_CHARS
+        )
+
+    def clipped(value: Any, limit: int, *, query: str = "") -> str:
+        text = str(value or "")
+        if len(text) <= limit:
+            return text
+        if query and limit >= 40:
+            return best_snippet(query, text, max_chars=limit)
+        return text[: max(1, limit - 1)].rstrip() + "…"
+
+    def term_span(text: str, terms: list[str] | tuple[str, ...], limit: int, *, anchor: bool) -> str:
+        if len(text) <= limit:
+            return text
+        for match in _SOURCE_SEARCH_TOKEN.finditer(text):
+            token = _source_normalized_token(match.group(0))
+            matched = (
+                any(_source_anchor_matches_token(term, token) for term in terms)
+                if anchor
+                else any(
+                    _source_focus_matches_token(term, token, query_terms=tuple(query_terms)) for term in terms
+                )
+            )
+            if not matched:
+                continue
+            if anchor:
+                return match.group(0)
+            start = match.start()
+            end = min(len(text), start + limit)
+            while start > 0 and text[start - 1].isalnum() and text[start].isalnum():
+                start += 1
+            while end < len(text) and end > start and text[end - 1].isalnum() and text[end].isalnum():
+                end -= 1
+            span = text[start:end].strip()
+            prefix = "… " if start > 0 else ""
+            suffix = " …" if end < len(text) else ""
+            return f"{prefix}{span}{suffix}"
+        return clipped(text, limit, query=" ".join(terms))
+
+    def bounded_excerpt(row: dict[str, Any], limit: int) -> str:
+        original = str(row.get("excerpt") or "")
+        if len(original) <= limit:
+            return original
+        if not explicit_focus or "focus_terms_total" not in row:
+            return best_snippet(query, original, max_chars=limit)
+
+        if row.get("focus_match_kind") == "anchor_context":
+            candidate = best_snippet(query, original, max_chars=limit)
+            projected, matched, context = _source_anchor_context_projection(
+                query,
+                focus,
+                candidate,
+                max_chars=limit,
+            )
+            row["focus_terms_matched"] = matched
+            row["focus_terms_total"] = len(focus_terms)
+            row["anchor_context_terms"] = context
+            row["focus_match_kind"] = "anchor_context"
+            return projected or candidate
+
+        # Join two spans from the SAME already-validated record.  This keeps
+        # both the anchor and the field/value rather than retaining stale
+        # `full` metadata after clipping the value off the tail.
+        detail_terms = [term for term in focus_terms if term not in query_terms]
+        anchor_budget = max(24, min(limit // 3, limit - 24))
+        anchor_part = term_span(original, tuple(query_terms), anchor_budget, anchor=True)
+        separator = " … "
+        detail_budget = max(24, limit - len(anchor_part) - len(separator))
+        detail_part = term_span(original, detail_terms or list(focus_terms), detail_budget, anchor=False)
+        combined = anchor_part if detail_part in anchor_part else f"{anchor_part}{separator}{detail_part}"
+        if len(combined) > limit:
+            combined = combined[:limit]
+        projected, matched, context = _source_anchor_context_projection(
+            query,
+            focus,
+            combined,
+            max_chars=limit,
+        )
+        if not projected:
+            projected = best_snippet(query, original, max_chars=limit)
+            matched = 0
+            context = 0
+        row["focus_terms_matched"] = matched
+        row["focus_terms_total"] = len(focus_terms)
+        row["anchor_context_terms"] = context
+        row["focus_match_kind"] = "full" if focus_terms and matched == len(focus_terms) else "anchor_context"
+        return projected
+
+    if fits():
+        return payload
+    # Excerpts carry the fact, so shrink them gradually and query-aware before
+    # touching provenance labels.  The lower bound still fits a name/value row.
+    for limit in (360, 280, 220, 160, 120, 80):
+        for row in rows:
+            if isinstance(row, dict) and "excerpt" in row:
+                row["excerpt"] = bounded_excerpt(row, limit)
+        if fits():
+            return payload
+    # Pathological database strings are not allowed to turn the page into a
+    # sliced, invalid JSON document.  Bound non-evidence metadata next.
+    for field, limits in (
+        ("title", (160, 120, 80, 40)),
+        ("raw_object_id", (80, 48, 32)),
+        ("content_type", (48, 32, 20)),
+        ("received_at", (32, 24, 16)),
+        ("review_status", (24, 16, 12)),
+    ):
+        for limit in limits:
+            for row in rows:
+                if isinstance(row, dict) and field in row:
+                    row[field] = clipped(row.get(field), limit)
+            if fits():
+                return payload
+    for optional in ("content_type", "received_at"):
+        for row in rows:
+            if isinstance(row, dict):
+                row.pop(optional, None)
+        if fits():
+            return payload
+    # With at most twenty rows the closed minima above fit under both budgets.
+    # Keep this assertion local: returning an oversized mapping would cause the
+    # generic ToolResult layer to slice it into invalid JSON.
+    if not fits():
+        raise ValueError("bounded source-search page exceeds the tool envelope")
+    return payload
+
 
 #: Сколько знаков запроса уходит НАРУЖУ, в чужой поисковик.
 #:
@@ -1446,6 +2371,7 @@ class ExecutionKernel:
             # ровно тем сборкам, где служба не поднята.
             "mission_compensation": self._mission_compensation,
             "memory_search": self._memory_search,
+            "source_search": self._source_search,
             "message_search": self._message_search,
             "memory_save": self._memory_save,
             "web_search": self._web_search,
@@ -1555,9 +2481,10 @@ class ExecutionKernel:
     #: цена недостающего — несделанное дело.
     _RELEVANT_TOOLS = {
         "интернет": {"web_search", "web_fetch", "web_research", "speak", "make_file", "remind"},
-        "знание": {"speak", "make_file", "remind", "memory_search"},
+        "знание": {"speak", "make_file", "remind", "memory_search", "source_search"},
         "архив": {
             "memory_search",
+            "source_search",
             "message_search",
             "what_happened",
             "upcoming",
@@ -1589,7 +2516,14 @@ class ExecutionKernel:
         },
         # Просьба о файле — это и «сочини документ» (make_file), и «собери
         # присланное» (collect_files). Какой из двух, решает модель по формулировке.
-        "файл": {"make_file", "collect_files", "memory_search", "what_happened", "speak"},
+        "файл": {
+            "make_file",
+            "collect_files",
+            "memory_search",
+            "source_search",
+            "what_happened",
+            "speak",
+        },
         # Быт: человек говорит о себе, а не спрашивает систему.
         #
         # Вида здесь не было вовсе, а «неизвестный вид» означает полные описания
@@ -1632,6 +2566,7 @@ class ExecutionKernel:
             "what_happened",
             "upcoming",
             "memory_search",
+            "source_search",
             "message_search",
             "list_tags",
             "kg_stats",
@@ -2444,7 +3379,7 @@ class ExecutionKernel:
         """
         name = str(getattr(self.settings, "local_timezone", "") or "").strip()
         if not name:
-            return datetime.now().astimezone().tzinfo or UTC
+            return _machine_zone()
         try:
             return ZoneInfo(name)
         except Exception as exc:  # noqa: BLE001 — кривое имя пояса не должно ронять ход
@@ -2452,7 +3387,7 @@ class ExecutionKernel:
                 "Unknown timezone in settings; falling back to machine zone (%s)",
                 type(exc).__name__,
             )
-            return datetime.now().astimezone().tzinfo or UTC
+            return _machine_zone()
 
     async def _remind(
         self,
@@ -3136,6 +4071,227 @@ class ExecutionKernel:
         payload["results"] = results
         return payload
 
+    async def _source_search(
+        self,
+        *,
+        actor: ActorContext,
+        query: str,
+        limit: int = 10,
+        focus: str = "",
+    ) -> dict[str, Any]:
+        """Search the owned source text, including material still in Inbox review.
+
+        ``memory_search`` deliberately searches promoted Knowledge Objects.  A
+        freshly uploaded file can remain a Raw Object while it waits for review,
+        which used to make an exact phrase from that file invisible to Friday even
+        though the upload itself had succeeded.  This explicit tool reaches the
+        existing verdict-aware source index: ignored/deleted/private material stays
+        unreachable, and a pending hit is labelled as pending rather than being
+        presented as promoted knowledge.
+
+        Only bounded query-aware excerpts cross the model boundary.  The full Raw
+        Object is read tenant-scoped solely to choose the passage around the match;
+        it is never returned wholesale and never added to the ordinary background
+        context merely because a conversation exists.
+        """
+
+        storage = self.storage
+        if storage is None:
+            raise RuntimeError("Execution kernel storage is not initialized")
+        clean_query = " ".join(str(query or "").split()).strip()
+        if not clean_query:
+            raise ValueError("query is required")
+        if len(clean_query) > _SOURCE_SEARCH_QUERY_CHARS:
+            raise ValueError("query is too long")
+        explicit_focus = bool(" ".join(str(focus or "").split()).strip())
+        snippet_focus = " ".join(str(focus or clean_query).split()).strip()
+        if not snippet_focus:
+            snippet_focus = clean_query
+        snippet_focus = snippet_focus[:_SOURCE_SEARCH_FOCUS_CHARS]
+        clamped_limit = max(1, min(int(limit), 20))
+        candidate_rows = await run_blocking(
+            storage.search_raw_objects,
+            actor.user_id,
+            clean_query,
+            limit=_SOURCE_SEARCH_CANDIDATE_CAP,
+            include_content=True,
+        )
+        focus_terms = tuple(
+            dict.fromkeys(
+                re.findall(
+                    r"[\w@.+/-]{2,}",
+                    unicodedata.normalize("NFKC", snippet_focus).casefold(),
+                )
+            )
+        )[:12]
+        valid_rows = [row for row in candidate_rows if isinstance(row, Mapping)]
+        projections: Sequence[str | tuple[str, int, int]]
+        if explicit_focus:
+            projections = await asyncio.gather(
+                *(
+                    run_blocking(
+                        _source_anchor_context_projection,
+                        clean_query,
+                        snippet_focus,
+                        str(row.get("_raw_content") or ""),
+                        max_chars=_TOOL_EXCERPT_CHARS * 2,
+                    )
+                    for row in valid_rows
+                )
+            )
+        else:
+            projections = await asyncio.gather(
+                *(
+                    run_blocking(
+                        best_snippet,
+                        clean_query,
+                        str(row.get("_raw_content") or ""),
+                        max_chars=_TOOL_EXCERPT_CHARS * 2,
+                    )
+                    for row in valid_rows
+                )
+            )
+        ranked_rows: list[tuple[bool, int, int, int, Mapping[str, Any], str]] = []
+        for row_index, (row, projection) in enumerate(zip(valid_rows, projections, strict=True)):
+            if explicit_focus:
+                ranking_excerpt, matched_terms, context_terms = cast(tuple[str, int, int], projection)
+            else:
+                ranking_excerpt = str(projection)
+                matched_terms = 0
+                context_terms = 0
+            literal_focus = bool(focus_terms) and matched_terms == len(focus_terms)
+            ranked_rows.append(
+                (
+                    literal_focus,
+                    matched_terms,
+                    context_terms,
+                    row_index,
+                    row,
+                    ranking_excerpt,
+                )
+            )
+        # `query` remains the sole FTS eligibility key.  A richer focus may rank
+        # only those already-owned candidates, never admit a predicate-only
+        # source.  Predicate-only sources therefore never enter the page.  Pure
+        # repeated-anchor rows are discarded; richer anchor-bound rows remain a
+        # safe fallback when a document expresses the requested value without a
+        # literal field label.
+        if explicit_focus and focus_terms and len(focus_terms) > 1:
+            # A literal field label is preferred but not mandatory: real rows
+            # often say `Иванов — ведущий инженер` without the word
+            # “должность”.  Retain an anchor-bound passage only when it contains
+            # some substantive context beyond repetitions of the anchor itself.
+            eligible_rows = [item for item in ranked_rows if item[2] > 0]
+        else:
+            eligible_rows = ranked_rows
+        # Context vocabulary is only an anchor-only/noise gate.  It is not a
+        # relevance score: verbose boilerplate around a surname would otherwise
+        # page out a short factual row.  Preserve the filtered FTS order within
+        # the full-focus and contextual tiers.
+        eligible_rows.sort(key=lambda item: (-int(item[0]), -item[1], item[3]))
+        selected_rows = eligible_rows[:clamped_limit]
+        excerpt_chars = max(
+            220,
+            min(_TOOL_EXCERPT_CHARS * 2, 4_800 // max(1, len(selected_rows))),
+        )
+        results: list[dict[str, Any]] = []
+        for (
+            _full_focus,
+            _matched_terms,
+            _context_terms,
+            _row_index,
+            ranked_row,
+            _ranking_excerpt,
+        ) in selected_rows:
+            raw_id = str(ranked_row.get("id") or "").strip()
+            if not raw_id:
+                continue
+            # The full text is projected by the same verdict-filtered SELECT as
+            # this page.  A second get_raw_object() would create a race in which
+            # the reviewer could mark the row ignored between the search and the
+            # content read, resurrecting text after the verdict changed.
+            raw_metadata = ranked_row.get("_raw_metadata")
+            if isinstance(raw_metadata, Mapping):
+                metadata = dict(raw_metadata)
+            else:
+                try:
+                    metadata = json.loads(str(raw_metadata or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    metadata = {}
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+            filename = " ".join(str(metadata.get("filename") or "").split()).strip()
+            # ``source_ref`` can be an opaque transport id, internal path or URL
+            # token.  It is provenance for code, not a user-facing filename.
+            title = filename or "Исходный материал"
+            if explicit_focus:
+                excerpt, excerpt_focus_terms, excerpt_context_terms = _source_anchor_context_projection(
+                    clean_query,
+                    snippet_focus,
+                    _ranking_excerpt,
+                    max_chars=excerpt_chars,
+                )
+            else:
+                excerpt = best_snippet(clean_query, _ranking_excerpt, max_chars=excerpt_chars)
+                excerpt_focus_terms = 0
+                excerpt_context_terms = 0
+            item: dict[str, Any] = {
+                "raw_object_id": raw_id,
+                "title": title[:260],
+                "content_type": str(ranked_row.get("content_type") or "")[:80],
+                "received_at": str(ranked_row.get("received_at") or "")[:40],
+                "review_status": str(ranked_row.get("inbox_status") or "unreviewed")[:40],
+                "promoted": bool(ranked_row.get("knowledge_object_id")),
+                "excerpt": excerpt,
+            }
+            if explicit_focus:
+                item.update(
+                    {
+                        "focus_terms_matched": excerpt_focus_terms,
+                        "focus_terms_total": len(focus_terms),
+                        "anchor_context_terms": excerpt_context_terms,
+                        "focus_match_kind": (
+                            "full"
+                            if focus_terms and excerpt_focus_terms == len(focus_terms)
+                            else "anchor_context"
+                        ),
+                    }
+                )
+            results.append(item)
+        emitted_full_focus = bool(
+            explicit_focus
+            and focus_terms
+            and any(item.get("focus_terms_matched") == len(focus_terms) for item in results)
+        )
+        emitted_contextual_focus = bool(
+            explicit_focus
+            and any(
+                item.get("focus_match_kind") == "anchor_context"
+                and isinstance(item.get("anchor_context_terms"), int)
+                and item["anchor_context_terms"] > 0
+                for item in results
+            )
+        )
+        payload = {
+            "query": clean_query,
+            "focus": snippet_focus,
+            "shown": len(results),
+            "results": results,
+            "coverage": {
+                "complete": (
+                    len(candidate_rows) < _SOURCE_SEARCH_CANDIDATE_CAP and len(eligible_rows) < clamped_limit
+                ),
+                "limit": clamped_limit,
+                "candidates_scanned": len(candidate_rows),
+                "candidate_cap": _SOURCE_SEARCH_CANDIDATE_CAP,
+                "focus_conjunctive": bool(explicit_focus and focus_terms and len(focus_terms) > 1),
+                "focus_match_found": emitted_full_focus,
+                "focus_fallback_contextual": emitted_contextual_focus,
+                "ignored_excluded": True,
+            },
+        }
+        return _bound_source_search_payload(payload)
+
     async def _message_search(
         self,
         *,
@@ -3230,6 +4386,15 @@ class ExecutionKernel:
         region: str = "",
     ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
+        query = str(query or "").strip()
+        if not query:
+            return {
+                "query": "",
+                "results": [],
+                "outbound_attempted": False,
+                "search_failed": True,
+                "error": "empty_query",
+            }
         raw_site = site
         raw_include_domains = include_domains
         # Validate before quota accounting and before any provider can see the
@@ -3244,7 +4409,7 @@ class ExecutionKernel:
         )
         refusal = await self._what_must_not_leave(query, actor)
         if refusal:
-            return refusal
+            return {**refusal, "outbound_attempted": False}
         outbound_domain_forms: list[str] = []
         if site:
             outbound_domain_forms.extend((raw_site, site))
@@ -3265,10 +4430,10 @@ class ExecutionKernel:
             # local privacy classifier before the provider sees its encoding.
             refusal = await self._what_must_not_leave(domain, actor)
             if refusal:
-                return refusal
+                return {**refusal, "outbound_attempted": False}
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
-            return {**exhausted, "query": query}
+            return {**exhausted, "query": query, "outbound_attempted": False}
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         search_options: dict[str, Any] = {
             "max_results": max(1, min(int(max_results), 10)),
@@ -3300,6 +4465,12 @@ class ExecutionKernel:
             return {
                 "query": query,
                 "results": [],
+                # Some adapters can try a capable provider first and only then
+                # discover that every remaining fallback lacks the requested
+                # filter.  The exception carries that exact boundary: an empty
+                # tuple means nothing left the host, a non-empty one means the
+                # query was already sent to those providers.
+                "outbound_attempted": bool(capability_failure.refused_providers),
                 "search_failed": True,
                 "unsupported_filters": list(capability_failure.filter_names),
                 "error": "Доступные поисковые системы не умеют применить все запрошенные фильтры.",
@@ -3321,6 +4492,7 @@ class ExecutionKernel:
             return {
                 "query": query,
                 "results": [],
+                "outbound_attempted": True,
                 "search_failed": True,
                 "error": "Поисковые системы не ответили — это сбой доступа, а не отсутствие результатов.",
                 # Факт, а не поручение. Здесь стояло «Скажи человеку… и НЕ
@@ -3333,10 +4505,30 @@ class ExecutionKernel:
                 # не является.
                 "note": "Сведений из интернета в этом результате нет: ни одна выдача не получена.",
             }
-        response: dict[str, Any] = {
-            "query": query,
-            "results": [item.to_dict() for item in results],
-        }
+        except Exception as exc:  # noqa: BLE001 — disclose stage, never provider details
+            LOGGER.warning("Web search provider failed after outbound start (%s)", type(exc).__name__)
+            return {
+                "query": query,
+                "results": [],
+                "outbound_attempted": True,
+                "search_failed": True,
+                "error": "Web provider failed after outbound attempt.",
+            }
+        try:
+            response: dict[str, Any] = {
+                "query": query,
+                "results": [item.to_dict() for item in results],
+                "outbound_attempted": True,
+            }
+        except Exception as exc:  # noqa: BLE001 — provider returned a malformed result
+            LOGGER.warning("Web search result normalization failed (%s)", type(exc).__name__)
+            return {
+                "query": query,
+                "results": [],
+                "outbound_attempted": True,
+                "search_failed": True,
+                "error": "Web provider returned a malformed result after outbound attempt.",
+            }
         if site or include_domains or exclude_domains:
             requested_results = int(search_options["max_results"])
             returned_results = len(results)
@@ -3357,21 +4549,68 @@ class ExecutionKernel:
         _, _, web, _ = self._require_services()
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
-            return {**exhausted, "url": url, "text": "", "text_length": 0}
+            return {
+                **exhausted,
+                "url": url,
+                "text": "",
+                "text_length": 0,
+                "outbound_attempted": False,
+            }
         # `query` необязателен и означает «что искать на странице»: с ним модель
         # получает кусок вокруг совпадения, без него — начало страницы.
-        return (await web.fetch(url)).to_dict(query=query)
+        try:
+            result = (await web.fetch(url)).to_dict(query=query)
+            result["outbound_attempted"] = str(result.get("error") or "") != "blocked_url"
+            if result["outbound_attempted"]:
+                result["outbound_url"] = url
+            return result
+        except Exception as exc:  # noqa: BLE001 — disclose stage, never provider details
+            LOGGER.warning("Web fetch provider failed after outbound start (%s)", type(exc).__name__)
+            return {
+                "url": "",
+                "text": "",
+                "text_length": 0,
+                "outbound_attempted": True,
+                "outbound_url": url,
+                "error": "Web provider failed after outbound attempt.",
+            }
 
     async def _web_research(self, *, actor: ActorContext, query: str, max_sources: int = 3) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
+        query = str(query or "").strip()
+        if not query:
+            return {
+                "query": "",
+                "sources": [],
+                "outbound_attempted": False,
+                "search_failed": True,
+                "error": "empty_query",
+            }
         refusal = await self._what_must_not_leave(query, actor)
         if refusal:
-            return refusal
+            return {**refusal, "outbound_attempted": False}
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
-            return {**exhausted, "query": query, "sources": []}
+            return {**exhausted, "query": query, "sources": [], "outbound_attempted": False}
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
-        report = await web.research(query, max_sources=max(1, min(int(max_sources), 8)))
+        bounded_sources = max(1, min(int(max_sources), 8))
+        try:
+            raw_report = await web.research(query, max_sources=bounded_sources)
+            if not isinstance(raw_report, Mapping):
+                raise TypeError("web research report is not a mapping")
+            # The adapter owns source data, never the disclosure ledger.  Keep
+            # the exact bounded string this handler sent even if a malformed
+            # adapter returns a different `query` field.
+            report = {**raw_report, "query": query, "outbound_attempted": True}
+        except Exception as exc:  # noqa: BLE001 — disclose stage, never provider details
+            LOGGER.warning("Web research provider failed after outbound start (%s)", type(exc).__name__)
+            return {
+                "query": query,
+                "sources": [],
+                "outbound_attempted": True,
+                "search_failed": True,
+                "error": "Web provider failed after outbound attempt.",
+            }
         captured = await self._capture_web_sources(actor, query, report)
         return {**report, "captured": captured} if captured else report
 
@@ -3500,8 +4739,8 @@ class ExecutionKernel:
         Права проверяются честно: без `knowledge.create` поиск работает, а запись
         не делается — искать и запоминать это разные разрешения.
         """
-        sources = report.get("sources")
-        if not isinstance(sources, list) or not sources:
+        sources = _capturable_web_sources(report)
+        if not sources:
             return []
         if not (self.authorization and self.authorization.authorize(actor, "knowledge.create").allowed):
             return []
@@ -3516,7 +4755,7 @@ class ExecutionKernel:
             # в Inbox с одним заголовком — работа для человека на ровном месте.
             if not url or len(text) < _WEB_CAPTURE_MIN_CHARS:
                 continue
-            title = str(source.get("title") or source.get("search_title") or url)
+            title = str(source.get("title") or url)
             # Ключ несёт и адрес, и содержимое. Страница живая: курс ЦБ, прогноз
             # погоды, лента новостей меняются между двумя чтениями, и адрес,
             # взятый ключом в одиночку, конфликтовал сам с собой — замерено на
@@ -4549,6 +5788,8 @@ class ExecutionKernel:
         since: str | None = None,
         until: str | None = None,
         limit: int = 50,
+        offset: int = 0,
+        documents_only: bool = False,
         analysis: list[str] | None = None,
         top: int = 10,
     ) -> dict[str, Any]:
@@ -4641,6 +5882,8 @@ class ExecutionKernel:
                     "match_method": chosen.method,
                     "since": since,
                     "until": until,
+                    "offset": max(0, int(offset)),
+                    "documents_only": bool(documents_only),
                     "content": "full" if include_content else "redacted",
                     "analysis": list(analysis) if analysis else None,
                 },
@@ -4665,24 +5908,26 @@ class ExecutionKernel:
         answer: dict[str, Any] = {
             "resolved": chosen.to_dict(),
             "content": "full" if include_content else "redacted",
-            "summary": storage.user_activity_summary(tenant, since=since, until=until, uploaded_by=by_author),
+            "summary": storage.user_activity_summary(
+                tenant,
+                since=since,
+                until=until,
+                uploaded_by=by_author,
+                files_only=documents_only,
+            ),
             # Что человек ПИСАЛ. Без этого инструмент выполнял своё название
             # наполовину: у того, кто только переписывается, загрузок ноль, и на
             # «что писал JBL?» приходило «сообщений 42, но записи не загрузились».
-            "messages": storage.user_messages(
-                chosen.user_id,
-                since=since,
-                until=until,
-                limit=max(1, min(int(limit), 40)),
-                include_content=include_content,
-            ),
+            "messages": [],
             "items": storage.user_activity(
                 tenant,
                 since=since,
                 until=until,
                 limit=max(1, min(int(limit), 200)),
+                offset=max(0, int(offset)),
                 include_content=include_content,
                 uploaded_by=by_author,
+                files_only=documents_only,
             ),
             # Сколько документов за то же окно вообще НЕ имеют отметки автора.
             #
@@ -4695,8 +5940,32 @@ class ExecutionKernel:
             # того как новые документы приходят уже с отметкой, безымянных в
             # СВЕЖЕМ окне становится ноль — и отрицание делается законным, без
             # единой правки здесь.
-            "arrivals_without_an_author": storage.arrivals_without_an_author(tenant, since, until),
+            "arrivals_without_an_author": storage.arrivals_without_an_author(
+                tenant,
+                since,
+                until,
+                files_only=documents_only,
+            )
+            if shared
+            else 0,
+            "documents_only": bool(documents_only),
+            "offset": max(0, int(offset)),
         }
+        if not documents_only:
+            # Keep the call explicit here: documents-only inventory must never
+            # broaden into message content, while ordinary person activity must
+            # still carry what the participant actually wrote.
+            answer.update(
+                {
+                    "messages": storage.user_messages(
+                        chosen.user_id,
+                        since=since,
+                        until=until,
+                        limit=max(1, min(int(limit), 40)),
+                        include_content=include_content,
+                    )
+                }
+            )
         if analysis:
             try:
                 answer["analysis"] = storage.user_activity_analysis(
@@ -5076,6 +6345,35 @@ class ExecutionKernel:
                         "Пятнице к этому точному моменту"
                     ),
                 },
+            },
+            ["query"],
+            risk="observe",
+        )
+        spec(
+            "source_search",
+            "Дословно искать в исходном тексте загруженных материалов, включая файлы, "
+            "которые ещё ждут решения в Inbox и поэтому не видны memory_search. Используй "
+            "только когда человек явно просит найти сведения в загруженном/присланном "
+            "файле или исходнике. Результаты — короткие выдержки; review_status=pending "
+            "не означает, что материал уже стал долгосрочным знанием. ignored material "
+            "всегда исключён. coverage.complete=false означает, что показана лишь первая "
+            "порция и её нельзя выдавать за все совпадения.",
+            "knowledge.read",
+            {
+                "query": {
+                    "type": "string",
+                    "maxLength": _SOURCE_SEARCH_QUERY_CHARS,
+                    "description": "Отличительная фраза, фамилия, код или несколько ключевых слов",
+                },
+                "focus": {
+                    "type": "string",
+                    "maxLength": _SOURCE_SEARCH_FOCUS_CHARS,
+                    "description": (
+                        "Необязательно: слова поля/вопроса только для выбора выдержки внутри "
+                        "уже найденного по query исходника; не расширяют поиск источников"
+                    ),
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
             },
             ["query"],
             risk="observe",
@@ -5543,6 +6841,11 @@ class ExecutionKernel:
                 "since": {"type": "string"},
                 "until": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+                "documents_only": {
+                    "type": "boolean",
+                    "description": "ограничить точным перечнем загруженных файлов/документов",
+                },
                 # `additionalProperties: False` on the spec means an invented
                 # argument is rejected outright, so the vocabulary has to be
                 # declared — and declared as an enum, or the model fills the field

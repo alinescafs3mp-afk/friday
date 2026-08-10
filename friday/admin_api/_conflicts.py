@@ -22,7 +22,6 @@ from friday.admin_api._deps import (
     _require,
     _services,
     _target_user,
-    asyncio,
     functools,
 )
 from friday.api.kg import (
@@ -270,7 +269,7 @@ async def detect_knowledge_duplicates(request: Request) -> dict[str, Any]:
     state = _services(request)
     # Off the event loop: a manual scan on a large corpus would otherwise block every
     # other request. ``full_rescan`` lets an operator re-walk history on demand.
-    result = await asyncio.to_thread(
+    result = await run_blocking(
         functools.partial(detect_near_duplicates, full_rescan=bool(body.get("full_rescan"))),
         state.storage,
         state.settings,
@@ -296,7 +295,7 @@ async def detect_resolutions(request: Request) -> dict[str, Any]:
     # `detect_duplicates` returned the proposals it happened to reach before the
     # pair ceiling, and the fact that it had stopped early existed only as a WARNING
     # in the log — so a short list read as «nothing more to merge».
-    report = await asyncio.to_thread(
+    report = await run_blocking(
         functools.partial(_services(request).kg.resolver.sweep_duplicates, user_id, min_confidence=0.55)
     )
     public_report = _public_duplicate_scan_report(report)

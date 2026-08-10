@@ -23,12 +23,18 @@ from friday.storage._base import (
     UTC,
     Any,
     AuditEntry,
+    DeletedAccountError,
     StorageShared,
     _json_load,
+    account_deletion_eligibility_key,
+    account_external_identity_history_key,
     audit_generated_id_exists,
     datetime,
+    deleted_account_tombstone_key,
+    deleted_identity_tombstone_key,
     json,
     new_id,
+    normalize_identity_source,
     re,
     timedelta,
     utc_now,
@@ -49,8 +55,15 @@ class AccountsMixin(StorageShared):
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         user_id = validate_user_id(user_id)
+        tombstone_key = deleted_account_tombstone_key(user_id)
         now = utc_now()
         with self.transaction() as conn:
+            if conn.execute("SELECT 1 FROM runtime_kv WHERE key=?", (tombstone_key,)).fetchone():
+                raise DeletedAccountError("This account was permanently deleted")
+            if str(source or "").strip() and str(external_id or "").strip():
+                identity_tombstone = deleted_identity_tombstone_key(source, external_id)
+                if conn.execute("SELECT 1 FROM runtime_kv WHERE key=?", (identity_tombstone,)).fetchone():
+                    raise DeletedAccountError("This login identity belonged to a permanently deleted account")
             existing = conn.execute("SELECT metadata_json FROM users WHERE id=?", (user_id,)).fetchone()
             merged_metadata = _json_load(existing["metadata_json"], {}) if existing else {}
             if not isinstance(merged_metadata, dict):
@@ -82,6 +95,19 @@ class AccountsMixin(StorageShared):
                     now,
                 ),
             )
+            has_external_history = str(source or "").strip().casefold() == "telegram" or bool(
+                isinstance(metadata, dict) and str(metadata.get("chat_id") or "").strip()
+            )
+            if has_external_history:
+                conn.execute(
+                    "DELETE FROM runtime_kv WHERE key=?",
+                    (account_deletion_eligibility_key(user_id),),
+                )
+                conn.execute(
+                    """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                       ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at""",
+                    (account_external_identity_history_key(user_id), "{}", now),
+                )
         return self.get_user(user_id) or {}
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
@@ -98,48 +124,154 @@ class AccountsMixin(StorageShared):
         Молчаливая подстановка производного идентификатора здесь и была бы тем
         самым слиянием двух понятий, ради разделения которых таблица заведена.
         """
-        row = self.execute(
-            "SELECT user_id FROM user_identities WHERE source=? AND external_id=?",
-            (str(source), str(external_id)),
-        ).fetchone()
-        return str(row["user_id"]) if row else None
+        clean_source = normalize_identity_source(source)
+        clean_external_id = str(external_id or "").strip()
+        if not clean_source or not clean_external_id:
+            return None
+        rows = self.execute(
+            """SELECT user_id FROM user_identities
+               WHERE jericho_casefold(source)=? AND external_id=?""",
+            (clean_source, clean_external_id),
+        ).fetchall()
+        owners = {str(row["user_id"]) for row in rows}
+        if len(owners) > 1:
+            raise ValueError("Identity source variants are linked to different accounts")
+        return next(iter(owners), None)
 
     def link_identity(
-        self, source: str, external_id: str, user_id: str, *, linked_by: str = ""
+        self,
+        source: str,
+        external_id: str,
+        user_id: str,
+        *,
+        linked_by: str = "",
+        allow_rebind: bool = True,
     ) -> dict[str, Any]:
         """Привязать личность к аккаунту. Аккаунт обязан существовать.
 
         Перепривязка разрешена (владелец сменил телеграм) и делается заменой строки:
         одна личность в один момент времени принадлежит ровно одному арендатору,
-        иначе «чьи это данные» перестаёт иметь ответ.
+        иначе «чьи это данные» перестаёт иметь ответ. Автоматический вход вызывает
+        тот же метод с ``allow_rebind=False``: конфигурация владельца может создать
+        отсутствующую связь, но не имеет права молча отнять уже связанную личность у
+        другого аккаунта. Проверка и INSERT живут в одной ``BEGIN IMMEDIATE``
+        транзакции, поэтому два первых запроса не расходятся по двум аккаунтам.
         """
         user_id = validate_user_id(user_id)
-        if not self.get_user(user_id):
-            raise ValueError(f"Unknown account: {user_id}")
-        if not str(external_id).strip():
+        clean_source = normalize_identity_source(source)
+        clean_external_id = str(external_id).strip()
+        if not clean_source:
+            raise ValueError("source is required")
+        if not clean_external_id:
             raise ValueError("external_id is required")
+        identity_tombstone_key = deleted_identity_tombstone_key(clean_source, clean_external_id)
         now = utc_now()
+        stored_linked_by = str(linked_by)
+        stored_created_at = now
         with self.transaction() as conn:
-            conn.execute(
-                """INSERT INTO user_identities(source, external_id, user_id, linked_by, created_at)
-                   VALUES(?, ?, ?, ?, ?)
-                   ON CONFLICT(source, external_id) DO UPDATE SET
-                     user_id=excluded.user_id, linked_by=excluded.linked_by, created_at=excluded.created_at""",
-                (str(source), str(external_id), user_id, str(linked_by), now),
-            )
+            if conn.execute(
+                "SELECT 1 FROM runtime_kv WHERE key=?",
+                (deleted_account_tombstone_key(user_id),),
+            ).fetchone():
+                raise DeletedAccountError("This account was permanently deleted")
+            if not conn.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+                raise ValueError(f"Unknown account: {user_id}")
+            if conn.execute("SELECT 1 FROM runtime_kv WHERE key=?", (identity_tombstone_key,)).fetchone():
+                raise DeletedAccountError("This login identity belonged to a permanently deleted account")
+            previous_rows = conn.execute(
+                """SELECT source, user_id, linked_by, created_at FROM user_identities
+                   WHERE jericho_casefold(source)=? AND external_id=?
+                   ORDER BY CASE WHEN source=? THEN 0 ELSE 1 END,
+                            created_at ASC, source ASC""",
+                (clean_source, clean_external_id, clean_source),
+            ).fetchall()
+            previous_accounts = {str(row["user_id"]) for row in previous_rows}
+            if len(previous_accounts) > 1:
+                # A legacy case-variant collision has no single owner.  Even an
+                # otherwise-authorized rebind must not silently pick one account
+                # and erase the other account's explicit login authority.
+                raise ValueError("Identity source variants are linked to different accounts")
+            previous = previous_rows[0] if previous_rows else None
+            if previous and str(previous["user_id"]) != user_id and not allow_rebind:
+                raise ValueError("Identity is already linked to a different account")
+            if clean_source.casefold() == "telegram":
+                affected_accounts = {user_id, *previous_accounts}
+                for affected_user_id in affected_accounts:
+                    conn.execute(
+                        "DELETE FROM runtime_kv WHERE key=?",
+                        (account_deletion_eligibility_key(affected_user_id),),
+                    )
+                    conn.execute(
+                        """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                           ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at""",
+                        (account_external_identity_history_key(affected_user_id), "{}", now),
+                    )
+            if previous and str(previous["user_id"]) == user_id and not allow_rebind:
+                # Idempotent first-login race: preserve the original provenance
+                # rather than making the second request look like a re-link.
+                stored_linked_by = str(previous["linked_by"])
+                stored_created_at = str(previous["created_at"])
+                if len(previous_rows) == 1 and str(previous["source"]) == clean_source:
+                    pass
+                else:
+                    # Canonicalize same-owner legacy variants without changing
+                    # their original provenance.
+                    conn.execute(
+                        """DELETE FROM user_identities
+                           WHERE jericho_casefold(source)=? AND external_id=?""",
+                        (clean_source, clean_external_id),
+                    )
+                    conn.execute(
+                        """INSERT INTO user_identities(
+                               source, external_id, user_id, linked_by, created_at
+                           ) VALUES(?, ?, ?, ?, ?)""",
+                        (
+                            clean_source,
+                            clean_external_id,
+                            user_id,
+                            stored_linked_by,
+                            stored_created_at,
+                        ),
+                    )
+            else:
+                # Remove every canonical-equivalent legacy variant before the
+                # authoritative write. BEGIN IMMEDIATE serializes this check and
+                # insert against concurrent first-login claims.
+                conn.execute(
+                    """DELETE FROM user_identities
+                       WHERE jericho_casefold(source)=? AND external_id=?""",
+                    (clean_source, clean_external_id),
+                )
+                conn.execute(
+                    """INSERT INTO user_identities(source, external_id, user_id, linked_by, created_at)
+                       VALUES(?, ?, ?, ?, ?)""",
+                    (clean_source, clean_external_id, user_id, str(linked_by), now),
+                )
         return {
-            "source": str(source),
-            "external_id": str(external_id),
+            "source": clean_source,
+            "external_id": clean_external_id,
             "user_id": user_id,
-            "linked_by": str(linked_by),
-            "created_at": now,
+            "linked_by": stored_linked_by,
+            "created_at": stored_created_at,
         }
 
     def unlink_identity(self, source: str, external_id: str) -> bool:
+        clean_source = normalize_identity_source(source)
+        clean_external_id = str(external_id or "").strip()
+        if not clean_source or not clean_external_id:
+            return False
         with self.transaction() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT user_id FROM user_identities
+                   WHERE jericho_casefold(source)=? AND external_id=?""",
+                (clean_source, clean_external_id),
+            ).fetchall()
+            if len(rows) > 1:
+                raise ValueError("Identity source variants are linked to different accounts")
             cursor = conn.execute(
-                "DELETE FROM user_identities WHERE source=? AND external_id=?",
-                (str(source), str(external_id)),
+                """DELETE FROM user_identities
+                   WHERE jericho_casefold(source)=? AND external_id=?""",
+                (clean_source, clean_external_id),
             )
         return cursor.rowcount > 0
 
@@ -181,11 +313,17 @@ class AccountsMixin(StorageShared):
         allowed = {"display_name", "username", "preset_key", "status", "metadata_json"}
         updates: list[str] = []
         values: list[Any] = []
+        external_chat_history = False
         for key, value in fields.items():
             if key not in allowed:
                 continue
-            if key == "metadata_json" and not isinstance(value, str):
-                value = json.dumps(value or {}, ensure_ascii=False, sort_keys=True)
+            if key == "metadata_json":
+                parsed_metadata = _json_load(value, {}) if isinstance(value, str) else value
+                external_chat_history = bool(
+                    isinstance(parsed_metadata, dict) and str(parsed_metadata.get("chat_id") or "").strip()
+                )
+                if not isinstance(value, str):
+                    value = json.dumps(value or {}, ensure_ascii=False, sort_keys=True)
             updates.append(f"{key}=?")
             values.append(value)
         if not updates:
@@ -198,6 +336,17 @@ class AccountsMixin(StorageShared):
                 f"UPDATE users SET {', '.join(updates)} WHERE id=?",  # nosec B608
                 tuple(values),
             )
+            if external_chat_history:
+                now = utc_now()
+                conn.execute(
+                    "DELETE FROM runtime_kv WHERE key=?",
+                    (account_deletion_eligibility_key(user_id),),
+                )
+                conn.execute(
+                    """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                       ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at""",
+                    (account_external_identity_history_key(user_id), "{}", now),
+                )
         return self.get_user(user_id)
 
     def remember_correction(

@@ -545,7 +545,11 @@ async def test_a_failed_assembly_does_not_turn_into_an_invented_document() -> No
 
     source = inspect.getsource(AgentRuntime.chat)
     at = source.index("_file_for_a_request_that_wanted_one(")
-    guard = source[max(0, at - 400) : at]
+    branch_start = source.rfind("\n        if (", 0, at)
+    assert branch_start >= 0, "не найдена ветка поздней сборки файла"
+    branch_end = source.find("\n        ):", branch_start, at)
+    assert branch_end >= 0, "не найдено условие ветки поздней сборки файла"
+    guard = source[branch_start:branch_end]
     assert "not context.asked_for_an_archive" in guard, "выдумка снова заменяет архив"
 
 

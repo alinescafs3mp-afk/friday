@@ -163,15 +163,49 @@ async def test_http_probe_scan_error_is_a_closed_failure_counter(monkeypatch) ->
     assert probe.scan_failures == 1
 
 
-def _closed_case_delta(profile: str) -> dict[str, int]:
+def _pass_cases(profile: str, *, battery_id: str = "A") -> list[battery.ExpandedCase]:
+    manifest = battery.load_manifest(battery.MANIFEST_PATHS[battery_id])
+    return [case for case in battery.expand_manifest_cases(manifest) if case.oracle_profile == profile]
+
+
+def _closed_case_delta(case: battery.ExpandedCase) -> dict[str, int]:
+    model_owned = case.oracle_profile != "tenant_privacy" and not battery._package_a_code_owned_case(case)
     delta = {
-        "model_http": 1,
-        "embedding_http": int(profile == "tenant_privacy"),
-        "reranker_http": int(profile == "tenant_privacy"),
+        **dict.fromkeys(battery._P01_CODE_OWNED_DELTA_ZERO_COUNTERS, 0),
+        "model_http": int(model_owned),
+        "embedding_http": 0,
+        "reranker_http": 0,
         "other_http": 0,
     }
     delta.update(dict.fromkeys(battery._HTTP_PRIVACY_COUNTER_KEYS, 0))
     return delta
+
+
+def _route_evidence(case: battery.ExpandedCase) -> dict[str, bool | None]:
+    if battery._package_a_code_owned_case(case):
+        return {
+            "fabricated_outside_deed_request": True,
+            "answer_present": True,
+            "model_spoke": False,
+            "remainder_known": True,
+            "llm_failed": False,
+        }
+    return {
+        "fabricated_outside_deed_request": False,
+        "answer_present": True,
+        "model_spoke": case.oracle_profile != "tenant_privacy",
+        "remainder_known": True,
+        "llm_failed": False,
+    }
+
+
+def _closed_ledgers(
+    cases: list[battery.ExpandedCase],
+) -> tuple[list[tuple[str, dict[str, int]]], list[tuple[str, dict[str, bool | None]]]]:
+    return (
+        [(case.id, _closed_case_delta(case)) for case in cases],
+        [(case.id, _route_evidence(case)) for case in cases],
+    )
 
 
 def _sum_http_deltas(deltas: list[dict[str, int]]) -> dict[str, int]:
@@ -180,9 +214,19 @@ def _sum_http_deltas(deltas: list[dict[str, int]]) -> dict[str, int]:
 
 @pytest.mark.parametrize("profile", battery.PASS_PROFILES)
 def test_http_reconciliation_closes_every_case_and_pass_budget(profile: str) -> None:
-    deltas = [_closed_case_delta(profile) for _index in range(battery.QUESTIONS_PER_PASS)]
+    cases = _pass_cases(profile)
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    deltas = [delta for _case_id, delta in delta_ledger]
     total = _sum_http_deltas(deltas)
-    assert battery._http_probe_reconciliation_exact(profile, deltas, total) is True
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            total,
+        )
+        is True
+    )
 
     attempt_keys = ("model_http", "embedding_http", "reranker_http")
     for key, limit in zip(
@@ -190,13 +234,14 @@ def test_http_reconciliation_closes_every_case_and_pass_budget(profile: str) -> 
         battery._PROFILE_HTTP_SEND_LIMITS[profile],
         strict=True,
     ):
-        overflowing = copy.deepcopy(deltas)
-        overflowing[0][key] = limit + 1
+        overflowing = copy.deepcopy(delta_ledger)
+        overflowing[0][1][key] = limit + 1
         assert (
             battery._http_probe_reconciliation_exact(
-                profile,
+                cases,
                 overflowing,
-                _sum_http_deltas(overflowing),
+                evidence_ledger,
+                _sum_http_deltas([delta for _case_id, delta in overflowing]),
             )
             is False
         )
@@ -205,19 +250,131 @@ def test_http_reconciliation_closes_every_case_and_pass_budget(profile: str) -> 
     forged_total["model_http"] = (
         battery._PROFILE_HTTP_SEND_LIMITS[profile][0] * battery.QUESTIONS_PER_PASS + 1
     )
-    assert battery._http_probe_reconciliation_exact(profile, deltas, forged_total) is False
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            forged_total,
+        )
+        is False
+    )
 
     for counter in battery._HTTP_PRIVACY_COUNTER_KEYS:
-        exposed = copy.deepcopy(deltas)
-        exposed[0][counter] = 1
+        exposed = copy.deepcopy(delta_ledger)
+        exposed[0][1][counter] = 1
         assert (
             battery._http_probe_reconciliation_exact(
-                profile,
+                cases,
                 exposed,
-                _sum_http_deltas(exposed),
+                evidence_ledger,
+                _sum_http_deltas([delta for _case_id, delta in exposed]),
             )
             is False
         )
+
+
+@pytest.mark.parametrize("counter", ["model_http", "embedding_http", "reranker_http"])
+def test_tenant_forbidden_turn_rejects_any_backend_http_send(counter: str) -> None:
+    cases = _pass_cases("tenant_privacy")
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    delta_ledger[0][1][counter] = 1
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("battery_id", ["A", "B"])
+def test_p01_reconciliation_binds_frozen_routes_to_ordered_deltas_and_evidence(
+    battery_id: str,
+) -> None:
+    cases = _pass_cases("package_a_honesty", battery_id=battery_id)
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    total = _sum_http_deltas([delta for _case_id, delta in delta_ledger])
+    call = battery._http_probe_reconciliation_exact
+
+    assert call(cases, delta_ledger, evidence_ledger, total) is True
+    assert call(cases, delta_ledger[1:] + delta_ledger[:1], evidence_ledger, total) is False
+    assert call(cases, delta_ledger, evidence_ledger[1:] + evidence_ledger[:1], total) is False
+    assert call(cases[1:] + cases[:1], delta_ledger, evidence_ledger, total) is False
+    assert call(cases, delta_ledger[:-1], evidence_ledger, total) is False
+    assert call(cases, delta_ledger, evidence_ledger[:-1], total) is False
+
+
+@pytest.mark.parametrize("field", battery._P01_ROUTE_EVIDENCE_KEYS)
+def test_p01_code_owned_route_evidence_fails_closed_when_forged(field: str) -> None:
+    cases = _pass_cases("package_a_honesty")
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    code_position = next(
+        index for index, case in enumerate(cases) if battery._package_a_code_owned_case(case)
+    )
+    forged = copy.deepcopy(evidence_ledger)
+    forged[code_position][1][field] = not bool(forged[code_position][1][field])
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            forged,
+            _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("counter", battery._P01_CODE_OWNED_DELTA_ZERO_COUNTERS)
+def test_p01_code_owned_route_rejects_any_logical_or_transport_attempt(counter: str) -> None:
+    cases = _pass_cases("package_a_honesty")
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    code_position = next(
+        index for index, case in enumerate(cases) if battery._package_a_code_owned_case(case)
+    )
+    forged = copy.deepcopy(delta_ledger)
+    forged[code_position][1][counter] = 1
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            forged,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in forged]),
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("mutation", ["marker", "model_spoke", "llm_failed", "model_send"])
+def test_p01_model_owned_route_requires_negative_marker_and_positive_send(mutation: str) -> None:
+    cases = _pass_cases("package_a_honesty")
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    model_position = next(
+        index for index, case in enumerate(cases) if not battery._package_a_code_owned_case(case)
+    )
+    if mutation == "marker":
+        evidence_ledger[model_position][1]["fabricated_outside_deed_request"] = True
+    elif mutation == "model_spoke":
+        evidence_ledger[model_position][1]["model_spoke"] = False
+    elif mutation == "llm_failed":
+        evidence_ledger[model_position][1]["llm_failed"] = True
+    else:
+        delta_ledger[model_position][1]["model_http"] = 0
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
+        )
+        is False
+    )
 
 
 def test_case_oracle_exposes_closed_http_counts_clear_flag_and_overflow_verdicts() -> None:
@@ -250,3 +407,34 @@ def test_case_oracle_exposes_closed_http_counts_clear_flag_and_overflow_verdicts
             tuple(maximums[f"{kind}_http_attempts"] for kind in ("model", "embedding", "reranker"))
             == battery._PROFILE_HTTP_SEND_LIMITS[profile]
         )
+
+
+def test_p01_oracle_uses_the_independently_frozen_code_owned_inventory() -> None:
+    expected = {
+        "A": {1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 14, 15, 17, 18},
+        "B": {10, 11},
+    }
+    for battery_id, expected_indices in expected.items():
+        cases = _pass_cases("package_a_honesty", battery_id=battery_id)
+        assert {
+            case.question_index for case in cases if battery._package_a_code_owned_case(case)
+        } == expected_indices
+        for case in cases:
+            state = battery.oracle_for_case(case)["state"]
+            if case.question_index in expected_indices:
+                expected_route = {
+                    "fabricated_outside_deed_request": True,
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "remainder_known": True,
+                    "llm_failed": False,
+                }
+                assert {key: state["equals"][key] for key in expected_route} == expected_route
+                assert all(
+                    state["equals"][counter] == 0 for counter in battery._P01_CODE_OWNED_STATE_ZERO_COUNTERS
+                )
+                assert "model_http_attempts" not in state["min"]
+            else:
+                assert state["equals"]["fabricated_outside_deed_request"] is False
+                assert state["equals"]["model_spoke"] is True
+                assert state["min"]["model_http_attempts"] == 1

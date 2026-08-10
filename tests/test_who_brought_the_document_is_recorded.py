@@ -234,16 +234,27 @@ def test_authenticated_intake_roads_record_the_person_not_the_shared_tenant(sett
 
         async def research(self, query: str, *, max_sources: int = 3) -> dict:
             del max_sources
+            text = ("Синтетический результат веб-поиска с явным автором. " * 8).strip()
             return {
                 "query": query,
+                "outbound_attempted": True,
                 "sources": [
                     {
-                        "url": "https://example.test/research",
+                        "url": "https://example.org/research",
                         "title": "Найденная страница",
-                        "text": "Синтетический результат веб-поиска с явным автором. " * 8,
+                        "text": text,
+                        "text_length": len(text),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
                     }
                 ],
                 "summary": "ok",
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
             }
 
     with TestClient(app) as client:

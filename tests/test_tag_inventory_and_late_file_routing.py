@@ -68,6 +68,18 @@ class _TagKernel:
                     "truncated": False,
                 },
             )
+        if name == "kg_stats":
+            return ToolResult(
+                name,
+                True,
+                {
+                    "knowledge_object_count": 7,
+                    "raw_object_count": 5,
+                    "file_count": 3,
+                    "entity_count": 2,
+                    "relation_count": 1,
+                },
+            )
         raise AssertionError(f"unexpected aggregate call: {name}")
 
 
@@ -97,6 +109,7 @@ async def _run_tag_prefetch(
     question: str,
     *,
     llm: _TagLLM | None = None,
+    outward_kind: str = "знание",
 ) -> tuple[AgentContext, _TagKernel, _TagLLM, list[dict[str, Any]], list[str]]:
     kernel = _TagKernel()
     chosen_llm = llm or _TagLLM()
@@ -108,7 +121,7 @@ async def _run_tag_prefetch(
         user_id="synthetic",
         # The aggregate route must not depend on a broad outer arbiter choosing
         # the same noun for every natural inventory wording.
-        outward_verdict=("знание", None),
+        outward_verdict=(outward_kind, None),
     )
     tools = [_tool("kg_stats"), _tool("list_tags"), _tool("memory_search")]
     tools_used: list[str] = []
@@ -129,7 +142,10 @@ async def _run_tag_prefetch(
 async def test_every_frozen_tag_variant_is_one_exact_list_tags_read(question: str) -> None:
     assert _fast_tag_inventory_intent(question) is True
 
-    context, kernel, _, tools, tools_used = await _run_tag_prefetch(question)
+    context, kernel, llm, tools, tools_used = await _run_tag_prefetch(
+        question,
+        outward_kind="архив",
+    )
 
     assert kernel.calls == [("list_tags", {})]
     assert tools_used == ["list_tags"]
@@ -140,6 +156,8 @@ async def test_every_frozen_tag_variant_is_one_exact_list_tags_read(question: st
     assert context.structural_answer.count("syn-tag-gamma — 1") == 1
     assert context.remainder_known is True
     assert context.open_remainder == ""
+    assert not any("Часть просьбы человека уже решена" in call for call in llm.calls)
+    assert not any("Классифицируй запрос числа" in call for call in llm.calls)
 
 
 @pytest.mark.parametrize(
@@ -194,9 +212,197 @@ async def test_a_tag_remainder_cannot_reopen_the_settled_inventory() -> None:
     assert kernel.calls == [("list_tags", {})]
     assert tools_used == ["list_tags"]
     assert context.structural_answer.count("Теги личного архива:") == 1
-    assert "повтори её отдельным сообщением" in context.structural_answer
+    assert "повтори её отдельным сообщением" not in context.structural_answer
     assert context.remainder_known is True
     assert context.open_remainder == ""
+
+
+@pytest.mark.asyncio
+async def test_anaphoric_tag_counts_do_not_open_the_whole_archive_counter() -> None:
+    question = "Какими метками размечены записи и каковы их точные счётчики?"
+
+    context, kernel, _, _, tools_used = await _run_tag_prefetch(
+        question,
+        outward_kind="архив",
+    )
+
+    assert kernel.calls == [("list_tags", {})]
+    assert tools_used == ["list_tags"]
+    assert context.structural_answer.count("Теги личного архива:") == 1
+    assert context.remainder_known is True
+    assert context.open_remainder == ""
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_remainder"),
+    [
+        pytest.param(
+            "Сколько записей подходит под учебный запрос «Кобальт»? И покажи доступные теги.",
+            "Сколько записей подходит под учебный запрос «Кобальт»",
+            id="local-count-before-tags",
+        ),
+        pytest.param(
+            "Покажи доступные теги и сколько записей подходит под учебный запрос «Кобальт»?",
+            "сколько записей подходит под учебный запрос «Кобальт»",
+            id="tags-before-local-count",
+        ),
+        pytest.param(
+            "Покажи доступные теги и заодно скажи, сколько записей подходит под учебный запрос «Кобальт»?",
+            "скажи, сколько записей подходит под учебный запрос «Кобальт»",
+            id="tags-before-local-count-with-modifier",
+        ),
+        pytest.param(
+            "Сколько записей подходит под учебный запрос «Кобальт», а потом покажи доступные теги.",
+            "Сколько записей подходит под учебный запрос «Кобальт»",
+            id="local-count-before-tags-with-modifier",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_local_count_compound_stays_open_without_global_counter_authority(
+    question: str,
+    expected_remainder: str,
+) -> None:
+    context, kernel, llm, tools, tools_used = await _run_tag_prefetch(
+        question,
+        outward_kind="архив",
+    )
+
+    assert kernel.calls == [("list_tags", {})]
+    assert tools_used == ["list_tags"]
+    assert {item["function"]["name"] for item in tools} == {"memory_search"}
+    assert context.remainder_known is True
+    assert context.open_remainder == expected_remainder
+    assert not any("Часть просьбы человека уже решена" in call for call in llm.calls)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        pytest.param(
+            "Покажи теги и скажи, сколько всего файлов в архиве.",
+            id="tags-then-count",
+        ),
+        pytest.param(
+            "Покажи теги, затем скажи, сколько всего файлов в архиве.",
+            id="tags-then-count-with-modifier",
+        ),
+        pytest.param(
+            "Скажи, сколько всего файлов в архиве, а потом покажи теги.",
+            id="count-then-tags-with-modifier",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tag_and_global_count_settle_both_owned_capabilities_once(question: str) -> None:
+
+    context, kernel, llm, tools, tools_used = await _run_tag_prefetch(
+        question,
+        outward_kind="архив",
+    )
+
+    assert kernel.calls == [("kg_stats", {}), ("list_tags", {})]
+    assert tools_used == ["kg_stats", "list_tags"]
+    assert {item["function"]["name"] for item in tools} == {"memory_search"}
+    assert context.structural_answer.startswith("В личном архиве: Файлов — 3.")
+    assert context.structural_answer.count("Теги личного архива:") == 1
+    assert context.remainder_known is True
+    assert context.open_remainder == ""
+    assert sum("Часть просьбы человека уже решена" in call for call in llm.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "создай документ Word",
+        "создай документ Word с этим списком тегов",
+        "создай заметку про этот список тегов",
+        "проверь состояние сервиса",
+        "проверь теги в приложенном файле",
+        "напомни завтра позвонить",
+        "напомни завтра проверить счётчики тегов",
+    ],
+)
+@pytest.mark.asyncio
+async def test_tag_inventory_preserves_one_independent_action_tail(tail: str) -> None:
+    llm = _TagLLM(remainder="неверный остаток")
+
+    context, kernel, _, _, tools_used = await _run_tag_prefetch(
+        f"Покажи все теги моего архива и {tail}.",
+        llm=llm,
+        outward_kind="архив",
+    )
+
+    assert kernel.calls == [("list_tags", {})]
+    assert tools_used == ["list_tags"]
+    assert context.structural_answer.count("Теги личного архива:") == 1
+    assert context.remainder_known is True
+    assert context.open_remainder == tail
+    assert not any("Часть просьбы человека уже решена" in call for call in llm.calls)
+
+
+@pytest.mark.parametrize(
+    ("connector", "tail"),
+    [
+        pytest.param("и ещё", "создай документ Word", id="create-after-and-more"),
+        pytest.param("и заодно", "проверь состояние сервиса", id="check-after-and-also"),
+        pytest.param(", затем", "напомни завтра позвонить", id="remind-after-then"),
+        pytest.param("и потом", "напомни завтра проверить счётчики тегов", id="remind-after-later"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tag_inventory_preserves_action_tails_after_natural_connectors(
+    connector: str,
+    tail: str,
+) -> None:
+    llm = _TagLLM(remainder="неверный остаток")
+
+    context, kernel, _, tools, tools_used = await _run_tag_prefetch(
+        f"Покажи все теги моего архива {connector} {tail}.",
+        llm=llm,
+        outward_kind="архив",
+    )
+
+    assert kernel.calls == [("list_tags", {})]
+    assert tools_used == ["list_tags"]
+    assert {item["function"]["name"] for item in tools} == {"memory_search"}
+    assert context.structural_answer.count("Теги личного архива:") == 1
+    assert context.remainder_known is True
+    assert context.open_remainder == tail
+    assert not any("Часть просьбы человека уже решена" in call for call in llm.calls)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param(
+            "объясни фразу «и потом напомни завтра позвонить»",
+            id="angle-quotes",
+        ),
+        pytest.param(
+            "объясни фразу “и потом напомни завтра позвонить”",
+            id="curly-quotes",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tag_remainder_connectors_inside_a_quote_do_not_split_the_tail_again(
+    tail: str,
+) -> None:
+    llm = _TagLLM(remainder="неверный остаток")
+
+    context, kernel, _, tools, tools_used = await _run_tag_prefetch(
+        f"Покажи все теги моего архива и {tail}.",
+        llm=llm,
+        outward_kind="архив",
+    )
+
+    assert kernel.calls == [("list_tags", {})]
+    assert tools_used == ["list_tags"]
+    assert {item["function"]["name"] for item in tools} == {"memory_search"}
+    assert context.remainder_known is True
+    assert context.open_remainder == tail
+    assert not any("Часть просьбы человека уже решена" in call for call in llm.calls)
 
 
 def _file_fixture_questions() -> list[str]:

@@ -24,14 +24,16 @@ from friday.agent_runtime import VERDICT_FAILED, AgentRuntime, _verification_cau
 
 def test_the_judge_sees_the_search_results_not_a_snippet() -> None:
     """Мутация: вернуть 500 знаков — тест краснеет."""
-    from friday.agent_runtime import _TOOL_EVIDENCE_CHARS
+    from friday.agent_runtime import _TOOL_EVIDENCE_CHARS, _secondary_tool_evidence
 
     assert _TOOL_EVIDENCE_CHARS >= 2000, (
         f"судья снова видит {_TOOL_EVIDENCE_CHARS} знаков выдачи — этого не хватает "
         "ни на одну новостную сводку"
     )
-    source = inspect.getsource(AgentRuntime._verify_response)
-    assert "max_chars=_TOOL_EVIDENCE_CHARS" in source, "предел выдачи снова зашит числом"
+    verifier_source = inspect.getsource(AgentRuntime._verify_response)
+    projection_source = inspect.getsource(_secondary_tool_evidence)
+    assert "_secondary_tool_evidence(entry, query)" in verifier_source
+    assert "max_chars=_TOOL_EVIDENCE_CHARS" in projection_source, "предел выдачи снова зашит числом"
 
 
 def test_a_web_answer_is_not_accused_of_contradicting_personal_data() -> None:
@@ -46,7 +48,8 @@ def test_an_archive_answer_keeps_the_old_wording() -> None:
 
 
 def test_the_turn_decides_by_the_tools_it_actually_used() -> None:
-    """Проверяется подключённое: признак берётся из следов инструментов хода."""
+    """Признак берётся из code-owned вердикта веб-выдачи."""
     source = inspect.getsource(AgentRuntime.chat)
-    assert 'startswith("web_")' in source, "признак «ответ из сети» больше ни на чём не основан"
+    assert "context.web_evidence_status" in source
+    assert 'web_evidence_status in {"sourced", "partial"}' in source
     assert "from_the_web=from_the_web" in source, "признак вычисляется, но не передаётся"

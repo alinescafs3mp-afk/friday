@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.200.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
+Текущая версия: **0.201.0**. Это release-candidate / 1.0-ready сборка: умеренная классификация, активный граф знаний, управляемая многошаговая работа, миссии с управляемой автономией, замкнутый feedback loop и полноценные эксплуатационные контуры без скрытой автоматической записи.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -41,6 +41,7 @@ Telegram → подписанный durable bridge → Conversation + mode
 - Entity extraction распознаёт явно названные проекты, инфраструктуру, технологии и версии, организации, события, локации, документы, людей и точные коды (`BRK.A`, `BRNQ26`, ISIN) с confidence/evidence. Пунктуация идентификаторов сохраняется, fuzzy/prefix merge для них запрещён.
 - Entity Resolution учитывает точные алиасы, сходство имён, аббревиатуры, общие knowledge links и соседей. Сомнительные сущности только предлагаются к объединению; canonical target выбирает человек, а история merge сохраняется.
 - Гибридный поиск объединяет SQLite FTS, lexical similarity, optional embeddings, точные идентификаторы, предметные поля, graph evidence, importance, lifecycle, feedback, quality и promotion confidence.
+- Явный `source_search` ищет по исходному тексту загруженных файлов, включая pending Inbox до promotion, но не подмешивает Raw-корпус в обычный контекст. Выдача tenant-scoped, ограничена query-aware выдержками и исключает ignored/deleted/private-dependent материал; pending никогда не называется уже сохранённым знанием.
 - Длинные объекты индексируются ещё и по пассажам: один релевантный абзац целой статьи находится, а вектор всего объекта остаётся полом скора (чанкинг может только добавить recall). Выигравший пассаж и цитируется в ответе.
 - Холодный passage-скан выбирает SQL-план по состоянию индекса: плотный актуальный корпус читается сразу в порядке объектов без сортировки всех BLOB-строк, а sparse/rolling корпус сохраняет дешёвый chunk-first путь. Окно newest-N имеет полный tie-break по ID; обе стороны денормализованного tenant ключа проверяются fail-closed.
 - Для relational-запросов используется аккуратно затухающее двухшаговое расширение графа; обычный поиск остаётся одношаговым, чтобы не тащить шум. Явно отброшенная реляционная оговорка не включает дорогую дорогу, но вводная часть перед настоящим вопросом и второе неподавленное совпадение его не скрывают.
@@ -365,7 +366,7 @@ jericho model-check
 При `FRIDAY_HOME=D:\jericho`:
 
 ```text
-data/state/friday.sqlite3       основная БД
+data/state/friday.sqlite3       основная БД новой установки
 data/state/telegram-inbox.sqlite3 очередь Telegram bridge
 data/files/                      исходные загруженные файлы
 data/memory-vault/               Markdown-представление знаний
@@ -377,6 +378,10 @@ models/                          веса моделей
 ```
 
 Runtime-каталоги и секреты исключены из Git и из дистрибутивного архива.
+Существующая установка может продолжать использовать `jericho.sqlite3` через
+явный `FRIDAY_DATABASE_PATH`; две разные непустые базы рядом не выбираются
+автоматически. `FRIDAY_DATABASE_MUST_EXIST=1` запрещает боевому процессу создать
+пустую замену, если назначенная база пропала.
 
 ## Резервирование
 
@@ -417,6 +422,13 @@ jericho doctor
 Chromium; отсутствующий браузер и любой skipped UI-тест считаются ошибкой. Для
 локальной итерации есть `--phase static`, `--phase tests` и `--phase ui`, но перед
 пушем выполняется полная команда без `--phase`.
+
+Рекурсивная синтетическая live-приёмка имеет отдельный воспроизводимый контракт:
+tracked pre-release runner одним снимком проверяет P06 A+B **40/40** и focused
+P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официальный `--both` запускает
+две десятипроходные батареи и не начинает B до полностью чистой A. Команды,
+приватные артефакты и точные критерии описаны в
+[docs/LIVE_BATTERY_RUNBOOK.md](docs/LIVE_BATTERY_RUNBOOK.md).
 
 Тесты покрывают provenance, tenant isolation, versions, soft delete, review-only lifecycle, backup verification/restore/rollback, entity resolution, терминальные relation decisions и монотонные conflict decisions, три исхода ingestion, feedback replacement и точную attribution, usage-aware retrieval, agent modes, knowledge-work/research-to-Inbox, grounded bounded vision/OCR, bulk Admin workflows, worker timeout/partial failure health, backend singleton lease, capability default-deny и безопасное делегирование, инструментальное ядро и завершение дерева процессов, архивные лимиты, SSRF, подписанный Telegram/API vertical slice, inline callbacks, миграцию/повторы/dead-letter очереди Telegram, redaction логов, tool-call protocol и закреплённый vLLM image/profile.
 

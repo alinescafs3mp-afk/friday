@@ -159,7 +159,7 @@ def test_adversarial_non_requests_never_take_the_deterministic_effect_path(messa
     assert runtime.kernel.calls == []
     assert context.structural_answer == ""
     assert used == [] and evidence == []
-    assert [tool["function"]["name"] for tool in tools].count("remind") == 2
+    assert [tool["function"]["name"] for tool in tools] == ["memory_search"]
 
 
 def test_an_unmistakable_compound_remainder_survives_after_the_effect() -> None:

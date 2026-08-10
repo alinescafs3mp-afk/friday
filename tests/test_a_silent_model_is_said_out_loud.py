@@ -18,13 +18,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import httpx
 import pytest
 
 from friday.agent_runtime import AgentContext, AgentRuntime
-from friday.agent_runtime.llm import MAX_RETRIES, LLMRouter
+from friday.agent_runtime.llm import MAX_RETRIES, LLMRouter, LLMUnavailableError
 
 
 class _Silent:
@@ -47,6 +48,63 @@ class _Refusing:
     async def post(self, *args, **kwargs):
         self.attempts += 1
         raise httpx.ConnectError("connection refused")
+
+
+class _HalfOpenSilent:
+    """A recovery probe that remains in flight while a sibling arrives."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def post(self, *args, **kwargs):
+        self.attempts += 1
+        self.started.set()
+        await self.release.wait()
+        raise httpx.ReadTimeout("still silent")
+
+
+class _InterleavedFailures:
+    """One call backs off while a sibling proves that the endpoint is silent."""
+
+    def __init__(self) -> None:
+        self.first_attempts = 0
+        self.silent_attempts = 0
+
+    async def post(self, *args, **kwargs):
+        content = kwargs["json"]["messages"][-1]["content"]
+        if content == "fast failure":
+            self.first_attempts += 1
+            raise httpx.ConnectError("connection refused")
+        self.silent_attempts += 1
+        raise httpx.ReadTimeout("silent sibling")
+
+
+class _DelayedToolRefusal:
+    """Hold a tool-schema rejection until a sibling opens the breaker."""
+
+    def __init__(self) -> None:
+        self.tool_attempts = 0
+        self.silent_attempts = 0
+        self.tool_started = asyncio.Event()
+        self.release_tool_refusal = asyncio.Event()
+
+    async def post(self, url, **kwargs):
+        content = kwargs["json"]["messages"][-1]["content"]
+        if content == "tool refusal":
+            self.tool_attempts += 1
+            self.tool_started.set()
+            await self.release_tool_refusal.wait()
+            return httpx.Response(
+                400,
+                request=httpx.Request("POST", url),
+                text=(
+                    '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set'
+                ),
+            )
+        self.silent_attempts += 1
+        raise httpx.ReadTimeout("silent sibling")
 
 
 def _client(settings, transport, monkeypatch) -> LLMRouter:
@@ -88,6 +146,103 @@ async def test_a_silent_endpoint_is_not_asked_twice(settings, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_one_silent_timeout_blocks_later_calls_until_cooldown_expires(
+    settings,
+    monkeypatch,
+) -> None:
+    silent = _Silent()
+    client = _client(settings, silent, monkeypatch)
+
+    with pytest.raises(httpx.ReadTimeout):
+        await client.chat([{"role": "user", "content": "первый ход"}])
+    with pytest.raises(LLMUnavailableError, match="silent cooldown"):
+        await client.chat([{"role": "user", "content": "следующий внутренний вызов"}])
+
+    assert silent.attempts == 1, "cooldown снова отправил запрос в доказанно молчащий endpoint"
+
+    # Expiry does not require a health/model probe: the next ordinary call is
+    # allowed to test recovery once.  The synthetic endpoint remains silent.
+    client._silent_until = 0.0  # noqa: SLF001
+    with pytest.raises(httpx.ReadTimeout):
+        await client.chat([{"role": "user", "content": "ход после cooldown"}])
+    assert silent.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_expired_cooldown_admits_only_one_half_open_probe(settings, monkeypatch) -> None:
+    endpoint = _HalfOpenSilent()
+    client = _client(settings, endpoint, monkeypatch)
+    client._silent_until = 0.1  # noqa: SLF001 - expired monotonic deadline
+
+    probe = asyncio.create_task(client.chat([{"role": "user", "content": "recovery probe"}]))
+    await endpoint.started.wait()
+    with pytest.raises(LLMUnavailableError, match="silent cooldown"):
+        await client.chat([{"role": "user", "content": "concurrent sibling"}])
+    endpoint.release.set()
+    with pytest.raises(httpx.ReadTimeout):
+        await probe
+
+    assert endpoint.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_silent_sibling_stops_a_call_already_waiting_to_retry(settings, monkeypatch) -> None:
+    endpoint = _InterleavedFailures()
+    client = _client(settings, endpoint, monkeypatch)
+    retry_waiting = asyncio.Event()
+    sibling_timed_out = asyncio.Event()
+
+    async def _coordinated_sleep(_seconds: float) -> None:
+        retry_waiting.set()
+        await sibling_timed_out.wait()
+
+    monkeypatch.setattr("asyncio.sleep", _coordinated_sleep)
+    first = asyncio.create_task(client.chat([{"role": "user", "content": "fast failure"}]))
+    await retry_waiting.wait()
+
+    with pytest.raises(httpx.ReadTimeout):
+        await client.chat([{"role": "user", "content": "silent sibling"}])
+    sibling_timed_out.set()
+
+    with pytest.raises(LLMUnavailableError, match="silent cooldown"):
+        await first
+    assert endpoint.first_attempts == 1
+    assert endpoint.silent_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_silent_sibling_stops_immediate_schema_less_fallback(settings, monkeypatch) -> None:
+    endpoint = _DelayedToolRefusal()
+    client = _client(settings, endpoint, monkeypatch)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "synthetic_tool",
+                "description": "local deterministic fixture",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    first = asyncio.create_task(
+        client.chat(
+            [{"role": "user", "content": "tool refusal"}],
+            tools=tools,
+        )
+    )
+    await endpoint.tool_started.wait()
+    with pytest.raises(httpx.ReadTimeout):
+        await client.chat([{"role": "user", "content": "silent sibling"}])
+    endpoint.release_tool_refusal.set()
+
+    with pytest.raises(LLMUnavailableError, match="silent cooldown"):
+        await first
+    assert endpoint.tool_attempts == 1
+    assert endpoint.silent_attempts == 1
+
+
+@pytest.mark.asyncio
 async def test_a_refused_connection_is_still_retried(settings, monkeypatch):
     """Другая половина: мгновенный отказ повторять стоит — сервер мог подняться."""
     refusing = _Refusing()
@@ -97,6 +252,7 @@ async def test_a_refused_connection_is_still_retried(settings, monkeypatch):
         await client.chat([{"role": "user", "content": "привет"}])
 
     assert refusing.attempts == MAX_RETRIES, "перестали повторять быстрый отказ соединения"
+    assert client._silent_until == 0.0  # noqa: SLF001
 
 
 def _context(**kwargs) -> AgentContext:

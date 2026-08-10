@@ -19,6 +19,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _extract_json_object,
+    _is_direct_file_request,
     _normalize_verdict,
     _unknown_verdict,
     _verification_caution,
@@ -153,6 +154,64 @@ def test_normalize_verdict_clamps_score_and_coerces_issues():
     verdict = _normalize_verdict('{"ok": false, "score": 5, "issues": [1, "", "  дубль  "]}')
     assert verdict["score"] == 1.0
     assert verdict["issues"] == ["1", "дубль"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_status", "expected_ok"),
+    [
+        pytest.param(
+            '{"ok": true, "score": 0.9, "issues": []}',
+            "unknown",
+            False,
+            id="missing",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": "true", "score": 0.9, "issues": []}',
+            "unknown",
+            False,
+            id="string-is-not-a-boolean",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": 1, "score": 0.9, "issues": []}',
+            "unknown",
+            False,
+            id="integer-is-not-a-boolean",
+        ),
+        pytest.param(
+            '{"ok": false, "score": 0.1, "issues": ["off topic"]}',
+            "unknown",
+            False,
+            id="missing-even-when-ok-is-false",
+        ),
+        pytest.param(
+            '{"ok": false, "request_satisfied": "false", "score": 0.1, "issues": ["off topic"]}',
+            "unknown",
+            False,
+            id="non-boolean-even-when-ok-is-false",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": false, "score": 0.9, "issues": []}',
+            "failed",
+            False,
+            id="request-not-satisfied",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": true, "score": 0.9, "issues": []}',
+            "passed",
+            True,
+            id="request-satisfied",
+        ),
+    ],
+)
+def test_normalize_attachment_verdict_requires_boolean_request_satisfied(
+    payload,
+    expected_status,
+    expected_ok,
+):
+    verdict = _normalize_verdict(payload, require_request_satisfied=True)
+
+    assert verdict["status"] == expected_status
+    assert verdict["ok"] is expected_ok
 
 
 def test_verification_caution_only_warns_for_failed_and_unknown():
@@ -343,7 +402,7 @@ async def test_verify_response_judges_against_tool_evidence(settings, storage):
     # evidence, so it is not flagged as fabricated for want of a matching note.
     llm = _RecordingLLM(
         answer="Сейчас в Париже 15°C, облачно.",
-        verdict='{"ok": true, "score": 0.9, "issues": []}',
+        verdict='{"ok": true, "request_satisfied": true, "score": 0.9, "issues": []}',
     )
     storage.ensure_user("alice")
     runtime = AgentRuntime(settings, storage, llm=llm)
@@ -426,11 +485,27 @@ async def test_agentic_tool_output_reaches_verification(settings, storage):
     # Full path: the agent calls a tool, and the tool's output is carried into
     # answer verification even with no personal-knowledge hits (previously the
     # verifier saw nothing and judged tool-grounded answers against empty notes).
-    tool = ToolResult(tool_name="web_search", success=True, data="Weather in Paris: 15°C, cloudy.")
+    tool = ToolResult(
+        tool_name="web_search",
+        success=True,
+        data={
+            "query": "weather in Paris",
+            "outbound_attempted": True,
+            "results": [
+                {
+                    "url": "https://weather.synthetic.example.com/paris",
+                    "title": "Paris weather",
+                    "snippet": "Weather in Paris: 15°C, cloudy.",
+                    "source": "synthetic",
+                    "error": "",
+                }
+            ],
+        },
+    )
     llm = _ToolThenAnswerLLM(
         tool_name="web_search",
         answer="Сейчас в Париже 15°C, облачно — по данным поиска.",
-        verdict='{"ok": true, "score": 0.9, "issues": []}',
+        verdict='{"ok": true, "request_satisfied": true, "score": 0.9, "issues": []}',
     )
     tuned = dataclasses.replace(settings, verify_min_answer_chars=1, verify_answers=True)
     storage.ensure_user("alice")
@@ -465,6 +540,513 @@ class _CapturingLLM:
         self.system = next((str(m.get("content") or "") for m in messages if m.get("role") == "system"), "")
         self.user = next((str(m.get("content") or "") for m in messages if m.get("role") == "user"), "")
         return {"content": self._verdict}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("judge_reply", "expected_status", "expected_ok"),
+    [
+        pytest.param(
+            '{"ok": true, "score": 0.9, "issues": []}',
+            "unknown",
+            False,
+            id="missing",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": null, "score": 0.9, "issues": []}',
+            "unknown",
+            False,
+            id="non-boolean",
+        ),
+        pytest.param(
+            '{"ok": false, "score": 0.1, "issues": ["off topic"]}',
+            "unknown",
+            False,
+            id="missing-even-when-ok-is-false",
+        ),
+        pytest.param(
+            '{"ok": false, "request_satisfied": "false", "score": 0.1, "issues": ["off topic"]}',
+            "unknown",
+            False,
+            id="non-boolean-even-when-ok-is-false",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": false, "score": 0.9, "issues": []}',
+            "failed",
+            False,
+            id="false-overrides-ok",
+        ),
+        pytest.param(
+            '{"ok": true, "request_satisfied": true, "score": 0.9, "issues": []}',
+            "passed",
+            True,
+            id="true-with-ok-passes",
+        ),
+    ],
+)
+async def test_attachment_verifier_enforces_request_satisfied_schema(
+    settings,
+    storage,
+    judge_reply,
+    expected_status,
+    expected_ok,
+):
+    llm = _CapturingLLM(judge_reply)
+    storage.ensure_user("alice")
+    runtime = AgentRuntime(settings, storage, llm=llm)
+    context = AgentContext(conversation_id="c1", user_id="alice")
+
+    verdict = await runtime._verify_response(
+        "Сделай короткую сводку по таблице.",
+        "В таблице три строки о продажах.",
+        context,
+        tool_evidence=[
+            {
+                "tool": "attachment",
+                "output": "Вложение synthetic.docx:\nТаблица: три строки о продажах.",
+            }
+        ],
+    )
+
+    assert verdict["status"] == expected_status
+    assert verdict["ok"] is expected_ok
+    assert llm.system is not None
+    assert '"request_satisfied": boolean' in llm.system
+
+
+class _AttachmentChatRepairLLM:
+    """Script the complete synthesis -> judge -> repair -> judge sequence."""
+
+    enabled = True
+    model = "attachment-chat-repair-test"
+    total_budget_sec = 360.0
+
+    def __init__(self, verdicts: list[str]):
+        self._verdicts = list(verdicts)
+        self.events: list[str] = []
+        self.verified_answers: list[str] = []
+        self.verified_questions: list[str] = []
+        self.repair_inputs: list[str] = []
+        self.repair_questions: list[str] = []
+
+    async def chat(self, messages, **kwargs):
+        del kwargs
+        user_messages = [str(item.get("content") or "") for item in messages if item.get("role") == "user"]
+        repair_frame = next(
+            (item for item in user_messages if item.startswith("FRIDAY_REPAIR_DATA")),
+            "",
+        )
+        if repair_frame:
+            self.events.append("repair")
+            payload = json.loads(repair_frame.split("\n", 1)[1])
+            self.repair_inputs.append(str(payload["answer"]))
+            self.repair_questions.append(str(payload["question"]))
+            return {"content": _RELEVANT_ATTACHMENT_SUMMARY}
+
+        verification_frame = next(
+            (item for item in user_messages if item.startswith("FRIDAY_VERIFICATION_DATA")),
+            "",
+        )
+        if verification_frame:
+            self.events.append("verify")
+            payload = json.loads(verification_frame.split("\n", 1)[1])
+            self.verified_answers.append(str(payload["answer"]))
+            self.verified_questions.append(str(payload["question"]))
+            verdict_index = len(self.verified_answers) - 1
+            if verdict_index >= len(self._verdicts):
+                raise AssertionError("unexpected extra attachment verification")
+            return {"content": self._verdicts[verdict_index]}
+
+        self.events.append("generate")
+        return {"content": _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER}
+
+
+_ATTACHMENT_SUMMARY_QUESTION = "Сделай короткую сводку по таблице."
+_ATTACHMENT_TEXT = "Автор: аналитический отдел.\nПродажи по регионам:\nСевер: 120\nЮг: 80"
+_IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER = "Автор документа — аналитический отдел."
+_RELEVANT_ATTACHMENT_SUMMARY = "Краткая сводка: Север — 120 продаж, Юг — 80; Север лидирует на 40."
+
+
+async def _run_attachment_chat_repair_flow(settings, storage, monkeypatch, llm):
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        dataclasses.replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            answer_mode="general_conversation",
+        )
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+
+    async def unexpected_file_builder(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("an attachment summary is not a request to create a new file")
+
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", unexpected_file_builder)
+    return await runtime.chat(
+        "alice",
+        _ATTACHMENT_SUMMARY_QUESTION,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[
+            {
+                "filename": "synthetic-sales.txt",
+                "transient_text": _ATTACHMENT_TEXT,
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_repairs_once_when_attachment_answer_is_factual_but_irrelevant(
+    settings,
+    storage,
+    monkeypatch,
+):
+    llm = _AttachmentChatRepairLLM(
+        [
+            '{"ok": true, "request_satisfied": false, "score": 1.0, "issues": []}',
+            '{"ok": true, "request_satisfied": true, "score": 1.0, "issues": []}',
+        ]
+    )
+
+    result = await _run_attachment_chat_repair_flow(settings, storage, monkeypatch, llm)
+
+    assert llm.events == ["generate", "verify", "repair", "verify"]
+    assert llm.verified_answers == [
+        _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER,
+        _RELEVANT_ATTACHMENT_SUMMARY,
+    ]
+    assert llm.repair_inputs == [_IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER]
+    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_QUESTION] * 2
+    assert llm.repair_questions == [_ATTACHMENT_SUMMARY_QUESTION]
+    assert result["message"] == _RELEVANT_ATTACHMENT_SUMMARY
+    assert result["files"] == []
+    assert result["verification_status"] == "passed"
+    assert result["verified"] is True
+    assert result["verification_caution"] == ""
+
+    stored = storage.get_message(result["message_id"], "alice")
+    assert stored is not None and stored["content"] == _RELEVANT_ATTACHMENT_SUMMARY
+    metadata = json.loads(stored["metadata_json"])
+    assert metadata["verification_status"] == "passed"
+    assert metadata["verified"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "judge_reply",
+    [
+        pytest.param('{"ok": true, "score": 1.0, "issues": []}', id="ok-true"),
+        pytest.param(
+            '{"ok": false, "score": 0.1, "issues": ["off topic"]}',
+            id="ok-false",
+        ),
+    ],
+)
+async def test_chat_missing_attachment_request_satisfied_is_unknown_without_repair(
+    settings,
+    storage,
+    monkeypatch,
+    judge_reply,
+):
+    llm = _AttachmentChatRepairLLM([judge_reply])
+
+    result = await _run_attachment_chat_repair_flow(settings, storage, monkeypatch, llm)
+
+    assert llm.events == ["generate", "verify"]
+    assert llm.verified_answers == [_IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER]
+    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_QUESTION]
+    assert llm.repair_inputs == []
+    assert result["message"] == _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER
+    assert result["files"] == []
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
+    assert result["verification_caution"].startswith("⚠️")
+
+
+def test_attachment_summary_is_not_misrouted_as_a_direct_file_request():
+    assert _is_direct_file_request(_ATTACHMENT_SUMMARY_QUESTION) is False
+    assert _is_direct_file_request("Сделай сводку в файле Word.") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_answer",
+    [
+        pytest.param(_RELEVANT_ATTACHMENT_SUMMARY, id="unqualified-summary"),
+        pytest.param(
+            "По доступной части: Север — 120 продаж, Юг — 80.",
+            id="available-part-caveat",
+        ),
+        pytest.param(
+            "По извлечённому фрагменту: Север — 120 продаж, Юг — 80.",
+            id="extracted-fragment-caveat",
+        ),
+    ],
+)
+async def test_partial_attachment_summary_cannot_pass_on_an_optimistic_judge(
+    settings,
+    storage,
+    monkeypatch,
+    model_answer,
+):
+    llm = _AttachmentChatRepairLLM(['{"ok": true, "request_satisfied": true, "score": 1.0, "issues": []}'])
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        dataclasses.replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            answer_mode="general_conversation",
+        )
+
+    async def generate(context, question, attachments):
+        del context, question, attachments
+        return {"content": model_answer, "tools_used": []}
+
+    async def unexpected_file_builder(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("an attachment summary is not a request to create a new file")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", unexpected_file_builder)
+
+    result = await runtime.chat(
+        "alice",
+        _ATTACHMENT_SUMMARY_QUESTION,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[
+            {
+                "filename": "synthetic-sales.txt",
+                "transient_text": _ATTACHMENT_TEXT,
+                "extraction_success": True,
+                "verification_eligible": True,
+                "text_truncated": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert llm.events == ["verify"]
+    assert llm.repair_inputs == []
+    assert result["message"] == model_answer
+    assert result["attachment_coverage_complete"] is False
+    assert result["attachment_verification_complete"] is False
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
+    assert result["verification_caution"].startswith("⚠️")
+
+
+@pytest.mark.asyncio
+async def test_composite_attachment_repair_uses_only_open_remainder_and_drops_stale_carriers(
+    settings,
+    storage,
+    monkeypatch,
+):
+    original_question = "Структурная часть уже обработана; сделай короткую сводку по таблице."
+    structural_answer = "Системная часть подтверждена."
+    structural_file = {
+        "kind": "file",
+        "filename": "structural-owned.txt",
+        "content": "code-owned carrier",
+    }
+    stale_model_file = {
+        "kind": "file",
+        "filename": "stale-model-answer.txt",
+        "content": _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER,
+    }
+    stale_voice = {
+        "kind": "voice",
+        "filename": "stale-model-answer.ogg",
+        "content": _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER,
+    }
+    llm = _AttachmentChatRepairLLM(
+        [
+            '{"ok": true, "request_satisfied": false, "score": 1.0, "issues": []}',
+            '{"ok": true, "request_satisfied": true, "score": 1.0, "issues": []}',
+        ]
+    )
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        dataclasses.replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            answer_mode="general_conversation",
+            structural_answer=structural_answer,
+            remainder_known=True,
+            open_remainder=_ATTACHMENT_SUMMARY_QUESTION,
+        )
+
+    async def generate(context, question, attachments):
+        del context, attachments
+        assert question == _ATTACHMENT_SUMMARY_QUESTION
+        return {
+            "content": _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER,
+            "tools_used": [],
+            "file_clips": [structural_file, stale_model_file],
+            "_structural_file_count": 1,
+            "voice_clip": stale_voice,
+        }
+
+    observed_voice_inputs = []
+
+    async def voice_of_final(clip, content, **kwargs):
+        del content, kwargs
+        observed_voice_inputs.append(clip)
+        return None
+
+    async def unexpected_file_builder(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("an attachment summary is not a request to create a new file")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_voice_of_the_final_answer", voice_of_final)
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", unexpected_file_builder)
+
+    result = await runtime.chat(
+        "alice",
+        original_question,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[
+            {
+                "filename": "synthetic-sales.txt",
+                "transient_text": _ATTACHMENT_TEXT,
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert llm.events == ["verify", "repair", "verify"]
+    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_QUESTION] * 2
+    assert llm.repair_questions == [_ATTACHMENT_SUMMARY_QUESTION]
+    assert llm.repair_inputs == [_IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER]
+    assert result["message"] == f"{structural_answer}\n\n{_RELEVANT_ATTACHMENT_SUMMARY}"
+    assert result["message"].count(structural_answer) == 1
+    assert result["files"] == [structural_file]
+    assert observed_voice_inputs == [None]
+    assert result["verification_status"] == "passed"
+    assert result["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_readable_attachment_llm_failure_keeps_stage_honesty_and_only_structural_carriers(
+    settings,
+    storage,
+    monkeypatch,
+):
+    structural_file = {
+        "kind": "file",
+        "filename": "structural-owned.txt",
+        "content": "code-owned carrier",
+    }
+    stale_model_file = {
+        "kind": "file",
+        "filename": "stale-model-answer.txt",
+        "content": "Загрузите документ ещё раз.",
+    }
+    stale_voice = {
+        "kind": "voice",
+        "filename": "stale-model-answer.ogg",
+        "content": "Загрузите документ ещё раз.",
+    }
+    llm = _AttachmentChatRepairLLM([])
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        dataclasses.replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            answer_mode="general_conversation",
+        )
+
+    async def generate(context, question, attachments):
+        del context, question, attachments
+        return {
+            "content": "Не удалось прочитать файл. Загрузите документ ещё раз.",
+            "tools_used": [],
+            "llm_failed": True,
+            "file_clips": [structural_file, stale_model_file],
+            "_structural_file_count": 1,
+            "voice_clip": stale_voice,
+        }
+
+    observed_voice_inputs = []
+    owner_notifications = []
+
+    async def voice_of_final(clip, content, **kwargs):
+        del content, kwargs
+        observed_voice_inputs.append(clip)
+        return None
+
+    def notify_owner(user_id):
+        owner_notifications.append(user_id)
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_voice_of_the_final_answer", voice_of_final)
+    monkeypatch.setattr(runtime, "_tell_the_owner_the_model_is_silent", notify_owner)
+
+    result = await runtime.chat(
+        "alice",
+        _ATTACHMENT_SUMMARY_QUESTION,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[
+            {
+                "filename": "synthetic-sales.txt",
+                "transient_text": _ATTACHMENT_TEXT,
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert llm.events == []
+    assert owner_notifications == ["alice"]
+    assert "Вложение прочитано" in result["message"]
+    assert "Ошибка возникла на этапе подготовки ответа" in result["message"]
+    assert "загруз" not in result["message"].lower()
+    assert result["files"] == [structural_file]
+    assert observed_voice_inputs == [None]
+    assert result["verification_status"] == "skipped"
+    assert result["verified"] is False
 
 
 @pytest.mark.asyncio

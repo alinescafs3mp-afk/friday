@@ -10,18 +10,23 @@ through the outbound channel.
 Like every organ it INITIATES COMMUNICATION but writes nothing to the graph: it
 only reports what the diagnostics already know. Deny-by-default is preserved
 (the allowlist is checked here and again by the bridge at send time), quiet
-hours are respected, and each distinct issue alerts at most once per day so a
-persistent fault never turns into a stream of pings.
+hours are respected. Ordinary issues alert at most once per day; generation
+stalls use persisted healthy→failed episodes so one continuous outage never
+spams, while a new outage after observed recovery is not hidden by today's old
+dedup row.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
-from collections.abc import Sequence
+import uuid
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from friday.diagnostics import collect_diagnostics
+from friday.diagnostics import _llm_generates, collect_diagnostics
 from friday.organs import (
     Organ,
     OrganWorker,
@@ -51,6 +56,17 @@ _ALERT_SEVERITIES = {"error", "warning"}
 #: воркеров, резервные копии, гигиена секретов, нехватка места — важное, но не
 #: то, ради чего будят: оно дождётся утра и ничего за ночь не испортит.
 _WAKES_THE_OWNER = {"llm_not_generating", "start_llm_runtime"}
+
+# The full sentinel scan is intentionally expensive and stays on its 15-minute
+# cadence.  This probe is the opposite: one fixed token, no database/filesystem
+# diagnostics, and one bounded HTTP request.  Together with the configured
+# interval cap (60s), the whole 35-second worker budget keeps worst-case alert
+# enqueue below 95 seconds and leaves headroom for the outbound queue to drain.
+_GENERATION_PROBE_TIMEOUT_SEC = 25.0
+_GENERATION_AWAIT_TIMEOUT_SEC = 30.0
+_GENERATION_WORKER_TIMEOUT_SEC = 35.0
+_GENERATION_STATE_KEY = "sentinel:generation_watchdog"
+_GENERATION_STATE_VERSION = 1
 
 # Reading host diagnostics over HTTP needs this capability; a push carries the
 # same material, so it answers to the same gate. Otherwise the outbound channel
@@ -113,6 +129,195 @@ def _may_see_diagnostics(ctx: ServiceContext, user_id: str) -> bool:
         return False
 
 
+def _read_generation_state(ctx: ServiceContext) -> tuple[dict[str, Any], bool]:
+    """Read the closed, non-personal watchdog transition state."""
+
+    empty: dict[str, Any] = {
+        "version": _GENERATION_STATE_VERSION,
+        "status": "unknown",
+        "episode": "",
+    }
+    try:
+        raw = ctx.storage.kv_get(_GENERATION_STATE_KEY)
+    except Exception as exc:  # noqa: BLE001 — observability cannot stop workers
+        LOGGER.error("sentinel: cannot read generation state (%s)", type(exc).__name__)
+        return empty, False
+    if raw is None:
+        return empty, True
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return empty, True
+    if not isinstance(parsed, dict):
+        return empty, True
+    status = str(parsed.get("status") or "")
+    episode = str(parsed.get("episode") or "")
+    if (
+        parsed.get("version") != _GENERATION_STATE_VERSION
+        or status not in {"healthy", "failed"}
+        or (episode and (len(episode) != 32 or not all(char in "0123456789abcdef" for char in episode)))
+    ):
+        return empty, True
+    return {"version": _GENERATION_STATE_VERSION, "status": status, "episode": episode}, True
+
+
+def _write_generation_state(ctx: ServiceContext, *, status: str, episode: str = "") -> bool:
+    try:
+        ctx.storage.kv_set(
+            _GENERATION_STATE_KEY,
+            json.dumps(
+                {
+                    "version": _GENERATION_STATE_VERSION,
+                    "status": status,
+                    "episode": episode,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — fall back to daily dedup below
+        LOGGER.error("sentinel: cannot persist generation state (%s)", type(exc).__name__)
+        return False
+    return True
+
+
+def _open_generation_episode(ctx: ServiceContext) -> str:
+    """Return one stable dedup identity for the current continuous outage."""
+
+    state, available = _read_generation_state(ctx)
+    if not available:
+        return ""
+    if state["status"] == "failed" and state["episode"]:
+        return str(state["episode"])
+    episode = uuid.uuid4().hex
+    return episode if _write_generation_state(ctx, status="failed", episode=episode) else ""
+
+
+def _mark_generation_healthy(ctx: ServiceContext) -> None:
+    """Close a failed episode so a later outage gets a fresh notification key."""
+
+    state, available = _read_generation_state(ctx)
+    if available and state["status"] != "healthy":
+        _write_generation_state(ctx, status="healthy")
+
+
+def _alert_dedup_key(ctx: ServiceContext, action: dict[str, Any], *, day: str) -> str:
+    code = str(action.get("code") or "issue")
+    if code == "llm_not_generating":
+        # Daily dedup suppresses a second real incident after recovery.  A
+        # persisted episode identity instead deduplicates only one continuous
+        # outage and is shared by the fast probe and the full diagnostics scan.
+        episode = _open_generation_episode(ctx)
+        if episode:
+            return f"sentinel:{code}:episode:{episode}"
+    return f"sentinel:{code}:{day}"
+
+
+def _enqueue_alerts(
+    ctx: ServiceContext,
+    alerts: Sequence[dict[str, Any]],
+    *,
+    day: str,
+) -> int:
+    """Queue already-filtered sentinel actions for the privileged owner audience."""
+
+    settings = ctx.settings
+    prepared = [(action, _alert_dedup_key(ctx, action, day=day)) for action in alerts]
+    enqueued = 0
+    audience = 0
+    for user_id in ctx.storage.list_user_ids(active_only=True):
+        # Host health is privileged material. Fanning it out to every active
+        # account handed a guest the worker, backup and secret-hygiene state of
+        # a machine which is not theirs, while the same HTTP read needs
+        # ``admin.diagnostics``.
+        if not _may_see_diagnostics(ctx, user_id):
+            continue
+        chat_id = resolve_chat_id(ctx.storage, user_id)
+        if not chat_id or not _is_service_recipient(settings, chat_id):
+            continue
+        audience += 1
+        # Deny-by-default, re-checked here (the bridge re-checks again at send).
+        if not may_push_to(settings, ctx.storage, user_id, chat_id):
+            continue
+        for action, dedup_key in prepared:
+            if ctx.storage.enqueue_notification(
+                user_id,
+                chat_id,
+                _format_alert(action),
+                kind="sentinel",
+                dedup_key=dedup_key,
+            ):
+                enqueued += 1
+    if enqueued:
+        LOGGER.info("Sentinel organ queued %d health alert(s)", enqueued)
+    elif not audience:
+        # Silence here would be indistinguishable from health. Say it out loud:
+        # the instance is unwell and there is nobody it is allowed to tell.
+        LOGGER.warning(
+            "sentinel: %d health alert(s) with no recipient — no active account holds %s "
+            "with a private Telegram chat on the allowlist",
+            len(alerts),
+            _DIAGNOSTICS_CAPABILITY,
+        )
+    return enqueued
+
+
+async def watch_generation(ctx: ServiceContext) -> None:
+    """Probe only the generation path and alert before a short outage can pass."""
+
+    settings = ctx.settings
+    if not (settings.sentinel_enabled and settings.sentinel_check_llm and settings.llm_enabled):
+        return
+    # No delivery target means there is nobody to alert.  Avoid spending even
+    # the one-token probe when its result cannot leave this process.
+    if not settings.telegram_effective_allowed_chat_ids:
+        return
+    try:
+        # urllib's socket timeout normally returns first.  The coroutine-level
+        # deadline is a second, independent boundary for a peer which keeps the
+        # socket alive without ever completing the body.  It also lets us alert
+        # before the supervisor's last-resort timeout merely records a worker
+        # failure that the owner would not see until the full 15-minute scan.
+        async with asyncio.timeout(_GENERATION_AWAIT_TIMEOUT_SEC):
+            generation = await run_blocking(
+                _llm_generates,
+                settings.llm_base_url,
+                settings.llm_model,
+                api_key=settings.llm_api_key,
+                timeout=_GENERATION_PROBE_TIMEOUT_SEC,
+            )
+    except TimeoutError:
+        generation = {"generates": False, "seconds": _GENERATION_AWAIT_TIMEOUT_SEC}
+    except Exception as exc:  # noqa: BLE001 — absence of a verdict is not health
+        LOGGER.error("sentinel: generation probe failed to run (%s)", type(exc).__name__)
+        generation = {"generates": False, "seconds": None}
+
+    generates = generation.get("generates") if isinstance(generation, Mapping) else None
+    if generates is True:
+        _mark_generation_healthy(ctx)
+        return
+
+    elapsed = generation.get("seconds") if isinstance(generation, Mapping) else None
+    detail = (
+        "Проверочная однотокенная генерация не вернула ответа"
+        + (f" за {elapsed} с" if isinstance(elapsed, (int, float)) else "")
+        + ". Людям в это время могут уходить таймауты вместо обычных ответов. "
+        "Нужна ручная проверка и, если зависание подтвердится, перезапуск сервера модели."
+    )
+    _enqueue_alerts(
+        ctx,
+        [
+            {
+                "code": "llm_not_generating",
+                "severity": "error",
+                "title": "Проверочная генерация не отвечает",
+                "detail": detail,
+            }
+        ],
+        day=local_now(settings).date().isoformat(),
+    )
+
+
 async def scan_health(ctx: ServiceContext) -> None:
     settings = ctx.settings
     if not settings.sentinel_enabled:
@@ -163,56 +368,7 @@ async def scan_health(ctx: ServiceContext) -> None:
     if not alerts:
         return
 
-    day = now.date().isoformat()
-    enqueued = 0
-    audience = 0
-    for user_id in ctx.storage.list_user_ids(active_only=True):
-        # Host health is privileged material. Fanning it out to every active
-        # account handed a guest — anyone who wrote once in an allowlisted group —
-        # the worker state, the backup state and the secret-hygiene report of a
-        # machine that is not theirs, while the same read over HTTP needs
-        # `admin.diagnostics`.
-        if not _may_see_diagnostics(ctx, user_id):
-            continue
-        chat_id = resolve_chat_id(ctx.storage, user_id)
-        if not chat_id:
-            continue
-        # Служебное — только владельцу, в его чат. Права здесь перестали быть
-        # границей: владелец попросил заводить каждого написавшего с полным
-        # набором прав, и `admin.diagnostics` теперь есть у всех — то есть
-        # состояние воркеров, резервных копий и гигиены секретов чужой машины
-        # рассылалось бы каждому, кто однажды написал боту.
-        #
-        # Список owner-чатов задан — он и есть адресат. Не задан — остаётся
-        # прежнее правило по способности: молчать совсем хуже, чем сказать
-        # тому, кто и так всё видит.
-        if not _is_service_recipient(settings, chat_id):
-            continue
-        audience += 1
-        # Deny-by-default, re-checked here (the bridge re-checks again at send).
-        if not may_push_to(settings, ctx.storage, user_id, chat_id):
-            continue
-        for action in alerts:
-            code = str(action.get("code") or "issue")
-            if ctx.storage.enqueue_notification(
-                user_id,
-                chat_id,
-                _format_alert(action),
-                kind="sentinel",
-                dedup_key=f"sentinel:{code}:{day}",
-            ):
-                enqueued += 1
-    if enqueued:
-        LOGGER.info("Sentinel organ queued %d health alert(s)", enqueued)
-    elif not audience:
-        # Silence here would be indistinguishable from health. Say it out loud:
-        # the instance is unwell and there is nobody it is allowed to tell.
-        LOGGER.warning(
-            "sentinel: %d health alert(s) with no recipient — no active account holds %s "
-            "with a private Telegram chat on the allowlist",
-            len(alerts),
-            _DIAGNOSTICS_CAPABILITY,
-        )
+    _enqueue_alerts(ctx, alerts, day=now.date().isoformat())
 
 
 class SentinelOrgan(Organ):
@@ -221,6 +377,20 @@ class SentinelOrgan(Organ):
 
     def workers(self, ctx: ServiceContext) -> Sequence[OrganWorker]:
         return (
+            OrganWorker(
+                name="sentinel_generation_watch",
+                run=watch_generation,
+                interval_sec=float(ctx.settings.sentinel_generation_interval_sec),
+                enabled=bool(
+                    ctx.settings.sentinel_enabled
+                    and ctx.settings.sentinel_check_llm
+                    and ctx.settings.llm_enabled
+                ),
+                # The probe is cheap and startup is exactly when the model may
+                # have failed independently from the API process.
+                run_immediately=True,
+                timeout_sec=_GENERATION_WORKER_TIMEOUT_SEC,
+            ),
             OrganWorker(
                 name="sentinel_watch",
                 run=scan_health,

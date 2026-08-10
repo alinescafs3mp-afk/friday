@@ -43,7 +43,31 @@ class _Surfer:
 
     async def research(self, query: str, *, max_sources: int = 3) -> dict:
         self.asked.append(query)
-        return {"query": query, "sources": self.sources, "summary": "ok"}
+        sources: list[dict] = []
+        for raw in self.sources:
+            item = dict(raw)
+            text = str(item.get("text") or "")
+            item.update(
+                {
+                    "text_length": len(text),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                }
+            )
+            sources.append(item)
+        return {
+            "query": query,
+            "sources": sources,
+            "summary": "ok",
+            # The fake already represents the provider's selected work set;
+            # it did not silently drop the unused caller capacity.
+            "requested_sources": len(sources),
+            "completed_sources": len(sources),
+            "timed_out_sources": 0,
+            "failed_sources": 0,
+            "search_timed_out": False,
+        }
 
 
 def _kernel(settings, storage, surfer) -> ExecutionKernel:
@@ -172,7 +196,24 @@ async def test_a_page_that_changed_between_two_readings_is_saved_anyway(settings
         return await kernel._capture_web_sources(  # noqa: SLF001
             actor,
             "ключевая ставка",
-            {"sources": [{"url": "https://cbr.ru/", "title": "Ключевая ставка", "text": text}]},
+            {
+                "sources": [
+                    {
+                        "url": "https://cbr.ru/",
+                        "title": "Ключевая ставка",
+                        "text": text,
+                        "text_length": len(text),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                ],
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+            },
         )
 
     first = await _capture("Ключевая ставка составляет 14,00% годовых. " * 12)

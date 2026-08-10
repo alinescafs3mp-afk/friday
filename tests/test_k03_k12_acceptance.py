@@ -269,7 +269,7 @@ async def test_k03_a_compound_tag_request_keeps_only_its_unrelated_remainder_ope
             "truncated": False,
         },
     )
-    remainder = "объясни термин объект знаний"
+    remainder = "объясни термин «объект знаний»"
 
     context, kernel, tools, _, _ = await _prefetch_tags(
         "Какие теги есть в базе? И объясни термин «объект знаний».",

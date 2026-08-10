@@ -164,6 +164,20 @@ def test_a_self_contained_question_is_not_a_followup():
         )
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Какие документы я сегодня присылал?",
+        "Какие файлы я за сегодня скидывал?",
+        "What files did I send today?",
+        "Which documents did we upload today?",
+    ],
+)
+def test_short_personal_file_history_question_is_self_contained(question: str) -> None:
+    history = [{"role": "user", "content": "Объясни порядок поверки манометра."}]
+    assert AgentRuntime._contextualize_query(question, history) == question  # noqa: SLF001
+
+
 def test_real_follow_ups_still_get_the_context():
     """Обратная сторона: слишком строгий порог отнимет контекст у настоящих хвостов.
 

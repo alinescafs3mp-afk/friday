@@ -26,6 +26,7 @@ from friday.agent_runtime import (
     _ASKS_FOR_THE_WEB,
     AgentRuntime,
     _might_be_a_question,
+    _project_web_tool_result,
 )
 
 
@@ -196,7 +197,6 @@ def test_a_failed_search_is_not_passed_off_as_results():
     человека, и честное «не дотянулась» лучше пересказанной диагностики.
     """
     import asyncio
-    import inspect
 
     class _Failed:
         success = False
@@ -240,8 +240,11 @@ def test_a_failed_search_is_not_passed_off_as_results():
     for order in ("скажи человеку", "не выдумывай", "предложи"):
         assert order not in content.casefold(), f"служебная строка написана как приказ: {content!r}"
 
-    source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
-    assert "if not result.success:" in source
+    assert _project_web_tool_result(  # noqa: SLF001
+        "web_research",
+        _Failed.data,
+        transport_success=_Failed.success,
+    ) == ("failed", [], None)
 
 
 def test_a_name_from_the_archive_never_leaves_for_a_search_engine():

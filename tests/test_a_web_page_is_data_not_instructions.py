@@ -51,7 +51,30 @@ class _ReturnsTheHostilePage:
         return [{"type": "function", "function": {"name": "web_research", "description": "искать"}}]
 
     async def execute(self, name, arguments=None, *, actor=None):  # noqa: ANN001, ARG002
-        result = ToolResult(name, True, data={"sources": [{"url": "https://example.org", "title": "Курс"}]})
+        result = ToolResult(
+            name,
+            True,
+            data={
+                "query": "курс евро",
+                "outbound_attempted": True,
+                "sources": [
+                    {
+                        "url": "https://example.org",
+                        "title": "Курс",
+                        "text": HOSTILE_PAGE,
+                        "text_length": len(HOSTILE_PAGE),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                ],
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+            },
+        )
         result.to_llm_message = lambda: HOSTILE_PAGE  # type: ignore[method-assign]
         return result
 

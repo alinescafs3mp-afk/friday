@@ -130,6 +130,46 @@ def test_the_three_signs_survive_the_public_projection() -> None:
     assert extraction.get("source_truncated_for_parse") is True, published
 
 
+def test_transient_flat_reliability_facts_survive_the_public_projection() -> None:
+    published = public_chat_ingestion(
+        {
+            "message": "Готово.",
+            "file_ingestion": {
+                "action": "transient",
+                "promoted": False,
+                "queued_for_review": False,
+                "raw_object_id": None,
+                "extraction_success": True,
+                "empty_text": False,
+                "text_truncated": True,
+                "parse_deadline_reached": True,
+                "archive_truncated": True,
+                "archive_files": 30,
+                "archive_files_read": 24,
+                "source_truncated_for_parse": True,
+                "unsupported_format": False,
+            },
+        }
+    )
+
+    receipt = published["file_ingestion"]
+    assert receipt == {
+        "promoted": False,
+        "queued_for_review": False,
+        "persisted": False,
+        "action": "transient",
+        "extraction_success": True,
+        "empty_text": False,
+        "text_truncated": True,
+        "parse_deadline_reached": True,
+        "archive_truncated": True,
+        "source_truncated_for_parse": True,
+        "unsupported_format": False,
+        "archive_files": 30,
+        "archive_files_read": 24,
+    }
+
+
 def test_a_photo_is_not_called_an_unknown_format(settings, storage) -> None:
     """Картинку и звук Friday читает ДРУГИМИ путями — зрением и расшифровкой.
 

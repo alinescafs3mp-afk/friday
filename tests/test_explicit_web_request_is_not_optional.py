@@ -81,7 +81,26 @@ async def test_the_search_runs_before_the_model_gets_a_turn(monkeypatch):
     class _Result:
         success = True
         attachment = None
-        data = {"results": [{"url": "https://cbr.ru/", "title": "Ставка 14,00%"}]}
+        data = {
+            "query": "какая сейчас ключевая ставка ЦБ",
+            "outbound_attempted": True,
+            "sources": [
+                {
+                    "url": "https://cbr.ru/",
+                    "title": "Ставка 14,00%",
+                    "text": "Ключевая ставка составляет 14,00% на 31.07.2026.",
+                    "text_length": len("Ключевая ставка составляет 14,00% на 31.07.2026."),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                }
+            ],
+            "requested_sources": 1,
+            "completed_sources": 1,
+            "timed_out_sources": 0,
+            "failed_sources": 0,
+            "search_timed_out": False,
+        }
 
         def to_llm_message(self) -> str:
             return "Результат web_research:\nставка 14,00% на 31.07.2026"
@@ -265,7 +284,26 @@ async def test_an_encyclopedia_fallback_is_never_passed_off_as_fresh(monkeypatch
     class _Result:
         success = True
         attachment = None
-        data = {"sources": [{"url": "https://ru.wikipedia.org/wiki/Погода", "title": "Погода", "text": "…"}]}
+        data = {
+            "query": "какая завтра погода",
+            "outbound_attempted": True,
+            "sources": [
+                {
+                    "url": "https://ru.wikipedia.org/wiki/Погода",
+                    "title": "Погода",
+                    "text": "Погода — совокупность значений метеорологических элементов.",
+                    "text_length": len("Погода — совокупность значений метеорологических элементов."),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                }
+            ],
+            "requested_sources": 1,
+            "completed_sources": 1,
+            "timed_out_sources": 0,
+            "failed_sources": 0,
+            "search_timed_out": False,
+        }
 
         def to_llm_message(self) -> str:
             return "Результат web_research: статья «Погода»"
@@ -304,7 +342,26 @@ async def test_an_ordinary_result_carries_no_encyclopedia_caveat(monkeypatch):
     class _Result:
         success = True
         attachment = None
-        data = {"sources": [{"url": "https://cbr.ru/", "title": "Ставка", "text": "14%"}]}
+        data = {
+            "query": "ключевую ставку",
+            "outbound_attempted": True,
+            "sources": [
+                {
+                    "url": "https://cbr.ru/",
+                    "title": "Ставка",
+                    "text": "Ключевая ставка составляет 14%.",
+                    "text_length": len("Ключевая ставка составляет 14%."),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                }
+            ],
+            "requested_sources": 1,
+            "completed_sources": 1,
+            "timed_out_sources": 0,
+            "failed_sources": 0,
+            "search_timed_out": False,
+        }
 
         def to_llm_message(self) -> str:
             return "Результат web_research: ставка 14%"
@@ -347,7 +404,26 @@ async def test_the_person_sees_what_went_out_to_the_search_engine(monkeypatch):
     class _Result:
         success = True
         attachment = None
-        data = {"results": [{"url": "https://cbr.ru/", "title": "Ставка"}]}
+        data = {
+            "query": "ключевую ставку ЦБ",
+            "outbound_attempted": True,
+            "sources": [
+                {
+                    "url": "https://cbr.ru/",
+                    "title": "Ставка",
+                    "text": "Ключевая ставка составляет 14%.",
+                    "text_length": len("Ключевая ставка составляет 14%."),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                }
+            ],
+            "requested_sources": 1,
+            "completed_sources": 1,
+            "timed_out_sources": 0,
+            "failed_sources": 0,
+            "search_timed_out": False,
+        }
 
         def to_llm_message(self) -> str:
             return "Результат web_research: 14%"

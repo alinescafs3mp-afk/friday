@@ -23,6 +23,7 @@ from friday.permissions import AuthorizationService
 # постусловий.
 OBSERVE = {
     "memory_search",
+    "source_search",
     "message_search",
     "web_search",
     "web_fetch",

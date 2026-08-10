@@ -849,7 +849,7 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
 
 
 def warn_if_service_holds_the_database(storage: Any, *, action: str) -> bool:
-    """Сказать вслух, что базу прямо сейчас держит живая служба.
+    """Сказать вслух, что heartbeat ещё считает службу живой.
 
     Два процесса, одновременно пишущие в одну базу SQLite, — это не теория.
     Живой экземпляр упал 2026-08-05 в 00:22:29: сигнал 7 (SIGBUS), стек целиком
@@ -866,9 +866,10 @@ def warn_if_service_holds_the_database(storage: Any, *, action: str) -> bool:
     прагмы молча игнорируются — проверено исполнением, файлы `-wal`/`-shm` после
     закрытия удаляются как ни в чём не бывало.
 
-    Поэтому здесь не запрет, а честное предупреждение: запрет остановил бы работу
-    там, где риск — секунды недоступности, а не потеря данных. Решает человек,
-    но решает ЗНАЯ.
+    Командная граница теперь берёт ``backend.lock`` ДО вызова изменяющего
+    обработчика и не допускает второго писателя вовсе. Эта проверка остаётся
+    поясняющей диагностикой для старого heartbeat и прямых внутренних вызовов;
+    она больше не является единственным предохранителем.
     """
 
     age = storage.live_service_heartbeat_age()
@@ -1153,7 +1154,16 @@ def _prune_entities(args: argparse.Namespace) -> int:
         if apply_changes and doomed:
             storage.record_event(
                 "graph.entities_pruned",
-                {"scanned": scanned, "removed": len(doomed), "names": [str(e["name"]) for e in doomed][:200]},
+                {
+                    "scanned": scanned,
+                    "removed": len(doomed),
+                    "names": [str(e["name"]) for e in doomed][:200],
+                    # Names are personal material without an intrinsic tenant id.
+                    # Recording the closed owner set lets account deletion find
+                    # the row and makes record_event's tombstone barrier reject a
+                    # stale CLI pass which resumes after that owner was erased.
+                    "user_ids": sorted({str(entity["user_id"]) for entity in doomed}),
+                },
             )
     finally:
         storage.close()
@@ -2372,6 +2382,74 @@ def _run_telegram_bridge() -> int:
     return 0
 
 
+# Commands not listed here are fail-closed: ``main`` takes both the account-
+# deletion contour and backend process leases before their handler runs.  This
+# is intentionally the inverse of a list of known mutators; a future maintenance
+# command cannot accidentally become a second SQLite writer merely because
+# somebody forgot to add it to an inventory.
+_CLI_COMMANDS_WITHOUT_ACCOUNT_DATA = frozenset(
+    {
+        "init",
+        "backup-keygen",
+        "decrypt-backup",
+        "model-check",
+        "install-services",
+    }
+)
+_CLI_SERVICE_ROLE_COMMANDS = frozenset(
+    {
+        "server",
+        "telegram-bridge",
+        "up",
+        "tui",
+    }
+)
+_CLI_COMMANDS_SAFE_WITH_ACTIVE_BACKEND = frozenset(
+    {
+        "status",
+        "doctor",
+        "backup",
+        "verify-backup",
+        "export-user",
+        "events",
+        "search-source",
+    }
+)
+_CLI_COMMANDS_WITH_SELF_MANAGED_BACKEND_LEASE = frozenset(
+    {
+        "restore-backup",
+        "purge",
+    }
+)
+
+
+def _run_cli_handler(args: argparse.Namespace) -> int:
+    """Run a CLI command, excluding every default/main-database mutator."""
+
+    command = str(getattr(args, "command", "") or "")
+    if command in _CLI_COMMANDS_WITHOUT_ACCOUNT_DATA or command in _CLI_SERVICE_ROLE_COMMANDS:
+        return int(args.handler(args) or 0)
+
+    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.diagnostics.runtime_lease import ProcessLease
+
+    settings = load_settings()
+    ensure_runtime_dirs(settings)
+    # Reads, exports and online backups may materialise a pre-deletion snapshot.
+    # They can coexist with the ordinary backend, but never with account deletion.
+    with ProcessLease(
+        settings.state_dir / "account-deletion.lock",
+        protocol="friday.account-deletion.v1",
+    ):
+        if (
+            command in _CLI_COMMANDS_SAFE_WITH_ACTIVE_BACKEND
+            or command in _CLI_COMMANDS_WITH_SELF_MANAGED_BACKEND_LEASE
+        ):
+            return int(args.handler(args) or 0)
+        with ProcessLease(settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+            return int(args.handler(args) or 0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="jericho",
@@ -2885,7 +2963,7 @@ def main() -> None:
     load_local_env_file()
     configure_logging(args.log_level)
     try:
-        code = int(args.handler(args) or 0)
+        code = _run_cli_handler(args)
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         logging.getLogger(__name__).error("CLI command failed (%s)", type(exc).__name__)
         code = 2

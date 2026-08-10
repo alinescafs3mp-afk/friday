@@ -332,7 +332,7 @@ async def test_attachment_chunks_reach_cardinality_verifier_and_repair(settings,
     combined = "\n".join(chunk["output"] for chunk in chunks)
     assert "POSITION-01" in combined and "POSITION-16" in combined
 
-    judge = _Judge('{"ok": true, "score": 1.0, "issues": []}')
+    judge = _Judge('{"ok": true, "request_satisfied": true, "score": 1.0, "issues": []}')
     runtime = AgentRuntime(settings, storage, llm=judge)
     verdict = await runtime._verify_response(  # noqa: SLF001
         "перечисли все позиции и посчитай их",

@@ -12,11 +12,13 @@ uploads.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from io import BytesIO
 
 import pytest
 from PIL import Image
 
+from friday.config import PROFILES
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.storage.models import EntityType, InboxItem, InboxStatus, new_id
@@ -65,7 +67,12 @@ def _png() -> bytes:
 
 
 async def _ingest_image(settings, storage, *, source_ref: str):
-    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), _VisionLLM())
+    pipeline = IngestionPipeline(
+        replace(settings, profile=PROFILES["qwen36-vl"]),
+        storage,
+        KnowledgeGraph(storage),
+        _VisionLLM(),
+    )
     result = await pipeline.ingest_file(
         "alice",
         None,

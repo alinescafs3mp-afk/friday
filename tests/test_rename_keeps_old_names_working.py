@@ -12,7 +12,10 @@ systemd-юнитах, в `.env.local`, в скриптах и в заголов�
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from friday.config import env
 
@@ -85,11 +88,188 @@ def test_the_existing_database_file_is_not_abandoned(tmp_path):
     (state / "friday.sqlite3").write_bytes(b"")
     assert _existing_database(state) == state / "friday.sqlite3"
 
+    legacy.write_bytes(b"legacy-data")
+    (state / "friday.sqlite3").write_bytes(b"new-data")
+    with pytest.raises(RuntimeError, match="FRIDAY_DATABASE_PATH"):
+        _existing_database(state)
+
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     assert _existing_database(fresh) == fresh / "friday.sqlite3", (
         "на чистой машине база должна создаваться с новым именем"
     )
+
+
+def test_explicit_database_path_bypasses_an_ambiguous_automatic_choice(tmp_path, monkeypatch):
+    from friday.config import load_settings
+
+    home = tmp_path / "home"
+    state = home / "data" / "state"
+    state.mkdir(parents=True)
+    (state / "friday.sqlite3").write_bytes(b"new-data")
+    legacy = state / "jericho.sqlite3"
+    legacy.write_bytes(b"legacy-data")
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(legacy))
+
+    assert load_settings().database_path == legacy.resolve()
+
+
+def test_deployed_database_can_be_required_to_exist_without_breaking_fresh_scratch(tmp_path, monkeypatch):
+    from friday.config import load_settings
+
+    home = tmp_path / "home"
+    database = home / "data" / "state" / "authoritative.sqlite3"
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(database))
+
+    # Scratch/test installations retain the deliberate bootstrap path.
+    assert load_settings().database_path == database.resolve()
+
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
+    with pytest.raises(RuntimeError, match="refusing to create"):
+        load_settings()
+
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"")
+    with pytest.raises(RuntimeError, match="refusing to create"):
+        load_settings()
+
+    database.write_bytes(b"existing-database")
+    assert load_settings().database_path == database.resolve()
+
+
+def test_required_database_removed_after_configuration_is_never_recreated(tmp_path, monkeypatch):
+    """The existence check and sqlite open share a no-create contract.
+
+    Regression for the startup TOCTOU: validation saw the authoritative image,
+    another recovery step removed it, and the ordinary sqlite3 open silently
+    bootstrapped a replacement at the same path.
+    """
+    from friday.config import load_settings
+    from friday.storage import FridayStorage
+
+    home = tmp_path / "home"
+    database = home / "data" / "state" / "authoritative.sqlite3"
+    database.parent.mkdir(parents=True)
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE authority_marker(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO authority_marker(value) VALUES('present')")
+
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(database))
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
+    loaded = load_settings()
+    assert loaded.database_must_exist is True
+    assert loaded.public_dict()["data"]["database_must_exist"] is True
+
+    database.unlink()
+    storage = FridayStorage(loaded)
+    try:
+        with pytest.raises(
+            sqlite3.OperationalError,
+            match="(?:unable to open database|required Friday database)",
+        ):
+            storage.get_user("owner")
+    finally:
+        storage.close(final=True)
+
+    assert not database.exists(), "mode=rw recreated the vanished authoritative database"
+
+
+def test_required_database_truncated_after_configuration_is_never_initialized(tmp_path, monkeypatch):
+    """An existing zero-byte file must not be bootstrapped at the open boundary."""
+
+    from friday.config import load_settings
+    from friday.storage import FridayStorage
+
+    home = tmp_path / "home"
+    database = home / "data" / "state" / "authoritative.sqlite3"
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(database))
+    monkeypatch.delenv("FRIDAY_DATABASE_MUST_EXIST", raising=False)
+    bootstrap = FridayStorage(load_settings())
+    bootstrap.ensure_user("owner", preset_key="owner")
+    bootstrap.close(final=True)
+
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
+    loaded = load_settings()
+    database.write_bytes(b"")
+
+    storage = FridayStorage(loaded)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="required Friday database"):
+            storage.get_user("owner")
+    finally:
+        storage.close(final=True)
+
+    assert database.stat().st_size == 0, "Friday initialized the truncated authoritative image"
+
+
+def test_required_nonempty_blank_sqlite_image_is_not_migrated(tmp_path, monkeypatch):
+    """MUST_EXIST means an existing Friday DB, not any nonempty SQLite file."""
+
+    from friday.config import load_settings
+    from friday.storage import FridayStorage
+
+    home = tmp_path / "home"
+    database = home / "data" / "state" / "authoritative.sqlite3"
+    database.parent.mkdir(parents=True)
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE unrelated(value TEXT)")
+
+    original = database.read_bytes()
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(database))
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
+    loaded = load_settings()
+
+    storage = FridayStorage(loaded)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="recognizable Friday schema"):
+            storage.get_user("owner")
+    finally:
+        storage.close(final=True)
+
+    assert database.read_bytes() == original
+    assert not Path(f"{database}-wal").exists()
+    assert not Path(f"{database}-shm").exists()
+
+
+@pytest.mark.parametrize("second_table", ["messages", "raw_objects"])
+def test_required_foreign_database_with_common_table_names_is_not_modified(
+    tmp_path,
+    monkeypatch,
+    second_table,
+):
+    """Generic names are not a Friday authority signature."""
+
+    from friday.config import load_settings
+    from friday.storage import FridayStorage
+
+    home = tmp_path / "home"
+    database = home / "data" / "state" / "authoritative.sqlite3"
+    database.parent.mkdir(parents=True)
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE users(id TEXT PRIMARY KEY)")
+        connection.execute(f'CREATE TABLE "{second_table}"(id TEXT PRIMARY KEY)')  # nosec B608
+        connection.execute("INSERT INTO users(id) VALUES('foreign-owner')")
+    original = database.read_bytes()
+
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(database))
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
+    loaded = load_settings()
+    storage = FridayStorage(loaded)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="recognizable Friday schema"):
+            storage.get_user("owner")
+    finally:
+        storage.close(final=True)
+
+    assert database.read_bytes() == original
+    assert not Path(f"{database}-wal").exists()
+    assert not Path(f"{database}-shm").exists()
 
 
 def test_the_bridge_accepts_both_header_spellings(settings):
