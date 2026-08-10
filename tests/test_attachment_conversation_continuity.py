@@ -268,10 +268,11 @@ async def test_pending_file_continues_only_when_the_same_conversation_points_bac
     assert first_text not in json.dumps(seen[4], ensure_ascii=False), "the replaced file became active again"
     assert unreadable_turn["restored_attachment_count"] == 0
     assert unreadable_turn["attachment_context_available"] is False
+    assert "прочитать не удалось" in unreadable_turn["message"]
     assert transient_turn["attachment_context_available"] is True
     assert after_transient["restored_attachment_count"] == 0
     assert after_transient["attachment_context_available"] is False
-    assert seen[7] == [], "a no-save file allowed an older persisted file to return"
+    assert seen[6] == [], "a no-save file allowed an older persisted file to return"
 
     first_user = storage.get_conversation_messages(opened["conversation_id"], user_id="alice", limit=20)[0]
     metadata = json.loads(first_user["metadata_json"])
@@ -411,6 +412,8 @@ def test_conversation_catalog_resolves_names_ordinals_and_sets(
             [2, 3],
             2,
         ),
+        (["report.pdf", "scan.jpg"], "Сравни report.pdf и scan.jpg.", [0, 1], 2),
+        (["report.pdf", "scan.jpg"], "Что в scan.jpg.", [1], 1),
         (["one.txt", "two.txt", "three.txt"], "Что в пятом файле?", [], 1),
         (["one.txt", "two.txt", "three.txt"], "Что в файле №99?", [], 1),
     ],

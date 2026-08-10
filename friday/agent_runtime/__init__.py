@@ -5477,6 +5477,78 @@ _FALSE_CURRENT_MODEL_OUTAGE = re.compile(
     r"как\s+только\s+модель\s+(?:ответит|поднимется|заработает)\b)",
     re.IGNORECASE,
 )
+# A parsed current attachment is a measured runtime fact.  A successful model
+# answer has no authority to deny that the bytes/text were supplied or to ask
+# for the same complete file again.  Keep the detector on the leading answer
+# assertion and on whole-file access claims; difficulty reading one field or a
+# genuinely incomplete parse is a different, truthful outcome.
+_FALSE_READABLE_ATTACHMENT_REFUSAL = re.compile(
+    r"\A\s*(?:⚠️?\s*)?(?:(?:(?:к\s+сожалению|увы)\s*[,;:—-]?|"
+    r"(?:извините|простите)\s*[,;:—-]?\s*(?:но\s+)?)\s*)?(?:"
+    r"(?:я\s+)?не\s+(?:могу|умею|способ(?:ен|на))\s+"
+    r"(?:(?:напрямую|самостоятельно|здесь|в\s+этом\s+чате)\s+)?"
+    r"(?:открыть|прочитать|просмотреть|увидеть|"
+    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?|"
+    r"получить\s+доступ\s+к)"
+    r"(?:\s+(?:или|и)\s+(?:открыть|прочитать|просмотреть|увидеть))?\s+"
+    r"(?:(?:содержим\w+|текст\w*|данн\w+)\s+)?"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
+    r"(?:я\s+)?не\s+(?:вижу|получил(?:а)?|имею\s+доступ\s+к)\s+"
+    r"(?:(?:содержим\w+|текст\w*|данн\w+)\s+)?"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
+    r"(?:у\s+меня|здесь)\s+нет\s+доступа\s+к\s+"
+    r"(?:(?:этому|вашему|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файлу)?|файл\w*|документ\w*|вложени\w*)\b|"
+    r"(?:у\s+меня\s+нет|я\s+не\s+имею)\s+возможности\s+"
+    r"(?:открыть|прочитать|просмотреть|увидеть)\s+"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
+    r"(?:не\s+удалось|не\s+получилось)\s+"
+    r"(?:открыть|прочитать|просмотреть|увидеть|"
+    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?)\s+"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
+    r"(?:мне\s+)?(?:не\s+доступ\w*|не\s+отобража\w*|не\s+передан\w*|"
+    r"не\s+получен\w*|не\s+откр\w*|не\s+чита\w*|не\s+виден\w*)\b|"
+    r"(?:мне\s+)?(?:недоступен|не\s+(?:доступен|виден|отображается|"
+    r"открывается|читается))\s+"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b|"
+    r"(?:содержим\w+|текст\w*|данн\w+)\s+"
+    r"(?:(?:этого|вашего|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файла)?|файл\w*|документ\w*|вложени\w*)\s+"
+    r"(?:мне\s+)?(?:не\s+доступ\w*|не\s+вид\w*|не\s+отобража\w*|"
+    r"не\s+получен\w*|не\s+чита\w*)\b|"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
+    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?|имею)\s*[,;:—-]?\s*"
+    r"(?:(?:но|однако)\s+)?"
+    r"(?:открыть|прочитать|просмотреть|увидеть|"
+    r"извлечь(?:\s+(?:содержим\w+|текст\w*|данн\w+)\s+из)?)\s+"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
+    r"(?:я\s+)?не\s+(?:могу|умею|способ(?:ен|на))\b|"
+    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?|имею)\s+"
+    r"(?:(?:этот|ваш|загруженн\w*|прикрепл[её]нн\w*)\s+)?"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\b[^.!?\n]{0,40}\b(?:"
+    r"не\s+(?:могу|умею|способ(?:ен|на))\s+"
+    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
+    r"(?:его|их|это|содержим\w*)|"
+    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
+    r"(?:его|их|это|содержим\w*)\s+(?:я\s+)?"
+    r"не\s+(?:могу|умею|способ(?:ен|на))\b)|"
+    r"(?:pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+"
+    r"(?:я\s+)?(?:вижу|получил(?:а)?|открыл(?:а)?)\b\s*(?:[.!?]\s*)?"
+    r"(?:открыть|прочитать|просмотреть|увидеть|извлечь)\s+"
+    r"(?:его|их|это|содержим\w*)\s+(?:я\s+)?"
+    r"не\s+(?:могу|умею|способ(?:ен|на))\b|"
+    r"(?:пришлите|загрузите|отправьте|прикрепите)\s+"
+    r"(?:(?:этот|ваш|его|pdf(?:-?файл)?|файл\w*|документ\w*|вложени\w*)\s+){0,3}"
+    r"(?:снова|заново|повторно|ещ[её]\s+раз|целиком|полностью)\b)",
+    re.IGNORECASE,
+)
 _ASKS_ABOUT_MODEL_OUTAGE = re.compile(
     r"(?:"
     r"\b(?:почему|когда|что\s+случилось|статус|состояние|работает\s+ли|доступна\s+ли|"
@@ -5487,6 +5559,11 @@ _ASKS_ABOUT_MODEL_OUTAGE = re.compile(
 )
 _FALSE_MODEL_OUTAGE_FALLBACK = (
     "Не удалось получить содержательный ответ на этот запрос. Повторите запрос ещё раз."
+)
+_UNREADABLE_ATTACHMENT_ANSWER = (
+    "Содержимое вложения прочитать не удалось: система не получила из файла ни "
+    "проверяемого текста, ни подтверждённого распознавания. Поэтому я не буду "
+    "угадывать или выдумывать его данные."
 )
 
 
@@ -6325,7 +6402,7 @@ _EXPLICIT_ATTACHMENT_REFERENCE = re.compile(
 _ATTACHMENT_FILE_EXTENSION = r"(?:[A-Za-z0-9]{1,16})"
 _ATTACHMENT_BARE_FILENAME_REFERENCE = re.compile(
     rf"(?<![\w./\\-])(?P<filename>[\w@+(),\[\]-]+(?:\.[\w@+(),\[\]-]+)*\."
-    rf"{_ATTACHMENT_FILE_EXTENSION})(?![\w.-])",
+    rf"{_ATTACHMENT_FILE_EXTENSION})(?![\w-]|\.[\w])",
     re.IGNORECASE,
 )
 _ATTACHMENT_QUOTED_FILENAME_REFERENCE = re.compile(
@@ -6335,7 +6412,7 @@ _ATTACHMENT_QUOTED_FILENAME_REFERENCE = re.compile(
 _ATTACHMENT_FILENAME_REFERENCE = re.compile(
     rf"(?:[«\"'][^«»\"'/\\\r\n]{{1,180}}\.{_ATTACHMENT_FILE_EXTENSION}[»\"']|"
     rf"(?<![\w./\\-])[\w@+(),\[\]-]+(?:\.[\w@+(),\[\]-]+)*\."
-    rf"{_ATTACHMENT_FILE_EXTENSION}(?![\w.-]))",
+    rf"{_ATTACHMENT_FILE_EXTENSION}(?![\w-]|\.[\w]))",
     re.IGNORECASE,
 )
 _ATTACHMENT_COMPARISON_ACTION = re.compile(
@@ -6382,7 +6459,8 @@ _ATTACHMENT_SELECTIVE_REFERENCE = re.compile(
     rf"\b(?:тот|этот|один)\b[^.!?\n]{{0,80}}\b(?:из|среди)\b[^.!?\n]{{0,80}}"
     rf"{_ATTACHMENT_REFERENCE_NOUN}\b|"
     rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,100}}\b(?:где|котор)\w*\b|"
-    rf"\b(?:из|среди)\b[^.!?\n]{{0,80}}{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    r"\b(?:из|среди|among)\b[^.!?\n]{0,80}"
+    r"(?:файлов|документов|вложений|таблиц|files|documents|attachments|spreadsheets)\b|"
     rf"\b(?:предыдущ|предпоследн|перв|втор|трет|четв[её]рт|последн)\w*\b"
     rf"[^.!?\n]{{0,100}}{_ATTACHMENT_REFERENCE_NOUN}\b"
     rf")",
@@ -8203,6 +8281,20 @@ def _attachment_source_complete(item: Mapping[str, Any]) -> bool:
     )
 
 
+def _attachment_has_verifiable_content(item: Mapping[str, Any]) -> bool:
+    """Whether attachment text may be used as factual answer evidence.
+
+    Vision/OCR and transcription are deliberately advisory in the ingestion
+    contract.  Prompt caveats and a later verifier cannot make model-produced
+    OCR prove itself, so those bytes stay out of synthesis and hierarchy until
+    a separately verified visual-source contract exists.  Other explicitly
+    ineligible text is withheld by the same positive gate: a synthesis model
+    cannot bootstrap evidence which the extractor refused to authenticate.
+    """
+
+    return bool(item.get("verification_eligible", True) is not False and not item.get("advisory_only"))
+
+
 def _attachment_needs_full_source_prepass(
     active: list[dict[str, Any]],
     projected: list[dict[str, Any]],
@@ -8221,6 +8313,10 @@ def _attachment_needs_full_source_prepass(
     if len(active) != len(projected):
         return True
     for source, view in zip(active, projected, strict=True):
+        if not _attachment_has_verifiable_content(source):
+            # The file still counts toward requested-set completeness, but its
+            # advisory body must never trigger or enter a full-source map.
+            continue
         if not _attachment_source_complete(source):
             return True
         if is_trusted_office_attachment(source):
@@ -8394,9 +8490,11 @@ def _attachment_whole_source_plan(
     # only the selected prefix would incorrectly tell a person to upload an
     # already readable file again when the real limit was map capacity.
     for file_index, item in enumerate(admitted, start=1):
-        text = str(item.get("transient_text") or "")
+        content_is_verifiable = _attachment_has_verifiable_content(item)
+        text = str(item.get("transient_text") or "") if content_is_verifiable else ""
         readable = bool(
-            item.get("extraction_success", True) is not False
+            content_is_verifiable
+            and item.get("extraction_success", True) is not False
             and (text.strip() or item.get("empty_text") is True)
         )
         if readable:
@@ -13602,7 +13700,7 @@ class AgentRuntime:
         # inside `old-report.pdf`, the bug that used to select both files.
         known_candidates: list[tuple[int, int, str]] = []
         for name in name_groups:
-            for match in re.finditer(rf"(?<![\w.-]){re.escape(name)}(?![\w.-])", folded):
+            for match in re.finditer(rf"(?<![\w.-]){re.escape(name)}(?![\w-]|\.[\w])", folded):
                 known_candidates.append((match.start(), match.end(), name))
         accepted_known: list[tuple[int, int, str]] = []
         for start, end, name in sorted(
@@ -14512,6 +14610,24 @@ class AgentRuntime:
             if raw_id:
                 active_raw_ids.add(raw_id)
             active_attachment_set.append(item)
+        # Advisory OCR/transcription is model-produced text, not evidence for
+        # the underlying bytes.  Withhold it before every projector/query/map
+        # path, while retaining the file descriptor itself so requested-set
+        # accounting remains truthful (one selected file, zero readable).
+        for position, item in enumerate(active_attachment_set):
+            if not isinstance(item, Mapping) or _attachment_has_verifiable_content(item):
+                continue
+            withheld = dict(item)
+            withheld["transient_text"] = ""
+            withheld["extraction_success"] = False
+            withheld.pop("empty_text", None)
+            active_attachment_set[position] = (
+                trusted_office_attachment(withheld)
+                if is_trusted_office_attachment(item)
+                else _OwnedAttachment(withheld)
+                if isinstance(item, _OwnedAttachment)
+                else withheld
+            )
         whole_document_task = (
             "summary"
             if synthetic_document_notice and active_attachment_set
@@ -14562,7 +14678,8 @@ class AgentRuntime:
         attachment_readable_count = sum(
             1
             for item in attachments
-            if (
+            if _attachment_has_verifiable_content(item)
+            and (
                 item.get("_source_readable") is True
                 if item.get("_request_projection_applied") is True
                 else (
@@ -14607,7 +14724,8 @@ class AgentRuntime:
             and sum(
                 1
                 for item in attachments
-                if (
+                if _attachment_has_verifiable_content(item)
+                and (
                     item.get("_source_readable") is True
                     if item.get("_request_projection_applied") is True
                     else (
@@ -14649,6 +14767,25 @@ class AgentRuntime:
             else _ATTACHMENT_QUERY_UNKNOWN
             if attachment_request_projection.status == "unknown"
             else ""
+        )
+        unreadable_attachment_answer = bool(
+            attachment_expected_count
+            and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
+            and len(attachments) == attachment_expected_count
+            and attachment_readable_count == 0
+            and not empty_attachment_answer
+            and not attachment_resolution_failed
+            and not multi_attachment_incomplete
+            and not attachment_query_closed_answer
+        )
+        partially_unreadable_attachment_answer = bool(
+            attachment_expected_count > 1
+            and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
+            and len(attachments) == attachment_expected_count
+            and 0 < attachment_readable_count < attachment_expected_count
+            and not attachment_resolution_failed
+            and not multi_attachment_incomplete
+            and not attachment_query_closed_answer
         )
         foreign_private_request = _requests_foreign_private_data(clean_message)
         dangerous_instruction_request = bool(
@@ -15017,7 +15154,12 @@ class AgentRuntime:
                 search_query=clean_message,
                 outward_verdict=("человек", None),
             )
-        elif empty_attachment_answer or office_exact is not None:
+        elif (
+            empty_attachment_answer
+            or unreadable_attachment_answer
+            or partially_unreadable_attachment_answer
+            or office_exact is not None
+        ):
             # Exact Office membership/count is already completely determined by
             # the authenticated structural view.
             context = AgentContext(
@@ -15453,6 +15595,8 @@ class AgentRuntime:
             and not fabricated_outside_deed_request
             and not private_web_search_blocked
             and not empty_attachment_answer
+            and not unreadable_attachment_answer
+            and not partially_unreadable_attachment_answer
             and not multi_attachment_incomplete
             and not attachment_query_closed_answer
         ):
@@ -15516,6 +15660,23 @@ class AgentRuntime:
                 "content": "Текста в файле не оказалось.",
                 "tools_used": [],
                 "_empty_attachment_owned": True,
+            }
+        elif unreadable_attachment_answer:
+            response = {
+                "content": _UNREADABLE_ATTACHMENT_ANSWER,
+                "tools_used": [],
+                "_unreadable_attachment_owned": True,
+            }
+        elif partially_unreadable_attachment_answer:
+            response = {
+                "content": (
+                    "Не могу надёжно ответить по всему выбранному набору: проверяемое "
+                    f"содержимое доступно для {attachment_readable_count} из "
+                    f"{attachment_expected_count} вложений. По непрочитанным файлам я "
+                    "не буду угадывать или выдумывать данные."
+                ),
+                "tools_used": [],
+                "_unreadable_attachment_owned": True,
             }
         elif office_exact is not None:
             # The model is not allowed to nominate the members of an exact set.
@@ -15631,6 +15792,82 @@ class AgentRuntime:
         if response.get("llm_failed") and self.llm.enabled:
             self._tell_the_owner_the_model_is_silent(user_id)
         content = (response.get("content") or "").strip()
+        false_readable_attachment_refusal_replaced = False
+        readable_attachment_refusal = bool(
+            self.llm.enabled
+            and response.get("_model_generated") is True
+            and not response.get("llm_failed")
+            and attachment_coverage_complete
+            and attachment_readable_count > 0
+            and _FALSE_READABLE_ATTACHMENT_REFUSAL.search(_refusal_classification_text(content))
+        )
+        if readable_attachment_refusal:
+            # The parser, not the answering model, owns file availability.  Give
+            # one bounded retry an attachment-only context so stale dialogue
+            # cannot replay the false refusal.  The retry is tool-free; effects
+            # already completed by the first pass remain in the ledger, while
+            # every response-derived carrier is discarded below.
+            retry_context = AgentContext(
+                conversation_id=context.conversation_id,
+                user_id=context.user_id,
+                person_id=context.person_id,
+                search_query=str(asked_of_model or clean_message),
+                current_attachment_present=True,
+                focused_attachment_turn=True,
+                isolated_shape_turn=True,
+                attachment_primary_deadline=context.attachment_primary_deadline,
+                attachment_hierarchy_bundle=context.attachment_hierarchy_bundle,
+                attachment_hierarchy_complete=context.attachment_hierarchy_complete,
+            )
+            retried = await self._generate_response(
+                retry_context,
+                str(asked_of_model or clean_message),
+                attachments,
+            )
+            retried_content = str(retried.get("content") or "").strip()
+            retry_accepted = bool(
+                retried.get("_model_generated") is True
+                and not retried.get("llm_failed")
+                and retried_content
+                and not _FALSE_READABLE_ATTACHMENT_REFUSAL.search(
+                    _refusal_classification_text(retried_content)
+                )
+            )
+            if retry_accepted:
+                content = retried_content
+                response["content"] = content
+                response["_model_generated"] = True
+            else:
+                authorised_active_ids = list(
+                    current_attachment_ids or replay_attachment_ids or restored_attachment_ids
+                )
+                reusable_readable = bool(
+                    attachment_context_complete
+                    and len(set(authorised_active_ids)) == attachment_expected_count
+                )
+                content = _readable_attachment_model_failure(
+                    expected_count=max(attachment_expected_count, attachment_readable_count),
+                    readable_count=attachment_readable_count,
+                    coverage_complete=attachment_coverage_complete,
+                    reusable=reusable_readable,
+                )
+                response["content"] = content
+                response["_model_generated"] = False
+                response["_attachment_model_failure_owned"] = True
+            refusal_files = response.get("file_clips")
+            refusal_file_clips = list(refusal_files) if isinstance(refusal_files, list) else []
+            refusal_structural_count = response.get("_structural_file_count")
+            response["file_clips"] = (
+                refusal_file_clips[: max(0, min(len(refusal_file_clips), refusal_structural_count))]
+                if isinstance(refusal_structural_count, int)
+                and not isinstance(refusal_structural_count, bool)
+                else []
+            )
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            response["_readable_attachment_refusal_replaced"] = True
+            false_readable_attachment_refusal_replaced = True
+            LOGGER.warning("attachment: false readable-file refusal discarded")
         stale_conversational_replay_replaced = bool(
             context.small_talk
             and _replays_latest_conversational_answer(content, context.conversation_history)
@@ -15842,6 +16079,7 @@ class AgentRuntime:
             or web_evidence_used
             or attachment_evidence
             or response.get("_office_exact_owned") is True
+            or response.get("_unreadable_attachment_owned") is True
         )
         person_grounding_replaced = False
         if (
@@ -16367,6 +16605,8 @@ class AgentRuntime:
         model_said = (
             ""
             if response.get("_office_exact_owned") is True
+            or response.get("_unreadable_attachment_owned") is True
+            or response.get("_attachment_model_failure_owned") is True
             or office_model_claim_rejected
             or outside_deed_replaced
             or supported_deed_replaced
@@ -16484,6 +16724,8 @@ class AgentRuntime:
                 "score": 1.0 if exact_status == VERDICT_PASSED else None,
                 "issues": [] if exact_status == VERDICT_PASSED else ["office_structure_unavailable"],
             }
+        elif response.get("_unreadable_attachment_owned") is True:
+            verification = _unknown_verdict("attachment_content_unreadable")
         elif office_model_claim_rejected:
             verification = _unknown_verdict("office_model_exhaustive_claim_rejected")
         else:
@@ -16783,6 +17025,40 @@ class AgentRuntime:
         # boundary.  Reapply the guard to the model body only, at the last point
         # before refusal alternatives and derived file/TTS creation.  Structural
         # facts stay byte-for-byte intact.
+        late_false_readable_attachment_refusal = bool(
+            self.llm.enabled
+            and response.get("_model_generated") is True
+            and not response.get("llm_failed")
+            and attachment_coverage_complete
+            and attachment_readable_count > 0
+            and _FALSE_READABLE_ATTACHMENT_REFUSAL.search(_refusal_classification_text(str(model_said or "")))
+        )
+        if late_false_readable_attachment_refusal:
+            false_readable_attachment_refusal_replaced = True
+            authorised_active_ids = list(
+                current_attachment_ids or replay_attachment_ids or restored_attachment_ids
+            )
+            reusable_readable = bool(
+                attachment_context_complete and len(set(authorised_active_ids)) == attachment_expected_count
+            )
+            fallback = _readable_attachment_model_failure(
+                expected_count=max(attachment_expected_count, attachment_readable_count),
+                readable_count=attachment_readable_count,
+                coverage_complete=attachment_coverage_complete,
+                reusable=reusable_readable,
+            )
+            model_said = ""
+            content = f"{spoken}\n\n{fallback}".strip() if spoken else fallback
+            response["content"] = content
+            response["file_clips"] = list(structural_file_clips)
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            response["_model_generated"] = False
+            response["_attachment_model_failure_owned"] = True
+            response["_readable_attachment_refusal_replaced"] = True
+            verification = _unknown_verdict("false_readable_attachment_refusal_replaced")
+            verification_status = VERDICT_UNKNOWN
+            LOGGER.warning("attachment: false repair/replay readable-file refusal discarded")
         late_false_model_outage = bool(
             self.llm.enabled
             and response.get("_model_generated") is True
@@ -16895,6 +17171,8 @@ class AgentRuntime:
             and shape_contract is None
             and not exact_quote_pipeline_owned
             and not response.get("llm_failed")
+            and response.get("_attachment_model_failure_owned") is not True
+            and response.get("_unreadable_attachment_owned") is not True
             and (not capability_refusal or bool(_REFUSAL_OFFERS_LOCAL_FILE.search(compact_model_said)))
             and asked_for_a_file
             and not context.asked_for_an_archive
@@ -17375,6 +17653,11 @@ class AgentRuntime:
                     ),
                     "answer_present": bool(spoken) or response.get("_office_exact_owned") is True,
                     "model_spoke": bool(model_said),
+                    **(
+                        {"readable_attachment_refusal_replaced": True}
+                        if false_readable_attachment_refusal_replaced
+                        else {}
+                    ),
                     **(
                         {"person_document_inventory": True}
                         if context.person_document_inventory_settled

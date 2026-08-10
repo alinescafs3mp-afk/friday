@@ -2145,7 +2145,7 @@ async def test_repair_cannot_introduce_a_verified_count_from_incomplete_attachme
 
 @pytest.mark.parametrize("kind", ["vision", "voice"])
 @pytest.mark.asyncio
-async def test_advisory_vision_and_voice_are_not_verifier_or_grounding_evidence(
+async def test_advisory_vision_and_voice_are_withheld_from_synthesis_and_verification(
     settings,
     storage,
     monkeypatch,
@@ -2160,7 +2160,6 @@ async def test_advisory_vision_and_voice_are_not_verifier_or_grounding_evidence(
         llm=_UnusedEnabledLLM(),
         kernel=ExecutionKernel(auth, settings),
     )
-    shown: list[list[dict[str, Any]]] = []
     grounding: dict[str, Any] = {}
 
     async def prepare(user_id, message, conversation_id, **kwargs):
@@ -2175,8 +2174,8 @@ async def test_advisory_vision_and_voice_are_not_verifier_or_grounding_evidence(
 
     async def generate(context, message, attachments):
         del context, message
-        shown.append([dict(item) for item in (attachments or [])])
-        return {"content": "В распознанном материале есть одна строка.", "tools_used": []}
+        del attachments
+        raise AssertionError("unverified advisory text reached answer synthesis")
 
     async def should_not_verify(*args, **kwargs):
         del args, kwargs
@@ -2207,9 +2206,10 @@ async def test_advisory_vision_and_voice_are_not_verifier_or_grounding_evidence(
         enable_tools=False,
     )
 
-    assert advisory_text in shown[0][0]["transient_text"]
-    assert _attachment_evidence_chunks(shown[0]) == []
-    assert result["attachment_context_available"] is True
+    assert advisory_text not in result["message"]
+    assert "прочитать не удалось" in result["message"]
+    assert "не буду угадывать или выдумывать" in result["message"]
+    assert result["attachment_context_available"] is False
     assert result["attachment_verification_complete"] is False
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False
