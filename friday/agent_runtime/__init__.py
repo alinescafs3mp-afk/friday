@@ -15332,6 +15332,25 @@ class AgentRuntime:
                 )
             )
         )
+        # Source loss belongs to the authorised extractor result, before the
+        # request projector reuses ``text_truncated`` to describe a bounded
+        # prompt view.  A complete 20 KB DOCX may be clipped for one prompt and
+        # still be fully available to hierarchy/search; that is not a partial
+        # parse and must not produce the source-loss warning.
+        attachment_has_unread_tail = any(
+            item.get(flag) is True
+            for item in active_attachment_set
+            if isinstance(item, Mapping)
+            for flag in (
+                "text_truncated",
+                "extraction_truncated",
+                "rows_truncated",
+                "archive_truncated",
+                "source_truncated_for_parse",
+                "parse_deadline_reached",
+                "parse_pages_truncated",
+            )
+        )
         attachments, attachment_request_projection = _project_attachments_for_request(
             clean_message,
             active_attachment_set,
@@ -15453,19 +15472,6 @@ class AgentRuntime:
             if item.get("advisory_only") is True
             and str(item.get("transient_text") or "").strip()
             and not _is_file_provenance_stub(str(item.get("transient_text") or ""))
-        )
-        attachment_has_unread_tail = any(
-            item.get(flag) is True
-            for item in attachments
-            for flag in (
-                "text_truncated",
-                "extraction_truncated",
-                "rows_truncated",
-                "archive_truncated",
-                "source_truncated_for_parse",
-                "parse_deadline_reached",
-                "parse_pages_truncated",
-            )
         )
         unreadable_attachment_answer = bool(
             attachment_expected_count
