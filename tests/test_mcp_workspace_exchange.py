@@ -196,7 +196,11 @@ async def test_fixed_stdio_tools_use_kernel_auth_and_exact_exchange_bytes(settin
     assert inbox is not None and outbox is not None
     (inbox / "note.txt").write_text("ORION-42\n" * 200, encoding="utf-8")
 
-    manager = MCPClientManager([workspace_server_definition(configured)])
+    definition = workspace_server_definition(configured)
+    assert definition.environment["PYTHONPATH"] == str(
+        Path(workspace_server_definition.__code__.co_filename).resolve().parents[2]
+    )
+    manager = MCPClientManager([definition])
     await manager.start()
     try:
         assert manager.is_available("workspace")

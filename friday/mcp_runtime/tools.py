@@ -51,6 +51,11 @@ def workspace_server_definition(settings: FridaySettings) -> MCPServerDefinition
     # Keep the venv launcher symlink: resolving it selects the system Python,
     # where the pinned MCP dependency is intentionally not installed.
     executable = Path(sys.executable).absolute()
+    # The backend may run from an immutable release selected through
+    # PYTHONPATH while the venv itself is an editable checkout.  Pass the
+    # code-owned root of the module which built this definition so the MCP
+    # child imports that exact release instead of drifting to the checkout.
+    release_root = Path(__file__).resolve(strict=True).parents[2]
     return MCPServerDefinition(
         alias=_SERVER_ALIAS,
         command=str(executable),
@@ -66,6 +71,7 @@ def workspace_server_definition(settings: FridaySettings) -> MCPServerDefinition
         ),
         allowed_tools=_SERVER_TOOLS,
         cwd=settings.home,
+        environment={"PYTHONPATH": str(release_root)},
         startup_timeout_sec=settings.mcp_startup_timeout_sec,
         call_timeout_sec=settings.mcp_call_timeout_sec,
     )
