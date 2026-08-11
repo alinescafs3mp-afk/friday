@@ -17,6 +17,7 @@ import itertools
 import json
 import logging
 import lzma
+import math
 import mimetypes
 import re
 import tarfile
@@ -115,6 +116,7 @@ _MAX_OFFICE_EXPANDED_BYTES = 128 * 1024 * 1024
 _MAX_OFFICE_MEMBER_BYTES = 64 * 1024 * 1024
 _MAX_ZIP_RATIO = 500.0
 _MAX_TABULAR_ROWS = 100_000
+_MAX_PDF_RENDER_AXIS_PIXELS = 16_384
 
 # Дата САМОГО документа, взятая из провенанса файла, а не угаданная из текста.
 #
@@ -251,6 +253,19 @@ class VisualAsset:
             "height": self.height,
             "size_bytes": len(self.data),
         }
+
+
+@dataclass(frozen=True)
+class VisualPageRender:
+    """Bounded, contiguous PDF-page render prepared for vision OCR."""
+
+    assets: tuple[VisualAsset, ...]
+    pages_total: int
+    pages_rendered: int
+    pages_truncated: bool
+    deadline_reached: bool
+    page_cap_reached: bool
+    error: str = ""
 
 
 class ArchiveLimitError(ValueError):
@@ -537,6 +552,178 @@ class DocumentExtractor:
             if len(assets) >= max_images:
                 break
         return assets
+
+    def render_pdf_pages(
+        self,
+        content: bytes,
+        filename: str,
+        mime_type: str = "",
+        *,
+        max_pages: int = 40,
+        max_pixels: int = 8_000_000,
+        max_encoded_bytes: int = 1_500_000,
+        deadline: float | None = None,
+    ) -> VisualPageRender:
+        """Render a contiguous, bounded prefix of a PDF entirely in-process.
+
+        ``pypdf`` can recover a text layer and individual embedded images, but
+        neither is the visible page: forms, rotations, masks and several image
+        tiles may compose one scan page.  PDFium supplies that missing page
+        boundary without a shell, temporary files, or an unbounded output
+        directory.  Each page is normalized through the same image gate as a
+        direct upload before it can reach vision.
+
+        The prefix rule is deliberate.  Skipping a broken middle page and then
+        reporting only a count would make ``6 of 7`` look like pages 1--6 even
+        when page 3 was the one nobody read.  On the first render failure or
+        deadline, stop and return the exact contiguous coverage achieved.
+        """
+
+        safe_name = Path(str(filename or "document.pdf")).name
+        ext = self._compound_extension(safe_name.casefold())
+        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
+        if ext != ".pdf" and detected_mime != "application/pdf":
+            return VisualPageRender((), 0, 0, False, False, False, "not_pdf")
+        if not isinstance(content, bytes) or len(content) > self.max_input_bytes:
+            return VisualPageRender((), 0, 0, False, False, False, "invalid_pdf_input")
+
+        max_pages = max(1, min(int(max_pages), 128))
+        max_pixels = max(100_000, min(int(max_pixels), 12_000_000))
+        max_encoded_bytes = max(64_000, min(int(max_encoded_bytes), 3 * 1024 * 1024))
+        try:
+            import pypdfium2 as pdfium  # type: ignore[import-untyped]
+        except ImportError:
+            return VisualPageRender((), 0, 0, False, False, False, "pdf_renderer_unavailable")
+
+        assets: list[VisualAsset] = []
+        pages_total = 0
+        deadline_reached = False
+        error = ""
+        try:
+            document = pdfium.PdfDocument(content)
+        except Exception as exc:
+            LOGGER.debug("PDF page renderer could not open document (%s)", type(exc).__name__)
+            return VisualPageRender((), 0, 0, False, False, False, "pdf_open_failed")
+        try:
+            pages_total = max(0, int(len(document)))
+            for page_index in range(min(pages_total, max_pages)):
+                if deadline is not None and time.monotonic() >= deadline:
+                    deadline_reached = True
+                    break
+                page = None
+                bitmap = None
+                try:
+                    page = document[page_index]
+                    width, height = page.get_size()
+                    page_area = float(width) * float(height)
+                    if (
+                        not math.isfinite(page_area)
+                        or not math.isfinite(float(width))
+                        or not math.isfinite(float(height))
+                        or width <= 0
+                        or height <= 0
+                    ):
+                        error = "pdf_page_has_invalid_dimensions"
+                        break
+                    # 2.5x is sharp enough for ordinary 72-DPI PDF coordinates;
+                    # oversized pages are scaled down before PDFium allocates a
+                    # bitmap, so the configured pixel ceiling is real, not a
+                    # post-render resize.
+                    max_axis = min(_MAX_PDF_RENDER_AXIS_PIXELS, max_pixels)
+                    scale = min(
+                        2.5,
+                        math.sqrt(max_pixels / page_area),
+                        max_axis / float(width),
+                        max_axis / float(height),
+                    )
+                    if not math.isfinite(scale) or scale <= 0:
+                        error = "pdf_page_has_invalid_scale"
+                        break
+                    # PDFium rounds both axes to whole pixels before allocating
+                    # the bitmap.  An area-only floating-point check is not
+                    # sufficient for an extreme MediaBox such as 80M x 0.1:
+                    # ceil(width*scale) can otherwise request a huge row even
+                    # though width*height looks harmless.  Find the largest
+                    # uniform scale whose actual rounded allocation obeys both
+                    # the area and per-axis ceilings.
+                    render_width = max(1, math.ceil(float(width) * scale))
+                    render_height = max(1, math.ceil(float(height) * scale))
+                    if (
+                        render_width > max_axis
+                        or render_height > max_axis
+                        or render_width * render_height > max_pixels
+                    ):
+                        low = 0.0
+                        high = scale
+                        for _ in range(48):
+                            candidate = (low + high) / 2.0
+                            candidate_width = max(1, math.ceil(float(width) * candidate))
+                            candidate_height = max(1, math.ceil(float(height) * candidate))
+                            if (
+                                candidate_width <= max_axis
+                                and candidate_height <= max_axis
+                                and candidate_width * candidate_height <= max_pixels
+                            ):
+                                low = candidate
+                            else:
+                                high = candidate
+                        scale = low
+                        render_width = max(1, math.ceil(float(width) * scale))
+                        render_height = max(1, math.ceil(float(height) * scale))
+                    if (
+                        not math.isfinite(scale)
+                        or scale <= 0
+                        or render_width > max_axis
+                        or render_height > max_axis
+                        or render_width * render_height > max_pixels
+                    ):
+                        error = "pdf_page_render_budget_exceeded"
+                        break
+                    bitmap = page.render(scale=scale)
+                    image = bitmap.to_pil()
+                    encoded = io.BytesIO()
+                    image.save(encoded, format="JPEG", quality=90, optimize=False, progressive=False)
+                    normalized = self._normalize_visual_asset(
+                        encoded.getvalue(),
+                        source=f"pdf-page-{page_index + 1}-render",
+                        max_pixels=max_pixels,
+                        max_encoded_bytes=max_encoded_bytes,
+                    )
+                    if normalized is None:
+                        error = "pdf_page_normalization_failed"
+                        break
+                    assets.append(normalized)
+                except Exception as exc:
+                    LOGGER.debug(
+                        "PDF page %s rendering failed (%s)",
+                        page_index + 1,
+                        type(exc).__name__,
+                    )
+                    error = "pdf_page_render_failed"
+                    break
+                finally:
+                    if bitmap is not None:
+                        with suppress(Exception):
+                            bitmap.close()
+                    if page is not None:
+                        with suppress(Exception):
+                            page.close()
+        finally:
+            with suppress(Exception):
+                document.close()
+
+        pages_rendered = len(assets)
+        page_cap_reached = pages_total > max_pages and pages_rendered >= max_pages
+        pages_truncated = pages_rendered < pages_total
+        return VisualPageRender(
+            tuple(assets),
+            pages_total,
+            pages_rendered,
+            pages_truncated,
+            deadline_reached,
+            page_cap_reached,
+            error,
+        )
 
     def visual_source_pages(self, content: bytes, filename: str, mime_type: str = "") -> int:
         """Сколько страниц (или вложенных картинок) есть у документа ВСЕГО.

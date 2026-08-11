@@ -19,6 +19,9 @@ dependencies = [
     "Pillow>=11,<13",
     "pydantic>=2.13,<3",
     "pypdf>=5.9,<7",
+    # In-process page renderer for scan-only PDFs.  pypdf extracts text and
+    # embedded streams but cannot render a page's visible composition for OCR.
+    "pypdfium2>=5.12.1,<6",
     "python-docx>=1.1,<2",
     "python-multipart>=0.0.20,<1",
     "python-pptx>=1.0,<2",

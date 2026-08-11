@@ -274,3 +274,81 @@ async def test_no_save_visual_attachment_uses_vision_as_ephemeral_advisory_text(
     assert preview["verification_eligible"] is False
     assert not any(path.is_file() for path in settings.files_dir.rglob("*"))
     assert storage.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_transient_sparse_pdf_carries_the_selected_visual_prefix_coverage(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """A tiny native header must not hide that selected OCR saw only 4/10 pages."""
+
+    class SparsePdfExtractor(_EmptyVisualExtractor):
+        def extract(self, *args, **kwargs):
+            del args, kwargs
+            return DocumentResult(
+                "x",
+                {
+                    "format": "pdf",
+                    "pages_read": 1,
+                    "total_pages": 10,
+                    "pages_truncated": True,
+                    "parse_deadline_reached": True,
+                },
+            )
+
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    pipeline._doc_extractor = SparsePdfExtractor()  # noqa: SLF001
+
+    async def visual_extract(*_args, **_kwargs):
+        return {
+            "success": True,
+            "error": "vision_deadline_reached",
+            "confidence": 0.8,
+            "text": "VISUAL-PREFIX-ONLY",
+            "title": "",
+            "summary": "",
+            "entities": [],
+            "evidence": [],
+            "warnings": ["vision_deadline_reached"],
+            "pages_total": 10,
+            "pages_read": 4,
+            "pages_truncated": True,
+            "deadline_reached": True,
+            "assets": [],
+            "advisory_only": True,
+        }
+
+    monkeypatch.setattr(pipeline, "_extract_visual_document", visual_extract)
+    preview = await pipeline.inspect_file_transient(
+        _PDF,
+        filename="sparse-scan.pdf",
+        mime_type="application/pdf",
+    )
+
+    assert preview["_runtime_source_text"] == "VISUAL-PREFIX-ONLY"
+    assert preview["parse_pages_read"] == 4
+    assert preview["parse_total_pages"] == 10
+    assert preview["parse_pages_truncated"] is True
+    assert preview["parse_deadline_reached"] is True
+
+    async def complete_visual_extract(*_args, **_kwargs):
+        return {
+            **(await visual_extract()),
+            "error": "",
+            "pages_read": 10,
+            "pages_truncated": False,
+            "deadline_reached": False,
+        }
+
+    monkeypatch.setattr(pipeline, "_extract_visual_document", complete_visual_extract)
+    complete = await pipeline.inspect_file_transient(
+        _PDF,
+        filename="sparse-scan.pdf",
+        mime_type="application/pdf",
+    )
+    assert complete["_runtime_source_text"] == "VISUAL-PREFIX-ONLY"
+    assert complete["parse_pages_read"] == complete["parse_total_pages"] == 10
+    assert complete["parse_pages_truncated"] is False
+    assert complete["parse_deadline_reached"] is False

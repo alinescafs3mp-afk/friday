@@ -7,8 +7,10 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import time
+from collections.abc import Mapping, Sequence
 
+from friday.documents import VisualAsset
 from friday.documents._office_structure import validate_office_structure_index
 from friday.ingestion._base import (
     LOGGER,
@@ -63,6 +65,17 @@ _STRUCTURED_OFFICE_MIME_TYPES = frozenset(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
 )
+_VISION_BATCH_SIZE = 4
+_VISION_BATCH_CONCURRENCY = 2
+_VISION_PDF_MAX_PAGES = 40
+_VISION_OCR_BUDGET_SEC = 120.0
+_VISION_PDF_RENDER_BUDGET_FLOOR_SEC = 30.0
+_PDF_RENDER_SOURCE_RE = re.compile(r"^pdf-page-(\d+)-(?:render|image-\d+)$", re.IGNORECASE)
+
+
+def _visual_page_number(asset: VisualAsset) -> int | None:
+    match = _PDF_RENDER_SOURCE_RE.fullmatch(asset.source)
+    return int(match.group(1)) if match else None
 
 
 def _text_extraction_was_truncated(metadata: Mapping[str, Any]) -> bool:
@@ -158,41 +171,32 @@ class FilesMixin(PipelineShared):
             replay["transcript_text"] = spoken
         return replay
 
-    async def _extract_visual_document(
+    async def _extract_visual_batch(
         self,
-        file_content: bytes,
+        assets: Sequence[VisualAsset],
         *,
-        filename: str,
-        mime_type: str,
-    ) -> dict[str, Any] | None:
-        """Run bounded local vision/OCR and return advisory-only metadata."""
-        if not self.llm or not self.llm.enabled or not self.settings.profile.vision_capable:
-            return None
-        assets = await asyncio.to_thread(
-            self._doc_extractor.extract_visual_assets,
-            file_content,
-            filename,
-            mime_type,
-            max_images=4,
-            max_pixels=8_000_000,
-            max_encoded_bytes=1_500_000,
-        )
-        if not assets:
-            return None
-        # Сколько страниц у документа ВСЕГО против того, сколько ушло в модель.
-        # Считается отдельным дешёвым проходом, а не выводится из числа картинок:
-        # у одной страницы их может быть несколько.
-        pages_total = await asyncio.to_thread(
-            self._doc_extractor.visual_source_pages,
-            file_content,
-            filename,
-            mime_type,
-        )
-        # Источник у актива вида `pdf-page-7-image-1` — до `-image-` стоит страница.
-        # Строку эту собираем мы сами, здесь же и разбираем.
-        pages_read = len({asset.source.split("-image-")[0] for asset in assets})
+        asset_offset: int,
+    ) -> dict[str, Any]:
+        """Run one at-most-four-image vision request and validate its advice."""
+        llm = self.llm
+        if llm is None or not assets or len(assets) > _VISION_BATCH_SIZE:
+            return {
+                "success": False,
+                "error": "invalid_vision_batch",
+                "confidence": 0.0,
+                "text": "",
+                "title": "",
+                "summary": "",
+                "entities": [],
+                "evidence": [],
+                "warnings": ["invalid_vision_batch"],
+                "assets": [],
+            }
         asset_catalog = {
-            f"A{index}": {"asset_id": f"A{index}", **asset.to_dict()}
+            f"A{asset_offset + index}": {
+                "asset_id": f"A{asset_offset + index}",
+                **asset.to_dict(),
+            }
             for index, asset in enumerate(assets, start=1)
         }
         prompt_parts: list[dict[str, Any]] = [
@@ -201,10 +205,12 @@ class FilesMixin(PipelineShared):
                 "text": (
                     "Analyze these pages/images as a document. Perform careful OCR where possible. "
                     "Each image is preceded by a stable asset label such as A1. Return exactly one "
-                    "JSON object with keys: text, title, summary, document_type, confidence, "
+                    "JSON object with keys: pages, text, title, summary, document_type, confidence, "
                     "entities, evidence, warnings. entities is an array of objects with name, "
                     "entity_type, confidence, asset_id, evidence. evidence is an array of objects "
-                    "with asset_id, quote, claim. warnings is an array of short strings. Valid "
+                    "with asset_id, quote, claim. pages is an array with exactly one object per "
+                    "supplied asset, each containing asset_id and the OCR text visible on that asset; "
+                    "preserve their supplied order. warnings is an array of short strings. Valid "
                     "entity_type values: person, project, concept, event, organization, location, "
                     "document, other. Every factual claim and entity must point to a supplied asset "
                     "and a visible quote when possible. Never invent obscured text, silently join "
@@ -214,7 +220,7 @@ class FilesMixin(PipelineShared):
             }
         ]
         for index, asset in enumerate(assets, start=1):
-            asset_id = f"A{index}"
+            asset_id = f"A{asset_offset + index}"
             prompt_parts.append(
                 {
                     "type": "text",
@@ -232,7 +238,7 @@ class FilesMixin(PipelineShared):
                 }
             )
         try:
-            response = await self.llm.chat(
+            response = await llm.chat(
                 [
                     {
                         "role": "system",
@@ -266,8 +272,6 @@ class FilesMixin(PipelineShared):
                 "success": False,
                 "error": f"vision_request_failed:{type(exc).__name__}",
                 "confidence": 0.0,
-                "pages_total": pages_total,
-                "pages_read": pages_read,
                 "assets": list(asset_catalog.values()),
                 "text": "",
                 "title": "",
@@ -278,7 +282,43 @@ class FilesMixin(PipelineShared):
             }
 
         confidence = _coerce_score(parsed.get("confidence"), default=0.0)
-        text = _bounded_text(parsed.get("text"), self.settings.max_extracted_text_chars)
+        page_text: dict[str, str] = {}
+        reported_asset_ids: list[str] = []
+        for candidate in _json_list(parsed.get("pages"))[: len(assets)]:
+            if not isinstance(candidate, dict):
+                continue
+            asset_id = _bounded_text(candidate.get("asset_id"), 12).upper().strip()
+            visible = _bounded_text(candidate.get("text"), self.settings.max_extracted_text_chars).strip()
+            if asset_id in asset_catalog and asset_id not in page_text:
+                page_text[asset_id] = visible
+                reported_asset_ids.append(asset_id)
+        expected_asset_ids = list(asset_catalog)
+        if len(assets) > 1 and reported_asset_ids != expected_asset_ids:
+            return {
+                "success": False,
+                "error": "vision_batch_page_coverage_incomplete",
+                "confidence": 0.0,
+                "assets": list(asset_catalog.values()),
+                "text": "",
+                "title": "",
+                "summary": "",
+                "entities": [],
+                "evidence": [],
+                "warnings": ["vision_batch_page_coverage_incomplete"],
+                "reported_asset_ids": reported_asset_ids,
+            }
+        if page_text:
+            ordered_text: list[str] = []
+            for (asset_id, descriptor), asset in zip(asset_catalog.items(), assets, strict=True):
+                visible = page_text.get(asset_id)
+                if not visible:
+                    continue
+                page_number = _visual_page_number(asset)
+                label = f"Страница {page_number}" if page_number is not None else descriptor["source"]
+                ordered_text.append(f"[{label}]\n{visible}")
+            text = _bounded_text("\n\n".join(ordered_text), self.settings.max_extracted_text_chars)
+        else:
+            text = _bounded_text(parsed.get("text"), self.settings.max_extracted_text_chars)
         title = _bounded_text(parsed.get("title"), 200)
         summary = _bounded_text(parsed.get("summary"), 2_000)
         warnings: list[str] = []
@@ -328,7 +368,7 @@ class FilesMixin(PipelineShared):
             asset_id = _bounded_text(candidate.get("asset_id"), 12).upper().strip()
             entity_evidence = _bounded_text(candidate.get("evidence"), 400).strip()
             if asset_id not in asset_catalog:
-                asset_id = "A1" if len(asset_catalog) == 1 else ""
+                asset_id = next(iter(asset_catalog), "") if len(asset_catalog) == 1 else ""
             entity_confidence = min(
                 0.79,
                 _coerce_score(candidate.get("confidence"), default=confidence),
@@ -361,9 +401,287 @@ class FilesMixin(PipelineShared):
             "warnings": warnings,
             "grounded_evidence_count": len(evidence),
             "asset_coverage": round(len(used_assets) / len(assets), 3) if assets else 0.0,
+            "assets": list(asset_catalog.values()),
+            "reported_asset_ids": reported_asset_ids or expected_asset_ids,
+            "model": self.settings.llm_model,
+            "advisory_only": True,
+        }
+
+    async def _extract_visual_document(
+        self,
+        file_content: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+    ) -> dict[str, Any] | None:
+        """Render and OCR a bounded document in ordered, at-most-four-page batches."""
+        if not self.llm or not self.llm.enabled or not self.settings.profile.vision_capable:
+            return None
+
+        safe_mime = str(mime_type or "").split(";", 1)[0].strip().casefold()
+        is_pdf = Path(str(filename or "document")).suffix.casefold() == ".pdf" or (
+            safe_mime == "application/pdf"
+        )
+        loop = asyncio.get_running_loop()
+        common_deadline = loop.time() + _VISION_OCR_BUDGET_SEC
+        pages_total = 0
+        render_deadline_reached = False
+        page_cap_reached = False
+        render_error = ""
+        assets: list[VisualAsset] = []
+
+        if is_pdf:
+            # Rendering has its own CPU sub-budget but shares the one wall-clock
+            # deadline with every later model batch.  A timeout around to_thread
+            # would merely abandon a still-running PDFium thread; the renderer
+            # therefore checks this deadline between pages itself.
+            render_remaining = max(0.0, common_deadline - loop.time())
+            # Native text parsing normally finishes within the smaller PDF
+            # budget, but rendering forty photographic pages is legitimate
+            # work and may take longer.  Keep one internal deadline so the
+            # non-cancellable worker cannot run forever, while giving ordinary
+            # large scans a useful share of the common OCR budget.
+            render_budget = min(
+                max(float(self.settings.pdf_parse_budget_sec), _VISION_PDF_RENDER_BUDGET_FLOOR_SEC),
+                render_remaining,
+            )
+            render_deadline = time.monotonic() + render_budget
+            rendered = await asyncio.to_thread(
+                self._doc_extractor.render_pdf_pages,
+                file_content,
+                filename,
+                mime_type,
+                max_pages=_VISION_PDF_MAX_PAGES,
+                max_pixels=8_000_000,
+                max_encoded_bytes=1_500_000,
+                deadline=render_deadline,
+            )
+            assets = list(rendered.assets)
+            pages_total = rendered.pages_total
+            render_deadline_reached = rendered.deadline_reached
+            page_cap_reached = rendered.page_cap_reached
+            render_error = rendered.error
+            if not assets:
+                # Keep the old embedded-stream route as a degraded fallback for
+                # an unreadable PDF or an installation missing PDFium.  It stays
+                # bounded to one model batch and never claims the unsubmitted
+                # pages were read.
+                assets = await asyncio.to_thread(
+                    self._doc_extractor.extract_visual_assets,
+                    file_content,
+                    filename,
+                    mime_type,
+                    max_images=_VISION_BATCH_SIZE,
+                    max_pixels=8_000_000,
+                    max_encoded_bytes=1_500_000,
+                )
+                if pages_total <= 0:
+                    pages_total = await asyncio.to_thread(
+                        self._doc_extractor.visual_source_pages,
+                        file_content,
+                        filename,
+                        mime_type,
+                    )
+        else:
+            assets = await asyncio.to_thread(
+                self._doc_extractor.extract_visual_assets,
+                file_content,
+                filename,
+                mime_type,
+                max_images=_VISION_BATCH_SIZE,
+                max_pixels=8_000_000,
+                max_encoded_bytes=1_500_000,
+            )
+            if not assets:
+                return None
+            pages_total = await asyncio.to_thread(
+                self._doc_extractor.visual_source_pages,
+                file_content,
+                filename,
+                mime_type,
+            )
+
+        if not assets:
+            # A real PDF with known pages is a failed visual extraction, not
+            # "vision was never applicable".  Keeping the result lets the
+            # receipt tell the user 0/N instead of losing the document silently.
+            if not is_pdf or pages_total <= 0:
+                return None
+            render_warnings = ["vision_render_failed"]
+            if render_deadline_reached:
+                render_warnings.append("vision_render_deadline_reached")
+            return {
+                "success": False,
+                "error": render_error or "vision_render_failed",
+                "confidence": 0.0,
+                "text": "",
+                "title": "",
+                "summary": "",
+                "document_type": "",
+                "entities": [],
+                "evidence": [],
+                "warnings": render_warnings,
+                "grounded_evidence_count": 0,
+                "asset_coverage": 0.0,
+                "pages_total": pages_total,
+                "pages_read": 0,
+                "pages_truncated": True,
+                "partial": True,
+                "deadline_reached": render_deadline_reached,
+                "page_cap_reached": page_cap_reached,
+                "text_truncated": False,
+                "assets": [],
+                "model": self.settings.llm_model,
+                "advisory_only": True,
+            }
+
+        batch_specs = [
+            (offset, assets[offset : offset + _VISION_BATCH_SIZE])
+            for offset in range(0, len(assets), _VISION_BATCH_SIZE)
+        ]
+
+        async def run_batch(offset: int, batch_assets: Sequence[VisualAsset]) -> dict[str, Any]:
+            remaining = common_deadline - loop.time()
+            if remaining <= 0:
+                return {"success": False, "error": "vision_deadline_reached", "_deadline": True}
+            try:
+                async with asyncio.timeout(remaining):
+                    return await self._extract_visual_batch(batch_assets, asset_offset=offset)
+            except TimeoutError:
+                return {"success": False, "error": "vision_deadline_reached", "_deadline": True}
+
+        successful: list[tuple[Sequence[VisualAsset], dict[str, Any]]] = []
+        ocr_deadline_reached = False
+        batch_error = ""
+        stop = False
+        # Two batches in flight use the measured spare foreground parallelism,
+        # while waves preserve a contiguous prefix: after the first failed batch
+        # no later page is accepted merely because its concurrent request won a
+        # race.  That keeps pages_read interpretable as pages 1..N.
+        for wave_start in range(0, len(batch_specs), _VISION_BATCH_CONCURRENCY):
+            wave = batch_specs[wave_start : wave_start + _VISION_BATCH_CONCURRENCY]
+            results = await asyncio.gather(*(run_batch(offset, batch) for offset, batch in wave))
+            for (_offset, batch), result in zip(wave, results, strict=True):
+                if result.get("_deadline"):
+                    ocr_deadline_reached = True
+                    batch_error = "vision_deadline_reached"
+                    stop = True
+                    break
+                if result.get("success") is not True:
+                    batch_error = str(result.get("error") or "vision_batch_failed")
+                    stop = True
+                    break
+                successful.append((batch, result))
+            if stop:
+                break
+
+        successful_assets = [asset for batch, _result in successful for asset in batch]
+        pages_read = len(successful_assets)
+        if is_pdf:
+            successful_page_numbers = {
+                number for asset in successful_assets if (number := _visual_page_number(asset)) is not None
+            }
+            pages_read = len(successful_page_numbers) if successful_page_numbers else len(successful_assets)
+        pages_total = max(pages_total, pages_read)
+
+        text_parts: list[str] = []
+        summaries: list[str] = []
+        titles: list[str] = []
+        document_types: list[str] = []
+        warnings: list[str] = []
+        evidence: list[dict[str, str]] = []
+        entities: list[dict[str, Any]] = []
+        weighted_confidence = 0.0
+        weighted_coverage = 0.0
+        grounded_evidence_count = 0
+        for successful_batch, result in successful:
+            batch_text = str(result.get("text") or "").strip()
+            if batch_text:
+                if is_pdf and not batch_text.startswith("[Страница "):
+                    batch_page_numbers = [
+                        number
+                        for asset in successful_batch
+                        if (number := _visual_page_number(asset)) is not None
+                    ]
+                    if batch_page_numbers:
+                        label = (
+                            f"Страница {batch_page_numbers[0]}"
+                            if len(batch_page_numbers) == 1
+                            else f"Страницы {batch_page_numbers[0]}–{batch_page_numbers[-1]}"
+                        )
+                        batch_text = f"[{label}]\n{batch_text}"
+                text_parts.append(batch_text)
+            summary = str(result.get("summary") or "").strip()
+            if summary:
+                summaries.append(summary)
+            title = str(result.get("title") or "").strip()
+            if title:
+                titles.append(title)
+            document_type = str(result.get("document_type") or "").strip()
+            if document_type:
+                document_types.append(document_type)
+            for warning in _json_list(result.get("warnings")):
+                bounded_warning = _bounded_text(warning, 160).strip()
+                if bounded_warning:
+                    warnings.append(bounded_warning)
+            evidence.extend(item for item in _json_list(result.get("evidence")) if isinstance(item, dict))
+            entities.extend(item for item in _json_list(result.get("entities")) if isinstance(item, dict))
+            weight = len(successful_batch)
+            weighted_confidence += _coerce_score(result.get("confidence"), default=0.0) * weight
+            weighted_coverage += _coerce_score(result.get("asset_coverage"), default=0.0) * weight
+            grounded_evidence_count += max(0, int(result.get("grounded_evidence_count") or 0))
+
+        joined_text = "\n\n".join(text_parts)
+        text_truncated = len(joined_text) > self.settings.max_extracted_text_chars
+        text = _bounded_text(joined_text, self.settings.max_extracted_text_chars)
+        pages_truncated = pages_total > pages_read
+        deadline_reached = render_deadline_reached or ocr_deadline_reached
+        if render_error:
+            warnings.append("vision_pdf_render_fallback" if successful else "vision_render_failed")
+        if batch_error:
+            warnings.append("vision_batch_failed")
+        if deadline_reached:
+            warnings.append("vision_deadline_reached")
+        if page_cap_reached:
+            warnings.append("vision_page_cap_reached")
+        if pages_truncated:
+            warnings.append("vision_pages_truncated")
+        if text_truncated:
+            warnings.append("vision_text_truncated")
+        warnings = list(dict.fromkeys(warnings))[:20]
+
+        confidence = round(_clamp(weighted_confidence / max(1, len(successful_assets))), 3)
+        asset_coverage = round(
+            _clamp(weighted_coverage / max(1, len(successful_assets))),
+            3,
+        )
+        error = batch_error or (render_error if pages_truncated else "")
+        return {
+            "success": bool(successful) and bool(text or summaries),
+            "error": error,
+            "confidence": confidence,
+            "text": text,
+            "title": _bounded_text(titles[0] if titles else "", 200),
+            "summary": _bounded_text("\n\n".join(summaries), 2_000),
+            "document_type": _bounded_text(document_types[0] if document_types else "", 80),
+            "entities": entities[:30],
+            "evidence": evidence[:40],
+            "warnings": warnings,
+            "grounded_evidence_count": min(40, grounded_evidence_count),
+            "asset_coverage": asset_coverage,
             "pages_total": pages_total,
             "pages_read": pages_read,
-            "assets": list(asset_catalog.values()),
+            "pages_truncated": pages_truncated,
+            "partial": pages_truncated or bool(batch_error) or text_truncated,
+            "deadline_reached": deadline_reached,
+            "page_cap_reached": page_cap_reached,
+            "text_truncated": text_truncated,
+            "batches_total": len(batch_specs),
+            "batches_read": len(successful),
+            "assets": [
+                {"asset_id": f"A{index}", **asset.to_dict()}
+                for index, asset in enumerate(successful_assets, start=1)
+            ],
             "model": self.settings.llm_model,
             "advisory_only": True,
         }
@@ -562,6 +880,7 @@ class FilesMixin(PipelineShared):
         if len(text_content) > self.settings.max_extracted_text_chars:
             text_content = text_content[: self.settings.max_extracted_text_chars]
             text_truncated = True
+        native_text_available = bool(text_content.strip())
         vision: dict[str, Any] | None = None
         if len(text_content.strip()) < 160:
             vision = await self._extract_visual_document(
@@ -571,6 +890,25 @@ class FilesMixin(PipelineShared):
             )
             if vision and vision.get("success") and vision.get("text"):
                 text_content = str(vision["text"])[: self.settings.max_extracted_text_chars]
+                text_truncated = text_truncated or bool(vision.get("text_truncated"))
+        vision_text_selected = bool(vision and vision.get("success") and vision.get("text"))
+        vision_pages_total = max(0, int((vision or {}).get("pages_total") or 0))
+        vision_pages_read = max(0, int((vision or {}).get("pages_read") or 0))
+        visual_page_source_selected = vision_text_selected or (
+            not native_text_available and vision_pages_total > 0
+        )
+        if visual_page_source_selected:
+            effective_parse_deadline = bool((vision or {}).get("deadline_reached"))
+            effective_pages_read = vision_pages_read
+            effective_total_pages = vision_pages_total
+            effective_pages_truncated = bool(
+                (vision or {}).get("pages_truncated") or (vision_pages_total > vision_pages_read)
+            )
+        else:
+            effective_parse_deadline = bool(extraction_metadata.get("parse_deadline_reached"))
+            effective_pages_read = max(0, int(extraction_metadata.get("pages_read") or 0))
+            effective_total_pages = max(0, int(extraction_metadata.get("total_pages") or 0))
+            effective_pages_truncated = bool(extraction_metadata.get("pages_truncated"))
         transcription: dict[str, Any] | None = None
         if (
             not text_content.strip()
@@ -851,16 +1189,16 @@ class FilesMixin(PipelineShared):
         # хранимого объекта, а не подробность одного ответа. Без пометки в метаданных
         # «первые 12 страниц» неотличимы от целого файла для всего, что придёт потом:
         # поиска, повторного разбора, ответа модели о содержимом.
-        if (extraction.metadata or {}).get("parse_deadline_reached"):
+        if effective_parse_deadline:
             file_metadata["parse_deadline_reached"] = True
-            file_metadata["parse_pages_read"] = int((extraction.metadata or {}).get("pages_read") or 0)
+            file_metadata["parse_pages_read"] = effective_pages_read
         # Страниц в томе больше, чем разборщик читает. Свойство хранимого объекта по
         # той же причине, что и обрыв по сроку: «первые 250 страниц» неотличимы от
         # целого документа для всего, что придёт потом.
-        if (extraction.metadata or {}).get("pages_truncated"):
+        if effective_pages_truncated:
             file_metadata["parse_pages_truncated"] = True
-            file_metadata["parse_pages_read"] = int((extraction.metadata or {}).get("pages_read") or 0)
-            file_metadata["parse_total_pages"] = int((extraction.metadata or {}).get("total_pages") or 0)
+            file_metadata["parse_pages_read"] = effective_pages_read
+            file_metadata["parse_total_pages"] = effective_total_pages
         if media_kind:
             file_metadata["media_kind"] = media_kind
         # Freeze the complete, bounded extraction receipt beside the Raw Object.
@@ -872,12 +1210,12 @@ class FilesMixin(PipelineShared):
             {
                 "extraction_receipt_version": 1,
                 "extraction_chars": len(text_content or ""),
-                "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),
-                "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
-                "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
-                "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
-                "vision_pages_total": int((vision or {}).get("pages_total") or 0),
-                "vision_pages_read": int((vision or {}).get("pages_read") or 0),
+                "parse_deadline_reached": effective_parse_deadline,
+                "parse_pages_read": effective_pages_read,
+                "parse_pages_truncated": effective_pages_truncated,
+                "parse_total_pages": effective_total_pages,
+                "vision_pages_total": vision_pages_total,
+                "vision_pages_read": vision_pages_read,
                 "archive_files": int((extraction.metadata or {}).get("files") or 0),
                 "archive_files_read": int((extraction.metadata or {}).get("previewed_files") or 0),
                 "unsupported_format": bool(
@@ -1069,10 +1407,8 @@ class FilesMixin(PipelineShared):
                         # сроку, приходит сюда с `success=True` и частичным текстом;
                         # без этой строки загрузивший узнаёт «файл принят» и ничего
                         # о том, что принято лишь начало.
-                        "parse_deadline_reached": bool(
-                            (extraction.metadata or {}).get("parse_deadline_reached")
-                        ),
-                        "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
+                        "parse_deadline_reached": effective_parse_deadline,
+                        "parse_pages_read": effective_pages_read,
                         # Том толще потолка. Признак ставился в метаданные файла и
                         # НЕ клался сюда — а читает его именно отсюда единственный
                         # потребитель (`_file_fate_line` в мосте). Правка от
@@ -1080,13 +1416,13 @@ class FilesMixin(PipelineShared):
                         # тест был зелёным, потому что звал потребителя с
                         # рукотворным словарём, то есть подменял ровно то место,
                         # где обрыв и был.
-                        "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
-                        "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
+                        "parse_pages_truncated": effective_pages_truncated,
+                        "parse_total_pages": effective_total_pages,
                         # Скан без текстового слоя читается глазами модели, и в
                         # запрос уходит лишь несколько страниц. Цена честная,
                         # молчание о ней — нет.
-                        "vision_pages_total": int((vision or {}).get("pages_total") or 0),
-                        "vision_pages_read": int((vision or {}).get("pages_read") or 0),
+                        "vision_pages_total": vision_pages_total,
+                        "vision_pages_read": vision_pages_read,
                         # Архив разобран не весь: часть членов не поместилась в
                         # бюджет распаковки или оказалась слишком крупной. TAR об
                         # этом говорил, ZIP и RAR молчали — при том что ZIP на
@@ -1197,6 +1533,15 @@ class FilesMixin(PipelineShared):
         source_text = vision_text if advisory_only else native_text
         vision_pages_total = max(0, int(vision.get("pages_total") or 0)) if vision is not None else 0
         vision_pages_read = max(0, int(vision.get("pages_read") or 0)) if vision is not None else 0
+        vision_text_truncated = bool(advisory_only and (vision or {}).get("text_truncated"))
+        # A successful visual fallback becomes the actual transient source even
+        # when the native parser found a tiny title/header.  Its own page
+        # coverage must therefore travel with that OCR text; publishing the
+        # sparse native parser's 0/0 coverage would hide a partial 4/10 scan.
+        visual_page_source_selected = bool(
+            advisory_only or (vision_pages_total > 0 and not native_text.strip())
+        )
+        vision_deadline_reached = bool(visual_page_source_selected and (vision or {}).get("deadline_reached"))
         parser_metadata = extraction.metadata or {}
         limit = max(1_000, min(int(preview_chars), 48_000))
         transient = {
@@ -1217,27 +1562,45 @@ class FilesMixin(PipelineShared):
             # extractor result above is handed to AgentRuntime.  Keep the parser's
             # own loss bit separate so a 100k no-save text can be mapped in full
             # without claiming completeness for an extractor-capped source.
-            "_runtime_source_truncated": _text_extraction_was_truncated(parser_metadata),
+            "_runtime_source_truncated": (
+                vision_text_truncated if advisory_only else _text_extraction_was_truncated(parser_metadata)
+            ),
             # One prompt-level truth covers either loss: the transient preview
             # may be shorter than the extractor result, or the extractor itself
             # may already have stopped at its text budget.  In both cases the
             # model must not make a whole-document claim from the visible text.
-            "text_truncated": len(source_text) > limit or _text_extraction_was_truncated(parser_metadata),
+            "text_truncated": (
+                len(source_text) > limit
+                or vision_text_truncated
+                or (not advisory_only and _text_extraction_was_truncated(parser_metadata))
+            ),
             # Deadline/page ceilings remain distinct because their metrics let
             # the prompt explain how much of the document was actually read.
-            "parse_deadline_reached": bool(parser_metadata.get("parse_deadline_reached")),
+            "parse_deadline_reached": (
+                vision_deadline_reached
+                if visual_page_source_selected
+                else bool(parser_metadata.get("parse_deadline_reached"))
+            ),
             "parse_pages_read": (
-                vision_pages_read if advisory_only else int(parser_metadata.get("pages_read") or 0)
+                vision_pages_read
+                if visual_page_source_selected
+                else int(parser_metadata.get("pages_read") or 0)
             ),
             # Третья обрезка, отличная от обеих предыдущих: том толще потолка
             # разборщика. Здесь она особенно важна — материал не сохраняется, и
             # переспросить по нему потом будет нечего.
             "parse_pages_truncated": bool(
-                parser_metadata.get("pages_truncated")
-                or (advisory_only and vision_pages_total > 0 and vision_pages_read < vision_pages_total)
+                (
+                    (vision or {}).get("pages_truncated")
+                    or (vision_pages_total > 0 and vision_pages_read < vision_pages_total)
+                )
+                if visual_page_source_selected
+                else parser_metadata.get("pages_truncated")
             ),
             "parse_total_pages": (
-                vision_pages_total if advisory_only else int(parser_metadata.get("total_pages") or 0)
+                vision_pages_total
+                if visual_page_source_selected
+                else int(parser_metadata.get("total_pages") or 0)
             ),
             # Те же три потери, что и на приёмном пути. Здесь они важнее: материал
             # не сохраняется, и переспросить по нему потом будет нечего.

@@ -52,6 +52,7 @@ def test_pipeline_exposes_the_same_surface() -> None:
 # step. Pinned separately for that reason.
 EXPECTED_ASYNC = frozenset(
     {
+        "_extract_visual_batch",
         "_extract_visual_document",
         "_transcribe_audio",
         "advise_inbox_item",
@@ -100,7 +101,7 @@ def test_public_names_stay_importable() -> None:
     )
 
 
-EXPECTED_MEMBER_COUNT = 44
+EXPECTED_MEMBER_COUNT = 45
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_apply_feedback_calibration": "(self, user_id: 'str', assessment: 'PromotionAssessment') -> 'PromotionAssessment'",
     "_commit_staged_file": "(self, target: 'Path', staged: 'Path | None', digest: 'str') -> 'Path'",
@@ -110,6 +111,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     # обогащение этот вид теряет.
     "_enrich": "(self, content: 'str', assessment: 'PromotionAssessment', *, user_id: 'str', title: 'str' = '', extra_blocked: 'frozenset[str]' = frozenset()) -> 'KnowledgeEnrichment'",
     "_entity_suggestions": "(self, user_id: 'str', content: 'str') -> 'list[dict[str, Any]]'",
+    "_extract_visual_batch": "(self, assets: 'Sequence[VisualAsset]', *, asset_offset: 'int') -> 'dict[str, Any]'",
     "_extract_visual_document": "(self, file_content: 'bytes', *, filename: 'str', mime_type: 'str') -> 'dict[str, Any] | None'",
     "_file_sha256": "(path: 'Path') -> 'str'",
     "_file_target": "(self, user_id: 'str', digest: 'str', filename: 'str') -> 'Path'",
