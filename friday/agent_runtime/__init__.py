@@ -114,13 +114,32 @@ _OUTSIDE_DEED_RECOVERY_MAX_TOKENS = 384
 _OUTSIDE_DEED_RECOVERY_MAX_CHARS = 4_000
 # A healthy LAN model currently answers a 15--24k synthetic document prompt in
 # under a second, but three successful live Office summaries took 60--71 seconds
-# while the endpoint was degraded.  Ninety seconds keeps those valid answers
-# possible while preventing one optional stage from inheriting the general
-# 240-second endpoint timeout.  Verification + repair + re-verification share a
-# *single* secondary budget below; it is not renewed for every stage.
+# while the endpoint was degraded.  Keep 90 seconds for final synthesis.  The
+# full-source prepass starts at the same budget and can grow to 150 seconds for
+# many bounded parallel waves, while the complete attachment turn stays within
+# the bridge's roughly 240-second envelope.  Neither deadline is renewed between
+# stages.  Verification + repair + re-verification share a separate single
+# secondary budget below.
 _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC = 5.0
 _ATTACHMENT_GENERATION_TIMEOUT_SEC = 90.0
+_ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC = 90.0
+_ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC = 150.0
+_ATTACHMENT_PREPASS_WAVE_BUDGET_SEC = 15.0
 _ATTACHMENT_SECONDARY_BUDGET_SEC = 90.0
+
+
+def _attachment_prepass_budget_sec(chunk_count: int, parallelism: int) -> float:
+    """Scale one unrenewed prepass deadline by its number of map waves."""
+
+    parallelism = max(1, int(parallelism))
+    waves = (max(0, int(chunk_count)) + parallelism - 1) // parallelism
+    return min(
+        _ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC,
+        max(
+            _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC,
+            waves * _ATTACHMENT_PREPASS_WAVE_BUDGET_SEC,
+        ),
+    )
 
 
 def _remaining_attachment_secondary_budget(deadline: float | None) -> float:
@@ -19806,14 +19825,27 @@ class AgentRuntime:
             )
         return context.attachment_primary_deadline
 
-    def _ensure_attachment_prepass_deadline(self, context: AgentContext) -> float | None:
+    def _ensure_attachment_prepass_deadline(
+        self,
+        context: AgentContext,
+        *,
+        requested_budget_sec: float | None = None,
+    ) -> float | None:
         """Create, but never renew, the full-source mapping deadline."""
 
         if not context.current_attachment_present:
             return None
         if context.attachment_prepass_deadline is None:
+            budget = (
+                _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC
+                if requested_budget_sec is None
+                else max(
+                    _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC,
+                    min(_ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC, float(requested_budget_sec)),
+                )
+            )
             context.attachment_prepass_deadline = time.monotonic() + min(
-                _ATTACHMENT_GENERATION_TIMEOUT_SEC,
+                budget,
                 max(1.0, float(self.settings.llm_timeout_sec)),
             )
         return context.attachment_prepass_deadline
@@ -20048,33 +20080,9 @@ class AgentRuntime:
                     ordered_record_sets_capped = True
                     continue
                 ordered_record_counts[key] = max(ordered_record_counts.get(key, 0), record_position)
-        prepass_deadline = self._ensure_attachment_prepass_deadline(context)
-        for chunk_offset, chunk in enumerate(chunks):
-            remaining = _remaining_attachment_primary_budget(prepass_deadline)
-            if remaining is not None and remaining <= 0:
-                failed_chunks.extend(
-                    {
-                        "file_index": pending.file_index,
-                        "chunk_index": pending.chunk_index,
-                    }
-                    for pending in chunks[chunk_offset:]
-                )
-                break
-            payload = {
-                "request": message[:8_000],
-                "task_kind": task_kind,
-                "file_index": chunk.file_index,
-                "filename": chunk.filename,
-                "chunk_index": chunk.chunk_index,
-                "chunks_in_file": chunk.chunks_in_file,
-                "start": chunk.start,
-                "end": chunk.end,
-                "text": chunk.text,
-            }
-            # `chunk.text` already contains every row once.  Row ordinals remain
-            # code-owned below for exact selection/count evidence; serialising all
-            # row bodies into the map request duplicated an XLSX almost verbatim
-            # and made a 9k-character source a 14k-token model prompt.
+        for chunk in chunks:
+            # Exact row selection is code-owned and must not depend on the order
+            # in which concurrent model calls happen to finish.
             for line_number, source_row, record_position, sheet_name, row_text in chunk.ordered_rows:
                 if record_position not in requested_positions:
                     continue
@@ -20102,6 +20110,37 @@ class AgentRuntime:
                         "text_complete": len(clipped) == len(row_text),
                     }
                 )
+
+        foreground_slots = max(1, int(self.settings.llm_foreground_slots))
+        # Leave one configured foreground slot available to unrelated chat
+        # turns.  Three leaf calls are enough to expose vLLM batching without
+        # letting one large document occupy the whole interactive queue.
+        map_parallelism = max(1, min(3, foreground_slots - 1))
+        prepass_deadline = self._ensure_attachment_prepass_deadline(
+            context,
+            requested_budget_sec=_attachment_prepass_budget_sec(len(chunks), map_parallelism),
+        )
+        map_semaphore = asyncio.Semaphore(map_parallelism)
+
+        async def map_chunk_with_slot(chunk: _AttachmentSourceChunk) -> tuple[str, bool]:
+            remaining = _remaining_attachment_primary_budget(prepass_deadline)
+            if remaining is not None and remaining <= 0:
+                return "", False
+            payload = {
+                "request": message[:8_000],
+                "task_kind": task_kind,
+                "file_index": chunk.file_index,
+                "filename": chunk.filename,
+                "chunk_index": chunk.chunk_index,
+                "chunks_in_file": chunk.chunks_in_file,
+                "start": chunk.start,
+                "end": chunk.end,
+                "text": chunk.text,
+            }
+            # `chunk.text` already contains every row once.  Row ordinals remain
+            # code-owned above for exact selection/count evidence; serialising all
+            # row bodies into the map request duplicated an XLSX almost verbatim
+            # and made a 9k-character source a 14k-token model prompt.
             model_messages = [
                 {
                     "role": "system",
@@ -20140,6 +20179,17 @@ class AgentRuntime:
                 LOGGER.warning("Attachment hierarchy map failed (%s)", type(exc).__name__)
                 summary = ""
                 summary_clipped = False
+            return summary, summary_clipped
+
+        async def map_chunk(chunk: _AttachmentSourceChunk) -> tuple[str, bool]:
+            async with map_semaphore:
+                return await map_chunk_with_slot(chunk)
+
+        # ``gather`` keeps the source-plan order even when later chunks finish
+        # first.  Cancellation of this await propagates to every child; ordinary
+        # per-chunk failures are converted above into explicit missing coverage.
+        map_results = await asyncio.gather(*(map_chunk(chunk) for chunk in chunks))
+        for chunk, (summary, summary_clipped) in zip(chunks, map_results, strict=True):
             if not summary:
                 failed_chunks.append({"file_index": chunk.file_index, "chunk_index": chunk.chunk_index})
                 continue

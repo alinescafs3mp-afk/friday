@@ -193,6 +193,43 @@ class _SlowMapLLM(_HierarchyLLM):
         return await super().chat(messages, **kwargs)
 
 
+class _ConcurrentMapLLM(_HierarchyLLM):
+    """Complete leaf calls out of order while measuring live fan-out."""
+
+    def __init__(
+        self,
+        final_answer: str,
+        *,
+        fail_map: tuple[int, int] | None = None,
+    ) -> None:
+        super().__init__(final_answer, fail_map=fail_map)
+        self.active_maps = 0
+        self.max_active_maps = 0
+        self.map_completions: list[tuple[int, int]] = []
+
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        chunk_messages = [
+            str(item.get("content") or "")
+            for item in messages
+            if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+        ]
+        if not chunk_messages:
+            return await super().chat(messages, **kwargs)
+        data = _payload(chunk_messages[-1], CHUNK_PREFIX)
+        identity = (int(data["file_index"]), int(data["chunk_index"]))
+        self.active_maps += 1
+        self.max_active_maps = max(self.max_active_maps, self.active_maps)
+        try:
+            # Chunk 1 deliberately finishes after later chunks.  The runtime
+            # must still rebuild its canonical evidence in source-plan order.
+            await asyncio.sleep(0.03 if identity == (1, 1) else 0.003)
+            result = await super().chat(messages, **kwargs)
+            self.map_completions.append(identity)
+            return result
+        finally:
+            self.active_maps -= 1
+
+
 async def _prepare_without_archive(
     user_id: str,
     message: str,
@@ -289,6 +326,54 @@ def _assert_no_action_surface(llm: _HierarchyLLM) -> None:
     assert all(call["kwargs"].get("tools") in (None, []) for call in llm.calls)
 
 
+def test_hierarchy_prepass_deadline_scales_by_waves_without_renewal(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed_now = 1_000.0
+    monkeypatch.setattr(agent_runtime_module.time, "monotonic", lambda: fixed_now)
+    runtime = AgentRuntime(
+        replace(settings, llm_timeout_sec=240.0),
+        storage,
+        llm=_HierarchyLLM("unused"),
+    )
+    small = AgentContext(
+        conversation_id="synthetic-small-budget",
+        user_id="synthetic-budget-owner",
+        current_attachment_present=True,
+    )
+    many = AgentContext(
+        conversation_id="synthetic-large-budget",
+        user_id="synthetic-budget-owner",
+        current_attachment_present=True,
+    )
+
+    small_budget = agent_runtime_module._attachment_prepass_budget_sec(6, 3)
+    many_budget = agent_runtime_module._attachment_prepass_budget_sec(21, 3)
+    assert (
+        runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
+            small,
+            requested_budget_sec=small_budget,
+        )
+        == fixed_now + 90.0
+    )
+    first_large_deadline = runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
+        many,
+        requested_budget_sec=many_budget,
+    )
+    assert first_large_deadline is not None
+    assert fixed_now + 90.0 < first_large_deadline <= fixed_now + 150.0
+    assert agent_runtime_module._attachment_prepass_budget_sec(128, 3) == 150.0
+    assert (
+        runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
+            many,
+            requested_budget_sec=150.0,
+        )
+        == first_large_deadline
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_100k_summary_maps_every_owned_byte_and_shares_one_final_evidence(
     settings: Any,
@@ -318,6 +403,72 @@ async def test_a_100k_summary_maps_every_owned_byte_and_shares_one_final_evidenc
     assert result["verification_status"] == "passed"
     assert result["verified"] is True
     _assert_no_action_surface(llm)
+
+
+@pytest.mark.asyncio
+async def test_parallel_map_is_bounded_and_reassembles_out_of_order_tails(
+    settings: Any,
+    storage: Any,
+) -> None:
+    source = "PARALLEL_HEAD\n" + "p" * 99_970 + "\nSINGLE_TAIL"
+    llm = _ConcurrentMapLLM("unused")
+    runtime = AgentRuntime(replace(settings, llm_foreground_slots=4), storage, llm=llm)
+    context = AgentContext(
+        conversation_id="synthetic-parallel-map",
+        user_id="synthetic-parallel-map-owner",
+        person_id="synthetic-parallel-map-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(
+        context,
+        "Обобщи весь документ целиком.",
+        [_owned("parallel-100k.txt", source)],
+        task_kind="summary",
+    )
+
+    payloads = _chunk_payloads(llm)
+    _assert_exact_coverage(payloads, [("parallel-100k.txt", source)])
+    assert llm.max_active_maps == 3
+    assert llm.map_completions[0] != (1, 1)
+    manifest = _payload(bundle.evidence, MAP_PREFIX)
+    assert [record["chunk_index"] for record in manifest["records"]] == list(range(1, len(payloads) + 1))
+    assert "SINGLE_TAIL" in manifest["records"][-1]["summary"]
+    assert manifest["coverage"]["failed_chunks"] == []
+    assert manifest["coverage"]["complete"] is complete is True
+
+
+@pytest.mark.asyncio
+async def test_parallel_map_failure_stays_partial_and_cannot_pass(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "PARTIAL_HEAD\n" + "q" * 99_970 + "\nPARTIAL_TAIL"
+    llm = _ConcurrentMapLLM(
+        "Оптимистичный итог по доступным заметкам.",
+        fail_map=(1, 3),
+    )
+
+    result = await _run(
+        replace(settings, llm_foreground_slots=4),
+        storage,
+        monkeypatch,
+        question="Обобщи весь документ целиком.",
+        attachments=[_owned("parallel-partial.txt", source)],
+        llm=llm,
+    )
+
+    synthesis, verification = _canonical_map_blocks(llm)
+    assert synthesis == verification and len(synthesis) == 1
+    coverage = _payload(synthesis[0], MAP_PREFIX)["coverage"]
+    assert llm.max_active_maps == 3
+    assert coverage["failed_chunks"] == [{"chunk_index": 3, "file_index": 1}]
+    assert coverage["map_complete"] is False
+    assert coverage["complete"] is False
+    assert result["attachment_coverage_complete"] is False
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
 
 
 @pytest.mark.asyncio
@@ -992,19 +1143,20 @@ async def test_map_fanout_cap_marks_uncovered_source_unknown(
 
 
 @pytest.mark.asyncio
-async def test_hierarchy_uses_one_unrenewed_primary_deadline(
+async def test_hierarchy_uses_one_unrenewed_prepass_deadline(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A timed-out leaf cannot start N more maps or a final synthesis."""
 
-    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_GENERATION_TIMEOUT_SEC", 0.01)
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC", 0.01)
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC", 0.01)
     source = "DEADLINE_HEAD\n" + "d" * 99_970 + "\nDEADLINE_TAIL"
     llm = _SlowMapLLM("Этот ответ не должен быть сгенерирован после дедлайна.")
 
     result = await _run(
-        settings,
+        replace(settings, llm_foreground_slots=4),
         storage,
         monkeypatch,
         question="Обобщи весь документ целиком.",
@@ -1012,8 +1164,8 @@ async def test_hierarchy_uses_one_unrenewed_primary_deadline(
         llm=llm,
     )
 
-    assert llm.map_starts == 1
-    assert llm.map_cancellations == 1
+    assert llm.map_starts == 3
+    assert llm.map_cancellations == 3
     assert _chunk_payloads(llm) == []
     assert result["attachment_coverage_complete"] is False
     assert result["verification_status"] == "unknown"
