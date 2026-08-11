@@ -353,6 +353,53 @@ async def test_source_search_uses_a_separate_focus_without_broadening_retrieval(
 
 
 @pytest.mark.asyncio
+async def test_source_search_binds_a_single_cell_section_heading_to_its_first_record(
+    settings,
+    storage,
+):
+    owner = "source-table-section-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    target = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="opaque-orion-section",
+        raw_content=(
+            "ORION platoon |  |  | \n"
+            "ALPHA person | Commander platoon | Senior | 41\n"
+            "BRAVO person | Operator | Junior | 42"
+        ),
+        content_type="file",
+        metadata_json={"filename": "synthetic-orion-staff.xlsx"},
+    )
+    storage.store_raw_object(target)
+    storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=target.id))
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {
+            "query": "ORION",
+            "focus": "ORION commander platoon",
+            "limit": 10,
+        },
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True
+    assert result.data["shown"] == 1
+    [item] = result.data["results"]
+    assert item["raw_object_id"] == target.id
+    assert item["focus_match_kind"] == "full"
+    assert "ORION platoon" in item["excerpt"]
+    assert "ALPHA person" in item["excerpt"]
+    assert "Commander platoon" in item["excerpt"]
+    assert "BRAVO person" not in item["excerpt"]
+
+
+@pytest.mark.asyncio
 async def test_source_search_never_cross_joins_a_far_predicate_in_the_same_document(settings, storage):
     owner = "source-same-window-owner"
     storage.ensure_user(owner, preset_key="owner")

@@ -37,6 +37,7 @@ IGNORED_CANARY = "IGNORED-SOURCE-CANARY"
 FOREIGN_CANARY = "FOREIGN-SOURCE-CANARY"
 PRIVATE_CANARY = "PRIVATE-DEPENDENCY-SOURCE-CANARY"
 HOSTILE_GUESS = "В ранее загруженном файле у Синтетикова указана должность: генеральный директор."
+CONFIDENT_CAPPED_ABSENCE = "В доступных ранее загруженных материалах сведения ORION отсутствуют."
 
 
 class _EmptySearcher:
@@ -175,6 +176,74 @@ class _SourceSearchModel:
             }
 
         raise AssertionError("source synthesis reached the model without the deterministic evidence envelope")
+
+
+class _ModelSelectedCappedSourceSearch:
+    enabled = True
+    model = "synthetic-model-selected-source-search"
+    total_budget_sec = 2.0
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def chat(self, messages, *, tools=None, **kwargs):  # noqa: ANN001, ARG002
+        snapshot = {
+            "messages": copy.deepcopy(messages),
+            "tools": copy.deepcopy(tools or []),
+        }
+        self.calls.append(snapshot)
+        offered = {
+            str((item.get("function") or {}).get("name") or "")
+            for item in (tools or [])
+            if isinstance(item, dict)
+        }
+        common = {
+            "_queue_wait_sec": 0.0,
+            "_offered_tool_names": sorted(offered),
+        }
+        system_text = "\n".join(
+            str(item.get("content") or "") for item in messages if str(item.get("role") or "") == "system"
+        )
+        if "Проверь ответ по двум независимым условиям" in system_text:
+            return {
+                **common,
+                "content": json.dumps(
+                    {
+                        "ok": False,
+                        "request_satisfied": False,
+                        "score": 0.0,
+                        "issues": ["answer contradicts the bounded source page"],
+                    }
+                ),
+                "tool_calls": None,
+            }
+        if "Ответь одним словом: РАЗГОВОР или ЗАПРОС." in system_text:
+            return {**common, "content": "ЗАПРОС", "tool_calls": None}
+        if "Никаких пояснений, только JSON." in system_text:
+            return {
+                **common,
+                "content": '{"вид": "файл", "дни": []}',
+                "tool_calls": None,
+            }
+        if "Автопроверка нашла в ответе несоответствия" in system_text:
+            return {**common, "content": CONFIDENT_CAPPED_ABSENCE, "tool_calls": None}
+        if any(str(item.get("role") or "") == "tool" for item in messages):
+            return {**common, "content": CONFIDENT_CAPPED_ABSENCE, "tool_calls": None}
+        assert "source_search" in offered
+        return {
+            **common,
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-model-selected-source-search",
+                    "type": "function",
+                    "function": {
+                        "name": "source_search",
+                        "arguments": json.dumps({"query": "ORION", "focus": "ORION unit", "limit": 10}),
+                    },
+                }
+            ],
+        }
 
 
 def _raw(
@@ -375,4 +444,39 @@ async def test_hostile_model_cannot_skip_source_search_and_publish_a_personal_fi
     assert response["verification_status"] == "passed"
     assert "генеральный директор" not in response["message"], (
         "P1: deterministic source evidence existed but an unsupported personal-file guess was still delivered"
+    )
+
+
+@pytest.mark.asyncio
+async def test_model_selected_capped_source_search_cannot_publish_confident_absence(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    for index in range(11):
+        _raw(
+            storage,
+            user_id=OWNER,
+            text=f"ORION unit record {index:02d}: ALPHA person is present.",
+            filename=f"synthetic-orion-{index:02d}.txt",
+            status=InboxStatus.PENDING,
+        )
+    model = _ModelSelectedCappedSourceSearch()
+    runtime, kernel, actor = _runtime(settings, storage, model)  # type: ignore[arg-type]
+
+    response = await runtime.chat(
+        OWNER,
+        "Проверь сведения ORION",
+        actor=actor,
+        enable_tools=True,
+        hybrid_searcher=_EmptySearcher(),
+    )
+
+    assert kernel.calls == [("source_search", {"query": "ORION", "focus": "ORION unit", "limit": 10})]
+    assert response["tools_used"] == ["source_search"]
+    assert response["verified"] is False
+    assert CONFIDENT_CAPPED_ABSENCE not in response["message"]
+    assert any(
+        marker in response["message"].casefold()
+        for marker in ("неизвест", "не доказ", "нельзя", "не удалось")
     )

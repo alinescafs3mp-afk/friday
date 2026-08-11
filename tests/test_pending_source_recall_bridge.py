@@ -894,6 +894,17 @@ def test_source_query_is_a_bounded_target_from_the_current_message(message: str,
     assert _archived_source_search_query(message) == query
 
 
+def test_colloquial_staff_file_lookup_keeps_the_unit_and_role_as_focus() -> None:
+    message = "посмотри в штатке, кто командиром взвода рэб числится?"
+
+    query = _archived_source_search_query(message)
+    focus = _archived_source_search_focus(message, query)
+
+    assert query == "рэб"
+    assert focus.split()[0] == query
+    assert {"командир", "взвод"}.issubset(set(focus.split()))
+
+
 @pytest.mark.parametrize(
     "message",
     [

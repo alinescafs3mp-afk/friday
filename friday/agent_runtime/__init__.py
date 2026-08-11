@@ -7585,6 +7585,7 @@ _ATTACHMENT_QUERY_STOP_PREFIXES = (
     "файл",
     "фамил",
     "контрольн",
+    "командир",
     "можеш",
     "может",
     "найд",
@@ -7616,6 +7617,8 @@ _ATTACHMENT_QUERY_STOP_PREFIXES = (
     "рол",
     "строк",
     "сегодня",
+    "штатк",
+    "числ",
 )
 _ATTACHMENT_QUERY_FIELD_PREFIXES = (
     "должност",
@@ -7634,6 +7637,30 @@ _ATTACHMENT_QUERY_FIELD_PREFIXES = (
     "line",
     "title",
     "surname",
+)
+_ARCHIVED_SOURCE_CARRIER_WORD = (
+    r"(?:файл|документ|вложени|исходник|источник|материал|таблиц|"
+    r"штатк|ведомост|реестр|расписани|отч[её]т|file|document|attachment|source|table|report)"
+)
+_ARCHIVED_SOURCE_ROLE_QUESTION = re.compile(
+    r"\b(?:кто|кого|кем)\b[^.!?\n]{0,100}\b"
+    r"(?:командир|начальник|руководител|ответственн|заведующ|директор)\w*\b|"
+    r"\b(?:командир|начальник|руководител|ответственн|заведующ|директор)\w*\b"
+    r"[^.!?\n]{0,100}\b(?:кто|кого|кем|числ|указ|явля|занима)\w*\b",
+    re.IGNORECASE,
+)
+_ARCHIVED_SOURCE_ROLE_FOCUS: tuple[tuple[str, str], ...] = (
+    ("командир", "командир"),
+    ("начальник", "начальник"),
+    ("руководител", "руководитель"),
+    ("ответственн", "ответственный"),
+    ("заведующ", "заведующий"),
+    ("директор", "директор"),
+    ("взвод", "взвод"),
+    ("отделени", "отделение"),
+    ("рот", "рота"),
+    ("батальон", "батальон"),
+    ("управлен", "управление"),
 )
 _ATTACHMENT_ABSTRACT_REQUEST = re.compile(
     r"(?:\bчто\s+(?:ты\s+)?дума\w*\b|"
@@ -7717,6 +7744,7 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
     )
     field_cue = re.search(
         r"\b(?:должност|позици|рол|значени|строк|endpoint|узел|node|фамил|"
+        r"командир|начальник|руководител|ответственн|заведующ|директор|"
         r"position|role|value|code|title|surname)\w*\b",
         visible,
         re.IGNORECASE,
@@ -7748,7 +7776,7 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
             break
     strong_anchors = _attachment_query_anchors(message, tuple(terms))
     document_reference = re.search(
-        r"\b(?:файл|документ|текст|вложени|file|document|text|attachment|source)\w*\b",
+        rf"\b(?:{_ARCHIVED_SOURCE_CARRIER_WORD}|текст|text)\w*\b",
         visible,
         re.IGNORECASE,
     )
@@ -7870,7 +7898,8 @@ _ARCHIVED_SOURCE_DELIVERY_CUE = re.compile(
     re.IGNORECASE,
 )
 _ARCHIVED_SOURCE_DURABLE_SCOPE = re.compile(
-    r"(?:\bмо[её]м\b[^.!?\n]{0,80}\b(?:загруж|загруз|присла|отправ|прикрепл|закин|скид)\w*\b|"
+    rf"(?:\b(?:в|среди|по)\s+(?:(?:эт|одн)\w*\s+)?{_ARCHIVED_SOURCE_CARRIER_WORD}\w*\b|"
+    r"\bмо[её]м\b[^.!?\n]{0,80}\b(?:загруж|загруз|присла|отправ|прикрепл|закин|скид)\w*\b|"
     r"\b(?:в|среди|по)\s+мо(?:их|им|ем|ём|ей)\b[^.!?\n]{0,80}"
     r"\b(?:файл|документ|вложени|источник|материал)\w*\b|"
     r"\b(?:in|among)\s+my\s+(?:file|document|attachment|source)s?\b|"
@@ -7888,7 +7917,7 @@ _ARCHIVED_SOURCE_DURABLE_SCOPE = re.compile(
     re.IGNORECASE,
 )
 _ARCHIVED_SOURCE_NOUN = re.compile(
-    r"\b(?:файл|документ|вложени|исходник|источник|материал|file|document|attachment|source)\w*\b",
+    rf"\b{_ARCHIVED_SOURCE_CARRIER_WORD}\w*\b",
     re.IGNORECASE,
 )
 _CURRENT_SOURCE_CARRIER = re.compile(
@@ -7975,6 +8004,11 @@ _SOURCE_SEARCH_CAPPED_EXHAUSTIVE_REJECTION = (
     "совпадение или отсутствие других сведений в ранее загруженных материалах. "
     "Нужен более узкий поисковый признак."
 )
+_SOURCE_SEARCH_EVIDENCE_MISMATCH_REJECTION = (
+    "Найденные фрагменты не подтверждают сформулированный ответ. Я не буду "
+    "утверждать, что сведений в документах нет: результат остаётся неизвестным, "
+    "пока не найден подходящий фрагмент исходного файла."
+)
 _SOURCE_SEARCH_EXHAUSTIVE_CLAIM = re.compile(
     r"(?:\bединственн\w*(?:\s+\w+){0,3}\s+"
     r"(?:должност|позици|роль|упоминани|запис|совпадени|сведени)\w*\b|"
@@ -7984,6 +8018,8 @@ _SOURCE_SEARCH_EXHAUSTIVE_CLAIM = re.compile(
     r"(?:не\s+)?(?:упомина|встреча|указа|найд)\w*\b|"
     r"\b(?:друг\w*|ин\w*)\s+(?:должност|позици|роль|упоминани|запис|"
     r"совпадени|сведени)\w*[^.!?\n]{0,60}\b(?:нет|не\s+(?:виж|обнаруж|найд))\w*\b|"
+    r"\b(?:информаци|сведени|данн)\w*\b[^.!?\n]{0,100}\b"
+    r"(?:отсутств|не\s+(?:представл|содерж|найд|обнаруж))\w*\b|"
     r"\b(?:only|sole)\s+(?:(?:position|role|record|mention|result)s?|match(?:es)?)\b|"
     r"\bno\s+other\s+(?:(?:position|role|record|mention|result)s?|match(?:es)?)\b)",
     re.IGNORECASE,
@@ -8002,6 +8038,7 @@ def _archived_source_request_surface(message: str) -> tuple[str, str]:
             *_ARCHIVED_SOURCE_LOOKUP_ACTION.finditer(text),
             *_ARCHIVED_SOURCE_FIELD_QUESTION.finditer(text),
             *_ARCHIVED_SOURCE_EMPLOYMENT_QUESTION.finditer(text),
+            *_ARCHIVED_SOURCE_ROLE_QUESTION.finditer(text),
         ]
         pairs = [
             (source, directive)
@@ -8094,11 +8131,13 @@ def _archived_source_search_query(message: str) -> str:
     source = _ARCHIVED_SOURCE_NOUN.search(request_text)
     field_question = _ARCHIVED_SOURCE_FIELD_QUESTION.search(request_text)
     employment_question = _ARCHIVED_SOURCE_EMPLOYMENT_QUESTION.search(request_text)
+    role_question = _ARCHIVED_SOURCE_ROLE_QUESTION.search(request_text)
     closed_field_question = bool(
-        (field_question or employment_question)
+        (field_question or employment_question or role_question)
         and (
             request_text.rstrip().endswith("?")
             or employment_question
+            or role_question
             or re.search(
                 r"\b(?:какая|какую|какой|что\s+за|what|which)\b",
                 request_text,
@@ -8146,6 +8185,20 @@ def _archived_source_search_query(message: str) -> str:
     # multi-person request could otherwise return evidence for only half of the
     # requested facts and still look successful.
     anchors = _attachment_query_anchors(visible, terms)
+    if len(anchors) != 1 and role_question is not None:
+        # Role-holder questions often end in a lowercase unit/acronym
+        # (``кто командиром взвода рэб``).  Within an already proved local
+        # source carrier, keep the one non-generic subject as the recall
+        # anchor instead of handing a broad OR search to the model.
+        generic_prefixes = tuple(prefix for prefix, _canonical in _ARCHIVED_SOURCE_ROLE_FOCUS)
+        role_targets = tuple(
+            term
+            for term in terms
+            if not any(term.startswith(prefix) for prefix in generic_prefixes)
+            and not re.fullmatch(r"(?:штатк|таблиц|ведомост|реестр|расписани|отч[её]т)\w*", term)
+        )
+        if len(role_targets) == 1:
+            anchors = role_targets
     if len(anchors) != 1:
         return ""
     selected = list(anchors)
@@ -8175,12 +8228,28 @@ def _archived_source_search_focus(message: str, query: str) -> str:
             break
     if not fields and _ARCHIVED_SOURCE_EMPLOYMENT_QUESTION.search(visible):
         fields.append("должност")
+    if _ARCHIVED_SOURCE_ROLE_QUESTION.search(visible):
+        for matched in _ATTACHMENT_QUERY_TOKEN.finditer(visible):
+            token = matched.group(0).casefold()
+            canonical = next(
+                (value for prefix, value in _ARCHIVED_SOURCE_ROLE_FOCUS if token.startswith(prefix)),
+                "",
+            )
+            if canonical and canonical not in fields and canonical != anchor.casefold():
+                fields.append(canonical)
+            if len(fields) >= 4:
+                break
     return " ".join([anchor, *fields])[:240]
 
 
 def _source_search_normalized_token(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).casefold().replace("ё", "е").strip()
     return normalized if any(char.isalnum() for char in normalized) else ""
+
+
+_SOURCE_SEARCH_TABLE_HEADER_SUBJECTS = frozenset(
+    {"фамилия", "фио", "имя", "сотрудник", "работник", "person", "employee", "name", "surname"}
+)
 
 
 def _source_search_anchor_matches_token(term: str, token: str) -> bool:
@@ -8392,6 +8461,7 @@ def _project_source_search_result(
             if (token := _source_search_normalized_token(matched.group(0))) and len(token) >= 3
             if not any(_source_excerpt_has_query_term(term, token) for term in query_terms)
             and not any(_source_excerpt_has_focus_term(term, token) for term in non_query_focus_terms)
+            and token not in _SOURCE_SEARCH_TABLE_HEADER_SUBJECTS
         }
         actual_context_terms = len(substantive_tokens)
         actual_matched = sum(
@@ -8532,11 +8602,12 @@ def _attachment_needs_full_source_prepass(
 ) -> bool:
     """Whether ordinary prompt projection would omit authenticated source data.
 
-    This decision is deliberately independent of the request text.  A private
-    source is either present in full in the synthesis carrier or it is not.  In
-    particular, native Office projection has much more JSON overhead than its
-    extracted text, so a 300-row sheet can expose only its first records even
-    when the raw text itself is well below the 24k prompt budget.
+    A whole-document task needs every source byte.  A query projection is
+    different: it has already scanned the complete authenticated source and
+    carries the bounded matching windows.  Mapping the whole workbook again in
+    that case both adds no evidence and turned a one-row lookup into two huge
+    30k/8k model passes.  The projection's private completeness markers are
+    process-owned; caller dictionaries cannot forge them.
     """
 
     if not active:
@@ -8550,6 +8621,12 @@ def _attachment_needs_full_source_prepass(
             continue
         if not _attachment_source_complete(source):
             return True
+        if (
+            isinstance(view, _ProjectedAttachment)
+            and view.get("_request_projection_applied") is True
+            and view.get("_request_projection_scan_complete") is True
+        ):
+            continue
         if is_trusted_office_attachment(source):
             if (
                 view.get("_office_structured") is not True
@@ -14468,6 +14545,7 @@ class AgentRuntime:
                 if callable(owned_search)
                 else None
             )
+            search_rows: Sequence[Mapping[str, Any]]
             if isinstance(owned_page, Mapping) and owned_page.get("available") is True:
                 page_rows = owned_page.get("results")
                 search_rows = (
@@ -17705,6 +17783,26 @@ class AgentRuntime:
             source_search_exhaustive_rejected = True
             verification = _unknown_verdict("source_search_scope_not_exhaustive")
             verification_status = VERDICT_UNKNOWN
+        if context.source_search_used and model_said and verification_status == VERDICT_FAILED:
+            # A failed judge means the final (possibly already repaired) prose
+            # still contradicts the exact source page.  Publishing that prose
+            # with a small warning produced the live false negative “the files
+            # do not contain it” even though the following upload found the row.
+            # Preserve model freedom while evidence agrees; at the real
+            # provenance boundary, fail closed instead of certifying absence.
+            LOGGER.warning("source-search: evidence-mismatching answer discarded")
+            model_said = ""
+            content = (
+                f"{spoken}\n\n{_SOURCE_SEARCH_EVIDENCE_MISMATCH_REJECTION}".strip()
+                if spoken
+                else _SOURCE_SEARCH_EVIDENCE_MISMATCH_REJECTION
+            )
+            response["content"] = content
+            response["file_clips"] = list(structural_file_clips)
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            verification = _unknown_verdict("source_search_evidence_mismatch")
+            verification_status = VERDICT_UNKNOWN
         if (
             attachment_expected_count
             and not attachment_verification_complete
@@ -20543,6 +20641,7 @@ class AgentRuntime:
                         False,
                         error="Производный носитель отклонён выходным рубежом",
                     )
+                canonical_tool_evidence = ""
                 tools_used.append(call.name)
                 if (
                     call.name == "user_activity"
@@ -20614,6 +20713,72 @@ class AgentRuntime:
                             context.web_evidence_scope = "open_search"
                         elif context.web_evidence_scope == "none":
                             context.web_evidence_scope = "page"
+                if tool_result.success and call.name == "source_search":
+                    source_arguments = call_arguments if isinstance(call_arguments, Mapping) else {}
+                    source_query = " ".join(str(source_arguments.get("query") or "").split())[:240]
+                    source_focus = " ".join(str(source_arguments.get("focus") or source_query).split())[:480]
+                    raw_source_data = tool_result.data
+                    source_projection = _project_source_search_result(
+                        raw_source_data,
+                        query=source_query,
+                        focus=source_focus,
+                    )
+                    if source_projection is None:
+                        # A model-selected read crosses the same validation
+                        # boundary as the deterministic prefetch.  Raw ids,
+                        # malformed coverage and unbounded excerpts may never
+                        # reach synthesis merely because the model chose the
+                        # tool itself.
+                        tool_result.success = False
+                        tool_result.error = "Локальный поиск вернул непроверяемую страницу"
+                        tool_result.data = None
+                    else:
+                        context.source_search_used = True
+                        context.source_search_query = source_query
+                        context.source_search_focus = source_focus
+                        source_scope = source_projection.get("scope") or {}
+                        context.source_search_page_capped = bool(
+                            context.source_search_page_capped or not bool(source_scope.get("page_complete"))
+                        )
+                        source_rows = source_projection.get("results") or []
+                        context.source_search_advisory_evidence = bool(
+                            context.source_search_advisory_evidence
+                            or any(
+                                isinstance(item, Mapping)
+                                and isinstance(item.get("evidence_authority"), Mapping)
+                                and item["evidence_authority"].get("verification_eligible") is False
+                                for item in source_rows
+                            )
+                        )
+                        raw_rows = (
+                            raw_source_data.get("results") if isinstance(raw_source_data, Mapping) else None
+                        )
+                        adopted_ids = list(context.source_search_result_raw_ids)
+                        for raw_row in raw_rows if isinstance(raw_rows, list) else []:
+                            if not isinstance(raw_row, Mapping):
+                                continue
+                            raw_id = str(raw_row.get("raw_object_id") or "").strip()
+                            if (
+                                not _RAW_OBJECT_ID_RE.fullmatch(raw_id)
+                                or raw_id in adopted_ids
+                                or self._owned_file_attachment(
+                                    raw_id,
+                                    tenant_id=actor.user_id,
+                                    person_id=actor.own_id,
+                                )
+                                is None
+                            ):
+                                continue
+                            adopted_ids.append(raw_id)
+                            if len(adopted_ids) >= _SOURCE_SEARCH_PAGE_SIZE:
+                                break
+                        context.source_search_result_raw_ids = adopted_ids
+                        tool_result.data = source_projection
+                        canonical_tool_evidence = _SOURCE_SEARCH_EVIDENCE_PREFIX + json.dumps(
+                            source_projection,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
                 if tool_result.success:
                     raw_tool_data = tool_result.data
                     graph_bearing = _graph_tool_result_is_graph_bearing(call.name, raw_tool_data)
@@ -20727,7 +20892,12 @@ class AgentRuntime:
                 # Keep successful tool outputs as verification evidence: the answer
                 # may rest on these, not on personal notes.
                 if tool_result.success and rendered and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
-                    tool_evidence.append({"tool": call.name, "output": str(rendered)})
+                    tool_evidence.append(
+                        {
+                            "tool": call.name,
+                            "output": canonical_tool_evidence or str(rendered),
+                        }
+                    )
                 round_results.append((str(openai_call["id"]), str(rendered)))
 
             # Результаты ОДНОГО раунда делят бюджет поровну.

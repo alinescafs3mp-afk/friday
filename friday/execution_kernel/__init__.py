@@ -1944,7 +1944,16 @@ def _source_anchor_context_projection(
     if " | " in body:
         table_header = ""
         table_fallback: tuple[str, int, int] | None = None
-        for line in body.splitlines():
+        table_lines = body.splitlines()
+
+        def sparse_section_heading(line: str) -> bool:
+            # Empty spreadsheet cells render as `` |  | ``; splitting on the
+            # literal delimiter leaves a stray ``|`` in the last cell after
+            # line trimming.  Parse the delimiter itself, not its padding.
+            cells = [cell.strip() for cell in re.split(r"\s*\|\s*", line)]
+            return len(cells) >= 3 and sum(bool(cell) for cell in cells) == 1
+
+        for line_index, line in enumerate(table_lines):
             if " | " not in line:
                 table_header = ""
                 continue
@@ -1959,6 +1968,39 @@ def _source_anchor_context_projection(
                 _source_anchor_matches_token(term, token) for term in query_terms for token in line_tokens
             ):
                 continue
+            if sparse_section_heading(stripped_line):
+                # Extracted workbooks commonly encode a section name in one
+                # non-empty cell and its first factual record on the following
+                # row (``ORION platoon`` -> ``ALPHA | Commander platoon``).
+                # The ordinary record boundary correctly forbids neighbouring
+                # people, but treating the sparse section row as a standalone
+                # record discards the value the section scopes.  Admit exactly
+                # the first following non-section table row; never sweep a
+                # group or cross the next heading.
+                next_record = ""
+                for candidate in table_lines[line_index + 1 : line_index + 13]:
+                    candidate = candidate.strip()
+                    if " | " not in candidate or sparse_section_heading(candidate):
+                        break
+                    next_record = candidate
+                    break
+                if next_record:
+                    section_passage = f"{stripped_line}\n{next_record}"
+                    if len(section_passage) > max_chars:
+                        row_budget = max(80, max_chars - len(stripped_line) - 1)
+                        section_passage = (
+                            f"{stripped_line}\n"
+                            f"{best_snippet(focus or query, next_record, max_chars=row_budget)}"
+                        )[:max_chars]
+                    section_focus, section_context, _section_vocabulary = score_passage(section_passage)
+                    if section_context > 0:
+                        if focus_terms and section_focus == len(focus_terms):
+                            return section_passage, section_focus, section_context
+                        table_fallback = (
+                            section_passage,
+                            section_focus,
+                            section_context,
+                        )
             header = "" if table_header == stripped_line else table_header
             passage = _source_table_record_projection(
                 header,
