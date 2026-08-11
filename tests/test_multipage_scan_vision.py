@@ -203,12 +203,31 @@ async def test_six_page_raster_pdf_is_rendered_and_fully_ocr_batched(settings, s
     )
 
     assert result is not None and result["success"] is True
-    assert sorted(llm.calls) == [[1, 2, 3, 4], [5, 6]]
+    assert sorted(llm.calls) == [[1, 2, 3], [4, 5, 6]]
     assert result["pages_read"] == result["pages_total"] == 6
     assert result["pages_truncated"] is False
     assert result["batches_read"] == result["batches_total"] == 2
     positions = [result["text"].index(f"OCR PAGE {page}") for page in range(1, 7)]
     assert positions == sorted(positions), result["text"]
+
+
+@pytest.mark.asyncio
+async def test_five_page_scan_balances_concurrent_batches_without_a_one_page_tail(
+    settings,
+    storage,
+) -> None:
+    llm = _PageVision()
+    result = await _pipeline(settings, storage, llm)._extract_visual_document(  # noqa: SLF001
+        _raster_pdf(5),
+        filename="five-page-scan.pdf",
+        mime_type="application/pdf",
+    )
+
+    assert result is not None and result["success"] is True
+    assert sorted(llm.calls) == [[1, 2, 3], [4, 5]]
+    assert result["pages_read"] == result["pages_total"] == 5
+    assert result["pages_truncated"] is False
+    assert "OCR PAGE 5" in result["text"]
 
 
 @pytest.mark.asyncio
@@ -221,7 +240,7 @@ async def test_failed_second_vision_batch_keeps_only_honest_contiguous_prefix(se
     )
 
     assert result is not None and result["success"] is True
-    assert sorted(llm.calls) == [[1, 2, 3, 4], [5, 6, 7, 8]]
+    assert sorted(llm.calls) == [[1, 2, 3, 4], [5, 6, 7]]
     assert result["pages_total"] == 10
     assert result["pages_read"] == 4
     assert result["pages_truncated"] is True and result["partial"] is True

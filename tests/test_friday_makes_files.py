@@ -232,6 +232,7 @@ def test_the_filename_cannot_escape_its_folder():
     assert _safe_filename("../../etc/passwd", "pdf") == "etc passwd.pdf"
     assert _safe_filename("Отчёт: июль/август", "docx") == "Отчёт июль август.docx"
     assert _safe_filename("", "xlsx") == "Отчёт.xlsx"
+    assert _safe_filename("metadata-export.docx", "docx") == "metadata-export.docx"
     assert "/" not in _safe_filename("a/b/c", "png")
 
 
@@ -262,6 +263,32 @@ async def test_the_tool_returns_the_file_as_an_attachment(settings, storage):
     assert result.attachment["kind"] == "document"
     assert result.attachment["mime_type"].endswith("wordprocessingml.document")
     assert result.attachment["content_base64"]
+
+
+@pytest.mark.anyio
+async def test_the_tool_keeps_one_exact_matching_requested_filename(settings, storage):
+    from friday.execution_kernel import ExecutionKernel
+    from friday.permissions import ActorContext, AuthorizationService
+
+    storage.ensure_user("alice", preset_key="admin")
+    kernel = ExecutionKernel(AuthorizationService(storage), settings)
+    kernel.bind_services(storage, None, None, None)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute(
+        "make_file",
+        {
+            "kind": "docx",
+            "title": "Синтетический экспорт",
+            "filename": "metadata-export.docx",
+            "blocks": BLOCKS,
+        },
+        actor=actor,
+    )
+
+    assert result.success, result.error
+    assert result.data["filename"] == "metadata-export.docx"
+    assert result.attachment and result.attachment["filename"] == "metadata-export.docx"
 
 
 @pytest.mark.anyio

@@ -21,6 +21,7 @@ from docx import Document
 from friday.agent_runtime import (
     _FALSE_CURRENT_MODEL_OUTAGE,
     _PERSON_DOCUMENT_INVENTORY,
+    _WEB_EVIDENCE_MISSING,
     _WEB_ISOLATION_DEICTIC,
     AgentContext,
     AgentRuntime,
@@ -690,7 +691,16 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
     )
 
     async def generate(context, message, attachments):  # noqa: ANN001, ARG001
-        assert attachments and attachments[0].get("_office_structured") is True
+        assert attachments
+        projected = attachments[0]
+        if incomplete:
+            assert projected.get("_office_structured") is not True
+            assert projected.get("_office_full_text_fit") is True
+            assert projected.get("_source_text_complete") is True
+            assert projected.get("_prompt_projection_complete") is True
+            assert "Synthetic status" in str(projected.get("transient_text") or "")
+        else:
+            assert projected.get("_office_structured") is True
         return {"content": draft, "tools_used": [], "_model_generated": True}
 
     monkeypatch.setattr(runtime, "_generate_response", generate)
@@ -703,24 +713,12 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
         synthetic_document_notice=True,
     )
 
-    if incomplete:
-        assert reply["message"].endswith(draft)
-        assert "Не весь исходный материал" in reply["message"]
-    else:
-        assert reply["message"] == draft
+    assert reply["message"] == draft
     assert reply["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
     assert "пришлите" not in reply["message"].casefold()
     assert reply["attachment_context_readable_count"] == 1
-    if incomplete:
-        assert reply["attachment_coverage_complete"] is False
-        assert reply["verification_status"] == "unknown"
-        caution = reply["verification_caution"].casefold()
-        assert "вложение удалось прочитать" in caution
-        assert "полный состав документа не доказан" in caution
-        assert "пришлите" not in caution
-    else:
-        assert reply["attachment_coverage_complete"] is True
-        assert reply["verification_status"] != "unknown"
+    assert reply["attachment_coverage_complete"] is True
+    assert reply["verification_status"] != "unknown"
 
 
 def test_stale_web_isolation_rejects_reference_only_requests() -> None:
@@ -997,6 +995,349 @@ def test_document_urls_are_exact_inert_evidence_not_web_provenance() -> None:
     assert "По данным интернета" not in provenance
     assert "В документе" in provenance
     assert _attachment_web_literals_are_grounded(provenance, allowed)
+
+
+def test_document_source_word_without_a_web_literal_is_byte_preserved() -> None:
+    answer = "  Контрольный код из источника: LINEAGE-TARGET-1.  "
+
+    assert _reconcile_attachment_web_literals(answer, allowed=frozenset()) == (answer, False)
+
+
+def test_explicit_web_provenance_without_a_literal_remains_guarded() -> None:
+    answer = "По данным интернета, контрольный код LINEAGE-TARGET-1."
+    reconciled, changed = _reconcile_attachment_web_literals(
+        answer,
+        allowed=frozenset(),
+    )
+
+    assert changed is False
+    assert reconciled == answer
+
+
+@pytest.mark.parametrize("separator", [", ", "! ", "\n"])
+def test_attachment_web_reconciliation_does_not_drop_an_unrelated_source_clause(
+    separator: str,
+) -> None:
+    answer = (
+        f"Контрольный код из источника: LINEAGE-TARGET-1{separator}"
+        "Неподтверждённая ссылка: https://invented.invalid/path."
+    )
+
+    reconciled, changed = _reconcile_attachment_web_literals(answer, allowed=frozenset())
+
+    assert changed is True
+    assert "LINEAGE-TARGET-1" in reconciled
+    assert "invented.invalid" not in reconciled
+
+
+@pytest.mark.parametrize("separator", [", ", "; ", "! ", "\n"])
+def test_benign_document_source_fragment_does_not_poison_an_exact_url(
+    separator: str,
+) -> None:
+    exact = "https://Document.Invalid/CasePath?Q=AbC"
+    answer = f"Источник документа: D02{separator}endpoint: {exact}"
+    allowed = _attachment_web_fact_targets([{"tool": "attachment", "output": answer}])
+
+    reconciled, changed = _reconcile_attachment_web_literals(answer, allowed=allowed)
+
+    assert changed is True
+    assert "Источник документа: D02" in reconciled
+    assert exact in reconciled
+    assert _attachment_web_literals_are_grounded(reconciled, allowed) is True
+
+
+@pytest.mark.parametrize(
+    "answer_template",
+    [
+        "Источник документа {url} содержит код LINEAGE-TARGET-1.",
+        "Источник документа, {url} содержит код LINEAGE-TARGET-1.",
+        "Источник документа: {url}; код LINEAGE-TARGET-1.",
+        "Источник документа!\n{url} содержит код LINEAGE-TARGET-1.",
+    ],
+)
+def test_exact_url_inerting_never_erases_a_same_clause_attachment_fact(
+    answer_template: str,
+) -> None:
+    exact = "https://Document.Invalid/CasePath?Q=AbC"
+    answer = answer_template.format(url=exact)
+    allowed = _attachment_web_fact_targets([{"tool": "attachment", "output": answer}])
+
+    reconciled, changed = _reconcile_attachment_web_literals(answer, allowed=allowed)
+
+    assert changed is True
+    assert exact in reconciled
+    assert "LINEAGE-TARGET-1" in reconciled
+    assert _attachment_web_literals_are_grounded(reconciled, allowed) is True
+
+
+@pytest.mark.parametrize(
+    "answer_template",
+    [
+        "По данным интернета: {url} содержит код LINEAGE-TARGET-1.",
+        "Информация LINEAGE-TARGET-1 была найдена в интернете: {url}.",
+    ],
+)
+def test_fabricated_web_label_is_removed_without_erasing_the_grounded_fact(
+    answer_template: str,
+) -> None:
+    exact = "https://Document.Invalid/CasePath?Q=AbC"
+    answer = answer_template.format(url=exact)
+    allowed = _attachment_web_fact_targets([{"tool": "attachment", "output": answer}])
+
+    reconciled, changed = _reconcile_attachment_web_literals(answer, allowed=allowed)
+
+    assert changed is True
+    assert "данным интернета" not in reconciled.casefold()
+    assert exact in reconciled
+    assert "LINEAGE-TARGET-1" in reconciled
+
+
+def test_unsupported_web_clause_cannot_launder_residual_as_a_document_fact() -> None:
+    answer = "По данным интернета: https://invented.invalid/not-in-document код FABRICATED-42."
+
+    reconciled, changed = _reconcile_attachment_web_literals(answer, allowed=frozenset())
+
+    assert changed is True
+    assert "invented.invalid" not in reconciled
+    assert "по данным интернета" in reconciled.casefold()
+    assert "в документе указано" not in reconciled.casefold()
+
+
+@pytest.mark.asyncio
+async def test_attachment_source_word_cannot_erase_the_model_answer(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=_NoToolsKernel(),
+    )
+    answer = "Контрольный код из источника процитированного ответа: LINEAGE-TARGET-1."
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        return {
+            "content": answer,
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    reply = await runtime.chat(
+        "alice",
+        "Повтори контрольный код из источника процитированного ответа.",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "older-source.odt",
+                "transient_text": "Контрольный код: LINEAGE-TARGET-1.",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+        quoted_attachment_reference=True,
+    )
+
+    assert reply["message"] == answer
+    assert reply["verification_status"] != "unknown"
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["attachment_context_used"] is True
+    assert metadata["attachment_context_expected_count"] == 1
+    assert metadata["attachment_context_readable_count"] == 1
+    assert metadata["attachment_coverage_complete"] is True
+    assert metadata["verification"]["issues"] != ["unsupported_attachment_web_literal_removed"]
+
+
+@pytest.mark.asyncio
+async def test_exact_attachment_url_survives_the_final_guard_beside_a_document_source_label(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=_NoToolsKernel(),
+    )
+    exact = "https://Document.Invalid/CasePath?Q=AbC"
+    invented = "https://invented.invalid/not-in-document"
+    answer = f"Источник документа: D02; endpoint: {exact}; лишняя ссылка: {invented}."
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        return {"content": answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Покажи источник документа и точный endpoint.",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "source.odt",
+                "transient_text": f"Источник документа: D02; endpoint: {exact}",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert reply["message"] != _WEB_EVIDENCE_MISSING
+    assert "Источник документа: D02" in reply["message"]
+    assert exact in reply["message"]
+    assert invented not in reply["message"]
+
+
+@pytest.mark.asyncio
+async def test_same_clause_attachment_fact_survives_url_reconciliation_and_final_guard(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=_NoToolsKernel(),
+    )
+    exact = "https://Document.Invalid/CasePath?Q=AbC"
+    invented = "https://invented.invalid/not-in-document"
+    grounded = f"Источник документа {exact} содержит код LINEAGE-TARGET-1."
+    answer = f"{grounded} Неподтверждённая ссылка: {invented}."
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        return {"content": answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Покажи источник документа, точный endpoint и контрольный код.",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "source.odt",
+                "transient_text": grounded,
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert reply["message"] != _WEB_EVIDENCE_MISSING
+    assert exact in reply["message"]
+    assert "LINEAGE-TARGET-1" in reply["message"]
+    assert invented not in reply["message"]
+
+
+@pytest.mark.parametrize(
+    "model_answer",
+    [
+        "Проверила онлайн: контрольный код LINEAGE-TARGET-1.",
+        "Интернет-источник сообщает: контрольный код LINEAGE-TARGET-1.",
+    ],
+)
+@pytest.mark.asyncio
+async def test_explicit_online_claim_without_a_url_reaches_the_web_hard_guard(
+    settings,
+    storage,
+    monkeypatch,
+    model_answer: str,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=_NoToolsKernel(),
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        return {
+            "content": model_answer,
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    reply = await runtime.chat(
+        "alice",
+        "Повтори контрольный код из приложенного документа.",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "source.odt",
+                "transient_text": "Контрольный код: LINEAGE-TARGET-1.",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _WEB_EVIDENCE_MISSING
+    assert "LINEAGE-TARGET-1" not in reply["message"]
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"]["output_guards"]["web_evidence_replaced"] is True
+
+
+@pytest.mark.asyncio
+async def test_unsupported_web_clause_cannot_reach_the_final_attachment_answer(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=_NoToolsKernel(),
+    )
+    model_answer = "По данным интернета: https://invented.invalid/not-in-document код FABRICATED-42."
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        return {
+            "content": model_answer,
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    reply = await runtime.chat(
+        "alice",
+        "Повтори контрольный код из приложенного документа.",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "source.odt",
+                "transient_text": "Контрольный код: LEGITIMATE-42.",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _WEB_EVIDENCE_MISSING
+    assert "FABRICATED-42" not in reply["message"]
 
 
 def test_hostile_document_url_syntax_stays_visible_without_a_telegram_link() -> None:

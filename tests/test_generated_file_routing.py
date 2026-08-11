@@ -50,6 +50,49 @@ def test_output_format_is_resolved_from_the_target_not_the_source(
     assert _file_kind_from_request(prompt) == expected
 
 
+def test_unsupported_txt_suffix_does_not_claim_a_make_file_format() -> None:
+    assert _is_direct_file_request("Сохрани результат в metadata-export.txt.") is False
+
+
+@pytest.mark.asyncio
+async def test_successful_workspace_text_output_is_not_duplicated_by_late_make_file(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledOfflineRouter())
+
+    async def prepare(user_id: str, message: str, conversation_id: str, **kwargs: Any) -> AgentContext:
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=user_id)
+
+    async def generate(context: AgentContext, message: str, attachments: Any) -> dict[str, Any]:
+        del context, message, attachments
+        return {
+            "content": "Файл во внешнем outbox создан.",
+            "tools_used": ["workspace_create"],
+            "tool_evidence": [{"tool": "workspace_create", "output": "synthetic success"}],
+        }
+
+    async def forbidden_late_file(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise AssertionError("successful workspace output was duplicated as a chat attachment")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", forbidden_late_file)
+    result = await runtime.chat(
+        "alice",
+        "Используй workspace_create и создай в MCP outbox файл mcp-metadata.txt.",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        enable_tools=False,
+    )
+
+    assert result["tools_used"] == ["workspace_create"]
+    assert result["files"] == []
+
+
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [

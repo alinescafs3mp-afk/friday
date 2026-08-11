@@ -157,10 +157,7 @@ def _attachment_prepass_budget_sec(chunk_count: int, parallelism: int) -> float:
     waves = (max(0, int(chunk_count)) + parallelism - 1) // parallelism
     return min(
         _ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC,
-        max(
-            _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC,
-            waves * _ATTACHMENT_PREPASS_WAVE_BUDGET_SEC,
-        ),
+        _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC + max(0, waves - 1) * _ATTACHMENT_PREPASS_WAVE_BUDGET_SEC,
     )
 
 
@@ -6215,6 +6212,12 @@ def _named_person_aggregation_scope(
     """Closed current/prior scope for one named-user content aggregation."""
 
     visible = _classification_text(message)
+    if _attachment_temporal_read_clause(visible) and not _named_person_query_from(visible):
+        # ``обобщи документ и покажи, что происходило вчера`` contains a
+        # document task and a separate owner-timeline clock.  The latter must
+        # not be reinterpreted as the arrival window of an implicit all-time
+        # self corpus; the current authenticated attachment remains the source.
+        return None
     direct = bool(
         _NAMED_PERSON_AGGREGATION_ACTION.search(visible) and _NAMED_PERSON_AGGREGATION_SUBJECT.search(visible)
     )
@@ -7503,9 +7506,13 @@ def _document_metadata_request_scope(
         )
     if not matched:
         return ""
-    if _DOCUMENT_TECHNICAL_METADATA_SCOPE.search(text):
+    technical_scope = bool(_DOCUMENT_TECHNICAL_METADATA_SCOPE.search(text))
+    details_scope = bool(re.search(r"\bреквизит\w*\b", text, re.IGNORECASE))
+    if technical_scope and details_scope:
+        return "both"
+    if technical_scope:
         return "technical"
-    if re.search(r"\bреквизит\w*\b", text, re.IGNORECASE):
+    if details_scope:
         return "details"
     return "both"
 
@@ -8508,40 +8515,287 @@ def _normalized_attachment_selector(value: str) -> str:
 def _attachment_filename_mentions(message: str) -> tuple[str, ...]:
     """Exact filename-shaped selectors, with quoted spaces but no fuzzy substrings."""
 
-    found: list[tuple[int, str]] = []
-    quoted_spans: list[tuple[int, int]] = []
-    for match in _ATTACHMENT_QUOTED_FILENAME_REFERENCE.finditer(str(message or "")):
-        quoted_spans.append(match.span())
-        found.append((match.start(), _normalized_attachment_selector(match.group("filename"))))
-    for match in _ATTACHMENT_BARE_FILENAME_REFERENCE.finditer(str(message or "")):
-        if any(start <= match.start() and match.end() <= end for start, end in quoted_spans):
-            continue
-        found.append((match.start(), _normalized_attachment_selector(match.group("filename"))))
+    found = [
+        (match.start(), _normalized_attachment_selector(match.group("filename")))
+        for match in _attachment_filename_reference_matches(message)
+    ]
     found.sort(key=lambda item: item[0])
     return tuple(dict.fromkeys(name for _offset, name in found if name))
+
+
+def _attachment_filename_reference_matches(message: str) -> list[re.Match[str]]:
+    """Non-overlapping filename spans, including quoted names with spaces."""
+
+    text = str(message or "")
+    quoted_spans: list[tuple[int, int]] = []
+    matches: list[re.Match[str]] = []
+    for match in _ATTACHMENT_QUOTED_FILENAME_REFERENCE.finditer(text):
+        quoted_spans.append(match.span())
+        matches.append(match)
+    for match in _ATTACHMENT_BARE_FILENAME_REFERENCE.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in quoted_spans):
+            continue
+        matches.append(match)
+    return sorted(matches, key=lambda item: item.start())
+
+
+_ATTACHMENT_OUTPUT_FILENAME_LEAD = re.compile(
+    r"(?:"
+    r"\b(?:сохран|запиш|выгруз|экспортир|отправ|пришл)\w*"
+    r"(?:\s+(?:(?:готов|итогов|полученн|эт)\w+\s+){0,2}"
+    r"(?:результат|итог|файл|документ|отч[её]т|таблиц|выгрузк|копи|данн)\w*)?"
+    r"\s+(?:в|как)|"
+    r"\b(?:созда|сдела|сформир|подготов|оформ)\w*"
+    r"(?:\s+(?:(?:готов|итогов|полученн|нов|обычн|текстов)\w+\s+){0,2}"
+    r"(?:результат|итог|файл|документ|отч[её]т|таблиц|выгрузк|копи)\w*)?"
+    r"\s+(?:в|как)|"
+    r"\b(?:save|write|export|send)\b"
+    r"(?:\s+(?:(?:the|final|finished)\s+){0,2}"
+    r"(?:result|output|file|document|report|table|copy|data))?\s+(?:to|as)|"
+    r"\b(?:create|make)\b"
+    r"(?:\s+(?:(?:the|final|finished|new|plain|text)\s+){0,2}"
+    r"(?:result|output|file|document|report|table|copy))?\s+(?:to|as)"
+    r")$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_BARE_OUTPUT_FILENAME_LEAD = re.compile(
+    r"(?:"
+    r"\b(?:созда|сдела|сформир|подготов|оформ)\w*"
+    r"(?:\s+(?:нов|обычн|итогов|готов|текстов|табличн|word|excel|pdf|"
+    r"файл|документ|отч[её]т|таблиц|презентац)\w*(?:-\w+)*){0,5}|"
+    r"\b(?:create|make|build|generate)\b"
+    r"(?:\s+(?:a|an|the|new|plain|final|text|word|excel|pdf|output|result|"
+    r"file|document|report|spreadsheet|presentation)){0,5}"
+    r")$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_SOURCE_DESTINATION_ACTION = re.compile(
+    r"(?:"
+    r"\b(?:сохран|запиш|выгруз|экспортир|конверт|преобраз|скопир|объедин|соедин)\w*|"
+    r"\b(?:save|write|export|convert|copy|merge|combine)\b"
+    r")[^,;:!?\n]{0,100}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_SOURCE_DESTINATION_CONNECTOR = re.compile(
+    r"^(?:в|как|to|as|into)$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_OUTPUT_FIRST_ACTION = re.compile(
+    r"(?:"
+    r"\b(?:созда|сдела|сформир|подготов|оформ)\w*|"
+    r"\b(?:create|make|build|generate)\b"
+    r")[^,;:!?\n]{0,100}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_OUTPUT_FIRST_INPUT_CONNECTOR = re.compile(
+    r"^(?:"
+    r"по\s+(?:данным|материалам|содержимому)(?:\s+из)?|"
+    r"из|используя|на\s+(?:основе|базе|основании)|"
+    r"from(?:\s+(?:data|content))?(?:\s+(?:in|from))?|using|based\s+on|"
+    r"with\s+(?:data|content)\s+from"
+    r")$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_MULTI_INPUT_ACTION = re.compile(
+    r"\b(?:сравн|сопостав|свер|объедин|соедин|merge|combine|compare|contrast)\w*",
+    re.IGNORECASE,
+)
+
+
+def _attachment_filename_match_is_transform_destination(
+    text: str,
+    start: int,
+    end: int | None = None,
+) -> bool:
+    matches = _attachment_filename_reference_matches(text)
+    current_index = next(
+        (
+            index
+            for index, match in enumerate(matches)
+            if match.start() == start and (end is None or match.end() == end)
+        ),
+        -1,
+    )
+    if current_index <= 0:
+        return False
+    previous = matches[current_index - 1]
+    connector = _normalized_attachment_selector(text[previous.end() : start])
+    action_prefix = _normalized_attachment_selector(text[max(0, previous.start() - 120) : previous.start()])
+    return bool(
+        _ATTACHMENT_SOURCE_DESTINATION_CONNECTOR.fullmatch(connector)
+        and _ATTACHMENT_SOURCE_DESTINATION_ACTION.search(action_prefix)
+    )
+
+
+def _attachment_filename_match_is_output(
+    text: str,
+    start: int,
+    end: int | None = None,
+) -> bool:
+    """Whether one exact filename span names a future output carrier."""
+
+    matches = _attachment_filename_reference_matches(text)
+    current_index = next(
+        (
+            index
+            for index, match in enumerate(matches)
+            if match.start() == start and (end is None or match.end() == end)
+        ),
+        -1,
+    )
+    if current_index < 0:
+        return False
+    if _attachment_filename_match_is_transform_destination(text, start, end):
+        return True
+    prefix = _normalized_attachment_selector(text[max(0, start - 120) : start])
+    if _ATTACHMENT_OUTPUT_FILENAME_LEAD.search(prefix) or _ATTACHMENT_BARE_OUTPUT_FILENAME_LEAD.search(
+        prefix
+    ):
+        return True
+    if current_index + 1 >= len(matches):
+        return False
+    following = matches[current_index + 1]
+    connector = _normalized_attachment_selector(text[matches[current_index].end() : following.start()])
+    return bool(
+        _ATTACHMENT_OUTPUT_FIRST_INPUT_CONNECTOR.fullmatch(connector)
+        and _ATTACHMENT_OUTPUT_FIRST_ACTION.search(prefix)
+    )
+
+
+def _attachment_filename_match_has_private_lead(
+    text: str,
+    start: int,
+    end: int | None = None,
+) -> bool:
+    """Whether one filename is locally introduced as an existing private input."""
+
+    matches = _attachment_filename_reference_matches(text)
+    current_index = next(
+        (
+            index
+            for index, match in enumerate(matches)
+            if match.start() == start and (end is None or match.end() == end)
+        ),
+        -1,
+    )
+    if current_index >= 0:
+        if _attachment_filename_match_is_output(text, start, end):
+            return False
+        # In a closed ``source -> destination`` construction, role comes from
+        # the connector between the two exact spans.  This handles both
+        # ``сохрани данные из report.txt в export.txt`` and the equally common
+        # preposition-less ``сохрани содержимое report.txt в export.txt`` while
+        # keeping the first filename as input and masking only the second.
+        if current_index + 1 < len(matches):
+            following = matches[current_index + 1]
+            connector = _normalized_attachment_selector(
+                text[matches[current_index].end() : following.start()]
+            )
+            action_prefix = _normalized_attachment_selector(text[max(0, start - 120) : start])
+            if _ATTACHMENT_SOURCE_DESTINATION_CONNECTOR.fullmatch(
+                connector
+            ) and _ATTACHMENT_SOURCE_DESTINATION_ACTION.search(action_prefix):
+                return True
+        if _attachment_filename_match_is_transform_destination(text, start, end):
+            return False
+
+        # Output-first transformations invert the more common order without
+        # changing authority: ``create export.docx from report.docx`` names a
+        # future carrier first and an existing source second.
+        if current_index > 0:
+            previous = matches[current_index - 1]
+            connector = _normalized_attachment_selector(text[previous.end() : start])
+            action_prefix = _normalized_attachment_selector(
+                text[max(0, previous.start() - 120) : previous.start()]
+            )
+            if _ATTACHMENT_OUTPUT_FIRST_INPUT_CONNECTOR.fullmatch(
+                connector
+            ) and _ATTACHMENT_OUTPUT_FIRST_ACTION.search(action_prefix):
+                return True
+
+    prefix = _normalized_attachment_selector(text[max(0, start - 120) : start])
+    # A destination preposition is not an input selector.  In particular,
+    # ``сохрани результат в export.txt`` used to hit the generic bare ``в``
+    # branch below and either restore an older export or fail closed because
+    # the future output did not exist yet.  Keep this cue local and bounded so
+    # genuine sources such as ``данные из report.txt`` retain their authority.
+    if _ATTACHMENT_OUTPUT_FILENAME_LEAD.search(prefix):
+        return False
+    multi_input_matches = list(_ATTACHMENT_MULTI_INPUT_ACTION.finditer(prefix))
+    if multi_input_matches and not re.search(
+        r"[!?;\n]|\.(?=\s|$)",
+        prefix[multi_input_matches[-1].end() :],
+    ):
+        return True
+    return bool(
+        re.search(
+            rf"(?:"
+            rf"\b(?:в|из|по|про|с|from|to)(?:\s+(?:этом|том|ранее|присланн\w*|загруженн\w*|"
+            rf"{_ATTACHMENT_REFERENCE_NOUN}))*|"
+            rf"\b(?:используя|используй|using)\w*|"
+            rf"\b(?:на\s+основе|на\s+базе|на\s+основании)|"
+            rf"\bвозьм\w*(?:\s+\w+){{0,3}}(?:\s+из)?|"
+            rf"\b(?:открой|прочитай|прочти|посмотри|проверь|разбери|open|read|check|inspect)\w*"
+            rf")$",
+            prefix,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _attachment_filename_has_private_lead(message: str) -> bool:
     """Whether filename syntax explicitly points to a supplied/uploaded file."""
 
     text = str(message or "")
-    matches = [
-        *list(_ATTACHMENT_QUOTED_FILENAME_REFERENCE.finditer(text)),
-        *list(_ATTACHMENT_BARE_FILENAME_REFERENCE.finditer(text)),
-    ]
+    return any(
+        _attachment_filename_match_has_private_lead(text, match.start(), match.end())
+        for match in _attachment_filename_reference_matches(text)
+    )
+
+
+def _attachment_selector_message(message: str) -> str:
+    """Hide output filenames from private-input resolution on direct file requests.
+
+    ``create export.txt`` names a future carrier, while ``open report.txt and
+    create export.txt`` contains one input and one output.  Preserve only the
+    individually introduced private filenames; keeping a single turn-wide flag
+    would make the absent output name invalidate the exact input selection.
+    """
+
+    text = str(message or "")
+    matches = _attachment_filename_reference_matches(text)
+    if not _is_direct_file_request(text) and not any(
+        _attachment_filename_match_is_output(text, match.start(), match.end()) for match in matches
+    ):
+        return text
+    chars = list(text)
     for match in matches:
-        prefix = _normalized_attachment_selector(text[max(0, match.start() - 120) : match.start()])
-        if re.search(
-            rf"(?:"
-            rf"\b(?:в|из|по|про|с)(?:\s+(?:этом|том|ранее|присланн\w*|загруженн\w*|"
-            rf"{_ATTACHMENT_REFERENCE_NOUN}))*|"
-            rf"\b(?:открой|прочитай|прочти|посмотри|проверь|разбери)\w*"
-            rf")$",
-            prefix,
-            re.IGNORECASE,
-        ):
-            return True
-    return False
+        if _attachment_filename_match_has_private_lead(text, match.start(), match.end()):
+            continue
+        chars[match.start() : match.end()] = " " * (match.end() - match.start())
+    return "".join(chars)
+
+
+def _requested_output_filename_stem(message: str, *, kind: str) -> tuple[str, bool]:
+    """Return one code-owned output stem and whether its format is supported."""
+
+    text = str(message or "")
+    candidates = [
+        str(match.group("filename") or "").strip()
+        for match in _attachment_filename_reference_matches(text)
+        if not _attachment_filename_match_has_private_lead(text, match.start(), match.end())
+    ]
+    unique = list(dict.fromkeys(value for value in candidates if value))
+    if not unique:
+        return "", True
+    if len(unique) != 1:
+        return "", False
+    extension = str(SUPPORTED_KINDS.get(str(kind or "").casefold(), ("", ""))[1] or "")
+    filename = unique[0]
+    stem, dot, supplied_extension = filename.rpartition(".")
+    if not extension or not dot or supplied_extension.casefold() != extension.casefold() or not stem.strip():
+        return "", False
+    return stem.strip(), True
 
 
 def _attachment_count_range_side(message: str) -> str:
@@ -9151,6 +9405,36 @@ _ATTACHMENT_ABSTRACT_REQUEST = re.compile(
     r"(?:file|document|text)\s+about)\b)",
     re.IGNORECASE,
 )
+_ATTACHMENT_COMPOSITE_TRANSFORMATION = re.compile(
+    r"\b(?:вычисл|рассчита|посчита|примени|использу|провер|определ|оцени|умнож)\w*\b|"
+    r"\b(?:compute|calculate|apply|use|check|verify|evaluate|multipl(?:y|ies|ied))\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_DOCUMENT_GLOBAL_DEPENDENCY = re.compile(
+    r"(?:"
+    r"\b(?:по|согласно|учитывая|используя|на\s+основании)\b[^.!?\n]{0,48}"
+    r"\b(?:правил|формул|методик|алгоритм|инструкц|критери|услови|порядк)\w*\b"
+    r"[^.!?\n]{0,64}\b(?:документ|файл|текст|материал|источник)\w*\b|"
+    r"\b(?:правил|формул|методик|алгоритм|инструкц|критери|услови|порядк)\w*\b"
+    r"[^.!?\n]{0,32}\b(?:из|в|этого|данного|текущего)\b[^.!?\n]{0,24}"
+    r"\b(?:документ|файл|текст|материал|источник)\w*\b|"
+    r"\b(?:according\s+to|using|based\s+on)\b[^.!?\n]{0,48}"
+    r"\b(?:rule|formula|method|algorithm|instruction|criterion|condition)s?\b"
+    r"[^.!?\n]{0,64}\b(?:document|file|text|attachment|source)\b|"
+    r"\b(?:rule|formula|method|algorithm|instruction|criterion|condition)s?\b"
+    r"[^.!?\n]{0,32}\b(?:in|from|of)\b[^.!?\n]{0,24}"
+    r"\b(?:document|file|text|attachment|source)\b|"
+    # Deictic locations refer to authenticated text outside the target's local
+    # lexical window even when the person does not repeat ``document/file``.
+    r"\b(?:по|согласно|учитывая|используя|на\s+основании)\b[^.!?\n]{0,48}"
+    r"\b(?:правил|формул|методик|алгоритм|инструкц|критери|услови|порядк)\w*\b"
+    r"[^.!?\n]{0,32}\b(?:выше|ниже|в\s+начале|в\s+конце)\b|"
+    r"\b(?:according\s+to|using|based\s+on)\b[^.!?\n]{0,48}"
+    r"\b(?:rule|formula|method|algorithm|instruction|criterion|condition)s?\b"
+    r"[^.!?\n]{0,32}\b(?:above|below|at\s+the\s+(?:beginning|start|end))\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _attachment_explicitly_partial_scope(message: str) -> bool:
@@ -9160,6 +9444,16 @@ def _attachment_explicitly_partial_scope(message: str) -> bool:
     return bool(
         _ANSWER_EXPLICITLY_PARTIAL_ATTACHMENT.search(visible)
         or _ATTACHMENT_PARTIAL_SCOPE_REQUEST.search(visible)
+    )
+
+
+def _attachment_query_requires_global_context(message: str) -> bool:
+    """A local target must also be transformed by a document-wide rule."""
+
+    visible = _classification_text(message)
+    return bool(
+        _ATTACHMENT_COMPOSITE_TRANSFORMATION.search(visible)
+        and _ATTACHMENT_DOCUMENT_GLOBAL_DEPENDENCY.search(visible)
     )
 
 
@@ -9274,6 +9568,13 @@ def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str
     visible = _classification_text(message)
     if not visible or _attachment_explicitly_partial_scope(visible):
         return ""
+    if _attachment_query_requires_global_context(visible):
+        # A lexical window can prove the named target, but it cannot prove the
+        # rule/formula elsewhere in the file which the user asked us to apply.
+        # Classify this bounded composite form as analysis so the authenticated
+        # hierarchy covers head, target and tail. Ordinary exact lookups keep
+        # the fast complete-scan projection below.
+        return "analysis"
     # A named literal/field query is not made global merely because it also says
     # "compare".  The query projector has stronger, more exact source authority.
     if _attachment_query_terms(visible):
@@ -11325,6 +11626,42 @@ _MODEL_WEB_PROVENANCE_CLAIM = re.compile(
     r"found\s+(?:this\s+)?(?:on|at)|information\s+(?:came|comes|is)\s+from)\b",
     re.IGNORECASE,
 )
+_MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM = re.compile(
+    r"(?:"
+    r"\b(?:интернет|web|online)\w*\b[^.!?\n]{0,48}"
+    r"\b(?:источник|ссылк|данн|информац|source|link|data|information)\w*\b|"
+    r"\b(?:источник|ссылк|данн|информац|source|link|data|information)\w*\b"
+    r"[^.!?\n]{0,48}\b(?:интернет|web|online)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_ATTACHMENT_FABRICATED_WEB_LABEL = re.compile(
+    r"(?:"
+    r"\bпо\s+данн\w*\s+(?:из\s+|в\s+)?интернет\w*\b|"
+    r"\b(?:я\s+)?(?:искал|нашл|посмотр|провер)\w*\s+(?:это\s+)?(?:в|через)\s+"
+    r"(?:интернет|сети|веб)\w*\b|"
+    r"\b(?:я\s+)?(?:искал|нашл|посмотр|провер)\w*\s+(?:это\s+)?(?:онлайн|online)\b|"
+    r"\b(?:(?:был[аои]?|было|были)\s+)?"
+    r"(?:бер|взя|получ|найд|основан|собран)\w*\s+(?:с|из|в)\s+"
+    r"(?:интернет|сети|веб)\w*\b|"
+    r"\b(?:интернет|web|online)\w*[-\s]*"
+    r"(?:источник|ссылк|данн|информац|source|link|data|information)\w*\b|"
+    r"\b(?:источник|ссылк|данн|информац|source|link|data|information)\w*\s+"
+    r"(?:из|в|from)\s+(?:интернет|web|online)\w*\b|"
+    r"\b(?:according\s+to|based\s+on)\s+(?:online|open|web)\s+sources?\b|"
+    r"\b(?:i\s+)?(?:got|took|found|collected)\s+(?:this\s+)?"
+    r"(?:from\s+the\s+)?(?:web|internet)\b"
+    r")",
+    re.IGNORECASE,
+)
+_MODEL_WEB_PROVENANCE_FRAGMENT_ONLY = re.compile(
+    r"\s*(?:[-—:]\s*)?(?:"
+    r"(?:\w+\s+){0,2}(?:источник|ссылк)\w*|"
+    r"(?:source|link|url)s?|"
+    r"(?:по\s+)?данн\w*\s+(?:из\s+|в\s+)?интернет\w*"
+    r")\s*[:—-]?\s*[.,!?;]?\s*",
+    re.IGNORECASE,
+)
 _CONTENT_FILE_SUFFIXES = frozenset(
     {
         "7z",
@@ -11616,26 +11953,25 @@ def _reconcile_attachment_web_literals(
 ) -> tuple[str, bool]:
     """Keep exact document literals inert; remove unsupported web-shaped text."""
 
-    original = str(answer or "").strip()
+    source = str(answer or "")
+    original = source.strip()
+
+    # ``источник`` is also the ordinary Russian word for the
+    # document the answer is reading.  It is not web provenance by itself.  The
+    # previous broad branch entered this reconciler on that word alone and then
+    # dropped the whole clause, including an exact value copied from the file.
+    # With no web-shaped token there is nothing to reconcile: preserve the
+    # model body byte-for-byte and leave the independent no-web claim guards to
+    # their own, narrower authority.
+    if (
+        not _MODEL_MARKDOWN_WEB_LINK.search(source)
+        and not _attachment_web_literal_occurrences(source)
+        and not _MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM.search(source)
+    ):
+        return source, False
 
     def keep(value: str) -> str:
         return value if _attachment_web_literal_key(value) in allowed else ""
-
-    reconciled = _MODEL_MARKDOWN_WEB_LINK.sub(
-        lambda match: keep(str(match.group("url") or "")) or str(match.group("label") or ""),
-        original,
-    )
-
-    # Normalize an already model-authored code span before producing our own
-    # single safe span.  This also collapses the hostile shape
-    # `` `[label](http://private)` `` after the Markdown-link step above.
-    reconciled = re.sub(
-        r"`([^`\n]{1,2048})`",
-        lambda match: (
-            match.group(1) if _attachment_web_literal_key(match.group(1)) in allowed else match.group(0)
-        ),
-        reconciled,
-    )
 
     def replace_literals(source: str, *, inert: bool) -> str:
         pieces: list[str] = []
@@ -11653,28 +11989,104 @@ def _reconcile_attachment_web_literals(
         pieces.append(source[cursor:])
         return "".join(pieces)
 
-    reconciled = replace_literals(reconciled, inert=False)
-    changed = reconciled != original
-    clauses = re.split(r"(?<=[.;])\s+|\s*;\s*", reconciled)
+    def strip_fabricated_provenance_label(value: str) -> str:
+        """Remove only the web-origin claim, retaining the attachment fact."""
+
+        # Do not substitute the broad detection regexes here: their bounded
+        # gaps intentionally recognise prose such as ``информация CODE была
+        # найдена в интернете`` and therefore include CODE in the match.  This
+        # narrower pattern owns only the fabricated origin words.
+        rewritten = _ATTACHMENT_FABRICATED_WEB_LABEL.sub(" ", value)
+        rewritten = re.sub(
+            r"^\s*(?:сообща|утвержда|пиш)\w*\s*[:—-]?\s*",
+            "",
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+        rewritten = re.sub(r"^[\s:—-]+", "", rewritten)
+        rewritten = re.sub(r"[ \t]+([:;,])", r"\1", rewritten)
+        rewritten = re.sub(r"[ \t]{2,}", " ", rewritten).strip()
+        return f"В документе указано: {rewritten}" if rewritten else ""
+
+    changed = False
+    # Strong punctuation, commas and physical lines are independent bounded
+    # fragments for provenance purposes.  A URL in one fragment must never
+    # grant the broad words ``источник``/``ссылка`` authority over a document
+    # fact in its neighbour.
+    clauses = re.split(r"(?<=[.!?;,])(?:[ \t]+|\r?\n+)|\r?\n+", original)
     kept: list[str] = []
-    for clause in clauses:
-        clean = clause.strip()
+    for original_clause in clauses:
+        clean = original_clause.strip()
+        if not clean:
+            continue
+        # A web literal in one sentence must not give the generic word
+        # ``источник`` authority over another sentence.  Reconcile
+        # only the clause which actually carried URL/domain/IP syntax.
+        if (
+            not _MODEL_MARKDOWN_WEB_LINK.search(clean)
+            and not _attachment_web_literal_occurrences(clean)
+            and not _MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM.search(clean)
+        ):
+            kept.append(clean)
+            continue
+        clause_occurrences = _attachment_web_literal_occurrences(clean)
+        supported_literal_present = any(
+            _attachment_web_literal_key(value.rstrip(".,;:!?")) in allowed
+            for _start, _end, value in clause_occurrences
+        )
+        unsupported_literal_present = any(
+            _attachment_web_literal_key(value.rstrip(".,;:!?")) not in allowed
+            for _start, _end, value in clause_occurrences
+        )
+        reconciled_clause = _MODEL_MARKDOWN_WEB_LINK.sub(
+            lambda match: keep(str(match.group("url") or "")) or str(match.group("label") or ""),
+            clean,
+        )
+        # Normalize an already model-authored code span before producing our
+        # own single safe span.  This also collapses the hostile shape
+        # `` `[label](http://private)` `` after the Markdown-link step above.
+        reconciled_clause = re.sub(
+            r"`([^`\n]{1,2048})`",
+            lambda match: (
+                str(match.group(1))
+                if _attachment_web_literal_key(str(match.group(1))) in allowed
+                else str(match.group(0))
+            ),
+            reconciled_clause,
+        )
+        reconciled_clause = replace_literals(reconciled_clause, inert=False).strip()
+        changed = changed or reconciled_clause != clean
+        clean = reconciled_clause
         if not clean:
             continue
         if _claims_current_answer_came_from_the_web(clean):
             # A first-person/current action claim is not a harmless source label.
-            # Leave it visible for the ordinary no-web hard guard to reject.
-            kept.append(clean)
+            # With no URL-shaped carrier, leave it visible for the ordinary
+            # no-web hard guard.  Otherwise remove only the fabricated origin
+            # phrase: the exact URL and any neighbouring attachment fact stay.
+            if supported_literal_present:
+                grounded_clause = strip_fabricated_provenance_label(clean)
+                changed = True
+                if grounded_clause and grounded_clause.casefold() != "в документе указано":
+                    kept.append(grounded_clause)
+            else:
+                kept.append(clean)
             continue
-        if _MODEL_WEB_PROVENANCE_CLAIM.search(clean):
-            literals = [
-                value.rstrip(".,;:!?")
-                for _start, _end, value in _attachment_web_literal_occurrences(clean)
-                if _attachment_web_literal_key(value) in allowed
-            ]
+        if _MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM.search(clean) and supported_literal_present:
+            grounded_clause = strip_fabricated_provenance_label(clean)
             changed = True
-            if literals:
-                kept.append("В документе указано: " + ", ".join(dict.fromkeys(literals)))
+            if grounded_clause and grounded_clause.casefold() != "в документе указано":
+                kept.append(grounded_clause)
+            continue
+        # Removing an unsupported literal may leave only its local label
+        # (``неподтверждённая ссылка:``). Drop that bounded fragment, but never
+        # a larger clause which also carries an attachment fact.
+        if (
+            _MODEL_WEB_PROVENANCE_CLAIM.search(clean)
+            and unsupported_literal_present
+            and _MODEL_WEB_PROVENANCE_FRAGMENT_ONLY.fullmatch(clean)
+        ):
+            changed = True
             continue
         kept.append(clean)
     reconciled = " ".join(kept).strip()
@@ -11684,11 +12096,7 @@ def _reconcile_attachment_web_literals(
 
 
 def _attachment_web_literals_are_grounded(answer: str, allowed: frozenset[str]) -> bool:
-    if (
-        not allowed
-        or _claims_current_answer_came_from_the_web(answer)
-        or _MODEL_WEB_PROVENANCE_CLAIM.search(str(answer or ""))
-    ):
+    if not allowed or _claims_current_answer_came_from_the_web(answer):
         return False
     probe = re.sub(
         r"`([^`\n]{1,2048})`",
@@ -12214,15 +12622,75 @@ def asks_for_the_web(message: str) -> bool:
     )
 
 
+_ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION = re.compile(
+    r"(?:"
+    r"\b(?:запусти(?:те)?|выполни(?:те)?|исполни(?:те)?|execute|run)\b[^.!?\n]{0,72}"
+    r"\b(?:python|питон|скрипт|sql|sqlite|программ\w*\s+код)\w*\b|"
+    r"\b(?:python|питон|скрипт|sql|sqlite|программ\w*\s+код)\w*\b[^.!?\n]{0,72}"
+    r"\b(?:запусти(?:те)?|выполни(?:те)?|исполни(?:те)?|execute|run)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _attachment_requests_archive_tool(message: str) -> bool:
+    """Whether a closed archive-wide read must keep its authorised tool route."""
+
+    visible = _classification_text(message)
+    count_intent = _fast_archive_count_intent(_archive_count_projection(visible))
+    return bool(
+        count_intent is not None
+        and count_intent.scope == "whole_archive"
+        or _fast_tag_inventory_intent(visible)
+        or _tag_inventory_semantic_candidate(visible)
+    )
+
+
+_ATTACHMENT_COMPOUND_CLAUSE_BOUNDARY = re.compile(
+    r"(?:[.!?;]\s*|\b(?:и|а\s+также|затем)\b)",
+    re.IGNORECASE,
+)
+
+
+def _attachment_temporal_read_clause(message: str) -> str:
+    """Return one independently authorised timeline/calendar clause.
+
+    A whole-document summary is normally a direct, no-tool task.  When the
+    person appends an independent request such as ``и покажи планы завтра``,
+    that second speech act must retain the existing closed temporal route.
+    Quoted time language and document-scoped dates remain source data, not
+    authority to read the owner's timeline.
+    """
+
+    visible = temporal_routing_text(_classification_text(message))
+    if not _ATTACHMENT_SUMMARY_REQUEST.search(visible):
+        return ""
+    for fragment in _ATTACHMENT_COMPOUND_CLAUSE_BOUNDARY.split(visible):
+        candidate = fragment.strip(" \t,:—-")
+        if (
+            not candidate
+            or _has_temporal_subject_filter(candidate)
+            or not is_temporal_read_request(candidate)
+            or fast_time_intent(candidate) is None
+        ):
+            continue
+        return candidate
+    return ""
+
+
 def _attachment_requests_a_tool_action(message: str) -> bool:
     """Keep compound file+effect requests on the ordinary tool loop."""
 
     visible = _classification_text(message)
+    unquoted = _QUOTED_TEXT.sub(" ", visible)
     return bool(
         asks_for_the_web(visible)
         or _ASKS_FOR_A_REMINDER.search(visible)
         or _is_direct_file_request(visible)
         or _ASKS_FOR_VOICE.search(visible)
+        or _attachment_requests_archive_tool(visible)
+        or _attachment_temporal_read_clause(visible)
+        or _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(unquoted)
         or re.search(
             r"\b(?:сохрани|запомни|запиши|добавь|создай|удали|измени|"
             r"отправь|перешли|опубликуй|save|remember|store|add|create|"
@@ -12442,6 +12910,8 @@ _CURRENT_WEB_SOURCE_CLAIM = re.compile(
     r"\b(?:судя|согласно)\s+по\s+(?:открыт\w+\s+)?(?:интернет-)?источник\w*\b|"
     r"\b(?:я\s+)?(?:искал|нашл|посмотр|провер)\w*\s+(?:это\s+)?(?:в|через)\s+"
     r"(?:интернет\w*|сети|веб\w*)\b|"
+    r"\b(?:я\s+)?(?:искал|нашл|посмотр|провер)\w*\s+(?:это\s+)?(?:онлайн|online)\b|"
+    r"\bпо\s+данн\w*\s+(?:из\s+|в\s+)?интернет\w*\b|"
     r"\b(?:я\s+)?нашл\w*\s+на\s+https?://|"
     r"\b(?:i\s+)?(?:got|took|found|collected)\b.{0,50}\b(?:from\s+the\s+)?(?:web|internet)\b|"
     r"\b(?:according\s+to|based\s+on)\s+(?:online|open|web)\s+sources?\b)",
@@ -17330,7 +17800,8 @@ class AgentRuntime:
         document_metadata_other_requested = bool(
             document_metadata_requested and _DOCUMENT_METADATA_OTHER_TARGET.search(clean_message)
         )
-        attachment_reference_kind = _attachment_reference_kind(clean_message)
+        attachment_selector_message = _attachment_selector_message(clean_message)
+        attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
         # A stop order is the emergency path: after conversation ownership and
         # the sticky private-lineage state are known, it must not depend on the
         # execution kernel, file authorization, attachment restoration, search,
@@ -17475,11 +17946,13 @@ class AgentRuntime:
         all_attachment_set_requested = bool(
             _requests_all_attachment_set(clean_message) or _ATTACHMENT_ALL_REFERENCE.search(clean_message)
         )
+        filename_mentions = _attachment_filename_mentions(attachment_selector_message)
+        filename_targets_existing_attachment = bool(filename_mentions)
         hard_attachment_selector = bool(
             _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
             or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
             or _ATTACHMENT_SELECTIVE_REFERENCE.search(clean_message)
-            or _attachment_filename_mentions(clean_message)
+            or filename_targets_existing_attachment
         )
         descriptive_filename_selector = _descriptive_filename_selector(clean_message)
         strict_attachment_selector = bool(
@@ -17497,7 +17970,7 @@ class AgentRuntime:
                 )
             )
             and (
-                _attachment_filename_mentions(clean_message)
+                _attachment_filename_mentions(attachment_selector_message)
                 or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
                 or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
                 or _ATTACHMENT_BOTH_REFERENCE.search(clean_message)
@@ -17560,7 +18033,7 @@ class AgentRuntime:
         else:
             restored_attachments, restored_attachment_expected_count = (
                 self._restore_conversation_attachments(
-                    clean_message,
+                    attachment_selector_message,
                     attachment_catalog_history,
                     tenant_id=tenant_id,
                     person_id=person_id,
@@ -17971,7 +18444,8 @@ class AgentRuntime:
             == attachment_expected_count
         )
         multi_attachment_incomplete = bool(
-            multi_attachment_requested_count is not None
+            not document_metadata_requested
+            and multi_attachment_requested_count is not None
             and (
                 attachment_expected_count != multi_attachment_requested_count
                 or len(active_attachment_set) != multi_attachment_requested_count
@@ -18684,6 +19158,13 @@ class AgentRuntime:
             )
             else []
         )
+        if hierarchical_attachment_turn and not attachment_tool_action_requested:
+            # A complete, authenticated whole-document read already has its
+            # bounded source plan. Unrelated schemas add prompt cost and divert
+            # the turn through the agentic loop, where the canonical map can be
+            # ignored. Compound requests (reminder/file/voice/etc.) retain the
+            # ordinary tool route and receive the same mandatory prepass.
+            visible_tools = []
         if (
             foreign_private_request
             or dangerous_instruction_request
@@ -19349,18 +19830,20 @@ class AgentRuntime:
                 or _MODEL_WEB_PROVENANCE_CLAIM.search(content)
             )
         ):
-            attachment_web_unsupported_removed = bool(
+            unsupported_attachment_web_input = bool(
                 _claims_current_answer_came_from_the_web(content)
-                or _MODEL_WEB_PROVENANCE_CLAIM.search(content)
+                or _MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM.search(content)
                 or any(
-                    _attachment_web_literal_key(match.group(0)) not in attachment_web_targets
-                    for pattern in (_MODEL_PLAIN_WEB_URL, _MODEL_ANY_DOMAIN_OR_IP)
-                    for match in pattern.finditer(content)
+                    _attachment_web_literal_key(value.rstrip(".,;:!?")) not in attachment_web_targets
+                    for _start, _end, value in _attachment_web_literal_occurrences(content)
                 )
             )
             content, attachment_web_reconciliation_changed = _reconcile_attachment_web_literals(
                 content,
                 allowed=attachment_web_targets,
+            )
+            attachment_web_unsupported_removed = bool(
+                unsupported_attachment_web_input and attachment_web_reconciliation_changed
             )
             response["content"] = content
             if attachment_web_reconciliation_changed:
@@ -19397,6 +19880,7 @@ class AgentRuntime:
                 web_evidence_status in {"failed", "empty"}
                 or asks_for_the_web(clean_message)
                 or _claims_current_answer_came_from_the_web(content)
+                or bool(_MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM.search(content))
                 or bool(
                     _model_text_has_external_source(content)
                     and (
@@ -20646,6 +21130,11 @@ class AgentRuntime:
             and asked_for_a_file
             and not context.asked_for_an_archive
             and not response.get("file_clips")
+            and not any(
+                str(item.get("tool") or "") == "workspace_create"
+                for item in (response.get("tool_evidence") or [])
+                if isinstance(item, Mapping)
+            )
         ):
             late_file_content = content
             if web_evidence_used:
@@ -22230,10 +22719,11 @@ class AgentRuntime:
                     min(_ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC, float(requested_budget_sec)),
                 )
             )
-            context.attachment_prepass_deadline = time.monotonic() + min(
-                budget,
-                max(1.0, float(self.settings.llm_timeout_sec)),
-            )
+            # This is one shared deadline for a bounded set of independent map
+            # calls. The LLM client still applies ``llm_timeout_sec`` to each
+            # request; capping the whole hierarchy by that same single-call
+            # timeout made later waves expire before they could start.
+            context.attachment_prepass_deadline = time.monotonic() + budget
         return context.attachment_prepass_deadline
 
     async def _attachment_primary_chat(
@@ -23228,6 +23718,22 @@ class AgentRuntime:
                     continue
                 call_arguments: Any = call.arguments
                 carrier_allowed = True
+                if call.name == "make_file" and isinstance(call.arguments, Mapping):
+                    requested_kind = _file_kind_from_request(message)
+                    requested_filename, requested_filename_supported = _requested_output_filename_stem(
+                        message, kind=requested_kind
+                    )
+                    model_kind = str(call.arguments.get("kind") or "").casefold()
+                    if not requested_filename_supported or (
+                        requested_filename and model_kind != requested_kind
+                    ):
+                        carrier_allowed = False
+                    elif requested_filename:
+                        # The visible output name is a code-owned projection of
+                        # the user's output span, not a model guess and not an
+                        # input-file selector.
+                        call_arguments = dict(call.arguments)
+                        call_arguments["filename"] = requested_filename
                 carrier_file_descriptors = [
                     str(item.get("filename") or "")
                     for item in file_clips
@@ -23242,18 +23748,21 @@ class AgentRuntime:
                     context.successful_reminders
                 )
                 if call.name in {"make_file", "speak"}:
-                    carrier_allowed = call.name != "make_file" or _carrier_projection_passes(
-                        call.arguments,
-                        archive_status_guarded=carrier_archive_status_guarded,
-                        reminder_descriptors=carrier_reminder_descriptors,
-                        reminder_delivery_scheduled=carrier_reminder_delivery_scheduled,
+                    carrier_allowed = carrier_allowed and (
+                        call.name != "make_file"
+                        or _carrier_projection_passes(
+                            call_arguments,
+                            archive_status_guarded=carrier_archive_status_guarded,
+                            reminder_descriptors=carrier_reminder_descriptors,
+                            reminder_delivery_scheduled=carrier_reminder_delivery_scheduled,
+                        )
                     )
-                    if carrier_allowed and call.name == "speak" and isinstance(call.arguments, Mapping):
+                    if carrier_allowed and call.name == "speak" and isinstance(call_arguments, Mapping):
                         # Piper delivers this normalised/truncated projection,
                         # not the full argument.  A safe tail must not legitimise
                         # an unsafe audible prefix.
                         audible_text, _ = sanitize_text(
-                            str(call.arguments.get("text") or ""),
+                            str(call_arguments.get("text") or ""),
                             max_chars=int(getattr(self.settings, "tts_max_chars", 2_000)),
                         )
                         audible_guarded, carrier_allowed = _guard_generated_carrier_text(
@@ -23267,7 +23776,7 @@ class AgentRuntime:
                         carrier_allowed = carrier_allowed and audible_guarded == audible_text
                     if carrier_allowed:
                         call_arguments, carrier_allowed = _guard_model_carrier_payload(
-                            call.arguments,
+                            call_arguments,
                             archive_status_guarded=carrier_archive_status_guarded,
                             _text_guarded_by_projection=call.name == "make_file",
                             supported_file_available=(call.name == "make_file" or bool(file_clips)),
@@ -25370,6 +25879,13 @@ class AgentRuntime:
         чем если бы модель разметила блоки сама, но несравнимо лучше обещания.
         """
         kind = _file_kind_from_request(request)
+        requested_filename, requested_filename_supported = _requested_output_filename_stem(
+            request,
+            kind=kind,
+        )
+        if not requested_filename_supported:
+            LOGGER.warning("Fallback file build rejected an unsupported output filename format")
+            return None
         if blocks is None:
             blocks = _blocks_from_text(answer)
         if not blocks:
@@ -25378,10 +25894,16 @@ class AgentRuntime:
         # абзац как раз и становится заголовком, поэтому в блоках его уже нет —
         # прежний порядок спрашивал у списка то, что из него вынули.
         title = _title_from_text(answer) or _title_from_request(request) or "Отчёт"
+        arguments: dict[str, Any] = {"kind": kind, "title": title, "blocks": blocks}
+        if requested_filename:
+            # ``ExecutionKernel._safe_filename`` appends the validated kind's
+            # extension.  Passing the code-owned stem avoids both path text and
+            # a duplicated ``.docx.docx`` suffix.
+            arguments["filename"] = requested_filename
         try:
             result = await self.kernel.execute(
                 "make_file",
-                {"kind": kind, "title": title, "blocks": blocks},
+                arguments,
                 actor=actor,
             )
         except Exception as exc:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
@@ -26559,11 +27081,18 @@ class AgentRuntime:
             ]
             return
 
+        # A document summary and an independent calendar read are two speech
+        # acts in one turn.  Route only the bounded temporal clause through the
+        # existing closed parser; the summary itself remains attachment data
+        # and cannot donate a date or a subject to the timeline query.
+        attachment_temporal_clause = _attachment_temporal_read_clause(visible_message)
+        temporal_probe = attachment_temporal_clause or visible_message
+
         # A named/other-person subject changes the scope before it changes the
         # window: these tools can read only the asker's broad timeline and have
         # no subject filter.  Keep the ordinary archive route instead of
         # leaking that timeline or consuming a compound subject request.
-        if _has_temporal_subject_filter(visible_message):
+        if _has_temporal_subject_filter(temporal_probe):
             tools[:] = [
                 tool
                 for tool in tools
@@ -26574,8 +27103,8 @@ class AgentRuntime:
 
         # From here on ``visible_message`` means the asker's own temporal
         # speech, not a bounded phrase they merely quoted for translation or
-        # discussion.  Subject scoping above deliberately saw the full text.
-        visible_message = temporal_routing_text(visible_message)
+        # discussion. Subject scoping above saw this exact selected speech act.
+        visible_message = temporal_routing_text(temporal_probe)
 
         local_today = self._local_today()
         deterministic_intent = fast_time_intent(visible_message, today=local_today)

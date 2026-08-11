@@ -20,7 +20,10 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _attachment_evidence_chunks,
+    _attachment_filename_mentions,
+    _attachment_selector_message,
     _is_document_metadata_request,
+    _requested_output_filename_stem,
 )
 from friday.permissions import ActorContext
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
@@ -2375,6 +2378,233 @@ async def test_unknown_or_duplicate_filename_never_falls_back_to_latest_file(
     request_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
     request_metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
     assert "conversation_attachment_raw_ids" not in request_metadata
+
+
+@pytest.mark.asyncio
+async def test_output_filename_never_displaces_exact_supplied_reply_attachment(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    source = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "SOURCE-MUST-REACH-FILE-CREATION",
+        filename="source.odt",
+    )
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    message = (
+        "Создай обычный Word-файл metadata-export.docx по процитированному документу. "
+        "Включи четыре строки из предыдущего ответа."
+    )
+
+    await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        attachments=[{"raw_object_id": source.id}],
+        enable_tools=True,
+        quoted_attachment_reference=True,
+    )
+
+    assert len(seen) == 1
+    assert [item.get("raw_object_id") for item in seen[0][1]] == [source.id]
+    assert seen[0][1][0]["transient_text"] == "SOURCE-MUST-REACH-FILE-CREATION"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Сохрани результат в export.txt", ()),
+        ("Сохрани как export.txt", ()),
+        ("Создай итоговый файл как export.txt", ()),
+        ("Создай файл с именем export.txt", ()),
+        ("Прочитай данные из report.txt", ("report.txt",)),
+        ("Сохрани изменения в report.txt", ("report.txt",)),
+        ("Сохрани отчёт по данным в report.txt", ("report.txt",)),
+        ("Сохрани данные из report.txt в export.txt", ("report.txt",)),
+        ("Сохрани содержимое report.txt в export.txt", ("report.txt",)),
+        ("Save data from report.txt to export.txt", ("report.txt",)),
+        ("Создай export.docx по данным report.docx", ("report.docx",)),
+        ("Create export.docx from report.docx", ("report.docx",)),
+        ("Create export.docx using report.docx", ("report.docx",)),
+        (
+            "Сравни a.docx и b.docx и сохрани результат в out.docx.",
+            ("a.docx", "b.docx"),
+        ),
+        (
+            "Compare a.docx and b.docx and save the result to out.docx.",
+            ("a.docx", "b.docx"),
+        ),
+        (
+            "Объедини a.docx и b.docx и создай Word-файл out.docx.",
+            ("a.docx", "b.docx"),
+        ),
+        (
+            "Merge a.docx and b.docx and create Word file out.docx.",
+            ("a.docx", "b.docx"),
+        ),
+        (
+            "Combine a.docx and b.docx into out.docx.",
+            ("a.docx", "b.docx"),
+        ),
+        (
+            "Используя report.txt, сохрани результат в export.txt",
+            ("report.txt",),
+        ),
+    ],
+)
+def test_direct_output_filename_masking_is_local_to_each_span(
+    message: str,
+    expected: tuple[str, ...],
+) -> None:
+    assert _attachment_filename_mentions(_attachment_selector_message(message)) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_stem"),
+    [
+        ("Создай export.docx по данным report.docx", "export"),
+        ("Create export.docx from report.docx", "export"),
+        ("Сравни a.docx и b.docx и сохрани результат в out.docx.", "out"),
+        ("Compare a.docx and b.docx and save the result to out.docx.", "out"),
+        ("Объедини a.docx и b.docx и создай Word-файл out.docx.", "out"),
+        ("Merge a.docx and b.docx and create Word file out.docx.", "out"),
+        ("Combine a.docx and b.docx into out.docx.", "out"),
+    ],
+)
+def test_mixed_input_output_roles_keep_one_supported_output_name(
+    message: str,
+    expected_stem: str,
+) -> None:
+    assert _requested_output_filename_stem(message, kind="docx") == (expected_stem, True)
+
+
+@pytest.mark.asyncio
+async def test_output_destination_filename_never_restores_an_older_same_named_file(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    old_export = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "OLD-EXPORT-MUST-NOT-BECOME-INPUT",
+        filename="export.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", old_export, "old export")
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    async def no_late_file(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", no_late_file)
+    await runtime.chat(
+        "alice",
+        "Сохрани результат в export.txt",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert len(seen) == 1
+    assert seen[0][1] == []
+    assert "OLD-EXPORT-MUST-NOT-BECOME-INPUT" not in json.dumps(seen, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    ("source_name", "message"),
+    [
+        (
+            "open-source.docx",
+            "Открой open-source.docx и создай Word-файл open-export.docx по нему.",
+        ),
+        (
+            "using-source.docx",
+            "Используя using-source.docx, создай Word-файл using-export.docx.",
+        ),
+        (
+            "from-source.docx",
+            "Сохрани данные из from-source.docx в from-export.docx.",
+        ),
+        (
+            "content-source.docx",
+            "Сохрани содержимое content-source.docx в content-export.docx.",
+        ),
+        (
+            "english-source.docx",
+            "Save data from english-source.docx to english-export.docx.",
+        ),
+    ],
+)
+def test_direct_file_creation_still_honours_explicit_input_filename_selector(
+    settings,
+    storage,
+    source_name: str,
+    message: str,
+) -> None:
+    selected = _pending_file(storage, "alice", "alice", "SELECTED-INPUT", filename=source_name)
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", selected, "selected input")
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        _attachment_selector_message(message),
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert expected == 1
+    assert [item["raw_object_id"] for item in restored] == [selected.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Открой report.docx и создай Word-файл export.docx по нему.",
+        "Создай Word-файл export.docx по данным report.docx.",
+        "Объедини report.docx и current.odt и создай Word-файл export.docx.",
+    ],
+)
+async def test_ambiguous_input_filename_on_file_creation_never_falls_back_to_current(
+    settings,
+    storage,
+    monkeypatch,
+    message: str,
+) -> None:
+    first = _pending_file(storage, "alice", "alice", "FIRST-REPORT", filename="report.docx")
+    second = _pending_file(storage, "alice", "alice", "SECOND-REPORT", filename="report.docx")
+    current = _pending_file(storage, "alice", "alice", "CURRENT-MUST-NOT-WIN", filename="current.odt")
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", first, "first report")
+    _record_upload(storage, conversation["id"], "alice", second, "second report")
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden_generate(*_args, **_kwargs):
+        raise AssertionError("ambiguous input filename reached generation")
+
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[{"raw_object_id": current.id}],
+        enable_tools=True,
+    )
+
+    assert "не удалось однозначно определить" in result["message"].casefold()
+    assert "CURRENT-MUST-NOT-WIN" not in json.dumps(result, ensure_ascii=False)
 
 
 def test_exact_replay_restores_a_caption_for_regenerate(settings, storage):

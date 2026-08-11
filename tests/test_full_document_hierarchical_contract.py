@@ -13,6 +13,7 @@ import base64
 import io
 import json
 from dataclasses import replace
+from datetime import date, datetime
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
+    _attachment_requests_a_tool_action,
     _attachment_source_complete,
     _attachment_whole_document_task,
     _bounded_attachment_projection,
@@ -33,7 +35,7 @@ from friday.agent_runtime._office_attachments import (
     trusted_office_attachment,
 )
 from friday.documents import DocumentExtractor
-from friday.execution_kernel import ExecutionKernel
+from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.permissions import AuthorizationService
 from friday.storage.models import RawObject, new_id
 
@@ -351,12 +353,14 @@ def test_hierarchy_prepass_deadline_scales_by_waves_without_renewal(
 
     small_budget = agent_runtime_module._attachment_prepass_budget_sec(6, 3)
     many_budget = agent_runtime_module._attachment_prepass_budget_sec(21, 3)
+    assert small_budget == 105.0
+    assert agent_runtime_module._attachment_prepass_budget_sec(11, 3) == 135.0
     assert (
         runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
             small,
             requested_budget_sec=small_budget,
         )
-        == fixed_now + 90.0
+        == fixed_now + 105.0
     )
     first_large_deadline = runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
         many,
@@ -371,6 +375,26 @@ def test_hierarchy_prepass_deadline_scales_by_waves_without_renewal(
             requested_budget_sec=150.0,
         )
         == first_large_deadline
+    )
+
+    # Per-request transport timeouts remain enforced by the LLM client.  They
+    # must not also truncate the one shared multi-wave hierarchy budget.
+    low_timeout_runtime = AgentRuntime(
+        replace(settings, llm_timeout_sec=30.0),
+        storage,
+        llm=_HierarchyLLM("unused"),
+    )
+    low_timeout = AgentContext(
+        conversation_id="synthetic-low-call-timeout",
+        user_id="synthetic-budget-owner",
+        current_attachment_present=True,
+    )
+    assert (
+        low_timeout_runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
+            low_timeout,
+            requested_budget_sec=135.0,
+        )
+        == fixed_now + 135.0
     )
 
 
@@ -689,19 +713,38 @@ async def test_incomplete_office_prompt_counts_all_300_rows_without_requesting_a
 
 
 @pytest.mark.parametrize(
-    ("question", "expected_focused"),
+    ("question", "tool_names", "expected_tools"),
     [
-        ("Разберись с ZETA-77 и напомни завтра сверить вывод.", False),
-        ("Обобщи весь документ целиком.", True),
+        (
+            "Разберись с ZETA-77 и напомни завтра сверить вывод.",
+            ("remind", "web_search", "web_research", "web_fetch", "code_run", "data_query"),
+            {"remind"},
+        ),
+        (
+            "Обобщи весь документ целиком и скажи, сколько всего объектов знаний в моей базе.",
+            ("kg_stats", "web_search", "code_run", "data_query"),
+            {"kg_stats"},
+        ),
+        (
+            "Обобщи документ и покажи, что происходило вчера.",
+            ("what_happened", "upcoming", "web_search", "code_run"),
+            {"what_happened", "upcoming"},
+        ),
+        (
+            "Обобщи документ и покажи планы завтра.",
+            ("what_happened", "upcoming", "web_search", "code_run"),
+            {"what_happened", "upcoming"},
+        ),
     ],
 )
 @pytest.mark.asyncio
-async def test_full_source_prepass_keeps_the_ordinary_agentic_tool_route(
+async def test_compound_full_source_prepass_keeps_the_ordinary_agentic_tool_route(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
     question: str,
-    expected_focused: bool,
+    tool_names: tuple[str, ...],
+    expected_tools: set[str],
 ) -> None:
     owner = "synthetic-prepass-tool-owner"
     storage.ensure_user(owner, preset_key="owner")
@@ -714,14 +757,7 @@ async def test_full_source_prepass_keeps_the_ordinary_agentic_tool_route(
             del actor, topic
             return [
                 {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
-                for name in (
-                    "remind",
-                    "web_search",
-                    "web_research",
-                    "web_fetch",
-                    "code_run",
-                    "data_query",
-                )
+                for name in tool_names
             ]
 
     kernel = ToolKernel()
@@ -768,11 +804,240 @@ async def test_full_source_prepass_keeps_the_ordinary_agentic_tool_route(
     )
 
     _assert_exact_coverage(_chunk_payloads(llm), [("tool-route-100k.txt", source)])
+    assert captured, result
     assert isinstance(captured["bundle"], agent_runtime_module._AttachmentHierarchyBundle)
-    assert captured["focused"] is expected_focused
-    assert "remind" in captured["tools"]
-    assert "web_search" in captured["tools"]
+    assert captured["focused"] is False
+    assert captured["tools"] == expected_tools
     assert result["attachment_coverage_complete"] is True
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Обобщи весь документ и запусти Python-код для проверки вывода.", True),
+        ("Обобщи весь документ и выполни SQL-запрос для проверки вывода.", True),
+        ("Обобщи весь документ и напомни завтра проверить вывод.", True),
+        ("Обобщи весь документ и создай по выводу Word-файл.", True),
+        ("Обобщи весь документ и ответь голосом.", True),
+        ("Обобщи документ и проверь вывод по свежим данным в интернете.", True),
+        ("Обобщи документ и скажи, сколько всего объектов знаний в моей базе.", True),
+        ("Обобщи документ и покажи все теги моего архива.", True),
+        ("Обобщи документ и покажи, что происходило вчера.", True),
+        ("Обобщи документ и покажи планы завтра.", True),
+        ("Обобщи весь документ, включая раздел «Как выполнить код Python безопасно».", False),
+        ("Обобщи весь документ и объясни, как выполнить Python-код безопасно.", False),
+        ("Обобщи весь документ и объясни, как выполнить кодекс этики.", False),
+        ("Обобщи документ и покажи, что происходило вчера в документе.", False),
+        ("Обобщи документ с фразой «покажи планы завтра».", False),
+        ("Обобщи весь документ целиком.", False),
+    ],
+)
+def test_hierarchy_direct_route_distinguishes_compute_actions_from_quoted_document_text(
+    question: str,
+    expected: bool,
+) -> None:
+    assert _attachment_requests_a_tool_action(question) is expected
+
+
+@pytest.mark.parametrize(
+    ("question", "tool_name", "expected_since", "expected_until"),
+    [
+        (
+            "Обобщи документ и покажи, что происходило вчера.",
+            "what_happened",
+            "2026-08-10T00:00:00",
+            "2026-08-10T23:59:59",
+        ),
+        (
+            "Обобщи документ и покажи планы завтра.",
+            "upcoming",
+            "2026-08-12",
+            "2026-08-12",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_attachment_temporal_compound_executes_only_its_closed_calendar_clause(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+    tool_name: str,
+    expected_since: str,
+    expected_until: str,
+) -> None:
+    class TemporalKernel:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        async def execute(
+            self,
+            tool: str,
+            params: dict[str, Any],
+            actor: Any = None,
+        ) -> ToolResult:
+            del actor
+            self.calls.append((tool, dict(params)))
+            since = str(params["since"])
+            until = str(params["until"])
+            asked_about = {
+                "since": since,
+                "until": until,
+                "timezone": "Europe/Moscow",
+            }
+            if tool == "what_happened":
+                return ToolResult(
+                    tool,
+                    True,
+                    {
+                        "understood": True,
+                        "asked_about": asked_about,
+                        "shown": 0,
+                        "events": [],
+                        "total": {"messages": 0, "documents": 0, "total": 0},
+                        "coverage": {
+                            "complete": True,
+                            "strategy": "complete",
+                            "includes_latest": True,
+                        },
+                    },
+                )
+            return ToolResult(
+                tool,
+                True,
+                {
+                    "understood": True,
+                    "asked_about": asked_about,
+                    "shown": 0,
+                    "items": [],
+                    "total": 0,
+                    "days": 1,
+                    "note": "Синтетический календарь пуст.",
+                },
+            )
+
+    class NoModel:
+        enabled = False
+
+    kernel = TemporalKernel()
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.settings = replace(settings, local_timezone="Europe/Moscow")
+    runtime.kernel = kernel
+    runtime.llm = NoModel()
+    monkeypatch.setattr(runtime, "_local_today", lambda: date(2026, 8, 11))
+    monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 8, 11, 12, 0, 0))
+    tools = [
+        {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+        for name in ("what_happened", "upcoming", "memory_search")
+    ]
+    tools_used: list[str] = []
+    evidence: list[dict[str, str]] = []
+
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        question,
+        None,  # type: ignore[arg-type]
+        tools,
+        [],
+        tools_used,
+        evidence,
+        AgentContext(
+            conversation_id="synthetic-temporal-compound",
+            user_id="synthetic-temporal-owner",
+            outward_verdict=("материал", None),
+        ),
+    )
+
+    expected_params: dict[str, Any] = {
+        "since": expected_since,
+        "until": expected_until,
+    }
+    if tool_name == "what_happened":
+        expected_params["limit"] = 40
+    assert kernel.calls == [(tool_name, expected_params)]
+    assert tools_used == [tool_name]
+    assert [str((tool.get("function") or {}).get("name") or "") for tool in tools] == ["memory_search"]
+    assert [item["tool"] for item in evidence] == [tool_name]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Обобщи весь документ целиком.",
+        "Обобщи весь документ, включая раздел «Как выполнить код Python безопасно».",
+    ],
+)
+@pytest.mark.asyncio
+async def test_pure_whole_document_summary_uses_the_direct_no_tool_route(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+) -> None:
+    owner = "synthetic-direct-hierarchy-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    auth = AuthorizationService(storage)
+
+    class ToolKernel:
+        authorization = auth
+
+        def get_tool_definitions(self, actor: Any, *, topic: str = "") -> list[dict[str, Any]]:
+            del actor, topic
+            return [
+                {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+                for name in ("remind", "web_search", "code_run", "data_query")
+            ]
+
+    llm = _HierarchyLLM("Прямой итог учитывает DIRECT_HEAD, DIRECT_MIDDLE и DIRECT_TAIL.")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+        kernel=ToolKernel(),  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_archive)
+
+    async def fail_agentic(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        pytest.fail("a pure whole-document read must not enter the agentic tool loop")
+
+    monkeypatch.setattr(runtime, "_agentic_loop", fail_agentic)
+    source = "DIRECT_HEAD\n" + "x" * 49_000 + "\nDIRECT_MIDDLE\n" + "y" * 50_000 + "\nDIRECT_TAIL"
+    result = await runtime.chat(
+        owner,
+        question,
+        actor=auth.actor_for_user(owner, source="test"),
+        attachments=[_owned("direct-route-100k.txt", source)],
+        enable_tools=True,
+    )
+
+    _assert_exact_coverage(_chunk_payloads(llm), [("direct-route-100k.txt", source)])
+    _assert_no_action_surface(llm)
+    assert result["message"].startswith("Прямой итог")
+    assert result["attachment_coverage_complete"] is True
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Найди ZETA-77 и умножь на 3 по формуле выше.",
+        "Найди ZETA-77 и вычисли по формуле в начале.",
+        "Найди ZETA-77 и вычисли по правилу из начала файла.",
+        "Find ZETA-77 and multiply it using formula above.",
+        "Find ZETA-77 and calculate according to rule in document.",
+    ],
+)
+def test_deictic_distant_rule_requires_the_authenticated_whole_document(question: str) -> None:
+    assert _attachment_whole_document_task(question) == "analysis"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Найди ZETA-77 и сообщи его значение.",
+        "Найди ZETA-77 и умножь его на 3.",
+        "Find ZETA-77 and report the formula above.",
+    ],
+)
+def test_local_lookup_without_a_distant_rule_keeps_the_local_projection(question: str) -> None:
+    assert _attachment_whole_document_task(question) == ""
 
 
 @pytest.mark.asyncio
@@ -789,16 +1054,18 @@ async def test_a_lexical_match_does_not_hide_a_distant_document_rule(
         + "\nRULE-TAIL"
     )
     llm = _HierarchyLLM("По общему правилу документа: 5 × 9 = 45.")
+    question = "Найди ZETA-77 и умножь по формуле выше."
 
     result = await _run(
         settings,
         storage,
         monkeypatch,
-        question="Найди ZETA-77 и вычисли по правилу документа.",
+        question=question,
         attachments=[_owned("rule-and-target.txt", source)],
         llm=llm,
     )
 
+    assert _attachment_whole_document_task(question) == "analysis"
     payloads = _chunk_payloads(llm)
     _assert_exact_coverage(payloads, [("rule-and-target.txt", source)])
     mapped = "".join(str(item["text"]) for item in payloads)
@@ -806,6 +1073,29 @@ async def test_a_lexical_match_does_not_hide_a_distant_document_rule(
     assert "ZETA-77=5" in mapped
     assert "RULE-TAIL" in mapped
     assert result["message"] == "По общему правилу документа: 5 × 9 = 45."
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_exact_literal_lookup_keeps_the_local_projection(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "LOCAL_HEAD\n" + "x" * 72_000 + "\nZETA-77=5\n" + "y" * 25_000 + "\nLOCAL_TAIL"
+    llm = _HierarchyLLM("В документе указано ZETA-77=5.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Найди ZETA-77 и сообщи его значение.",
+        attachments=[_owned("local-target.txt", source)],
+        llm=llm,
+    )
+
+    assert _attachment_whole_document_task("Найди ZETA-77 и сообщи его значение.") == ""
+    assert _chunk_payloads(llm) == []
+    assert result["message"] == "В документе указано ZETA-77=5."
 
 
 @pytest.mark.parametrize(
@@ -1214,7 +1504,11 @@ async def test_full_source_prepass_and_reduction_leave_a_fresh_answer_deadline(
     assert context.attachment_primary_deadline is None
     primary_deadline = runtime._ensure_attachment_primary_deadline(context)
     assert primary_deadline is not None
-    assert primary_deadline > context.attachment_prepass_deadline
+    # It is a newly created 90-second window, not the unused remainder of the
+    # longer map deadline. Its absolute timestamp may be earlier than a prepass
+    # deadline which completed quickly and still has time left.
+    primary_remaining = primary_deadline - agent_runtime_module.time.monotonic()
+    assert 89.0 <= primary_remaining <= 90.0
 
 
 @pytest.mark.asyncio
@@ -1301,7 +1595,7 @@ def test_a_large_no_save_text_reaches_runtime_whole_but_never_storage(settings: 
 
 
 @pytest.mark.asyncio
-async def test_all_uploaded_files_restores_the_complete_contiguous_episode(
+async def test_all_uploaded_files_maps_the_complete_self_corpus_newest_first(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -1320,6 +1614,10 @@ async def test_all_uploaded_files_restores_the_complete_contiguous_episode(
         (f"restored-{index}.txt", letter.lower() * 29_970 + f"\n{letter}_TAIL")
         for index, letter in enumerate(("A", "B", "C"), start=1)
     ]
+    # Unqualified "all uploaded files" is the exact self-uploader, all-time
+    # corpus route. Its stable public order is received_at DESC / rowid DESC,
+    # not the oldest-first chronology used while seeding this fixture.
+    newest_first_sources = list(reversed(sources))
     conversation_id: str | None = None
     for index, (filename, text) in enumerate(sources, start=1):
         raw = RawObject(
@@ -1369,7 +1667,7 @@ async def test_all_uploaded_files_restores_the_complete_contiguous_episode(
 
     final_calls = _HierarchyLLM(llm.final_answer)
     final_calls.calls = llm.calls[before_final_calls:]
-    _assert_exact_coverage(_chunk_payloads(final_calls), sources)
+    _assert_exact_coverage(_chunk_payloads(final_calls), newest_first_sources)
     assert result["restored_attachment_count"] == 3
     assert result["attachment_context_expected_count"] == 3
     assert result["attachment_context_readable_count"] == 3
@@ -1389,7 +1687,7 @@ async def test_all_uploaded_files_restores_the_complete_contiguous_episode(
 
     repeated_calls = _HierarchyLLM(llm.final_answer)
     repeated_calls.calls = llm.calls[before_repeat_calls:]
-    _assert_exact_coverage(_chunk_payloads(repeated_calls), sources)
+    _assert_exact_coverage(_chunk_payloads(repeated_calls), newest_first_sources)
     assert repeated["restored_attachment_count"] == 3
     assert repeated["attachment_context_expected_count"] == 3
     assert repeated["attachment_context_readable_count"] == 3

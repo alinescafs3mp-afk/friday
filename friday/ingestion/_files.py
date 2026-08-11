@@ -862,10 +862,20 @@ class FilesMixin(PipelineShared):
                 "advisory_only": True,
             }
 
-        batch_specs = [
-            (offset, assets[offset : offset + _VISION_BATCH_SIZE])
-            for offset in range(0, len(assets), _VISION_BATCH_SIZE)
-        ]
+        # Keep concurrent requests similarly sized. Fixed groups of four leave
+        # a one-page tail for five/nine/... page scans; on a batched local model
+        # that tiny request can sit behind the much heavier first request until
+        # the common deadline and make a small scan look like an incomplete
+        # four-page prefix. Balance the same finite number of batches instead
+        # (5 -> 3+2, 9 -> 3+3+3), while preserving the per-request cap and order.
+        batch_count = max(1, (len(assets) + _VISION_BATCH_SIZE - 1) // _VISION_BATCH_SIZE)
+        batch_floor, larger_batches = divmod(len(assets), batch_count)
+        batch_specs: list[tuple[int, Sequence[VisualAsset]]] = []
+        batch_offset = 0
+        for batch_index in range(batch_count):
+            batch_size = batch_floor + (1 if batch_index < larger_batches else 0)
+            batch_specs.append((batch_offset, assets[batch_offset : batch_offset + batch_size]))
+            batch_offset += batch_size
 
         async def run_batch(offset: int, batch_assets: Sequence[VisualAsset]) -> dict[str, Any]:
             remaining = common_deadline - loop.time()

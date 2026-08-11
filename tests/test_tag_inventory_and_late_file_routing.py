@@ -530,6 +530,27 @@ async def test_every_actual_late_make_file_attempt_is_ledgered_once(
 
 
 @pytest.mark.asyncio
+async def test_late_make_file_uses_the_code_owned_requested_output_name(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+
+    await runtime.chat(
+        "alice",
+        "Сделай Word-файл и сохрани результат как exact-output.docx.",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        enable_tools=False,
+    )
+
+    assert [name for name, _ in kernel.calls] == ["make_file"]
+    assert kernel.calls[0][1]["kind"] == "docx"
+    assert kernel.calls[0][1]["filename"] == "exact-output"
+
+
+@pytest.mark.asyncio
 async def test_a_lone_file_verdict_never_authorises_a_late_make_file(
     settings: Any,
     storage: Any,

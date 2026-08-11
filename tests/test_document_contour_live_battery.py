@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib.util
 import json
 import os
@@ -35,6 +36,31 @@ def test_manifest_is_exactly_ten_unique_document_scenarios() -> None:
     assert [item.case_id for item in runner.SCENARIOS] == [f"D{index:02d}" for index in range(1, 11)]
     assert len(runner._CASE_RUNNERS) == 10
     assert all(item.contract for item in runner.SCENARIOS)
+
+
+def test_d03_prompt_authorizes_approximate_filename_navigation_without_becoming_exact() -> None:
+    from friday.agent_runtime import (
+        _attachment_filename_mentions,
+        _attachment_reference_kind,
+        _descriptive_filename_selector,
+        _filename_clue_ids,
+    )
+
+    runner = _module()
+    target_id = "raw_" + "a" * 32
+    decoy_id = "raw_" + "b" * 32
+    catalog = [
+        {
+            "raw_object_id": target_id,
+            "filename": "Список комендатур Луганской Народной Республики 2026.odt",
+        },
+        {"raw_object_id": decoy_id, "filename": "СУВ 5_222.xlsx"},
+    ]
+
+    assert _attachment_reference_kind(runner._D03_PROMPT) == "explicit"
+    assert _descriptive_filename_selector(runner._D03_PROMPT) is True
+    assert _attachment_filename_mentions(runner._D03_PROMPT) == ()
+    assert _filename_clue_ids(runner._D03_PROMPT, catalog) == ([target_id], 1)
 
 
 def test_offline_self_test_never_imports_server_or_uses_production_database(monkeypatch) -> None:
@@ -201,14 +227,14 @@ def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
 
     async def hierarchy(*args, **kwargs):
         del args, kwargs
-        return {}
+        return ({"bounded": True}, True)
 
     app = SimpleNamespace(
         state=SimpleNamespace(
             embeddings=SimpleNamespace(embed=embed),
             hybrid_searcher=SimpleNamespace(_reranker=None),
             kernel=SimpleNamespace(execute=execute),
-            agent=SimpleNamespace(_hierarchical_attachment_response=hierarchy),
+            agent=SimpleNamespace(_build_attachment_hierarchy_bundle=hierarchy),
             settings=SimpleNamespace(
                 embeddings_base_url="http://127.0.0.1:8102/v1",
                 rerank_base_url="http://127.0.0.1:8103",
@@ -222,6 +248,10 @@ def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
         with pytest.raises(runner.BatteryFailure, match="external_web_tool_attempted"):
             asyncio.run(app.state.kernel.execute("web_fetch", {"url": "https://example.test"}))
         assert probes.counts["forbidden_web_calls"] == 1
+        built = asyncio.run(app.state.agent._build_attachment_hierarchy_bundle())
+        assert built == ({"bounded": True}, True)
+        assert probes.counts["hierarchy_calls"] == 1
+        assert probes.counts["hierarchy_complete"] == 1
     finally:
         probes.close()
 
@@ -392,6 +422,311 @@ def test_d02_offline_oracle_closes_newer_deleted_and_foreign_controls() -> None:
     assert result["checks"]["answer_no_decoy"] is True
     assert result["checks"]["answer_no_deleted"] is True
     assert result["checks"]["answer_no_foreign"] is True
+
+
+def test_d05_fixture_never_crosses_an_open_direct_transaction_with_ingestion() -> None:
+    runner = _module()
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.pending = False
+
+        def execute(self, _sql, _parameters):  # noqa: ANN001
+            self.pending = True
+
+        def commit(self) -> None:
+            self.pending = False
+
+        @staticmethod
+        def get_searchable_file_sources(
+            _tenant,
+            raw_ids,
+            *,
+            uploaded_by,
+            include_content,
+            limit,
+        ):  # noqa: ANN001
+            assert uploaded_by == "jbl"
+            assert include_content is False
+            assert limit == 3
+            return [{"id": raw_id} for raw_id in raw_ids]
+
+    class FakeHarness:
+        run_index = 1
+        owner_id = "owner"
+        jbl_id = "jbl"
+        jbl_chat = 9911011
+
+        def __init__(self) -> None:
+            self.storage = FakeStorage()
+            self.selected = ["raw-jbl-3", "raw-jbl-2", "raw-jbl-1"]
+
+        @staticmethod
+        def document(filename, mime_type, content, source_ref):  # noqa: ANN001
+            del filename, mime_type, content
+            return {"source_ref": source_ref}
+
+        def chat(self, _case_id, _message, *, document=None, **_kwargs):  # noqa: ANN001
+            assert self.storage.pending is False, "HTTP turn crossed an open fixture transaction"
+            if document is not None:
+                index = str(document["source_ref"]).rsplit("-", 1)[-1]
+                return {"file_ingestion": {"raw_object_id": f"raw-jbl-{index}"}}
+            return {"message": "JBL-FIRST-1 JBL-SECOND-1 JBL-THIRD-1"}
+
+        def ingest(self, *_args, **_kwargs):  # noqa: ANN001
+            assert self.storage.pending is False, "ingestion crossed an open fixture transaction"
+            return {"raw_object_id": "raw-foreign"}
+
+        def last_user_metadata(self, _result):  # noqa: ANN001
+            return {"conversation_attachment_raw_ids": self.selected}
+
+        @staticmethod
+        def case_result(case_id, _started, checks, *, counters=None):  # noqa: ANN001
+            del counters
+            failed = [name for name, value in checks.items() if not value]
+            return {
+                "case_id": case_id,
+                "status": "failed" if failed else "passed",
+                "failure_codes": failed,
+                "checks": checks,
+            }
+
+    result = runner._case_05(FakeHarness())
+
+    assert result["status"] == "passed"
+    assert result["checks"] == {
+        "all_expected_ids": True,
+        "uploader_reauthorized": True,
+        "foreign_excluded": True,
+        "answer_all_markers": True,
+        "answer_no_foreign": True,
+    }
+
+
+def test_d09_oracle_counts_only_files_and_reauthorizes_public_persistence(tmp_path) -> None:
+    runner = _module()
+
+    class CountRow(dict):
+        def fetchone(self):
+            return self
+
+    class FakeStorage:
+        file_count = 0
+        text_count = 0
+
+        def execute(self, sql, _parameters):  # noqa: ANN001
+            assert "content_type='file'" in sql
+            return CountRow(count=self.file_count)
+
+    class FakeHarness:
+        run_index = 1
+        owner_id = "owner"
+
+        def __init__(self, *, hidden_missing_persistence: bool = False) -> None:
+            self.storage = FakeStorage()
+            self.run_dir = tmp_path
+            self.raw_evidence: list[dict[str, object]] = []
+            self.persisted = False
+            self.hidden_missing_persistence = hidden_missing_persistence
+            self.missing_persisted = False
+
+        @staticmethod
+        def document(filename, mime_type, content, source_ref):  # noqa: ANN001
+            del filename, mime_type, content
+            return {"source_ref": source_ref}
+
+        def chat(self, _case_id, _message, *, document=None, archive_password=None, **_kwargs):  # noqa: ANN001
+            assert document is not None
+            request = {"archive_password": archive_password} if archive_password is not None else {}
+            self.raw_evidence.append({"case_id": "D09", "request": request})
+            if archive_password is None:
+                if self.hidden_missing_persistence:
+                    self.storage.file_count += 1
+                    self.missing_persisted = True
+                return {
+                    "archive_password_required": True,
+                    "file_ingestion": {"persisted": False},
+                }
+            self.persisted = True
+            self.storage.file_count += 1
+            # Ordinary chat provenance may create non-file Raw rows. The D09
+            # contract is exactly one archive file, not one row of every kind.
+            self.storage.text_count += 1
+            return {
+                "message": "ARCHIVE-NESTED-1",
+                # Public chat intentionally does not expose raw_object_id.
+                "file_ingestion": {"persisted": True},
+            }
+
+        def resolve_ref(self, source_ref, **_kwargs):  # noqa: ANN001
+            assert source_ref == "telegram-file:ENCRYPTED-1"
+            if self.persisted:
+                return "raw-archive"
+            return "raw-hidden" if self.missing_persisted else ""
+
+        @staticmethod
+        def case_result(case_id, _started, checks, *, counters=None):  # noqa: ANN001
+            del counters
+            failed = [name for name, value in checks.items() if not value]
+            return {
+                "case_id": case_id,
+                "status": "failed" if failed else "passed",
+                "failure_codes": failed,
+                "checks": checks,
+            }
+
+    harness = FakeHarness()
+    result = runner._case_09(harness)
+
+    assert result["status"] == "passed"
+    assert result["checks"]["missing_not_persisted"] is True
+    assert result["checks"]["success_persisted_once"] is True
+    assert harness.storage.file_count == 1
+    assert harness.storage.text_count == 1
+    assert all("archive_password" not in record["request"] for record in harness.raw_evidence)
+
+    hidden = FakeHarness(hidden_missing_persistence=True)
+    hidden_result = runner._case_09(hidden)
+    assert hidden_result["status"] == "failed"
+    assert hidden_result["checks"]["challenge_required"] is True
+    assert hidden_result["checks"]["missing_not_persisted"] is False
+    assert hidden_result["checks"]["success_persisted_once"] is False
+    assert hidden.storage.file_count == 2
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_failure"),
+    [
+        ("", ""),
+        ("wrong-filename", "regular_file_delivered"),
+        ("missing-signatory", "regular_file_grounded"),
+        ("extra-mcp-line", "mcp_exact_content"),
+        ("duplicate-inline", "mcp_no_duplicate_chat_file"),
+    ],
+)
+def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
+    tmp_path,
+    mutation: str,
+    expected_failure: str,
+) -> None:
+    runner = _module()
+    from friday.reports import render, spec_from_payload
+
+    number = "17-ДСП/1"
+    marker = "META-EXPORT-1"
+    body_date = "10 августа 2026 года"
+    required_lines = [
+        "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ",
+        f"ПРИКАЗ № {number}",
+        f"Дата документа: {body_date}",
+        "Подписант: начальник отдела Иван Иванович Иванов",
+    ]
+    if mutation == "missing-signatory":
+        required_lines.pop()
+    report = render(
+        "docx",
+        spec_from_payload(
+            "Синтетический экспорт",
+            "",
+            [{"kind": "text", "text": line} for line in required_lines],
+        ),
+    )
+
+    class FakeProbes:
+        @staticmethod
+        def snapshot():
+            return {"workspace_create_kernel": 0, "workspace_create_mcp": 0}
+
+        @staticmethod
+        def delta(_before):  # noqa: ANN001
+            return {"workspace_create_kernel": 1, "workspace_create_mcp": 1}
+
+    class FakeKernel:
+        async def execute(self, name, arguments, *, actor):  # noqa: ANN001
+            del actor
+            assert name == "workspace_create"
+            assert arguments["filename"] == "mcp-metadata.txt"
+            return SimpleNamespace(success=False)
+
+    class FakeHarness:
+        run_index = 1
+        owner_id = "owner"
+
+        def __init__(self) -> None:
+            outbox = tmp_path / mutation / "outbox"
+            outbox.mkdir(parents=True)
+            self.settings = SimpleNamespace(mcp_workspace_outbox_dir=outbox)
+            self.probes = FakeProbes()
+            self.app = SimpleNamespace(state=SimpleNamespace(kernel=FakeKernel()))
+            self.calls = 0
+
+        @staticmethod
+        def document(filename, mime_type, content, source_ref):  # noqa: ANN001
+            del filename, mime_type, content, source_ref
+            return {}
+
+        def chat(self, _case_id, _message, **_kwargs):  # noqa: ANN001
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "message": "\n".join(
+                        (
+                            "Заголовок: Технический заголовок контейнера",
+                            "Автор: Редактор Контейнера",
+                            "Дата создания в свойствах контейнера: 2022-02-03T04:05:06+00:00",
+                            "Дата изменения в свойствах контейнера: 2022-02-04T05:06:07+00:00",
+                            "Циклы редактирования: 7",
+                            "Страницы: 3",
+                            "Абзацы: 8",
+                            "Слова: 44",
+                            *required_lines,
+                            f"Контрольный маркер: {marker}",
+                        )
+                    )
+                }
+            if self.calls == 2:
+                filename = "wrong.docx" if mutation == "wrong-filename" else "metadata-export.docx"
+                return {
+                    "files": [
+                        {
+                            "filename": filename,
+                            "mime_type": (
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            ),
+                            "content_base64": base64.b64encode(report).decode("ascii"),
+                        }
+                    ]
+                }
+            outbox = Path(str(self.settings.mcp_workspace_outbox_dir)) / "mcp-metadata.txt"
+            lines = [number, marker]
+            if mutation == "extra-mcp-line":
+                lines.append("unrequested")
+            outbox.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            outbox.chmod(0o600)
+            return {
+                "tools_used": ["workspace_create"],
+                "files": ([{"filename": "duplicate.docx"}] if mutation == "duplicate-inline" else []),
+            }
+
+        @staticmethod
+        def case_result(case_id, _started, checks, counters=None):  # noqa: ANN001
+            del counters
+            failed = [name for name, value in checks.items() if not value]
+            return {
+                "case_id": case_id,
+                "status": "failed" if failed else "passed",
+                "failure_codes": failed,
+                "checks": checks,
+            }
+
+    result = runner._case_10(FakeHarness())
+
+    if expected_failure:
+        assert result["status"] == "failed"
+        assert result["checks"][expected_failure] is False
+    else:
+        assert result["status"] == "passed", result
+        assert all(result["checks"].values())
 
 
 def test_cli_self_test_is_closed_json_and_does_not_start_live_worker() -> None:

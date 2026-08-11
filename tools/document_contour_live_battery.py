@@ -697,17 +697,17 @@ class LiveProbes:
         self._restore.append(lambda: setattr(kernel, "execute", original_execute))
 
         agent = self.app.state.agent
-        original_hierarchy = agent._hierarchical_attachment_response
+        original_hierarchy = agent._build_attachment_hierarchy_bundle
 
         async def hierarchy(*args: Any, **kwargs: Any):
             self.counts["hierarchy_calls"] += 1
             result = await original_hierarchy(*args, **kwargs)
-            if isinstance(result, Mapping) and result.get("_attachment_hierarchy_complete") is True:
+            if isinstance(result, tuple) and len(result) == 2 and result[1] is True:
                 self.counts["hierarchy_complete"] += 1
             return result
 
-        agent._hierarchical_attachment_response = hierarchy
-        self._restore.append(lambda: setattr(agent, "_hierarchical_attachment_response", original_hierarchy))
+        agent._build_attachment_hierarchy_bundle = hierarchy
+        self._restore.append(lambda: setattr(agent, "_build_attachment_hierarchy_bundle", original_hierarchy))
 
         original_send = httpx.AsyncClient.send
         embedding_base = str(self.app.state.settings.embeddings_base_url).rstrip("/")
@@ -1067,6 +1067,9 @@ def _case_02(h: Harness) -> dict[str, Any]:
     return h.case_result("D02", started, checks)
 
 
+_D03_PROMPT = "В ранее загруженном файле «список камендатур ЛНР» найди отдел в Молодогвардейске и его код."
+
+
 def _case_03(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     marker = f"ОТДЕЛ-МОЛОДОГВАРДЕЙСК-{h.run_index}"
@@ -1090,7 +1093,7 @@ def _case_03(h: Harness) -> dict[str, Any]:
     )
     answer = h.chat(
         "D03",
-        "В ранее загруженном списке камендатур ЛНР найди отдел в Молодогвардейске и его код.",
+        _D03_PROMPT,
     )
     metadata = h.last_user_metadata(answer)
     attached = list(metadata.get("conversation_attachment_raw_ids") or [])
@@ -1206,6 +1209,7 @@ def _case_04(h: Harness) -> dict[str, Any]:
 def _case_05(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     expected: list[str] = []
+    dated_ids: list[tuple[int, str]] = []
     for index, (day, marker) in enumerate(((7, "JBL-FIRST"), (9, "JBL-SECOND"), (11, "JBL-THIRD")), 1):
         result = h.chat(
             "D05",
@@ -1220,16 +1224,23 @@ def _case_05(h: Harness) -> dict[str, Any]:
         )
         raw_id = str((result.get("file_ingestion") or {}).get("raw_object_id") or "")
         expected.append(raw_id)
-        h.storage.execute(
-            "UPDATE raw_objects SET received_at=? WHERE id=?",
-            (f"2026-08-{day:02d}T09:00:00+00:00", raw_id),
-        )
+        dated_ids.append((day, raw_id))
     foreign = h.ingest(
         "D05",
         _odt_bytes([f"FOREIGN-DECOY-{h.run_index}"], title="Foreign owner decoy"),
         "foreign-decoy.odt",
         source_ref=f"telegram-file:FOREIGN-{h.run_index}",
     )
+    # Seed every upload before opening the direct fixture transaction.  Leaving
+    # the first UPDATE pending while the next TestClient/ingestion request starts
+    # its own transaction on the shared Storage connection raises SQLite's
+    # "cannot start a transaction within a transaction" before product code is
+    # exercised at all.
+    for day, raw_id in dated_ids:
+        h.storage.execute(
+            "UPDATE raw_objects SET received_at=? WHERE id=?",
+            (f"2026-08-{day:02d}T09:00:00+00:00", raw_id),
+        )
     h.storage.execute(
         "UPDATE raw_objects SET received_at=? WHERE id=?",
         ("2026-08-08T09:00:00+00:00", str(foreign.get("raw_object_id") or "")),
@@ -1410,16 +1421,22 @@ def _case_09(h: Harness) -> dict[str, Any]:
         password,
     )
     source_ref = f"telegram-file:ENCRYPTED-{h.run_index}"
+    initial_row = h.storage.execute(
+        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
+        (h.owner_id,),
+    ).fetchone()
+    initial_count = int(initial_row["count"] if initial_row else 0)
     missing = h.chat(
         "D09",
         "Какой код находится во вложенном документе?",
         document=h.document("защищённый.zip", "application/zip", archive, source_ref),
     )
-    before_row = h.storage.execute(
-        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=?",
+    after_missing_row = h.storage.execute(
+        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
         (h.owner_id,),
     ).fetchone()
-    before_count = int(before_row["count"] if before_row else 0)
+    after_missing_count = int(after_missing_row["count"] if after_missing_row else 0)
+    missing_raw_id = h.resolve_ref(source_ref)
     success = h.chat(
         "D09",
         "Какой код находится во вложенном документе?",
@@ -1427,18 +1444,23 @@ def _case_09(h: Harness) -> dict[str, Any]:
         archive_password=password,
     )
     after_row = h.storage.execute(
-        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=?",
+        "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
         (h.owner_id,),
     ).fetchone()
     after_count = int(after_row["count"] if after_row else 0)
+    success_ingestion = _mapping(success.get("file_ingestion"))
+    persisted_raw_id = h.resolve_ref(source_ref)
     variants = tuple(value.encode("utf-8") for value in _secret_variants(password))
     checks = {
         "challenge_required": bool(
             missing.get("archive_password_required") is True
             and (missing.get("file_ingestion") or {}).get("persisted") is False
         ),
+        "missing_not_persisted": bool(after_missing_count == initial_count and not missing_raw_id),
         "success_persisted_once": bool(
-            (success.get("file_ingestion") or {}).get("raw_object_id") and after_count == before_count + 1
+            success_ingestion.get("persisted") is True
+            and persisted_raw_id
+            and after_count == initial_count + 1
         ),
         "answer_nested_marker": marker.casefold() in str(success.get("message") or "").casefold(),
         "secret_not_in_state": not _tree_contains_any(h.run_dir, variants),
@@ -1484,27 +1506,49 @@ def _case_10(h: Harness) -> dict[str, Any]:
     text = str(metadata.get("message") or "")
     regular = h.chat(
         "D10",
-        "Создай обычный TXT-файл metadata-export.txt с номером, грифом, датой и подписантом из этого документа.",
+        "Создай обычный Word-файл metadata-export.docx по процитированному документу. "
+        "Включи ровно четыре строки: гриф, номер документа, видимую дату документа "
+        "и подписанта из предыдущего ответа.",
         reply_document_source_ref=source_ref,
         reply_to=text[:1000],
     )
-    files = regular.get("files") if isinstance(regular.get("files"), list) else []
+    raw_files = regular.get("files")
+    files: list[Any] = raw_files if isinstance(raw_files, list) else []
     regular_payload = b""
     if files and isinstance(files[0], Mapping):
         try:
             regular_payload = base64.b64decode(str(files[0].get("content_base64") or ""), validate=True)
         except (TypeError, ValueError):
             regular_payload = b""
+    regular_text = ""
+    regular_extraction_success = False
+    if regular_payload and files and isinstance(files[0], Mapping):
+        from friday.documents import DocumentExtractor
+
+        extracted = DocumentExtractor(secret_values=()).extract(
+            regular_payload,
+            str(files[0].get("filename") or "metadata-export.docx"),
+            str(files[0].get("mime_type") or ""),
+        )
+        regular_extraction_success = extracted.success
+        regular_text = extracted.text if extracted.success else ""
     before = h.probes.snapshot()
     mcp = h.chat(
         "D10",
-        "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. Запиши туда только номер документа и контрольный маркер из процитированного источника.",
+        "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
+        "Первая строка — только значение номера документа без подписи. Вторая строка — "
+        "только значение контрольного маркера без подписи. Никаких других строк.",
         reply_document_source_ref=source_ref,
         reply_to=text[:1000],
     )
     delta = h.probes.delta(before)
     outbox = Path(str(h.settings.mcp_workspace_outbox_dir)) / "mcp-metadata.txt"
     outbox_bytes = outbox.read_bytes() if outbox.is_file() else b""
+    outbox_lines = tuple(
+        _normalized(line)
+        for line in outbox_bytes[:8_193].decode("utf-8", "ignore").splitlines()
+        if line.strip()
+    )
     before_overwrite = _sha256(outbox_bytes) if outbox_bytes else ""
     overwrite_refused = False
     if outbox.is_file():
@@ -1531,18 +1575,39 @@ def _case_10(h: Harness) -> dict[str, Any]:
     checks = {
         "technical_title": "Технический заголовок контейнера".casefold() in text.casefold(),
         "technical_creator": "Редактор Контейнера".casefold() in text.casefold(),
+        "technical_all_stored_fields": _contains_all(
+            text,
+            (
+                "Дата создания в свойствах контейнера: 2022-02-03",
+                "Дата изменения в свойствах контейнера: 2022-02-04",
+                "Циклы редактирования: 7",
+                "Страницы: 3",
+                "Абзацы: 8",
+                "Слова: 44",
+            ),
+        ),
         "technical_dates_distinct": "2022-02-03" in text and body_date.casefold() in text.casefold(),
         "visible_requisites": _contains_all(text, (number, "служебного пользования", "Иван Иванович Иванов")),
-        "regular_file_delivered": bool(files and regular_payload),
-        "regular_file_grounded": _contains_all(
-            regular_payload.decode("utf-8", "ignore"), (number, body_date)
+        "regular_file_delivered": bool(
+            len(files) == 1
+            and isinstance(files[0], Mapping)
+            and str(files[0].get("filename") or "") == "metadata-export.docx"
+            and regular_payload
+            and regular_extraction_success
         ),
-        "mcp_kernel_real": delta["workspace_create_kernel"] >= 1,
-        "mcp_transport_real": delta["workspace_create_mcp"] >= 1,
-        "mcp_exact_content": _contains_all(outbox_bytes.decode("utf-8", "ignore"), (number, marker)),
+        "regular_file_grounded": _contains_all(
+            regular_text,
+            (number, body_date, "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ", "Иван Иванович Иванов"),
+        ),
+        "mcp_kernel_real": delta["workspace_create_kernel"] == 1,
+        "mcp_transport_real": delta["workspace_create_mcp"] == 1,
+        "mcp_exact_content": bool(
+            len(outbox_bytes) <= 8_192 and outbox_lines == (_normalized(number), _normalized(marker))
+        ),
         "mcp_private_mode": bool(outbox.is_file() and stat.S_IMODE(outbox.stat().st_mode) == 0o600),
         "mcp_create_only": overwrite_refused,
         "mcp_reported_tool": "workspace_create" in list(mcp.get("tools_used") or []),
+        "mcp_no_duplicate_chat_file": not list(mcp.get("files") or []),
     }
     return h.case_result("D10", started, checks, delta)
 

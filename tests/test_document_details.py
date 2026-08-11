@@ -159,6 +159,12 @@ def test_metadata_scope_separates_technical_properties_from_body_details() -> No
     assert _document_metadata_request_scope("Покажи метаданные этого документа") == "both"
     assert _document_metadata_request_scope("Покажи технические свойства этого документа") == "technical"
     assert _document_metadata_request_scope("Покажи реквизиты этого документа") == "details"
+    assert (
+        _document_metadata_request_scope(
+            "Покажи все технические метаданные контейнера и все видимые реквизиты этого документа"
+        )
+        == "both"
+    )
     assert _document_metadata_request_scope("Кем подписан этот документ?") == "details"
     assert _document_metadata_request_scope("Какой гриф у этого документа?") == "details"
     assert _document_metadata_request_scope("Покажи реквизиты компании в этом документе") == ""
@@ -350,3 +356,65 @@ async def test_container_date_is_not_presented_as_the_visible_document_date(
     assert "Дата в свойствах контейнера: 2013-01-02" in result["message"]
     assert "Дата: «Дата документа: 15.07.2026»" in result["message"]
     assert "Дата документа: 2013-01-02" not in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_all_metadata_fields_for_one_document_never_becomes_all_documents_guard(
+    settings,
+    storage,
+) -> None:
+    raw = _stored_odt(
+        storage,
+        text=(
+            "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n"
+            "Дата документа: 15.07.2026\n"
+            "Подписал: командир части полковник Иванов И.И."
+        ),
+        extra_metadata={
+            "creator": "Редактор Контейнера",
+            "document_date": "2013-01-02",
+            "creation_date": "2013-01-02T03:04:05Z",
+        },
+    )
+    llm = _DocumentDetailsLLM()
+    runtime = AgentRuntime(replace(settings, llm_timeout_sec=10), storage, llm=llm)
+
+    result = await runtime.chat(
+        "alice",
+        "Покажи все технические метаданные контейнера и все видимые реквизиты этого документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[{"raw_object_id": raw.id}],
+        enable_tools=True,
+    )
+
+    assert len(llm.calls) == 1
+    assert "Учебный приказ" in result["message"]
+    assert "Редактор Контейнера" in result["message"]
+    assert "Дата в свойствах контейнера: 2013-01-02" in result["message"]
+    assert "Дата: «Дата документа: 15.07.2026»" in result["message"]
+    assert "Подписант и должность" in result["message"]
+    assert "не могу надёжно обобщить все 1 документа" not in result["message"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_ordinary_all_two_documents_request_keeps_missing_set_guard(settings, storage) -> None:
+    raw = _stored_odt(storage, text="Единственный доступный документ")
+
+    class NoModel:
+        enabled = True
+        model = "must-not-run"
+
+        async def chat(self, *_args, **_kwargs):
+            raise AssertionError("incomplete two-document set reached the model")
+
+    runtime = AgentRuntime(settings, storage, llm=NoModel())
+    result = await runtime.chat(
+        "alice",
+        "Обобщи все 2 документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[{"raw_object_id": raw.id}],
+        enable_tools=True,
+    )
+
+    assert "не могу надёжно обобщить все 2 документа" in result["message"].casefold()
+    assert "1 из 2" in result["message"]

@@ -7745,6 +7745,10 @@ def _safe_filename(title: str, extension: str) -> str:
     Заголовок пишет модель, а он становится именем на диске и в Telegram: слэш
     или `..` в нём — это уже не косметика.
     """
-    cleaned = "".join(char if char.isalnum() or char in " -_()" else " " for char in str(title or "").strip())
+    source = str(title or "").strip()
+    supplied_suffix = f".{str(extension or '').strip().lstrip('.')}"
+    if supplied_suffix != "." and source.casefold().endswith(supplied_suffix.casefold()):
+        source = source[: -len(supplied_suffix)]
+    cleaned = "".join(char if char.isalnum() or char in " -_()" else " " for char in source)
     cleaned = " ".join(cleaned.split())[:80].strip() or "Отчёт"
     return f"{cleaned}.{extension}"
