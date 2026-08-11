@@ -356,6 +356,10 @@ _SAFE_TOOL_TARGETS = frozenset(
         "web_research",
         "web_search",
         "what_happened",
+        "workspace_create",
+        "workspace_list",
+        "workspace_read",
+        "workspace_search",
     }
 )
 
@@ -735,6 +739,7 @@ _HASH_KEYS = frozenset(
         "exclude_domains_sha256",
         "include_domains_sha256",
         "prompt_sha256",
+        "path_sha256",
         "query_sha256",
         "response_sha256",
         "restored_sha256",

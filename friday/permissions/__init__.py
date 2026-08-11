@@ -212,6 +212,20 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
     ),
     CapabilityDefinition("files.read", "Read owned files", "files", 0, ("admin", "moderator", "user")),
     CapabilityDefinition(
+        "mcp.files.read",
+        "Read files from the operator-configured MCP exchange inbox",
+        "mcp",
+        2,
+        ("owner", "admin"),
+    ),
+    CapabilityDefinition(
+        "mcp.files.create",
+        "Create new files in the operator-configured MCP exchange outbox",
+        "mcp",
+        2,
+        ("owner", "admin"),
+    ),
+    CapabilityDefinition(
         "feedback.write",
         "Record retrieval and answer feedback",
         "feedback",

@@ -82,6 +82,8 @@ from friday.ingestion import (
     IngestionPipeline,
 )
 from friday.knowledge_graph import KnowledgeGraph, normalize_event_date
+from friday.mcp_runtime import MCPClientManager
+from friday.mcp_runtime.tools import bind_workspace_mcp_tools, workspace_server_definition
 from friday.memory import MemoryVault
 from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
@@ -1194,6 +1196,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             graph = KnowledgeGraph(storage)
             ingestion = IngestionPipeline(settings, storage, graph, llm)
             web_surfer = WebSurfer(settings)
+            mcp_manager: MCPClientManager | None = None
             kernel = ExecutionKernel(auth_service, settings)
             kernel.bind_services(storage, graph, web_surfer, ingestion, searcher=searcher)
             agent = AgentRuntime(settings, storage, llm, kernel)
@@ -1259,13 +1262,33 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.workers = workers
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
-            await workers.start()
+            if settings.mcp_enabled:
+                try:
+                    mcp_manager = MCPClientManager([workspace_server_definition(settings)])
+                    await mcp_manager.start()
+                    if bind_workspace_mcp_tools(kernel, mcp_manager, ingestion, settings):
+                        LOGGER.info("MCP workspace exchange is available")
+                    else:
+                        LOGGER.warning("MCP workspace exchange is configured but unavailable")
+                except BaseException:
+                    if mcp_manager is not None:
+                        await mcp_manager.close()
+                    raise
+            application.state.mcp = mcp_manager
+            try:
+                await workers.start()
+            except BaseException:
+                if mcp_manager is not None:
+                    await mcp_manager.close()
+                raise
             LOGGER.info("Friday API started on configured interface, port %d", settings.api_port)
             try:
                 yield
             finally:
                 await workers.stop()
                 await web_surfer.close()
+                if mcp_manager is not None:
+                    await mcp_manager.close()
                 # workers.stop() only cancels the asyncio tasks; a worker cancelled
                 # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
                 # still running on the default executor thread.

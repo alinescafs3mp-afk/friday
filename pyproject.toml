@@ -12,6 +12,9 @@ dependencies = [
     "httpcore>=1,<2",
     "httpx>=0.28,<1",
     "lxml>=6,<7",
+    # Standard connector bus for local/remote tools.  Keep the major pinned:
+    # MCP v2 is the first stable line for the 2026-07-28 stateless protocol.
+    "mcp>=2,<3",
     "openpyxl>=3.1,<4",
     "Pillow>=11,<13",
     "pydantic>=2.13,<3",

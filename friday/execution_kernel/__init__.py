@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
 
@@ -1016,6 +1016,9 @@ class ToolSpec:
     risk: str
     handler: Handler | None = None
     allowed_execution_scopes: frozenset[str] = frozenset({"dialogue"})
+    # Optional per-tool ceiling for connectors whose bounded parser/model stage
+    # legitimately exceeds the generic 30-second observation timeout.
+    timeout_sec: float | None = None
 
     def __post_init__(self) -> None:
         scopes = frozenset(self.allowed_execution_scopes)
@@ -1025,6 +1028,8 @@ class ToolSpec:
                 f"{sorted(str(scope) for scope in scopes)!r}"
             )
         self.allowed_execution_scopes = scopes
+        if self.timeout_sec is not None and self.timeout_sec <= 0:
+            raise ValueError(f"tool timeout must be positive for {self.name!r}")
 
     def to_openai(self, *, brief: bool = False) -> dict[str, Any]:
         """Описание для модели. `brief` — короткая форма, одна фраза.
@@ -2366,6 +2371,9 @@ def _bound_source_search_payload(payload: dict[str, Any]) -> dict[str, Any]:
 #: нужно, а цена утечки растёт с каждым: в журнале остаётся только хеш, и что
 #: именно ушло, владелец потом не узнает.
 _MAX_OUTBOUND_QUERY_CHARS = 200
+_GLOBAL_OPERATOR_TOOLS = frozenset(
+    {"workspace_create", "workspace_list", "workspace_read", "workspace_search"}
+)
 
 
 class ExecutionKernel:
@@ -2552,6 +2560,10 @@ class ExecutionKernel:
             "make_file",
             "collect_files",
             "mission_propose",
+            "workspace_create",
+            "workspace_list",
+            "workspace_read",
+            "workspace_search",
         },
         # Просьба о файле — это и «сочини документ» (make_file), и «собери
         # присланное» (collect_files). Какой из двух, решает модель по формулировке.
@@ -2562,6 +2574,10 @@ class ExecutionKernel:
             "source_search",
             "what_happened",
             "speak",
+            "workspace_create",
+            "workspace_list",
+            "workspace_read",
+            "workspace_search",
         },
         # Быт: человек говорит о себе, а не спрашивает систему.
         #
@@ -2661,6 +2677,8 @@ class ExecutionKernel:
                 continue
             if tool.name == "code_run" and not (self.settings and self.settings.code_execution_enabled):
                 continue
+            if tool.name in _GLOBAL_OPERATOR_TOOLS and not (actor.is_owner or actor.preset_key == "admin"):
+                continue
             if not self.authorization.authorize(actor, tool.security_id).allowed:
                 continue
             if tool.handler:
@@ -2708,6 +2726,9 @@ class ExecutionKernel:
             and not arguments.get("analysis")
         )
         effective_security_id = "files.read" if self_document_inventory else tool.security_id
+        if name in _GLOBAL_OPERATOR_TOOLS and not (actor.is_owner or actor.preset_key == "admin"):
+            await self._audit(actor, name, False, "authorization_denied", details=details)
+            return ToolResult(name, False, error="Authorization denied")
         try:
             self.authorization.require(actor, effective_security_id)
         except AuthorizationError:
@@ -2738,8 +2759,8 @@ class ExecutionKernel:
         if needs_person and needs_person(arguments or {}):
             return await self._request_approval(actor, name, arguments or {}, details)
 
-        timeout = 30
-        if self.settings:
+        timeout = tool.timeout_sec or 30
+        if self.settings and tool.timeout_sec is None:
             timeout = max(1, self.settings.code_execution_timeout_sec if name == "code_run" else 30)
         # Инструмент, МЕНЯЮЩИЙ данные, получает запись о начале ДО вызова.
         #
@@ -3069,8 +3090,8 @@ class ExecutionKernel:
             )
 
         details = self._audit_details(name, arguments)
-        timeout = 30
-        if self.settings:
+        timeout = tool.timeout_sec or 30
+        if self.settings and tool.timeout_sec is None:
             timeout = max(1, self.settings.code_execution_timeout_sec if name == "code_run" else 30)
         try:
             async with asyncio.timeout(timeout):
@@ -3166,6 +3187,44 @@ class ExecutionKernel:
                 "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
                 "code_chars": len(code),
             }
+        if tool_name in {
+            "workspace_list",
+            "workspace_search",
+            "workspace_read",
+            "workspace_create",
+        }:
+            path_value = args.get(
+                "relative_path",
+                args.get("relative_dir", args.get("filename", "")),
+            )
+            workspace_details: dict[str, Any] = {}
+            if isinstance(path_value, str):
+                workspace_details.update(
+                    {
+                        "path_sha256": hashlib.sha256(path_value.encode("utf-8")).hexdigest(),
+                        "path_chars": len(path_value),
+                        "path_suffix": PurePath(path_value).suffix.casefold(),
+                    }
+                )
+            if tool_name == "workspace_search":
+                query = args.get("query")
+                if isinstance(query, str):
+                    workspace_details.update(
+                        {
+                            "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
+                            "query_chars": len(query),
+                        }
+                    )
+            if tool_name == "workspace_create":
+                content = args.get("content")
+                if isinstance(content, str):
+                    workspace_details.update(
+                        {
+                            "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                            "content_chars": len(content),
+                        }
+                    )
+            return workspace_details
         if tool_name in {"web_search", "web_research"}:
             query = args.get("query")
             if not isinstance(query, str):

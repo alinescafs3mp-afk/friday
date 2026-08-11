@@ -590,6 +590,37 @@ Recursive closure материализует только entity IDs: `private_e
 шума, и следующая работа здесь — про группировку и пакетное подтверждение, а не про
 пороги.
 
+### MCP: транспорт под политикой Friday, а не второй агент
+
+MCP подключается только как транспорт к уже существующему `ExecutionKernel`.
+Удалённый сервер не может сам добавить модели инструмент: его имена, описания,
+JSON Schema, prompts и resources не публикуются. При старте client-manager лишь
+проверяет наличие фиксированного code-owned allowlist, после чего модель видит
+только локальные `ToolSpec` с обычными actor/capability/audit/timeout-границами.
+
+Первый коннектор — локальный filesystem exchange из двух непересекающихся
+каталогов:
+
+- `inbox`: только bounded list/search/read; файл после выбора MCP повторно
+  открывается Friday через `openat + O_NOFOLLOW`, сверяется по inode/размеру/
+  mtime/ctime и передаётся штатному документному разборщику без сохранения;
+- `outbox`: только атомарное создание нового UTF-8 текстового файла. Перезаписи,
+  append, rename, move, delete, shell и чтения outbox в протоколе нет;
+- пути всегда относительные, symlink/hardlink и вложенные inbox/outbox запрещены;
+  глобальный exchange виден только настоящему владельцу установки и admin, а не
+  любому участнику общего архива с широким preset;
+- сбой или таймаут MCP не роняет backend и не расширяет права: инструменты либо
+  не регистрируются, либо возвращают bounded unavailable.
+
+Публичный SQLite MCP намеренно не добавлен: `data_sources/data_schema/data_query`
+уже дают объявленные read-only SQL-источники через те же права. Headless-browser
+MCP будет отдельным fallback для JS-страниц после собственного SSRF/cookie/
+download-аудита; он не заменяет существующий безопасный web-контур автоматически.
+
+Настройки: `FRIDAY_MCP_ENABLED`, отдельные
+`FRIDAY_MCP_WORKSPACE_INBOX_DIR`/`OUTBOX_DIR`, bounded startup/call timeouts и
+`FRIDAY_MCP_RESULT_CHARS`. По умолчанию MCP выключен.
+
 ## 15. Чего здесь нет намеренно
 
 ### Семантический поиск противоречий

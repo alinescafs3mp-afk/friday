@@ -717,6 +717,16 @@ class FridaySettings:
     code_execution_timeout_sec: int
     code_execution_max_output_bytes: int
 
+    # MCP is an optional, code-owned connector boundary. Phase 1 accepts exactly
+    # one local filesystem exchange: read-only inbox + create-only outbox. These
+    # defaults keep every existing/direct FridaySettings constructor disabled.
+    mcp_enabled: bool = False
+    mcp_workspace_inbox_dir: Path | None = None
+    mcp_workspace_outbox_dir: Path | None = None
+    mcp_startup_timeout_sec: float = 15.0
+    mcp_call_timeout_sec: float = 20.0
+    mcp_result_chars: int = 7_000
+
     @property
     def is_loopback_bind(self) -> bool:
         return self.api_host in {"127.0.0.1", "localhost", "::1"}
@@ -840,6 +850,11 @@ class FridaySettings:
                 "backup_mirror_configured": self.backup_mirror_dir is not None,
                 "backup_encryption_configured": self.backup_encryption_key_file is not None,
                 "account_hard_delete_enabled": self.account_hard_delete_enabled,
+            },
+            "mcp": {
+                "enabled": self.mcp_enabled,
+                "workspace_configured": bool(self.mcp_workspace_inbox_dir and self.mcp_workspace_outbox_dir),
+                "filesystem_mode": "inbox-read/outbox-create" if self.mcp_enabled else "disabled",
             },
             "graph": {"max_depth": self.graph_max_depth},
             "api": {"host": self.api_host, "port": self.api_port, "tls": self.api_tls_enabled},
@@ -1210,6 +1225,26 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         code_execution_max_output_bytes=_int_env(
             "FRIDAY_CODE_EXECUTION_MAX_OUTPUT_BYTES", 64 * 1024, minimum=1024
         ),
+        mcp_enabled=_bool_env("FRIDAY_MCP_ENABLED", False),
+        # Deliberately do not resolve these paths: resolving would erase the fact
+        # that an operator configured a symlink. Validation and the MCP server
+        # reject symlink components instead of silently accepting their targets.
+        mcp_workspace_inbox_dir=Path(
+            env("FRIDAY_MCP_WORKSPACE_INBOX_DIR", "").strip() or home / "mcp-exchange" / "inbox"
+        )
+        .expanduser()
+        .absolute(),
+        mcp_workspace_outbox_dir=Path(
+            env("FRIDAY_MCP_WORKSPACE_OUTBOX_DIR", "").strip() or home / "mcp-exchange" / "outbox"
+        )
+        .expanduser()
+        .absolute(),
+        mcp_startup_timeout_sec=_float_env("FRIDAY_MCP_STARTUP_TIMEOUT_SEC", 15.0, minimum=1.0),
+        mcp_call_timeout_sec=_float_env("FRIDAY_MCP_CALL_TIMEOUT_SEC", 20.0, minimum=1.0),
+        mcp_result_chars=min(
+            7_000,
+            _int_env("FRIDAY_MCP_RESULT_CHARS", 7_000, minimum=1_000),
+        ),
     )
 
 
@@ -1227,6 +1262,13 @@ def ensure_runtime_dirs(settings: FridaySettings) -> list[Path]:
         settings.backups_dir,
         settings.exports_dir,
     ]
+    if settings.mcp_enabled:
+        mcp_errors = _mcp_workspace_errors(settings)
+        if mcp_errors:
+            raise ValueError("; ".join(mcp_errors))
+        assert settings.mcp_workspace_inbox_dir is not None
+        assert settings.mcp_workspace_outbox_dir is not None
+        paths.extend((settings.mcp_workspace_inbox_dir, settings.mcp_workspace_outbox_dir))
     for path in paths:
         ensure_private_directory(path)
     return paths
@@ -1245,6 +1287,86 @@ def _same_file(left: Path, right: Path) -> bool:
             return left.resolve(strict=False) == right.resolve(strict=False)
         except (OSError, RuntimeError):
             return False
+
+
+def _path_is_within(path: Path, directory: Path) -> bool:
+    """Lexical containment for already-absolute configured paths."""
+
+    try:
+        Path(path).absolute().relative_to(Path(directory).absolute())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _path_has_symlink_component(path: Path) -> bool:
+    """Reject a configured exchange whose existing ancestry redirects elsewhere."""
+
+    candidate = Path(path).absolute()
+    current = Path(candidate.anchor)
+    for component in candidate.parts[1:]:
+        current /= component
+        try:
+            if current.is_symlink():
+                return True
+        except OSError:
+            return True
+    return False
+
+
+def _mcp_workspace_errors(settings: FridaySettings) -> list[str]:
+    errors: list[str] = []
+    inbox = settings.mcp_workspace_inbox_dir
+    outbox = settings.mcp_workspace_outbox_dir
+    if inbox is None or outbox is None:
+        return [
+            "FRIDAY_MCP_ENABLED requires FRIDAY_MCP_WORKSPACE_INBOX_DIR and FRIDAY_MCP_WORKSPACE_OUTBOX_DIR"
+        ]
+    workspace_paths = (
+        ("FRIDAY_MCP_WORKSPACE_INBOX_DIR", Path(inbox).absolute()),
+        ("FRIDAY_MCP_WORKSPACE_OUTBOX_DIR", Path(outbox).absolute()),
+    )
+    for label, candidate in workspace_paths:
+        if any(component in {".", ".."} for component in candidate.parts[1:]):
+            errors.append(f"{label} must not contain dot path segments")
+        if _path_has_symlink_component(candidate):
+            errors.append(f"{label} must not contain a symlink component")
+        try:
+            exists = candidate.exists()
+            is_directory = candidate.is_dir()
+        except OSError:
+            exists = True
+            is_directory = False
+        if exists and not is_directory:
+            errors.append(f"{label} must point to a directory")
+    if _same_file(inbox, outbox) or _path_is_within(inbox, outbox) or _path_is_within(outbox, inbox):
+        errors.append("MCP workspace inbox and outbox must be separate, non-nested directories")
+    protected = {
+        settings.data_dir,
+        settings.cache_dir,
+        settings.log_dir,
+        settings.model_root,
+        settings.state_dir,
+        settings.files_dir,
+        settings.memory_vault_dir,
+        settings.backups_dir,
+        settings.exports_dir,
+        settings.database_path.parent,
+    }
+    for label, candidate in workspace_paths:
+        if any(
+            _path_is_within(candidate, guarded) or _path_is_within(guarded, candidate)
+            for guarded in protected
+        ):
+            errors.append(f"{label} must not overlap Friday data, state, model, cache, log or backup paths")
+            break
+    if not 1.0 <= settings.mcp_startup_timeout_sec <= 120.0:
+        errors.append("FRIDAY_MCP_STARTUP_TIMEOUT_SEC must be between 1 and 120")
+    if not 1.0 <= settings.mcp_call_timeout_sec <= 300.0:
+        errors.append("FRIDAY_MCP_CALL_TIMEOUT_SEC must be between 1 and 300")
+    if not 1_000 <= settings.mcp_result_chars <= 7_000:
+        errors.append("FRIDAY_MCP_RESULT_CHARS must be between 1000 and 7000")
+    return errors
 
 
 def validate_settings(settings: FridaySettings, *, production: bool = False) -> list[str]:
@@ -1403,6 +1525,8 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             "are empty: reranking and the confidence cut-off would silently never run — "
             "set both or set FRIDAY_RERANK_TOP=0"
         )
+    if settings.mcp_enabled:
+        errors.extend(_mcp_workspace_errors(settings))
     # Открытая регистрация впускает НЕЗНАКОМОГО человека — того, кого владелец не
     # называл ни по имени, ни по номеру чата. Что этот человек получит, решают две
     # соседние настройки, и оба сочетания отдают ему архив целиком. Цена ошибки
