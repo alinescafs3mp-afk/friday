@@ -69,15 +69,17 @@ def hierarchy_is_configured(storage: Any) -> bool:
     управлять чужой работой оно не открывает: там граница проходит по хозяину
     архива (`ActorContext.is_owner`), и она осталась на месте.
     """
-    for row in storage.list_users(limit=5000):
-        raw = row.get("metadata_json")
-        try:
-            metadata = json.loads(str(raw or "{}")) if isinstance(raw, str) else (raw or {})
-        except (TypeError, ValueError):
-            continue
-        if isinstance(metadata, dict) and str(metadata.get("supervisor_id") or "").strip():
-            return True
-    return False
+    # One indexed-size-independent EXISTS, not a capped directory page.  A
+    # supervisor assigned to row 5001 must close the hierarchy boundary just as
+    # surely as one assigned to row 1.  json_valid keeps legacy malformed
+    # metadata from aborting the authorization check.
+    row = storage.execute(
+        """SELECT 1 FROM users
+             WHERE json_valid(metadata_json)=1
+               AND COALESCE(TRIM(CAST(json_extract(metadata_json,'$.supervisor_id') AS TEXT)), '')<>''
+             LIMIT 1"""
+    ).fetchone()
+    return row is not None
 
 
 def may_oversee(storage: Any, viewer_id: str, target_id: str, *, owner_id: str = "") -> bool:

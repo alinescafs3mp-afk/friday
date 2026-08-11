@@ -29,6 +29,7 @@ import tarfile
 import tempfile
 import time
 import zipfile
+import zlib
 from collections.abc import Sequence
 from contextlib import ExitStack, closing, suppress
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from typing import Any, Protocol
 
 from bs4 import BeautifulSoup
 
+from friday.archive_passwords import archive_password_candidates
 from friday.documents._office_structure import (
     build_docx_text_and_structure,
     build_xlsx_text_and_structure,
@@ -110,11 +112,36 @@ _OPENDOCUMENT_MIME_TYPES = {
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/vnd.oasis.opendocument.presentation",
 }
+_OOXML_EXTENSIONS = {".docx": "docx", ".xlsx": "xlsx", ".pptx": "pptx"}
+_OOXML_MIME_FORMATS = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+}
+_OOXML_MIME_TYPES = frozenset(_OOXML_MIME_FORMATS)
+_EMAIL_METADATA_EXTENSIONS = {".eml": "eml", ".mht": "mhtml", ".mhtml": "mhtml"}
 _ODF_META_MEMBER = "meta.xml"
 _MAX_ODF_METADATA_BYTES = 256 * 1024
+_MAX_ODF_SIGNATURE_BYTES = 512 * 1024
+_MAX_ODF_SIGNATURE_MEMBERS = 8
+_MAX_TECHNICAL_METADATA_XML_BYTES = 512 * 1024
+_MAX_TECHNICAL_METADATA_RECORDS = 64
+_MAX_PDF_SIGNATURE_FIELDS = 16
+_MAX_PDF_FORM_FIELDS_SCANNED = 256
+_MAX_EMAIL_METADATA_BYTES = 2 * 1024 * 1024
+_MAX_EPUB_CONTAINER_BYTES = 64 * 1024
+_MAX_EPUB_PACKAGE_BYTES = 512 * 1024
 _ODF_OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
 _ODF_META_NS = "urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
 _ODF_DC_NS = "http://purl.org/dc/elements/1.1/"
+_ODF_XLINK_NS = "http://www.w3.org/1999/xlink"
+_XMLDSIG_NS = "http://www.w3.org/2000/09/xmldsig#"
+_OOXML_CP_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+_OOXML_DC_NS = "http://purl.org/dc/elements/1.1/"
+_OOXML_DCTERMS_NS = "http://purl.org/dc/terms/"
+_OOXML_EP_NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+_OOXML_VT_NS = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
+_OOXML_CUSTOM_NS = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
 _ODF_STRING_TAGS = {
     f"{{{_ODF_DC_NS}}}title": ("title", 500),
     f"{{{_ODF_DC_NS}}}subject": ("subject", 500),
@@ -123,14 +150,24 @@ _ODF_STRING_TAGS = {
     f"{{{_ODF_DC_NS}}}description": ("description", 4000),
     f"{{{_ODF_DC_NS}}}language": ("language", 64),
     f"{{{_ODF_META_NS}}}generator": ("generator", 300),
+    f"{{{_ODF_META_NS}}}printed-by": ("printed_by", 300),
 }
 _ODF_STATISTIC_ATTRIBUTES = {
+    f"{{{_ODF_META_NS}}}cell-count": "cell_count",
+    f"{{{_ODF_META_NS}}}draw-count": "draw_count",
+    f"{{{_ODF_META_NS}}}frame-count": "frame_count",
     f"{{{_ODF_META_NS}}}page-count": "page_count",
+    f"{{{_ODF_META_NS}}}paragraph-count": "paragraph_count",
+    f"{{{_ODF_META_NS}}}row-count": "row_count",
+    f"{{{_ODF_META_NS}}}sentence-count": "sentence_count",
+    f"{{{_ODF_META_NS}}}syllable-count": "syllable_count",
     f"{{{_ODF_META_NS}}}word-count": "word_count",
     f"{{{_ODF_META_NS}}}character-count": "character_count",
+    f"{{{_ODF_META_NS}}}non-whitespace-character-count": "non_whitespace_character_count",
     f"{{{_ODF_META_NS}}}table-count": "table_count",
     f"{{{_ODF_META_NS}}}image-count": "image_count",
     f"{{{_ODF_META_NS}}}object-count": "object_count",
+    f"{{{_ODF_META_NS}}}ole-object-count": "ole_object_count",
 }
 _OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx", ".odt", ".rtf"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -517,6 +554,7 @@ class DocumentExtractor:
             return DocumentResult("", success=False, error="Document content must be bytes")
         if _depth > _MAX_NESTING_DEPTH:
             return DocumentResult("", success=False, error="Archive nesting limit exceeded")
+        password_candidates = archive_password_candidates(archive_password)
         # One budget per upload, created at the top and carried down the nesting.
         budget = _budget or _ArchiveBudget(
             previews=_MAX_ARCHIVE_PREVIEW_FILES,
@@ -560,16 +598,6 @@ class DocumentExtractor:
                 # это не решение, а недосмотр: у семьи форматов один разборщик.
                 odf_format = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
                 result = self._extract_xml_zip_text(content, "content.xml", odf_format)
-                result = DocumentResult(
-                    result.text,
-                    {
-                        **result.metadata,
-                        **self.extract_document_metadata(content, safe_name, detected_mime),
-                    },
-                    result.success,
-                    result.error,
-                    result.office_structure_index,
-                )
             elif ext == ".epub" or detected_mime == "application/epub+zip":
                 result = self._extract_epub(content)
             elif ext in {".eml", ".mht", ".mhtml"} or detected_mime in {
@@ -580,15 +608,27 @@ class DocumentExtractor:
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
             elif ext in _ARCHIVE_EXTENSIONS or ext.startswith(".tar."):
-                result = self._extract_archive(
-                    content,
-                    safe_name,
-                    ext,
-                    _depth,
-                    budget,
-                    deadline,
-                    archive_password,
-                )
+                # Passwords are credentials, so retries are a closed set of
+                # representation variants rather than guesses.  Every attempt
+                # consumes the same upload-wide budget and deadline.  Only an
+                # explicit invalid-password result permits the next variant;
+                # limits, missing backends and corrupt archives fail closed.
+                for candidate in password_candidates or (None,):
+                    try:
+                        result = self._extract_archive(
+                            content,
+                            safe_name,
+                            ext,
+                            _depth,
+                            budget,
+                            deadline,
+                            candidate,
+                        )
+                    except ArchivePasswordInvalid:
+                        continue
+                    break
+                else:
+                    raise ArchivePasswordInvalid
             elif detected_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
             else:
@@ -637,12 +677,26 @@ class DocumentExtractor:
                 f"document_extract_failed:{type(exc).__name__}",
             )
 
+        # Technical/container metadata has one body-free parser for both new
+        # uploads and later legacy hydration.  Merge its closed projection even
+        # when body extraction failed (for example, a scan-only image): stored
+        # properties do not depend on OCR/model availability.
+        native_metadata = self.extract_document_metadata(content, safe_name, detected_mime)
+        if native_metadata:
+            result = DocumentResult(
+                result.text,
+                {**result.metadata, **native_metadata},
+                result.success,
+                result.error,
+                result.office_structure_index,
+            )
+
         # Убрать собственные credential ДО обреза: иначе граница могла бы
         # разрезать секрет пополам и оставить его половину в тексте.
         # The password is request-ephemeral.  It is not normally part of member
         # contents, but a hostile archive could deliberately echo it in a name or
         # file; redact that exact value before text can reach a prompt or index.
-        turn_secrets = (*self.secret_values, archive_password) if archive_password else self.secret_values
+        turn_secrets = (*self.secret_values, *password_candidates)
         redacted_text, secrets_removed = _redact_own_secrets(result.text, turn_secrets)
         text = redacted_text[: self.max_text_chars]
         metadata = {
@@ -702,33 +756,848 @@ class DocumentExtractor:
         filename: str,
         mime_type: str = "",
     ) -> dict[str, Any]:
-        """Return a closed, header-only metadata projection for OpenDocument.
+        """Return a closed, header-only technical metadata projection.
 
         This intentionally does not call ``extract``: legacy hydration may read
         authorised stored bytes solely to answer a metadata question, and must
         not parse ``content.xml``, run OCR/vision, mutate Raw, or build model
-        context.  Unknown formats and malformed/oversized metadata simply have
-        no safe projection.
+        context.  Every parser below is format-specific, byte/record bounded and
+        treats embedded values as inert strings.  Unknown formats have no safe
+        projection; malformed or oversized known metadata is explicitly partial.
         """
 
         if not isinstance(content, bytes) or len(content) > self.max_input_bytes:
             return {}
         safe_name = Path(str(filename or "document")).name
         ext = self._compound_extension(safe_name.casefold())
-        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
-        if ext not in _OPENDOCUMENT_EXTENSIONS and detected_mime not in _OPENDOCUMENT_MIME_TYPES:
+        detected_mime = (
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0].strip().casefold()
+        )
+        parser: Any
+        if ext in _OPENDOCUMENT_EXTENSIONS or detected_mime in _OPENDOCUMENT_MIME_TYPES:
+            format_name = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
+            parser = self._extract_opendocument_metadata
+        elif ext in _OOXML_EXTENSIONS or detected_mime in _OOXML_MIME_TYPES:
+            format_name = _OOXML_EXTENSIONS.get(ext, _OOXML_MIME_FORMATS.get(detected_mime, "ooxml"))
+            parser = self._extract_ooxml_metadata
+        elif ext == ".pdf" or detected_mime == "application/pdf":
+            format_name = "pdf"
+            parser = self._extract_pdf_metadata
+        elif ext in _EMAIL_METADATA_EXTENSIONS or detected_mime in {
+            "message/rfc822",
+            "multipart/related",
+        }:
+            format_name = _EMAIL_METADATA_EXTENSIONS.get(ext, "eml")
+            parser = self._extract_email_metadata
+        elif ext == ".epub" or detected_mime == "application/epub+zip":
+            format_name = "epub"
+            parser = self._extract_epub_metadata
+        elif ext in _IMAGE_EXTENSIONS or detected_mime.startswith("image/"):
+            format_name = "image"
+            parser = self._extract_image_metadata
+        else:
             return {}
-        format_name = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
         try:
-            metadata = self._extract_opendocument_metadata(content)
+            metadata = parser(content)
         except Exception:  # noqa: BLE001 - optional metadata cannot break body extraction
-            return {"format": format_name}
+            return {
+                "format": format_name,
+                "metadata_parse_status": "unreadable",
+                "technical_metadata_incomplete": True,
+            }
         return {"format": format_name, **metadata}
+
+    @staticmethod
+    def _metadata_local_name(value: Any) -> str:
+        return str(value or "").rsplit("}", 1)[-1].split(":", 1)[-1]
+
+    @staticmethod
+    def _metadata_inert_text(value: Any, limit: int = 1_000) -> tuple[str, bool]:
+        raw = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or ""))
+        cleaned = " ".join(raw.split())
+        bounded = cleaned[: max(0, int(limit))]
+        return bounded, len(cleaned) > len(bounded)
+
+    @classmethod
+    def _metadata_element_text(cls, element: Any, limit: int = 1_000) -> tuple[str, bool]:
+        return cls._metadata_inert_text("".join(element.itertext()), limit)
+
+    @staticmethod
+    def _metadata_xml_root(raw: bytes) -> Any:
+        """Parse metadata XML with encoding-safe DTD/entity/network denial."""
+
+        from lxml import etree  # type: ignore[import-untyped]
+
+        parser = etree.XMLParser(
+            resolve_entities=False,
+            no_network=True,
+            load_dtd=False,
+            recover=False,
+            huge_tree=False,
+        )
+        try:
+            root = etree.fromstring(raw, parser=parser)
+        except (etree.LxmlError, LookupError, ValueError) as exc:
+            raise ValueError("unreadable metadata XML") from exc
+        # ``resolve_entities=False`` prevents expansion, but the unresolved
+        # entity node would still be attacker-controlled metadata.  Reject the
+        # declaration and any entity node outright.  ``docinfo.doctype`` is
+        # decoded by libxml2 first, so UTF-16/UTF-32 cannot bypass this gate.
+        if str(root.getroottree().docinfo.doctype or "").strip():
+            raise ValueError("DTD is not permitted in metadata XML")
+        if any(getattr(node, "tag", None) is etree.Entity for node in root.iter()):
+            raise ValueError("entities are not permitted in metadata XML")
+        return root
+
+    def _read_metadata_xml_member(
+        self,
+        archive: zipfile.ZipFile,
+        member_name: str,
+        *,
+        max_bytes: int = _MAX_TECHNICAL_METADATA_XML_BYTES,
+    ) -> tuple[Any | None, str]:
+        try:
+            info = archive.getinfo(member_name)
+        except KeyError:
+            return None, "absent"
+        if info.is_dir() or info.file_size > max_bytes:
+            return None, "too_large"
+        try:
+            with archive.open(info) as stream:
+                raw, truncated = self._read_stream_preview(stream, max_bytes)
+            if truncated:
+                return None, "unsafe_or_truncated"
+            return self._metadata_xml_root(raw), "parsed"
+        except (OSError, ValueError, zipfile.BadZipFile):
+            return None, "unreadable"
+
+    def _extract_ooxml_metadata(self, content: bytes) -> dict[str, Any]:
+        """Read bounded OOXML core/app/custom properties without document body."""
+
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self._validate_office_zip(archive)
+            parts = {
+                name: self._read_metadata_xml_member(archive, name)
+                for name in ("docProps/core.xml", "docProps/app.xml", "docProps/custom.xml")
+            }
+
+        metadata: dict[str, Any] = {}
+        records: list[dict[str, str]] = []
+        records_total = 0
+        incomplete = any(status not in {"absent", "parsed"} for _root, status in parts.values())
+
+        def add_record(source: str, name: str, value_type: str, raw_value: Any) -> str:
+            nonlocal records_total, incomplete
+            value, clipped = self._metadata_inert_text(raw_value, 1_000)
+            safe_name, name_clipped = self._metadata_inert_text(name, 200)
+            safe_type, type_clipped = self._metadata_inert_text(value_type or "string", 40)
+            records_total += 1
+            incomplete = incomplete or clipped or name_clipped or type_clipped
+            shown = value or "(пустое значение)"
+            if len(records) < _MAX_TECHNICAL_METADATA_RECORDS and safe_name and safe_type:
+                records.append(
+                    {
+                        "source": source,
+                        "name": safe_name,
+                        "value_type": safe_type,
+                        "value": shown,
+                    }
+                )
+            else:
+                incomplete = True
+            return value
+
+        core_root, _core_status = parts["docProps/core.xml"]
+        core_map = {
+            f"{{{_OOXML_DC_NS}}}title": "title",
+            f"{{{_OOXML_DC_NS}}}subject": "subject",
+            f"{{{_OOXML_DC_NS}}}creator": "creator",
+            f"{{{_OOXML_DC_NS}}}description": "description",
+            f"{{{_OOXML_DC_NS}}}language": "language",
+            f"{{{_OOXML_DC_NS}}}identifier": "identifier",
+            f"{{{_OOXML_CP_NS}}}lastModifiedBy": "last_modified_by",
+            f"{{{_OOXML_CP_NS}}}revision": "revision",
+            f"{{{_OOXML_CP_NS}}}category": "category",
+            f"{{{_OOXML_CP_NS}}}contentStatus": "content_status",
+            f"{{{_OOXML_CP_NS}}}version": "version",
+            f"{{{_OOXML_DCTERMS_NS}}}created": "creation_date",
+            f"{{{_OOXML_DCTERMS_NS}}}modified": "modified_date",
+            f"{{{_OOXML_CP_NS}}}lastPrinted": "print_date",
+        }
+        if core_root is not None:
+            for element in list(core_root):
+                value, clipped = self._metadata_element_text(element, 4_000)
+                incomplete = incomplete or clipped
+                local_name = self._metadata_local_name(element.tag)
+                add_record("OOXML core", local_name, "string", value)
+                mapped = core_map.get(element.tag)
+                if mapped and value and mapped not in metadata:
+                    metadata[mapped] = value
+                if element.tag == f"{{{_OOXML_CP_NS}}}keywords" and value:
+                    keywords = [item.strip() for item in re.split(r"[;,\n]", value) if item.strip()]
+                    metadata["keywords"] = keywords[:32]
+                    metadata["keywords_total"] = len(keywords)
+                    metadata["keywords_shown"] = min(len(keywords), 32)
+                    incomplete = incomplete or len(keywords) > 32
+
+        app_root, _app_status = parts["docProps/app.xml"]
+        app_strings = {
+            "Application": "application",
+            "AppVersion": "application_version",
+            "Company": "company",
+            "Manager": "manager",
+            "Template": "template_name",
+            "PresentationFormat": "presentation_format",
+        }
+        app_counts = {
+            "TotalTime": "total_editing_time_minutes",
+            "Pages": "page_count",
+            "Words": "word_count",
+            "Characters": "character_count",
+            "CharactersWithSpaces": "characters_with_spaces",
+            "Lines": "line_count",
+            "Paragraphs": "paragraph_count",
+            "Slides": "slide_count",
+            "Notes": "note_count",
+            "HiddenSlides": "hidden_slide_count",
+            "MMClips": "multimedia_clip_count",
+            "DocSecurity": "document_security",
+        }
+        app_booleans = {
+            "ScaleCrop": "scale_crop",
+            "LinksUpToDate": "links_up_to_date",
+            "SharedDoc": "shared_document",
+            "HyperlinksChanged": "hyperlinks_changed",
+        }
+        if app_root is not None:
+            for element in list(app_root):
+                value, clipped = self._metadata_element_text(element, 4_000)
+                incomplete = incomplete or clipped
+                local_name = self._metadata_local_name(element.tag)
+                add_record("OOXML app", local_name, "string", value)
+                if element.tag != f"{{{_OOXML_EP_NS}}}{local_name}":
+                    continue
+                if local_name in app_strings and value:
+                    metadata.setdefault(app_strings[local_name], value)
+                elif local_name in app_counts and value:
+                    if value.isdecimal():
+                        parsed = int(value)
+                        metadata[app_counts[local_name]] = min(parsed, 2_147_483_647)
+                        incomplete = incomplete or parsed > 2_147_483_647
+                    else:
+                        incomplete = True
+                elif local_name in app_booleans and value:
+                    normalized = value.casefold()
+                    if normalized in {"true", "1", "yes"}:
+                        metadata[app_booleans[local_name]] = True
+                    elif normalized in {"false", "0", "no"}:
+                        metadata[app_booleans[local_name]] = False
+                    else:
+                        incomplete = True
+
+        custom_root, _custom_status = parts["docProps/custom.xml"]
+        if custom_root is not None:
+            for prop in list(custom_root):
+                if prop.tag != f"{{{_OOXML_CUSTOM_NS}}}property":
+                    incomplete = True
+                    continue
+                name = str(prop.attrib.get("name") or "")
+                children = list(prop)
+                if len(children) != 1:
+                    add_record("OOXML custom", name or "property", "unknown", "")
+                    incomplete = True
+                    continue
+                value, clipped = self._metadata_element_text(children[0], 4_000)
+                incomplete = incomplete or clipped
+                value_type = self._metadata_local_name(children[0].tag)
+                if not str(children[0].tag).startswith(f"{{{_OOXML_VT_NS}}}"):
+                    incomplete = True
+                add_record("OOXML custom", name or "property", value_type, value)
+
+        statuses = [status for _root, status in parts.values()]
+        if records:
+            metadata["stored_properties"] = records
+        metadata["stored_properties_total"] = records_total
+        metadata["stored_properties_shown"] = len(records)
+        if records_total > len(records):
+            incomplete = True
+        if all(status == "absent" for status in statuses):
+            metadata["metadata_parse_status"] = "absent"
+        elif incomplete:
+            metadata["metadata_parse_status"] = "partial"
+            metadata["technical_metadata_incomplete"] = True
+        else:
+            metadata["metadata_parse_status"] = "parsed"
+        own_date = _plausible_document_date(
+            str(metadata.get("creation_date") or metadata.get("modified_date") or "")
+        )
+        if own_date:
+            metadata["document_date"] = own_date
+        return self._redact_metadata_value(metadata)
+
+    def _extract_pdf_metadata(self, content: bytes) -> dict[str, Any]:
+        """Read PDF Info/XMP and stored signature-field facts, never validate."""
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            try:
+                if reader.decrypt("") == 0:
+                    return {
+                        "metadata_parse_status": "encrypted",
+                        "technical_metadata_incomplete": True,
+                    }
+            except Exception:
+                return {
+                    "metadata_parse_status": "encrypted",
+                    "technical_metadata_incomplete": True,
+                }
+
+        metadata: dict[str, Any] = {}
+        records: list[dict[str, str]] = []
+        records_total = 0
+        incomplete = False
+
+        def add_record(source: str, name: Any, value_type: str, raw_value: Any) -> str:
+            nonlocal records_total, incomplete
+            safe_name, name_clipped = self._metadata_inert_text(name, 200)
+            value, value_clipped = self._metadata_inert_text(raw_value, 1_000)
+            records_total += 1
+            incomplete = incomplete or name_clipped or value_clipped
+            if len(records) < _MAX_TECHNICAL_METADATA_RECORDS and safe_name:
+                records.append(
+                    {
+                        "source": source,
+                        "name": safe_name,
+                        "value_type": value_type,
+                        "value": value or "(пустое значение)",
+                    }
+                )
+            else:
+                incomplete = True
+            return value
+
+        info_map = {
+            "/Title": "title",
+            "/Author": "creator",
+            "/Subject": "subject",
+            "/Creator": "generator",
+            "/Producer": "producer",
+            "/CreationDate": "creation_date",
+            "/ModDate": "modified_date",
+            "/Trapped": "trapped",
+        }
+        try:
+            info: Any = reader.metadata or {}
+            for key, raw_value in info.items():
+                name = str(key or "").lstrip("/") or "property"
+                value = add_record("PDF Info", name, "string", raw_value)
+                mapped = info_map.get(str(key))
+                if mapped and value and mapped not in metadata:
+                    metadata[mapped] = value
+                if str(key) == "/Keywords" and value:
+                    keywords = [item.strip() for item in re.split(r"[;,\n]", value) if item.strip()]
+                    metadata["keywords"] = keywords[:32]
+                    metadata["keywords_total"] = len(keywords)
+                    metadata["keywords_shown"] = min(len(keywords), 32)
+                    incomplete = incomplete or len(keywords) > 32
+        except Exception:
+            incomplete = True
+        header = str(getattr(reader, "pdf_header", "") or "")
+        if header.startswith("%PDF-"):
+            metadata["pdf_version"] = header[5:21]
+
+        root: Any = None
+        try:
+            root = reader.trailer["/Root"].get_object()
+        except Exception:
+            incomplete = True
+
+        # XMP is often an uncompressed XML metadata stream.  Never ask pypdf to
+        # inflate an arbitrary filtered stream without an output limit: a tiny
+        # compressed stream could otherwise allocate unbounded memory.  Such a
+        # packet is reported partial rather than silently skipped.
+        if root is not None:
+            try:
+                metadata_ref = root.get("/Metadata")
+                if metadata_ref is not None:
+                    stream = metadata_ref.get_object()
+                    filters = stream.get("/Filter")
+                    raw_stream = bytes(getattr(stream, "_data", b""))
+                    xmp_bytes: bytes | None = None
+                    if len(raw_stream) > _MAX_TECHNICAL_METADATA_XML_BYTES:
+                        incomplete = True
+                    elif not filters:
+                        xmp_bytes = raw_stream
+                    else:
+                        filter_names = (
+                            [str(item) for item in filters]
+                            if isinstance(filters, (list, tuple))
+                            else [str(filters)]
+                        )
+                        decode_params = stream.get("/DecodeParms")
+                        if filter_names == ["/FlateDecode"] and not decode_params:
+                            try:
+                                inflater = zlib.decompressobj()
+                                expanded = inflater.decompress(
+                                    raw_stream,
+                                    _MAX_TECHNICAL_METADATA_XML_BYTES + 1,
+                                )
+                                if (
+                                    len(expanded) > _MAX_TECHNICAL_METADATA_XML_BYTES
+                                    or inflater.unconsumed_tail
+                                ):
+                                    incomplete = True
+                                else:
+                                    remaining = _MAX_TECHNICAL_METADATA_XML_BYTES + 1 - len(expanded)
+                                    expanded += inflater.flush(max(1, remaining))
+                                    if len(expanded) > _MAX_TECHNICAL_METADATA_XML_BYTES or not inflater.eof:
+                                        incomplete = True
+                                    else:
+                                        xmp_bytes = expanded
+                            except zlib.error:
+                                incomplete = True
+                        else:
+                            incomplete = True
+                    if xmp_bytes:
+                        try:
+                            xmp_root = self._metadata_xml_root(xmp_bytes)
+                        except Exception:
+                            incomplete = True
+                        else:
+                            scanned = 0
+
+                            def walk_xmp(element: Any, path: tuple[str, ...] = ()) -> None:
+                                nonlocal scanned, incomplete
+                                if scanned >= 256:
+                                    incomplete = True
+                                    return
+                                local = self._metadata_local_name(element.tag)
+                                current = (*path[-2:], local)
+                                children = list(element)
+                                if not children:
+                                    scanned += 1
+                                    value, clipped = self._metadata_element_text(element, 4_000)
+                                    incomplete = incomplete or clipped
+                                    name = "/".join(current)
+                                    add_record("PDF XMP", name, "xml", value)
+                                    folded_path = {item.casefold() for item in current}
+                                    for cue, target in (
+                                        ("title", "title"),
+                                        ("creator", "creator"),
+                                        ("description", "description"),
+                                        ("language", "language"),
+                                        ("createdate", "creation_date"),
+                                        ("modifydate", "modified_date"),
+                                    ):
+                                        if cue in folded_path and value and target not in metadata:
+                                            metadata[target] = value
+                                for attr_name, attr_value in element.attrib.items():
+                                    scanned += 1
+                                    if scanned > 256:
+                                        incomplete = True
+                                        break
+                                    add_record(
+                                        "PDF XMP",
+                                        f"{'/'.join(current)}/@{self._metadata_local_name(attr_name)}",
+                                        "attribute",
+                                        attr_value,
+                                    )
+                                for child in children:
+                                    walk_xmp(child, current)
+
+                            walk_xmp(xmp_root)
+            except Exception:
+                incomplete = True
+
+        signature_fields: list[dict[str, str]] = []
+        signature_total = 0
+        if root is not None:
+            try:
+                acroform_ref = root.get("/AcroForm")
+                if acroform_ref is not None:
+                    acroform = acroform_ref.get_object()
+                    stack: list[tuple[Any, str, Any, int]] = [
+                        (field, "", None, 0) for field in list(acroform.get("/Fields") or [])
+                    ]
+                    seen: set[tuple[int, int] | int] = set()
+                    scanned = 0
+                    while stack:
+                        field_ref, parent_name, inherited_type, depth = stack.pop()
+                        if depth > 8 or scanned >= _MAX_PDF_FORM_FIELDS_SCANNED:
+                            incomplete = True
+                            break
+                        field = field_ref.get_object()
+                        identity_ref = getattr(field_ref, "idnum", None)
+                        generation = getattr(field_ref, "generation", 0)
+                        identity: tuple[int, int] | int = (
+                            (int(identity_ref), int(generation))
+                            if isinstance(identity_ref, int)
+                            else id(field)
+                        )
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                        scanned += 1
+                        own_name, clipped = self._metadata_inert_text(field.get("/T"), 200)
+                        incomplete = incomplete or clipped
+                        field_name = ".".join(item for item in (parent_name, own_name) if item)
+                        field_type = field.get("/FT") or inherited_type
+                        if str(field_type or "") == "/Sig":
+                            signature_total += 1
+                            signature: Any = field.get("/V")
+                            signature = signature.get_object() if signature is not None else None
+                            row: dict[str, str] = {
+                                "field_name": field_name or f"signature-{signature_total}",
+                            }
+                            if signature is not None:
+                                for source_key, target_key in (
+                                    ("/Name", "signer_name"),
+                                    ("/M", "signing_time"),
+                                    ("/Reason", "reason"),
+                                    ("/Location", "location"),
+                                    ("/ContactInfo", "contact_info"),
+                                    ("/Filter", "filter"),
+                                    ("/SubFilter", "subfilter"),
+                                ):
+                                    value, was_clipped = self._metadata_inert_text(
+                                        signature.get(source_key), 500
+                                    )
+                                    incomplete = incomplete or was_clipped
+                                    if value:
+                                        row[target_key] = value
+                                if signature.get("/ByteRange") is not None:
+                                    row["byte_range_present"] = "да"
+                                if signature.get("/Contents") is not None:
+                                    row["contents_present"] = "да"
+                            if len(signature_fields) < _MAX_PDF_SIGNATURE_FIELDS:
+                                signature_fields.append(row)
+                            else:
+                                incomplete = True
+                        for child in list(field.get("/Kids") or []):
+                            stack.append((child, field_name, field_type, depth + 1))
+            except Exception:
+                incomplete = True
+
+        if records:
+            metadata["stored_properties"] = records
+        metadata["stored_properties_total"] = records_total
+        metadata["stored_properties_shown"] = len(records)
+        if signature_fields:
+            metadata["signature_fields"] = signature_fields
+        metadata["signature_fields_total"] = signature_total
+        metadata["signature_fields_shown"] = len(signature_fields)
+        if signature_total:
+            metadata["signature_count"] = signature_total
+            metadata["signature_validity"] = "not_checked"
+        if records_total > len(records) or signature_total > len(signature_fields):
+            incomplete = True
+        own_date = _pdf_document_date(reader)
+        if own_date:
+            metadata["document_date"] = own_date
+        if incomplete:
+            metadata["metadata_parse_status"] = "partial"
+            metadata["technical_metadata_incomplete"] = True
+        else:
+            metadata["metadata_parse_status"] = "parsed" if records_total or signature_total else "absent"
+        return self._redact_metadata_value(metadata)
+
+    def _extract_email_metadata(self, content: bytes) -> dict[str, Any]:
+        """Project bounded RFC/MHTML headers only; MIME bodies stay unread."""
+
+        from email import policy
+        from email.parser import BytesParser
+
+        source = content[:_MAX_EMAIL_METADATA_BYTES]
+        incomplete = len(content) > len(source)
+        message = BytesParser(policy=policy.default).parsebytes(source, headersonly=True)
+        records: list[dict[str, str]] = []
+        total = 0
+        metadata: dict[str, Any] = {}
+        header_map = {
+            "from": "email_from",
+            "to": "email_to",
+            "cc": "email_cc",
+            "bcc": "email_bcc",
+            "sender": "email_sender",
+            "reply-to": "email_reply_to",
+            "subject": "email_subject",
+            "date": "email_date",
+            "message-id": "message_id",
+            "in-reply-to": "in_reply_to",
+            "references": "references",
+            "content-type": "email_content_type",
+            "content-language": "content_language",
+        }
+        for raw_name, raw_value in message.raw_items():
+            total += 1
+            name, name_clipped = self._metadata_inert_text(raw_name, 120)
+            value, value_clipped = self._metadata_inert_text(raw_value, 2_000)
+            incomplete = incomplete or name_clipped or value_clipped
+            if len(records) < _MAX_TECHNICAL_METADATA_RECORDS and name:
+                records.append(
+                    {
+                        "source": "RFC header",
+                        "name": name,
+                        "value_type": "header",
+                        "value": value or "(пустое значение)",
+                    }
+                )
+            else:
+                incomplete = True
+            mapped = header_map.get(name.casefold())
+            if mapped and value and mapped not in metadata:
+                metadata[mapped] = value
+        # Common fields are decoded for display; the complete bounded raw
+        # header ledger above remains available as stored technical evidence.
+        for header_name, target in header_map.items():
+            decoded, clipped = self._metadata_inert_text(
+                str(message.get(header_name) or ""),
+                2_000,
+            )
+            incomplete = incomplete or clipped
+            if decoded:
+                metadata[target] = decoded
+        if records:
+            metadata["stored_properties"] = records
+        metadata["stored_properties_total"] = total
+        metadata["stored_properties_shown"] = len(records)
+        raw_date = str(message.get("Date") or "")
+        own_date = _plausible_document_date(_email_iso_date(raw_date))
+        if own_date:
+            metadata["document_date"] = own_date
+        if incomplete or total > len(records):
+            metadata["metadata_parse_status"] = "partial"
+            metadata["technical_metadata_incomplete"] = True
+        else:
+            metadata["metadata_parse_status"] = "parsed" if total else "absent"
+        return self._redact_metadata_value(metadata)
+
+    def _extract_epub_metadata(self, content: bytes) -> dict[str, Any]:
+        """Read the package OPF metadata selected by EPUB container.xml."""
+
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self._validate_office_zip(archive)
+            container, container_status = self._read_metadata_xml_member(
+                archive,
+                "META-INF/container.xml",
+                max_bytes=_MAX_EPUB_CONTAINER_BYTES,
+            )
+            if container is None:
+                return {
+                    "metadata_parse_status": (
+                        "missing_container" if container_status == "absent" else container_status
+                    ),
+                    "technical_metadata_incomplete": True,
+                }
+            rootfiles = [
+                item
+                for item in container.iter()
+                if self._metadata_local_name(item.tag) == "rootfile"
+                and str(item.attrib.get("full-path") or "").strip()
+            ]
+            if not rootfiles:
+                return {
+                    "metadata_parse_status": "missing_package_metadata",
+                    "technical_metadata_incomplete": True,
+                }
+            package_path = str(rootfiles[0].attrib.get("full-path") or "")
+            _safe_archive_member_name(package_path)
+            package, package_status = self._read_metadata_xml_member(
+                archive,
+                package_path,
+                max_bytes=_MAX_EPUB_PACKAGE_BYTES,
+            )
+
+        if package is None:
+            return {
+                "metadata_parse_status": package_status,
+                "technical_metadata_incomplete": True,
+            }
+        metadata_element = next(
+            (item for item in package.iter() if self._metadata_local_name(item.tag) == "metadata"),
+            None,
+        )
+        if metadata_element is None:
+            return {
+                "metadata_parse_status": "missing_package_metadata",
+                "technical_metadata_incomplete": True,
+            }
+
+        metadata: dict[str, Any] = {}
+        records: list[dict[str, str]] = []
+        total = 0
+        incomplete = len(rootfiles) > 1
+        subjects: list[str] = []
+        common_map = {
+            "title": "title",
+            "creator": "creator",
+            "description": "description",
+            "language": "language",
+            "identifier": "identifier",
+            "publisher": "publisher",
+            "rights": "rights",
+            "source": "source",
+            "coverage": "coverage",
+            "relation": "relation",
+        }
+        for element in list(metadata_element):
+            total += 1
+            local_name = self._metadata_local_name(element.tag)
+            value, clipped = self._metadata_element_text(element, 4_000)
+            incomplete = incomplete or clipped
+            attributes: list[str] = []
+            for raw_name, raw_value in element.attrib.items():
+                name, name_clipped = self._metadata_inert_text(self._metadata_local_name(raw_name), 100)
+                attr_value, value_clipped = self._metadata_inert_text(raw_value, 500)
+                incomplete = incomplete or name_clipped or value_clipped
+                if name:
+                    attributes.append(f"{name}={attr_value}")
+            shown_value = value
+            if attributes:
+                shown_value = f"{value} [{' ; '.join(attributes)}]".strip()
+            shown_value, shown_clipped = self._metadata_inert_text(shown_value, 1_000)
+            incomplete = incomplete or shown_clipped
+            if len(records) < _MAX_TECHNICAL_METADATA_RECORDS:
+                records.append(
+                    {
+                        "source": "EPUB OPF",
+                        "name": local_name,
+                        "value_type": "xml",
+                        "value": shown_value or "(пустое значение)",
+                    }
+                )
+            else:
+                incomplete = True
+            mapped = common_map.get(local_name.casefold())
+            if mapped and value and mapped not in metadata:
+                metadata[mapped] = value
+            if local_name.casefold() == "subject" and value:
+                subjects.append(value)
+            property_name = str(element.attrib.get("property") or "").casefold()
+            if property_name == "dcterms:modified" and value:
+                metadata.setdefault("modified_date", value)
+        if subjects:
+            metadata["keywords"] = subjects[:32]
+            metadata["keywords_total"] = len(subjects)
+            metadata["keywords_shown"] = min(len(subjects), 32)
+            incomplete = incomplete or len(subjects) > 32
+        if records:
+            metadata["stored_properties"] = records
+        metadata["stored_properties_total"] = total
+        metadata["stored_properties_shown"] = len(records)
+        if total > len(records):
+            incomplete = True
+        own_date = _plausible_document_date(str(metadata.get("modified_date") or ""))
+        if own_date:
+            metadata["document_date"] = own_date
+        if incomplete:
+            metadata["metadata_parse_status"] = "partial"
+            metadata["technical_metadata_incomplete"] = True
+        else:
+            metadata["metadata_parse_status"] = "parsed" if total else "absent"
+        return self._redact_metadata_value(metadata)
+
+    def _extract_image_metadata(self, content: bytes) -> dict[str, Any]:
+        """Read dimensions and a capped EXIF ledger without decoding pixels."""
+
+        from PIL import ExifTags, Image
+
+        metadata: dict[str, Any] = {}
+        records: list[dict[str, str]] = []
+        total = 0
+        incomplete = False
+
+        def exif_value(raw_value: Any) -> tuple[str, bool]:
+            if isinstance(raw_value, bytes):
+                clipped = len(raw_value) > 4_096
+                sample = raw_value[:4_096]
+                decoded = sample.decode("utf-8", errors="replace")
+                if decoded.count("�") > max(2, len(decoded) // 10):
+                    return f"[двоичные данные: {len(raw_value)} байт]", clipped
+                value, text_clipped = self._metadata_inert_text(decoded, 1_000)
+                return value, clipped or text_clipped
+            if isinstance(raw_value, (list, tuple)):
+                clipped = len(raw_value) > 32
+                value, text_clipped = self._metadata_inert_text(
+                    ", ".join(str(item) for item in raw_value[:32]), 1_000
+                )
+                return value, clipped or text_clipped
+            return self._metadata_inert_text(raw_value, 1_000)
+
+        with Image.open(io.BytesIO(content)) as image:
+            width, height = image.size
+            metadata.update(
+                {
+                    "image_format": str(image.format or "").upper()[:32],
+                    "image_mode": str(image.mode or "")[:32],
+                    "width_pixels": max(0, int(width)),
+                    "height_pixels": max(0, int(height)),
+                    "image_frame_count": max(1, int(getattr(image, "n_frames", 1) or 1)),
+                    "image_animated": bool(getattr(image, "is_animated", False)),
+                }
+            )
+            exif = image.getexif()
+            ledgers: list[tuple[str, Any]] = [("EXIF", exif)]
+            for tag_id, prefix in ((0x8769, "EXIF sub-IFD"), (0x8825, "GPS IFD")):
+                with suppress(Exception):
+                    nested = exif.get_ifd(tag_id)
+                    if nested:
+                        ledgers.append((prefix, nested))
+            seen: set[tuple[str, int]] = set()
+            for source, ledger in ledgers:
+                for raw_tag, raw_value in ledger.items():
+                    tag = int(raw_tag)
+                    identity = (source, tag)
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    total += 1
+                    name = str(ExifTags.TAGS.get(tag) or ExifTags.GPSTAGS.get(tag) or f"Tag {tag}")
+                    value, clipped = exif_value(raw_value)
+                    incomplete = incomplete or clipped
+                    if len(records) < _MAX_TECHNICAL_METADATA_RECORDS:
+                        records.append(
+                            {
+                                "source": source,
+                                "name": name[:200],
+                                "value_type": type(raw_value).__name__[:40],
+                                "value": value or "(пустое значение)",
+                            }
+                        )
+                    else:
+                        incomplete = True
+                    if name == "Make" and value:
+                        metadata.setdefault("camera_make", value)
+                    elif name == "Model" and value:
+                        metadata.setdefault("camera_model", value)
+                    elif name == "DateTimeOriginal" and value:
+                        metadata.setdefault("capture_date", value)
+                    elif name == "Orientation" and value:
+                        metadata.setdefault("image_orientation", value)
+        if records:
+            metadata["stored_properties"] = records
+        metadata["stored_properties_total"] = total
+        metadata["stored_properties_shown"] = len(records)
+        if total > len(records):
+            incomplete = True
+        if incomplete:
+            metadata["metadata_parse_status"] = "partial"
+            metadata["technical_metadata_incomplete"] = True
+        else:
+            metadata["metadata_parse_status"] = "parsed"
+        return self._redact_metadata_value(metadata)
 
     @staticmethod
     def _bounded_odf_text(element: Any, limit: int) -> str:
         text = " ".join("".join(element.itertext()).split())
         return text[: max(0, int(limit))]
+
+    @staticmethod
+    def _bounded_odf_value(value: Any, limit: int) -> str:
+        text = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or ""))
+        return " ".join(text.split())[: max(0, int(limit))]
 
     @staticmethod
     def _odf_iso_datetime(value: str) -> str:
@@ -743,87 +1612,353 @@ class DocumentExtractor:
             return candidate
         return ""
 
-    def _extract_opendocument_metadata(self, content: bytes) -> dict[str, Any]:
-        import xml.etree.ElementTree as ET
+    def _extract_odf_signature_metadata(
+        self,
+        archive: zipfile.ZipFile,
+        members: Sequence[zipfile.ZipInfo],
+    ) -> dict[str, Any]:
+        """Describe stored ODF signature XML without validating a signature.
 
+        ODF permits signature files below ``META-INF/`` whose names contain
+        ``signatures``.  Presence and inert XML fields are container metadata;
+        cryptographic validity requires certificate/path/revocation checks and
+        is deliberately outside this parser.
+        """
+
+        all_candidates = sorted(
+            member.filename
+            for member in members
+            if not member.is_dir()
+            and member.filename.startswith("META-INF/")
+            and "signatures" in PurePosixPath(member.filename).name.casefold()
+            and member.filename.casefold().endswith(".xml")
+        )
+        candidates = all_candidates[:_MAX_ODF_SIGNATURE_MEMBERS]
+        if not candidates:
+            return {}
+
+        signature_ids: list[str] = []
+        signature_subjects: list[str] = []
+        signature_times: list[str] = []
+        signature_ids_total = 0
+        signature_subjects_total = 0
+        signature_times_total = 0
+        signatures = 0
+        incomplete = len(all_candidates) > len(candidates)
+        for name in candidates:
+            info = archive.getinfo(name)
+            if info.file_size > _MAX_ODF_SIGNATURE_BYTES:
+                incomplete = True
+                continue
+            try:
+                with archive.open(info) as stream:
+                    raw, truncated = self._read_stream_preview(stream, _MAX_ODF_SIGNATURE_BYTES)
+                if truncated:
+                    incomplete = True
+                    continue
+                root = self._metadata_xml_root(raw)
+            except (KeyError, OSError, ValueError, zipfile.BadZipFile):
+                incomplete = True
+                continue
+            if root.tag.rsplit("}", 1)[-1] != "document-signatures":
+                incomplete = True
+                continue
+            for signature in root.iter(f"{{{_XMLDSIG_NS}}}Signature"):
+                signatures += 1
+                raw_signature_id = self._bounded_odf_value(signature.attrib.get("Id"), 10_000)
+                signature_id = raw_signature_id[:200]
+                incomplete = incomplete or len(raw_signature_id) > len(signature_id)
+                if signature_id:
+                    signature_ids_total += 1
+                    if signature_id not in signature_ids and len(signature_ids) < 16:
+                        signature_ids.append(signature_id)
+            for element in root.iter():
+                local_name = element.tag.rsplit("}", 1)[-1]
+                if local_name == "X509SubjectName":
+                    raw_value = self._bounded_odf_text(element, 10_000)
+                    value = raw_value[:500]
+                    incomplete = incomplete or len(raw_value) > len(value)
+                    if value:
+                        signature_subjects_total += 1
+                        if value not in signature_subjects and len(signature_subjects) < 16:
+                            signature_subjects.append(value)
+                elif local_name == "SigningTime":
+                    raw_value = self._bounded_odf_text(element, 10_000)
+                    value = raw_value[:80]
+                    incomplete = incomplete or len(raw_value) > len(value)
+                    if value:
+                        signature_times_total += 1
+                        if value not in signature_times and len(signature_times) < 16:
+                            signature_times.append(value)
+
+        metadata: dict[str, Any] = {
+            "signature_members": candidates,
+            "signature_members_total": len(all_candidates),
+            "signature_members_shown": len(candidates),
+            "signature_count": signatures,
+            "signature_validity": "not_checked",
+        }
+        if signature_ids:
+            metadata["signature_ids"] = signature_ids
+        metadata["signature_ids_total"] = signature_ids_total
+        metadata["signature_ids_shown"] = len(signature_ids)
+        if signature_subjects:
+            metadata["signature_subjects"] = signature_subjects
+        metadata["signature_subjects_total"] = signature_subjects_total
+        metadata["signature_subjects_shown"] = len(signature_subjects)
+        if signature_times:
+            metadata["signature_times"] = signature_times
+        metadata["signature_times_total"] = signature_times_total
+        metadata["signature_times_shown"] = len(signature_times)
+        if (
+            signature_ids_total > len(signature_ids)
+            or signature_subjects_total > len(signature_subjects)
+            or signature_times_total > len(signature_times)
+        ):
+            incomplete = True
+        if incomplete:
+            metadata["signature_metadata_incomplete"] = True
+        return metadata
+
+    def _redact_metadata_value(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return _redact_own_secrets(value, self.secret_values)[0]
+        if isinstance(value, list):
+            return [self._redact_metadata_value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): self._redact_metadata_value(item) for key, item in value.items()}
+        return value
+
+    def _extract_opendocument_metadata(self, content: bytes) -> dict[str, Any]:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_office_zip(archive)
             names = {member.filename for member in members}
-            if _ODF_META_MEMBER not in names:
-                return {}
-            info = archive.getinfo(_ODF_META_MEMBER)
-            if info.file_size > _MAX_ODF_METADATA_BYTES:
-                return {}
-            with archive.open(info) as stream:
-                raw, truncated = self._read_stream_preview(stream, _MAX_ODF_METADATA_BYTES)
-        if truncated or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
-            return {}
-        root = ET.fromstring(raw)
+            signature_metadata = self._extract_odf_signature_metadata(archive, members)
+            raw = b""
+            truncated = False
+            metadata_parse_status = "absent"
+            if _ODF_META_MEMBER in names:
+                info = archive.getinfo(_ODF_META_MEMBER)
+                if info.file_size <= _MAX_ODF_METADATA_BYTES:
+                    with archive.open(info) as stream:
+                        raw, truncated = self._read_stream_preview(stream, _MAX_ODF_METADATA_BYTES)
+                    metadata_parse_status = "read"
+                else:
+                    metadata_parse_status = "too_large"
+        if not raw:
+            result = {**signature_metadata, "metadata_parse_status": metadata_parse_status}
+            if metadata_parse_status != "absent":
+                result["technical_metadata_incomplete"] = True
+            return result
+        if truncated:
+            return {
+                **signature_metadata,
+                "metadata_parse_status": "unsafe_or_truncated",
+                "technical_metadata_incomplete": True,
+            }
+        try:
+            root = self._metadata_xml_root(raw)
+        except ValueError:
+            return {
+                **signature_metadata,
+                "metadata_parse_status": "unreadable",
+                "technical_metadata_incomplete": True,
+            }
         office_meta = root.find(f".//{{{_ODF_OFFICE_NS}}}meta")
         if office_meta is None:
-            return {}
+            return {
+                **signature_metadata,
+                "metadata_parse_status": "missing_office_meta",
+                "technical_metadata_incomplete": True,
+            }
 
-        metadata: dict[str, Any] = {}
+        metadata: dict[str, Any] = {
+            **signature_metadata,
+            "metadata_parse_status": "parsed",
+        }
+        technical_incomplete = signature_metadata.get("signature_metadata_incomplete") is True
         keywords: list[str] = []
+        keywords_total = 0
+        user_defined: list[dict[str, str]] = []
+        user_defined_total = 0
+
+        def element_text(element: Any, limit: int) -> str:
+            nonlocal technical_incomplete
+            value = " ".join("".join(element.itertext()).split())
+            if len(value) > limit:
+                technical_incomplete = True
+            return value[:limit]
+
+        def attribute_text(value: Any, limit: int) -> str:
+            nonlocal technical_incomplete
+            cleaned = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or ""))
+            cleaned = " ".join(cleaned.split())
+            if len(cleaned) > limit:
+                technical_incomplete = True
+            return cleaned[:limit]
+
         for element in list(office_meta):
             string_spec = _ODF_STRING_TAGS.get(element.tag)
             if string_spec is not None and string_spec[0] not in metadata:
                 key, limit = string_spec
-                value = self._bounded_odf_text(element, limit)
+                value = element_text(element, limit)
                 if (
                     key == "language"
                     and value
                     and not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*", value)
                 ):
                     value = ""
+                    technical_incomplete = True
                 if value:
                     metadata[key] = value
                 continue
             if element.tag == f"{{{_ODF_META_NS}}}keyword":
-                keyword = self._bounded_odf_text(element, 200)
+                keywords_total += 1
+                keyword = element_text(element, 200)
                 if keyword and keyword not in keywords and len(keywords) < 32:
                     keywords.append(keyword)
+                elif keyword:
+                    technical_incomplete = True
                 continue
             if element.tag == f"{{{_ODF_META_NS}}}creation-date":
-                value = self._odf_iso_datetime(self._bounded_odf_text(element, 64))
+                raw_value = element_text(element, 64)
+                value = self._odf_iso_datetime(raw_value)
                 if value:
                     metadata.setdefault("creation_date", value)
+                elif raw_value:
+                    technical_incomplete = True
                 continue
             if element.tag == f"{{{_ODF_DC_NS}}}date":
-                value = self._odf_iso_datetime(self._bounded_odf_text(element, 64))
+                raw_value = element_text(element, 64)
+                value = self._odf_iso_datetime(raw_value)
                 if value:
                     metadata.setdefault("modified_date", value)
+                elif raw_value:
+                    technical_incomplete = True
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}print-date":
+                raw_value = element_text(element, 64)
+                value = self._odf_iso_datetime(raw_value)
+                if value:
+                    metadata.setdefault("print_date", value)
+                elif raw_value:
+                    technical_incomplete = True
                 continue
             if element.tag == f"{{{_ODF_META_NS}}}editing-cycles":
-                value = self._bounded_odf_text(element, 16)
+                value = element_text(element, 16)
                 if value.isdecimal():
-                    metadata["editing_cycles"] = min(int(value), 2_147_483_647)
+                    parsed = int(value)
+                    metadata["editing_cycles"] = min(parsed, 2_147_483_647)
+                    technical_incomplete = technical_incomplete or parsed > 2_147_483_647
+                elif value:
+                    technical_incomplete = True
                 continue
             if element.tag == f"{{{_ODF_META_NS}}}editing-duration":
-                value = self._bounded_odf_text(element, 64)
+                value = element_text(element, 64)
                 if re.fullmatch(
                     r"P(?=\d|T)(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?",
                     value,
                 ):
                     metadata["editing_duration"] = value
+                elif value:
+                    technical_incomplete = True
                 continue
             if element.tag == f"{{{_ODF_META_NS}}}document-statistic":
                 for attribute, key in _ODF_STATISTIC_ATTRIBUTES.items():
                     value = str(element.attrib.get(attribute) or "")
                     if value.isdecimal():
-                        metadata[key] = min(int(value), 2_147_483_647)
+                        try:
+                            parsed = int(value)
+                        except ValueError:
+                            technical_incomplete = True
+                            continue
+                        metadata[key] = min(parsed, 2_147_483_647)
+                        technical_incomplete = technical_incomplete or parsed > 2_147_483_647
+                    elif value:
+                        technical_incomplete = True
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}template":
+                template: dict[str, str] = {}
+                title = attribute_text(element.attrib.get(f"{{{_ODF_META_NS}}}title"), 500)
+                date_value = self._odf_iso_datetime(
+                    attribute_text(element.attrib.get(f"{{{_ODF_META_NS}}}date"), 64)
+                )
+                href = attribute_text(element.attrib.get(f"{{{_ODF_XLINK_NS}}}href"), 1_000)
+                if title:
+                    template["title"] = title
+                if date_value:
+                    template["date"] = date_value
+                if href:
+                    template["href"] = href
+                if template:
+                    metadata["template"] = template
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}auto-reload":
+                auto_reload: dict[str, str] = {}
+                href = attribute_text(element.attrib.get(f"{{{_ODF_XLINK_NS}}}href"), 1_000)
+                delay = attribute_text(element.attrib.get(f"{{{_ODF_META_NS}}}delay"), 64)
+                if href:
+                    auto_reload["href"] = href
+                if re.fullmatch(
+                    r"P(?=\d|T)(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?",
+                    delay,
+                ):
+                    auto_reload["delay"] = delay
+                elif delay:
+                    technical_incomplete = True
+                if auto_reload:
+                    metadata["auto_reload"] = auto_reload
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}hyperlink-behaviour":
+                behaviour: dict[str, str] = {}
+                target = attribute_text(element.attrib.get(f"{{{_ODF_OFFICE_NS}}}target-frame-name"), 200)
+                show = attribute_text(element.attrib.get(f"{{{_ODF_XLINK_NS}}}show"), 32)
+                if target:
+                    behaviour["target_frame_name"] = target
+                if show in {"new", "replace", "embed", "other", "none"}:
+                    behaviour["show"] = show
+                elif show:
+                    technical_incomplete = True
+                if behaviour:
+                    metadata["hyperlink_behaviour"] = behaviour
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}user-defined":
+                user_defined_total += 1
+                name = attribute_text(element.attrib.get(f"{{{_ODF_META_NS}}}name"), 200)
+                value_type = attribute_text(
+                    element.attrib.get(f"{{{_ODF_META_NS}}}value-type") or "string",
+                    32,
+                )
+                value = element_text(element, 1_000)
+                if (
+                    len(user_defined) < 32
+                    and name
+                    and value
+                    and re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,31}", value_type)
+                ):
+                    user_defined.append({"name": name, "value_type": value_type, "value": value})
+                else:
+                    technical_incomplete = True
+                continue
+            # ODF extended documents may carry implementation-defined custom
+            # metadata.  It is not safe to assign semantics to an unknown XML
+            # element, so expose the omission instead of silently dropping it.
+            technical_incomplete = True
 
         if keywords:
             metadata["keywords"] = keywords
-        for key, value in list(metadata.items()):
-            if isinstance(value, str):
-                metadata[key] = _redact_own_secrets(value, self.secret_values)[0]
-            elif isinstance(value, list):
-                metadata[key] = [
-                    _redact_own_secrets(item, self.secret_values)[0]
-                    for item in value
-                    if isinstance(item, str)
-                ]
+        metadata["keywords_total"] = keywords_total
+        metadata["keywords_shown"] = len(keywords)
+        if user_defined:
+            metadata["user_defined"] = user_defined
+        metadata["user_defined_total"] = user_defined_total
+        metadata["user_defined_shown"] = len(user_defined)
+        if keywords_total > len(keywords) or user_defined_total > len(user_defined):
+            technical_incomplete = True
+        if technical_incomplete:
+            metadata["technical_metadata_incomplete"] = True
+            metadata["metadata_parse_status"] = "partial"
+        metadata = self._redact_metadata_value(metadata)
         own_date = _plausible_document_date(
             str(metadata.get("creation_date") or metadata.get("modified_date") or "")
         )

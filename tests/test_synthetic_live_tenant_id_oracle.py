@@ -24,10 +24,10 @@ class _SearchHarness:
 
 
 def test_tenant_owned_ids_cover_seeded_schema32_tenants_without_overlap(storage) -> None:
-    assert SCHEMA_VERSION == 32
+    assert SCHEMA_VERSION == 33
     assert (
         storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()["value"]
-        == "32"
+        == "33"
     )
 
     graph = KnowledgeGraph(storage)

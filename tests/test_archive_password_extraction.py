@@ -7,7 +7,9 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sys
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -272,3 +274,53 @@ sys.stdout.buffer.write("RAR-MARKER кириллица\\n".encode("utf-8"))
     assert all(_RAR_PASSWORD not in argument for argument in argv)
     assert set(invocation["environment"]) <= {"LANG", "LC_ALL"}
     assert not (tmp_path / "rar-note.txt").exists()
+
+
+def test_rar_tool_stdin_preserves_whitespace_and_unicode(
+    tmp_path: Path,
+) -> None:
+    password = "  Ra\u0301r-🔐  "
+    trace = tmp_path / "stdin-ok.json"
+    fake = tmp_path / "unrar"
+    fake.write_text(
+        f"""#!{sys.executable}
+import json
+import os
+import sys
+
+password = sys.stdin.buffer.readline().rstrip(b"\\n").decode("utf-8")
+with open({str(trace)!r}, "w", encoding="utf-8") as handle:
+    json.dump({{"matched": password == {password!r}, "argv": sys.argv[1:]}}, handle)
+if password != {password!r}:
+    raise SystemExit(11)
+sys.stdout.buffer.write(b"RAR-EXACT-STDIN-MARKER")
+""",
+        encoding="utf-8",
+    )
+    fake.chmod(0o700)
+    source = tmp_path / "opaque-encrypted.rar"
+    source.write_bytes(b"encrypted-rar-bytes")
+
+    extracted = _extractor()._read_rar_member_with_tool(
+        str(source),
+        "note.txt",
+        tool=str(fake),
+        password=password,
+        limit=1024,
+        deadline=time.monotonic() + 5,
+    )
+
+    invocation = json.loads(trace.read_text(encoding="utf-8"))
+    assert invocation["matched"] is True
+    assert extracted == b"RAR-EXACT-STDIN-MARKER"
+    assert all(password not in argument for argument in invocation["argv"])
+
+
+@pytest.mark.skipif(shutil.which("unrar") is None, reason="real UnRAR is not installed")
+def test_real_unrar_opens_known_header_encrypted_fixture() -> None:
+    _assert_password_contract(
+        _HEADER_ENCRYPTED_RAR,
+        "protected.rar",
+        _RAR_PASSWORD,
+        "RAR-MARKER",
+    )

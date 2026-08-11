@@ -2486,6 +2486,196 @@ _MAX_OUTBOUND_QUERY_CHARS = 200
 _GLOBAL_OPERATOR_TOOLS = frozenset(
     {"workspace_create", "workspace_list", "workspace_read", "workspace_search"}
 )
+_PERSON_DIRECTORY_LIMIT = 5000
+
+
+def _complete_person_directory(storage: Any) -> tuple[list[dict[str, Any]], bool]:
+    """Return one bounded account snapshot, or no fuzzy universe at all.
+
+    A partial directory is not safe input to a fuzzy resolver: an omitted row
+    can be the equally good spelling which should have made the answer
+    ambiguous.  Fetch one sentinel row beyond the supported universe and fail
+    closed instead of treating a page as the complete account set.
+    """
+
+    rows = storage.execute(
+        "SELECT * FROM users ORDER BY last_seen_at DESC, id DESC LIMIT ?",
+        (_PERSON_DIRECTORY_LIMIT + 1,),
+    ).fetchall()
+    if len(rows) > _PERSON_DIRECTORY_LIMIT:
+        return [], False
+    return [dict(row) for row in rows], True
+
+
+def _supervisor_from_row(row: Mapping[str, Any]) -> str:
+    raw = row.get("metadata_json")
+    try:
+        metadata = json.loads(str(raw or "{}")) if isinstance(raw, str) else (raw or {})
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(metadata, Mapping):
+        return ""
+    supervisor = str(metadata.get("supervisor_id") or "").strip()
+    return "" if supervisor == str(row.get("id") or "") else supervisor
+
+
+def _directory_may_oversee(
+    supervisor_by_id: Mapping[str, str],
+    viewer_id: str,
+    target_id: str,
+) -> bool:
+    """In-memory equivalent of the bounded supervisor-chain check."""
+
+    viewer = str(viewer_id or "")
+    target = str(target_id or "")
+    if not viewer or not target:
+        return False
+    if viewer in (target, LEGACY_OWNER_USER_ID):
+        return True
+    seen = {target}
+    current = target
+    for _ in range(8):
+        current = str(supervisor_by_id.get(current) or "")
+        if not current or current in seen:
+            return False
+        if current == viewer:
+            return True
+        seen.add(current)
+    return False
+
+
+def _exact_active_person_rows(storage: Any, query: str) -> list[dict[str, Any]]:
+    """Bounded exact ID/handle lookup which remains safe past the fuzzy cap."""
+
+    clean = " ".join(str(query or "").split()).strip()
+    if not clean:
+        return []
+    handle = clean.removeprefix("@").strip()
+    rows = storage.execute(
+        """SELECT * FROM users
+             WHERE status='active'
+               AND (id=? OR external_id=?
+                    OR jericho_casefold(username)=jericho_casefold(?)
+                    OR jericho_casefold(display_name)=jericho_casefold(?))
+             ORDER BY id ASC LIMIT 6""",
+        (clean, clean, handle, clean),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def complete_person_matches(storage: Any, query: str) -> list[Any]:
+    """Resolve against a proven-complete bounded directory, or exact keys only."""
+
+    directory, complete = _complete_person_directory(storage)
+    if complete:
+        active = [row for row in directory if str(row.get("status") or "active") == "active"]
+        return resolve_person(active, query)
+    return [
+        match
+        for match in resolve_person(_exact_active_person_rows(storage, query), query)
+        if match.method == "exact"
+    ]
+
+
+def _visible_directory_rows(
+    directory: list[dict[str, Any]],
+    actor: ActorContext,
+) -> list[dict[str, Any]]:
+    active = [row for row in directory if str(row.get("status") or "active") == "active"]
+    supervisor_by_id = {
+        str(row.get("id") or ""): _supervisor_from_row(row) for row in directory if str(row.get("id") or "")
+    }
+    if not any(supervisor_by_id.values()):
+        return active
+    return [
+        row
+        for row in active
+        if _directory_may_oversee(
+            supervisor_by_id,
+            actor.own_id,
+            str(row.get("id") or ""),
+        )
+    ]
+
+
+def resolvable_person_rows(storage: Any, actor: ActorContext) -> list[dict[str, Any]]:
+    """Active accounts this actor may safely resolve by a human name.
+
+    Fuzzy resolution itself is intentionally privacy-blind; callers supply its
+    candidate universe.  Filtering *after* resolution lets an invisible account
+    create an ambiguity (or appear in the returned candidate list), and worse,
+    lets a stronger invisible spelling crowd out the visible person.  Apply the
+    same oversight boundary as the eventual read before any name comparison.
+    """
+
+    directory, complete = _complete_person_directory(storage)
+    if not complete:
+        return []
+    # Explicit product policy for an unconfigured hierarchy: authorised
+    # oversight sees everyone. Capability checks still live at the tool
+    # boundary; this helper only narrows the directory.
+    return _visible_directory_rows(directory, actor)
+
+
+def resolvable_person_matches(storage: Any, actor: ActorContext, query: str) -> list[Any]:
+    """Resolve only visible accounts, with exact lookup past the fuzzy ceiling."""
+
+    directory, complete = _complete_person_directory(storage)
+    if complete:
+        active = [row for row in directory if str(row.get("status") or "active") == "active"]
+        exact = [match for match in resolve_person(active, query) if match.method == "exact"]
+        visible_rows = _visible_directory_rows(directory, actor)
+        if exact:
+            visible_ids = {str(row.get("id") or "") for row in visible_rows}
+            # Exact account identities outrank every fuzzy visible spelling.
+            # If the exact target is outside this hierarchy, fail closed rather
+            # than silently selecting a similarly named visible person.
+            return [match for match in exact if match.user_id in visible_ids]
+        return resolve_person(visible_rows, query)
+
+    # When the directory exceeded its hard ceiling, exact stable identifiers
+    # and handles still work. A typo/partial name does not: it cannot be proven
+    # unique without the omitted accounts.
+    exact = [
+        match
+        for match in resolve_person(_exact_active_person_rows(storage, query), query)
+        if match.method == "exact"
+    ]
+    if not exact or not hierarchy_is_configured(storage):
+        return exact
+    return [
+        match
+        for match in exact
+        if may_oversee(storage, actor.own_id, match.user_id, owner_id=LEGACY_OWNER_USER_ID)
+    ]
+
+
+def _oversight_person_matches(
+    storage: Any,
+    actor: ActorContext,
+    query: str,
+) -> list[Any]:
+    """Resolve visible fuzzy names, while preserving exact out-of-scope denial.
+
+    An exact account/name outside the hierarchy must reach the existing audited
+    denied branch, not masquerade as “not found”. Fuzzy and approximate names,
+    however, are compared only inside the visible directory so a foreign row
+    cannot crowd out, enumerate itself, or create an observable ambiguity.
+    """
+
+    visible_matches = resolvable_person_matches(storage, actor, query)
+    visible_exact = [match for match in visible_matches if match.method == "exact"]
+    if visible_exact:
+        return visible_exact
+    exact = [
+        match
+        for match in resolve_person(_exact_active_person_rows(storage, query), query)
+        if match.method == "exact"
+    ]
+    if exact:
+        chosen = unambiguous(exact)
+        return [chosen] if chosen is not None else []
+    return visible_matches
 
 
 class ExecutionKernel:
@@ -6246,7 +6436,7 @@ class ExecutionKernel:
         distinction is easiest to lose.
         """
         storage, _, _, _ = self._require_services()
-        matches = resolve_person(storage.list_users(limit=5000), person)
+        matches = _oversight_person_matches(storage, actor, person)
         self_document_request = bool(documents_only and person == actor.own_id and not analysis)
         chosen = (
             next((match for match in matches if match.user_id == actor.own_id), None)
@@ -6495,7 +6685,7 @@ class ExecutionKernel:
         clean_query = " ".join(str(query or "").split()).strip()
         if not clean_query:
             return {"resolved": None, "reason": "empty_query"}
-        matches = resolve_person(storage.list_users(limit=5000), person)
+        matches = _oversight_person_matches(storage, actor, person)
         chosen = unambiguous(matches)
         if chosen is None:
             # Та же ветка, что у `user_activity`, и по той же причине: ответ несёт

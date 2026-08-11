@@ -20,6 +20,16 @@ from friday.telegram_bridge._base import (
     time,
 )
 
+_OUTBOUND_REPLY_CONTEXT_TTL_SEC = 30 * 24 * 3600.0
+_OUTBOUND_REPLY_CONTEXT_MAX_ROWS = 20_000
+
+
+def _safe_backend_message_id(value: object) -> str:
+    candidate = str(value or "")
+    if not candidate or len(candidate) > 128 or not candidate.isascii():
+        return ""
+    return candidate if all(char.isalnum() or char in "._:-" for char in candidate) else ""
+
 
 def _ordering_key(update: dict[str, Any], update_id: int) -> str:
     """Stable FIFO partition for one Telegram conversation.
@@ -119,6 +129,14 @@ class _UpdateInbox:
                 expires_at REAL NOT NULL,
                 PRIMARY KEY(chat_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS outbound_reply_context (
+                chat_id INTEGER NOT NULL,
+                telegram_message_id INTEGER NOT NULL,
+                backend_message_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                PRIMARY KEY(chat_id, telegram_message_id)
+            );
             """
         )
         restrict_sqlite_files(path)
@@ -182,6 +200,10 @@ class _UpdateInbox:
         )
         self._conn.execute(
             "DELETE FROM pending_archive_passwords WHERE expires_at < ?",
+            (time.time(),),
+        )
+        self._conn.execute(
+            "DELETE FROM outbound_reply_context WHERE expires_at < ?",
             (time.time(),),
         )
         self._conn.commit()
@@ -362,6 +384,74 @@ class _UpdateInbox:
             (int(chat_id), int(user_id)),
         )
         self._conn.commit()
+
+    def remember_outbound_reply_context(
+        self,
+        chat_id: int,
+        telegram_message_id: int,
+        backend_message_id: str,
+        *,
+        ttl_sec: float = _OUTBOUND_REPLY_CONTEXT_TTL_SEC,
+        max_rows: int = _OUTBOUND_REPLY_CONTEXT_MAX_ROWS,
+    ) -> None:
+        """Bind one delivered Telegram chunk to one opaque backend message.
+
+        No answer text, filename, Raw id or attachment metadata belongs here.
+        The backend message id is only a lookup handle; the backend must still
+        re-authorize its owner, conversation and current attachment verdict.
+        """
+
+        safe_backend_id = _safe_backend_message_id(backend_message_id)
+        chat = int(chat_id)
+        telegram_id = int(telegram_message_id)
+        if not chat or telegram_id <= 0 or not safe_backend_id:
+            return
+        now = time.time()
+        expires_at = now + max(60.0, min(float(ttl_sec), 180 * 24 * 3600.0))
+        self._conn.execute(
+            """INSERT INTO outbound_reply_context(
+                   chat_id, telegram_message_id, backend_message_id, created_at, expires_at
+               ) VALUES(?, ?, ?, ?, ?)
+               ON CONFLICT(chat_id, telegram_message_id) DO UPDATE SET
+                   backend_message_id=excluded.backend_message_id,
+                   created_at=excluded.created_at,
+                   expires_at=excluded.expires_at""",
+            (chat, telegram_id, safe_backend_id, now, expires_at),
+        )
+        self._conn.execute(
+            "DELETE FROM outbound_reply_context WHERE expires_at < ?",
+            (now,),
+        )
+        self._conn.execute(
+            """DELETE FROM outbound_reply_context
+               WHERE rowid IN (
+                   SELECT rowid FROM outbound_reply_context
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT -1 OFFSET ?
+               )""",
+            (max(1, min(int(max_rows), _OUTBOUND_REPLY_CONTEXT_MAX_ROWS)),),
+        )
+        self._conn.commit()
+
+    def outbound_reply_source_message_id(
+        self,
+        chat_id: int,
+        telegram_message_id: int,
+    ) -> str:
+        """Resolve a non-expired handle only inside the originating chat."""
+
+        now = time.time()
+        self._conn.execute(
+            "DELETE FROM outbound_reply_context WHERE expires_at < ?",
+            (now,),
+        )
+        row = self._conn.execute(
+            """SELECT backend_message_id FROM outbound_reply_context
+               WHERE chat_id=? AND telegram_message_id=? AND expires_at>=?""",
+            (int(chat_id), int(telegram_message_id), now),
+        ).fetchone()
+        self._conn.commit()
+        return _safe_backend_message_id(row["backend_message_id"]) if row is not None else ""
 
     def remember_delivered_notification(self, notification_id: str) -> None:
         """Уведомление ушло человеку — записать это ТАМ, ГДЕ ЭТО ПРОИЗОШЛО.

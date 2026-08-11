@@ -8,6 +8,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 
 from friday.storage._base import (
@@ -186,9 +187,19 @@ class IntakeMixin(StorageShared):
         uploader_namespace = hashlib.sha256(exact_uploader.encode("utf-8")).hexdigest()[:24]
         scoped_ref = f"uploader:{uploader_namespace}:{exact_ref}"
         rows = self.execute(
-            f"""SELECT r.id FROM raw_objects r
+            f"""WITH bound(raw_object_id) AS (
+                    SELECT a.raw_object_id
+                      FROM file_source_aliases a
+                     WHERE a.user_id=? AND a.uploaded_by=? AND a.source_ref=?
+                    UNION
+                    SELECT legacy.id
+                      FROM raw_objects legacy
+                     WHERE legacy.user_id=? AND legacy.source='upload'
+                       AND legacy.source_ref IN (?, ?)
+                 )
+                 SELECT DISTINCT r.id FROM bound b
+                 JOIN raw_objects r ON r.id=b.raw_object_id
                  WHERE r.user_id=? AND r.source='upload'
-                   AND r.source_ref IN (?, ?)
                    AND r.content_type='file' AND r.deleted_at IS NULL
                    AND {_not_audio_document("r")}
                    AND {_not_private_raw_dependency("r")}
@@ -199,12 +210,83 @@ class IntakeMixin(StorageShared):
                           AND i.status='ignored'
                    )
                  LIMIT 2""",  # nosec B608 - fixed predicates, values are bound
-            (str(user_id), exact_ref, scoped_ref, exact_uploader),
+            (
+                str(user_id),
+                exact_uploader,
+                exact_ref,
+                str(user_id),
+                exact_ref,
+                scoped_ref,
+                str(user_id),
+                exact_uploader,
+            ),
         ).fetchall()
-        # A well-formed archive has either the legacy key or its uploader-scoped
-        # successor.  Two live bindings are inconsistent authority, not a reason
-        # to choose one by row order.
+        # A well-formed archive has one canonical Raw binding, whether it came
+        # from the immutable alias table, the legacy key, or its uploader-scoped
+        # successor. Two different live bindings are inconsistent authority,
+        # not a reason to choose one by row order.
         return str(rows[0]["id"]) if len(rows) == 1 else None
+
+    def bind_owned_file_source_ref_alias(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        source_ref: str,
+        raw_object_id: str,
+    ) -> bool:
+        """Bind one fresh Telegram file id to an existing immutable Raw Object.
+
+        Byte-level deduplication deliberately reuses the first Raw row.  This
+        separate binding preserves every later Telegram ``file_id`` without
+        rewriting that row's original provenance.  Conflicting aliases fail
+        closed and the resolver rechecks current lifecycle/privacy/verdict on
+        every read; the alias itself grants no access.
+        """
+
+        exact_user = str(user_id or "").strip()
+        exact_uploader = str(uploaded_by or "").strip()
+        exact_ref = str(source_ref or "").strip()
+        exact_raw = str(raw_object_id or "").strip()
+        if (
+            not exact_user
+            or not exact_uploader
+            or not exact_raw
+            or not exact_ref.startswith("telegram-file:")
+            or len(exact_ref) > 500
+            or any(char.isspace() or ord(char) < 33 for char in exact_ref.removeprefix("telegram-file:"))
+        ):
+            return False
+        with self.transaction() as conn:
+            canonical = conn.execute(
+                f"""SELECT r.id FROM raw_objects r
+                     WHERE r.id=? AND r.user_id=? AND r.source='upload'
+                       AND r.content_type='file' AND r.deleted_at IS NULL
+                       AND {_not_audio_document("r")}
+                       AND {_not_private_raw_dependency("r")}
+                       AND {_exact_uploader_raw_dependency("r")}
+                     LIMIT 1""",  # nosec B608 - fixed predicates, values are bound
+                (exact_raw, exact_user, exact_uploader),
+            ).fetchone()
+            if canonical is None:
+                return False
+            existing = conn.execute(
+                """SELECT raw_object_id FROM file_source_aliases
+                    WHERE user_id=? AND uploaded_by=? AND source_ref=?""",
+                (exact_user, exact_uploader, exact_ref),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["raw_object_id"]) != exact_raw:
+                    raise SourceReferenceConflictError(
+                        "file source alias is already bound to different content"
+                    )
+                return True
+            conn.execute(
+                """INSERT INTO file_source_aliases(
+                       user_id, uploaded_by, source_ref, raw_object_id, created_at
+                   ) VALUES(?, ?, ?, ?, ?)""",
+                (exact_user, exact_uploader, exact_ref, exact_raw, utc_now()),
+            )
+            return True
 
     def find_file_by_content_hash(
         self,
@@ -748,6 +830,140 @@ class IntakeMixin(StorageShared):
             (str(user_id), str(uploaded_by), page_size),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def select_owned_file_corpus(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        *,
+        received_since: str | None = None,
+        received_until: str | None = None,
+        document_since: str | None = None,
+        document_until: str | None = None,
+        limit: int = 13,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Select one uploader's file corpus with exact scope and honest totals.
+
+        Arrival time and a document's own date are different clocks.  Callers
+        choose exactly one; mixing them is how a request for files *received*
+        during a week silently became a search for dates merely mentioned in
+        their bodies.  The body stays out of this selector: chosen opaque ids
+        are re-authorized through ``get_searchable_file_sources`` immediately
+        before use.
+
+        Unknown uploader provenance is counted separately and can never be
+        attributed to the named person.  Likewise, an own-date range reports
+        that uploader's undated files, because they make exhaustive range
+        coverage unknowable even though they cannot be selected into it.
+        """
+
+        tenant = str(user_id or "").strip()
+        person = str(uploaded_by or "").strip()
+        if not tenant or not person:
+            return {"items": [], "total": 0, "unattributed": 0, "undated": 0, "time_role": ""}
+        received_window = bool(received_since or received_until)
+        document_window = bool(document_since or document_until)
+        if received_window and document_window:
+            raise ValueError("received and document date windows are mutually exclusive")
+
+        def bounded_stamp(value: str | None, *, own_date: bool = False) -> str | None:
+            if value is None:
+                return None
+            clean = str(value).strip()
+            if not clean or len(clean) > (10 if own_date else 64):
+                raise ValueError("invalid file corpus time boundary")
+            if own_date:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", clean):
+                    raise ValueError("invalid document date boundary")
+            elif any(char not in "0123456789T:+-.Z " for char in clean):
+                raise ValueError("invalid received-at boundary")
+            return clean
+
+        received_since = bounded_stamp(received_since)
+        received_until = bounded_stamp(received_until)
+        document_since = bounded_stamp(document_since, own_date=True)
+        document_until = bounded_stamp(document_until, own_date=True)
+        role = "document_date" if document_window else "received_at"
+        document_date = "jericho_iso_date(json_extract(r.metadata_json,'$.document_date'))"
+        time_clauses: list[str] = []
+        time_params: list[Any] = []
+        if received_since:
+            time_clauses.append("r.received_at >= ?")
+            time_params.append(received_since)
+        if received_until:
+            time_clauses.append("r.received_at <= ?")
+            time_params.append(received_until)
+        if document_since:
+            time_clauses.append(f"{document_date} >= ?")
+            time_params.append(document_since)
+        if document_until:
+            time_clauses.append(f"{document_date} <= ?")
+            time_params.append(document_until)
+        time_sql = "" if not time_clauses else " AND " + " AND ".join(time_clauses)
+        base = f"""r.user_id=? AND r.deleted_at IS NULL
+                   AND r.content_type='file'
+                   AND json_valid(r.metadata_json)
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND NOT EXISTS (
+                       SELECT 1 FROM inbox i
+                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                          AND i.status='ignored'
+                   )"""
+        exact = f"{base} AND {_exact_uploader_raw_dependency('r')}{time_sql}"
+        params = (tenant, person, *time_params)
+        total_row = self.execute(
+            f"SELECT COUNT(*) AS count FROM raw_objects r WHERE {exact}",  # nosec B608
+            params,
+        ).fetchone()
+        total = int(total_row["count"] if total_row else 0)
+        page_size = max(1, min(int(limit), 100))
+        page_offset = max(0, int(offset))
+        rows = self.execute(
+            f"""SELECT r.id, r.received_at,
+                       {document_date} AS document_date
+                  FROM raw_objects r
+                 WHERE {exact}
+                 ORDER BY r.received_at DESC, r.rowid DESC
+                 LIMIT ? OFFSET ?""",  # nosec B608
+            (*params, page_size, page_offset),
+        ).fetchall()
+
+        # Missing author evidence is counted only, never returned as a
+        # candidate.  On an arrival-time request the same closed window applies;
+        # on an own-date request an unattributed or undated row cannot safely be
+        # placed inside or outside the range, so the all-time count is the honest
+        # completeness ceiling.
+        missing_author = (
+            "(json_type(r.metadata_json,'$.uploaded_by') IS NULL OR "
+            "json_extract(r.metadata_json,'$.uploaded_by')='')"
+        )
+        unknown_time_sql = time_sql if role == "received_at" else ""
+        unknown_params = (tenant, *(time_params if role == "received_at" else ()))
+        unattributed_row = self.execute(
+            f"""SELECT COUNT(*) AS count FROM raw_objects r
+                 WHERE {base} AND {missing_author}{unknown_time_sql}""",  # nosec B608
+            unknown_params,
+        ).fetchone()
+        undated = 0
+        if role == "document_date":
+            undated_row = self.execute(
+                f"""SELECT COUNT(*) AS count FROM raw_objects r
+                     WHERE {base} AND {_exact_uploader_raw_dependency("r")}
+                       AND {document_date} IS NULL""",  # nosec B608
+                (tenant, person),
+            ).fetchone()
+            undated = int(undated_row["count"] if undated_row else 0)
+        return {
+            "items": [dict(row) for row in rows],
+            "total": total,
+            "unattributed": int(unattributed_row["count"] if unattributed_row else 0),
+            "undated": undated,
+            "time_role": role,
+            "offset": page_offset,
+            "page_complete": page_offset + len(rows) >= total,
+        }
 
     def find_owned_files_by_filename(
         self,

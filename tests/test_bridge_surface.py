@@ -391,7 +391,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_message": (
         "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, "
         "reply_markup: 'dict[str, Any] | None' = None, resume_key: 'int | None' = None, "
-        "text_format: 'str' = 'markdown') -> 'None'"
+        "text_format: 'str' = 'markdown', reply_source_message_id: 'str' = '') -> 'None'"
     ),
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_search": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
@@ -428,6 +428,11 @@ EXPECTED_INBOX: dict[str, str] = {
     "remember_generated_file_delivery": "(self, delivery_key: 'str') -> 'None'",
     "take_edit_prompt": "(self, prompt_message_id: 'int') -> 'str'",
     "remember_delivered_notification": "(self, notification_id: 'str') -> 'None'",
+    "remember_outbound_reply_context": (
+        "(self, chat_id: 'int', telegram_message_id: 'int', backend_message_id: 'str', *, "
+        "ttl_sec: 'float' = 2592000.0, max_rows: 'int' = 20000) -> 'None'"
+    ),
+    "outbound_reply_source_message_id": ("(self, chat_id: 'int', telegram_message_id: 'int') -> 'str'"),
     "remember_registered_chat": "(self, chat_id: 'int') -> 'None'",
     "remove": "(self, update_id: 'int') -> 'None'",
     "clear_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'None'",

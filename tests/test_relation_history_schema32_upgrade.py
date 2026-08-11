@@ -34,6 +34,26 @@ def _unpack_schema_31(tmp_path: Path, name: str) -> Path:
     return database
 
 
+def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
+    """Build the exact schema-32 predecessor of the file-alias migration.
+
+    A fresh ``FridayStorage`` now creates schema 33.  Tests which labelled that
+    database "v32" were no longer exercising the predecessor at all and then
+    expected the wrong version in fail-closed diagnostics.  Schema 33 adds only
+    the immutable transport-alias table/index, so remove those two artifacts
+    and restore both completion markers to obtain the released v32 shape.
+    """
+
+    database = tmp_path / f"{name}.sqlite3"
+    made = FridayStorage(replace(settings, database_path=database))
+    made.execute("SELECT 1")
+    made.close(final=True)
+    with sqlite3.connect(database) as predecessor:
+        predecessor.execute("DROP TABLE file_source_aliases")
+        predecessor.execute("UPDATE schema_meta SET value='32' WHERE key IN ('schema_version','fts_build')")
+    return database
+
+
 def _weaken_relation_projection(database: Path) -> None:
     with sqlite3.connect(database) as db:
         table_sql = str(
@@ -209,7 +229,7 @@ def test_schema_31_to_32_preserves_evidence_and_installs_the_exact_current_contr
         assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
             0
         ] == str(SCHEMA_VERSION)
-        assert SCHEMA_VERSION == 32
+        assert SCHEMA_VERSION == 33
         assert tuple(
             migrated.execute(
                 """SELECT singleton, batch_id, recorded_at, observed_at
@@ -323,10 +343,9 @@ def test_schema_31_upgrade_failure_rolls_back_marker_schema_and_evidence(
     monkeypatch.setattr(storage_core, "_upgrade_relation_history_31_to_32", real_upgrade)
     recovered = FridayStorage(replace(settings, database_path=database))
     try:
-        assert (
-            recovered.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            == "32"
-        )
+        assert recovered.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
+            0
+        ] == str(SCHEMA_VERSION)
         assert _relation_evidence(recovered.conn) == before["evidence"]
     finally:
         recovered.close(final=True)
@@ -339,10 +358,7 @@ def test_relation_projection_with_weakened_constraints_is_rejected_without_mutat
     if source_schema == 31:
         database = _unpack_schema_31(tmp_path, "weakened-relation-projection-v31")
     else:
-        database = tmp_path / "weakened-relation-projection-v32.sqlite3"
-        made = FridayStorage(replace(settings, database_path=database))
-        made.execute("SELECT 1")
-        made.close(final=True)
+        database = _make_schema_32(settings, tmp_path, "weakened-relation-projection-v32")
     _weaken_relation_projection(database)
 
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as probe:
@@ -379,10 +395,7 @@ def test_unknown_unique_index_on_guarded_authority_is_rejected_without_mutation_
     if source_schema == 31:
         database = _unpack_schema_31(tmp_path, f"extra-unique-{table}-v31")
     else:
-        database = tmp_path / f"extra-unique-{table}-v32.sqlite3"
-        made = FridayStorage(replace(settings, database_path=database))
-        made.execute("SELECT 1")
-        made.close(final=True)
+        database = _make_schema_32(settings, tmp_path, f"extra-unique-{table}-v32")
     private_index_name = f"synthetic_private_{table}_unique"
     with sqlite3.connect(database) as corrupt:
         corrupt.execute(
@@ -413,10 +426,7 @@ def test_active_relation_unique_contract_is_exact_and_fail_closed(
     if source_schema == 31:
         database = _unpack_schema_31(tmp_path, f"{corruption}-active-unique-v31")
     else:
-        database = tmp_path / f"{corruption}-active-unique-v32.sqlite3"
-        made = FridayStorage(replace(settings, database_path=database))
-        made.execute("SELECT 1")
-        made.close(final=True)
+        database = _make_schema_32(settings, tmp_path, f"{corruption}-active-unique-v32")
     with sqlite3.connect(database) as corrupt:
         corrupt.execute("DROP INDEX uq_active_relation")
         if corruption == "altered":
@@ -438,10 +448,7 @@ def test_active_relation_unique_contract_is_exact_and_fail_closed(
 
 
 def test_schema_32_rejects_an_unknown_relation_authority_trigger_without_mutation(settings, tmp_path) -> None:
-    database = tmp_path / "schema-32-extra-trigger.sqlite3"
-    made = FridayStorage(replace(settings, database_path=database))
-    made.execute("SELECT 1")
-    made.close(final=True)
+    database = _make_schema_32(settings, tmp_path, "schema-32-extra-trigger")
 
     trigger_name = "synthetic_extra_relation_history_writer"
     with sqlite3.connect(database) as corrupt:
@@ -468,3 +475,52 @@ def test_schema_32_rejects_an_unknown_relation_authority_trigger_without_mutatio
 
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as probe:
         assert _relation_authority(probe) == before
+
+
+def test_schema_32_to_33_adds_file_alias_authority_without_rewriting_raw_objects(settings, tmp_path) -> None:
+    database = _make_schema_32(settings, tmp_path, "schema-32-file-alias-upgrade")
+    with sqlite3.connect(database) as predecessor:
+        predecessor.execute(
+            """INSERT INTO users(id, display_name, created_at, updated_at, last_seen_at)
+               VALUES(
+                   'schema32-owner','Schema owner','2026-01-01','2026-01-01','2026-01-01'
+               )"""
+        )
+        predecessor.execute(
+            """INSERT INTO raw_objects(
+                   id,user_id,content_type,source,source_ref,raw_content,metadata_json,
+                   content_hash,received_at,created_at,deleted_at
+               ) VALUES(
+                   'raw_schema32_file','schema32-owner','file','upload',
+                   'telegram-file:legacy','[File: legacy.odt]',
+                   '{"filename":"legacy.odt","uploaded_by":"schema32-owner"}',
+                   'schema32-hash','2026-01-01','2026-01-01',NULL
+               )"""
+        )
+        before = tuple(
+            predecessor.execute(
+                "SELECT id,source_ref,raw_content,metadata_json,content_hash FROM raw_objects"
+            ).fetchone()
+        )
+
+    migrated = FridayStorage(replace(settings, database_path=database))
+    try:
+        assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
+            0
+        ] == str(SCHEMA_VERSION)
+        assert (
+            migrated.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='file_source_aliases'"
+            ).fetchone()
+            is not None
+        )
+        after = tuple(
+            migrated.execute(
+                "SELECT id,source_ref,raw_content,metadata_json,content_hash FROM raw_objects"
+            ).fetchone()
+        )
+        assert after == before
+        assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        migrated.close(final=True)

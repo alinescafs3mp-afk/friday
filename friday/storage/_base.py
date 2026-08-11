@@ -129,7 +129,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 32 — monotonic observed boundary и REPLACE/conflict guards для этой истории.
 # Это отдельный upgrade: выпущенную schema 31 нельзя молча чинить под тем же
 # marker, иначе current-schema fail-closed validator примет миграцию за tampering.
-SCHEMA_VERSION = 32
+# 33 — immutable aliases for file transport identities. Content deduplication
+# deliberately reuses one Raw Object, but every successful Telegram re-upload
+# still needs its fresh file_id to resolve back to that canonical object.
+SCHEMA_VERSION = 33
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно
@@ -461,6 +464,21 @@ CREATE TABLE IF NOT EXISTS raw_objects (
     received_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     deleted_at TEXT
+);
+
+-- One transport identity may point at an already-existing immutable Raw Object
+-- after byte-level deduplication.  Keep that fact separately: changing Raw
+-- source_ref would rewrite its original provenance, while dropping the fresh
+-- Telegram file_id makes a later reply-to-file resolve to an unrelated history
+-- pointer.  Uploader is part of the key because shared archives deliberately
+-- share user_id while retaining private conversational ownership.
+CREATE TABLE IF NOT EXISTS file_source_aliases (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    uploaded_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_ref TEXT NOT NULL,
+    raw_object_id TEXT NOT NULL REFERENCES raw_objects(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, uploaded_by, source_ref)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_objects (
@@ -1149,6 +1167,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_source_ref
 -- строкам: удалённые в этом поиске не участвуют никогда.
 CREATE INDEX IF NOT EXISTS idx_raw_content_hash
     ON raw_objects(user_id, source, content_hash) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_file_source_alias_raw
+    ON file_source_aliases(user_id, raw_object_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_lifecycle
     ON knowledge_objects(user_id, lifecycle_stage, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_quality

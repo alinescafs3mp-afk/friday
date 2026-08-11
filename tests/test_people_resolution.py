@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import pytest
 
+from friday.execution_kernel import resolvable_person_matches, resolvable_person_rows
 from friday.people import resolve_person, unambiguous
+from friday.permissions import ActorContext
 
 PEOPLE = [
     {
@@ -87,7 +89,7 @@ def test_a_clear_winner_is_returned():
     assert winner.user_id == "telegram:telegram:100000001"
 
 
-KNOWN_METHODS = {"exact", "inflected", "inflected_stem", "partial_name", "typo"}
+KNOWN_METHODS = {"exact", "inflected", "inflected_stem", "partial_name", "typo", "short_typo"}
 
 
 def test_every_match_says_how_it_was_made():
@@ -139,6 +141,97 @@ def test_a_full_name_is_reachable_by_its_first_part():
     match = _top("Анна")
     assert match is not None and match.user_id == "usr_anna"
     assert match.confidence < 1.0, "a partial name should not claim to be exact"
+
+
+def test_exact_handle_punctuation_spacing_and_short_unique_typo_are_supported():
+    rows = [
+        {
+            "id": "usr_jbl",
+            "display_name": "JBL",
+            "username": "jbl_archive",
+            "external_id": "",
+        },
+        {
+            "id": "usr_alex",
+            "display_name": "Александр-Королёв",
+            "username": "alex_k",
+            "external_id": "",
+        },
+    ]
+
+    assert unambiguous(resolve_person(rows, "@JBL_ARCHIVE")).user_id == "usr_jbl"  # type: ignore[union-attr]
+    assert unambiguous(resolve_person(rows, "Александр Королев")).user_id == "usr_alex"  # type: ignore[union-attr]
+    assert unambiguous(resolve_person(rows, "Алекс Кор")).user_id == "usr_alex"  # type: ignore[union-attr]
+    short = unambiguous(resolve_person(rows, "GBL"))
+    assert short is not None and short.user_id == "usr_jbl"
+    assert short.method == "short_typo"
+
+
+def test_short_typo_ambiguity_fails_closed():
+    rows = [
+        {"id": "usr_jbl", "display_name": "JBL", "username": "", "external_id": ""},
+        {"id": "usr_hbl", "display_name": "HBL", "username": "", "external_id": ""},
+    ]
+    matches = resolve_person(rows, "GBL")
+    assert {item.user_id for item in matches} == {"usr_jbl", "usr_hbl"}
+    assert unambiguous(matches) is None
+
+
+def test_over_cap_directory_keeps_exact_handle_and_fails_closed_for_fuzzy(
+    storage,
+    monkeypatch,
+) -> None:
+    import friday.execution_kernel as execution_kernel
+
+    monkeypatch.setattr(execution_kernel, "_PERSON_DIRECTORY_LIMIT", 3)
+    for user_id, display_name, username in (
+        ("viewer", "Viewer", "viewer"),
+        ("first", "First", "first"),
+        ("second", "Second", "second"),
+        ("target", "Synthetic Target", "target_handle"),
+    ):
+        storage.ensure_user(user_id, display_name=display_name, username=username)
+    actor = ActorContext(user_id="viewer", preset_key="admin", source="test")
+
+    assert resolvable_person_rows(storage, actor) == []
+    assert resolvable_person_matches(storage, actor, "Synthetic Targte") == []
+    exact = unambiguous(resolvable_person_matches(storage, actor, "@TARGET_HANDLE"))
+    assert exact is not None and exact.user_id == "target"
+
+    # A supervisor assignment outside the old first-page assumption must
+    # immediately close the same exact lookup rather than restoring all-visible.
+    storage.update_user("target", metadata_json={"supervisor_id": "second"})
+    assert resolvable_person_matches(storage, actor, "@TARGET_HANDLE") == []
+
+
+def test_complete_hierarchy_filter_is_in_memory_and_does_not_make_n_by_chain_reads(
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("viewer", display_name="Viewer")
+    storage.ensure_user("subordinate", display_name="Subordinate")
+    storage.ensure_user("foreign", display_name="Foreign")
+    storage.ensure_user("visible-near", display_name="Targte")
+    storage.ensure_user("hidden-exact", display_name="Target")
+    storage.update_user("subordinate", metadata_json={"supervisor_id": "viewer"})
+    storage.update_user("visible-near", metadata_json={"supervisor_id": "viewer"})
+    storage.update_user("foreign", metadata_json={"supervisor_id": "someone-else"})
+    storage.update_user("hidden-exact", metadata_json={"supervisor_id": "someone-else"})
+    calls = 0
+    original_get_user = storage.get_user
+
+    def counted_get_user(user_id: str):
+        nonlocal calls
+        calls += 1
+        return original_get_user(user_id)
+
+    monkeypatch.setattr(storage, "get_user", counted_get_user)
+    actor = ActorContext(user_id="viewer", preset_key="admin", source="test")
+    visible = resolvable_person_rows(storage, actor)
+
+    assert {row["id"] for row in visible} == {"viewer", "subordinate", "visible-near"}
+    assert resolvable_person_matches(storage, actor, "Target") == []
+    assert calls == 0
 
 
 # --- what this cannot do, stated rather than hidden ----------------------

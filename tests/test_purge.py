@@ -185,6 +185,46 @@ def test_purge_removes_every_trace_including_fts(storage):
         assert _count(storage, match, ("Уникальнейшийтокен",)) == 0
 
 
+def test_purge_removes_transport_alias_before_its_raw_target(storage):
+    storage.ensure_user("alice", preset_key="admin")
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id="alice",
+        source="upload",
+        source_ref="uploader:synthetic:telegram-file:original",
+        raw_content="synthetic extracted file body",
+        content_type="file",
+        content_hash=hashlib.sha256(b"synthetic-alias-file").hexdigest(),
+        metadata_json={"filename": "synthetic.odt", "uploaded_by": "alice"},
+    )
+    storage.store_raw_object(raw)
+    ko = KnowledgeObject(
+        id=new_id("ko"),
+        user_id="alice",
+        raw_object_id=raw.id,
+        content=raw.raw_content,
+        content_type="file",
+        title="Synthetic alias file",
+        summary="synthetic",
+    )
+    storage.store_knowledge_object(ko)
+    assert storage.bind_owned_file_source_ref_alias(
+        "alice",
+        "alice",
+        "telegram-file:fresh-reupload",
+        raw.id,
+    )
+    assert _count(storage, "SELECT COUNT(*) FROM file_source_aliases WHERE raw_object_id=?", (raw.id,)) == 1
+
+    assert storage.soft_delete_knowledge_object(ko.id, "alice")
+    report = storage.purge_knowledge_object(ko.id, "alice")
+
+    assert report["raw_removed"] is True
+    assert report["deleted"]["file_source_aliases"] == 1
+    assert _count(storage, "SELECT COUNT(*) FROM file_source_aliases WHERE raw_object_id=?", (raw.id,)) == 0
+    assert storage.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def test_purge_deletes_raw_file_and_vault_copy(storage, settings):
     digest = hashlib.sha256(b"filebytes").hexdigest()
     ko_id, file_path = _file_ko(storage, settings, "alice", b"filebytes", title="Файл", digest=digest)

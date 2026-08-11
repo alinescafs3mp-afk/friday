@@ -42,7 +42,10 @@ def _metadata_odt() -> bytes:
  xmlns:dc="http://purl.org/dc/elements/1.1/">
  <office:meta><dc:title>ODF-METADATA-TITLE</dc:title>
  <meta:creation-date>2023-06-07T08:09:10Z</meta:creation-date>
- <meta:document-statistic meta:page-count="4" meta:word-count="99"/>
+ <meta:print-date>2023-06-08T09:10:11Z</meta:print-date>
+ <meta:document-statistic meta:page-count="4" meta:word-count="99"
+     meta:paragraph-count="12" meta:non-whitespace-character-count="500"/>
+ <meta:user-defined meta:name="Подразделение" meta:value-type="string">Отдел 7</meta:user-defined>
  </office:meta></office:document-meta>""",
         )
     return payload.getvalue()
@@ -122,9 +125,18 @@ async def test_odf_metadata_is_persisted_and_has_header_only_transient_path(sett
 
     assert header["_document_metadata"]["title"] == "ODF-METADATA-TITLE"
     assert header["_document_metadata"]["page_count"] == 4
+    assert header["_document_metadata"]["print_date"] == "2023-06-08T09:10:11Z"
+    assert header["_document_metadata"]["paragraph_count"] == 12
+    assert header["_document_metadata"]["user_defined"] == [
+        {"name": "Подразделение", "value_type": "string", "value": "Отдел 7"}
+    ]
     assert "text_preview" not in header and "_runtime_source_text" not in header
     assert stored["title"] == "ODF-METADATA-TITLE"
     assert stored["document_date"] == "2023-06-07"
+    assert stored["print_date"] == "2023-06-08T09:10:11Z"
+    assert stored["paragraph_count"] == 12
+    assert stored["non_whitespace_character_count"] == 500
+    assert stored["user_defined"] == [{"name": "Подразделение", "value_type": "string", "value": "Отдел 7"}]
 
 
 def test_bridge_strips_same_caption_password_before_sqlite(tmp_path) -> None:

@@ -192,7 +192,9 @@ async def test_quoted_file_pointer_owns_pronoun_metadata_without_becoming_an_upl
 
     monkeypatch.setattr(runtime, "_prepare_context", forbidden)
     monkeypatch.setattr(runtime, "_generate_response", forbidden)
-    message = "Покажи метаданные его"
+    # Exact live shape: the explicit metadata/file wording used to activate the
+    # ordinary history resolver after the structural Telegram pointer failed.
+    message = "покажи метаданные этого файла"
     result = await runtime.chat(
         "alice",
         message,
@@ -238,7 +240,7 @@ async def test_unresolved_quoted_file_pointer_does_not_drift_to_latest_upload(
 
     monkeypatch.setattr(runtime, "_prepare_context", forbidden)
     monkeypatch.setattr(runtime, "_generate_response", forbidden)
-    message = "Покажи метаданные его"
+    message = "покажи метаданные этого файла"
     result = await runtime.chat(
         "alice",
         message,
@@ -249,7 +251,7 @@ async def test_unresolved_quoted_file_pointer_does_not_drift_to_latest_upload(
         quoted_attachment_reference=True,
     )
 
-    assert "не удалось определить" in result["message"].casefold()
+    assert "не удалось открыть документ, на который вы ответили" in result["message"].casefold()
     assert "Latest upload private title" not in result["message"]
     assert "LATEST-UPLOAD-PRIVATE-BODY" not in result["message"]
     rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
@@ -257,6 +259,115 @@ async def test_unresolved_quoted_file_pointer_does_not_drift_to_latest_upload(
     metadata = json.loads(str(user_row.get("metadata_json") or "{}"))
     assert metadata["attachment_origin"] == "reply_reference"
     assert metadata["quoted_attachment_reference"] is True
+    assert "conversation_attachment_raw_ids" not in metadata
+    assert "conversation_uploaded_raw_ids" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_reply_to_assistant_selects_that_answers_file_and_records_safe_lineage(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    selected = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ANSWER-A-PRIVATE-BODY-MUST-NOT-REACH-MODEL",
+        filename="answer-a.odt",
+        extra_metadata={
+            "title": "Answer A synthetic title",
+            "mime_type": "application/vnd.oasis.opendocument.text",
+        },
+    )
+    newer = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "NEWER-B-PRIVATE-BODY-MUST-NOT-REACH-MODEL",
+        filename="newer-b.odt",
+        extra_metadata={"title": "Newer B synthetic title"},
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", newer, "newer upload")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("assistant-reply metadata route reached model/retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    message = "покажи метаданные его"
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        conversation_id=conversation["id"],
+        attachments=[{"raw_object_id": selected.id}],
+        enable_tools=True,
+        reply_assistant_reference=True,
+    )
+
+    assert "Answer A synthetic title" in result["message"]
+    assert "Newer B synthetic title" not in result["message"]
+    assert "PRIVATE-BODY" not in result["message"]
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
+    user_row = next(item for item in rows if item.get("role") == "user" and item.get("content") == message)
+    user_metadata = json.loads(str(user_row.get("metadata_json") or "{}"))
+    assert user_metadata["attachment_origin"] == "reply_assistant"
+    assert user_metadata["reply_assistant_reference"] is True
+    assert user_metadata["conversation_attachment_raw_ids"] == [selected.id]
+    assert "conversation_uploaded_raw_ids" not in user_metadata
+    assistant_metadata = json.loads(str(rows[-1].get("metadata_json") or "{}"))
+    assert assistant_metadata["attachment_context_used"] is True
+    assert assistant_metadata["conversation_attachment_raw_ids"] == [selected.id]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_reply_to_assistant_never_drifts_to_latest_upload(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    previous = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LATEST-UPLOAD-PRIVATE-BODY",
+        filename="latest-upload.odt",
+        extra_metadata={"title": "Latest upload private title"},
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", previous, "previous upload")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("unresolved assistant reply reached model/retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    message = "покажи метаданные его"
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=True,
+        reply_assistant_reference=True,
+    )
+
+    assert "вложения ответа пятницы" in result["message"].casefold()
+    assert "более новый файл автоматически подставлен не будет" in result["message"].casefold()
+    assert "Latest upload private title" not in result["message"]
+    assert "LATEST-UPLOAD-PRIVATE-BODY" not in result["message"]
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
+    user_row = next(item for item in rows if item.get("role") == "user" and item.get("content") == message)
+    metadata = json.loads(str(user_row.get("metadata_json") or "{}"))
+    assert metadata["attachment_origin"] == "reply_assistant"
+    assert metadata["reply_assistant_reference"] is True
     assert "conversation_attachment_raw_ids" not in metadata
     assert "conversation_uploaded_raw_ids" not in metadata
 
@@ -470,6 +581,11 @@ async def test_legacy_odt_metadata_is_hydrated_from_authorised_header_without_ra
         filename="legacy-metadata.odt",
         extra_metadata={
             "mime_type": "application/vnd.oasis.opendocument.text",
+            # Version 2 was the narrow pre-universal ODF projection. It must
+            # not suppress the bounded metadata-only hydration below.
+            "format": "odt",
+            "metadata_schema_version": 2,
+            "title": "STALE-NARROW-ODF-TITLE",
             "size_bytes": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
             "stored_path": relative_path,
@@ -480,6 +596,15 @@ async def test_legacy_odt_metadata_is_hydrated_from_authorised_header_without_ra
     _record_upload(storage, conversation["id"], "alice", raw, "legacy upload")
     runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
     runtime.kernel.ingestion = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    metadata_inspections = 0
+    original_inspect = runtime.kernel.ingestion.inspect_file_transient
+
+    async def observed_inspect(*args, **kwargs):  # noqa: ANN002, ANN003
+        nonlocal metadata_inspections
+        metadata_inspections += 1
+        return await original_inspect(*args, **kwargs)
+
+    runtime.kernel.ingestion.inspect_file_transient = observed_inspect
 
     async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
         del args, kwargs
@@ -500,9 +625,12 @@ async def test_legacy_odt_metadata_is_hydrated_from_authorised_header_without_ra
     assert "LEGACY-ODT-CREATOR" in result["message"]
     assert "Страницы: 7" in result["message"]
     assert "Слова: 321" in result["message"]
-    assert "PRIVATE-ODT-USER-FIELD" not in result["message"]
+    # ODF user-defined properties are explicit technical metadata. They are
+    # rendered inertly under this dedicated route, never sent as instructions.
+    assert "private-path (string): PRIVATE-ODT-USER-FIELD" in result["message"]
     assert "PRIVATE-ODT-BODY-MUST-NOT-BE-PARSED" not in result["message"]
     assert "LEGACY-RAW-BODY-MUST-NOT-BE-RENDERED" not in result["message"]
+    assert metadata_inspections == 1
     assert storage.get_raw_object(raw.id, "alice")["metadata_json"] == before
 
 
@@ -689,17 +817,33 @@ async def test_pending_file_continues_only_when_the_same_conversation_points_bac
     assert first_text not in json.dumps(seen[4], ensure_ascii=False), "the replaced file became active again"
     assert unreadable_turn["restored_attachment_count"] == 0
     assert unreadable_turn["attachment_context_available"] is False
+    assert unreadable_turn["attachment_context_readable_count"] == 0
+    assert unreadable_turn["attachment_coverage_complete"] is False
     assert "прочитать не удалось" in unreadable_turn["message"]
     assert transient_turn["attachment_context_available"] is True
     assert after_transient["restored_attachment_count"] == 0
     assert after_transient["attachment_context_available"] is False
     assert seen[6] == [], "a no-save file allowed an older persisted file to return"
 
-    first_user = storage.get_conversation_messages(opened["conversation_id"], user_id="alice", limit=20)[0]
+    conversation_rows = storage.get_conversation_messages(
+        opened["conversation_id"], user_id="alice", limit=20
+    )
+    first_user = conversation_rows[0]
     metadata = json.loads(first_user["metadata_json"])
     assert metadata["conversation_attachment_raw_ids"] == [first.id]
     assert first_text not in first_user["metadata_json"]
     assert "first.txt" not in first_user["metadata_json"]
+    unreadable_user_index = next(
+        index
+        for index, row in enumerate(conversation_rows)
+        if row.get("role") == "user" and row.get("content") == "что в файле?"
+    )
+    unreadable_assistant = conversation_rows[unreadable_user_index + 1]
+    unreadable_metadata = json.loads(str(unreadable_assistant.get("metadata_json") or "{}"))
+    assert unreadable_metadata["attachment_context_used"] is True
+    assert unreadable_metadata["conversation_attachment_raw_ids"] == [unreadable.id]
+    assert unreadable_metadata["attachment_context_readable_count"] == 0
+    assert unreadable_metadata["attachment_coverage_complete"] is False
 
 
 def test_shared_tenant_attachment_requires_the_exact_uploader(settings, storage):

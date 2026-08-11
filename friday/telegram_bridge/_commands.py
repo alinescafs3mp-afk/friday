@@ -1285,6 +1285,7 @@ class CommandsMixin(BridgeShared):
                 # Повтор после обрыва: куски, уже дошедшие до человека, не уходят
                 # второй раз. Текст тот же самый — он взят из кеша, не из модели.
                 resume_key=int(update["update_id"]),
+                reply_source_message_id=str(cached_response.get("message_id") or ""),
             )
             await self._deliver_voice_reply(telegram, chat_id, cached_response)
             await self._deliver_generated_files(telegram, chat_id, cached_response)
@@ -1333,6 +1334,17 @@ class CommandsMixin(BridgeShared):
             "telegram_message_id": message.get("message_id"),
             "telegram_user": user,
         }
+        replied_to = message.get("reply_to_message")
+        replied_message_id = int(replied_to.get("message_id") or 0) if isinstance(replied_to, dict) else 0
+        reply_source_message_id = (
+            self._inbox.outbound_reply_source_message_id(chat_id, replied_message_id)
+            if replied_message_id > 0
+            else ""
+        )
+        if reply_source_message_id:
+            # Opaque backend identity only.  No quoted text, filename, Raw id or
+            # attachment metadata becomes authority at the transport boundary.
+            payload["reply_source_message_id"] = reply_source_message_id
         if forward:
             payload["forward"] = forward
         if document:
@@ -1391,6 +1403,7 @@ class CommandsMixin(BridgeShared):
             # Ответ уже в кеше строки очереди (строкой выше), поэтому повтор после
             # обрыва разрежет тот же текст и продолжит с места обрыва.
             resume_key=int(update["update_id"]),
+            reply_source_message_id=str(response.get("message_id") or ""),
         )
         await self._deliver_voice_reply(telegram, chat_id, response)
         await self._deliver_generated_files(telegram, chat_id, response)

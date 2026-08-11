@@ -272,6 +272,22 @@ async def test_two_people_of_the_same_name_come_back_as_a_question(kernel):
 
 
 @pytest.mark.asyncio
+async def test_invisible_and_inactive_accounts_do_not_participate_in_fuzzy_resolution(kernel):
+    runtime, auth, storage = kernel
+    storage.update_user("usr_ivan", metadata_json={"supervisor_id": "boss"})
+    storage.update_user("usr_anna", display_name="Иван", metadata_json={"supervisor_id": "someone-else"})
+    storage.ensure_user("usr_inactive_ivan", preset_key="user", display_name="Иван")
+    storage.update_user("usr_inactive_ivan", status="disabled")
+    boss = auth.actor_for_user("boss", source="test")
+
+    result = await runtime.execute("user_activity", {"person": "Иван"}, actor=boss)
+
+    assert result.success is True, result.error
+    assert result.data["человек"] == "Иван"
+    assert result.data["присылал файлов"] == 2
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_name_returns_nothing_rather_than_somebody(kernel):
     runtime, auth, _ = kernel
     boss = auth.actor_for_user("boss", source="test")

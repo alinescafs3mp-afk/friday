@@ -17,6 +17,7 @@ by ordering.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,7 +26,7 @@ from friday.retrieval._keyboard import switched
 from friday.retrieval._repair import _edit_distance
 
 _YO_FOLD = str.maketrans({"ё": "е", "Ё": "Е"})
-_WORD_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁ_.@-]+")
+_NAME_TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁ]+")
 
 # A name shorter than this is not typo-corrected: at three characters almost
 # everything is within one edit of everything else, and a wrong person is worse
@@ -56,7 +57,21 @@ class PersonMatch:
 
 
 def _fold(text: str) -> str:
-    return str(text or "").translate(_YO_FOLD).casefold().strip()
+    return unicodedata.normalize("NFKC", str(text or "")).translate(_YO_FOLD).casefold().strip()
+
+
+def _name_fold(text: str) -> str:
+    """Human-name comparison form, without transport punctuation.
+
+    Telegram handles are commonly pasted as ``@name`` while account rows store
+    ``name``.  Display names also drift between ``Анна-Мария``, ``Анна Мария``
+    and punctuation copied from a contact card.  Those separators are not
+    identity-bearing, whereas punctuation inside a stable id can be.  Stable ids
+    therefore stay on the exact-only channel below; this form is used only for
+    display names and usernames.
+    """
+
+    return " ".join(_NAME_TOKEN_RE.findall(_fold(text).lstrip("@")))
 
 
 # Sound, not key position. `switched` handles «набрал не в той раскладке» — the same
@@ -95,7 +110,7 @@ def _names_of(row: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 def _stems(text: str) -> tuple[str, ...]:
-    return tuple(stem(token) for token in _WORD_RE.findall(_fold(text)) if token)
+    return tuple(stem(token) for token in _NAME_TOKEN_RE.findall(_name_fold(text)) if token)
 
 
 def _is_transposition(left: str, right: str) -> bool:
@@ -133,6 +148,18 @@ def _ladder(folded_query: str, folded_name: str) -> tuple[float, str] | None:
         query_stems
         and name_stems
         and all(
+            any(len(left) >= 3 and len(right) >= len(left) and right.startswith(left) for right in name_stems)
+            for left in query_stems
+        )
+    ):
+        # A contact is often named by an unfinished token: ``Алекс Кор``.
+        # Prefixes are deliberately weaker than complete-name containment and a
+        # same-tier neighbour remains an ambiguity in ``unambiguous``.
+        return (0.82, "partial_name")
+    if (
+        query_stems
+        and name_stems
+        and all(
             any(
                 len(left) >= _MIN_FUZZY_NAME
                 and len(right) >= _MIN_FUZZY_NAME
@@ -159,8 +186,10 @@ def _ladder(folded_query: str, folded_name: str) -> tuple[float, str] | None:
 
 def _score_one(query: str, name: str, source: str) -> tuple[float, str] | None:
     """How well one query string matches one name, or None for no match at all."""
-    folded_query = _fold(query)
-    folded_name = _fold(name)
+    if source in {"id", "external_id"}:
+        return (1.0, "exact") if _fold(query) == _fold(name) and _fold(name) else None
+    folded_query = _name_fold(query)
+    folded_name = _name_fold(name)
     if not folded_query or not folded_name:
         return None
 
@@ -168,13 +197,36 @@ def _score_one(query: str, name: str, source: str) -> tuple[float, str] | None:
     if direct is not None:
         return direct
 
+    def short_account_typo() -> tuple[float, str] | None:
+        # Three-letter account nicknames are common in the live archive.  A
+        # blanket four-character typo floor made ``GBL`` unable to resolve the
+        # unique ``JBL`` account.  Keep this exception deliberately narrow:
+        # one uppercase ASCII token, exactly one substitution, display/handle
+        # fields only.  It is the weakest tier and still requires a unique
+        # winner, so two nearby acronyms fail closed.
+        compact_query = folded_query.replace(" ", "")
+        compact_name = folded_name.replace(" ", "")
+        visible_query = str(query or "").strip().lstrip("@")
+        if (
+            3 <= len(compact_query) <= 5
+            and len(compact_query) == len(compact_name)
+            and compact_query.isascii()
+            and compact_query.isalpha()
+            and compact_name.isascii()
+            and compact_name.isalpha()
+            and visible_query.isupper()
+            and _edit_distance(compact_query, compact_name, 1) == 1
+        ):
+            return (0.55, "short_typo")
+        return None
+
     # Same name, different alphabet. Only worth trying when the two sides are not
     # already in the same one — transliterating Latin leaves it unchanged, so this
     # costs nothing when it cannot help.
     romanised_query = _translit(folded_query)
     romanised_name = _translit(folded_name)
     if (romanised_query, romanised_name) == (folded_query, folded_name):
-        return None
+        return short_account_typo()
     # Case endings come off BEFORE the alphabet changes: the stemmer is Russian, so
     # «ивану» romanised first is «ivanu», which it cannot touch. Stemmed first it
     # is «иван» → «ivan», an exact hit on the Latin display name rather than a
@@ -183,7 +235,7 @@ def _score_one(query: str, name: str, source: str) -> tuple[float, str] | None:
     stemmed_name = _translit(" ".join(_stems(folded_name)))
     crossed = _ladder(stemmed_query, stemmed_name) or _ladder(romanised_query, romanised_name)
     if crossed is None:
-        return None
+        return short_account_typo()
     confidence, method = crossed
     return (confidence * 0.95, f"translit+{method}")
 
@@ -198,6 +250,33 @@ def resolve_person(rows: list[dict[str, Any]], query: str) -> list[PersonMatch]:
     text = str(query or "").strip()
     if not text:
         return []
+
+    # Stable ids and exact usernames win before any fuzzy name work.  Besides
+    # being faster, this prevents a near display-name candidate from turning an
+    # explicitly pasted ``@username`` or account id into an ambiguity.
+    exact: dict[str, PersonMatch] = {}
+    exact_query = _fold(text)
+    exact_handle = _name_fold(text)
+    for row in rows:
+        user_id = str(row.get("id") or "")
+        if not user_id:
+            continue
+        matched_on = ""
+        if exact_query in {_fold(user_id), _fold(str(row.get("external_id") or ""))}:
+            matched_on = user_id if exact_query == _fold(user_id) else str(row.get("external_id") or "")
+        elif exact_handle and exact_handle == _name_fold(str(row.get("username") or "")):
+            matched_on = str(row.get("username") or "")
+        if matched_on:
+            exact[user_id] = PersonMatch(
+                user_id=user_id,
+                display_name=str(row.get("display_name") or ""),
+                username=str(row.get("username") or ""),
+                confidence=1.0,
+                method="exact",
+                matched_on=matched_on,
+            )
+    if exact:
+        return sorted(exact.values(), key=lambda item: item.user_id)
 
     attempts: list[tuple[str, str]] = [(text, "")]
     flipped = switched(text)
@@ -244,7 +323,7 @@ def resolve_person(rows: list[dict[str, Any]], query: str) -> list[PersonMatch]:
 # Russian given names a numeric margin could not express it: at 0.1 «Павлу» resolved
 # confidently to «Павла» (both stem to «павл» while «Павел» keeps its fleeting
 # vowel), and at 0.2 six of eight ordinary case forms became «which of them?».
-_TIERS = ("exact", "inflected", "partial_name", "inflected_stem", "typo")
+_TIERS = ("exact", "inflected", "partial_name", "inflected_stem", "typo", "short_typo")
 
 # Within one tier the scores are near-identical by construction, so this only has to
 # separate a match from a genuinely equal one.

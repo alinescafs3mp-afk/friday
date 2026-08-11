@@ -355,6 +355,15 @@ class MaintenanceMixin(StorageShared):
                                 (owner, str(raw_row["content_hash"] or ""), raw_object_id),
                             ).fetchone()
                             unlink_file = shared is None
+                        # Installations upgraded from before source aliases
+                        # existed do not have ON DELETE CASCADE on this table.
+                        # Remove the transport bindings in the same transaction
+                        # before destroying their immutable Raw target.
+                        _del(
+                            "file_source_aliases",
+                            "raw_object_id=? AND user_id=?",
+                            (raw_object_id, owner),
+                        )
                         conn.execute(
                             "DELETE FROM raw_objects WHERE id=? AND user_id=?",
                             (raw_object_id, owner),

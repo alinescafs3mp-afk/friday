@@ -62,6 +62,7 @@ from friday.api.kg import router as kg_router
 from friday.api.knowledge import router as knowledge_router
 from friday.api.notifications import router as notifications_router
 from friday.api.projections import public_chat_ingestion
+from friday.archive_passwords import bounded_archive_password, strip_archive_password_directives
 from friday.audit_privacy import server_audit_ip, server_audit_request_id
 from friday.config import (
     FridaySettings,
@@ -335,37 +336,10 @@ _VOICE_QUESTION_MAX_SEC = 180.0
 # inside the model's existing attachment budget; it is never copied into the API
 # response, message metadata, or a second durable object.
 _CURRENT_TURN_ATTACHMENT_CHARS = 24_000
-_ARCHIVE_PASSWORD_DIRECTIVE_RE = re.compile(
-    r"^[ \t]*(?:пароль|password)[ \t]*(?::|=|[—-])[ \t]*(.*?)[ \t]*$",
-    re.IGNORECASE,
-)
-_ARCHIVE_PASSWORD_INLINE_RE = re.compile(
-    r"^(?P<prefix>.*?)(?:[,;][ \t]*)?\b(?:пароль|password)[ \t]*"
-    r"(?::|=|[—-])[ \t]*(?P<secret>.+?)[ \t]*$",
-    re.IGNORECASE,
-)
 
 
 def _strip_archive_password_directives(text: str) -> tuple[str, str | None]:
-    secret: str | None = None
-    kept: list[str] = []
-    for line in str(text or "").splitlines():
-        match = _ARCHIVE_PASSWORD_DIRECTIVE_RE.fullmatch(line)
-        if match is None:
-            kept.append(line)
-            continue
-        if secret is None and match.group(1):
-            secret = match.group(1)
-    if secret is None and kept:
-        match = _ARCHIVE_PASSWORD_INLINE_RE.fullmatch(kept[-1])
-        if match is not None and match.group("secret"):
-            secret = match.group("secret")
-            prefix = match.group("prefix").rstrip(" ,;\t")
-            if prefix:
-                kept[-1] = prefix
-            else:
-                kept.pop()
-    return "\n".join(kept).strip(), secret
+    return strip_archive_password_directives(text)
 
 
 def _take_archive_password(body: dict[str, Any]) -> str | None:
@@ -398,14 +372,7 @@ def _take_archive_password(body: dict[str, Any]) -> str | None:
         return None
     if not isinstance(raw_password, str):
         raise HTTPException(status_code=400, detail="archive_password must be a string")
-    encoded = raw_password.encode("utf-8", errors="strict")
-    if (
-        not encoded
-        or len(encoded) > 4096
-        or "\x00" in raw_password
-        or "\n" in raw_password
-        or "\r" in raw_password
-    ):
+    if bounded_archive_password(raw_password) is None:
         raise HTTPException(status_code=400, detail="archive_password has an invalid shape")
     return raw_password
 
@@ -806,6 +773,7 @@ def _chat_request_fingerprint(
     attachments: list[dict[str, Any]],
     document: dict[str, Any] | None,
     document_digest: str,
+    reply_source_message_id: str = "",
 ) -> str:
     """Bind an idempotency key to the request that actually produced it.
 
@@ -833,6 +801,7 @@ def _chat_request_fingerprint(
             if isinstance(body.get("reply_document_source_ref"), str)
             else None
         ),
+        "reply_source_message_id": reply_source_message_id,
         "attachments": attachments,
         "document": document_fingerprint,
     }
@@ -2213,8 +2182,24 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         document_value = body.get("document")
         document: dict[str, Any] | None = document_value if isinstance(document_value, dict) else None
+        raw_reply_source_message_id = body.pop("reply_source_message_id", None)
+        reply_assistant_pointer_present = bool(
+            actor.source == "telegram-bridge" and document is None and raw_reply_source_message_id is not None
+        )
+        reply_source_message_id = ""
+        if reply_assistant_pointer_present and isinstance(raw_reply_source_message_id, str):
+            candidate_message_id = raw_reply_source_message_id.strip()
+            if (
+                1 <= len(candidate_message_id) <= 128
+                and candidate_message_id.isascii()
+                and re.fullmatch(r"[A-Za-z0-9_.:-]+", candidate_message_id)
+            ):
+                reply_source_message_id = candidate_message_id
         reply_pointer_present = bool(
-            actor.source == "telegram-bridge" and document is None and "reply_document_source_ref" in body
+            actor.source == "telegram-bridge"
+            and document is None
+            and not reply_assistant_pointer_present
+            and "reply_document_source_ref" in body
         )
         reply_document_source_ref = ""
         if reply_pointer_present and isinstance(body.get("reply_document_source_ref"), str):
@@ -2270,6 +2255,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 attachments=attachments,
                 document=document,
                 document_digest=document_digest,
+                reply_source_message_id=reply_source_message_id,
             )
             claim = state.storage.idempotency_claim(
                 # Ключ принадлежит ЧЕЛОВЕКУ, а не архиву. Разбор Codex §12.3: для
@@ -2313,6 +2299,103 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
         try:
             file_ingestion = None
+            conversation_id = str(body.get("conversation_id") or "").strip() or None
+            channel_chat_id = getattr(request.state, "bridge_chat_id", None)
+            if actor.source == "telegram-bridge" and channel_chat_id:
+                session = state.storage.get_channel_session(
+                    actor.own_id,
+                    "telegram",
+                    str(channel_chat_id),
+                )
+                if session and not session.get("is_archived"):
+                    conversation_id = str(session["conversation_id"])
+                    if requested_mode is None:
+                        requested_mode = normalize_conversation_mode(str(session.get("mode") or "dialogue"))
+            reply_assistant_reference = reply_assistant_pointer_present
+            if reply_assistant_pointer_present:
+                # The structural reply target is authoritative. Discard any
+                # ambient/caller attachment list and rebuild it solely from the
+                # exact owned assistant row; failure stays an empty structural
+                # pointer so Runtime cannot restore a newer conversation file.
+                attachments = []
+                if reply_source_message_id and state.auth_service.authorize(actor, "files.read").allowed:
+                    try:
+                        source_message = await run_blocking(
+                            state.storage.get_message,
+                            reply_source_message_id,
+                            actor.own_id,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - closed unresolved pointer
+                        LOGGER.warning(
+                            "Assistant reply lineage lookup failed (%s)",
+                            type(exc).__name__,
+                        )
+                        source_message = None
+                    lineage_raw_ids: list[str] = []
+                    if (
+                        isinstance(source_message, dict)
+                        and str(source_message.get("role") or "") == "assistant"
+                        and conversation_id is not None
+                        and str(source_message.get("conversation_id") or "") == conversation_id
+                        and state.storage.get_conversation(conversation_id, actor.own_id) is not None
+                    ):
+                        raw_metadata = source_message.get("metadata_json")
+                        try:
+                            lineage_metadata = (
+                                json.loads(raw_metadata)
+                                if isinstance(raw_metadata, str) and len(raw_metadata) <= 65_536
+                                else {}
+                            )
+                        except (TypeError, ValueError):
+                            lineage_metadata = {}
+                        values = (
+                            lineage_metadata.get("conversation_attachment_raw_ids")
+                            if isinstance(lineage_metadata, dict)
+                            and lineage_metadata.get("attachment_context_used") is True
+                            else None
+                        )
+                        if isinstance(values, list):
+                            malformed = False
+                            for value in values[:13]:
+                                raw_id = str(value or "").strip()
+                                if (
+                                    not re.fullmatch(r"raw_[A-Za-z0-9_-]{8,120}", raw_id)
+                                    or raw_id in lineage_raw_ids
+                                    or len(lineage_raw_ids) >= 12
+                                ):
+                                    malformed = True
+                                    break
+                                lineage_raw_ids.append(raw_id)
+                            if malformed or len(values) != len(lineage_raw_ids):
+                                lineage_raw_ids = []
+                    if lineage_raw_ids:
+                        try:
+                            canonical_rows = await run_blocking(
+                                state.storage.get_searchable_file_sources,
+                                actor.user_id,
+                                lineage_raw_ids,
+                                uploaded_by=actor.own_id,
+                                limit=len(lineage_raw_ids),
+                                include_content=False,
+                            )
+                        except Exception as exc:  # noqa: BLE001 - verdict change stays closed
+                            LOGGER.warning(
+                                "Assistant reply attachments reauthorization failed (%s)",
+                                type(exc).__name__,
+                            )
+                            canonical_rows = []
+                        canonical_ids = {
+                            str(row.get("id") or "")
+                            for row in canonical_rows
+                            if isinstance(row, dict)
+                            and re.fullmatch(
+                                r"[0-9a-f]{64}",
+                                str(row.get("content_hash") or ""),
+                                re.IGNORECASE,
+                            )
+                        }
+                        if canonical_ids == set(lineage_raw_ids):
+                            attachments.extend({"raw_object_id": raw_id} for raw_id in lineage_raw_ids)
             quoted_attachment_reference = reply_pointer_present
             if reply_document_source_ref and state.auth_service.authorize(actor, "files.read").allowed:
                 try:
@@ -2577,19 +2660,6 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             verification_eligible=False,
                         )
 
-            conversation_id = str(body.get("conversation_id") or "").strip() or None
-            channel_chat_id = getattr(request.state, "bridge_chat_id", None)
-            if actor.source == "telegram-bridge" and channel_chat_id:
-                session = state.storage.get_channel_session(
-                    actor.own_id,
-                    "telegram",
-                    str(channel_chat_id),
-                )
-                if session and not session.get("is_archived"):
-                    conversation_id = str(session["conversation_id"])
-                    if requested_mode is None:
-                        requested_mode = normalize_conversation_mode(str(session.get("mode") or "dialogue"))
-
             ingestion_result = None
             if state.auth_service.authorize(actor, "knowledge.create").allowed:
                 if file_already_ingested:
@@ -2668,6 +2738,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # архив как слова человека, и в классификатор, решающий про граф.
                 reply_to=str(body.get("reply_to") or "").strip() or None,
                 quoted_attachment_reference=quoted_attachment_reference,
+                reply_assistant_reference=reply_assistant_reference,
             )
             # ``make_file`` keeps inline base64 for existing clients, but the
             # durable authority is an exact-byte, person-owned artifact.  Freeze

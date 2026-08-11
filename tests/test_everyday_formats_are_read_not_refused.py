@@ -90,23 +90,46 @@ def test_opendocument_carries_only_bounded_standard_metadata() -> None:
 <office:document-meta
  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
  xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
- xmlns:dc="http://purl.org/dc/elements/1.1/">
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
  <office:meta>
   <dc:title>План учений</dc:title>
   <dc:subject>Подготовка</dc:subject>
   <meta:initial-creator>Иван Петров</meta:initial-creator>
   <dc:creator>Мария Сидорова</dc:creator>
+  <meta:printed-by>Сергей Крылов</meta:printed-by>
   <meta:keyword>учения</meta:keyword>
   <meta:creation-date>2024-03-04T12:30:00Z</meta:creation-date>
   <dc:date>2024-03-05T08:00:00+03:00</dc:date>
+  <meta:print-date>2024-03-06T09:00:00Z</meta:print-date>
+  <meta:template meta:title="Служебный документ" meta:date="2024-01-02T03:04:05Z"
+      xlink:href="templates/service.ott"/>
+  <meta:auto-reload xlink:href="https://example.test/source" meta:delay="PT30M"/>
+  <meta:hyperlink-behaviour office:target-frame-name="_blank" xlink:show="new"/>
   <meta:editing-cycles>7</meta:editing-cycles>
   <meta:editing-duration>PT12M3S</meta:editing-duration>
   <meta:document-statistic meta:page-count="3" meta:word-count="420"
       meta:character-count="2100" meta:table-count="2" meta:image-count="1"
-      meta:object-count="0"/>
-  <meta:user-defined meta:name="private-path">/srv/private/secret</meta:user-defined>
+      meta:object-count="0" meta:paragraph-count="18"
+      meta:non-whitespace-character-count="1700"/>
+  <meta:user-defined meta:name="Подразделение" meta:value-type="string">Отдел 7</meta:user-defined>
  </office:meta>
 </office:document-meta>""",
+        )
+        archive.writestr(
+            "META-INF/documentsignatures.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<dsig:document-signatures
+ xmlns:dsig="urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0"
+ xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+ xmlns:xades="http://uri.etsi.org/01903/v1.3.2#">
+ <ds:Signature Id="signature-1">
+  <ds:KeyInfo><ds:X509Data><ds:X509SubjectName>CN=Иван Иванов</ds:X509SubjectName></ds:X509Data></ds:KeyInfo>
+  <ds:Object><xades:QualifyingProperties><xades:SignedProperties>
+   <xades:SignedSignatureProperties><xades:SigningTime>2024-03-05T08:01:00Z</xades:SigningTime></xades:SignedSignatureProperties>
+  </xades:SignedProperties></xades:QualifyingProperties></ds:Object>
+ </ds:Signature>
+</dsig:document-signatures>""",
         )
 
     extractor = _extractor()
@@ -124,11 +147,36 @@ def test_opendocument_carries_only_bounded_standard_metadata() -> None:
     assert result.metadata["editing_duration"] == "PT12M3S"
     assert result.metadata["page_count"] == 3
     assert result.metadata["word_count"] == 420
+    assert result.metadata["printed_by"] == "Сергей Крылов"
+    assert result.metadata["print_date"] == "2024-03-06T09:00:00Z"
+    assert result.metadata["template"] == {
+        "title": "Служебный документ",
+        "date": "2024-01-02T03:04:05Z",
+        "href": "templates/service.ott",
+    }
+    assert result.metadata["auto_reload"] == {
+        "href": "https://example.test/source",
+        "delay": "PT30M",
+    }
+    assert result.metadata["hyperlink_behaviour"] == {
+        "target_frame_name": "_blank",
+        "show": "new",
+    }
+    assert result.metadata["paragraph_count"] == 18
+    assert result.metadata["non_whitespace_character_count"] == 1700
+    assert result.metadata["user_defined"] == [
+        {"name": "Подразделение", "value_type": "string", "value": "Отдел 7"}
+    ]
+    assert result.metadata["signature_members"] == ["META-INF/documentsignatures.xml"]
+    assert result.metadata["signature_count"] == 1
+    assert result.metadata["signature_ids"] == ["signature-1"]
+    assert result.metadata["signature_subjects"] == ["CN=Иван Иванов"]
+    assert result.metadata["signature_times"] == ["2024-03-05T08:01:00Z"]
+    assert result.metadata["signature_validity"] == "not_checked"
     assert header_only["title"] == "План учений"
     assert header_only["document_date"] == "2024-03-04"
     assert "input_bytes" not in header_only
-    assert "private-path" not in result.metadata
-    assert "/srv/private/secret" not in str(result.metadata)
+    assert header_only["signature_validity"] == "not_checked"
 
 
 def test_a_letter_is_read_with_the_headers_a_person_reads() -> None:

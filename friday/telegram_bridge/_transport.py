@@ -8,9 +8,9 @@ before and nothing outside the package moved.
 from __future__ import annotations
 
 import copy
-import re
 from contextlib import suppress
 
+from friday.archive_passwords import bounded_archive_password, strip_archive_password_directives
 from friday.telegram_bridge._base import (
     ALLOWED_UPDATE_KINDS,
     API_BASE,
@@ -50,15 +50,6 @@ from friday.telegram_bridge._queue import _UpdateInbox
 _POLL_WATCHDOG_INTERVAL_SEC = 15.0
 _POLL_WATCHDOG_STALE_SEC = max(180.0, POLL_TIMEOUT + BACKOFF_MAX + 60.0)
 _TRANSITION_JOURNAL_TIMEOUT_SEC = 5.0
-_ARCHIVE_PASSWORD_DIRECTIVE_RE = re.compile(
-    r"^[ \t]*(?:пароль|password)[ \t]*(?::|=|[—-])[ \t]*(.*?)[ \t]*$",
-    re.IGNORECASE,
-)
-_ARCHIVE_PASSWORD_INLINE_RE = re.compile(
-    r"^(?P<prefix>.*?)(?:[,;][ \t]*)?\b(?:пароль|password)[ \t]*"
-    r"(?::|=|[—-])[ \t]*(?P<secret>.+?)[ \t]*$",
-    re.IGNORECASE,
-)
 _ARCHIVE_DOCUMENT_SUFFIXES = (".zip", ".rar", ".7z")
 _ARCHIVE_DOCUMENT_MIME_TYPES = frozenset(
     {
@@ -400,34 +391,11 @@ class TransportMixin(BridgeShared):
 
     @staticmethod
     def _strip_archive_password_directives(text: str) -> tuple[str, str | None]:
-        secret: str | None = None
-        kept: list[str] = []
-        for line in str(text or "").splitlines():
-            match = _ARCHIVE_PASSWORD_DIRECTIVE_RE.fullmatch(line)
-            if match is None:
-                kept.append(line)
-                continue
-            if secret is None and match.group(1):
-                secret = match.group(1)
-        if secret is None and kept:
-            match = _ARCHIVE_PASSWORD_INLINE_RE.fullmatch(kept[-1])
-            if match is not None and match.group("secret"):
-                secret = match.group("secret")
-                prefix = match.group("prefix").rstrip(" ,;\t")
-                if prefix:
-                    kept[-1] = prefix
-                else:
-                    kept.pop()
-        return "\n".join(kept).strip(), secret
+        return strip_archive_password_directives(text)
 
     @staticmethod
     def _bounded_ephemeral_archive_password(value: str | None) -> str | None:
-        if not isinstance(value, str) or not value:
-            return None
-        encoded = value.encode("utf-8", errors="strict")
-        if len(encoded) > 4096 or "\x00" in value or "\n" in value or "\r" in value:
-            return None
-        return value
+        return bounded_archive_password(value)
 
     def _sanitize_update_before_store(self, update: dict[str, Any]) -> dict[str, Any]:
         """Strip archive credentials before the first durable Telegram write."""
@@ -449,10 +417,13 @@ class TransportMixin(BridgeShared):
         safe_text, explicit_secret = self._strip_archive_password_directives(original_text)
         descriptor = self._archive_document_descriptor(message)
         pending = self._inbox.archive_password_challenge(chat_id, user_id)
-        followup = bool(pending and descriptor is None and original_text.strip())
+        followup = bool(pending and descriptor is None and original_text)
         candidate_secret = explicit_secret
         if followup and candidate_secret is None:
-            candidate_secret = original_text.strip()
+            # A standalone follow-up is the exact credential channel.  Spaces,
+            # quotes and Unicode composition are password data, not prose to
+            # normalize.  Only the closed shape validator below may reject it.
+            candidate_secret = original_text
             safe_text = ""
         secret = self._bounded_ephemeral_archive_password(candidate_secret)
 
@@ -1098,6 +1069,7 @@ class TransportMixin(BridgeShared):
         reply_markup: dict[str, Any] | None = None,
         resume_key: int | None = None,
         text_format: str = "markdown",
+        reply_source_message_id: str = "",
     ) -> None:
         """Отправить текст, при необходимости несколькими кусками.
 
@@ -1136,6 +1108,25 @@ class TransportMixin(BridgeShared):
                 payload["reply_markup"] = reply_markup
             response = await self._post_message_chunk(client, payload, chunk)
             response.raise_for_status()
+            if reply_source_message_id:
+                body = response.json()
+                result = body.get("result") if isinstance(body, dict) else None
+                try:
+                    telegram_message_id = (
+                        int(result.get("message_id") or 0) if isinstance(result, dict) else 0
+                    )
+                except (TypeError, ValueError):
+                    telegram_message_id = 0
+                if telegram_message_id > 0:
+                    # Commit the opaque lineage before the delivery checkpoint.
+                    # If the process dies between the two, a retried duplicate is
+                    # preferable to a delivered message whose reply can drift to
+                    # unrelated attachment history.
+                    self._inbox.remember_outbound_reply_context(
+                        chat_id,
+                        telegram_message_id,
+                        reply_source_message_id,
+                    )
             if resume_key is not None:
                 self._inbox.record_answer_chunks_sent(resume_key, index + 1)
 

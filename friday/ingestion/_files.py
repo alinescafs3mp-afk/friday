@@ -10,6 +10,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 
+from friday.document_metadata_codec import (
+    TECHNICAL_METADATA_SCHEMA_VERSION,
+    TECHNICAL_METADATA_TEXT_CODEC_FIELD,
+    TECHNICAL_METADATA_TEXT_CODEC_VERSION,
+    decode_technical_metadata_text,
+    encode_technical_metadata_text,
+)
 from friday.documents import VisualAsset
 from friday.documents._office_structure import validate_office_structure_index
 from friday.ingestion._base import (
@@ -79,10 +86,53 @@ _DOCUMENT_METADATA_STRING_FIELDS = (
     "description",
     "language",
     "generator",
+    "printed_by",
     "creation_date",
     "modified_date",
+    "print_date",
     "editing_duration",
     "document_date",
+    "signature_validity",
+    "metadata_parse_status",
+    "last_modified_by",
+    "revision",
+    "category",
+    "content_status",
+    "identifier",
+    "version",
+    "application",
+    "application_version",
+    "company",
+    "manager",
+    "template_name",
+    "presentation_format",
+    "producer",
+    "pdf_version",
+    "trapped",
+    "email_from",
+    "email_to",
+    "email_cc",
+    "email_bcc",
+    "email_sender",
+    "email_reply_to",
+    "email_subject",
+    "email_date",
+    "message_id",
+    "in_reply_to",
+    "references",
+    "email_content_type",
+    "content_language",
+    "publisher",
+    "rights",
+    "source",
+    "coverage",
+    "relation",
+    "image_format",
+    "image_mode",
+    "camera_make",
+    "camera_model",
+    "capture_date",
+    "image_orientation",
 )
 _DOCUMENT_METADATA_COUNT_FIELDS = (
     "editing_cycles",
@@ -92,6 +142,100 @@ _DOCUMENT_METADATA_COUNT_FIELDS = (
     "table_count",
     "image_count",
     "object_count",
+    "cell_count",
+    "draw_count",
+    "frame_count",
+    "paragraph_count",
+    "row_count",
+    "sentence_count",
+    "syllable_count",
+    "non_whitespace_character_count",
+    "ole_object_count",
+    "signature_count",
+    "keywords_total",
+    "keywords_shown",
+    "user_defined_total",
+    "user_defined_shown",
+    "signature_members_total",
+    "signature_members_shown",
+    "signature_ids_total",
+    "signature_ids_shown",
+    "signature_subjects_total",
+    "signature_subjects_shown",
+    "signature_times_total",
+    "signature_times_shown",
+    "line_count",
+    "slide_count",
+    "note_count",
+    "hidden_slide_count",
+    "multimedia_clip_count",
+    "total_editing_time_minutes",
+    "document_security",
+    "characters_with_spaces",
+    "width_pixels",
+    "height_pixels",
+    "image_frame_count",
+    "stored_properties_total",
+    "stored_properties_shown",
+    "signature_fields_total",
+    "signature_fields_shown",
+)
+_DOCUMENT_METADATA_BOOLEAN_FIELDS = (
+    "scale_crop",
+    "links_up_to_date",
+    "shared_document",
+    "hyperlinks_changed",
+    "image_animated",
+)
+_DOCUMENT_METADATA_LIST_FIELDS = {
+    "keywords": (32, 200),
+    "signature_members": (8, 500),
+    "signature_ids": (16, 200),
+    "signature_subjects": (16, 500),
+    "signature_times": (16, 80),
+}
+_DOCUMENT_METADATA_OBJECT_FIELDS = {
+    "template": {"title": 500, "date": 64, "href": 1_000},
+    "auto_reload": {"href": 1_000, "delay": 64},
+    "hyperlink_behaviour": {"target_frame_name": 200, "show": 32},
+}
+_DOCUMENT_METADATA_RECORD_FIELDS = {
+    "stored_properties": (
+        64,
+        {"source": 80, "name": 200, "value_type": 40, "value": 1_000},
+    ),
+    "signature_fields": (
+        16,
+        {
+            "field_name": 200,
+            "signer_name": 500,
+            "signing_time": 100,
+            "reason": 500,
+            "location": 500,
+            "contact_info": 500,
+            "filter": 100,
+            "subfilter": 100,
+            "byte_range_present": 8,
+            "contents_present": 8,
+        },
+    ),
+}
+_DOCUMENT_METADATA_FORMATS = frozenset(
+    {
+        "odt",
+        "ods",
+        "odp",
+        "opendocument",
+        "docx",
+        "xlsx",
+        "pptx",
+        "ooxml",
+        "pdf",
+        "eml",
+        "mhtml",
+        "epub",
+        "image",
+    }
 )
 
 
@@ -121,24 +265,161 @@ def _document_metadata_projection(value: Any) -> dict[str, Any]:
     """Closed process-private projection; never forward arbitrary parser keys."""
 
     source = value if isinstance(value, Mapping) else {}
-    format_name = str(source.get("format") or "")
-    if format_name not in {"odt", "ods", "odp", "opendocument"}:
+    encoded_source = source.get(TECHNICAL_METADATA_TEXT_CODEC_FIELD) == TECHNICAL_METADATA_TEXT_CODEC_VERSION
+    technical_incomplete = source.get("technical_metadata_incomplete") is True
+
+    def source_text(item: Any) -> str:
+        nonlocal technical_incomplete
+        if not isinstance(item, str):
+            return ""
+        if not encoded_source:
+            return item
+        decoded, valid = decode_technical_metadata_text(item)
+        if not valid:
+            technical_incomplete = True
+            return ""
+        return decoded
+
+    def projected_text(item: Any, limit: int) -> str:
+        nonlocal technical_incomplete
+        text = source_text(item)
+        if not text:
+            return ""
+        technical_incomplete = technical_incomplete or len(text) > limit
+        return encode_technical_metadata_text(text[:limit])
+
+    format_name = source_text(source.get("format"))
+    if format_name not in _DOCUMENT_METADATA_FORMATS:
         return {}
-    projected: dict[str, Any] = {"format": format_name}
+    projected: dict[str, Any] = {
+        "format": format_name,
+        "metadata_schema_version": TECHNICAL_METADATA_SCHEMA_VERSION,
+        TECHNICAL_METADATA_TEXT_CODEC_FIELD: TECHNICAL_METADATA_TEXT_CODEC_VERSION,
+    }
     for key in _DOCUMENT_METADATA_STRING_FIELDS:
         item = source.get(key)
-        if isinstance(item, str) and item:
-            projected[key] = item
-    keywords = source.get("keywords")
-    if isinstance(keywords, list):
-        safe_keywords = [item for item in keywords[:32] if isinstance(item, str) and item]
-        if safe_keywords:
-            projected["keywords"] = safe_keywords
+        limit = 4_000 if key == "description" else 1_000
+        raw_item = source_text(item)
+        if not raw_item:
+            continue
+        if key == "signature_validity" and raw_item != "not_checked":
+            technical_incomplete = True
+            continue
+        projected[key] = projected_text(item, limit)
+    for key, (item_limit, char_limit) in _DOCUMENT_METADATA_LIST_FIELDS.items():
+        values = source.get(key)
+        if not isinstance(values, list):
+            continue
+        safe_values = [safe for item in values[:item_limit] if (safe := projected_text(item, char_limit))]
+        if safe_values:
+            projected[key] = safe_values
+        technical_incomplete = technical_incomplete or len(values) > item_limit
     for key in _DOCUMENT_METADATA_COUNT_FIELDS:
         item = source.get(key)
         if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
             projected[key] = min(item, 2_147_483_647)
+            technical_incomplete = technical_incomplete or item > 2_147_483_647
+    for key in _DOCUMENT_METADATA_BOOLEAN_FIELDS:
+        item = source.get(key)
+        if isinstance(item, bool):
+            projected[key] = item
+    for key, field_limits in _DOCUMENT_METADATA_OBJECT_FIELDS.items():
+        item = source.get(key)
+        if not isinstance(item, Mapping):
+            continue
+        safe_item = {
+            field: safe
+            for field, limit in field_limits.items()
+            if (safe := projected_text(item.get(field), limit))
+        }
+        if safe_item:
+            projected[key] = safe_item
+        technical_incomplete = technical_incomplete or any(
+            field not in field_limits or not isinstance(value, str) for field, value in item.items()
+        )
+    user_defined = source.get("user_defined")
+    if isinstance(user_defined, list):
+        safe_user_defined: list[dict[str, str]] = []
+        for item in user_defined[:32]:
+            if not isinstance(item, Mapping):
+                technical_incomplete = True
+                continue
+            name = projected_text(item.get("name"), 200)
+            value_type = projected_text(item.get("value_type"), 32)
+            stored_value = projected_text(item.get("value"), 1_000)
+            if not name or not value_type or not stored_value:
+                technical_incomplete = True
+                continue
+            safe_user_defined.append(
+                {
+                    "name": name,
+                    "value_type": value_type,
+                    "value": stored_value,
+                }
+            )
+        if safe_user_defined:
+            projected["user_defined"] = safe_user_defined
+        technical_incomplete = technical_incomplete or len(user_defined) > 32
+    for key, (item_limit, field_limits) in _DOCUMENT_METADATA_RECORD_FIELDS.items():
+        values = source.get(key)
+        if not isinstance(values, list):
+            continue
+        safe_records: list[dict[str, str]] = []
+        for item in values[:item_limit]:
+            if not isinstance(item, Mapping):
+                technical_incomplete = True
+                continue
+            safe_record: dict[str, str] = {}
+            for field, limit in field_limits.items():
+                value = item.get(field)
+                if safe_value := projected_text(value, limit):
+                    safe_record[field] = safe_value
+            required = (
+                {"source", "name", "value_type", "value"} if key == "stored_properties" else {"field_name"}
+            )
+            if required.issubset(safe_record):
+                safe_records.append(safe_record)
+            else:
+                technical_incomplete = True
+        if safe_records:
+            projected[key] = safe_records
+        technical_incomplete = technical_incomplete or len(values) > item_limit
+    if source.get("signature_metadata_incomplete") is True:
+        projected["signature_metadata_incomplete"] = True
+        technical_incomplete = True
+    for total_key, shown_key, values_key in (
+        ("keywords_total", "keywords_shown", "keywords"),
+        ("user_defined_total", "user_defined_shown", "user_defined"),
+        ("signature_members_total", "signature_members_shown", "signature_members"),
+        ("signature_ids_total", "signature_ids_shown", "signature_ids"),
+        ("signature_subjects_total", "signature_subjects_shown", "signature_subjects"),
+        ("signature_times_total", "signature_times_shown", "signature_times"),
+        ("stored_properties_total", "stored_properties_shown", "stored_properties"),
+        ("signature_fields_total", "signature_fields_shown", "signature_fields"),
+    ):
+        total = projected.get(total_key)
+        shown = projected.get(shown_key)
+        values = projected.get(values_key)
+        if isinstance(total, int) and isinstance(shown, int):
+            technical_incomplete = technical_incomplete or shown > total or total > shown
+            if isinstance(values, list):
+                technical_incomplete = technical_incomplete or len(values) != shown
+            elif shown:
+                technical_incomplete = True
+    if technical_incomplete:
+        projected["technical_metadata_incomplete"] = True
     return projected
+
+
+def _document_metadata_projection_is_complete(value: Mapping[str, Any]) -> bool:
+    """Whether equality covers every admitted technical metadata value."""
+
+    if not value:
+        return True
+    return bool(
+        value.get("technical_metadata_incomplete") is not True
+        and value.get("metadata_parse_status") in {"parsed", "absent"}
+    )
 
 
 class FilesMixin(PipelineShared):
@@ -909,6 +1190,18 @@ class FilesMixin(PipelineShared):
                 raise IdempotencyConflictError("source_ref is unavailable for this upload")
             return existing_raw
 
+        def bind_transport_alias(raw_id: str) -> None:
+            # A content-deduplicated re-upload still has a fresh Telegram
+            # file_id. Preserve that exact structural reply pointer separately
+            # from the first Raw row's immutable source_ref.
+            if isinstance(uploaded_by, str) and uploaded_by:
+                self.storage.bind_owned_file_source_ref_alias(
+                    user_id,
+                    uploaded_by,
+                    base_source_ref,
+                    raw_id,
+                )
+
         self.storage.ensure_user(user_id, source="upload")
         existing = find_existing_source()
         if not existing:
@@ -928,6 +1221,7 @@ class FilesMixin(PipelineShared):
             # An exact retry can also repair a missing/corrupt content-addressed
             # file left by an interrupted older ingestion attempt.
             self._store_file(user_id, file_content, digest, filename)
+            bind_transport_alias(str(existing.get("id") or ""))
             return self._replay_file_source(user_id, existing)
 
         # Off the event loop. Extraction is pure CPU — archive walking, PDF text,
@@ -1077,6 +1371,23 @@ class FilesMixin(PipelineShared):
                 existing_mime_type = (
                     str(existing_metadata.get("mime_type") or "").split(";", 1)[0].strip().casefold()
                 )
+                # Equal body text does not make technical/header metadata
+                # interchangeable. A re-saved ODT/PDF may keep every visible
+                # paragraph while changing title, own date, signature fields or
+                # a custom property. Reusing the first immutable Raw would then
+                # make a structural reply to the second upload display the
+                # first file's metadata. Compare only the same closed projection
+                # persisted below: transport filename/hash/path/size are absent,
+                # while parser status, omission/cap flags and every admitted
+                # technical property must match exactly. Legacy/partial presence
+                # therefore fails closed instead of being treated as equivalent.
+                current_technical_metadata = _document_metadata_projection(extraction_metadata)
+                existing_technical_metadata = _document_metadata_projection(existing_metadata)
+                technical_metadata_equivalent = bool(
+                    current_technical_metadata == existing_technical_metadata
+                    and _document_metadata_projection_is_complete(current_technical_metadata)
+                    and _document_metadata_projection_is_complete(existing_technical_metadata)
+                )
                 structurally_equivalent = True
                 # Extension, declared media type, and the parser result are
                 # independent signals on *both* sides.  Telegram occasionally
@@ -1106,9 +1417,10 @@ class FilesMixin(PipelineShared):
                         and existing_structure.get("complete") is True
                         and office_structure == existing_structure
                     )
-                if structurally_equivalent:
+                if structurally_equivalent and technical_metadata_equivalent:
                     LOGGER.info("Тот же текст уже принят; повторяю прежний исход")
                     self._store_file(user_id, file_content, digest, filename)
+                    bind_transport_alias(str(same_document.get("id") or ""))
                     return self._replay_file_source(user_id, same_document)
         media_label = media_kind or "File"
         raw_content = (
@@ -1403,12 +1715,14 @@ class FilesMixin(PipelineShared):
                 existing = find_existing_source()
                 if existing:
                     self._validate_existing_file_source(existing, digest)
+                    bind_transport_alias(str(existing.get("id") or ""))
                     return self._replay_file_source(user_id, existing)
 
                 stored_path = self._commit_staged_file(target_path, staged_path, digest)
                 staged_path = None
                 try:
                     raw = self.storage.store_raw_object(raw)
+                    bind_transport_alias(raw.id)
                     # Review-gated invariant: vision/OCR output is model-generated
                     # and unextractable media has no verifiable text, so neither
                     # may become a searchable Knowledge Object before a human

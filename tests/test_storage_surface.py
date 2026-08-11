@@ -168,12 +168,18 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # privacy and lifecycle filters ahead of their ambiguity/completeness sentinels.
 # 354 → 355: dense/reranked file-source candidates are re-authorized against
 # immutable Raw bytes and the current Inbox verdict before an excerpt is projected.
-EXPECTED_MEMBER_COUNT = 356
+# 356 → 357: every successful transport identity of a content-deduplicated file
+# receives an immutable alias to the canonical Raw Object.
+# 357 → 358: one exact-uploader corpus selector keeps received/document time
+# roles distinct and returns totals separately from its bounded page.
+EXPECTED_MEMBER_COUNT = 358
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
     "get_raw_object_descriptors": "(self, raw_ids: 'list[str]', user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
     "get_searchable_file_sources": "(self, user_id: 'str', raw_ids: 'list[str]', *, uploaded_by: 'str | None' = None, limit: 'int' = 100, include_content: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_owned_file_catalog": "(self, user_id: 'str', uploaded_by: 'str', *, limit: 'int' = 5000) -> 'list[dict[str, Any]]'",
+    "select_owned_file_corpus": "(self, user_id: 'str', uploaded_by: 'str', *, received_since: 'str | None' = None, received_until: 'str | None' = None, document_since: 'str | None' = None, document_until: 'str | None' = None, limit: 'int' = 13, offset: 'int' = 0) -> 'dict[str, Any]'",
     "search_owned_file_content": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",
     "search_raw_objects_in_set": "(self, user_id: 'str', query: 'str', raw_ids: 'list[str]', *, limit: 'int' = 64) -> 'list[dict[str, Any]]'",
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
