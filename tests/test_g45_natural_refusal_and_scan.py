@@ -503,7 +503,8 @@ async def test_old_visual_raw_is_read_again_with_current_vision_for_every_attach
     assert VISION_TEXT in result["message"]
     # Vision text is useful for synthesis, but remains advisory rather than
     # silently becoming authenticated source evidence.
-    assert result["attachment_context_readable_count"] == 0
+    assert result["attachment_context_readable_count"] == 1
+    assert result["attachment_context_available"] is True
     assert result["attachment_verification_complete"] is False
     assert result["verified"] is False
     persisted = storage.get_raw_object(raw.id, OWNER)

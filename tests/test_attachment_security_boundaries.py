@@ -2144,12 +2144,14 @@ async def test_repair_cannot_introduce_a_verified_count_from_incomplete_attachme
 
 
 @pytest.mark.parametrize("kind", ["vision", "voice"])
+@pytest.mark.parametrize("synthetic_notice", [False, True])
 @pytest.mark.asyncio
 async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
     settings,
     storage,
     monkeypatch,
     kind,
+    synthetic_notice,
 ):
     advisory_text = f"ADVISORY-{kind.upper()}-TEXT"
     storage.ensure_user("alice", preset_key="owner")
@@ -2197,7 +2199,7 @@ async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
     monkeypatch.setattr(agent_runtime_module, "_grounding_warning", capture_grounding)
     result = await runtime.chat(
         "alice",
-        "что в этом файле?",
+        f"Загружен документ: advisory-{kind}.bin" if synthetic_notice else "что в этом файле?",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
             {
@@ -2209,6 +2211,7 @@ async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
             }
         ],
         enable_tools=False,
+        synthetic_document_notice=synthetic_notice,
     )
 
     assert len(shown) == 1
@@ -2216,7 +2219,9 @@ async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
     assert advisory_text in result["message"]
     assert "результат локального распознавания" in result["message"]
     assert "сверяйте критичные данные с оригиналом" in result["message"].casefold()
-    assert result["attachment_context_available"] is False
+    assert result["attachment_context_available"] is True
+    assert result["attachment_context_readable_count"] == 1
+    assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is False
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False

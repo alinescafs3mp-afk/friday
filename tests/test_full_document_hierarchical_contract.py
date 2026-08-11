@@ -404,6 +404,40 @@ async def test_ordinary_read_wording_maps_the_complete_source_instead_of_its_pre
     assert result["attachment_verification_complete"] is True
 
 
+@pytest.mark.asyncio
+async def test_fitting_complete_office_text_skips_an_incomplete_rich_index_map(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attachment = _synthetic_300_row_xlsx()
+    assert len(str(attachment["transient_text"])) < agent_runtime_module._ATTACHMENT_CONTEXT_CHARS
+    bounded = _bounded_attachment_projection([attachment])
+    assert bounded[0]["_office_index_complete"] is False
+    llm = _HierarchyLLM("Краткая синтетическая сводка содержит ROW-288-SENTINEL.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Дай краткую сводку документа.",
+        attachments=[attachment],
+        llm=llm,
+    )
+
+    assert _chunk_payloads(llm) == []
+    synthesis_calls = [
+        call
+        for call in llm.calls
+        if "FRIDAY_VERIFICATION_DATA" not in _blob(call["messages"])
+        and "FRIDAY_REPAIR_DATA" not in _blob(call["messages"])
+    ]
+    assert len(synthesis_calls) == 1
+    assert "ROW-288-SENTINEL" in _blob(synthesis_calls[0]["messages"])
+    assert result["attachment_coverage_complete"] is True
+    assert "Не весь исходный материал" not in result["message"]
+
+
 @pytest.mark.parametrize("multiline_before_target", [False, True])
 @pytest.mark.asyncio
 async def test_a_300_row_xlsx_exposes_record_288_even_when_office_prompt_stops_near_the_head(
@@ -431,20 +465,8 @@ async def test_a_300_row_xlsx_exposes_record_288_even_when_office_prompt_stops_n
 
     payloads = _chunk_payloads(llm)
     assert payloads
-    row = next(
-        row
-        for payload in payloads
-        for row in payload.get("ordered_rows", [])
-        if row.get("record_position") == 288
-    )
+    assert all("ordered_rows" not in payload for payload in payloads)
     source_line = 291 if multiline_before_target else 290
-    assert row == {
-        "source_line": source_line,
-        "source_row": 289,
-        "record_position": 288,
-        "sheet": "SYNTHETIC-300",
-        "text": "ITEM-288 | ROW-288-SENTINEL",
-    }
     synthesis, verification = _canonical_map_blocks(llm)
     assert synthesis == verification and "ROW-288-SENTINEL" in synthesis[0]
     final_evidence = _payload(synthesis[0], MAP_PREFIX)
@@ -467,11 +489,19 @@ async def test_a_300_row_xlsx_exposes_record_288_even_when_office_prompt_stops_n
     assert result["attachment_verification_complete"] is True
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Сколько всего записей в документе?",
+        "Файл synthetic-300, сколько там всего позиций?",
+    ],
+)
 @pytest.mark.asyncio
 async def test_incomplete_office_prompt_counts_all_300_rows_without_requesting_a_reupload(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
+    question: str,
 ) -> None:
     attachment = _synthetic_300_row_xlsx()
     bounded = _bounded_attachment_projection([attachment])
@@ -482,7 +512,7 @@ async def test_incomplete_office_prompt_counts_all_300_rows_without_requesting_a
         settings,
         storage,
         monkeypatch,
-        question="Сколько всего записей в документе?",
+        question=question,
         attachments=[attachment],
         llm=llm,
     )
@@ -492,13 +522,15 @@ async def test_incomplete_office_prompt_counts_all_300_rows_without_requesting_a
         payloads,
         [("synthetic-300.xlsx", str(attachment["transient_text"]))],
     )
-    ordered_rows = [row for payload in payloads for row in payload.get("ordered_rows", [])]
-    assert [row["record_position"] for row in ordered_rows if row["record_position"] > 0] == list(
-        range(1, 301)
-    )
-    # The total is rendered from the code-owned ordered record carrier, so no
-    # synthesis/verifier model call is needed for this exact cardinality.
-    assert _canonical_map_blocks(llm) == ([], [])
+    assert all("ordered_rows" not in payload for payload in payloads)
+    synthesis, verification = _canonical_map_blocks(llm)
+    if question.startswith("Сколько"):
+        # The simple cardinality is rendered from the code-owned ordered carrier.
+        assert (synthesis, verification) == ([], [])
+    else:
+        # A filename-scoped phrasing follows the complete hierarchy fallback;
+        # synthesis and judge receive the same canonical full-source map.
+        assert synthesis == verification and synthesis
     assert result["message"] == "В документе 300 позиций."
     assert "пришл" not in result["message"].casefold()
     assert result["attachment_coverage_complete"] is True

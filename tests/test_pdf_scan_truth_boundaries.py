@@ -251,7 +251,7 @@ async def test_unreadable_jpeg_is_code_owned_unknown_without_guessing_or_model(
 
 
 @pytest.mark.asyncio
-async def test_mixed_readable_and_advisory_selected_set_is_code_owned_unknown(
+async def test_mixed_readable_and_advisory_selected_set_reaches_synthesis_but_stays_unknown(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -292,15 +292,26 @@ async def test_mixed_readable_and_advisory_selected_set_is_code_owned_unknown(
     )
     monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
 
-    async def should_not_generate(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        del args, kwargs
-        raise AssertionError("a partially unreadable selected set reached answer synthesis")
+    async def synthesize(
+        context: AgentContext,
+        message: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        del context, message
+        shown = json.dumps(attachments, ensure_ascii=False)
+        assert PDF_SENTINEL in shown
+        assert ADVISORY_SENTINEL in shown
+        return {
+            "content": f"Сопоставлены {PDF_SENTINEL} и {ADVISORY_SENTINEL}.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
 
     async def should_not_verify(*args: Any, **kwargs: Any) -> dict[str, Any]:
         del args, kwargs
         raise AssertionError("a partially unreadable selected set reached the model verifier")
 
-    monkeypatch.setattr(runtime, "_generate_response", should_not_generate)
+    monkeypatch.setattr(runtime, "_generate_response", synthesize)
     monkeypatch.setattr(runtime, "_verify_response", should_not_verify)
     result = await runtime.chat(
         OWNER,
@@ -318,20 +329,22 @@ async def test_mixed_readable_and_advisory_selected_set_is_code_owned_unknown(
         enable_tools=False,
     )
 
-    assert "1 из 2" in result["message"]
-    assert "не буду угадывать или выдумывать" in result["message"]
+    assert PDF_SENTINEL in result["message"]
+    assert ADVISORY_SENTINEL in result["message"]
+    assert "результат локального распознавания" in result["message"]
+    assert "сверяйте критичные данные с оригиналом" in result["message"].casefold()
     assert model.calls == 0
     assert result["tools_used"] == []
     assert result["attachment_context_expected_count"] == 2
-    assert result["attachment_context_readable_count"] == 1
-    assert result["attachment_context_available"] is False
+    assert result["attachment_context_readable_count"] == 2
+    assert result["attachment_context_available"] is True
     assert result["attachment_verification_complete"] is False
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False
-    assert ADVISORY_SENTINEL not in json.dumps(result, ensure_ascii=False)
+    assert result["attachment_coverage_complete"] is True
 
     rows = storage.get_conversation_messages(result["conversation_id"], user_id=OWNER)
-    assert ADVISORY_SENTINEL not in rows[-1]["content"]
+    assert ADVISORY_SENTINEL in rows[-1]["content"]
     assert ADVISORY_SENTINEL not in rows[-1]["metadata_json"]
 
 
