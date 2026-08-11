@@ -33,7 +33,7 @@ import time
 import unicodedata
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -59,6 +59,8 @@ WORKER_TIMEOUT_SEC = 1_800
 SCHEMA = "friday.document-contour-live-battery.v1"
 WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
 REPORT_SCHEMA = "friday.document-contour-live-battery.report.v1"
+_RUN_ID_ENV = "FRIDAY_DOCUMENT_BATTERY_RUN_ID"
+_RUN_ID_RE = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,43 @@ class Scenario:
     case_id: str
     title: str
     contract: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CaseIdentity:
+    """Private invocation namespace for one run/case fixture universe."""
+
+    run_id: str = field(repr=False)
+    run_index: int
+    case_id: str
+
+    def token(self, purpose: str, *, length: int = 16) -> str:
+        if not purpose or not 8 <= length <= 32:
+            raise BatteryFailure("case_identity_request_invalid")
+        payload = f"{self.run_index}\0{self.case_id}\0{purpose}".encode()
+        return hashlib.sha256(bytes.fromhex(self.run_id) + b"\0" + payload).hexdigest()[:length]
+
+    @property
+    def cache_prefix(self) -> str:
+        return f"docbat-{self.case_id.casefold()}-{self.token('cache-prefix')}"
+
+    def marker(self, label: str) -> str:
+        return f"{label}-{self.token('marker:' + label, length=12).upper()}"
+
+    def source_ref(self, label: str) -> str:
+        return f"telegram-file:{label}-{self.token('source-ref:' + label)}"
+
+    def filename(self, stem: str, extension: str) -> str:
+        suffix = self.token(f"filename:{stem}:{extension}", length=12)
+        return f"{stem}-{suffix}.{extension.lstrip('.')}"
+
+    def prompt_variant(self, key: str, count: int) -> int:
+        if not key or not 1 <= count <= 2:
+            raise BatteryFailure("prompt_variant_contract_invalid")
+        return int(self.token("prompt-variant:" + key, length=8), 16) % count
+
+    def prompt_identity(self, key: str) -> str:
+        return self.token("prompt-identity:" + key)
 
 
 SCENARIOS: tuple[Scenario, ...] = (
@@ -305,6 +344,74 @@ def _canonical_json(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
 
+def _new_run_id() -> str:
+    return secrets.token_hex(32)
+
+
+def _validated_run_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if _RUN_ID_RE.fullmatch(normalized) is None:
+        raise BatteryFailure("battery_run_id_invalid")
+    return normalized
+
+
+def _run_id_hash(run_id: str) -> str:
+    return _sha256(bytes.fromhex(_validated_run_id(run_id)))
+
+
+def _run_token(run_id: str, run_index: int, purpose: str, *, length: int = 16) -> str:
+    if not 1 <= run_index <= RUNS or not purpose or not 8 <= length <= 32:
+        raise BatteryFailure("run_identity_request_invalid")
+    payload = f"{run_index}\0{purpose}".encode()
+    return hashlib.sha256(bytes.fromhex(_validated_run_id(run_id)) + b"\0" + payload).hexdigest()[:length]
+
+
+def _run_owner_chats(run_id: str, run_index: int) -> tuple[int, ...]:
+    # Telegram identifiers are signed 64-bit integers.  Reserving two decimal
+    # digits for the role makes the eleven identities collision-free per run.
+    base = 1_000_000_000 + int(_run_token(run_id, run_index, "telegram-chats", length=10), 16) * 100
+    return tuple(base + role for role in range(1, 12))
+
+
+def _case_identity(run_id: str, run_index: int, case_id: str) -> CaseIdentity:
+    if case_id not in {item.case_id for item in SCENARIOS}:
+        raise BatteryFailure("unknown_case_identity")
+    return CaseIdentity(_validated_run_id(run_id), run_index, case_id)
+
+
+def _marker(harness: Any, label: str, *, fallback: str = "") -> str:
+    identity = getattr(harness, "identity", None)
+    if isinstance(identity, CaseIdentity):
+        return identity.marker(label)
+    return fallback or f"{label}-{int(harness.run_index)}"
+
+
+def _source_ref(harness: Any, label: str, *, fallback: str = "") -> str:
+    identity = getattr(harness, "identity", None)
+    if isinstance(identity, CaseIdentity):
+        return identity.source_ref(label)
+    return fallback or f"telegram-file:{label}-{int(harness.run_index)}"
+
+
+def _filename(harness: Any, stem: str, extension: str, *, fallback: str = "") -> str:
+    identity = getattr(harness, "identity", None)
+    if isinstance(identity, CaseIdentity):
+        return identity.filename(stem, extension)
+    return fallback or f"{stem}.{extension.lstrip('.')}"
+
+
+def _scoped_prompt(harness: Any, key: str, message: str) -> str:
+    """Give non-empty live prompts one of two equivalent, cache-distinct forms."""
+
+    identity = getattr(harness, "identity", None)
+    if not message or not isinstance(identity, CaseIdentity):
+        return message
+    scope = identity.prompt_identity(key).upper()
+    if identity.prompt_variant(key, 2) == 0:
+        return f"{message} Контекст проверки: {scope}."
+    return f"Контекст проверки {scope}. {message}"
+
+
 def _load_env_file_values(path: Path) -> dict[str, str]:
     """Read only allowlisted sidecar values without mutating the controller env."""
 
@@ -351,6 +458,7 @@ def build_worker_environment(
     *,
     owner_chats: Sequence[int],
     source_env_file: Path | None = None,
+    run_id: str | None = None,
 ) -> dict[str, str]:
     run_dir = run_dir.resolve()
     if run_dir == Path(run_dir.anchor) or not run_dir.is_dir():
@@ -378,6 +486,7 @@ def build_worker_environment(
     environment["FRIDAY_API_TOKEN"] = secrets.token_urlsafe(48)
     environment["FRIDAY_DOCUMENT_BATTERY_RUN_DIR"] = str(run_dir)
     environment["FRIDAY_DOCUMENT_BATTERY_EVIDENCE"] = str(run_dir / "private-evidence.json")
+    environment[_RUN_ID_ENV] = _validated_run_id(run_id or _new_run_id())
     for relative in set(_SCRATCH_PATHS.values()) | {"fixtures", "private"}:
         _private_dir((run_dir / relative).resolve())
     return environment
@@ -389,12 +498,17 @@ def _scenario_manifest() -> list[dict[str, Any]]:
     ]
 
 
-def case_state_paths(run_dir: Path, case_id: str) -> dict[str, Path]:
+def case_state_paths(
+    run_dir: Path,
+    case_id: str,
+    identity: CaseIdentity | None = None,
+) -> dict[str, Path]:
     """Closed per-case mutable roots; scenarios never share a DB or file tree."""
 
     if case_id not in {item.case_id for item in SCENARIOS}:
         raise BatteryFailure("unknown_case_state")
-    case_root = (run_dir.resolve() / f"case-{case_id.casefold()}").resolve()
+    suffix = f"-{identity.token('state-path')}" if identity is not None else ""
+    case_root = (run_dir.resolve() / f"case-{case_id.casefold()}{suffix}").resolve()
     if not _inside(case_root, run_dir):
         raise BatteryFailure("case_state_escape")
     return {
@@ -424,8 +538,11 @@ def offline_self_test() -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="friday-document-battery-selftest-") as temporary:
         root = Path(temporary).resolve()
         root.chmod(0o700)
-        chats = tuple(9911000 + index for index in range(1, 12))
-        environment = build_worker_environment(root, owner_chats=chats)
+        run_ids = (_new_run_id(), _new_run_id())
+        if run_ids[0] == run_ids[1]:
+            raise BatteryFailure("invocation_identity_not_fresh")
+        chats = _run_owner_chats(run_ids[0], 1)
+        environment = build_worker_environment(root, owner_chats=chats, run_id=run_ids[0])
         for key, relative in _SCRATCH_PATHS.items():
             expected = (root / relative).resolve()
             if Path(environment[key]).resolve() != expected or not _inside(expected, root):
@@ -438,15 +555,42 @@ def offline_self_test() -> dict[str, Any]:
         _private_write(private, b"closed")
         if stat.S_IMODE(private.stat().st_mode) != 0o600:
             raise BatteryFailure("private_file_mode_invalid")
-        databases = {case_state_paths(root, scenario.case_id)["database"] for scenario in SCENARIOS}
-        if len(databases) != CASES or any(not _inside(path, root) for path in databases):
+        identities = [
+            _case_identity(run_id, run_index, scenario.case_id)
+            for run_id in run_ids
+            for run_index in range(1, RUNS + 1)
+            for scenario in SCENARIOS
+        ]
+        databases = {
+            case_state_paths(root, identity.case_id, identity)["database"] for identity in identities
+        }
+        if len(databases) != len(identities) or any(not _inside(path, root) for path in databases):
             raise BatteryFailure("case_database_isolation_invalid")
+        identity_sets = {
+            "cache": {identity.cache_prefix for identity in identities},
+            "marker": {identity.marker("SELFTEST") for identity in identities},
+            "ref": {identity.source_ref("SELFTEST") for identity in identities},
+            "filename": {identity.filename("selftest", "odt") for identity in identities},
+            "prompt": {
+                _scoped_prompt(
+                    type("PromptProbe", (), {"identity": identity})(),
+                    "selftest",
+                    "Обобщи документ.",
+                )
+                for identity in identities
+            },
+        }
+        if any(len(values) != len(identities) for values in identity_sets.values()):
+            raise BatteryFailure("fixture_identity_not_disjoint")
     return {
         "schema": SCHEMA,
         "self_test": "passed",
         "runs": RUNS,
         "cases_per_run": CASES,
         "scenario_ids": ids,
+        "identity_count": len(identities),
+        "identity_disjoint": True,
+        "prompt_variants": 2,
     }
 
 
@@ -505,7 +649,7 @@ def _xlsx_bytes(rows: Sequence[Sequence[str]]) -> bytes:
     return output.getvalue()
 
 
-def _scan_pdf(marker: str, *, pages: int = 5) -> bytes:
+def _scan_pdf(marker: str, *, pages: int = 5, fixture_scope: str = "") -> bytes:
     from PIL import Image, ImageDraw, ImageFont
     from reportlab.lib.utils import ImageReader  # type: ignore[import-untyped]
     from reportlab.pdfgen import canvas  # type: ignore[import-untyped]
@@ -519,6 +663,8 @@ def _scan_pdf(marker: str, *, pages: int = 5) -> bytes:
         draw = ImageDraw.Draw(image)
         draw.text((110, 180), f"SYNTHETIC SCAN PAGE {page}", fill="black", font=font)
         draw.text((110, 480), f"CONTROL PAGE NUMBER {page}", fill="black", font=font)
+        if fixture_scope:
+            draw.text((110, 650), f"FIXTURE SCOPE {fixture_scope} PAGE {page}", fill="black", font=font)
         if page == pages:
             draw.text((110, 860), f"SECRET CODE {marker}", fill="black", font=font)
         encoded = io.BytesIO()
@@ -768,20 +914,35 @@ class LiveProbes:
 
 
 class Harness:
-    def __init__(self, app: Any, client: Any, settings: Any, run_dir: Path, run_index: int) -> None:
+    def __init__(
+        self,
+        app: Any,
+        client: Any,
+        settings: Any,
+        run_dir: Path,
+        run_index: int,
+        identity: CaseIdentity | None = None,
+    ) -> None:
         self.app = app
         self.client = client
         self.settings = settings
         self.storage = app.state.storage
         self.run_dir = run_dir
         self.run_index = run_index
-        self.owner_chats = {item.case_id: 9911000 + int(item.case_id[1:]) for item in SCENARIOS}
-        self.jbl_chat = 9911011
+        self.identity = identity
+        chats = (
+            _run_owner_chats(identity.run_id, run_index)
+            if identity is not None
+            else tuple(9911000 + index for index in range(1, 12))
+        )
+        self.owner_chats = {item.case_id: chats[index] for index, item in enumerate(SCENARIOS)}
+        self.jbl_chat = chats[-1]
         self.sequence = 0
         self.raw_evidence: list[dict[str, Any]] = []
         self.probes = LiveProbes(app)
         self.probes.install()
-        self.owner_id = self._me(self.owner_chats["D01"])["actor"]["user_id"]
+        owner_case = identity.case_id if identity is not None else "D01"
+        self.owner_id = self._me(self.owner_chats[owner_case])["actor"]["user_id"]
         self.jbl_id = self._me(self.jbl_chat)["actor"]["user_id"]
         self.storage.update_user(self.jbl_id, display_name="JBL", username="jbl", preset_key="user")
 
@@ -856,19 +1017,39 @@ class Harness:
         document: dict[str, Any] | None = None,
         **fields: Any,
     ) -> dict[str, Any]:
+        if self.identity is not None and case_id != self.identity.case_id:
+            raise BatteryFailure("case_harness_identity_mismatch")
         self.sequence += 1
-        active_chat = chat or self.owner_chats[case_id]
-        payload: dict[str, Any] = {
-            "message": message,
-            "source_ref": f"document-live:{self.run_index}:{case_id}:{self.sequence}",
-            "telegram_message_id": self.run_index * 100_000 + self.sequence,
-            "telegram_user": {
+        active_chat = chat if chat is not None else self.owner_chats[case_id]
+        if self.identity is not None:
+            top_source_ref = f"document-live:{self.identity.token(f'chat-ref:{self.sequence}')}"
+            telegram_message_id = int(self.identity.token(f"message:{self.sequence}", length=15), 16)
+            username = f"synthetic_{case_id.casefold()}_{self.identity.token('telegram-user', length=8)}"
+        else:
+            top_source_ref = f"document-live:{self.run_index}:{case_id}:{self.sequence}"
+            telegram_message_id = self.run_index * 100_000 + self.sequence
+            username = f"synthetic_{case_id.casefold()}"
+        if active_chat == self.jbl_chat:
+            telegram_user = {
+                "id": active_chat,
+                "first_name": "JBL",
+                "last_name": "",
+                "username": "jbl",
+                "language_code": "ru",
+            }
+        else:
+            telegram_user = {
                 "id": active_chat,
                 "first_name": "Synthetic",
                 "last_name": case_id,
-                "username": f"synthetic_{case_id.casefold()}",
+                "username": username,
                 "language_code": "ru",
-            },
+            }
+        payload: dict[str, Any] = {
+            "message": _scoped_prompt(self, f"{case_id}:{self.sequence}", message),
+            "source_ref": top_source_ref,
+            "telegram_message_id": telegram_message_id,
+            "telegram_user": telegram_user,
             "enable_tools": True,
             **fields,
         }
@@ -920,14 +1101,19 @@ class Harness:
         archive_password: str | None = None,
     ) -> dict[str, Any]:
         owner = uploader or self.owner_id
+        channel = "document-live-battery"
+        fallback_ref = f"battery-seed:{self.run_index}:{case_id}:{secrets.token_hex(6)}"
+        if self.identity is not None:
+            channel = self.identity.cache_prefix
+            fallback_ref = self.identity.source_ref(f"seed-{self.sequence}-{secrets.token_hex(4)}")
         result = asyncio.run(
             self.app.state.ingestion.ingest_file(
                 self.owner_id,
                 None,
                 payload,
                 filename=filename,
-                metadata={"uploaded_by": owner, "channel": "document-live-battery"},
-                source_ref=source_ref or f"battery-seed:{self.run_index}:{case_id}:{secrets.token_hex(6)}",
+                metadata={"uploaded_by": owner, "channel": channel},
+                source_ref=source_ref or fallback_ref,
                 archive_password=archive_password,
             )
         )
@@ -962,30 +1148,31 @@ class Harness:
 
 def _case_01(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
-    marker = f"ALIAS-ORBIT-{h.run_index}"
+    marker = _marker(h, "ALIAS-ORBIT")
     target = _odt_bytes([f"Контрольный код документа: {marker}."], title="Canonical alias")
-    decoy_marker = f"DECOY-NEWEST-{h.run_index}"
+    decoy_marker = _marker(h, "DECOY-NEWEST")
     decoy = _odt_bytes([f"Контрольный код: {decoy_marker}."], title="Wrong newest")
-    for ref in ("ALIAS-A", "ALIAS-B"):
+    refs = {label: _source_ref(h, label) for label in ("ALIAS-A", "ALIAS-B", "DECOY")}
+    for label in ("ALIAS-A", "ALIAS-B"):
         h.ingest(
             "D01",
             target,
-            "канонический отчёт.odt",
-            source_ref=f"telegram-file:{ref}-{h.run_index}",
+            _filename(h, "канонический отчёт", "odt", fallback="канонический отчёт.odt"),
+            source_ref=refs[label],
         )
     h.ingest(
         "D01",
         decoy,
-        "другой новый отчёт.odt",
-        source_ref=f"telegram-file:DECOY-{h.run_index}",
+        _filename(h, "другой новый отчёт", "odt", fallback="другой новый отчёт.odt"),
+        source_ref=refs["DECOY"],
     )
-    first = h.resolve_ref(f"telegram-file:ALIAS-A-{h.run_index}")
-    second = h.resolve_ref(f"telegram-file:ALIAS-B-{h.run_index}")
-    decoy_id = h.resolve_ref(f"telegram-file:DECOY-{h.run_index}")
+    first = h.resolve_ref(refs["ALIAS-A"])
+    second = h.resolve_ref(refs["ALIAS-B"])
+    decoy_id = h.resolve_ref(refs["DECOY"])
     answer = h.chat(
         "D01",
         "Какой контрольный код указан именно в этом документе?",
-        reply_document_source_ref=f"telegram-file:ALIAS-B-{h.run_index}",
+        reply_document_source_ref=refs["ALIAS-B"],
         reply_to="Прими файл.",
     )
     metadata = h.last_user_metadata(answer)
@@ -1003,17 +1190,20 @@ def _case_01(h: Harness) -> dict[str, Any]:
 def _case_02(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     chat = h.owner_chats["D02"]
-    marker = f"LINEAGE-TARGET-{h.run_index}"
-    decoy_marker = f"LINEAGE-DECOY-{h.run_index}"
-    deleted_marker = f"LINEAGE-DELETED-{h.run_index}"
-    foreign_marker = f"LINEAGE-FOREIGN-{h.run_index}"
-    target_ref = f"telegram-file:LINEAGE-T-{h.run_index}"
+    marker = _marker(h, "LINEAGE-TARGET")
+    decoy_marker = _marker(h, "LINEAGE-DECOY")
+    deleted_marker = _marker(h, "LINEAGE-DELETED")
+    foreign_marker = _marker(h, "LINEAGE-FOREIGN")
+    target_ref = _source_ref(h, "LINEAGE-T")
+    decoy_ref = _source_ref(h, "LINEAGE-D")
+    deleted_ref = _source_ref(h, "LINEAGE-X")
+    foreign_ref = _source_ref(h, "LINEAGE-F")
     target_upload = h.chat(
         "D02",
         "Назови контрольный код из этого документа.",
         chat=chat,
         document=h.document(
-            "старый источник.odt",
+            _filename(h, "старый источник", "odt", fallback="старый источник.odt"),
             "application/vnd.oasis.opendocument.text",
             _odt_bytes([f"Контрольный код: {marker}."], title="Older exact source"),
             target_ref,
@@ -1026,18 +1216,23 @@ def _case_02(h: Harness) -> dict[str, Any]:
         "Прими новый файл.",
         chat=chat,
         document=h.document(
-            "новейший ложный источник.odt",
+            _filename(
+                h,
+                "новейший ложный источник",
+                "odt",
+                fallback="новейший ложный источник.odt",
+            ),
             "application/vnd.oasis.opendocument.text",
             _odt_bytes([f"Контрольный код: {decoy_marker}."], title="Newer decoy"),
-            f"telegram-file:LINEAGE-D-{h.run_index}",
+            decoy_ref,
         ),
     )
-    decoy_id = h.resolve_ref(f"telegram-file:LINEAGE-D-{h.run_index}")
+    decoy_id = h.resolve_ref(decoy_ref)
     deleted_seed = h.ingest(
         "D02",
         _odt_bytes([f"Контрольный код: {deleted_marker}."], title="Deleted control"),
-        "удалённый контроль.odt",
-        source_ref=f"telegram-file:LINEAGE-X-{h.run_index}",
+        _filename(h, "удалённый контроль", "odt", fallback="удалённый контроль.odt"),
+        source_ref=deleted_ref,
     )
     deleted_id = str(deleted_seed.get("raw_object_id") or "")
     h.storage.execute(
@@ -1048,9 +1243,9 @@ def _case_02(h: Harness) -> dict[str, Any]:
     foreign_seed = h.ingest(
         "D02",
         _odt_bytes([f"Контрольный код: {foreign_marker}."], title="Foreign control"),
-        "чужой контроль.odt",
+        _filename(h, "чужой контроль", "odt", fallback="чужой контроль.odt"),
         uploader=h.jbl_id,
-        source_ref=f"telegram-file:LINEAGE-F-{h.run_index}",
+        source_ref=foreign_ref,
     )
     foreign_id = str(foreign_seed.get("raw_object_id") or "")
     reply = h.chat(
@@ -1071,14 +1266,9 @@ def _case_02(h: Harness) -> dict[str, Any]:
         "controls_distinct": bool(
             deleted_id and foreign_id and len({target_id, decoy_id, deleted_id, foreign_id}) == 4
         ),
-        "deleted_control_closed": bool(h.resolve_ref(f"telegram-file:LINEAGE-X-{h.run_index}") == ""),
+        "deleted_control_closed": bool(h.resolve_ref(deleted_ref) == ""),
         "foreign_control_scoped": bool(
-            h.resolve_ref(
-                f"telegram-file:LINEAGE-F-{h.run_index}",
-                uploader=h.jbl_id,
-            )
-            == foreign_id
-            and h.resolve_ref(f"telegram-file:LINEAGE-F-{h.run_index}") == ""
+            h.resolve_ref(foreign_ref, uploader=h.jbl_id) == foreign_id and h.resolve_ref(foreign_ref) == ""
         ),
         "reply_raw_exact": bool(
             attached == [target_id] and not {decoy_id, deleted_id, foreign_id}.intersection(attached)
@@ -1096,7 +1286,7 @@ _D03_PROMPT = "В ранее загруженном файле «список к
 
 def _case_03(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
-    marker = f"ОТДЕЛ-МОЛОДОГВАРДЕЙСК-{h.run_index}"
+    marker = _marker(h, "ОТДЕЛ-МОЛОДОГВАРДЕЙСК")
     target = h.ingest(
         "D03",
         _odt_bytes(
@@ -1106,14 +1296,20 @@ def _case_03(h: Harness) -> dict[str, Any]:
             ],
             title="Список комендатур ЛНР 2026",
         ),
-        "Список комендатур Луганской Народной Республики 2026.odt",
-        source_ref=f"telegram-file:COMMANDANTS-{h.run_index}",
+        _filename(
+            h,
+            "Список комендатур Луганской Народной Республики 2026",
+            "odt",
+            fallback="Список комендатур Луганской Народной Республики 2026.odt",
+        ),
+        source_ref=_source_ref(h, "COMMANDANTS"),
     )
+    decoy_scope = _marker(h, "SUV-CONTROL")
     decoy = h.ingest(
         "D03",
-        _xlsx_bytes((("СУВ", "Отдел"), ("5_222", "Совсем другой город"))),
-        "СУВ 5_222.xlsx",
-        source_ref=f"telegram-file:SUV-DECOY-{h.run_index}",
+        _xlsx_bytes((("СУВ", "Отдел"), ("5_222", "Совсем другой город"), ("Контроль", decoy_scope))),
+        _filename(h, "СУВ 5_222", "xlsx", fallback="СУВ 5_222.xlsx"),
+        source_ref=_source_ref(h, "SUV-DECOY"),
     )
     answer = h.chat(
         "D03",
@@ -1165,7 +1361,7 @@ def _index_barrier(h: Harness, case_id: str, knowledge_ids: Sequence[str]) -> No
 
 def _case_04(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
-    marker = f"КАПИТАН-ОРЛОВ-{h.run_index}"
+    marker = _marker(h, "КАПИТАН-ОРЛОВ")
     target_result = h.ingest(
         "D04",
         _xlsx_bytes(
@@ -1176,8 +1372,8 @@ def _case_04(h: Harness) -> dict[str, Any]:
                 ("Тыловое обеспечение", "кладовщик", "узел Южный"),
             )
         ),
-        "штатное расписание.xlsx",
-        source_ref=f"telegram-file:SEM-XLSX-{h.run_index}",
+        _filename(h, "штатное расписание", "xlsx", fallback="штатное расписание.xlsx"),
+        source_ref=_source_ref(h, "SEM-XLSX"),
     )
     seeds = [h.require_promoted("D04", target_result)]
     for index, text in enumerate(
@@ -1188,11 +1384,21 @@ def _case_04(h: Harness) -> dict[str, Any]:
         ),
         start=1,
     ):
+        scoped_text = f"{text} Контроль выборки: {_marker(h, f'SEM-DECOY-{index}')}"
         result = h.ingest(
             "D04",
-            _odt_bytes([text], title=f"Semantic decoy {index}"),
-            f"семантический кандидат {index}.odt",
-            source_ref=f"telegram-file:SEM-DECOY-{h.run_index}-{index}",
+            _odt_bytes([scoped_text], title=f"Semantic decoy {index}"),
+            _filename(
+                h,
+                f"семантический кандидат {index}",
+                "odt",
+                fallback=f"семантический кандидат {index}.odt",
+            ),
+            source_ref=_source_ref(
+                h,
+                f"SEM-DECOY-{index}",
+                fallback=f"telegram-file:SEM-DECOY-{h.run_index}-{index}",
+            ),
         )
         seeds.append(h.require_promoted("D04", result))
     _index_barrier(h, "D04", [knowledge_id for _raw_id, knowledge_id in seeds])
@@ -1234,16 +1440,21 @@ def _case_05(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     expected: list[str] = []
     dated_ids: list[tuple[int, str]] = []
-    for index, (day, marker) in enumerate(((7, "JBL-FIRST"), (9, "JBL-SECOND"), (11, "JBL-THIRD")), 1):
+    expected_markers = tuple(_marker(h, label) for label in ("JBL-FIRST", "JBL-SECOND", "JBL-THIRD"))
+    for index, (day, marker) in enumerate(zip((7, 9, 11), expected_markers, strict=True), 1):
         result = h.chat(
             "D05",
             "Прими документ.",
             chat=h.jbl_chat,
             document=h.document(
-                f"jbl-{index}.odt",
+                _filename(h, f"jbl-{index}", "odt", fallback=f"jbl-{index}.odt"),
                 "application/vnd.oasis.opendocument.text",
-                _odt_bytes([f"{marker}-{h.run_index}"], title=f"JBL {index}"),
-                f"telegram-file:JBL-{h.run_index}-{index}",
+                _odt_bytes([marker], title=f"JBL {index}"),
+                _source_ref(
+                    h,
+                    f"JBL-{index}",
+                    fallback=f"telegram-file:JBL-{h.run_index}-{index}",
+                ),
             ),
         )
         raw_id = str((result.get("file_ingestion") or {}).get("raw_object_id") or "")
@@ -1251,9 +1462,9 @@ def _case_05(h: Harness) -> dict[str, Any]:
         dated_ids.append((day, raw_id))
     foreign = h.ingest(
         "D05",
-        _odt_bytes([f"FOREIGN-DECOY-{h.run_index}"], title="Foreign owner decoy"),
-        "foreign-decoy.odt",
-        source_ref=f"telegram-file:FOREIGN-{h.run_index}",
+        _odt_bytes([_marker(h, "FOREIGN-DECOY")], title="Foreign owner decoy"),
+        _filename(h, "foreign-decoy", "odt", fallback="foreign-decoy.odt"),
+        source_ref=_source_ref(h, "FOREIGN"),
     )
     # Seed every upload before opening the direct fixture transaction.  Leaving
     # the first UPDATE pending while the next TestClient/ingestion request starts
@@ -1290,9 +1501,9 @@ def _case_05(h: Harness) -> dict[str, Any]:
         "foreign_excluded": str(foreign.get("raw_object_id") or "") not in selected,
         "answer_all_markers": _contains_all(
             answer_text,
-            tuple(f"JBL-{name}-{h.run_index}" for name in ("FIRST", "SECOND", "THIRD")),
+            expected_markers,
         ),
-        "answer_no_foreign": f"foreign-decoy-{h.run_index}" not in answer_text.casefold(),
+        "answer_no_foreign": _marker(h, "FOREIGN-DECOY").casefold() not in answer_text.casefold(),
     }
     return h.case_result("D05", started, checks)
 
@@ -1300,9 +1511,9 @@ def _case_05(h: Harness) -> dict[str, Any]:
 def _case_06(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     markers = (
-        f"SMALL-ALPHA-{h.run_index}",
-        f"SMALL-BETA-{h.run_index}",
-        f"SMALL-GAMMA-{h.run_index}",
+        _marker(h, "SMALL-ALPHA"),
+        _marker(h, "SMALL-BETA"),
+        _marker(h, "SMALL-GAMMA"),
     )
     paragraphs = [
         f"Краткий служебный материал. Первый факт {markers[0]}.",
@@ -1314,10 +1525,10 @@ def _case_06(h: Harness) -> dict[str, Any]:
         "D06",
         "",
         document=h.document(
-            "малый материал.odt",
+            _filename(h, "малый материал", "odt", fallback="малый материал.odt"),
             "application/vnd.oasis.opendocument.text",
             _odt_bytes(paragraphs, title="Small fit first"),
-            f"telegram-file:SMALL-{h.run_index}",
+            _source_ref(h, "SMALL"),
         ),
     )
     delta = h.probes.delta(before)
@@ -1348,15 +1559,16 @@ def _case_06(h: Harness) -> dict[str, Any]:
 
 def _case_07(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
-    marker = f"SCAN-PAGE-FIVE-{h.run_index}"
+    marker = _marker(h, "SCAN-PAGE-FIVE")
+    fixture_scope = _marker(h, "SCAN-SCOPE")
     answer = h.chat(
         "D07",
         "Прочитай все страницы скана. Какой SECRET CODE расположен на пятой странице?",
         document=h.document(
-            "пятистраничный скан.pdf",
+            _filename(h, "пятистраничный скан", "pdf", fallback="пятистраничный скан.pdf"),
             "application/pdf",
-            _scan_pdf(marker),
-            f"telegram-file:SCAN-{h.run_index}",
+            _scan_pdf(marker, fixture_scope=fixture_scope),
+            _source_ref(h, "SCAN"),
         ),
     )
     file_ingestion = _mapping(answer.get("file_ingestion"))
@@ -1376,11 +1588,12 @@ def _case_07(h: Harness) -> dict[str, Any]:
 def _case_08(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     markers = (
-        f"LONG-HEAD-{h.run_index}",
-        f"LONG-MIDDLE-{h.run_index}",
-        f"LONG-TAIL-{h.run_index}",
+        _marker(h, "LONG-HEAD"),
+        _marker(h, "LONG-MIDDLE"),
+        _marker(h, "LONG-TAIL"),
     )
-    filler = "Синтетический нейтральный абзац описывает порядок учёта и проверки. "
+    fixture_scope = _marker(h, "LONG-SCOPE")
+    filler = f"Синтетический нейтральный абзац описывает порядок учёта и проверки в выборке {fixture_scope}. "
     parts = [f"Начало документа. Контрольный код {markers[0]}.\n"]
     parts.append((filler * 1500) + f"\nСередина документа. Контрольный код {markers[1]}.\n")
     parts.append((filler * 1500) + f"\nКонец документа. Контрольный код {markers[2]}.\n")
@@ -1390,10 +1603,10 @@ def _case_08(h: Harness) -> dict[str, Any]:
         "D08",
         "Обобщи весь документ целиком и отдельно перечисли контрольные коды из начала, середины и хвоста.",
         document=h.document(
-            "большой документ.txt",
+            _filename(h, "большой документ", "txt", fallback="большой документ.txt"),
             "text/plain",
             payload,
-            f"telegram-file:LONG-{h.run_index}",
+            _source_ref(h, "LONG"),
         ),
     )
     delta = h.probes.delta(before)
@@ -1437,14 +1650,22 @@ def _tree_contains_any(root: Path, needles: Sequence[bytes]) -> bool:
 
 def _case_09(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
-    password = f"  Cafe\u0301-{secrets.token_hex(4)}-🔐  "
-    marker = f"ARCHIVE-NESTED-{h.run_index}"
+    identity = getattr(h, "identity", None)
+    password_token = (
+        identity.token("archive-password", length=12)
+        if isinstance(identity, CaseIdentity)
+        else secrets.token_hex(6)
+    )
+    password = f"  Cafe\u0301-{password_token}-🔐  "
+    marker = _marker(h, "ARCHIVE-NESTED")
+    inner_name = _filename(h, "nested/document", "odt", fallback="nested/document.odt")
     archive = _encrypted_zip(
-        "nested/document.odt",
+        inner_name,
         _odt_bytes([f"Вложенный контрольный код: {marker}."], title="Nested protected"),
         password,
     )
-    source_ref = f"telegram-file:ENCRYPTED-{h.run_index}"
+    source_ref = _source_ref(h, "ENCRYPTED")
+    archive_name = _filename(h, "защищённый", "zip", fallback="защищённый.zip")
     initial_row = h.storage.execute(
         "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
         (h.owner_id,),
@@ -1453,7 +1674,7 @@ def _case_09(h: Harness) -> dict[str, Any]:
     missing = h.chat(
         "D09",
         "Какой код находится во вложенном документе?",
-        document=h.document("защищённый.zip", "application/zip", archive, source_ref),
+        document=h.document(archive_name, "application/zip", archive, source_ref),
     )
     after_missing_row = h.storage.execute(
         "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
@@ -1464,7 +1685,7 @@ def _case_09(h: Harness) -> dict[str, Any]:
     success = h.chat(
         "D09",
         "Какой код находится во вложенном документе?",
-        document=h.document("защищённый.zip", "application/zip", archive, source_ref),
+        document=h.document(archive_name, "application/zip", archive, source_ref),
         archive_password=password,
     )
     after_row = h.storage.execute(
@@ -1500,8 +1721,13 @@ def _case_09(h: Harness) -> dict[str, Any]:
 
 def _case_10(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
-    marker = f"META-EXPORT-{h.run_index}"
-    number = f"17-ДСП/{h.run_index}"
+    marker = _marker(h, "META-EXPORT")
+    identity = getattr(h, "identity", None)
+    number = (
+        f"17-ДСП/{identity.token('document-number', length=8).upper()}"
+        if isinstance(identity, CaseIdentity)
+        else f"17-ДСП/{h.run_index}"
+    )
     body_date = "10 августа 2026 года"
     body = (
         "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ",
@@ -1510,12 +1736,14 @@ def _case_10(h: Harness) -> dict[str, Any]:
         f"Контрольный маркер: {marker}",
         "Подписант: начальник отдела Иван Иванович Иванов",
     )
-    source_ref = f"telegram-file:METADATA-{h.run_index}"
+    source_ref = _source_ref(h, "METADATA")
+    regular_name = _filename(h, "metadata-export", "docx", fallback="metadata-export.docx")
+    mcp_name = _filename(h, "mcp-metadata", "txt", fallback="mcp-metadata.txt")
     metadata = h.chat(
         "D10",
         "Покажи все технические метаданные контейнера и все видимые реквизиты этого документа.",
         document=h.document(
-            "приказ с реквизитами.odt",
+            _filename(h, "приказ с реквизитами", "odt", fallback="приказ с реквизитами.odt"),
             "application/vnd.oasis.opendocument.text",
             _odt_bytes(
                 body,
@@ -1530,7 +1758,7 @@ def _case_10(h: Harness) -> dict[str, Any]:
     text = str(metadata.get("message") or "")
     regular = h.chat(
         "D10",
-        "Создай обычный Word-файл metadata-export.docx по процитированному документу. "
+        f"Создай обычный Word-файл {regular_name} по процитированному документу. "
         "Включи ровно четыре строки: гриф, номер документа, видимую дату документа "
         "и подписанта из предыдущего ответа.",
         reply_document_source_ref=source_ref,
@@ -1551,7 +1779,7 @@ def _case_10(h: Harness) -> dict[str, Any]:
 
         extracted = DocumentExtractor(secret_values=()).extract(
             regular_payload,
-            str(files[0].get("filename") or "metadata-export.docx"),
+            str(files[0].get("filename") or regular_name),
             str(files[0].get("mime_type") or ""),
         )
         regular_extraction_success = extracted.success
@@ -1581,14 +1809,14 @@ def _case_10(h: Harness) -> dict[str, Any]:
     before = h.probes.snapshot()
     mcp = h.chat(
         "D10",
-        "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
+        f"Используй именно workspace_create и создай в MCP outbox файл {mcp_name}. "
         "Первая строка — только значение номера документа без подписи. Вторая строка — "
         "только значение контрольного маркера без подписи. Никаких других строк.",
         reply_document_source_ref=source_ref,
         reply_to=text[:1000],
     )
     delta = h.probes.delta(before)
-    outbox = Path(str(h.settings.mcp_workspace_outbox_dir)) / "mcp-metadata.txt"
+    outbox = Path(str(h.settings.mcp_workspace_outbox_dir)) / mcp_name
     outbox_bytes = outbox.read_bytes() if outbox.is_file() else b""
     outbox_lines = tuple(
         _normalized(line)
@@ -1609,7 +1837,7 @@ def _case_10(h: Harness) -> dict[str, Any]:
         repeated = asyncio.run(
             h.app.state.kernel.execute(
                 "workspace_create",
-                {"filename": "mcp-metadata.txt", "content": "must-not-overwrite"},
+                {"filename": mcp_name, "content": "must-not-overwrite"},
                 actor=owner,
             )
         )
@@ -1637,7 +1865,7 @@ def _case_10(h: Harness) -> dict[str, Any]:
         "regular_file_delivered": bool(
             len(files) == 1
             and isinstance(files[0], Mapping)
-            and str(files[0].get("filename") or "") == "metadata-export.docx"
+            and str(files[0].get("filename") or "") == regular_name
             and regular_payload
             and regular_extraction_success
         ),
@@ -1704,8 +1932,13 @@ def _assert_worker_settings(settings: Any, run_dir: Path, *, require_mcp: bool) 
         raise BatteryFailure("mcp_not_enabled")
 
 
-def _settings_for_case(base: Any, run_dir: Path, case_id: str) -> tuple[Any, Path, Path]:
-    paths = case_state_paths(run_dir, case_id)
+def _settings_for_case(
+    base: Any,
+    run_dir: Path,
+    case_id: str,
+    identity: CaseIdentity | None = None,
+) -> tuple[Any, Path, Path]:
+    paths = case_state_paths(run_dir, case_id, identity)
     for key, path in paths.items():
         if key not in {"database", "evidence"}:
             _private_dir(path)
@@ -1741,6 +1974,8 @@ def execute_worker(run_index: int) -> dict[str, Any]:
 
     run_dir = Path(os.environ["FRIDAY_DOCUMENT_BATTERY_RUN_DIR"]).resolve()
     evidence_path = Path(os.environ["FRIDAY_DOCUMENT_BATTERY_EVIDENCE"]).resolve()
+    run_id = _validated_run_id(os.environ.get(_RUN_ID_ENV, ""))
+    run_hash = _run_id_hash(run_id)
     if not 1 <= run_index <= RUNS or not _inside(evidence_path, run_dir):
         raise BatteryFailure("worker_request_invalid")
     from friday.config import ensure_runtime_dirs, load_settings, validate_settings
@@ -1755,7 +1990,8 @@ def execute_worker(run_index: int) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     started = time.monotonic()
     for scenario, runner in zip(SCENARIOS, _CASE_RUNNERS, strict=True):
-        state = case_state_paths(run_dir, scenario.case_id)
+        identity = _case_identity(run_id, run_index, scenario.case_id)
+        state = case_state_paths(run_dir, scenario.case_id, identity)
         case_dir = _private_dir(state["root"])
         case_evidence_path = state["evidence"]
         raw_evidence: list[dict[str, Any]] = []
@@ -1765,6 +2001,7 @@ def execute_worker(run_index: int) -> dict[str, Any]:
                 base_settings,
                 run_dir,
                 scenario.case_id,
+                identity,
             )
             _assert_worker_settings(
                 settings,
@@ -1780,7 +2017,7 @@ def execute_worker(run_index: int) -> dict[str, Any]:
                 manager = getattr(app.state, "mcp", None)
                 if scenario.case_id == "D10" and (manager is None or not manager.is_available("workspace")):
                     raise BatteryFailure("mcp_workspace_unavailable")
-                harness = Harness(app, client, settings, case_dir, run_index)
+                harness = Harness(app, client, settings, case_dir, run_index, identity)
                 try:
                     result = runner(harness)
                     if harness.probes.counts["forbidden_web_calls"]:
@@ -1813,6 +2050,7 @@ def execute_worker(run_index: int) -> dict[str, Any]:
                     {
                         "schema": WORKER_SCHEMA,
                         "run_index": run_index,
+                        "run_id_hash": run_hash,
                         "case_id": scenario.case_id,
                         "fresh_database": True,
                         "raw_private_evidence": raw_evidence,
@@ -1828,6 +2066,7 @@ def execute_worker(run_index: int) -> dict[str, Any]:
             {
                 "schema": WORKER_SCHEMA,
                 "run_index": run_index,
+                "run_id_hash": run_hash,
                 "fresh_database_per_case": True,
                 "closed_results": results,
             }
@@ -1836,6 +2075,7 @@ def execute_worker(run_index: int) -> dict[str, Any]:
     return {
         "schema": WORKER_SCHEMA,
         "run_index": run_index,
+        "run_id_hash": run_hash,
         "status": "passed" if all(item["status"] == "passed" for item in results) else "failed",
         "duration_ms": round((time.monotonic() - started) * 1000),
         "cases": results,
@@ -1896,17 +2136,21 @@ def _controller_source_env_file(value: str) -> Path | None:
 def run_controller(args: argparse.Namespace) -> dict[str, Any]:
     commit = _validate_live_gate(str(args.freeze_commit or ""), bool(args.bridge_stopped))
     source_env_file = _controller_source_env_file(str(args.source_env_file or ""))
+    run_id = _new_run_id()
+    run_hash = _run_id_hash(run_id)
     private_root = Path(tempfile.mkdtemp(prefix="friday-document-live-battery-")).resolve()
     private_root.chmod(0o700)
     reports: list[dict[str, Any]] = []
-    owner_chats = tuple(9911000 + index for index in range(1, 12))
     try:
         for run_index in range(1, RUNS + 1):
-            run_dir = _private_dir(private_root / f"run-{run_index}")
+            run_token = _run_token(run_id, run_index, "state-path")
+            run_dir = _private_dir(private_root / f"run-{run_index}-{run_token}")
+            owner_chats = _run_owner_chats(run_id, run_index)
             environment = build_worker_environment(
                 run_dir,
                 owner_chats=owner_chats,
                 source_env_file=source_env_file,
+                run_id=run_id,
             )
             log_path = run_dir / "private-worker.log"
             log_descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -1936,6 +2180,19 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
                     "failure_codes": ["worker_output_invalid"],
                     "cases": [],
                 }
+            if (
+                report.get("schema") != WORKER_SCHEMA
+                or report.get("run_index") != run_index
+                or report.get("run_id_hash") != run_hash
+            ):
+                report = {
+                    "schema": WORKER_SCHEMA,
+                    "run_index": run_index,
+                    "run_id_hash": run_hash,
+                    "status": "failed",
+                    "failure_codes": ["worker_identity_mismatch"],
+                    "cases": [],
+                }
             reports.append(report)
             if report.get("status") != "passed":
                 # A failed first streak must be fixed on a new frozen commit;
@@ -1944,6 +2201,7 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
         aggregate = {
             "schema": REPORT_SCHEMA,
             "commit": commit,
+            "run_id_hash": run_hash,
             "runs_expected": RUNS,
             "runs_completed": len(reports),
             "cases_expected_per_run": CASES,

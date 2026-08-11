@@ -551,6 +551,163 @@ async def test_late_make_file_uses_the_code_owned_requested_output_name(
 
 
 @pytest.mark.asyncio
+async def test_exact_requested_body_lines_are_not_promoted_to_the_document_title(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+    fields = [
+        "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ",
+        "ПРИКАЗ № 17-ДСП/1",
+        "Дата документа: 10 августа 2026 года",
+        "Подписант: начальник отдела Иван Иванович Иванов",
+    ]
+
+    made = await runtime._file_for_a_request_that_wanted_one(  # noqa: SLF001
+        "Создай обычный Word-файл metadata-export.docx. Включи ровно четыре строки.",
+        "\n".join(fields),
+        ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert made is not None
+    assert [name for name, _arguments in kernel.calls] == ["make_file"]
+    arguments = kernel.calls[0][1]
+    assert arguments["filename"] == "metadata-export"
+    assert arguments["title"] == "metadata-export"
+    assert arguments["blocks"] == [{"kind": "text", "text": field} for field in fields]
+
+
+@pytest.mark.asyncio
+async def test_exact_single_body_line_bypasses_only_the_generic_report_minimum(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+
+    made = await runtime._file_for_a_request_that_wanted_one(  # noqa: SLF001
+        "Создай Word-файл one.docx. Включи ровно одну строку.",
+        "Единственная строка.",
+        ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert made is not None
+    assert kernel.calls == [
+        (
+            "make_file",
+            {
+                "kind": "docx",
+                "title": "one",
+                "blocks": [{"kind": "text", "text": "Единственная строка."}],
+                "filename": "one",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize("answer", ["", "Первая строка.\nВторая строка."])
+@pytest.mark.asyncio
+async def test_invalid_exact_single_line_answers_do_not_bypass_the_generic_minimum(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: str,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+
+    made = await runtime._file_for_a_request_that_wanted_one(  # noqa: SLF001
+        "Создай Word-файл one.docx. Включи ровно одну строку.",
+        answer,
+        ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert made is None
+    assert kernel.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ordinary_single_line_report_still_obeys_the_generic_minimum(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+
+    made = await runtime._file_for_a_request_that_wanted_one(  # noqa: SLF001
+        "Создай Word-файл с обычным отчётом.",
+        "Обычный заголовок без тела.",
+        ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert made is None
+    assert kernel.calls == []
+
+
+@pytest.mark.asyncio
+async def test_full_chat_delivers_one_exact_body_line_without_a_fill_generation(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+    fill_calls = 0
+
+    async def generate(context: AgentContext, message: str, attachments: Any) -> dict[str, Any]:
+        del context, message, attachments
+        return {"content": "Единственная строка.", "tools_used": []}
+
+    async def count_fill(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal fill_calls
+        fill_calls += 1
+        return {"content": "Незапрошенная вторая генерация."}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_attachment_primary_chat", count_fill)
+
+    reply = await runtime.chat(
+        "alice",
+        "Создай Word-файл one.docx. Включи ровно одну строку.",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        enable_tools=False,
+    )
+
+    assert fill_calls == 0
+    assert reply["tools_used"] == ["make_file"]
+    assert len(reply["files"]) == 1
+    assert kernel.calls[0][1]["blocks"] == [{"kind": "text", "text": "Единственная строка."}]
+
+
+@pytest.mark.asyncio
+async def test_ordinary_report_still_promotes_its_first_line_to_the_title(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _LateFileKernel(success=True)
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+
+    made = await runtime._file_for_a_request_that_wanted_one(  # noqa: SLF001
+        "Сделай Word-файл с обычным отчётом.",
+        "Обычный отчёт\nПервый абзац.\nВторой абзац.",
+        ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert made is not None
+    arguments = kernel.calls[0][1]
+    assert arguments["title"] == "Обычный отчёт"
+    assert arguments["blocks"] == [
+        {"kind": "text", "text": "Первый абзац."},
+        {"kind": "text", "text": "Второй абзац."},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_a_lone_file_verdict_never_authorises_a_late_make_file(
     settings: Any,
     storage: Any,

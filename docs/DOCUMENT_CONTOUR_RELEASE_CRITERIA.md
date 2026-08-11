@@ -150,11 +150,36 @@ Each run contains ten unique end-to-end document scenarios:
     number/date/grif/signatory, then a document-derived export/MCP action keeps
     provenance.
 
+Every live battery execution must be fresh, not a replay of canned bytes.  The
+controller generates a new unpredictable run id; both runs and all ten cases
+derive distinct filenames, source refs, document facts, control markers and
+decoys from it.  Natural prompts rotate through bounded contract-equivalent
+wordings, so the second clean run and later retries do not merely repeat the
+same phrase.  Oracles remain deterministic and validate the underlying
+contract, not a memorised marker or one exact wording.  No case may reuse a
+prior run's database, files, MCP outbox, conversation or model-prefix cache key.
+
 The release gate is **two consecutive completely clean runs** of this battery.
 Any defect resets the clean-run counter: fix all defects found in that run,
 build a new immutable release candidate and restart the count.  Store only
 sanitized case IDs, timings, token/tool counters, boolean assertions, hashes and
 closed failure codes as evidence.
+
+### Test execution budget
+
+- Do not turn each small edit into a broad or multi-hour test campaign.  After
+  a narrow fix, run only its exact reproducer, the nearest two or three positive/
+  negative controls, and static checks for the changed files.
+- Run the broader affected offline suite once, only after the complete fix set
+  is frozen and immediately before committing the release candidate.  Do not
+  repeat it after every regex, guard or fixture adjustment.
+- Live inference is reserved for release gates: a specifically justified smoke
+  when needed, followed by the required two full batteries.  Never run live
+  cases concurrently, and never repeat a red live case before its cause is
+  diagnosed and a new immutable candidate exists.
+- Prefer adding one precise regression that proves the discovered contract over
+  growing an unbounded permutation matrix.  Extra fuzzing is justified only by
+  a concrete unresolved security or correctness boundary.
 
 ## Deployment gate
 

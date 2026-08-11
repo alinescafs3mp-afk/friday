@@ -8920,6 +8920,11 @@ _WORKSPACE_CREATE_DATA_MENTION = re.compile(
     r"\b(?:с|with)\s+(?:текст|значени|content|value)\w*\s+workspace_create\b",
     re.IGNORECASE,
 )
+_WORKSPACE_OUTPUT_LINE_PREFIX = re.compile(
+    rf"{_ATTACHMENT_ORDINAL_TOKEN.pattern}\s+(?:строк\w*|lines?)\b"
+    r"\s*(?:[-–—:]\s*)?",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -9093,6 +9098,24 @@ def _explicit_workspace_create_intent(message: str) -> _WorkspaceCreateIntent | 
     if dot <= 0 or filename[dot:].casefold() not in _WORKSPACE_CREATE_TEXT_SUFFIXES:
         return None
     return _WorkspaceCreateIntent(filename=filename)
+
+
+def _workspace_reply_attachment_selector_message(message: str) -> str:
+    """Project selectors without treating output-line wording as a file pointer.
+
+    This projection is used only after the runtime has proved one exact,
+    authorised structural reply attachment and one explicit ``workspace_create``
+    output.  Ordinals in clauses such as ``Первая строка — номер документа``
+    describe the future output, not another document in the archive.  Genuine
+    input selectors outside those line clauses (for example ``по второму
+    документу``) remain intact.
+    """
+
+    projected = _attachment_selector_message(message)
+    chars = list(projected)
+    for match in _WORKSPACE_OUTPUT_LINE_PREFIX.finditer(projected):
+        chars[match.start() : match.end()] = " " * (match.end() - match.start())
+    return "".join(chars)
 
 
 def _attachment_count_range_side(message: str) -> str:
@@ -18110,6 +18133,8 @@ class AgentRuntime:
         document_metadata_other_requested = bool(
             document_metadata_requested and _DOCUMENT_METADATA_OTHER_TARGET.search(clean_message)
         )
+        clean_workspace_channel_requested = _workspace_create_channel_request(clean_message)
+        clean_workspace_intent = _explicit_workspace_create_intent(clean_message)
         attachment_selector_message = _attachment_selector_message(clean_message)
         attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
         # A stop order is the emergency path: after conversation ownership and
@@ -18191,6 +18216,7 @@ class AgentRuntime:
             if may_read_files
             else []
         )
+        current_attachment_authorized = False
         if current_attachment_ids and len(current_attachment_ids) == supplied_attachment_count:
             canonical_current = [
                 owned
@@ -18238,6 +18264,16 @@ class AgentRuntime:
                 # the storage-owned extractor result, never a forged sibling
                 # field from the request.
                 attachment_list = canonical_current
+                current_attachment_authorized = True
+        workspace_reply_attachment_contract = bool(
+            clean_workspace_intent is not None
+            and supplied_attachment_count == 1
+            and current_attachment_authorized
+            and (quoted_attachment_reference or reply_assistant_reference)
+        )
+        if workspace_reply_attachment_contract:
+            attachment_selector_message = _workspace_reply_attachment_selector_message(clean_message)
+            attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
         replay_had_attachments, replay_attachment_count, replay_attachment_ids = (
             self._replay_source_attachment_state(
                 clean_message,
@@ -18259,9 +18295,9 @@ class AgentRuntime:
         filename_mentions = _attachment_filename_mentions(attachment_selector_message)
         filename_targets_existing_attachment = bool(filename_mentions)
         hard_attachment_selector = bool(
-            _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
-            or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
-            or _ATTACHMENT_SELECTIVE_REFERENCE.search(clean_message)
+            _ATTACHMENT_WORD_ORDINAL_PHRASE.search(attachment_selector_message)
+            or _ATTACHMENT_NUMERIC_ORDINAL.search(attachment_selector_message)
+            or _ATTACHMENT_SELECTIVE_REFERENCE.search(attachment_selector_message)
             or filename_targets_existing_attachment
         )
         descriptive_filename_selector = _descriptive_filename_selector(clean_message)
@@ -18281,10 +18317,10 @@ class AgentRuntime:
             )
             and (
                 _attachment_filename_mentions(attachment_selector_message)
-                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
-                or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
-                or _ATTACHMENT_BOTH_REFERENCE.search(clean_message)
-                or _ATTACHMENT_SELECTIVE_REFERENCE.search(clean_message)
+                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(attachment_selector_message)
+                or _ATTACHMENT_NUMERIC_ORDINAL.search(attachment_selector_message)
+                or _ATTACHMENT_BOTH_REFERENCE.search(attachment_selector_message)
+                or _ATTACHMENT_SELECTIVE_REFERENCE.search(attachment_selector_message)
             )
         )
         restore_prior_for_current_multi = bool(
@@ -19477,7 +19513,7 @@ class AgentRuntime:
         workspace_actionable_text = _workspace_create_actionable_text(clean_message)
         workspace_channel_data_only = bool(
             _workspace_create_channel_mentioned(clean_message)
-            and not _workspace_create_channel_request(clean_message)
+            and not clean_workspace_channel_requested
             and (
                 # An unquoted identifier/outbox with a negated, meta or data
                 # use grants no alternate file effect either.
@@ -19656,6 +19692,7 @@ class AgentRuntime:
             if context.remainder_known
             else clean_message
         )
+        workspace_authority_message = clean_message if workspace_reply_attachment_contract else ""
         shape_guidance = _text_shape_guidance_for(shape_request)
         if shape_guidance:
             # A request to compose/format an answer is an instruction to this
@@ -19932,7 +19969,12 @@ class AgentRuntime:
                 "_office_exact_status": str(office_exact["status"]),
                 "_office_exact_kind": str(office_exact["kind"]),
             }
-        elif settled and context.remainder_known and not asked_of_model.strip():
+        elif (
+            settled
+            and context.remainder_known
+            and not asked_of_model.strip()
+            and not workspace_authority_message
+        ):
             response = {
                 "content": "",
                 "tools_used": inventory_preflight_tools_used,
@@ -19947,19 +19989,39 @@ class AgentRuntime:
                 bundle=context.attachment_hierarchy_bundle,
                 hierarchy_complete=context.attachment_hierarchy_complete,
             )
-        elif self.llm.enabled and (visible_tools or _workspace_create_channel_request(asked_of_model)):
+        elif self.llm.enabled and (
+            visible_tools
+            or _workspace_create_channel_request(asked_of_model)
+            or bool(workspace_authority_message)
+        ):
             outbound_tool_allowlist = (
                 frozenset({"web_search", "web_research", "web_fetch"}) if restricted_outbound_turn else None
             )
-            response = await self._agentic_loop(
-                context,
-                asked_of_model,
-                actor,
-                visible_tools,
-                attachments,
-                outbound_allowed=not outbound_blocked,
-                outbound_tool_allowlist=outbound_tool_allowlist,
-            )
+            if workspace_authority_message:
+                response = await self._agentic_loop(
+                    context,
+                    asked_of_model,
+                    actor,
+                    visible_tools,
+                    attachments,
+                    outbound_allowed=not outbound_blocked,
+                    outbound_tool_allowlist=outbound_tool_allowlist,
+                    workspace_authority_message=workspace_authority_message,
+                )
+            else:
+                # Preserve the established internal call seam for ordinary
+                # turns and test/adapter doubles which implement that exact
+                # signature.  The extra authority argument exists only for the
+                # narrowly validated structural workspace reply contract.
+                response = await self._agentic_loop(
+                    context,
+                    asked_of_model,
+                    actor,
+                    visible_tools,
+                    attachments,
+                    outbound_allowed=not outbound_blocked,
+                    outbound_tool_allowlist=outbound_tool_allowlist,
+                )
         else:
             response = await self._generate_response(generation_context, asked_of_model, attachments)
 
@@ -21490,7 +21552,7 @@ class AgentRuntime:
             and not response.get("llm_failed")
             and response.get("_attachment_model_failure_owned") is not True
             and response.get("_unreadable_attachment_owned") is not True
-            and not _workspace_create_channel_request(asked_of_model)
+            and not clean_workspace_channel_requested
             and not workspace_channel_data_only
             and (not capability_refusal or bool(_REFUSAL_OFFERS_LOCAL_FILE.search(compact_model_said)))
             and asked_for_a_file
@@ -23616,6 +23678,7 @@ class AgentRuntime:
         *,
         outbound_allowed: bool = True,
         outbound_tool_allowlist: frozenset[str] | None = None,
+        workspace_authority_message: str = "",
     ) -> dict[str, Any]:
         def outward_tool_is_allowed(tool_name: str) -> bool:
             if tool_name not in _OUTBOUND_TOOL_NAMES:
@@ -23624,6 +23687,9 @@ class AgentRuntime:
                 outbound_allowed and (outbound_tool_allowlist is None or tool_name in outbound_tool_allowlist)
             )
 
+        workspace_authority_message = str(workspace_authority_message or "").strip()
+        if _explicit_workspace_create_intent(workspace_authority_message) is None:
+            workspace_authority_message = ""
         messages = self._build_initial_messages(context, message, attachments, tool_enabled=True)
         # A current-file turn must not spend the foreground timeout anew on
         # every tool round, final synthesis and clean salvage.  Bound only the
@@ -23796,7 +23862,7 @@ class AgentRuntime:
         # последним сообщением ей уходила пустая строка. Замерено на боевой
         # сборке: вопрос_в_промпте=False, конверт данных не строился.
         if context.structural_answer and context.remainder_known:
-            rest = context.open_remainder.strip()
+            rest = workspace_authority_message or context.open_remainder.strip()
             if not rest:
                 # Отвечать больше не на что. Ход модели здесь не просто лишний
                 # расход: это единственная дверь, через которую в ответ попадает
@@ -23819,6 +23885,20 @@ class AgentRuntime:
             messages = self._build_initial_messages(context, rest, attachments, tool_enabled=True)
             messages.extend(added)
             context_message = rest
+        elif workspace_authority_message and workspace_authority_message != context_message:
+            # The structural parser may consume the whole visible clause while
+            # establishing attachment context.  A validated explicit outbox
+            # order is still the model-facing authority for the one forced MCP
+            # effect; do not derive that authority from the consumed remainder.
+            added = messages[before_prefetch:]
+            messages = self._build_initial_messages(
+                context,
+                workspace_authority_message,
+                attachments,
+                tool_enabled=True,
+            )
+            messages.extend(added)
+            context_message = workspace_authority_message
 
         workspace_channel_requested = _workspace_create_channel_request(context_message)
         workspace_intent = _explicit_workspace_create_intent(context_message)
@@ -26172,6 +26252,14 @@ class AgentRuntime:
             return None
         failed = bool(_ANSWER_IS_A_FAILURE.search(answer))
         blocks = [] if failed else _blocks_from_text(answer)
+        exact_body_blocks = None if failed else _validated_exact_file_body_blocks(request, answer)
+        if exact_body_blocks is not None:
+            # ``_blocks_from_text`` normally promotes the first prose line to
+            # the report title.  In a closed ``ровно N строк/абзацев`` request
+            # those N lines are the requested body itself; the title is owned
+            # separately by the request/output filename.
+            blocks = exact_body_blocks
+        exact_body_ready = exact_body_blocks is not None
         evidence_entries = [dict(item) for item in (evidence or []) if isinstance(item, Mapping)]
         canonical_records, legacy_records = _split_office_attachment_evidence(evidence_entries)
         hierarchy_records = [
@@ -26206,7 +26294,7 @@ class AgentRuntime:
             if single_body:
                 blocks = [{"kind": "text", "text": single_body}]
         hierarchy_body_ready = bool(hierarchy_records and blocks)
-        if len(blocks) < 2 and self.llm.enabled and not hierarchy_body_ready:
+        if len(blocks) < 2 and self.llm.enabled and not hierarchy_body_ready and not exact_body_ready:
             if not grounds.strip() and not canonical_records and not context_ground_records:
                 # Ни содержимого, ни оснований. Второй заход дал бы красивый файл с
                 # выдуманными числами: замерено — «15 420 записей», «500 ГБ», «10
@@ -26301,10 +26389,13 @@ class AgentRuntime:
                         return None
                     blocks = _blocks_from_text(clean)
                     # Заголовок — из ТОГО ЖЕ текста, из которого собраны блоки.
+                    answer = clean
+                    exact_body_blocks = _validated_exact_file_body_blocks(request, clean)
+                    if exact_body_blocks is not None:
+                        blocks = exact_body_blocks
                     # Иначе документ, собранный вторым заходом, получал имя по
                     # реплике из чата: «Собираю отчёт по документам которые
                     # появились в архиве в июле 2026 года.docx».
-                    answer = clean
             except Exception as exc:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
                 LOGGER.warning("Could not obtain document content (%s)", type(exc).__name__)
         if not blocks:
@@ -26340,14 +26431,21 @@ class AgentRuntime:
         if not requested_filename_supported:
             LOGGER.warning("Fallback file build rejected an unsupported output filename format")
             return None
+        exact_body_blocks = _validated_exact_file_body_blocks(request, answer)
         if blocks is None:
-            blocks = _blocks_from_text(answer)
+            blocks = exact_body_blocks or _blocks_from_text(answer)
         if not blocks:
             return None
-        # Заголовок берётся из ОТВЕТА, а не из `blocks[0]`: первый содержательный
-        # абзац как раз и становится заголовком, поэтому в блоках его уже нет —
-        # прежний порядок спрашивал у списка то, что из него вынули.
-        title = _title_from_text(answer) or _title_from_request(request) or "Отчёт"
+        # В обычном отчёте заголовок берётся из ОТВЕТА, а не из `blocks[0]`:
+        # первый содержательный абзац уже вынут из тела.  У закрытой формы
+        # ``ровно N строк/абзацев`` ни одна строка не является заголовком, и его
+        # отдельно задаёт подтверждённое имя выхода/сама просьба.
+        exact_body_shape = exact_body_blocks is not None and blocks == exact_body_blocks
+        title = (
+            (requested_filename or _title_from_request(request) or "Отчёт")
+            if exact_body_shape
+            else (_title_from_text(answer) or _title_from_request(request) or "Отчёт")
+        )
         arguments: dict[str, Any] = {"kind": kind, "title": title, "blocks": blocks}
         if requested_filename:
             # ``ExecutionKernel._safe_filename`` appends the validated kind's
@@ -30566,7 +30664,11 @@ def _tab_table_row(line: str) -> list[str] | None:
     return [_clean_markup(cell) for cell in cells]
 
 
-def _blocks_from_text(text: str) -> list[dict[str, Any]]:
+def _blocks_from_text(
+    text: str,
+    *,
+    preserve_first_text: bool = False,
+) -> list[dict[str, Any]]:
     """Текст ответа — в блоки документа.
 
     Разметки в ответе нет по правилам системного промпта (канал — мессенджер),
@@ -30651,8 +30753,87 @@ def _blocks_from_text(text: str) -> list[dict[str, Any]]:
             blocks.append({"kind": "text", "text": line})
     flush()
     # Первая строка стала заголовком документа — в теле она была бы повтором.
-    if blocks and blocks[0].get("kind") == "text":
+    if not preserve_first_text and blocks and blocks[0].get("kind") == "text":
         first = str(blocks[0].get("text") or "")
         if _title_from_text(first) == first[:80]:
             blocks = blocks[1:]
+    return blocks
+
+
+_EXACT_FILE_BODY_NUMBER_WORDS = {
+    "один": 1,
+    "одна": 1,
+    "одно": 1,
+    "одну": 1,
+    "два": 2,
+    "две": 2,
+    "двух": 2,
+    "три": 3,
+    "трех": 3,
+    "трёх": 3,
+    "четыре": 4,
+    "четырех": 4,
+    "четырёх": 4,
+    "пять": 5,
+    "пяти": 5,
+    "шесть": 6,
+    "шести": 6,
+    "семь": 7,
+    "семи": 7,
+    "восемь": 8,
+    "восьми": 8,
+    "девять": 9,
+    "девяти": 9,
+    "десять": 10,
+    "десяти": 10,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+_EXACT_FILE_BODY_NUMBER = r"(?:[1-9]|[1-5][0-9]|6[0-4]|" + "|".join(_EXACT_FILE_BODY_NUMBER_WORDS) + r")"
+_EXACT_FILE_BODY_COUNT = re.compile(
+    rf"(?:\bровно\s+(?P<ru>{_EXACT_FILE_BODY_NUMBER})\s+"
+    rf"(?:отдельн\w*\s+)?(?:строк\w*|абзац\w*)\b|"
+    rf"\bexactly\s+(?P<en>{_EXACT_FILE_BODY_NUMBER})\s+"
+    rf"(?:separate\s+)?(?:lines?|paragraphs?)\b)",
+    re.IGNORECASE,
+)
+
+
+def _requested_exact_file_body_count(request: str) -> int | None:
+    """Return one bounded exact body count from an authorised file request."""
+
+    visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(request)).split())
+    if not visible or len(visible) > 4_000 or not _is_direct_file_request(visible):
+        return None
+    kind = _file_kind_from_request(visible)
+    _stem, output_supported = _requested_output_filename_stem(visible, kind=kind)
+    if not output_supported:
+        return None
+    matches = list(_EXACT_FILE_BODY_COUNT.finditer(visible))
+    if len(matches) != 1:
+        return None
+    token = str(matches[0].group("ru") or matches[0].group("en") or "").casefold()
+    return int(token) if token.isdigit() else _EXACT_FILE_BODY_NUMBER_WORDS.get(token)
+
+
+def _validated_exact_file_body_blocks(
+    request: str,
+    answer: str,
+) -> list[dict[str, Any]] | None:
+    """Keep all N plain body blocks only when the requested shape is exact."""
+
+    expected = _requested_exact_file_body_count(request)
+    if expected is None:
+        return None
+    blocks = _blocks_from_text(answer, preserve_first_text=True)
+    if len(blocks) != expected or any(block.get("kind") != "text" for block in blocks):
+        return None
     return blocks

@@ -7,7 +7,9 @@ import json
 import time
 import uuid
 import zipfile
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -496,6 +498,403 @@ def _synthetic_metadata_odt(
 </office:document-meta>""",
         )
     return payload.getvalue()
+
+
+class _D10RoutingLLM:
+    enabled = True
+    total_budget_sec = 5.0
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def chat(
+        self,
+        messages,
+        *,
+        temperature=None,
+        max_tokens=None,
+        tools=None,
+        tool_choice=None,
+        **_kwargs,
+    ):
+        del temperature, max_tokens
+        offered = {
+            str((item.get("function") or {}).get("name") or "")
+            for item in (tools or [])
+            if isinstance(item, Mapping)
+        }
+        last_user = next(
+            (
+                str(item.get("content") or "")
+                for item in reversed(messages)
+                if isinstance(item, Mapping) and str(item.get("role") or "") == "user"
+            ),
+            "",
+        )
+        last_user_index = max(
+            (
+                index
+                for index, item in enumerate(messages)
+                if isinstance(item, Mapping) and str(item.get("role") or "") == "user"
+            ),
+            default=-1,
+        )
+        tool_result_after_user = any(
+            isinstance(item, Mapping) and str(item.get("role") or "") == "tool"
+            for item in messages[last_user_index + 1 :]
+        )
+        self.calls.append(
+            {
+                "user": last_user,
+                "tool_choice": tool_choice,
+                "offered": offered,
+            }
+        )
+        common = {"_queue_wait_sec": 0.0, "_offered_tool_names": sorted(offered)}
+        if any(
+            "FRIDAY_DOCUMENT_DETAIL_DATA" in str(item.get("content") or "")
+            for item in messages
+            if isinstance(item, Mapping)
+        ):
+            return {**common, "content": '{"details":[]}', "tool_calls": None}
+        if tool_choice == "workspace_create":
+            return {
+                **common,
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "d10-workspace-create",
+                        "function": {
+                            "name": "workspace_create",
+                            "arguments": json.dumps(
+                                {
+                                    "filename": "model-must-not-choose.txt",
+                                    "content": "17-ДСП/1\nMETA-EXPORT-1\n",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        if "metadata-export.docx" in last_user and not tool_result_after_user:
+            return {
+                **common,
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "d10-regular-make-file",
+                        "function": {
+                            "name": "make_file",
+                            "arguments": json.dumps(
+                                {
+                                    "kind": "docx",
+                                    "title": "metadata export",
+                                    "blocks": [
+                                        {"kind": "text", "text": "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ"},
+                                        {"kind": "text", "text": "17-ДСП/1"},
+                                        {"kind": "text", "text": "10 августа 2026 года"},
+                                        {"kind": "text", "text": "Иван Иванович Иванов"},
+                                    ],
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        if "metadata-export.docx" in last_user:
+            return {**common, "content": "Файл отправлен в этот чат.", "tool_calls": None}
+        if "workspace_create" in last_user and tool_result_after_user:
+            return {
+                **common,
+                "content": "Файл mcp-metadata.txt во внешнем MCP outbox создан.",
+                "tool_calls": None,
+            }
+        return {**common, "content": "Синтетический ответ.", "tool_calls": None}
+
+
+def _workspace_tool_schema(name: str) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": "synthetic routing contract",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_effect(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.agent_runtime import AgentContext
+    from friday.execution_kernel import ToolResult
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    llm = _D10RoutingLLM()
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        workspace = "workspace_create" in str(message)
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=str(kwargs.get("person_id") or user_id),
+            conversation_history=list(kwargs.get("prior_history") or []),
+            interaction_mode=str(kwargs.get("interaction_mode") or "dialogue"),
+            search_query=str(message),
+            outward_verdict=("материал", None),
+            # Exercise the exact production seam: a structural stage may have
+            # consumed the model remainder, but it did not consume the explicit
+            # current-user MCP authority.
+            structural_answer="Синтетический структурный этап завершён." if workspace else "",
+            open_remainder="",
+            remainder_known=workspace,
+        )
+
+    with TestClient(app) as client:
+        app.state.agent.llm = llm
+        kernel = app.state.agent.kernel
+        base_definitions = kernel.get_tool_definitions
+        base_execute = kernel.execute
+
+        def definitions(actor, topic=None):  # noqa: ANN001
+            result = list(base_definitions(actor, topic=topic))
+            names = {
+                str((item.get("function") or {}).get("name") or "")
+                for item in result
+                if isinstance(item, Mapping)
+            }
+            if "workspace_create" not in names:
+                result.append(_workspace_tool_schema("workspace_create"))
+            return result
+
+        async def execute(name, arguments, *, actor=None):  # noqa: ANN001
+            executed.append((str(name), dict(arguments)))
+            if name == "workspace_create":
+                return ToolResult(name, True, data={"created": True})
+            return await base_execute(name, arguments, actor=actor)
+
+        monkeypatch.setattr(kernel, "get_tool_definitions", definitions)
+        monkeypatch.setattr(kernel, "execute", execute)
+        monkeypatch.setattr(app.state.agent, "_prepare_context", prepare)
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        app.state.storage.update_user(uploader, preset_key="owner")
+        source_ref = "telegram-file:D10-ROUTING-SOURCE"
+        upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": (
+                    "Покажи все технические метаданные контейнера и все видимые реквизиты этого документа."
+                ),
+                "source_ref": "telegram-update:d10-routing-1",
+                "telegram_message_id": 7101,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "document": {
+                    "filename": "d10-routing.odt",
+                    "mime_type": "application/vnd.oasis.opendocument.text",
+                    "media_kind": "document",
+                    "source_ref": source_ref,
+                    "content_base64": base64.b64encode(_synthetic_metadata_odt()).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert upload.status_code == 200, upload.text
+        conversation_id = str(upload.json()["conversation_id"])
+        selected_raw_id = app.state.storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            source_ref,
+        )
+        assert selected_raw_id
+
+        # A second authorised file makes the old broad ordinal match observable:
+        # it must not replace the structural reply target with catalog ambiguity.
+        decoy = _stored_reply_file(app.state.storage, LEGACY_OWNER_USER_ID, uploader, "D10-DECOY")
+        app.state.storage.store_message(
+            conversation_id,
+            uploader,
+            "user",
+            "synthetic prior decoy upload",
+            metadata={
+                "had_attachments": True,
+                "attachment_count": 1,
+                "conversation_attachment_raw_ids": [decoy.id],
+                "conversation_uploaded_raw_ids": [decoy.id],
+            },
+        )
+        app.state.storage.store_message(
+            conversation_id,
+            uploader,
+            "assistant",
+            "synthetic decoy acknowledgement",
+            metadata={
+                "attachment_context_used": True,
+                "conversation_attachment_raw_ids": [decoy.id],
+            },
+        )
+
+        regular = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": (
+                    "Создай обычный Word-файл metadata-export.docx по процитированному документу. "
+                    "Включи ровно четыре строки: гриф, номер документа, видимую дату документа "
+                    "и подписанта из предыдущего ответа."
+                ),
+                "conversation_id": conversation_id,
+                "source_ref": "telegram-update:d10-routing-2",
+                "telegram_message_id": 7102,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": source_ref,
+            },
+            user="1001",
+        )
+        assert regular.status_code == 200, regular.text
+        make_file_before_workspace = sum(name == "make_file" for name, _arguments in executed)
+
+        workspace_prompt = (
+            "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
+            "Первая строка — только значение номера документа без подписи. Вторая строка — "
+            "только значение контрольного маркера без подписи. Никаких других строк."
+        )
+        workspace = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": workspace_prompt,
+                "conversation_id": conversation_id,
+                "source_ref": "telegram-update:d10-routing-3",
+                "telegram_message_id": 7103,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": source_ref,
+            },
+            user="1001",
+        )
+        assert workspace.status_code == 200, workspace.text
+        rows = app.state.storage.get_conversation_messages(
+            conversation_id,
+            user_id=uploader,
+            limit=100,
+        )
+
+    workspace_calls = [arguments for name, arguments in executed if name == "workspace_create"]
+    assert workspace_calls == [{"filename": "mcp-metadata.txt", "content": "17-ДСП/1\nMETA-EXPORT-1\n"}]
+    assert sum(name == "make_file" for name, _arguments in executed) == make_file_before_workspace
+    forced = [call for call in llm.calls if call["tool_choice"] == "workspace_create"]
+    assert len(forced) == 1
+    assert "workspace_create" in forced[0]["offered"]
+    assert workspace.json()["tools_used"] == ["workspace_create"]
+    assert workspace.json().get("files") == []
+    final_user = next(row for row in reversed(rows) if row.get("role") == "user")
+    final_metadata = json.loads(str(final_user.get("metadata_json") or "{}"))
+    assert final_metadata["conversation_attachment_raw_ids"] == [selected_raw_id]
+    assert final_metadata["attachment_origin"] == "reply_reference"
+
+
+def test_unresolved_or_foreign_workspace_reply_pointer_has_no_effect_or_late_file(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    executed: list[str] = []
+
+    async def forbidden_late_file(*_args, **_kwargs):
+        raise AssertionError("unresolved structural reply fell through to late make_file")
+
+    prompt = (
+        "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
+        "Первая строка — номер документа."
+    )
+    with TestClient(app) as client:
+        base_execute = app.state.agent.kernel.execute
+
+        async def execute(name, arguments, *, actor=None):  # noqa: ANN001
+            executed.append(str(name))
+            return await base_execute(name, arguments, actor=actor)
+
+        monkeypatch.setattr(app.state.agent.kernel, "execute", execute)
+        monkeypatch.setattr(app.state.agent, "_file_for_a_request_that_wanted_one", forbidden_late_file)
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        app.state.storage.update_user(uploader, preset_key="owner")
+        _stored_reply_file(app.state.storage, LEGACY_OWNER_USER_ID, "foreign-uploader", "FOREIGN-D10")
+        for index, pointer in enumerate(
+            ("telegram-file:MISSING-D10", "telegram-file:FOREIGN-D10"),
+            start=1,
+        ):
+            response = _bridge_call(
+                client,
+                scoped,
+                "POST",
+                "/api/chat",
+                {
+                    "message": prompt,
+                    "source_ref": f"telegram-update:d10-denied-{index}",
+                    "telegram_message_id": 7200 + index,
+                    "telegram_user": {"id": 1001, "first_name": "Alice"},
+                    "reply_document_source_ref": pointer,
+                },
+                user="1001",
+            )
+            assert response.status_code == 200, response.text
+            assert response.json().get("files") == []
+            assert response.json().get("tools_used") == []
+
+    assert executed == []
+
+
+def test_workspace_output_line_preserves_authorized_second_document_selector(
+    settings,
+    storage,
+) -> None:
+    from friday.agent_runtime import (
+        AgentRuntime,
+        _attachment_reference_kind,
+        _workspace_reply_attachment_selector_message,
+    )
+
+    tenant = "workspace-selector-tenant"
+    uploader = "workspace-selector-uploader"
+    storage.ensure_user(tenant, preset_key="owner")
+    storage.ensure_user(uploader, preset_key="user")
+    reply_source = _stored_reply_file(storage, tenant, uploader, "WORKSPACE-REPLY-FIRST")
+    selected_second = _stored_reply_file(storage, tenant, uploader, "WORKSPACE-SELECTED-SECOND")
+    prompt = "Используй workspace_create и создай out.txt. Первая строка — значение из второго документа."
+    selector = _workspace_reply_attachment_selector_message(prompt)
+    runtime = AgentRuntime(settings, storage)
+
+    restored, expected = runtime._resolve_conversation_attachment_reference(  # noqa: SLF001
+        selector,
+        [],
+        tenant_id=tenant,
+        person_id=uploader,
+        already_supplied_count=0,
+        reference_kind=_attachment_reference_kind(selector),
+        additional_raw_ids=(reply_source.id,),
+    )
+
+    assert expected == 1
+    assert [str(item.get("raw_object_id") or "") for item in restored] == [selected_second.id]
 
 
 def test_server_resolves_only_current_uploaders_live_nonignored_reply_file(settings, monkeypatch) -> None:

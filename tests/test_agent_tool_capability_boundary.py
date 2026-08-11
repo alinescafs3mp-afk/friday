@@ -27,6 +27,7 @@ from friday.agent_runtime import (
     _explicit_workspace_create_intent,
     _workspace_create_channel_request,
     _workspace_create_success_evidence,
+    _workspace_reply_attachment_selector_message,
 )
 from friday.agent_runtime.llm import LLMRouter
 from friday.execution_kernel import ToolResult
@@ -58,6 +59,37 @@ _EXACT_WORKSPACE_PROMPT = (
     "Первая строка — только значение номера документа без подписи. Вторая строка — "
     "только значение контрольного маркера без подписи. Никаких других строк."
 )
+
+
+def test_workspace_reply_selector_masks_only_output_line_requirements() -> None:
+    from friday.agent_runtime import (
+        _ATTACHMENT_SELECTIVE_REFERENCE,
+        _attachment_reference_kind,
+        _attachment_selector_message,
+    )
+
+    projected = _workspace_reply_attachment_selector_message(_EXACT_WORKSPACE_PROMPT)
+    assert _ATTACHMENT_SELECTIVE_REFERENCE.search(projected) is None
+    assert _attachment_reference_kind(projected) == ""
+
+    explicit_input = _workspace_reply_attachment_selector_message(
+        _EXACT_WORKSPACE_PROMPT + " Возьми данные по второму документу."
+    )
+    assert _ATTACHMENT_SELECTIVE_REFERENCE.search(explicit_input) is not None
+    assert _attachment_reference_kind(explicit_input) == "explicit"
+
+    same_output_line_input = _workspace_reply_attachment_selector_message(
+        "Используй workspace_create и создай out.txt. Первая строка — значение из второго документа."
+    )
+    assert _ATTACHMENT_SELECTIVE_REFERENCE.search(same_output_line_input) is not None
+    assert _attachment_reference_kind(same_output_line_input) == "explicit"
+
+    # Without a structural pointer the ordinary selector path is untouched.
+    no_pointer_projection = _attachment_selector_message(
+        "Используй workspace_create и создай out.txt по второму документу."
+    )
+    assert _ATTACHMENT_SELECTIVE_REFERENCE.search(no_pointer_projection) is not None
+    assert _attachment_reference_kind(no_pointer_projection) == "explicit"
 
 
 class _ForcedWorkspaceLLM:

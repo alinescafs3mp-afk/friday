@@ -73,6 +73,9 @@ def test_offline_self_test_never_imports_server_or_uses_production_database(monk
     assert report["self_test"] == "passed"
     assert report["runs"] == 2
     assert report["cases_per_run"] == 10
+    assert report["identity_count"] == 40
+    assert report["identity_disjoint"] is True
+    assert report["prompt_variants"] == 2
     assert "friday.server" not in sys.modules
     assert os.environ["FRIDAY_DATABASE_PATH"] == "/sentinel/production.sqlite3"
 
@@ -107,6 +110,41 @@ def test_every_case_has_a_distinct_database_and_private_state_root(tmp_path) -> 
     assert len({item["root"] for item in states}) == 10
     assert all(item["database"].is_relative_to(item["root"]) for item in states)
     assert all(item["evidence"].is_relative_to(item["root"]) for item in states)
+
+
+def test_two_invocations_and_both_runs_have_disjoint_fixture_identities(tmp_path) -> None:
+    runner = _module()
+    run_ids = ("01" * 32, "02" * 32)
+    manifests = [runner._scenario_manifest() for _run_id in run_ids]
+    identities = [
+        runner._case_identity(run_id, run_index, scenario.case_id)
+        for run_id in run_ids
+        for run_index in range(1, runner.RUNS + 1)
+        for scenario in runner.SCENARIOS
+    ]
+
+    assert manifests[0] == manifests[1]
+    assert len(identities) == 40
+    assert len({identity.cache_prefix for identity in identities}) == 40
+    assert len({identity.marker("FACT") for identity in identities}) == 40
+    assert len({identity.source_ref("SOURCE") for identity in identities}) == 40
+    assert len({identity.filename("fixture", "odt") for identity in identities}) == 40
+    assert len({runner.case_state_paths(tmp_path, item.case_id, item)["root"] for item in identities}) == 40
+    prompts = {
+        runner._scoped_prompt(SimpleNamespace(identity=identity), "natural", "Обобщи документ.")
+        for identity in identities
+    }
+    assert len(prompts) == 40
+    assert {identity.prompt_variant("natural", 2) for identity in identities}.issubset({0, 1})
+    assert runner._scoped_prompt(SimpleNamespace(identity=identities[0]), "bare", "") == ""
+    all_chats = {
+        chat
+        for run_id in run_ids
+        for run_index in range(1, runner.RUNS + 1)
+        for chat in runner._run_owner_chats(run_id, run_index)
+    }
+    assert len(all_chats) == 44
+    assert all(run_id not in json.dumps(sorted(prompts)) for run_id in run_ids)
 
 
 def test_explicit_source_env_forwards_only_sidecar_allowlist_and_never_its_path(tmp_path) -> None:
@@ -296,15 +334,19 @@ def test_controller_stops_a_failed_streak_but_runs_two_clean_workers(
     runner = _module()
     statuses = iter(worker_statuses)
     calls = 0
+    worker_run_ids: list[str] = []
 
     def run_worker(*args, **kwargs):
         nonlocal calls
-        del args, kwargs
+        del args
         calls += 1
+        run_id = kwargs["env"][runner._RUN_ID_ENV]
+        worker_run_ids.append(run_id)
         status = next(statuses)
         payload = {
             "schema": runner.WORKER_SCHEMA,
             "run_index": calls,
+            "run_id_hash": runner._run_id_hash(run_id),
             "status": status,
             "failure_codes": [] if status == "passed" else ["synthetic_failure"],
             "cases": [],
@@ -326,8 +368,11 @@ def test_controller_stops_a_failed_streak_but_runs_two_clean_workers(
     report = runner.run_controller(args)
 
     assert calls == expected_calls
+    assert len(set(worker_run_ids)) == 1
     assert report["runs_completed"] == expected_calls
     assert report["status"] == expected_status
+    assert report["run_id_hash"] == runner._run_id_hash(worker_run_ids[0])
+    assert worker_run_ids[0] not in json.dumps(report)
     assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == expected_status
 
 
@@ -600,6 +645,7 @@ def test_d09_oracle_counts_only_files_and_reauthorizes_public_persistence(tmp_pa
         ("", ""),
         ("wrong-filename", "regular_file_delivered"),
         ("missing-signatory", "regular_file_grounded"),
+        ("missing-regular-line", "regular_file_exact_four_lines"),
         ("extra-regular-line", "regular_file_exact_four_lines"),
         ("one-line-regular", "regular_file_exact_four_lines"),
         ("swapped-regular-lines", "regular_file_exact_four_lines"),
@@ -626,6 +672,8 @@ def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
     ]
     if mutation == "missing-signatory":
         required_lines.pop()
+    if mutation == "missing-regular-line":
+        required_lines.pop(2)
     if mutation == "extra-regular-line":
         required_lines.append("Лишняя строка")
     if mutation == "swapped-regular-lines":
