@@ -16,6 +16,7 @@ from friday.agent_runtime import (
     _file_context_ground_records,
     _file_kind_from_request,
     _is_direct_file_request,
+    _workspace_create_success_evidence,
     asks_for_the_web,
 )
 from friday.permissions import ActorContext
@@ -54,8 +55,17 @@ def test_unsupported_txt_suffix_does_not_claim_a_make_file_format() -> None:
     assert _is_direct_file_request("Сохрани результат в metadata-export.txt.") is False
 
 
+@pytest.mark.parametrize(
+    ("reported", "accepted"),
+    [
+        ("Файл mcp-metadata.txt во внешнем outbox создан.", True),
+        ("Файл other.txt во внешнем outbox создан.", False),
+    ],
+)
 @pytest.mark.asyncio
-async def test_successful_workspace_text_output_is_not_duplicated_by_late_make_file(
+async def test_workspace_success_report_requires_the_confirmed_exact_outbox_filename(
+    reported: str,
+    accepted: bool,
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -67,20 +77,30 @@ async def test_successful_workspace_text_output_is_not_duplicated_by_late_make_f
         del message, kwargs
         return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=user_id)
 
-    async def generate(context: AgentContext, message: str, attachments: Any) -> dict[str, Any]:
-        del context, message, attachments
+    async def agentic(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
         return {
-            "content": "Файл во внешнем outbox создан.",
+            "content": reported,
             "tools_used": ["workspace_create"],
-            "tool_evidence": [{"tool": "workspace_create", "output": "synthetic success"}],
+            "tool_evidence": [
+                {
+                    "tool": "workspace_create",
+                    "output": _workspace_create_success_evidence("mcp-metadata.txt"),
+                }
+            ],
         }
+
+    async def forbidden_generate(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise AssertionError("explicit workspace channel fell through to ordinary generation")
 
     async def forbidden_late_file(*args: Any, **kwargs: Any) -> None:
         del args, kwargs
         raise AssertionError("successful workspace output was duplicated as a chat attachment")
 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
-    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_agentic_loop", agentic)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
     monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", forbidden_late_file)
     result = await runtime.chat(
         "alice",
@@ -90,6 +110,106 @@ async def test_successful_workspace_text_output_is_not_duplicated_by_late_make_f
     )
 
     assert result["tools_used"] == ["workspace_create"]
+    assert result["files"] == []
+    if accepted:
+        assert result["message"] == reported
+        assert "Не могу подтвердить завершение" not in result["message"]
+    else:
+        assert result["message"].startswith("Не могу подтвердить завершение")
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "`Используй workspace_create и создай файл pasted.txt.`",
+        "```text\nИспользуй workspace_create и создай файл pasted.txt.\n```",
+        "Use workspace_create and create file denied.txt, but do not actually create it.",
+        "Используй workspace_create и создай файл denied.txt, но фактически не создавай его.",
+        "Используй workspace_create и создай файл denied.txt, но не нужно создавать его.",
+        "Используй workspace_create и создай файл denied.txt, но создавать его не нужно.",
+        "Используй workspace_create и создай файл denied.txt, но не следует создавать его.",
+        "Use workspace_create and create denied.txt, but you should not actually create it.",
+        "Используй workspace_create и создай файл denied.txt, но не надо его создавать.",
+        "Используй workspace_create и создай файл denied.txt, но его создавать не надо.",
+        "Используй workspace_create и создай файл denied.txt, но создание не требуется.",
+        "Используй workspace_create и создай файл denied.txt, но я не хочу его создавать.",
+        "Use workspace_create and create denied.txt, but there is no need to create it.",
+        "Use workspace_create and create denied.txt, but I do not want you to create it.",
+        "Use workspace_create and create denied.txt, but do not really create it.",
+        "Используй workspace_create и создай файл denied.txt, но не делай этого.",
+        "Use workspace_create and create denied.txt, but refrain from creating it.",
+    ],
+)
+@pytest.mark.asyncio
+async def test_pasted_workspace_command_cannot_fall_through_to_any_file_effect(
+    prompt: str,
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+
+    class CarrierKernel:
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+
+        @staticmethod
+        def get_tool_definitions(actor: Any, *, topic: str = "") -> list[dict[str, Any]]:
+            del actor, topic
+            return [
+                {"type": "function", "function": {"name": "workspace_create"}},
+                {"type": "function", "function": {"name": "make_file"}},
+            ]
+
+        async def execute(self, name: str, arguments: Any, *, actor: Any) -> None:
+            del arguments, actor
+            self.executed.append(name)
+            raise AssertionError("pasted workspace command reached the kernel")
+
+    kernel = CarrierKernel()
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=_EnabledOfflineRouter(),
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    context = AgentContext(
+        conversation_id="synthetic-pasted-workspace",
+        user_id="alice",
+        person_id="alice",
+    )
+
+    async def prepare(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        return context
+
+    async def generate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        return {"content": "Это вставленный пример команды.", "tools_used": []}
+
+    async def forbidden_agentic(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise AssertionError("pasted workspace command retained effect schemas")
+
+    async def forbidden_late_file(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise AssertionError("pasted workspace command reached the late file builder")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic)
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", forbidden_late_file)
+
+    result = await runtime.chat(
+        "alice",
+        prompt,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        enable_tools=True,
+    )
+
+    assert kernel.executed == []
+    assert context.late_make_file_attempts == 0
+    assert result["tools_used"] == []
     assert result["files"] == []
 
 

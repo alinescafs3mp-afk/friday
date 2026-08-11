@@ -480,6 +480,7 @@ class LLMRouter:
         max_tokens: int | None = None,
         priority: str = "foreground",
         tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
         reject_repeated_token_degeneration: bool = True,
     ) -> dict[str, Any]:
         if not self.enabled:
@@ -516,6 +517,7 @@ class LLMRouter:
                     temperature,
                     max_tokens,
                     tools,
+                    tool_choice,
                     half_open_probe=half_open_probe,
                     reject_repeated_token_degeneration=reject_repeated_token_degeneration,
                 )
@@ -535,6 +537,7 @@ class LLMRouter:
         temperature: float | None,
         max_tokens: int | None,
         tools: list[dict[str, Any]] | None,
+        tool_choice: str | None = None,
     ) -> dict[str, Any]:
         requested_output = max_tokens if max_tokens is not None else self.max_tokens
         requested_output = max(64, min(int(requested_output), self.settings.profile.max_model_len - 512))
@@ -571,6 +574,12 @@ class LLMRouter:
         }
         if effective_tools:
             payload["tools"] = effective_tools
+            offered_names = set(_bounded_tool_schema_names(effective_tools))
+            if isinstance(tool_choice, str) and tool_choice in offered_names:
+                payload["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": tool_choice},
+                }
         if self.settings.profile.suppress_model_thinking:
             # This is the supported Qwen path; post-processing below is only a
             # defense-in-depth fallback for non-conforming model responses.
@@ -583,11 +592,12 @@ class LLMRouter:
         temperature: float | None,
         max_tokens: int | None,
         tools: list[dict[str, Any]] | None,
+        tool_choice: str | None,
         *,
         half_open_probe: bool = False,
         reject_repeated_token_degeneration: bool = True,
     ) -> dict[str, Any]:
-        payload = self._prepare_payload(messages, temperature, max_tokens, tools)
+        payload = self._prepare_payload(messages, temperature, max_tokens, tools, tool_choice)
         last_error: Exception | None = None
 
         # One budget for the whole series, not per attempt. Each attempt is allowed

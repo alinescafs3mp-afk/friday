@@ -571,6 +571,30 @@ def _contains_all(value: str, expected: Sequence[str]) -> bool:
     return all(_normalized(item) in normalized for item in expected)
 
 
+def _docx_non_title_lines(payload: bytes) -> tuple[str, ...]:
+    """Return normalized non-empty DOCX paragraphs, excluding its title."""
+
+    if not payload:
+        return ()
+    try:
+        from docx import Document
+
+        document = Document(io.BytesIO(payload))
+    except (KeyError, OSError, ValueError, zipfile.BadZipFile):
+        return ()
+    lines: list[str] = []
+    for paragraph in document.paragraphs:
+        line = _normalized(paragraph.text)
+        if not line:
+            continue
+        style = getattr(paragraph, "style", None)
+        style_name = _normalized(str(getattr(style, "name", "") or ""))
+        if style_name == "title":
+            continue
+        lines.append(line)
+    return tuple(lines)
+
+
 class LiveProbes:
     """Content-free counters plus the last closed source-search projection."""
 
@@ -1532,6 +1556,28 @@ def _case_10(h: Harness) -> dict[str, Any]:
         )
         regular_extraction_success = extracted.success
         regular_text = extracted.text if extracted.success else ""
+    regular_lines = _docx_non_title_lines(regular_payload)
+    regular_expected_fields = tuple(
+        _normalized(value)
+        for value in (
+            "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ",
+            number,
+            body_date,
+            "Иван Иванович Иванов",
+        )
+    )
+    regular_exact_four_lines = bool(
+        len(regular_lines) == len(regular_expected_fields)
+        and all(
+            expected in regular_lines[index]
+            and all(
+                other not in regular_lines[index]
+                for other_index, other in enumerate(regular_expected_fields)
+                if other_index != index
+            )
+            for index, expected in enumerate(regular_expected_fields)
+        )
+    )
     before = h.probes.snapshot()
     mcp = h.chat(
         "D10",
@@ -1599,6 +1645,7 @@ def _case_10(h: Harness) -> dict[str, Any]:
             regular_text,
             (number, body_date, "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ", "Иван Иванович Иванов"),
         ),
+        "regular_file_exact_four_lines": regular_exact_four_lines,
         "mcp_kernel_real": delta["workspace_create_kernel"] == 1,
         "mcp_transport_real": delta["workspace_create_mcp"] == 1,
         "mcp_exact_content": bool(

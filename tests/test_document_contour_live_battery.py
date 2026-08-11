@@ -600,6 +600,9 @@ def test_d09_oracle_counts_only_files_and_reauthorizes_public_persistence(tmp_pa
         ("", ""),
         ("wrong-filename", "regular_file_delivered"),
         ("missing-signatory", "regular_file_grounded"),
+        ("extra-regular-line", "regular_file_exact_four_lines"),
+        ("one-line-regular", "regular_file_exact_four_lines"),
+        ("swapped-regular-lines", "regular_file_exact_four_lines"),
         ("extra-mcp-line", "mcp_exact_content"),
         ("duplicate-inline", "mcp_no_duplicate_chat_file"),
     ],
@@ -623,12 +626,17 @@ def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
     ]
     if mutation == "missing-signatory":
         required_lines.pop()
+    if mutation == "extra-regular-line":
+        required_lines.append("Лишняя строка")
+    if mutation == "swapped-regular-lines":
+        required_lines[0], required_lines[1] = required_lines[1], required_lines[0]
+    report_lines = [" ".join(required_lines)] if mutation == "one-line-regular" else required_lines
     report = render(
         "docx",
         spec_from_payload(
             "Синтетический экспорт",
             "",
-            [{"kind": "text", "text": line} for line in required_lines],
+            [{"kind": "text", "text": line} for line in report_lines],
         ),
     )
 

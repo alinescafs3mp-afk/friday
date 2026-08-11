@@ -2397,7 +2397,8 @@ async def test_output_filename_never_displaces_exact_supplied_reply_attachment(
     seen = _patch_attachment_generation(runtime, monkeypatch)
     message = (
         "Создай обычный Word-файл metadata-export.docx по процитированному документу. "
-        "Включи четыре строки из предыдущего ответа."
+        "Включи ровно четыре строки: гриф, номер документа, видимую дату документа "
+        "и подписанта из предыдущего ответа."
     )
 
     await runtime.chat(
@@ -2412,6 +2413,67 @@ async def test_output_filename_never_displaces_exact_supplied_reply_attachment(
     assert len(seen) == 1
     assert [item.get("raw_object_id") for item in seen[0][1]] == [source.id]
     assert seen[0][1][0]["transient_text"] == "SOURCE-MUST-REACH-FILE-CREATION"
+
+
+@pytest.mark.asyncio
+async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evidence(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    source = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "Видимые реквизиты исходного документа",
+        filename="source.odt",
+        extra_metadata={
+            "format": "odt",
+            "title": "TECHNICAL-METADATA-EVIDENCE",
+        },
+    )
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+    generated_contexts: list[AgentContext] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        generated_contexts.append(context)
+        assert [item.get("raw_object_id") for item in (attachments or [])] == [source.id]
+        messages = runtime._build_initial_messages(
+            context,
+            message,
+            attachments,
+            tool_enabled=False,
+        )
+        assert any("TECHNICAL-METADATA-EVIDENCE" in str(item.get("content") or "") for item in messages)
+        return {
+            "content": "Экспорт метаданных\n\nTECHNICAL-METADATA-EVIDENCE\n\nВидимые реквизиты",
+            "tools_used": [],
+        }
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    message = (
+        "Создай обычный Word-файл metadata-export.docx и выведи в него "
+        "технические метаданные процитированного документа."
+    )
+
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        attachments=[{"raw_object_id": source.id}],
+        enable_tools=False,
+        quoted_attachment_reference=True,
+    )
+
+    assert len(generated_contexts) == 1
+    assert "TECHNICAL-METADATA-EVIDENCE" in generated_contexts[0].document_metadata_evidence
+    assert generated_contexts[0].late_make_file_attempts == 1
+    assert result["tools_used"] == ["make_file"]
 
 
 @pytest.mark.parametrize(

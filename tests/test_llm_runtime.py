@@ -74,6 +74,49 @@ def test_qwen_payload_disables_model_thinking_and_has_one_system(settings):
     assert payload["messages"][0]["role"] == "system"
 
 
+def test_exact_tool_choice_is_emitted_only_for_an_effectively_offered_schema(settings):
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    schema = {
+        "type": "function",
+        "function": {
+            "name": "workspace_create",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    messages = [{"role": "user", "content": "synthetic"}]
+
+    selected = router._prepare_payload(  # noqa: SLF001
+        messages,
+        temperature=None,
+        max_tokens=256,
+        tools=[schema],
+        tool_choice="workspace_create",
+    )
+    unoffered = router._prepare_payload(  # noqa: SLF001
+        messages,
+        temperature=None,
+        max_tokens=256,
+        tools=[schema],
+        tool_choice="memory_search",
+    )
+    router._tools_refused = True  # noqa: SLF001 - proved endpoint capability latch
+    refused = router._prepare_payload(  # noqa: SLF001
+        messages,
+        temperature=None,
+        max_tokens=256,
+        tools=[schema],
+        tool_choice="workspace_create",
+    )
+
+    assert selected["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "workspace_create"},
+    }
+    assert "tool_choice" not in unoffered
+    assert "tools" not in refused
+    assert "tool_choice" not in refused
+
+
 @pytest.mark.asyncio
 async def test_vision_can_accept_valid_ocr_json_with_a_long_visual_separator(
     settings,
