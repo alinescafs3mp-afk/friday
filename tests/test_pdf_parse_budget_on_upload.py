@@ -65,6 +65,14 @@ class _GenericTextBudgetExtractor(_TruncatingExtractor):
         )
 
 
+class _EmptyVisualExtractor:
+    """Native parser opened the carrier, but found no text layer."""
+
+    def extract(self, *args, **kwargs):
+        del args, kwargs
+        return DocumentResult("", {"format": "visual", "total_pages": 1})
+
+
 def test_the_upload_extractor_is_built_with_a_parse_budget(settings, storage) -> None:
     """Мутация: убрать `parse_budget_sec` из `CoreMixin.__init__` — тест краснеет."""
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
@@ -205,3 +213,64 @@ async def test_generic_extractor_loss_reaches_the_transient_attachment(
     assert preview["_runtime_source_truncated"] is True
     assert preview["text_truncated"] is True
     assert preview["parse_deadline_reached"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "mime_type"),
+    [
+        ("scan.jpg", "image/jpeg"),
+        ("scan.pdf", "application/pdf"),
+    ],
+)
+async def test_no_save_visual_attachment_uses_vision_as_ephemeral_advisory_text(
+    settings,
+    storage,
+    monkeypatch,
+    filename: str,
+    mime_type: str,
+) -> None:
+    """No-save must have the same eyes while keeping OCR out of evidence."""
+
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    pipeline._doc_extractor = _EmptyVisualExtractor()  # noqa: SLF001
+    calls = []
+    visible_text = "TRANSIENT-VISION-BODY-551: synthetic scan"
+
+    async def visual_extract(file_content, *, filename, mime_type):
+        calls.append((file_content, filename, mime_type))
+        return {
+            "success": True,
+            "error": "",
+            "confidence": 0.91,
+            "text": visible_text,
+            "title": "Synthetic scan",
+            "summary": visible_text,
+            "entities": [],
+            "evidence": [{"asset_id": "A1", "quote": "synthetic scan", "claim": visible_text}],
+            "warnings": [],
+            "pages_total": 1,
+            "pages_read": 1,
+            "assets": [],
+            "advisory_only": True,
+        }
+
+    monkeypatch.setattr(pipeline, "_extract_visual_document", visual_extract)
+    source = b"synthetic-no-save-visual-bytes"
+    preview = await pipeline.inspect_file_transient(
+        source,
+        filename=filename,
+        mime_type=mime_type,
+    )
+
+    assert calls == [(source, filename, mime_type)]
+    assert preview["text_preview"] == visible_text
+    assert preview["_runtime_source_text"] == visible_text
+    assert preview["extraction_success"] is True
+    assert preview["vision_used"] is True
+    assert preview["vision_pages_read"] == 1
+    assert preview["vision_pages_total"] == 1
+    assert preview["advisory_only"] is True
+    assert preview["verification_eligible"] is False
+    assert not any(path.is_file() for path in settings.files_dir.rglob("*"))
+    assert storage.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0] == 0

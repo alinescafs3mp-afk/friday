@@ -820,6 +820,83 @@ async def test_missing_map_or_incomplete_parse_is_unknown_even_with_an_optimisti
 
 
 @pytest.mark.asyncio
+async def test_clipped_map_and_reduce_notes_stay_useful_but_never_complete(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LongMapLLM(_HierarchyLLM):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            if any(str(item.get("content") or "").startswith(CHUNK_PREFIX) for item in messages):
+                self.calls.append({"messages": [dict(item) for item in messages], "kwargs": dict(kwargs)})
+                return {"content": "M" * (agent_runtime_module._ATTACHMENT_MAP_OUTPUT_CHARS + 17)}
+            return await super().chat(messages, **kwargs)
+
+    source = "CLIPPED_MAP_HEAD\n" + "m" * 99_970 + "\nCLIPPED_MAP_TAIL"
+    map_llm = LongMapLLM("Частичный, но полезный итог по документу.")
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Обобщи весь документ целиком.",
+        attachments=[_owned("clipped-map.txt", source)],
+        llm=map_llm,
+    )
+
+    synthesis, _verification = _canonical_map_blocks(map_llm)
+    assert len(synthesis) == 1
+    mapped = _payload(synthesis[0], MAP_PREFIX)
+    assert mapped["records"]
+    assert all(
+        len(record["summary"]) == agent_runtime_module._ATTACHMENT_MAP_OUTPUT_CHARS
+        for record in mapped["records"]
+    )
+    assert mapped["coverage"]["clipped_chunks"]
+    assert mapped["coverage"]["map_complete"] is False
+    assert result["attachment_coverage_complete"] is False
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
+
+    class LongReduceLLM(_HierarchyLLM):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            if any(str(item.get("content") or "").startswith(REDUCE_PREFIX) for item in messages):
+                return {"content": "R" * (agent_runtime_module._ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS + 17)}
+            return await super().chat(messages, **kwargs)
+
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_FINAL_EVIDENCE_CHARS", 3_000)
+    reduce_runtime = AgentRuntime(settings, storage, llm=LongReduceLLM("unused"))
+    reduce_context = AgentContext(
+        conversation_id="clipped-reduce",
+        user_id="clipped-reduce-owner",
+        person_id="clipped-reduce-owner",
+        current_attachment_present=True,
+    )
+    records = [
+        {
+            "file_index": 1,
+            "filename": "clipped-reduce.txt",
+            "chunk_index": index,
+            "chunks_in_file": 40,
+            "start": index * 100,
+            "end": (index + 1) * 100,
+            "summary": "s" * 100,
+        }
+        for index in range(40)
+    ]
+    reduced, reduction_complete = await reduce_runtime._reduce_attachment_map_records(
+        reduce_context,
+        "Обобщи весь документ.",
+        records,
+    )
+
+    assert reduction_complete is False
+    assert len(reduced) == 1
+    assert reduced[0]["available"] is True
+    assert reduced[0]["summary_complete"] is False
+    assert len(reduced[0]["summary"]) == agent_runtime_module._ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS
+
+
+@pytest.mark.asyncio
 async def test_an_open_main_idea_cannot_pass_when_the_tail_never_reached_any_map(
     settings: Any,
     storage: Any,

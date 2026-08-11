@@ -64,6 +64,7 @@ def read_authorized_file(
     raw_id: str,
     user_id: str,
     *,
+    person_id: str | None = None,
     include_deleted: bool = False,
     max_bytes: int | None = None,
 ) -> AuthorizedFileBytes:
@@ -81,6 +82,7 @@ def read_authorized_file(
             root,
             raw_id,
             user_id,
+            person_id=person_id,
             include_deleted=include_deleted,
             max_bytes=max_bytes,
         )
@@ -92,19 +94,28 @@ def read_authorized_file_in_transaction(
     raw_id: str,
     user_id: str,
     *,
+    person_id: str | None = None,
     include_deleted: bool = False,
     max_bytes: int | None = None,
 ) -> AuthorizedFileBytes:
     """Transaction-scoped implementation used to assemble an atomic archive."""
 
     deleted_clause = "" if include_deleted else " AND r.deleted_at IS NULL"
+    person_clause = (
+        " AND json_valid(r.metadata_json) AND COALESCE(json_extract(r.metadata_json, '$.uploaded_by'), '')=?"
+        if person_id is not None
+        else ""
+    )
+    parameters: tuple[str, ...] = (
+        (str(raw_id), str(user_id), str(person_id)) if person_id is not None else (str(raw_id), str(user_id))
+    )
     row = conn.execute(
         f"""SELECT r.id, r.user_id, r.source_ref, r.metadata_json
               FROM raw_objects r
              WHERE r.id=? AND r.user_id=? AND r.content_type='file'
-               {deleted_clause}
+               {deleted_clause}{person_clause}
                AND {_not_private_raw_dependency("r")}""",  # nosec B608 - fixed SQL fragments
-        (str(raw_id), str(user_id)),
+        parameters,
     ).fetchone()
     if row is None:
         raise FileRecordUnavailable

@@ -127,6 +127,12 @@ class TransportMixin(BridgeShared):
         self._backend_down_since = 0.0
         self._backend_down_warned_at = 0.0
         self._poll_heartbeat_at = time.monotonic()
+        # Activity is not success.  A broken keep-alive can fail quickly,
+        # enter backoff and reset the heartbeat forever while Telegram keeps
+        # updates undelivered.  Track the last completed getUpdates round
+        # separately so systemd can replace the HTTP client after a sustained
+        # transport failure.
+        self._poll_success_at = self._poll_heartbeat_at
 
     async def run(self) -> None:
         install_secret_redaction(
@@ -334,6 +340,7 @@ class TransportMixin(BridgeShared):
                 await self._drain_inbox(telegram, backend)
                 updates = await self._get_updates(telegram)
                 self._poll_heartbeat_at = time.monotonic()
+                self._poll_success_at = self._poll_heartbeat_at
                 for update in updates:
                     self._inbox.store(update)
                     self._offset = max(self._offset, int(update["update_id"]) + 1)
@@ -362,10 +369,16 @@ class TransportMixin(BridgeShared):
 
         while self._running:
             await asyncio.sleep(_POLL_WATCHDOG_INTERVAL_SEC)
-            age = time.monotonic() - self._poll_heartbeat_at
-            if age <= _POLL_WATCHDOG_STALE_SEC:
+            now = time.monotonic()
+            heartbeat_age = now - self._poll_heartbeat_at
+            success_age = now - self._poll_success_at
+            if heartbeat_age <= _POLL_WATCHDOG_STALE_SEC and success_age <= _POLL_WATCHDOG_STALE_SEC:
                 continue
-            LOGGER.error("Telegram bridge poll watchdog expired after %.0fs", age)
+            LOGGER.error(
+                "Telegram bridge poll watchdog expired (heartbeat %.0fs, success %.0fs)",
+                heartbeat_age,
+                success_age,
+            )
             raise RuntimeError("telegram_poll_watchdog_expired")
 
     async def _outbound_loop(self, telegram: httpx.AsyncClient, backend: httpx.AsyncClient) -> None:

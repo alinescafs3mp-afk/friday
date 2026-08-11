@@ -200,6 +200,99 @@ async def test_named_day_inventory_and_its_completeness_followup_are_code_owned(
 
 
 @pytest.mark.asyncio
+async def test_named_inventory_without_a_date_is_all_time_but_temporal_cues_stay_closed(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner", display_name="Owner")
+    storage.ensure_user("jbl", preset_key="user", display_name="JBL")
+    kernel = _InventoryKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+
+    all_time = await runtime.chat(
+        "alice",
+        "Какие файлы загружал JBL",
+        actor=_actor(),
+    )
+    explicit_all_time = await runtime.chat(
+        "alice",
+        "Какие документы за всё время загружал JBL?",
+        actor=_actor(),
+    )
+    unclosed = await runtime.chat(
+        "alice",
+        "Какие файлы загружал JBL в июле?",
+        actor=_actor(),
+    )
+
+    expected_call = {
+        "person": "jbl",
+        "since": None,
+        "until": None,
+        "limit": 200,
+        "offset": 0,
+        "documents_only": True,
+    }
+    assert kernel.calls == [
+        expected_call,
+        expected_call,
+    ]
+    for reply in (all_time, explicit_all_time):
+        assert "за всё время" in reply["message"].casefold()
+        assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
+        assert reply["tools_used"] == ["user_activity"]
+    assert "неизвест" in unclosed["message"].casefold()
+    assert unclosed["tools_used"] == []
+
+
+@pytest.mark.asyncio
+async def test_named_inventory_relative_day_followup_stays_code_owned(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner", display_name="Owner")
+    storage.ensure_user("jbl", preset_key="user", display_name="JBL")
+    kernel = _InventoryKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+
+    yesterday = await runtime.chat(
+        "alice",
+        "Какие документы вчера загружал JBL?",
+        actor=_actor(),
+    )
+    day_before = await runtime.chat(
+        "alice",
+        "А позавчера?",
+        actor=_actor(),
+        conversation_id=yesterday["conversation_id"],
+    )
+
+    assert len(kernel.calls) == 2
+    assert all(call["person"] == "jbl" for call in kernel.calls)
+    assert all(call["documents_only"] is True for call in kernel.calls)
+    first_since = datetime.fromisoformat(str(kernel.calls[0]["since"]))
+    second_since = datetime.fromisoformat(str(kernel.calls[1]["since"]))
+    assert first_since - second_since == timedelta(days=1)
+    assert yesterday["tools_used"] == ["user_activity"]
+    assert day_before["tools_used"] == ["user_activity"]
+    assert "границы дня не определены" not in day_before["message"].casefold()
+
+
+@pytest.mark.asyncio
 async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_schema(
     settings,
     storage,

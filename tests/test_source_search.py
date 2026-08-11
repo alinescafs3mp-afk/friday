@@ -164,6 +164,61 @@ async def test_explicit_agent_source_search_reads_pending_owned_file_but_not_rej
 
 
 @pytest.mark.asyncio
+async def test_source_search_projects_closed_evidence_authority(settings, storage):
+    owner = "source-authority-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    marker = "SOURCE-AUTHORITY-MARKER"
+    cases = {
+        "native.txt": (
+            {"text_extraction_success": True},
+            {"verification_eligible": True, "basis": "extracted_text"},
+        ),
+        "review-scan.jpg": (
+            {"text_extraction_success": True, "vision_review_required": True},
+            {"verification_eligible": False, "basis": "advisory_visual"},
+        ),
+        "advisory-visual.png": (
+            {"vision_used": True, "advisory_only": True},
+            {"verification_eligible": False, "basis": "advisory_visual"},
+        ),
+        "transcript.txt": (
+            {"text_extraction_success": True, "transcription": {"model": "local"}},
+            {"verification_eligible": False, "basis": "advisory_transcript"},
+        ),
+    }
+    expected_by_id = {}
+    for filename, (metadata, authority) in cases.items():
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=owner,
+            source="upload",
+            source_ref=new_id("src"),
+            raw_content=f"{marker} {filename}",
+            content_type="file",
+            metadata_json={"filename": filename, **metadata},
+        )
+        storage.store_raw_object(raw)
+        storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=raw.id))
+        expected_by_id[raw.id] = authority
+
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+    result = await kernel.execute(
+        "source_search",
+        {"query": marker, "limit": 20},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True, result.error
+    assert {
+        row["raw_object_id"]: row["evidence_authority"] for row in result.data["results"]
+    } == expected_by_id
+    assert "vision_review_required" not in str(result.data)
+    assert "transcription" not in str(result.data)
+
+
+@pytest.mark.asyncio
 async def test_source_search_requires_knowledge_read(settings, storage):
     storage.ensure_user("source-guest", preset_key="guest")
     authorization = AuthorizationService(storage)
@@ -378,6 +433,60 @@ async def test_source_search_context_boilerplate_cannot_page_out_an_implicit_val
 
 
 @pytest.mark.asyncio
+async def test_source_search_focus_first_reaches_target_beyond_anchor_candidate_cap(settings, storage):
+    owner = "source-focus-cap-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    target = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="focus-cap-target",
+        raw_content="Иванов\nДолжность: ведущий инженер",
+        content_type="file",
+        metadata_json={"filename": "focused-target.docx", "text_extraction_success": True},
+    )
+    storage.store_raw_object(target)
+    storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=target.id))
+    storage.execute(
+        "UPDATE raw_objects SET received_at=? WHERE id=?",
+        ("2020-01-01T00:00:00+00:00", target.id),
+    )
+    for index in range(100):
+        noise = RawObject(
+            id=new_id("raw"),
+            user_id=owner,
+            source="upload",
+            source_ref=f"focus-cap-noise-{index:03d}",
+            raw_content="Иванов",
+            content_type="file",
+            metadata_json={"filename": f"anchor-only-{index:03d}.txt"},
+        )
+        storage.store_raw_object(noise)
+        storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id=owner, raw_object_id=noise.id))
+    storage.commit()
+
+    anchor_page = storage.search_raw_objects(owner, "Иванов", limit=100, include_content=True)
+    assert len(anchor_page) == 100
+    assert target.id not in {row["id"] for row in anchor_page}, "fixture did not place target at 101+"
+
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+    result = await kernel.execute(
+        "source_search",
+        {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True, result.error
+    assert result.data["shown"] == 1
+    assert result.data["results"][0]["raw_object_id"] == target.id
+    assert result.data["results"][0]["focus_match_kind"] == "full"
+    assert result.data["coverage"]["focus_match_found"] is True
+    assert result.data["coverage"]["complete"] is False
+
+
+@pytest.mark.asyncio
 async def test_source_search_maximum_metadata_page_remains_valid_untruncated_json(
     settings,
     storage,
@@ -398,11 +507,14 @@ async def test_source_search_maximum_metadata_page_remains_valid_untruncated_jso
         for index in range(10)
     ]
 
+    calls = []
+
     def fake_search_raw_objects(user_id, query, *, limit, include_content):
         assert user_id == owner
-        assert query == "Иванов"
+        assert query in {"Иванов", "Иванов должность"}
         assert limit == 100
         assert include_content is True
+        calls.append(query)
         return rows
 
     monkeypatch.setattr(storage, "search_raw_objects", fake_search_raw_objects)
@@ -425,6 +537,7 @@ async def test_source_search_maximum_metadata_page_remains_valid_untruncated_jso
     assert len(parsed["results"]) == 10
     assert "Должность: ведущий инженер 09" in parsed["results"][-1]["excerpt"]
     assert parsed["results"][-1]["focus_match_kind"] == "full"
+    assert calls == ["Иванов должность", "Иванов"]
 
 
 @pytest.mark.parametrize(
@@ -697,8 +810,8 @@ def test_raw_replay_keys_cannot_reopen_a_quarantined_source(storage):
     )
 
 
-def test_the_index_is_only_ever_read_through_the_filtered_helper():
-    """Structural, because a forgotten filter is exactly how the previous three went.
+def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
+    """Every FTS reader owns the full lifecycle/privacy predicate before LIMIT.
 
     `raw_fts` holds terms derived from EVERY raw object, rejected ones included — a
     deliberate choice, so that returning an ignored item to pending makes it
@@ -723,28 +836,39 @@ def test_the_index_is_only_ever_read_through_the_filtered_helper():
 
     intake = (root / "storage" / "_intake.py").read_text(encoding="utf-8")
     tree = ast.parse(intake)
-    readers = [
-        node.name
+    readers = {
+        node.name: ast.get_source_segment(intake, node) or ""
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and "raw_fts" in ast.get_source_segment(intake, node)
-    ]
-    assert readers == ["search_raw_objects"], f"a second reader of raw_fts appeared: {readers}"
+        if isinstance(node, ast.FunctionDef) and "raw_fts" in (ast.get_source_segment(intake, node) or "")
+    }
+    assert set(readers) == {
+        "search_raw_objects",
+        "search_raw_objects_in_set",
+        "search_owned_file_content",
+    }
+    for name, source in readers.items():
+        assert "_not_private_raw_dependency" in source, name
+        assert "status='ignored'" in source, name
 
 
-def test_source_text_only_reaches_the_agent_through_the_explicit_filtered_tool():
-    """Source text never becomes ambient recall; one explicit tool may read it.
+def test_source_text_only_reaches_prompts_through_the_explicit_filtered_tool():
+    """Body-free file selection may use FTS; only source_search projects text.
 
     Pending uploads must be searchable when the person asks about an uploaded
     source, but they must not silently enter HybridSearcher or every prompt.  The
-    execution kernel is the single capability-gated bridge and still calls the
-    verdict-aware helper which excludes ignored/private material.
+    execution kernel remains the only bridge that projects excerpts. Runtime may
+    ask the two verdict-aware helpers for opaque ids to resolve an explicitly
+    referenced file, but those helpers return no source body.
     """
     from pathlib import Path
 
     root = Path(__file__).parent.parent / "friday"
-    for relative in ("retrieval/__init__.py", "agent_runtime/__init__.py"):
-        source = (root / relative).read_text(encoding="utf-8")
-        assert "search_raw_objects" not in source, f"{relative} reached into source text"
+    retrieval = (root / "retrieval" / "__init__.py").read_text(encoding="utf-8")
+    assert "search_raw_objects" not in retrieval
+    runtime = (root / "agent_runtime" / "__init__.py").read_text(encoding="utf-8")
+    assert "self.storage.search_raw_objects(" not in runtime
+    assert "search_owned_file_content" in runtime
+    assert "search_raw_objects_in_set" in runtime
     kernel = (root / "execution_kernel" / "__init__.py").read_text(encoding="utf-8")
     assert kernel.count("storage.search_raw_objects") == 1
     assert '"source_search"' in kernel

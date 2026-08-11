@@ -31,7 +31,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from friday import __version__
 from friday.account_gate import AccountActivityGate, AccountGateClosed
 from friday.admin_api import router as admin_router
-from friday.agent_runtime import AgentRuntime, _OwnedAttachment, asks_for_the_web
+from friday.agent_runtime import (
+    AgentRuntime,
+    _is_file_provenance_stub,
+    _mime_is_visual_without_text_layer,
+    _OwnedAttachment,
+    asks_for_the_web,
+)
 from friday.agent_runtime._office_attachments import (
     OFFICE_STRUCTURE_KEY,
     bounded_raw_file_metadata,
@@ -364,21 +370,26 @@ def _current_turn_file_attachment(
     except (TypeError, ValueError):
         extracted_chars = 0
     raw_text = str((raw or {}).get("raw_content") or "")
+    usable_raw_text = bool(raw_text.strip()) and not _is_file_provenance_stub(raw_text)
     # A content/source replay deliberately omits the extraction result block;
     # the durable Raw metadata is the authoritative closed provenance in that
     # case.  Do not make a successfully extracted duplicate unreadable merely
-    # because this request avoided doing the parser work twice.
+    # because this request avoided doing the parser work twice.  Provenance
+    # stubs such as ``[document: …]`` are not extracted body text.
     replay_has_text = bool(
         file_ingestion.get("idempotent_replay")
-        and raw_text.strip()
-        and not raw_text.lstrip().startswith("[File:")
+        and usable_raw_text
         and (
             raw_metadata.get("extraction_success") is True
             or raw_metadata.get("text_extraction_success") is True
             or bool(raw_metadata.get("transcription"))
         )
     )
-    text = raw_text if extracted_chars or replay_has_text else ""
+    text = raw_text if (extracted_chars > 0 and usable_raw_text) or replay_has_text else ""
+    if extracted_chars > 0 and not usable_raw_text and not replay_has_text:
+        # Parser reported characters, but durable raw_content is only a stub —
+        # never promote the stub as body evidence.
+        text = ""
     stored_office_index = raw_metadata.get(OFFICE_STRUCTURE_KEY)
     office_index = (
         validate_runtime_office_index(stored_office_index, raw_text)
@@ -399,19 +410,36 @@ def _current_turn_file_attachment(
         or extraction.get("vision")
         or file_ingestion.get("transcript_text")
     )
-    native_text_success = (
-        extraction.get("text_success") is True
-        if "text_success" in extraction
-        else raw_metadata.get("text_extraction_success") is True
-    )
+    # ``text_success`` / ``text_extraction_success`` historically mirrored parser
+    # open-success.  Prefer actual body presence; fall back to the flag only when
+    # chars prove the body existed on this turn.
+    if "text_success" in extraction:
+        native_text_success = extraction.get("text_success") is True and (
+            extracted_chars > 0 or bool(str(extraction.get("text") or "").strip())
+        )
+    else:
+        native_text_success = raw_metadata.get("text_extraction_success") is True and (
+            extracted_chars > 0 or usable_raw_text
+        )
+    if extracted_chars > 0 and usable_raw_text:
+        native_text_success = True
     text_truncated = bool(extraction.get("text_truncated") or raw_metadata.get("text_truncated"))
     archive_truncated = bool(extraction.get("archive_truncated") or raw_metadata.get("archive_truncated"))
     source_truncated_for_parse = bool(
         extraction.get("source_truncated_for_parse") or raw_metadata.get("source_truncated_for_parse")
     )
+    mime_type = str(raw_metadata.get("mime_type") or file_ingestion.get("mime_type") or "")
+    try:
+        meta_chars = max(0, int(raw_metadata.get("extraction_chars") or extracted_chars or 0))
+    except (TypeError, ValueError):
+        meta_chars = max(0, extracted_chars)
+    visual_without_text = _mime_is_visual_without_text_layer(
+        mime_type,
+        extraction_chars=meta_chars if not text.strip() else max(meta_chars, 1),
+    )
     empty_text = bool(
         not text.strip()
-        and native_text_success
+        and not visual_without_text
         and (extraction.get("success") is True or raw_metadata.get("extraction_success") is True)
         and not advisory_only
         and not text_truncated
@@ -474,6 +502,7 @@ def _current_turn_file_attachment(
         )
     attachment.update(
         {
+            "mime_type": mime_type,
             "parse_deadline_reached": bool(
                 extraction.get("parse_deadline_reached") or raw_metadata.get("parse_deadline_reached")
             ),
@@ -2175,6 +2204,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         private_source_text,
                     )
                     runtime_source_truncated = bool(transient_file.get("_runtime_source_truncated"))
+                    transient_advisory = transient_file.get("advisory_only") is True
                     transient_incomplete = any(
                         runtime_source_truncated if key == "text_truncated" else transient_file.get(key)
                         for key in (
@@ -2187,6 +2217,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     )
                     transient_attachment = {
                         "filename": transient_file["filename"],
+                        "mime_type": str(transient_file.get("mime_type") or mime_type),
                         "transient": True,
                         "persisted": False,
                         # Whole extractor text stays process-private and exists for
@@ -2197,6 +2228,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "empty_text": bool(
                             transient_file["extraction_success"]
                             and not private_source_text.strip()
+                            and not transient_advisory
+                            and not _mime_is_visual_without_text_layer(
+                                str(transient_file.get("mime_type") or mime_type),
+                                extraction_chars=0,
+                            )
                             and not transient_incomplete
                         ),
                         # Всё, что осмотр УЖЕ выяснил про полноту разбора.
@@ -2214,7 +2250,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "parse_total_pages": transient_file["parse_total_pages"],
                         "archive_truncated": transient_file["archive_truncated"],
                         "source_truncated_for_parse": transient_file["source_truncated_for_parse"],
-                        "verification_eligible": bool(transient_file["extraction_success"]),
+                        "advisory_only": transient_advisory,
+                        "verification_eligible": bool(
+                            transient_file.get("verification_eligible") is True and not transient_advisory
+                        ),
                     }
                     if transient_office_index is not None:
                         transient_attachment[OFFICE_STRUCTURE_KEY] = transient_office_index

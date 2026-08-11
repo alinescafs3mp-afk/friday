@@ -1916,6 +1916,25 @@ async def test_a_stale_poll_heartbeat_crashes_for_the_service_supervisor(monkeyp
         bridge._inbox.close()
 
 
+@pytest.mark.asyncio
+async def test_repeated_poll_failures_cannot_keep_a_dead_transport_formally_alive(monkeypatch, tmp_path):
+    """Fast failed attempts are activity, but not a successful Telegram poll."""
+    from friday.telegram_bridge import _transport
+
+    bridge = _ux_bridge(tmp_path)
+    monkeypatch.setattr(_transport, "_POLL_WATCHDOG_INTERVAL_SEC", 0.001)
+    monkeypatch.setattr(_transport, "_POLL_WATCHDOG_STALE_SEC", 0.001)
+    bridge._running = True
+    bridge._poll_heartbeat_at = time.monotonic()
+    bridge._poll_success_at = time.monotonic() - 1.0
+    try:
+        with pytest.raises(RuntimeError, match="telegram_poll_watchdog_expired"):
+            await bridge._poll_watchdog()
+    finally:
+        bridge._running = False
+        bridge._inbox.close()
+
+
 def test_registered_chats_table_remembers_and_forgets_nothing(tmp_path):
     """Direct unit test of the small table `_commands.py` writes to and every
     other gate point reads from. Durable and idempotent: re-admitting the same

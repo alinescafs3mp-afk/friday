@@ -58,7 +58,12 @@ def _store_source(
         source_ref=new_id("opaque"),
         raw_content=text,
         content_type="file",
-        metadata_json={"filename": filename},
+        metadata_json={
+            "filename": filename,
+            "uploaded_by": user_id,
+            "extraction_success": True,
+            "text_extraction_success": True,
+        },
     )
     storage.store_raw_object(raw)
     storage.store_inbox_item(
@@ -241,6 +246,10 @@ def _synthetic_source_payload(*, excerpt: str = "Иванов\nДолжност�
                 "received_at": "2026-08-10T00:00:00+00:00",
                 "review_status": "pending",
                 "promoted": False,
+                "evidence_authority": {
+                    "verification_eligible": True,
+                    "basis": "extracted_text",
+                },
                 "focus_terms_matched": 2,
                 "focus_terms_total": 2,
                 "anchor_context_terms": 1,
@@ -337,18 +346,143 @@ async def test_pending_owned_source_is_recalled_once_and_the_same_evidence_is_ve
     source_user_metadata = json.loads(str(source_user_row.get("metadata_json") or "{}"))
     assert source_user_metadata["private_context_lineage"] is True
 
-    calls_before_private_followup = len(llm.calls)
-    blocked = await runtime.chat(
-        OWNER,
-        "Найди это в интернете",
-        actor=_actor(),
-        conversation_id=reply["conversation_id"],
+
+@pytest.mark.asyncio
+async def test_visual_source_search_remains_useful_but_cannot_be_marked_verified(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id = _store_source(
+        storage,
+        user_id=OWNER,
+        text=TARGET,
+        status=InboxStatus.PENDING,
+        filename="synthetic-scan.jpg",
     )
-    assert len(llm.calls) == calls_before_private_followup
+    raw = storage.get_raw_object(raw_id, OWNER)
+    assert raw is not None
+    metadata = json.loads(str(raw.get("metadata_json") or "{}"))
+    metadata.update({"vision_used": True, "vision_review_required": True})
+    storage.execute(
+        "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+        (json.dumps(metadata, ensure_ascii=False), raw_id),
+    )
+    storage.commit()
+    llm = _SourceModel("Распознавание указывает: Иванов — ведущий инженер по эксплуатации.")
+    runtime, kernel = _runtime(settings, storage, monkeypatch, llm=llm)
+
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
     assert kernel.calls == [("source_search", {"query": "иванов", "focus": "иванов должност", "limit": 10})]
-    assert all(not name.startswith("web_") for name in blocked["tools_used"])
-    assert INJECTION not in json.dumps(blocked, ensure_ascii=False)
-    assert "приват" in blocked["message"].casefold()
+    assert len(llm.calls) == 2, "advisory evidence still reaches synthesis and the ordinary judge"
+    evidence = _source_message(llm.calls[0])
+    assert '"basis": "advisory_visual"' in evidence
+    assert '"verification_eligible": false' in evidence
+    assert "ведущий инженер" in reply["message"]
+    assert "сверить с оригиналом" in reply["message"]
+    assert reply["verified"] is False
+    assert reply["verification_status"] == "unknown"
+    assert reply["verification"]["issues"] == ["source_search_requires_original_review"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ignored_before_followup", [False, True])
+async def test_first_found_file_followup_uses_exact_source_search_provenance_or_unknown(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    ignored_before_followup: bool,
+) -> None:
+    decoy_id = _store_source(
+        storage,
+        user_id=OWNER,
+        text="OLD-DECOY-A-MUST-NOT-BECOME-THE-FOUND-FILE",
+        status=InboxStatus.PENDING,
+        filename="old-decoy-a.txt",
+    )
+    target_id = _store_source(
+        storage,
+        user_id=OWNER,
+        text=f"{TARGET}\nSOURCE-SEARCH-TARGET-B-FULL-BODY",
+        status=InboxStatus.PENDING,
+        filename="found-target-b.txt",
+    )
+    llm = _SourceModel("Должность Иванова — ведущий инженер по эксплуатации.")
+    runtime, kernel = _runtime(settings, storage, monkeypatch, llm=llm)
+    conversation = storage.create_conversation(OWNER)
+    storage.store_message(
+        conversation["id"],
+        OWNER,
+        "user",
+        "старый файл A",
+        metadata={
+            "had_attachments": True,
+            "attachment_count": 1,
+            "conversation_attachment_raw_ids": [decoy_id],
+        },
+    )
+    storage.store_message(
+        conversation["id"],
+        OWNER,
+        "assistant",
+        "Старый файл принят.",
+        metadata={"attachment_context_used": True},
+    )
+    source_request = "Найди в ранее загруженном источнике должность Иванова"
+    found = await runtime.chat(
+        OWNER,
+        source_request,
+        actor=_actor(),
+        conversation_id=conversation["id"],
+    )
+    assert kernel.calls == [("source_search", {"query": "иванов", "focus": "иванов должност", "limit": 10})]
+    assert TARGET in _source_message(llm.calls[0])
+    assert "OLD-DECOY-A" not in _source_message(llm.calls[0])
+
+    if ignored_before_followup:
+        inbox = storage.find_inbox_by_raw(target_id, OWNER)
+        assert inbox is not None
+        assert storage.update_inbox_status(
+            str(inbox["id"]),
+            InboxStatus.IGNORED,
+            user_id=OWNER,
+        )
+
+    generated: list[list[dict[str, Any]]] = []
+
+    async def generate(
+        context: AgentContext,
+        message: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        del context, message
+        generated.append([dict(item) for item in (attachments or [])])
+        return {"content": "Прочитан найденный файл B.", "tools_used": []}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    followup = await runtime.chat(
+        OWNER,
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=found["conversation_id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    if ignored_before_followup:
+        assert generated == []
+        assert followup["restored_attachment_count"] == 0
+        assert any(
+            phrase in followup["message"].casefold()
+            for phrase in ("не удалось однозначно", "неизвест", "недоступ")
+        )
+    else:
+        assert len(generated) == 1
+        assert [item["raw_object_id"] for item in generated[0]] == [target_id]
+        assert "SOURCE-SEARCH-TARGET-B-FULL-BODY" in json.dumps(generated, ensure_ascii=False)
+        assert followup["restored_attachment_count"] == 1
+    assert "OLD-DECOY-A" not in json.dumps([followup, generated], ensure_ascii=False)
 
 
 @pytest.mark.asyncio

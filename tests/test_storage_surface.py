@@ -160,8 +160,19 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # feedback rows as get_feedback_state without turning a bounded page into a total.
 # 348 → 349: count_visible_raw_objects exposes exact tenant-wide raw/file
 # aggregates through the same privacy boundary as visible knowledge.
-EXPECTED_MEMBER_COUNT = 349
+# 349 → 351: conversation attachment selection added an authorized-id FTS
+# search and a body-free descriptor batch read.
+# 351 → 352: cross-conversation selection added the uploader-owned file
+# catalog used by exact names and indirect clues.
+# 352 → 354: bounded exact-filename and direct content lookup keep uploader,
+# privacy and lifecycle filters ahead of their ambiguity/completeness sentinels.
+EXPECTED_MEMBER_COUNT = 354
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
+    "get_raw_object_descriptors": "(self, raw_ids: 'list[str]', user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
+    "list_owned_file_catalog": "(self, user_id: 'str', uploaded_by: 'str', *, limit: 'int' = 5000) -> 'list[dict[str, Any]]'",
+    "search_owned_file_content": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",
+    "search_raw_objects_in_set": "(self, user_id: 'str', query: 'str', raw_ids: 'list[str]', *, limit: 'int' = 64) -> 'list[dict[str, Any]]'",
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
     "relativize_stored_paths": "(self, files_root: 'str') -> 'dict[str, int]'",

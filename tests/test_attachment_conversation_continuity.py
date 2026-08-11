@@ -493,8 +493,188 @@ def test_indirect_content_clue_selects_the_unique_older_file(settings, storage):
     assert "LATEST-DECOY" not in json.dumps(restored, ensure_ascii=False)
 
 
+@pytest.mark.asyncio
+async def test_fresh_conversation_resolves_an_exact_filename_from_the_uploaders_global_catalog(
+    settings,
+    storage,
+    monkeypatch,
+):
+    alpha = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "GLOBAL-ALPHA-ONLY",
+        filename="alpha.pdf",
+    )
+    newest_decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "GLOBAL-NEWEST-DECOY-MUST-STAY-OUT",
+        filename="newest.pdf",
+    )
+    upload_conversation = storage.create_conversation("alice")
+    _record_upload(storage, upload_conversation["id"], "alice", alpha, "alpha upload")
+    _record_upload(storage, upload_conversation["id"], "alice", newest_decoy, "newest upload")
+    fresh_conversation = storage.create_conversation("alice")
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    result = await runtime.chat(
+        "alice",
+        "Что в alpha.pdf?",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=fresh_conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in attachments] for _message, attachments in seen] == [[alpha.id]]
+    assert result["restored_attachment_count"] == 1
+    assert result["attachment_context_expected_count"] == 1
+    assert "GLOBAL-NEWEST-DECOY" not in json.dumps([result, seen], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_fresh_conversation_global_indirect_clue_requires_one_unique_file(
+    settings,
+    storage,
+    monkeypatch,
+):
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ORION-77 GLOBAL-UNIQUE-TARGET",
+        filename="orion-primary.pdf",
+    )
+    decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "GLOBAL-DECOY-WITHOUT-CLUE",
+        filename="newest-decoy.pdf",
+    )
+    first_upload_conversation = storage.create_conversation("alice")
+    _record_upload(storage, first_upload_conversation["id"], "alice", target, "target upload")
+    _record_upload(storage, first_upload_conversation["id"], "alice", decoy, "decoy upload")
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    unique_conversation = storage.create_conversation("alice")
+    unique = await runtime.chat(
+        "alice",
+        "Что по ORION-77 в моих файлах?",
+        actor=actor,
+        conversation_id=unique_conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    duplicate = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ORION-77 GLOBAL-SECOND-PRIVATE-MATCH",
+        filename="orion-duplicate.pdf",
+    )
+    duplicate_upload_conversation = storage.create_conversation("alice")
+    _record_upload(
+        storage,
+        duplicate_upload_conversation["id"],
+        "alice",
+        duplicate,
+        "duplicate upload",
+    )
+    ambiguous_conversation = storage.create_conversation("alice")
+    ambiguous = await runtime.chat(
+        "alice",
+        "Что по ORION-77 в моих файлах?",
+        actor=actor,
+        conversation_id=ambiguous_conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in attachments] for _message, attachments in seen] == [
+        [target.id]
+    ]
+    assert unique["restored_attachment_count"] == 1
+    assert unique["attachment_context_expected_count"] == 1
+    assert ambiguous["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" in ambiguous["message"].casefold()
+    assert "GLOBAL-SECOND-PRIVATE-MATCH" not in json.dumps(ambiguous, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_all_files_beyond_the_message_catalog_cap_is_never_certified_as_only_the_tail(
+    settings,
+    storage,
+    monkeypatch,
+):
+    first = _pending_file(storage, "alice", "alice", "CAP-FIRST-BODY", filename="alpha.pdf")
+    second = _pending_file(storage, "alice", "alice", "CAP-SECOND-BODY", filename="beta.pdf")
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", first, "alpha upload")
+    for index in range(1_001):
+        storage.store_message(conversation["id"], "alice", "assistant", f"filler-{index:04d}")
+    _record_upload(storage, conversation["id"], "alice", second, "beta upload")
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    all_files = await runtime.chat(
+        "alice",
+        "Обобщи все файлы",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+    exact_second = await runtime.chat(
+        "alice",
+        "Что в beta.pdf?",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    exact_calls = [attachments for message, attachments in seen if message == "Что в beta.pdf?"]
+    assert [[item["raw_object_id"] for item in call] for call in exact_calls] == [[second.id]]
+    assert exact_second["attachment_context_expected_count"] == 1
+    assert "CAP-FIRST-BODY" not in json.dumps(exact_calls, ensure_ascii=False)
+
+    all_calls = [attachments for message, attachments in seen if message == "Обобщи все файлы"]
+    if all_calls:
+        assert [[item["raw_object_id"] for item in call] for call in all_calls] == [[first.id, second.id]]
+    else:
+        assert any(
+            phrase in all_files["message"].casefold()
+            for phrase in ("полнота", "не удалось однозначно", "неизвест")
+        )
+
+
 def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
     document = _pending_file(storage, "shared", "alice", "OWN-DOCUMENT", filename="report.pdf")
+    ignored = _pending_file(storage, "shared", "alice", "IGNORED-DOCUMENT", filename="ignored.pdf")
+    storage.execute(
+        "UPDATE inbox SET status='ignored' WHERE raw_object_id=? AND user_id=?",
+        (ignored.id, "shared"),
+    )
     voice = _pending_file(storage, "shared", "alice", "VOICE-TRANSCRIPT", filename="voice.ogg")
     voice.metadata_json.update({"media_kind": "voice", "mime_type": "audio/ogg"})
     storage.execute(
@@ -504,7 +684,7 @@ def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
     foreign = _pending_file(storage, "shared", "bob", "FOREIGN-DOCUMENT", filename="foreign.pdf")
     runtime = AgentRuntime(settings, storage)
     conversation = storage.create_conversation("alice")
-    for raw in (document, voice, foreign):
+    for raw in (document, ignored, voice, foreign):
         _record_upload(storage, conversation["id"], "alice", raw, raw.id)
     history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
 
@@ -518,6 +698,7 @@ def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
 
     assert expected == 1
     assert [item["raw_object_id"] for item in restored] == [document.id]
+    assert "IGNORED-DOCUMENT" not in json.dumps(restored, ensure_ascii=False)
     assert "VOICE-TRANSCRIPT" not in json.dumps(restored, ensure_ascii=False)
     assert "FOREIGN-DOCUMENT" not in json.dumps(restored, ensure_ascii=False)
 

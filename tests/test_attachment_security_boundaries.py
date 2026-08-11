@@ -2145,7 +2145,7 @@ async def test_repair_cannot_introduce_a_verified_count_from_incomplete_attachme
 
 @pytest.mark.parametrize("kind", ["vision", "voice"])
 @pytest.mark.asyncio
-async def test_advisory_vision_and_voice_are_withheld_from_synthesis_and_verification(
+async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
     settings,
     storage,
     monkeypatch,
@@ -2161,6 +2161,7 @@ async def test_advisory_vision_and_voice_are_withheld_from_synthesis_and_verific
         kernel=ExecutionKernel(auth, settings),
     )
     grounding: dict[str, Any] = {}
+    shown: list[dict[str, Any]] = []
 
     async def prepare(user_id, message, conversation_id, **kwargs):
         del message, kwargs
@@ -2174,8 +2175,12 @@ async def test_advisory_vision_and_voice_are_withheld_from_synthesis_and_verific
 
     async def generate(context, message, attachments):
         del context, message
-        del attachments
-        raise AssertionError("unverified advisory text reached answer synthesis")
+        shown.extend(list(attachments or []))
+        return {
+            "content": f"Локально распознано: {advisory_text}",
+            "tools_used": [],
+            "_model_generated": True,
+        }
 
     async def should_not_verify(*args, **kwargs):
         del args, kwargs
@@ -2206,9 +2211,11 @@ async def test_advisory_vision_and_voice_are_withheld_from_synthesis_and_verific
         enable_tools=False,
     )
 
-    assert advisory_text not in result["message"]
-    assert "прочитать не удалось" in result["message"]
-    assert "не буду угадывать или выдумывать" in result["message"]
+    assert len(shown) == 1
+    assert advisory_text in str(shown[0].get("transient_text") or "")
+    assert advisory_text in result["message"]
+    assert "результат локального распознавания" in result["message"]
+    assert "сверяйте критичные данные с оригиналом" in result["message"].casefold()
     assert result["attachment_context_available"] is False
     assert result["attachment_verification_complete"] is False
     assert result["verification_status"] == "unknown"
@@ -2545,7 +2552,7 @@ async def test_private_attachment_allows_only_web_family_outbound_calls(
 
 
 @pytest.mark.asyncio
-async def test_focused_attachment_keeps_model_selected_web_without_person_or_timeline_prefetch(
+async def test_focused_attachment_without_web_intent_blocks_model_selected_outbound(
     settings,
     storage,
     monkeypatch,
@@ -2602,14 +2609,17 @@ async def test_focused_attachment_keeps_model_selected_web_without_person_or_tim
     )
 
     assert prepared and prepared[0].focused_attachment_turn is True
-    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
-    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
-    assert kernel.executed == ["web_search", "web_fetch"]
+    assert all(
+        not {"web_search", "web_research", "web_fetch", "code_run", "data_query"} & names
+        for names in llm.offered_names
+    )
+    assert kernel.executed == []
     assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
+    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 4
 
 
 @pytest.mark.asyncio
-async def test_person_topic_allows_web_family_but_not_code_or_data(
+async def test_person_topic_without_web_intent_blocks_model_selected_outbound(
     settings,
     storage,
     monkeypatch,
@@ -2648,11 +2658,13 @@ async def test_person_topic_allows_web_family_but_not_code_or_data(
     )
 
     assert llm.calls == 2
-    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
-    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
-    assert kernel.executed == ["web_search", "web_fetch"]
+    assert all(
+        not {"web_search", "web_research", "web_fetch", "code_run", "data_query"} & names
+        for names in llm.offered_names
+    )
+    assert kernel.executed == []
     assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
-    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 2
+    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 4
     assert not result.get("web_query_notice")
 
 

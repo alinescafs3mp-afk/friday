@@ -252,6 +252,12 @@ class FilesMixin(PipelineShared):
                 # двух чисел, из которых одно спрятано в коде.
                 max_tokens=self.settings.cognition_max_tokens,
                 priority="foreground",
+                # OCR may legitimately contain long visual separators such as
+                # underscores, dots or angle brackets. The strict JSON parser,
+                # bounded schema and evidence checks below are the right
+                # authority here; the chat-oriented repeated-character guard
+                # would discard the entire otherwise valid scan result.
+                reject_repeated_token_degeneration=False,
             )
             parsed = _parse_model_response(response, what="Vision extraction")
         except Exception as exc:
@@ -824,7 +830,7 @@ class FilesMixin(PipelineShared):
             # содержимое — разные вещи: тот же документ, пересохранённый из Word
             # или положенный в две папки, даёт другой `sha256` при том же тексте.
             "text_sha256": _extracted_text_digest(text_content),
-            "text_extraction_success": bool(extraction.success),
+            "text_extraction_success": bool(str(text_content or "").strip()),
             # Durable because source/content replay deliberately skips the
             # parser result block; the next same-turn projection and later
             # conversation follow-up must retain the same coverage caveat.
@@ -1049,7 +1055,7 @@ class FilesMixin(PipelineShared):
                     ),
                     "extraction": {
                         "success": extraction_succeeded,
-                        "text_success": extraction.success,
+                        "text_success": bool(str(text_content or "").strip()),
                         "error": extraction.error,
                         # Сколько знаков ВЫШЛО. Разбор без ошибки и разбор с
                         # текстом — разные вещи: пустой .txt и .docx, где весь
@@ -1174,6 +1180,24 @@ class FilesMixin(PipelineShared):
         extraction = await asyncio.to_thread(
             self._doc_extractor.extract, file_content, safe_filename, safe_mime_type
         )
+        native_text = extraction.text if extraction.success else ""
+        if not native_text.strip():
+            native_text = ""
+        vision: dict[str, Any] | None = None
+        if len(native_text.strip()) < 160:
+            vision = await self._extract_visual_document(
+                file_content,
+                filename=safe_filename,
+                mime_type=safe_mime_type,
+            )
+        vision_text = (
+            str(vision.get("text") or "") if vision is not None and vision.get("success") is True else ""
+        )
+        advisory_only = bool(vision_text.strip())
+        source_text = vision_text if advisory_only else native_text
+        vision_pages_total = max(0, int(vision.get("pages_total") or 0)) if vision is not None else 0
+        vision_pages_read = max(0, int(vision.get("pages_read") or 0)) if vision is not None else 0
+        parser_metadata = extraction.metadata or {}
         limit = max(1_000, min(int(preview_chars), 48_000))
         transient = {
             "filename": safe_filename,
@@ -1182,39 +1206,54 @@ class FilesMixin(PipelineShared):
             "size_bytes": len(file_content),
             "transient": True,
             "persisted": False,
-            "extraction_success": bool(extraction.success),
-            "extraction_error": extraction.error if not extraction.success else "",
-            "text_preview": extraction.text[:limit],
+            "extraction_success": bool(extraction.success or advisory_only),
+            "extraction_error": "" if extraction.success or advisory_only else extraction.error,
+            "text_preview": source_text[:limit],
             # Process-private whole extractor result for the request-aware
             # current-turn projector. The server removes this key before any
             # API/idempotency receipt is built.
-            "_runtime_source_text": extraction.text,
+            "_runtime_source_text": source_text,
             # Preview clipping is not source loss once the process-private whole
             # extractor result above is handed to AgentRuntime.  Keep the parser's
             # own loss bit separate so a 100k no-save text can be mapped in full
             # without claiming completeness for an extractor-capped source.
-            "_runtime_source_truncated": _text_extraction_was_truncated(extraction.metadata or {}),
+            "_runtime_source_truncated": _text_extraction_was_truncated(parser_metadata),
             # One prompt-level truth covers either loss: the transient preview
             # may be shorter than the extractor result, or the extractor itself
             # may already have stopped at its text budget.  In both cases the
             # model must not make a whole-document claim from the visible text.
-            "text_truncated": len(extraction.text) > limit
-            or _text_extraction_was_truncated(extraction.metadata or {}),
+            "text_truncated": len(source_text) > limit or _text_extraction_was_truncated(parser_metadata),
             # Deadline/page ceilings remain distinct because their metrics let
             # the prompt explain how much of the document was actually read.
-            "parse_deadline_reached": bool((extraction.metadata or {}).get("parse_deadline_reached")),
-            "parse_pages_read": int((extraction.metadata or {}).get("pages_read") or 0),
+            "parse_deadline_reached": bool(parser_metadata.get("parse_deadline_reached")),
+            "parse_pages_read": (
+                vision_pages_read if advisory_only else int(parser_metadata.get("pages_read") or 0)
+            ),
             # Третья обрезка, отличная от обеих предыдущих: том толще потолка
             # разборщика. Здесь она особенно важна — материал не сохраняется, и
             # переспросить по нему потом будет нечего.
-            "parse_pages_truncated": bool((extraction.metadata or {}).get("pages_truncated")),
-            "parse_total_pages": int((extraction.metadata or {}).get("total_pages") or 0),
+            "parse_pages_truncated": bool(
+                parser_metadata.get("pages_truncated")
+                or (advisory_only and vision_pages_total > 0 and vision_pages_read < vision_pages_total)
+            ),
+            "parse_total_pages": (
+                vision_pages_total if advisory_only else int(parser_metadata.get("total_pages") or 0)
+            ),
             # Те же три потери, что и на приёмном пути. Здесь они важнее: материал
             # не сохраняется, и переспросить по нему потом будет нечего.
-            "archive_truncated": bool((extraction.metadata or {}).get("archive_budget_exhausted")),
-            "archive_files": int((extraction.metadata or {}).get("files") or 0),
-            "archive_files_read": int((extraction.metadata or {}).get("previewed_files") or 0),
-            "source_truncated_for_parse": bool((extraction.metadata or {}).get("source_truncated_for_parse")),
+            "archive_truncated": bool(parser_metadata.get("archive_budget_exhausted")),
+            "archive_files": int(parser_metadata.get("files") or 0),
+            "archive_files_read": int(parser_metadata.get("previewed_files") or 0),
+            "source_truncated_for_parse": bool(parser_metadata.get("source_truncated_for_parse")),
+            # Local vision/OCR is useful current-turn context, but remains
+            # model-derived advice rather than independently verified source
+            # truth.  Runtime may synthesize from it with an explicit caveat;
+            # the verifier must never certify it as parser evidence.
+            "advisory_only": advisory_only,
+            "verification_eligible": bool(extraction.success and not advisory_only),
+            "vision_used": advisory_only,
+            "vision_pages_total": vision_pages_total,
+            "vision_pages_read": vision_pages_read,
             "unsupported_format": (
                 extraction.error == "unsupported_document_format"
                 and not safe_mime_type.startswith("image/")
@@ -1223,7 +1262,7 @@ class FilesMixin(PipelineShared):
         }
         office_structure = _validated_office_structure(
             getattr(extraction, "office_structure_index", None),
-            extraction.text,
+            source_text,
         )
         if office_structure is not None:
             # The caller may pass this only to the in-memory attachment for the
@@ -1234,7 +1273,7 @@ class FilesMixin(PipelineShared):
             # store_raw_object, and the durable caller-metadata road strips the
             # reserved index key above.
             transient[_OFFICE_STRUCTURE_METADATA_KEY] = office_structure
-            transient[_OFFICE_SOURCE_TEXT_KEY] = extraction.text
+            transient[_OFFICE_SOURCE_TEXT_KEY] = source_text
         return transient
 
     @staticmethod

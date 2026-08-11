@@ -46,6 +46,7 @@ from friday.permissions import (
     current_actor,
 )
 from friday.private_fs import open_private_text_write
+from friday.raw_metadata import bounded_raw_file_metadata
 from friday.reminder_schedule import reminder_clock, reminder_clock_description, reminder_when_text
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query
@@ -1195,6 +1196,7 @@ def _person_answer_for_llm(answer: dict[str, Any], *, zone: Any) -> dict[str, An
                 {
                     "когда": local(str(row.get("at") or "")),
                     "что": row.get("title") or row.get("filename") or "",
+                    "evidence_authority": row.get("evidence_authority"),
                 }
                 for row in files
             ],
@@ -1214,7 +1216,11 @@ def _person_answer_for_llm(answer: dict[str, Any], *, zone: Any) -> dict[str, An
     if files:
         trimmed["присылал файлов"] = summary.get("arrivals", len(files))
         trimmed["файлы"] = [
-            {"когда": local(str((row or {}).get("at") or "")), "что": (row or {}).get("title")}
+            {
+                "когда": local(str((row or {}).get("at") or "")),
+                "что": (row or {}).get("title"),
+                "evidence_authority": (row or {}).get("evidence_authority"),
+            }
             for row in files[:10]
         ]
     if answer.get("analysis"):
@@ -1676,6 +1682,70 @@ _SOURCE_CLOSED_FOCUS_FORMS: dict[str, frozenset[str]] = {
 _SOURCE_TABLE_HEADER_SUBJECTS = frozenset(
     {"фамилия", "фио", "имя", "сотрудник", "работник", "person", "employee", "name", "surname"}
 )
+_SOURCE_FOCUS_SEARCH_FORMS: dict[str, str] = {
+    "должност": "должность",
+    "позици": "позиция",
+    "рол": "роль",
+    "код": "код",
+    "значени": "значение",
+    "строк": "строка",
+    "узл": "узел",
+}
+
+
+def _closed_evidence_authority(raw_metadata: Any, *, available: bool = True) -> dict[str, Any]:
+    """Derive one closed, non-content authority label from Raw provenance.
+
+    Vision/OCR and speech transcription are useful retrieval text, but they are
+    model-produced observations rather than an independently extracted source
+    layer.  Never forward their arbitrary metadata to the model: collapse it to
+    a closed basis plus the one decision downstream synthesis needs.  Ordinary
+    native/legacy extracted text remains eligible.  A descriptor lost to a
+    concurrent privacy/verdict change fails closed instead of becoming trusted.
+    """
+
+    if not available:
+        return {"verification_eligible": False, "basis": "unavailable"}
+    metadata = bounded_raw_file_metadata(raw_metadata)
+    if isinstance(raw_metadata, str) and raw_metadata.strip() not in {"", "{}"} and not metadata:
+        return {"verification_eligible": False, "basis": "unavailable"}
+    if raw_metadata is not None and not isinstance(raw_metadata, (str, Mapping)):
+        return {"verification_eligible": False, "basis": "unavailable"}
+
+    visual = bool(
+        metadata.get("vision_review_required") is True
+        or metadata.get("vision_used") is True
+        or metadata.get("advisory_only") is True
+        or metadata.get("vision")
+    )
+    transcript = bool(metadata.get("transcription"))
+    explicitly_unverified = metadata.get("verification_eligible") is False
+    if visual and transcript:
+        basis = "advisory_visual_and_transcript"
+    elif visual:
+        basis = "advisory_visual"
+    elif transcript:
+        basis = "advisory_transcript"
+    elif explicitly_unverified:
+        basis = "unverified_source"
+    else:
+        basis = "extracted_text"
+    return {
+        "verification_eligible": basis == "extracted_text",
+        "basis": basis,
+    }
+
+
+def _source_focus_candidate_query(
+    clean_query: str,
+    focus_terms: tuple[str, ...],
+    query_terms: tuple[str, ...],
+) -> str:
+    """A bounded anchor+focus FTS lead for the conjunctive source pass."""
+
+    detail = [term for term in focus_terms if term not in query_terms]
+    focus_query = " ".join(_SOURCE_FOCUS_SEARCH_FORMS.get(term, term) for term in detail)
+    return f"{clean_query} {focus_query}" if focus_query else ""
 
 
 def _source_normalized_token(value: str) -> str:
@@ -4043,22 +4113,54 @@ class ExecutionKernel:
             snippet_focus = clean_query
         snippet_focus = snippet_focus[:_SOURCE_SEARCH_FOCUS_CHARS]
         clamped_limit = max(1, min(int(limit), 20))
-        candidate_rows = await run_blocking(
-            storage.search_raw_objects,
-            actor.user_id,
-            clean_query,
-            limit=_SOURCE_SEARCH_CANDIDATE_CAP,
-            include_content=True,
-        )
         focus_terms = tuple(
             dict.fromkeys(
-                re.findall(
-                    r"[\w@.+/-]{2,}",
-                    unicodedata.normalize("NFKC", snippet_focus).casefold(),
-                )
+                _source_normalized_token(match.group(0))
+                for match in _SOURCE_SEARCH_TOKEN.finditer(snippet_focus)
             )
         )[:12]
-        valid_rows = [row for row in candidate_rows if isinstance(row, Mapping)]
+        query_terms = tuple(
+            dict.fromkeys(
+                _source_normalized_token(match.group(0))
+                for match in _SOURCE_SEARCH_TOKEN.finditer(clean_query)
+            )
+        )[:8]
+        focus_candidate_query = (
+            _source_focus_candidate_query(clean_query, focus_terms, query_terms)
+            if explicit_focus and focus_terms and len(focus_terms) > 1
+            else ""
+        )
+
+        # Search the requested field/value vocabulary first, then prove the
+        # anchor AND the complete focus against each returned source body below.
+        # This uses the same tenant/private/ignored-filtered storage helper as
+        # the ordinary anchor pass, but prevents one hundred anchor-only rows
+        # from crowding a focused target into position 101 before focus is ever
+        # considered.  Predicate-only rows cannot escape the projection's
+        # anchor check and are discarded.
+        async def search_candidates(search_query: str) -> list[dict[str, Any]]:
+            return await run_blocking(
+                storage.search_raw_objects,
+                actor.user_id,
+                search_query,
+                limit=_SOURCE_SEARCH_CANDIDATE_CAP,
+                include_content=True,
+            )
+
+        focus_candidate_rows = await search_candidates(focus_candidate_query) if focus_candidate_query else []
+        anchor_candidate_rows = await search_candidates(clean_query)
+        candidate_rows: list[Mapping[str, Any]] = []
+        seen_raw_ids: set[str] = set()
+        for row in (*focus_candidate_rows, *anchor_candidate_rows):
+            if not isinstance(row, Mapping):
+                continue
+            raw_id = str(row.get("id") or "").strip()
+            if raw_id and raw_id in seen_raw_ids:
+                continue
+            if raw_id:
+                seen_raw_ids.add(raw_id)
+            candidate_rows.append(row)
+        valid_rows = candidate_rows
         projections: Sequence[str | tuple[str, int, int]]
         if explicit_focus:
             projections = await asyncio.gather(
@@ -4086,7 +4188,7 @@ class ExecutionKernel:
                 )
             )
         ranked_rows: list[tuple[bool, int, int, int, Mapping[str, Any], str]] = []
-        for row_index, (row, projection) in enumerate(zip(valid_rows, projections, strict=True)):
+        for row_index, (candidate, projection) in enumerate(zip(valid_rows, projections, strict=True)):
             if explicit_focus:
                 ranking_excerpt, matched_terms, context_terms = cast(tuple[str, int, int], projection)
             else:
@@ -4100,16 +4202,15 @@ class ExecutionKernel:
                     matched_terms,
                     context_terms,
                     row_index,
-                    row,
+                    candidate,
                     ranking_excerpt,
                 )
             )
-        # `query` remains the sole FTS eligibility key.  A richer focus may rank
-        # only those already-owned candidates, never admit a predicate-only
-        # source.  Predicate-only sources therefore never enter the page.  Pure
-        # repeated-anchor rows are discarded; richer anchor-bound rows remain a
-        # safe fallback when a document expresses the requested value without a
-        # literal field label.
+        # The focus-first pass is only a recall lead.  The source body must still
+        # contain the query anchor in the exact bounded passage, so a richer
+        # focus never admits a predicate-only source.  Pure repeated-anchor rows
+        # are discarded; richer anchor-bound rows remain a safe fallback when a
+        # document expresses the requested value without a literal field label.
         if explicit_focus and focus_terms and len(focus_terms) > 1:
             # A literal field label is preferred but not mandatory: real rows
             # often say `Иванов — ведущий инженер` without the word
@@ -4145,15 +4246,7 @@ class ExecutionKernel:
             # the reviewer could mark the row ignored between the search and the
             # content read, resurrecting text after the verdict changed.
             raw_metadata = ranked_row.get("_raw_metadata")
-            if isinstance(raw_metadata, Mapping):
-                metadata = dict(raw_metadata)
-            else:
-                try:
-                    metadata = json.loads(str(raw_metadata or "{}"))
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    metadata = {}
-            if not isinstance(metadata, Mapping):
-                metadata = {}
+            metadata = bounded_raw_file_metadata(raw_metadata)
             filename = " ".join(str(metadata.get("filename") or "").split()).strip()
             # ``source_ref`` can be an opaque transport id, internal path or URL
             # token.  It is provenance for code, not a user-facing filename.
@@ -4177,6 +4270,7 @@ class ExecutionKernel:
                 "review_status": str(ranked_row.get("inbox_status") or "unreviewed")[:40],
                 "promoted": bool(ranked_row.get("knowledge_object_id")),
                 "excerpt": excerpt,
+                "evidence_authority": _closed_evidence_authority(raw_metadata),
             }
             if explicit_focus:
                 item.update(
@@ -4213,11 +4307,13 @@ class ExecutionKernel:
             "results": results,
             "coverage": {
                 "complete": (
-                    len(candidate_rows) < _SOURCE_SEARCH_CANDIDATE_CAP and len(eligible_rows) < clamped_limit
+                    len(focus_candidate_rows) < _SOURCE_SEARCH_CANDIDATE_CAP
+                    and len(anchor_candidate_rows) < _SOURCE_SEARCH_CANDIDATE_CAP
+                    and len(eligible_rows) < clamped_limit
                 ),
                 "limit": clamped_limit,
                 "candidates_scanned": len(candidate_rows),
-                "candidate_cap": _SOURCE_SEARCH_CANDIDATE_CAP,
+                "candidate_cap": _SOURCE_SEARCH_CANDIDATE_CAP * (2 if focus_candidate_query else 1),
                 "focus_conjunctive": bool(explicit_focus and focus_terms and len(focus_terms) > 1),
                 "focus_match_found": emitted_full_focus,
                 "focus_fallback_contextual": emitted_contextual_focus,
@@ -5756,6 +5852,37 @@ class ExecutionKernel:
         shared = bool(getattr(actor, "shared_tenant", False))
         tenant = actor.user_id if shared else chosen.user_id
         by_author = chosen.user_id if shared else ""
+        activity_items = storage.user_activity(
+            tenant,
+            since=since,
+            until=until,
+            limit=max(1, min(int(limit), 200)),
+            offset=max(0, int(offset)),
+            include_content=include_content,
+            uploaded_by=by_author,
+            files_only=documents_only,
+        )
+        raw_ids = [
+            str(row.get("raw_object_id") or "").strip()
+            for row in activity_items
+            if isinstance(row, Mapping) and str(row.get("raw_object_id") or "").strip()
+        ]
+        descriptors = (
+            storage.get_raw_object_descriptors(raw_ids, tenant, limit=max(1, len(raw_ids))) if raw_ids else []
+        )
+        descriptor_by_id = {str(row.get("id") or ""): row for row in descriptors if isinstance(row, Mapping)}
+        annotated_items: list[dict[str, Any]] = []
+        for row in activity_items:
+            if not isinstance(row, Mapping):
+                continue
+            item = dict(row)
+            raw_id = str(item.get("raw_object_id") or "").strip()
+            descriptor = descriptor_by_id.get(raw_id)
+            item["evidence_authority"] = _closed_evidence_authority(
+                descriptor.get("metadata_json") if descriptor is not None else None,
+                available=descriptor is not None,
+            )
+            annotated_items.append(item)
         answer: dict[str, Any] = {
             "resolved": chosen.to_dict(),
             "content": "full" if include_content else "redacted",
@@ -5770,16 +5897,7 @@ class ExecutionKernel:
             # наполовину: у того, кто только переписывается, загрузок ноль, и на
             # «что писал JBL?» приходило «сообщений 42, но записи не загрузились».
             "messages": [],
-            "items": storage.user_activity(
-                tenant,
-                since=since,
-                until=until,
-                limit=max(1, min(int(limit), 200)),
-                offset=max(0, int(offset)),
-                include_content=include_content,
-                uploaded_by=by_author,
-                files_only=documents_only,
-            ),
+            "items": annotated_items,
             # Сколько документов за то же окно вообще НЕ имеют отметки автора.
             #
             # Без этого числа «загрузок от него нет» звучит одинаково в двух совсем

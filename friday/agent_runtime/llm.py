@@ -480,6 +480,7 @@ class LLMRouter:
         max_tokens: int | None = None,
         priority: str = "foreground",
         tools: list[dict[str, Any]] | None = None,
+        reject_repeated_token_degeneration: bool = True,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -516,6 +517,7 @@ class LLMRouter:
                     max_tokens,
                     tools,
                     half_open_probe=half_open_probe,
+                    reject_repeated_token_degeneration=reject_repeated_token_degeneration,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -583,6 +585,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None,
         *,
         half_open_probe: bool = False,
+        reject_repeated_token_degeneration: bool = True,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(messages, temperature, max_tokens, tools)
         last_error: Exception | None = None
@@ -682,7 +685,8 @@ class LLMRouter:
                     # Профиль всё-таки рассуждает вслух — значит обрыв по длине у
                     # него действительно может оставить один монолог.
                     self._thinking_seen = True
-                if detect_repeated_token_degeneration(content):
+                if reject_repeated_token_degeneration and detect_repeated_token_degeneration(content):
+                    LOGGER.warning("LLM response rejected: repeated_token_degeneration")
                     raise RuntimeError("LLM response rejected: repeated-token degeneration detected")
                 usage_value = data.get("usage")
                 usage: dict[str, Any] = usage_value if isinstance(usage_value, dict) else {}

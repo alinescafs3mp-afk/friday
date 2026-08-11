@@ -146,6 +146,50 @@ async def test_an_ordinary_account_can_inventory_only_its_own_documents(kernel):
 
 
 @pytest.mark.asyncio
+async def test_user_activity_projects_closed_file_evidence_authority(kernel):
+    runtime, auth, storage = kernel
+    cases = {
+        "native-evidence.pdf": (
+            {"text_extraction_success": True},
+            {"verification_eligible": True, "basis": "extracted_text"},
+        ),
+        "advisory-scan.jpg": (
+            {"text_extraction_success": True, "vision_review_required": True},
+            {"verification_eligible": False, "basis": "advisory_visual"},
+        ),
+        "advisory-transcript.txt": (
+            {"text_extraction_success": True, "transcription": {"model": "local"}},
+            {"verification_eligible": False, "basis": "advisory_transcript"},
+        ),
+    }
+    for filename, (metadata, _authority) in cases.items():
+        storage.store_raw_object(
+            RawObject(
+                id=new_id("raw"),
+                user_id="usr_ivan",
+                source="upload",
+                source_ref=new_id("src"),
+                raw_content=f"body for {filename}",
+                content_type="file",
+                metadata_json={"filename": filename, **metadata},
+            )
+        )
+    storage.commit()
+
+    result = await runtime.execute(
+        "user_activity",
+        {"person": "Иван", "documents_only": True, "limit": 20},
+        actor=auth.actor_for_user("boss", source="test"),
+    )
+
+    assert result.success is True, result.error
+    projected = {row["что"]: row["evidence_authority"] for row in result.data["документы"]}
+    assert projected == {filename: authority for filename, (_metadata, authority) in cases.items()}
+    assert "vision_review_required" not in str(result.data)
+    assert "transcription" not in str(result.data)
+
+
+@pytest.mark.asyncio
 async def test_shared_tenant_account_inventories_its_own_documents_not_the_tenants(
     settings,
     storage,

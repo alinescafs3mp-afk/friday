@@ -499,7 +499,11 @@ class IntakeMixin(StorageShared):
         """FTS over an already-authorized Raw-id set, scoped before SQL LIMIT."""
 
         text = " ".join((query or "").split()).strip()
-        ordered_ids = list(dict.fromkeys(str(raw_id or "").strip() for raw_id in raw_ids if raw_id))[:1_000]
+        # The global body-free document catalog is bounded at 5,000 entries.
+        # Truncating this authorized id set back to the old 1,000-message
+        # conversation horizon would make a unique older file impossible to
+        # select by content even though its exact id is already in scope.
+        ordered_ids = list(dict.fromkeys(str(raw_id or "").strip() for raw_id in raw_ids if raw_id))[:5_000]
         if not text or not ordered_ids or not self._fts_available:
             return []
         terms = _fts_terms(text)
@@ -581,6 +585,162 @@ class IntakeMixin(StorageShared):
             ).fetchall()
             found.update((str(row["id"]), dict(row)) for row in rows)
         return [found[raw_id] for raw_id in ordered if raw_id in found]
+
+    def list_owned_file_catalog(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        *,
+        limit: int = 5_000,
+    ) -> list[dict[str, Any]]:
+        """Return a body-free, uploader-scoped catalog across conversations.
+
+        Conversation pointers are an efficient continuity cache, not the
+        archive boundary.  An exact filename or unique content clue must still
+        be able to locate a file first mentioned in another conversation.  The
+        SQL applies person/privacy/ignored/audio filters *before* its finite
+        page, so another participant's corpus cannot crowd out the caller's
+        files or reveal their existence.
+        """
+
+        page_size = max(1, min(int(limit), 5_000))
+        rows = self.execute(
+            f"""SELECT r.id, r.content_type, r.received_at,
+                       substr(COALESCE(json_extract(r.metadata_json,'$.filename'),''),1,260)
+                           AS filename
+                  FROM raw_objects r
+                 WHERE r.user_id=? AND r.deleted_at IS NULL
+                   AND r.content_type='file'
+                   AND json_valid(r.metadata_json)
+                   AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                   AND json_extract(r.metadata_json,'$.uploaded_by')=?
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND NOT EXISTS (
+                       SELECT 1 FROM inbox i
+                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                          AND i.status='ignored'
+                   )
+                 ORDER BY r.received_at ASC, r.rowid ASC
+                 LIMIT ?""",  # nosec B608 - only fixed privacy predicates
+            (str(user_id), str(uploaded_by), page_size),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def find_owned_files_by_filename(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        filename: str,
+    ) -> list[dict[str, Any]]:
+        """Find zero, one or two exact filename matches for one uploader.
+
+        Two rows are sufficient to prove ambiguity, while returning a larger
+        page would invite callers to confuse a display limit with uniqueness.
+        SQLite's built-in ``NOCASE`` is ASCII-only, so the comparison uses the
+        connection's NFC-aware Unicode casefold function.  Every authority and
+        lifecycle predicate is applied before the fixed ``LIMIT 2``.
+        """
+
+        tenant = str(user_id or "").strip()
+        person = str(uploaded_by or "").strip()
+        clean_filename = str(filename or "").strip()
+        if not tenant or not person or not clean_filename or len(clean_filename) > 260:
+            return []
+        rows = self.execute(
+            f"""SELECT r.id, r.content_type, r.received_at,
+                       substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename
+                  FROM raw_objects r
+                 WHERE r.user_id=? AND r.deleted_at IS NULL
+                   AND r.content_type='file'
+                   AND json_valid(r.metadata_json)
+                   AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                   AND json_extract(r.metadata_json,'$.uploaded_by')=?
+                   AND json_type(r.metadata_json,'$.filename')='text'
+                   AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                   AND jericho_casefold(substr(json_extract(r.metadata_json,'$.filename'),1,261))=
+                       jericho_casefold(?)
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND NOT EXISTS (
+                       SELECT 1 FROM inbox i
+                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                          AND i.status='ignored'
+                   )
+                 ORDER BY r.received_at ASC, r.id ASC
+                 LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+            (tenant, person, clean_filename),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def search_owned_file_content(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        query: str,
+        *,
+        limit: int = 64,
+    ) -> dict[str, Any]:
+        """Search one uploader's file bodies with an explicit sentinel row.
+
+        The returned ``results`` page never exceeds 64 rows.  SQL asks for one
+        additional row, so ``complete`` can prove whether the bounded page
+        contains every match instead of treating a saturated page as unique or
+        exhaustive.  Invalid/unavailable FTS returns ``available=False`` and
+        therefore never proves absence.
+        """
+
+        page_size = max(1, min(int(limit), 64))
+        empty_page: dict[str, Any] = {
+            "results": [],
+            "complete": False,
+            "available": False,
+            "limit": page_size,
+            "matched_at_least": 0,
+        }
+        tenant = str(user_id or "").strip()
+        person = str(uploaded_by or "").strip()
+        text = " ".join(str(query or "").split()).strip()
+        if not tenant or not person or not text or not self._fts_available:
+            return empty_page
+        terms = _fts_terms(text)
+        if not terms:
+            return empty_page
+        match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+        try:
+            rows = self.execute(
+                f"""SELECT r.id, r.content_type, r.received_at,
+                           substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                           bm25(raw_fts) AS rank
+                      FROM raw_fts
+                      JOIN raw_objects r ON r.rowid=raw_fts.rowid
+                     WHERE r.user_id=? AND r.deleted_at IS NULL
+                       AND r.content_type='file'
+                       AND json_valid(r.metadata_json)
+                       AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                       AND json_extract(r.metadata_json,'$.uploaded_by')=?
+                       AND {_not_audio_document("r")}
+                       AND {_not_private_raw_dependency("r")}
+                       AND NOT EXISTS (
+                           SELECT 1 FROM inbox i
+                            WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                              AND i.status='ignored'
+                       )
+                       AND raw_fts MATCH ?
+                     ORDER BY rank ASC, r.received_at DESC, r.id ASC
+                     LIMIT ?""",  # nosec B608 - only fixed privacy predicates
+                (tenant, person, match_query, page_size + 1),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return empty_page
+        complete = len(rows) <= page_size
+        return {
+            "results": [dict(row) for row in rows[:page_size]],
+            "complete": complete,
+            "available": True,
+            "limit": page_size,
+            "matched_at_least": len(rows),
+        }
 
     def store_inbox_item(self, item: InboxItem) -> InboxItem:
         self.ensure_user(item.user_id)

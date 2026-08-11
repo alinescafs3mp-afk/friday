@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+import httpx
+import pytest
+
 from friday.agent_runtime.llm import LLMRouter, _fit_messages_to_context, _system_first
 
 
@@ -69,3 +72,45 @@ def test_qwen_payload_disables_model_thinking_and_has_one_system(settings):
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
     assert sum(item["role"] == "system" for item in payload["messages"]) == 1
     assert payload["messages"][0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_vision_can_accept_valid_ocr_json_with_a_long_visual_separator(
+    settings,
+    monkeypatch,
+):
+    content = '{"text":"____________","confidence":0.9}'
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    with pytest.raises(RuntimeError, match="repeated-token degeneration"):
+        await router.chat([{"role": "user", "content": "ordinary chat"}])
+
+    result = await router.chat(
+        [{"role": "user", "content": "bounded vision JSON"}],
+        reject_repeated_token_degeneration=False,
+    )
+    assert result["content"] == content
