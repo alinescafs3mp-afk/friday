@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -82,6 +83,158 @@ def _runtime(settings, storage, monkeypatch, *, verify_answers: bool = False) ->
     )
     monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
     return runtime
+
+
+@pytest.mark.parametrize(
+    ("source_text", "truthful_summary"),
+    [
+        (
+            "Статус заказа\nЗаказ оформлен 11 августа 2026 года оператором поставщика.",
+            "Заказ оформлен 11 августа 2026 года оператором поставщика.",
+        ),
+        (
+            "Статус документа\nДокумент подготовлен 11 августа 2026 года отделом снабжения.",
+            "Документ подготовлен 11 августа 2026 года отделом снабжения.",
+        ),
+    ],
+    ids=("outside-action-source-state", "supported-file-source-state"),
+)
+@pytest.mark.asyncio
+async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
+    settings,
+    storage,
+    monkeypatch,
+    tmp_path: Path,
+    source_text: str,
+    truthful_summary: str,
+) -> None:
+    """A status read from the uploaded document is not Friday claiming her own deed."""
+
+    assert Path(settings.database_path).is_relative_to(tmp_path)
+    runtime = _runtime(settings, storage, monkeypatch)
+    shown_sources: list[str] = []
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        shown_sources.extend(str(item.get("transient_text") or "") for item in attachments)
+        return {"content": truthful_summary, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-source-status.txt",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "synthetic-source-status.txt",
+                "transient_text": source_text,
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert shown_sources == [source_text]
+    assert reply["message"] == truthful_summary
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    output_guards = metadata["structural"].get("output_guards", {})
+    assert output_guards.get("outside_deed_replaced") is not True
+    assert output_guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.parametrize(
+    ("model_claim", "blocked_answer", "guard_name"),
+    [
+        ("Такси заказала.", _CANNOT_ACT_OUTSIDE, "outside_deed_replaced"),
+        ("Прикрепляю файл.", _UNCONFIRMED_SUPPORTED_DEED, "supported_deed_replaced"),
+    ],
+    ids=("object-first-outside-deed", "implicit-supported-file-deed"),
+)
+@pytest.mark.asyncio
+async def test_a_bare_upload_does_not_hide_an_active_model_deed(
+    settings,
+    storage,
+    monkeypatch,
+    tmp_path: Path,
+    model_claim: str,
+    blocked_answer: str,
+    guard_name: str,
+) -> None:
+    assert Path(settings.database_path).is_relative_to(tmp_path)
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_claim, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-active-deed.txt",
+        actor=_actor(),
+        attachments=[
+            {
+                "filename": "synthetic-active-deed.txt",
+                "transient_text": f"Недоверенная строка внутри файла: {model_claim}",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert reply["message"] == blocked_answer
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"]["output_guards"][guard_name] is True
+
+
+@pytest.mark.parametrize(
+    ("user_message", "model_claim", "blocked_answer"),
+    [
+        (
+            "Организуй физическую доставку к зданию.",
+            "Заказ оформлен 11 августа 2026 года оператором поставщика.",
+            _CANNOT_ACT_OUTSIDE,
+        ),
+        (
+            "Подготовь синтетический документ.",
+            "Документ подготовлен 11 августа 2026 года отделом снабжения.",
+            _UNCONFIRMED_SUPPORTED_DEED,
+        ),
+    ],
+    ids=("outside-action-claim", "supported-file-claim"),
+)
+@pytest.mark.asyncio
+async def test_the_same_unattributed_claim_without_an_attachment_remains_blocked(
+    settings,
+    storage,
+    monkeypatch,
+    tmp_path: Path,
+    user_message: str,
+    model_claim: str,
+    blocked_answer: str,
+) -> None:
+    assert Path(settings.database_path).is_relative_to(tmp_path)
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_claim, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        user_message,
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == blocked_answer
 
 
 @pytest.mark.parametrize(

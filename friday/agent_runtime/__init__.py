@@ -4060,7 +4060,11 @@ def _leading_model_assertion(answer: str) -> str:
     return " ".join(_model_authored_clauses(answer)).strip()
 
 
-def _candidate_claims_an_outside_deed(candidate: str) -> bool:
+def _candidate_claims_an_outside_deed(
+    candidate: str,
+    *,
+    passive_source_state: bool = False,
+) -> bool:
     if (
         candidate.rstrip().endswith("?")
         or _OUTSIDE_DEED_TECHNICAL_CONTEXT.search(candidate)
@@ -4137,6 +4141,15 @@ def _candidate_claims_an_outside_deed(candidate: str) -> bool:
     )
     if active:
         return True
+    if passive_source_state and not (
+        _OUTSIDE_SELF_SUBJECT.search(candidate) or _OUTSIDE_DEED_SELF_AGENT.search(candidate)
+    ):
+        # A backend-owned bare-upload turn is a read-only summary of the
+        # attached source.  Unattributed passive states such as ``заказ
+        # оформлен`` are therefore facts reported from that source, not deeds
+        # completed by Friday.  Active, implicit and object-first completions
+        # were checked above; an explicit ``мной``/``Пятницей`` remains a deed.
+        return False
     for passive in (
         _OUTSIDE_DEED_PASSIVE.search(candidate),
         _OUTSIDE_EXTERNAL_SEND_PASSIVE.search(candidate),
@@ -4150,7 +4163,11 @@ def _candidate_claims_an_outside_deed(candidate: str) -> bool:
     return False
 
 
-def claims_a_deed_it_cannot_do(answer: str) -> bool:
+def claims_a_deed_it_cannot_do(
+    answer: str,
+    *,
+    passive_source_state: bool = False,
+) -> bool:
     """Ответ отчитался о деле, которого система не делает.
 
     Смотрится только первое предложение: дальше те же слова обычно являются
@@ -4160,7 +4177,10 @@ def claims_a_deed_it_cannot_do(answer: str) -> bool:
     """
 
     return any(
-        _candidate_claims_an_outside_deed(part)
+        _candidate_claims_an_outside_deed(
+            part,
+            passive_source_state=passive_source_state,
+        )
         for candidate in _model_authored_clauses(answer)
         for part in re.split(
             rf"\s+и\s+(?=(?:я|мы)\b|{_OUTSIDE_COORDINATED_SUBJECT}\b)",
@@ -4865,17 +4885,36 @@ _SUPPORTED_FILE_HISTORICAL_REPORT = re.compile(
     r"\b(?:в|около)\s+(?:[01]?\d|2[0-3])[:.]\d{2}\b",
     re.IGNORECASE,
 )
+_SUPPORTED_FILE_ACTIVE_ACTION = (
+    r"(?:создал\w*|сделал\w*|сформировал\w*|сгенерировал\w*|"
+    r"сохранил\w*|экспортировал\w*|подготовил\w*|собрал\w*|"
+    r"прикрепил\w*|прикрепля\w*|приложил\w*|прилага\w*|"
+    r"отправил\w*|отправля\w*|выгрузил\w*)"
+)
 _SUPPORTED_FILE_ACTIVE_COMPLETION = re.compile(
-    r"^\W*(?:я\s+)?(?:создал\w*|сделал\w*|сформировал\w*|сгенерировал\w*|"
-    r"сохранил\w*|экспортировал\w*|подготовил\w*|"
-    r"собрал\w*|прикрепил\w*|прикрепля\w*|приложил\w*|прилага\w*|"
-    r"отправил\w*|отправля\w*|выгрузил\w*)\b",
+    rf"^\W*(?:я\s+)?{_SUPPORTED_FILE_ACTIVE_ACTION}\b",
     re.IGNORECASE,
 )
+_SUPPORTED_REMINDER_ACTIVE_ACTION = (
+    r"(?:поставил\w*|создал\w*|сохранил\w*|установил\w*|добавил\w*|"
+    r"запланировал\w*|зав[её]л\w*|активировал\w*)"
+)
 _SUPPORTED_REMINDER_ACTIVE_COMPLETION = re.compile(
-    r"^\W*(?:я\s+)?(?:поставил\w*|создал\w*|сохранил\w*|установил\w*|добавил\w*|"
-    r"запланировал\w*|зав[её]л\w*|активировал\w*)\b|"
+    rf"^\W*(?:я\s+)?{_SUPPORTED_REMINDER_ACTIVE_ACTION}\b|"
     r"^\W*напомн(?:ю|им)\b",
+    re.IGNORECASE,
+)
+_SUPPORTED_FILE_BARE_HANDOFF = re.compile(
+    rf"\b(?:держи(?:те)?|вот)\s+"
+    r"(?:(?:этот|тот|готовый|готовое|ваш|ваша|нужный|нужное|"
+    r"запрошенный|запрошенное)\s+){0,2}"
+    rf"{_SUPPORTED_FILE_OBJECT}\b|"
+    rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,64}}"
+    r"\b(?:во\s+вложени\w*|(?:уже|теперь|наход\w*|леж\w*)\s+в\s+чат\w*)\b",
+    re.IGNORECASE,
+)
+_SUPPORTED_VOICE_ACTIVE_ACTION = re.compile(
+    r"\b(?:озвучил\w*|записал\w*|отправил\w*)\b",
     re.IGNORECASE,
 )
 _SUPPORTED_FILE_GENERIC_TERMS = frozenset(
@@ -5139,6 +5178,7 @@ def _claims_an_unconfirmed_supported_deed(
     file_format_descriptors: list[str] | tuple[str, ...] | None = None,
     reminder_descriptors: list[str] | tuple[str, ...] = (),
     read_only_timeline_file_report: bool = False,
+    passive_source_state: bool = False,
 ) -> bool:
     for clause in _supported_deed_claim_clauses(answer):
         if clause.rstrip().endswith("?") or _SUPPORTED_DEED_NONACTUAL.search(clause):
@@ -5147,6 +5187,7 @@ def _claims_an_unconfirmed_supported_deed(
             continue
         reminder_claim = _SUPPORTED_REMINDER_COMPLETION.search(clause)
         file_claim = _SUPPORTED_FILE_COMPLETION.search(clause)
+        voice_claim = _SUPPORTED_VOICE_COMPLETION.search(clause)
         if (
             file_claim is not None
             and reminder_claim is not None
@@ -5162,6 +5203,24 @@ def _claims_an_unconfirmed_supported_deed(
             # Other clauses (for example a stray ``PDF готов`` without a
             # historical anchor) are still checked independently.
             file_claim = None
+        if passive_source_state:
+            # The whole response in this narrowly authenticated mode reports
+            # the newly uploaded source.  Only passive states inherit that
+            # source scope.  First-person, implicit/object-first active forms
+            # and bare hand-offs continue to require an effect from this turn.
+            source_clause_is_active = bool(
+                _OUTSIDE_SELF_SUBJECT.search(clause)
+                or _OUTSIDE_DEED_SELF_AGENT.search(clause)
+                or re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
+                or re.search(rf"\b{_SUPPORTED_REMINDER_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
+                or _SUPPORTED_REMINDER_DELIVERY_PROMISE.search(clause)
+                or _SUPPORTED_VOICE_ACTIVE_ACTION.search(clause)
+                or _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+            )
+            if not source_clause_is_active:
+                file_claim = None
+                reminder_claim = None
+                voice_claim = None
         if file_claim:
             if not has_file:
                 return True
@@ -5196,7 +5255,7 @@ def _claims_an_unconfirmed_supported_deed(
                 generic=_SUPPORTED_REMINDER_GENERIC_TERMS,
             ):
                 return True
-        if _SUPPORTED_VOICE_COMPLETION.search(clause) and not voice_succeeded:
+        if voice_claim and not voice_succeeded:
             return True
     return False
 
@@ -5429,6 +5488,7 @@ def _guard_repaired_model_output(
     answer: str,
     *,
     archive_status_guarded: bool,
+    passive_source_state: bool = False,
 ) -> tuple[str, bool, bool, bool]:
     """Повторить выходные рубежи после единственного repair.
 
@@ -5437,11 +5497,21 @@ def _guard_repaired_model_output(
     последующая проверка по-прежнему встречаются в коде ровно по одному разу.
     """
 
-    if claims_a_deed_it_cannot_do(answer):
+    if claims_a_deed_it_cannot_do(
+        answer,
+        passive_source_state=passive_source_state,
+    ):
         return _CANNOT_ACT_OUTSIDE, False, True, False
     if archive_status_guarded:
         cleaned, changed, has_model_content = strip_unasked_archive_status(answer)
-        if changed and has_model_content and claims_a_deed_it_cannot_do(cleaned):
+        if (
+            changed
+            and has_model_content
+            and claims_a_deed_it_cannot_do(
+                cleaned,
+                passive_source_state=passive_source_state,
+            )
+        ):
             return _CANNOT_ACT_OUTSIDE, False, True, True
         return cleaned, has_model_content, False, changed
     return answer, bool(str(answer or "").strip()), False, False
@@ -17000,6 +17070,21 @@ class AgentRuntime:
             else 0
         )
         structural_file_clips = all_response_files[:structural_file_count]
+        passive_attachment_summary_scope = bool(
+            synthetic_document_notice
+            and current_attachment_local
+            and attachment_expected_count > 0
+            and attachment_readable_count > 0
+            and response.get("_model_generated") is True
+            and not response.get("llm_failed")
+            and not response.get("tools_used")
+            and not response.get("tool_evidence")
+            and not all_response_files
+            and not response.get("voice_clip")
+            and not response.get("knowledge_object_ids")
+            and not context.successful_reminders
+            and context.late_make_file_attempts == 0
+        )
         requested_web_fact_targets = _requested_web_fact_targets(
             clean_message,
             response.get("tool_evidence"),
@@ -17091,7 +17176,10 @@ class AgentRuntime:
         # человеку голосом или файлом после того, как из чата его убрали.
         outside_deed_detected = bool(
             response.get("_attachment_model_failure_owned") is not True
-            and claims_a_deed_it_cannot_do(content)
+            and claims_a_deed_it_cannot_do(
+                content,
+                passive_source_state=passive_attachment_summary_scope,
+            )
         )
         outside_deed_replaced = outside_deed_detected
         outside_deed_recovery_attempted = False
@@ -17213,7 +17301,10 @@ class AgentRuntime:
                 # Старый голос уже содержит исходную модельную строку. Новый при
                 # необходимости синтезируется позднее из окончательного текста.
                 response["voice_clip"] = None
-                if archive_model_content and claims_a_deed_it_cannot_do(content):
+                if archive_model_content and claims_a_deed_it_cannot_do(
+                    content,
+                    passive_source_state=passive_attachment_summary_scope,
+                ):
                     LOGGER.warning("outside-deed: снятие служебного статуса открыло ложный отчёт")
                     outside_deed_replaced = True
                     content = _CANNOT_ACT_OUTSIDE
@@ -17258,6 +17349,7 @@ class AgentRuntime:
                 file_descriptors=file_deed_descriptors,
                 reminder_descriptors=reminder_deed_descriptors,
                 read_only_timeline_file_report=read_only_timeline_file_report,
+                passive_source_state=passive_attachment_summary_scope,
             )
         ):
             # Проверяется модельная часть ДО late builder: иначе выдуманное
@@ -17834,6 +17926,7 @@ class AgentRuntime:
                 ) = _guard_repaired_model_output(
                     repaired,
                     archive_status_guarded=archive_status_guarded,
+                    passive_source_state=passive_attachment_summary_scope,
                 )
                 if repaired_has_model_content and _claims_an_unconfirmed_supported_deed(
                     repaired_model_said,
@@ -17844,6 +17937,7 @@ class AgentRuntime:
                     file_descriptors=file_deed_descriptors,
                     reminder_descriptors=reminder_deed_descriptors,
                     read_only_timeline_file_report=read_only_timeline_file_report,
+                    passive_source_state=passive_attachment_summary_scope,
                 ):
                     LOGGER.warning("supported-deed: repair вернул неподтверждённое завершение")
                     repaired_model_said = _UNCONFIRMED_SUPPORTED_DEED
