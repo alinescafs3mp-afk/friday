@@ -865,6 +865,37 @@ def _not_private_raw_dependency(alias: str = "r") -> str:
     )"""
 
 
+def _exact_uploader_raw_dependency(alias: str = "r") -> str:
+    """One exact, fail-closed uploader check over bounded Raw metadata.
+
+    The expression contains one bound ``?``.  Duplicate JSON keys, malformed or
+    oversized metadata and a non-text/missing ``uploaded_by`` all fail closed;
+    filename navigation and semantic source recall must interpret provenance by
+    the same rule as uploader-scoped Knowledge retrieval.
+    """
+
+    return f"""CASE
+        WHEN length(CAST(COALESCE({alias}.metadata_json,'') AS BLOB))
+                 <={RAW_FILE_METADATA_MAX_BYTES}
+         AND typeof({alias}.metadata_json)='text'
+         AND json_valid({alias}.metadata_json)
+        THEN CASE
+          WHEN json_type({alias}.metadata_json)='object'
+           AND NOT EXISTS (
+                 SELECT 1 FROM json_tree({alias}.metadata_json) uploader_json_member
+                  WHERE uploader_json_member.key IS NOT NULL
+                  GROUP BY uploader_json_member.parent,
+                           CAST(uploader_json_member.key AS TEXT)
+                 HAVING COUNT(*) > 1
+               )
+           AND json_type({alias}.metadata_json,'$.uploaded_by')='text'
+          THEN json_extract({alias}.metadata_json,'$.uploaded_by')=?
+          ELSE 0
+        END
+        ELSE 0
+      END"""
+
+
 def _exact_uploader_knowledge_dependency(
     knowledge_alias: str = "k",
     raw_alias: str = "uploader_raw",
@@ -882,32 +913,20 @@ def _exact_uploader_knowledge_dependency(
     """
 
     public_raw = _not_private_raw_dependency(raw_alias)
+    exact_uploader = _exact_uploader_raw_dependency(raw_alias)
     return f"""EXISTS (
         SELECT 1 FROM raw_objects {raw_alias}
          WHERE {raw_alias}.id={knowledge_alias}.raw_object_id
            AND {raw_alias}.user_id={knowledge_alias}.user_id
            AND {raw_alias}.deleted_at IS NULL
            AND {public_raw}
-           AND CASE
-             WHEN length(CAST(COALESCE({raw_alias}.metadata_json,'') AS BLOB))
-                      <={RAW_FILE_METADATA_MAX_BYTES}
-              AND typeof({raw_alias}.metadata_json)='text'
-              AND json_valid({raw_alias}.metadata_json)
-             THEN CASE
-               WHEN json_type({raw_alias}.metadata_json)='object'
-                AND NOT EXISTS (
-                      SELECT 1 FROM json_tree({raw_alias}.metadata_json) uploader_json_member
-                       WHERE uploader_json_member.key IS NOT NULL
-                       GROUP BY uploader_json_member.parent,
-                                CAST(uploader_json_member.key AS TEXT)
-                      HAVING COUNT(*) > 1
-                    )
-                AND json_type({raw_alias}.metadata_json,'$.uploaded_by')='text'
-               THEN json_extract({raw_alias}.metadata_json,'$.uploaded_by')=?
-               ELSE 0
-             END
-             ELSE 0
-           END
+           AND {exact_uploader}
+           AND NOT EXISTS (
+               SELECT 1 FROM inbox uploader_inbox_verdict
+                WHERE uploader_inbox_verdict.raw_object_id={raw_alias}.id
+                  AND uploader_inbox_verdict.user_id={raw_alias}.user_id
+                  AND uploader_inbox_verdict.status='ignored'
+           )
     )"""
 
 

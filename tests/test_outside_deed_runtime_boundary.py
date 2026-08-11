@@ -237,6 +237,37 @@ async def test_the_same_unattributed_claim_without_an_attachment_remains_blocked
     assert reply["message"] == blocked_answer
 
 
+@pytest.mark.asyncio
+async def test_a_quoted_document_metadata_provenance_answer_is_not_replaced_as_a_file_deed(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    model_answer = "Я взяла гриф из метаданных документа, где он сохранён."
+    seen_quote: list[str] = []
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del message, attachments
+        seen_quote.append(str(context.reply_quote or ""))
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "А откуда ты это взяла, из метаданных?",
+        actor=_actor(),
+        enable_tools=False,
+        reply_to="В предыдущем ответе был указан синтетический гриф документа.",
+    )
+
+    assert seen_quote == ["В предыдущем ответе был указан синтетический гриф документа."]
+    assert reply["message"] == model_answer
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"].get("output_guards", {}).get("supported_deed_replaced") is not True
+
+
 @pytest.mark.parametrize(
     "claim",
     [

@@ -71,6 +71,28 @@ _VISION_PDF_MAX_PAGES = 40
 _VISION_OCR_BUDGET_SEC = 120.0
 _VISION_PDF_RENDER_BUDGET_FLOOR_SEC = 30.0
 _PDF_RENDER_SOURCE_RE = re.compile(r"^pdf-page-(\d+)-(?:render|image-\d+)$", re.IGNORECASE)
+_DOCUMENT_METADATA_STRING_FIELDS = (
+    "title",
+    "subject",
+    "creator",
+    "initial_creator",
+    "description",
+    "language",
+    "generator",
+    "creation_date",
+    "modified_date",
+    "editing_duration",
+    "document_date",
+)
+_DOCUMENT_METADATA_COUNT_FIELDS = (
+    "editing_cycles",
+    "page_count",
+    "word_count",
+    "character_count",
+    "table_count",
+    "image_count",
+    "object_count",
+)
 
 
 def _visual_page_number(asset: VisualAsset) -> int | None:
@@ -93,6 +115,30 @@ def _validated_office_structure(value: Any, text: str) -> dict[str, Any] | None:
     """Validate only mappings; absent parser/legacy metadata is ordinary None."""
 
     return validate_office_structure_index(value, text) if isinstance(value, Mapping) else None
+
+
+def _document_metadata_projection(value: Any) -> dict[str, Any]:
+    """Closed process-private projection; never forward arbitrary parser keys."""
+
+    source = value if isinstance(value, Mapping) else {}
+    format_name = str(source.get("format") or "")
+    if format_name not in {"odt", "ods", "odp", "opendocument"}:
+        return {}
+    projected: dict[str, Any] = {"format": format_name}
+    for key in _DOCUMENT_METADATA_STRING_FIELDS:
+        item = source.get(key)
+        if isinstance(item, str) and item:
+            projected[key] = item
+    keywords = source.get("keywords")
+    if isinstance(keywords, list):
+        safe_keywords = [item for item in keywords[:32] if isinstance(item, str) and item]
+        if safe_keywords:
+            projected["keywords"] = safe_keywords
+    for key in _DOCUMENT_METADATA_COUNT_FIELDS:
+        item = source.get(key)
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+            projected[key] = min(item, 2_147_483_647)
+    return projected
 
 
 class FilesMixin(PipelineShared):
@@ -310,12 +356,12 @@ class FilesMixin(PipelineShared):
         if page_text:
             ordered_text: list[str] = []
             for (asset_id, descriptor), asset in zip(asset_catalog.items(), assets, strict=True):
-                visible = page_text.get(asset_id)
-                if not visible:
+                page_visible = page_text.get(asset_id)
+                if not page_visible:
                     continue
                 page_number = _visual_page_number(asset)
                 label = f"Страница {page_number}" if page_number is not None else descriptor["source"]
-                ordered_text.append(f"[{label}]\n{visible}")
+                ordered_text.append(f"[{label}]\n{page_visible}")
             text = _bounded_text("\n\n".join(ordered_text), self.settings.max_extracted_text_chars)
         else:
             text = _bounded_text(parsed.get("text"), self.settings.max_extracted_text_chars)
@@ -773,12 +819,44 @@ class FilesMixin(PipelineShared):
         metadata: dict[str, Any] | None = None,
         source_ref: str = "",
         force_review: bool = False,
+        archive_password: str | None = None,
     ) -> dict[str, Any]:
         if len(file_content) > self.settings.max_upload_bytes:
             raise ValueError("file exceeds FRIDAY_MAX_UPLOAD_BYTES")
         filename = self._sanitize_filename(filename or (file_path.name if file_path else "upload.bin"))
         guessed_type, _ = mimetypes.guess_type(filename)
         mime_type = (mime_type or guessed_type or "application/octet-stream").split(";", 1)[0].strip()
+
+        # Password challenges must happen before Raw/file/dedup persistence.  A
+        # duplicate encrypted archive is still locked unless this request can
+        # prove its password; replaying the earlier receipt would both bypass
+        # authentication and make a wrong password look successful.  Restrict
+        # the eager parse to archive containers so ordinary duplicate documents
+        # retain the inexpensive hash-first path.
+        archive_suffix = Path(filename.casefold()).suffix
+        eager_archive_suffixes = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst"}
+        extraction = None
+        if archive_suffix in eager_archive_suffixes:
+            extraction = await asyncio.to_thread(
+                self._doc_extractor.extract,
+                file_content,
+                filename,
+                mime_type,
+                archive_password=archive_password,
+            )
+            if extraction.error in {"archive_password_required", "archive_password_invalid"}:
+                password_invalid = extraction.error == "archive_password_invalid"
+                return {
+                    "promoted": False,
+                    "queued_for_review": False,
+                    "persisted": False,
+                    "action": "transient",
+                    "raw_object_id": None,
+                    "extraction_success": False,
+                    "archive_password_required": not password_invalid,
+                    "archive_password_invalid": password_invalid,
+                    "extraction": {"success": False},
+                }
         digest = hashlib.sha256(file_content).hexdigest()
         supplied_metadata = metadata if isinstance(metadata, dict) else {}
         uploader_scoped = "uploaded_by" in supplied_metadata
@@ -859,7 +937,29 @@ class FilesMixin(PipelineShared):
         # (see `_ArchiveBudget`), but bounded is not instant: the shipped ceiling
         # still allows seconds of unpacking, and seconds of a frozen backend is
         # not a thing to leave in place.
-        extraction = await asyncio.to_thread(self._doc_extractor.extract, file_content, filename, mime_type)
+        if extraction is None:
+            extraction = await asyncio.to_thread(
+                self._doc_extractor.extract,
+                file_content,
+                filename,
+                mime_type,
+                archive_password=archive_password,
+            )
+        if extraction.error in {"archive_password_required", "archive_password_invalid"}:
+            # Defensive fallback for a nested encrypted archive reached through
+            # a container suffix not covered by the eager dispatch above.
+            password_invalid = extraction.error == "archive_password_invalid"
+            return {
+                "promoted": False,
+                "queued_for_review": False,
+                "persisted": False,
+                "action": "transient",
+                "raw_object_id": None,
+                "extraction_success": False,
+                "archive_password_required": not password_invalid,
+                "archive_password_invalid": password_invalid,
+                "extraction": {"success": False},
+            }
         # Пробелы — не текст. Разбор пустого .txt возвращает `success=True` и
         # строку из переводов строки, и дальше она проходит как содержимое: ветка
         # «из файла не вышло ни знака» не срабатывает, потому что строка непустая.
@@ -1154,6 +1254,7 @@ class FilesMixin(PipelineShared):
         target_preexisted = target_path.exists()
         file_metadata = {
             **enrichment.metadata,
+            **_document_metadata_projection(extraction_metadata),
             "filename": filename,
             "mime_type": mime_type,
             "sha256": digest,
@@ -1498,6 +1599,8 @@ class FilesMixin(PipelineShared):
         filename: str = "",
         mime_type: str = "",
         preview_chars: int = 24_000,
+        archive_password: str | None = None,
+        metadata_only: bool = False,
     ) -> dict[str, Any]:
         """Extract an attachment for the current turn without persisting it.
 
@@ -1511,11 +1614,42 @@ class FilesMixin(PipelineShared):
         safe_filename = self._sanitize_filename(filename or "upload.bin")
         guessed_type, _ = mimetypes.guess_type(safe_filename)
         safe_mime_type = (mime_type or guessed_type or "application/octet-stream").split(";", 1)[0].strip()
+        if metadata_only:
+            document_metadata = await asyncio.to_thread(
+                self._doc_extractor.extract_document_metadata,
+                file_content,
+                safe_filename,
+                safe_mime_type,
+            )
+            return {
+                "filename": safe_filename,
+                "mime_type": safe_mime_type,
+                "size_bytes": len(file_content),
+                "transient": True,
+                "persisted": False,
+                "_document_metadata": _document_metadata_projection(document_metadata),
+            }
         # Async for the same reason as `ingest_file`: this runs while a Telegram
         # user waits for a reply, on the loop that serves everyone else.
         extraction = await asyncio.to_thread(
-            self._doc_extractor.extract, file_content, safe_filename, safe_mime_type
+            self._doc_extractor.extract,
+            file_content,
+            safe_filename,
+            safe_mime_type,
+            archive_password=archive_password,
         )
+        if extraction.error in {"archive_password_required", "archive_password_invalid"}:
+            password_invalid = extraction.error == "archive_password_invalid"
+            return {
+                "filename": safe_filename,
+                "mime_type": safe_mime_type,
+                "size_bytes": len(file_content),
+                "transient": True,
+                "persisted": False,
+                "extraction_success": False,
+                "archive_password_required": not password_invalid,
+                "archive_password_invalid": password_invalid,
+            }
         native_text = extraction.text if extraction.success else ""
         if not native_text.strip():
             native_text = ""
@@ -1637,6 +1771,9 @@ class FilesMixin(PipelineShared):
             # reserved index key above.
             transient[_OFFICE_STRUCTURE_METADATA_KEY] = office_structure
             transient[_OFFICE_SOURCE_TEXT_KEY] = source_text
+        document_metadata = _document_metadata_projection(parser_metadata)
+        if document_metadata:
+            transient["_document_metadata"] = document_metadata
         return transient
 
     @staticmethod

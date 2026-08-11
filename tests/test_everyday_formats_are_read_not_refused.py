@@ -79,6 +79,58 @@ def test_a_presentation_from_the_free_office_is_read() -> None:
     assert "Смета на март" in result.text
 
 
+def test_opendocument_carries_only_bounded_standard_metadata() -> None:
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        archive.writestr("content.xml", "<office><text>Тело документа</text></office>")
+        archive.writestr(
+            "meta.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-meta
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/">
+ <office:meta>
+  <dc:title>План учений</dc:title>
+  <dc:subject>Подготовка</dc:subject>
+  <meta:initial-creator>Иван Петров</meta:initial-creator>
+  <dc:creator>Мария Сидорова</dc:creator>
+  <meta:keyword>учения</meta:keyword>
+  <meta:creation-date>2024-03-04T12:30:00Z</meta:creation-date>
+  <dc:date>2024-03-05T08:00:00+03:00</dc:date>
+  <meta:editing-cycles>7</meta:editing-cycles>
+  <meta:editing-duration>PT12M3S</meta:editing-duration>
+  <meta:document-statistic meta:page-count="3" meta:word-count="420"
+      meta:character-count="2100" meta:table-count="2" meta:image-count="1"
+      meta:object-count="0"/>
+  <meta:user-defined meta:name="private-path">/srv/private/secret</meta:user-defined>
+ </office:meta>
+</office:document-meta>""",
+        )
+
+    extractor = _extractor()
+    result = extractor.extract(payload.getvalue(), "план.odt")
+    header_only = extractor.extract_document_metadata(payload.getvalue(), "план.odt")
+
+    assert result.success, result.error
+    assert result.metadata["title"] == "План учений"
+    assert result.metadata["creator"] == "Мария Сидорова"
+    assert result.metadata["initial_creator"] == "Иван Петров"
+    assert result.metadata["keywords"] == ["учения"]
+    assert result.metadata["creation_date"] == "2024-03-04T12:30:00Z"
+    assert result.metadata["document_date"] == "2024-03-04"
+    assert result.metadata["editing_cycles"] == 7
+    assert result.metadata["editing_duration"] == "PT12M3S"
+    assert result.metadata["page_count"] == 3
+    assert result.metadata["word_count"] == 420
+    assert header_only["title"] == "План учений"
+    assert header_only["document_date"] == "2024-03-04"
+    assert "input_bytes" not in header_only
+    assert "private-path" not in result.metadata
+    assert "/srv/private/secret" not in str(result.metadata)
+
+
 def test_a_letter_is_read_with_the_headers_a_person_reads() -> None:
     result = _extractor().extract(EMAIL, "письмо.eml", "message/rfc822")
     assert result.success, result.error

@@ -32,11 +32,13 @@ async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     source_ref: str = Form(""),
+    archive_password: str = Form(""),
 ) -> dict[str, Any]:
     actor = _require(request, "files.upload")
     content = await file.read(request.app.state.settings.max_upload_bytes + 1)
     if len(content) > request.app.state.settings.max_upload_bytes:
         raise HTTPException(status_code=413, detail="Файл слишком большой")
+    password_kwargs = {"archive_password": archive_password} if archive_password else {}
     result = await request.app.state.ingestion.ingest_file(
         actor.user_id,
         None,
@@ -45,7 +47,13 @@ async def upload_file(
         mime_type=file.content_type or "application/octet-stream",
         source_ref=source_ref,
         metadata={"uploaded_via": "api", "uploaded_by": actor.own_id},
+        **password_kwargs,
     )
+    if result.get("archive_password_required") or result.get("archive_password_invalid"):
+        # The password challenge did not create a Raw/file row.  In particular,
+        # do not create an audit entry whose target or metadata could imply that
+        # an upload was persisted.
+        return public_ingestion_receipt(result, file=True)
     _audit(
         request,
         "file.upload",

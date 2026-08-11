@@ -36,6 +36,7 @@ _BOT_API_LIMIT_MESSAGE = (
 _CONFIGURED_LIMIT_MESSAGE = (
     "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено."
 )
+_REPLY_DOCUMENT_SOURCE_REF_MAX_CHARS = 500
 
 
 class MediaMixin(BridgeShared):
@@ -73,6 +74,30 @@ class MediaMixin(BridgeShared):
                 filename = f"telegram-{media_kind.replace('_', '-')}-{message_id}.{suffix}"
             return descriptor, filename, mime_type, media_kind
         return None, "", "application/octet-stream", ""
+
+    @staticmethod
+    def _reply_document_source_ref(message: dict[str, Any]) -> str:
+        """Return an exact bounded pointer to supported media being replied to.
+
+        This is a structural Telegram reference, not another upload: no bytes are
+        downloaded here.  The backend must still re-authorize tenant, uploader and
+        the current file verdict before turning it into an opaque Raw id.
+        """
+
+        replied = message.get("reply_to_message")
+        if not isinstance(replied, dict):
+            return ""
+        descriptor, _filename, _mime_type, _media_kind = MediaMixin._select_media(
+            replied,
+            {"update_id": int(replied.get("message_id") or 0)},
+        )
+        if not isinstance(descriptor, dict):
+            return ""
+        file_id = str(descriptor.get("file_id") or "").strip()
+        if not file_id or any(char.isspace() or ord(char) < 33 for char in file_id):
+            return ""
+        source_ref = f"telegram-file:{file_id}"
+        return source_ref if len(source_ref) <= _REPLY_DOCUMENT_SOURCE_REF_MAX_CHARS else ""
 
     async def _prepare_document(
         self,

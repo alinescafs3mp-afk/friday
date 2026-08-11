@@ -296,6 +296,45 @@ class CommandsMixin(BridgeShared):
                 return
             self._inbox.remember_registered_chat(chat_id)
 
+        update_id = int(update.get("update_id") or -1)
+        archive_password = self._archive_passwords.get(update_id)
+        pending_archive = self._inbox.archive_password_challenge(chat_id, int(external_user_id))
+        password_followup = update.get("friday_archive_password_followup") is True
+        if password_followup:
+            if pending_archive is None:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Не вижу архива, который ждёт пароль. Пришлите архив ещё раз вместе с паролем.",
+                )
+                return
+            if archive_password is None:
+                # The durable update is intentionally password-free.  A restart
+                # between intake and processing loses the ephemeral secret, so
+                # ask again instead of guessing or sending the redacted marker.
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Пароль не сохранился после перезапуска. Пришлите его ещё раз.",
+                )
+                return
+            message = dict(message)
+            message.pop("text", None)
+            message["caption"] = str(pending_archive.get("safe_query") or "")
+            message["document"] = dict(pending_archive["document"])
+            update["message"] = message
+        elif (
+            update.get("friday_archive_password_supplied") is True
+            and self._archive_document_descriptor(message) is None
+            and pending_archive is None
+        ):
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Не вижу архива, к которому относится пароль. Пришлите архив вместе с ним.",
+            )
+            return
+
         text = str(message.get("text") or message.get("caption") or "").strip()
         # В ГРУППЕ Пятница отвечает только когда обращаются к ней. Прежде в
         # разрешённой группе к модели уходило КАЖДОЕ сообщение: разговор двух
@@ -304,7 +343,7 @@ class CommandsMixin(BridgeShared):
         # `@имени`, ответ на сообщение самой Пятницы и команда.
         #
         # Личная переписка не меняется ничем: там обращение и есть само сообщение.
-        addressed, text = self._group_address(message, chat, text)
+        addressed, text = (True, text) if password_followup else self._group_address(message, chat, text)
         if not addressed:
             return
         # Альбом Telegram шлёт несколькими сообщениями с общим `media_group_id`, и
@@ -1298,6 +1337,15 @@ class CommandsMixin(BridgeShared):
             payload["forward"] = forward
         if document:
             payload["document"] = document
+        else:
+            # A reply to an earlier supported file is a pointer, not a new upload.
+            # Do not call getFile/download and never let it compete with media on
+            # the current turn; the backend resolves this exact opaque provenance.
+            reply_document_source_ref = self._reply_document_source_ref(message)
+            if reply_document_source_ref:
+                payload["reply_document_source_ref"] = reply_document_source_ref
+        if archive_password is not None:
+            payload["archive_password"] = archive_password
         # На что человек ответил репликой. Прежде `reply_to_message` не читался
         # вовсе: человек отвечал на конкретное сообщение — своё или Пятницы, — и
         # связь терялась. Отдельным полем, а не приклеенным к тексту: текст хода
@@ -1315,6 +1363,21 @@ class CommandsMixin(BridgeShared):
                 external_user_id,
                 str(chat_id),
             )
+            password_challenge = bool(
+                response.get("archive_password_required") is True
+                or response.get("archive_password_invalid") is True
+            )
+            archive_descriptor = self._archive_document_descriptor(message)
+            if password_challenge and archive_descriptor is not None:
+                self._inbox.remember_archive_password_challenge(
+                    chat_id,
+                    int(external_user_id),
+                    archive_descriptor,
+                    safe_query=text,
+                    original_message_id=int(message.get("message_id") or 0),
+                )
+            elif archive_descriptor is not None or pending_archive is not None:
+                self._inbox.clear_archive_password_challenge(chat_id, int(external_user_id))
             self._inbox.cache_backend_response(int(update["update_id"]), response)
         finally:
             typing_task.cancel()

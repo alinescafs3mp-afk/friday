@@ -86,6 +86,20 @@ def test_bullets_become_bullets() -> None:
     assert to_telegram_html("- первый\n- второй") == "• первый\n• второй"
 
 
+def test_flattened_model_bullets_become_real_list_lines() -> None:
+    source = "    *   Первый пункт. *   Второй пункт. *   **Третий пункт.**"
+
+    assert to_telegram_html(source) == (
+        "    • Первый пункт.\n    • Второй пункт.\n    • <b>Третий пункт.</b>"
+    )
+
+
+def test_spaced_multiplication_is_not_rewritten_as_a_list() -> None:
+    source = "цена 5 *   3 рубля"
+
+    assert to_telegram_html(source) == source
+
+
 def test_markdown_quote_becomes_a_telegram_blockquote() -> None:
     assert to_telegram_html("> синтетическая цитата") == ("<blockquote>синтетическая цитата</blockquote>")
 

@@ -30,6 +30,7 @@ from friday.storage._base import (
 )
 from friday.storage._knowledge import _fts_terms
 from friday.storage._privacy import (
+    _exact_uploader_raw_dependency,
     _not_audio_document,
     _not_private_inbox_dependency,
     _not_private_knowledge_dependency,
@@ -169,6 +170,41 @@ class IntakeMixin(StorageShared):
             (user_id, source, source_ref),
         ).fetchone()
         return dict(row) if row else None
+
+    def resolve_owned_file_source_ref(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        source_ref: str,
+    ) -> str | None:
+        """Atomically authorize an exact reply-to-upload pointer as one Raw id."""
+
+        exact_ref = str(source_ref or "").strip()
+        exact_uploader = str(uploaded_by or "").strip()
+        if not exact_uploader or not exact_ref.startswith("telegram-file:") or len(exact_ref) > 500:
+            return None
+        uploader_namespace = hashlib.sha256(exact_uploader.encode("utf-8")).hexdigest()[:24]
+        scoped_ref = f"uploader:{uploader_namespace}:{exact_ref}"
+        rows = self.execute(
+            f"""SELECT r.id FROM raw_objects r
+                 WHERE r.user_id=? AND r.source='upload'
+                   AND r.source_ref IN (?, ?)
+                   AND r.content_type='file' AND r.deleted_at IS NULL
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND {_exact_uploader_raw_dependency("r")}
+                   AND NOT EXISTS (
+                       SELECT 1 FROM inbox i
+                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                          AND i.status='ignored'
+                   )
+                 LIMIT 2""",  # nosec B608 - fixed predicates, values are bound
+            (str(user_id), exact_ref, scoped_ref, exact_uploader),
+        ).fetchall()
+        # A well-formed archive has either the legacy key or its uploader-scoped
+        # successor.  Two live bindings are inconsistent authority, not a reason
+        # to choose one by row order.
+        return str(rows[0]["id"]) if len(rows) == 1 else None
 
     def find_file_by_content_hash(
         self,
@@ -412,6 +448,7 @@ class IntakeMixin(StorageShared):
         *,
         limit: int = 20,
         include_content: bool = False,
+        uploaded_by: str | None = None,
     ) -> list[dict[str, Any]]:
         """Full-text search over SOURCE text, obeying the Inbox verdict.
 
@@ -453,6 +490,18 @@ class IntakeMixin(StorageShared):
         if not terms:
             return []
         match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+        uploader_clause = ""
+        parameters: list[Any] = [user_id]
+        if uploaded_by is not None:
+            # In a shared archive the tenant and the person who supplied a file
+            # are different authority axes.  Apply the exact source provenance
+            # before FTS LIMIT; a Python post-filter would let another person's
+            # rows fill the finite page and, worse, would already have projected
+            # their source body into this process lane.
+            uploader_clause = f"""AND r.content_type='file'
+                       AND {_exact_uploader_raw_dependency("r")}
+                       AND {_not_audio_document("r")}"""
+            parameters.append(str(uploaded_by))
         try:
             content_projection = (
                 ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
@@ -474,6 +523,7 @@ class IntakeMixin(StorageShared):
                    JOIN raw_objects r ON r.rowid=raw_fts.rowid
                    WHERE r.user_id=? AND r.deleted_at IS NULL
                      AND {_not_private_raw_dependency("r")}
+                     {uploader_clause}
                      AND NOT EXISTS (
                          SELECT 1 FROM inbox i
                           WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
@@ -482,11 +532,80 @@ class IntakeMixin(StorageShared):
                      AND raw_fts MATCH ?
                    ORDER BY bm25(raw_fts) ASC, r.received_at DESC
                    LIMIT ?""",  # nosec B608
-                (user_id, match_query, max(1, min(limit, 100))),
+                (*parameters, match_query, max(1, min(limit, 100))),
             ).fetchall()
         except sqlite3.OperationalError:
             return []
         return [dict(row) for row in rows]
+
+    def get_searchable_file_sources(
+        self,
+        user_id: str,
+        raw_ids: list[str],
+        *,
+        uploaded_by: str | None = None,
+        limit: int = 100,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Re-authorize semantic Raw candidates in one verdict-aware read.
+
+        Dense recall and the cross-encoder rank Knowledge Objects.  A source
+        excerpt, however, must come from the immutable Raw Object, and the Inbox
+        verdict can change between those two steps.  This helper accepts only a
+        bounded set of already recalled opaque ids and re-applies tenant,
+        privacy, soft-delete, file-kind, audio and ``ignored`` predicates before
+        projecting any body.  In a shared archive ``uploaded_by`` is an exact,
+        mandatory second boundary.
+
+        The returned order is the caller's order, so a validated reranker may
+        reorder candidates but can neither add a new id nor replace its canonical
+        source bytes.
+        """
+
+        page_size = max(1, min(int(limit), 100))
+        ordered_ids = list(
+            dict.fromkeys(str(raw_id or "").strip() for raw_id in raw_ids if str(raw_id or "").strip())
+        )[:page_size]
+        if not ordered_ids:
+            return []
+
+        uploader_clause = ""
+        parameters: list[Any] = [str(user_id), *ordered_ids]
+        if uploaded_by is not None:
+            uploader_clause = f"AND {_exact_uploader_raw_dependency('r')}"
+            parameters.append(str(uploaded_by))
+        placeholders = ",".join("?" for _raw_id in ordered_ids)
+        content_projection = (
+            ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
+        )
+        rows = self.execute(
+            f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                       r.content_hash
+                       {content_projection},
+                       (SELECT i2.status FROM inbox i2
+                         WHERE i2.raw_object_id=r.id AND i2.user_id=r.user_id
+                           AND {_not_private_inbox_dependency("i2")}
+                         ORDER BY i2.reviewed_at DESC, i2.created_at DESC LIMIT 1) AS inbox_status,
+                       (SELECT k.id FROM knowledge_objects k
+                         WHERE k.raw_object_id=r.id AND k.user_id=r.user_id
+                           AND k.deleted_at IS NULL
+                           AND {_not_private_knowledge_dependency("k")}
+                         ORDER BY k.version DESC LIMIT 1) AS knowledge_object_id
+                  FROM raw_objects r
+                 WHERE r.user_id=? AND r.id IN ({placeholders})
+                   AND r.deleted_at IS NULL AND r.content_type='file'
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND NOT EXISTS (
+                       SELECT 1 FROM inbox i
+                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                          AND i.status='ignored'
+                   )
+                   {uploader_clause}""",  # nosec B608 - placeholders and fixed privacy clauses only
+            tuple(parameters),
+        ).fetchall()
+        found = {str(row["id"]): dict(row) for row in rows}
+        return [found[raw_id] for raw_id in ordered_ids if raw_id in found]
 
     def search_raw_objects_in_set(
         self,
@@ -603,7 +722,10 @@ class IntakeMixin(StorageShared):
         files or reveal their existence.
         """
 
-        page_size = max(1, min(int(limit), 5_000))
+        # One internal caller asks for 5,001 rows so the 5,001st acts only as a
+        # completeness sentinel for a 5,000-file deterministic catalog.  The
+        # public/default page remains 5,000 and no body text is projected.
+        page_size = max(1, min(int(limit), 5_001))
         rows = self.execute(
             f"""SELECT r.id, r.content_type, r.received_at,
                        substr(COALESCE(json_extract(r.metadata_json,'$.filename'),''),1,260)

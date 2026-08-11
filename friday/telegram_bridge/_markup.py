@@ -48,6 +48,12 @@ _RULE = re.compile(r"^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$", re.MULTILINE)
 #: Маркер списка в начале строки: «- », «* », «+ ». Telegram списков не знает,
 #: поэтому маркер приводится к одному виду, а не выбрасывается.
 _BULLET = re.compile(r"^(\s*)[-*+]\s+(?=\S)", re.MULTILINE)
+# Some models occasionally flatten several Markdown bullets onto one physical
+# line: ``* first. *   second``.  Telegram quite correctly treats only the
+# first marker as a list item, leaving the later ``*`` visible.  Three or more
+# spaces after the inline star is the shape emitted by that failure and keeps
+# this distinct from multiplication or ordinary prose.
+_INLINE_BULLET = re.compile(r"[ \t]+\*[ \t]{2,}(?=\S)")
 # Markdown quote markers have to become Telegram's supported blockquote tag;
 # leaving ``>`` as escaped prose preserves bytes but loses the requested shape.
 _ESCAPED_QUOTE = re.compile(r"^&gt;[ \t]?(.*)$", re.MULTILINE)
@@ -60,6 +66,32 @@ _PLACEHOLDER = "\x00code{}\x00"
 _INLINE_PLACEHOLDER = "\x00inline{}\x00"
 _LINK_PLACEHOLDER = "\x00link{}\x00"
 _STASHED_CODE = re.compile(r"\x00code[0-9]+\x00")
+
+
+def _restore_flattened_bullets(source: str) -> str:
+    """Put flattened sibling bullets back on separate Markdown lines.
+
+    Only lines which already begin with a real Markdown bullet are repaired.
+    This is deliberately narrower than replacing every `` *   `` sequence:
+    code has already been stashed, but arithmetic and literal prose must still
+    remain byte-for-byte text.
+    """
+
+    restored: list[str] = []
+    for line in source.split("\n"):
+        marker = _BULLET.match(line)
+        body = line[marker.end() :] if marker is not None else ""
+        if marker is None or _INLINE_BULLET.search(body) is None:
+            restored.append(line)
+            continue
+        indent = marker.group(1)
+        # The leading marker itself has the same whitespace shape. Split only
+        # the body after it, otherwise the first "sibling" is an empty string
+        # and becomes a spurious leading blank line.
+        siblings = _INLINE_BULLET.split(body)
+        restored.append(f"{line[: marker.end()]}{siblings[0]}")
+        restored.extend(f"{indent}* {sibling}" for sibling in siblings[1:])
+    return "\n".join(restored)
 
 
 def _replace_balanced_links(source: str, renderer: Callable[[str, str], str]) -> str:
@@ -180,6 +212,10 @@ def to_telegram_html(text: str) -> str:
 
     source = _CODE_BLOCK.sub(_stash_block, source)
     source = _CODE_SPAN.sub(_stash_span, source)
+
+    # A flattened model list is still Markdown intent. Restore its physical
+    # lines before the ordinary bullet renderer turns the markers into ``•``.
+    source = _restore_flattened_bullets(source)
 
     # 1. Таблицы вне исходного кода превращаются в fenced blocks. Вынимаем и
     # эти новые блоки перед HTML/Markdown-преобразованиями ниже.

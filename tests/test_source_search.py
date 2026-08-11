@@ -15,6 +15,7 @@ repeat that at the largest scale yet.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 
@@ -22,7 +23,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from friday.execution_kernel import ExecutionKernel, _source_anchor_context_projection
-from friday.permissions import AuthorizationService
+from friday.permissions import ActorContext, AuthorizationService
+from friday.retrieval import HybridSearcher, pack_vector
 from friday.server import create_app
 from friday.storage.models import (
     Entity,
@@ -161,6 +163,459 @@ async def test_explicit_agent_source_search_reads_pending_owned_file_but_not_rej
     assert target in item["excerpt"]
     assert rejected.id not in str(result.data)
     assert foreign.id not in str(result.data)
+
+
+@pytest.mark.asyncio
+async def test_source_search_adopts_dense_reranked_passage_from_canonical_raw(settings, storage):
+    owner = "source-semantic-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    source_text = (
+        ("Служебное описание общего порядка работы подразделения.\n" * 80)
+        + "Основной пункт управления размещён в здании на площади Победы.\n"
+        + ("Дополнительный порядок связи приведён в отдельной ведомости.\n" * 80)
+    )
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="semantic-source",
+        raw_content=source_text,
+        content_type="file",
+        metadata_json={"filename": "дислокация.docx", "uploaded_by": owner},
+    )
+    storage.store_raw_object(raw)
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=owner,
+        raw_object_id=raw.id,
+        content=source_text,
+        content_type="file",
+        title="Дислокация подразделения",
+    )
+    storage.store_knowledge_object(knowledge)
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=owner,
+            raw_object_id=raw.id,
+            knowledge_object_id=knowledge.id,
+            status=InboxStatus.CLASSIFIED,
+        )
+    )
+    # Raw FTS is intentionally OR-based.  This lone literal decoy matches one
+    # generic query word, but it must not suppress the differently worded dense
+    # target merely because the lexical page happens to contain exactly one row.
+    decoy = RawObject(
+        id=new_id("raw"),
+        user_id=owner,
+        source="upload",
+        source_ref="semantic-literal-decoy",
+        raw_content="Оперативный справочник по хозяйственному обеспечению.",
+        content_type="file",
+        metadata_json={"filename": "справочник.docx", "uploaded_by": owner},
+    )
+    storage.store_raw_object(decoy)
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=owner,
+            raw_object_id=decoy.id,
+            status=InboxStatus.PENDING,
+        )
+    )
+    passage_lo = source_text.index("Основной пункт")
+    passage_hi = passage_lo + len("Основной пункт управления размещён в здании на площади Победы.")
+    tuned = dataclasses.replace(
+        settings,
+        embeddings_enabled=True,
+        embeddings_base_url="http://127.0.0.1:9/v1",
+        embeddings_model="source-semantic-test",
+        embeddings_resident_cache=False,
+        embeddings_chunk_chars=1200,
+        embeddings_dense_max_objects=100,
+        embeddings_recall_candidates=20,
+    )
+    storage.upsert_knowledge_vectors(
+        [
+            {
+                "knowledge_object_id": knowledge.id,
+                "user_id": owner,
+                "model": tuned.embeddings_model,
+                "dim": 2,
+                "source_version": knowledge.version,
+                "content_hash": "whole",
+                "chunk_scheme": "source-semantic-v1",
+                "vector": pack_vector([1.0, 0.0]),
+            }
+        ],
+        {
+            knowledge.id: [
+                {
+                    "chunk_index": 0,
+                    "user_id": owner,
+                    "model": tuned.embeddings_model,
+                    "dim": 2,
+                    "source_version": knowledge.version,
+                    "chunk_scheme": "source-semantic-v1",
+                    "start_char": passage_lo,
+                    "end_char": passage_hi,
+                    "content_hash": "passage",
+                    "vector": pack_vector([1.0, 0.0]),
+                }
+            ]
+        },
+    )
+
+    class SemanticEmbeddings:
+        def __init__(self):
+            self.settings = tuned
+            self.remote_enabled = True
+            self.calls = []
+
+        async def embed(self, texts, *, budget_sec=None):
+            self.calls.append((list(texts), budget_sec))
+            return [[1.0, 0.0] for _text in texts]
+
+    embeddings = SemanticEmbeddings()
+    rerank_calls = []
+
+    async def reranker(query, items):
+        rerank_calls.append((query, [str(item["id"]) for item in items]))
+        return [{**item, "_rerank_score": 0.97} for item in items]
+
+    searcher = HybridSearcher(
+        storage,
+        embeddings,  # type: ignore[arg-type]
+        reranker=reranker,
+        rerank_top=10,
+        rerank_confident_min=0.1,
+    )
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, tuned)
+    kernel.bind_services(storage, None, None, None, searcher=searcher)  # type: ignore[arg-type]
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": "где находится оперативный центр", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True, result.error
+    assert embeddings.calls and embeddings.calls[0][0] == ["где находится оперативный центр"]
+    assert rerank_calls == [("где находится оперативный центр", [knowledge.id])]
+    item = result.data["results"][0]
+    assert item["raw_object_id"] == raw.id
+    assert item["retrieval_match_kind"] == "semantic"
+    assert "пункт управления" in item["excerpt"]
+    assert [row["raw_object_id"] for row in result.data["results"]] == [raw.id, decoy.id]
+    assert result.data["coverage"]["semantic_recall"] is True
+    assert result.data["coverage"]["semantic_reranked"] is True
+    assert result.data["coverage"]["complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_focused_semantic_query_keeps_anchor_and_rejects_another_section(
+    settings,
+    storage,
+    monkeypatch,
+):
+    owner = "source-focused-semantic-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    fixtures = []
+    for label, content in (
+        ("target", "Подразделение РЭБ | командир взвода | капитан Орлов"),
+        (
+            "other",
+            "Радиоэлектронное противодействие | начальник группы | капитан Соколов",
+        ),
+    ):
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=owner,
+            source="upload",
+            source_ref=f"focused-{label}",
+            raw_content=content,
+            content_type="file",
+            metadata_json={"filename": f"{label}.xlsx", "uploaded_by": owner},
+        )
+        storage.store_raw_object(raw)
+        knowledge = KnowledgeObject(
+            id=new_id("ko"),
+            user_id=owner,
+            raw_object_id=raw.id,
+            content=content,
+            content_type="file",
+            title=label,
+        )
+        storage.store_knowledge_object(knowledge)
+        storage.store_inbox_item(
+            InboxItem(
+                id=new_id("inbox"),
+                user_id=owner,
+                raw_object_id=raw.id,
+                knowledge_object_id=knowledge.id,
+                status=InboxStatus.CLASSIFIED,
+            )
+        )
+        fixtures.append((label, raw, knowledge))
+
+    class FocusSearcher:
+        async def search(self, user_id, query, **kwargs):
+            assert user_id == owner
+            assert query == "РЭБ командир взвода"
+            assert kwargs["record_usage"] is False
+            # Put a dense-only related section first.  It contains neither the
+            # literal anchor nor the requested focus; semantic similarity alone
+            # must not turn it into focused evidence.
+            ordered = [fixtures[1], fixtures[0]]
+            return {
+                "results": [
+                    {
+                        **storage.get_knowledge_object(knowledge.id, owner),
+                        "_embedding_score": 0.98 - index * 0.01,
+                        "_rerank_score": 0.97 - index * 0.01,
+                    }
+                    for index, (_label, _raw, knowledge) in enumerate(ordered)
+                ],
+                "matched_at_least": 2,
+                "strategy": {"embeddings": True, "reranked": 2},
+            }
+
+    # Exercise the semantic-only envelope directly.  The target proves its anchor
+    # and focus from canonical Raw bytes; the related row proves neither.
+    monkeypatch.setattr(storage, "search_raw_objects", lambda *_args, **_kwargs: [])
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None, searcher=FocusSearcher())  # type: ignore[arg-type]
+    result = await kernel.execute(
+        "source_search",
+        {"query": "РЭБ", "focus": "командир взвода", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True, result.error
+    assert [item["raw_object_id"] for item in result.data["results"]] == [fixtures[0][1].id]
+    assert fixtures[1][1].id not in str(result.data)
+    [item] = result.data["results"]
+    assert item["retrieval_match_kind"] == "semantic"
+    assert item["focus_match_kind"] == "full"
+    assert item["focus_terms_matched"] == item["focus_terms_total"] == 2
+    assert item["anchor_context_terms"] > 0
+    assert result.data["coverage"]["focus_match_found"] is True
+    assert result.data["coverage"]["complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_semantic_source_candidates_are_reauthorized_by_uploader_and_verdict(settings, storage):
+    tenant = "source-shared-tenant"
+    person = "source-shared-person"
+    foreign_person = "source-shared-foreign"
+    for user_id in (tenant, person, foreign_person):
+        storage.ensure_user(user_id, preset_key="owner")
+
+    fixtures = []
+    for label, uploaded_by, status in (
+        ("owned", person, InboxStatus.CLASSIFIED),
+        ("foreign", foreign_person, InboxStatus.CLASSIFIED),
+        ("ignored", person, InboxStatus.IGNORED),
+        ("rerank-only", person, InboxStatus.CLASSIFIED),
+    ):
+        source_text = f"{label}: закрытый смысловой фрагмент о резервном узле управления"
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id=tenant,
+            source="upload",
+            source_ref=f"semantic-{label}",
+            raw_content=source_text,
+            content_type="file",
+            metadata_json={"filename": f"{label}.docx", "uploaded_by": uploaded_by},
+        )
+        storage.store_raw_object(raw)
+        knowledge = KnowledgeObject(
+            id=new_id("ko"),
+            user_id=tenant,
+            raw_object_id=raw.id,
+            content=source_text,
+            content_type="file",
+            title=label,
+        )
+        storage.store_knowledge_object(knowledge)
+        storage.store_inbox_item(
+            InboxItem(
+                id=new_id("inbox"),
+                user_id=tenant,
+                raw_object_id=raw.id,
+                knowledge_object_id=knowledge.id,
+                status=status,
+            )
+        )
+        fixtures.append((label, raw, knowledge))
+
+    class HostileSearcher:
+        async def search(self, user_id, query, **kwargs):
+            assert user_id == tenant
+            assert kwargs["uploaded_by"] == person
+            results = []
+            for index, (label, _raw, knowledge) in enumerate(fixtures):
+                item = {
+                    **storage.get_knowledge_object(knowledge.id, tenant),
+                    "_rerank_score": 0.98 - index * 0.01,
+                }
+                if label != "rerank-only":
+                    item["_embedding_score"] = 0.99 - index * 0.01
+                results.append(item)
+            return {
+                "results": results,
+                "matched_at_least": 4,
+                "strategy": {"embeddings": True, "reranked": 4},
+            }
+
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None, searcher=HostileSearcher())  # type: ignore[arg-type]
+    actor = ActorContext(
+        user_id=tenant,
+        person_id=person,
+        preset_key="owner",
+        source="test",
+        shared_tenant=True,
+    )
+
+    result = await kernel.execute(
+        "source_search",
+        {"query": "аварийная командная площадка", "limit": 10},
+        actor=actor,
+    )
+
+    assert result.success is True, result.error
+    assert [item["raw_object_id"] for item in result.data["results"]] == [fixtures[0][1].id]
+    assert fixtures[1][1].id not in str(result.data)
+    assert fixtures[2][1].id not in str(result.data)
+    assert fixtures[3][1].id not in str(result.data)
+    assert result.data["coverage"]["uploader_scoped"] is True
+    assert result.data["coverage"]["ignored_excluded"] is True
+
+
+@pytest.mark.asyncio
+async def test_one_literal_source_hit_does_not_pay_for_or_yield_to_semantic_fallback(settings, storage):
+    owner = "source-literal-first-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    raw_id = _ingest(
+        storage,
+        owner,
+        "UNIQUE-LITERAL-SOURCE-MARKER точный ответ",
+        status=InboxStatus.PENDING,
+    )
+
+    class ForbiddenSemanticSearcher:
+        async def search(self, *_args, **_kwargs):
+            raise AssertionError("an unambiguous literal source lookup invoked semantic fallback")
+
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(
+        storage,
+        None,
+        None,
+        None,
+        searcher=ForbiddenSemanticSearcher(),
+    )  # type: ignore[arg-type]
+    result = await kernel.execute(
+        "source_search",
+        {"query": "UNIQUE-LITERAL-SOURCE-MARKER", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True, result.error
+    assert [item["raw_object_id"] for item in result.data["results"]] == [raw_id]
+    assert "semantic_recall" not in result.data["coverage"]
+
+
+@pytest.mark.asyncio
+async def test_multiple_literal_source_hits_invoke_semantic_fallback(settings, storage):
+    owner = "source-literal-ambiguous-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    first = _ingest(
+        storage,
+        owner,
+        "AMBIGUOUS-LITERAL-MARKER первая версия ответа",
+        status=InboxStatus.PENDING,
+    )
+    second = _ingest(
+        storage,
+        owner,
+        "AMBIGUOUS-LITERAL-MARKER вторая версия ответа",
+        status=InboxStatus.PENDING,
+    )
+
+    class ObservedSemanticSearcher:
+        def __init__(self):
+            self.calls = []
+
+        async def search(self, user_id, query, **kwargs):
+            self.calls.append((user_id, query, kwargs))
+            return {
+                "results": [],
+                "matched_at_least": 0,
+                "strategy": {"embeddings": True, "reranked": False},
+            }
+
+    searcher = ObservedSemanticSearcher()
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None, searcher=searcher)  # type: ignore[arg-type]
+    result = await kernel.execute(
+        "source_search",
+        {"query": "AMBIGUOUS-LITERAL-MARKER", "limit": 10},
+        actor=authorization.actor_for_user(owner, source="test"),
+    )
+
+    assert result.success is True, result.error
+    assert {item["raw_object_id"] for item in result.data["results"]} == {first, second}
+    assert len(searcher.calls) == 1
+    assert searcher.calls[0][0:2] == (owner, "AMBIGUOUS-LITERAL-MARKER")
+    assert searcher.calls[0][2]["record_usage"] is False
+    assert result.data["coverage"]["semantic_recall"] is False
+
+
+def test_searchable_source_reads_scope_before_limit_and_reject_ignored(storage):
+    tenant = "source-storage-scope"
+    person = "source-storage-person"
+    foreign = "source-storage-foreign"
+    for user_id in (tenant, person, foreign):
+        storage.ensure_user(user_id)
+
+    own_id = _ingest(storage, tenant, "OWN-SCOPE-MARKER", status=InboxStatus.PENDING)
+    ignored_id = _ingest(storage, tenant, "OWN-SCOPE-MARKER ignored", status=InboxStatus.IGNORED)
+    foreign_id = _ingest(storage, tenant, "OWN-SCOPE-MARKER foreign", status=InboxStatus.PENDING)
+    for raw_id, uploader in ((own_id, person), (ignored_id, person), (foreign_id, foreign)):
+        metadata = {"filename": f"{raw_id}.txt", "uploaded_by": uploader}
+        storage.execute(
+            "UPDATE raw_objects SET content_type='file', metadata_json=? WHERE id=?",
+            (json.dumps(metadata), raw_id),
+        )
+    storage.execute(
+        "UPDATE raw_objects SET received_at='2020-01-01T00:00:00+00:00' WHERE id=?",
+        (own_id,),
+    )
+    storage.commit()
+
+    fts = storage.search_raw_objects(
+        tenant,
+        "OWN-SCOPE-MARKER",
+        limit=1,
+        include_content=True,
+        uploaded_by=person,
+    )
+    assert [row["id"] for row in fts] == [own_id]
+    adopted = storage.get_searchable_file_sources(
+        tenant,
+        [foreign_id, ignored_id, own_id],
+        uploaded_by=person,
+        include_content=True,
+    )
+    assert [row["id"] for row in adopted] == [own_id]
+    assert adopted[0]["_raw_content"] == "OWN-SCOPE-MARKER"
 
 
 @pytest.mark.asyncio

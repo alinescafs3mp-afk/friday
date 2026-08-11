@@ -13,7 +13,7 @@ import pytest
 from friday import retrieval as retrieval_module
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES, bounded_raw_file_metadata
 from friday.retrieval import HybridSearcher, pack_vector
-from friday.storage.models import KnowledgeObject, RawObject, new_id
+from friday.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject, new_id
 
 
 class _SyntheticEmbeddings:
@@ -402,6 +402,78 @@ def test_every_storage_cap_uses_the_same_exact_uploader(storage, monkeypatch):
     assert storage.get_user_chunk_embeddings(
         tenant, "synthetic-author-scope", 3
     ) == storage.get_user_chunk_embeddings(tenant, "synthetic-author-scope", 3, uploaded_by=None)
+
+
+def test_ignored_source_cannot_fill_scoped_fts_or_dense_caps(storage):
+    tenant = "shared-ignored-cap-synthetic"
+    author = "target-author"
+    storage.ensure_user(tenant)
+    target_id, target_raw = _knowledge(
+        storage,
+        tenant,
+        author=author,
+        content="common ignored-cap marker valid source",
+        title="Valid older source",
+        created_at="2020-01-01T00:00:00Z",
+    )
+    ignored_id, ignored_raw = _knowledge(
+        storage,
+        tenant,
+        author=author,
+        content="common ignored-cap marker rejected source",
+        title="Ignored newer source",
+        created_at="2026-01-01T00:00:00Z",
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=tenant,
+            raw_object_id=target_raw,
+            knowledge_object_id=target_id,
+            status=InboxStatus.CLASSIFIED,
+        )
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=tenant,
+            raw_object_id=ignored_raw,
+            knowledge_object_id=ignored_id,
+            status=InboxStatus.IGNORED,
+        )
+    )
+    _vectors(storage, tenant, [target_id, ignored_id])
+
+    assert [
+        row["id"]
+        for row in storage.search_knowledge(
+            tenant,
+            "common ignored-cap marker",
+            limit=1,
+            uploaded_by=author,
+        )
+    ] == [target_id]
+    assert [
+        row[0]
+        for row in storage.get_user_embeddings(
+            tenant,
+            "synthetic-author-scope",
+            3,
+            limit=1,
+            uploaded_by=author,
+        )
+    ] == [target_id]
+    assert [
+        row[0].split("#", 1)[0]
+        for row in storage.get_user_chunk_embeddings(
+            tenant,
+            "synthetic-author-scope",
+            3,
+            object_limit=1,
+            row_limit=4,
+            uploaded_by=author,
+        )
+    ] == [target_id]
 
 
 def test_ambiguous_or_unbounded_raw_metadata_belongs_to_nobody(storage):

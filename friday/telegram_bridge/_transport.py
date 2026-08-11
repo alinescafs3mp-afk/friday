@@ -7,6 +7,8 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import copy
+import re
 from contextlib import suppress
 
 from friday.telegram_bridge._base import (
@@ -48,6 +50,24 @@ from friday.telegram_bridge._queue import _UpdateInbox
 _POLL_WATCHDOG_INTERVAL_SEC = 15.0
 _POLL_WATCHDOG_STALE_SEC = max(180.0, POLL_TIMEOUT + BACKOFF_MAX + 60.0)
 _TRANSITION_JOURNAL_TIMEOUT_SEC = 5.0
+_ARCHIVE_PASSWORD_DIRECTIVE_RE = re.compile(
+    r"^[ \t]*(?:пароль|password)[ \t]*(?::|=|[—-])[ \t]*(.*?)[ \t]*$",
+    re.IGNORECASE,
+)
+_ARCHIVE_PASSWORD_INLINE_RE = re.compile(
+    r"^(?P<prefix>.*?)(?:[,;][ \t]*)?\b(?:пароль|password)[ \t]*"
+    r"(?::|=|[—-])[ \t]*(?P<secret>.+?)[ \t]*$",
+    re.IGNORECASE,
+)
+_ARCHIVE_DOCUMENT_SUFFIXES = (".zip", ".rar", ".7z")
+_ARCHIVE_DOCUMENT_MIME_TYPES = frozenset(
+    {
+        "application/zip",
+        "application/x-7z-compressed",
+        "application/vnd.rar",
+        "application/x-rar-compressed",
+    }
+)
 
 
 class _LazyUpdateInbox:
@@ -85,6 +105,9 @@ class TransportMixin(BridgeShared):
         # Подписи альбомов по `media_group_id`. Ограничены по числу: группа живёт
         # секунды, а словарь без потолка рос бы всю жизнь процесса.
         self._album_captions: dict[str, str] = {}
+        # Passwords live only until their one sanitized durable update finishes.
+        # The queue and the pending-media table never receive this mapping.
+        self._archive_passwords: dict[int, str] = {}
         # Раздача прекращается на остановке, но уже начатое доводится до конца:
         # брошенная задача — это обновление, снятое с очереди и не отвеченное.
         self._stopping = False
@@ -342,7 +365,10 @@ class TransportMixin(BridgeShared):
                 self._poll_heartbeat_at = time.monotonic()
                 self._poll_success_at = self._poll_heartbeat_at
                 for update in updates:
-                    self._inbox.store(update)
+                    safe_update = self._sanitize_update_before_store(update)
+                    stored = self._inbox.store(safe_update)
+                    if not stored:
+                        self._archive_passwords.pop(int(update.get("update_id") or -1), None)
                     self._offset = max(self._offset, int(update["update_id"]) + 1)
                     self._inbox.set_offset(self._offset)
                 if updates:
@@ -357,6 +383,94 @@ class TransportMixin(BridgeShared):
                 await self._journal_transition(backend, "poll", failing=True, error=exc)
                 await asyncio.sleep(backoff)
                 backoff = min(BACKOFF_MAX, backoff * 2)
+
+    @staticmethod
+    def _archive_document_descriptor(message: dict[str, Any]) -> dict[str, Any] | None:
+        document = message.get("document")
+        if not isinstance(document, dict):
+            return None
+        filename = str(document.get("file_name") or "").casefold()
+        mime_type = str(document.get("mime_type") or "").split(";", 1)[0].strip().casefold()
+        if (
+            not filename.endswith(_ARCHIVE_DOCUMENT_SUFFIXES)
+            and mime_type not in _ARCHIVE_DOCUMENT_MIME_TYPES
+        ):
+            return None
+        return document
+
+    @staticmethod
+    def _strip_archive_password_directives(text: str) -> tuple[str, str | None]:
+        secret: str | None = None
+        kept: list[str] = []
+        for line in str(text or "").splitlines():
+            match = _ARCHIVE_PASSWORD_DIRECTIVE_RE.fullmatch(line)
+            if match is None:
+                kept.append(line)
+                continue
+            if secret is None and match.group(1):
+                secret = match.group(1)
+        if secret is None and kept:
+            match = _ARCHIVE_PASSWORD_INLINE_RE.fullmatch(kept[-1])
+            if match is not None and match.group("secret"):
+                secret = match.group("secret")
+                prefix = match.group("prefix").rstrip(" ,;\t")
+                if prefix:
+                    kept[-1] = prefix
+                else:
+                    kept.pop()
+        return "\n".join(kept).strip(), secret
+
+    @staticmethod
+    def _bounded_ephemeral_archive_password(value: str | None) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        encoded = value.encode("utf-8", errors="strict")
+        if len(encoded) > 4096 or "\x00" in value or "\n" in value or "\r" in value:
+            return None
+        return value
+
+    def _sanitize_update_before_store(self, update: dict[str, Any]) -> dict[str, Any]:
+        """Strip archive credentials before the first durable Telegram write."""
+
+        safe_update = copy.deepcopy(update)
+        update_id = int(safe_update.get("update_id") or -1)
+        message = safe_update.get("message")
+        if update_id < 0 or not isinstance(message, dict):
+            return safe_update
+        raw_chat = message.get("chat")
+        raw_user = message.get("from")
+        chat_id = int(raw_chat.get("id") or 0) if isinstance(raw_chat, dict) else 0
+        user_id = int(raw_user.get("id") or 0) if isinstance(raw_user, dict) else 0
+        if not chat_id or not user_id:
+            return safe_update
+
+        text_field = "text" if isinstance(message.get("text"), str) else "caption"
+        original_text = str(message.get(text_field) or "")
+        safe_text, explicit_secret = self._strip_archive_password_directives(original_text)
+        descriptor = self._archive_document_descriptor(message)
+        pending = self._inbox.archive_password_challenge(chat_id, user_id)
+        followup = bool(pending and descriptor is None and original_text.strip())
+        candidate_secret = explicit_secret
+        if followup and candidate_secret is None:
+            candidate_secret = original_text.strip()
+            safe_text = ""
+        secret = self._bounded_ephemeral_archive_password(candidate_secret)
+
+        if explicit_secret is not None or followup:
+            # Text entities carry offsets into the removed password.  They are
+            # content-free but useless after rewriting and must not accidentally
+            # make a later formatter reconstruct the old caption.
+            message[text_field] = safe_text
+            message.pop("entities", None)
+            message.pop("caption_entities", None)
+            safe_update["friday_archive_password_followup"] = followup
+            safe_update["friday_archive_password_supplied"] = secret is not None
+        if secret is not None:
+            self._archive_passwords[update_id] = secret
+            if descriptor is not None and secret in str(descriptor.get("file_name") or ""):
+                descriptor["file_name"] = "protected-archive.bin"
+
+        return safe_update
 
     async def _poll_watchdog(self) -> None:
         """Crash a formally live bridge whose Telegram poll made no progress.
@@ -744,6 +858,7 @@ class TransportMixin(BridgeShared):
                 LOGGER.error("Telegram update exhausted its retry budget")
                 await self._notify_dead_letter(telegram, update, permanent=False)
         finally:
+            self._archive_passwords.pop(update_id, None)
             # Чат освобождается ЗДЕСЬ, а не в чужом обходе: только эта задача
             # знает, что её работа кончилась, и только отсюда следующая строка
             # того же чата может уйти в работу немедленно.

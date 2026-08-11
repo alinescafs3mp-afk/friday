@@ -166,10 +166,13 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # catalog used by exact names and indirect clues.
 # 352 → 354: bounded exact-filename and direct content lookup keep uploader,
 # privacy and lifecycle filters ahead of their ambiguity/completeness sentinels.
-EXPECTED_MEMBER_COUNT = 354
+# 354 → 355: dense/reranked file-source candidates are re-authorized against
+# immutable Raw bytes and the current Inbox verdict before an excerpt is projected.
+EXPECTED_MEMBER_COUNT = 356
 EXPECTED_SIGNATURES: dict[str, str] = {
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
     "get_raw_object_descriptors": "(self, raw_ids: 'list[str]', user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
+    "get_searchable_file_sources": "(self, user_id: 'str', raw_ids: 'list[str]', *, uploaded_by: 'str | None' = None, limit: 'int' = 100, include_content: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_owned_file_catalog": "(self, user_id: 'str', uploaded_by: 'str', *, limit: 'int' = 5000) -> 'list[dict[str, Any]]'",
     "search_owned_file_content": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",
     "search_raw_objects_in_set": "(self, user_id: 'str', query: 'str', raw_ids: 'list[str]', *, limit: 'int' = 64) -> 'list[dict[str, Any]]'",
@@ -372,9 +375,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "resolve_conflict": "(self, user_id: 'str', conflict_id: 'str', winner_id: 'str', *, reviewed_by: 'str', resolution_note: 'str' = '') -> 'dict[str, Any] | None'",
     "restore_backup": "(self, filename: 'str', *, safety_label: 'str' = 'pre-restore') -> 'dict[str, Any]'",
     "review_knowledge_conflict": "(self, user_id: 'str', conflict_id: 'str', status: 'str', *, reviewed_by: 'str', resolution_note: 'str' = '') -> 'dict[str, Any] | None'",
+    "resolve_owned_file_source_ref": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str') -> 'str | None'",
     "review_relation_candidate": "(self, user_id: 'str', candidate_id: 'str', status: 'str', *, reviewed_by: 'str') -> 'dict[str, Any] | None'",
     "revoke_api_token": "(self, token_id: 'str', *, user_id: 'str | None' = None) -> 'bool'",
-    "search_raw_objects": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, include_content: 'bool' = False) -> 'list[dict[str, Any]]'",
+    "search_raw_objects": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, include_content: 'bool' = False, uploaded_by: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "search_knowledge": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, uploaded_by: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "search_messages": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, conversation_id: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "set_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str', conversation_id: 'str', *, mode: 'str | None' = None) -> 'None'",

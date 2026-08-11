@@ -335,6 +335,101 @@ _VOICE_QUESTION_MAX_SEC = 180.0
 # inside the model's existing attachment budget; it is never copied into the API
 # response, message metadata, or a second durable object.
 _CURRENT_TURN_ATTACHMENT_CHARS = 24_000
+_ARCHIVE_PASSWORD_DIRECTIVE_RE = re.compile(
+    r"^[ \t]*(?:пароль|password)[ \t]*(?::|=|[—-])[ \t]*(.*?)[ \t]*$",
+    re.IGNORECASE,
+)
+_ARCHIVE_PASSWORD_INLINE_RE = re.compile(
+    r"^(?P<prefix>.*?)(?:[,;][ \t]*)?\b(?:пароль|password)[ \t]*"
+    r"(?::|=|[—-])[ \t]*(?P<secret>.+?)[ \t]*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_archive_password_directives(text: str) -> tuple[str, str | None]:
+    secret: str | None = None
+    kept: list[str] = []
+    for line in str(text or "").splitlines():
+        match = _ARCHIVE_PASSWORD_DIRECTIVE_RE.fullmatch(line)
+        if match is None:
+            kept.append(line)
+            continue
+        if secret is None and match.group(1):
+            secret = match.group(1)
+    if secret is None and kept:
+        match = _ARCHIVE_PASSWORD_INLINE_RE.fullmatch(kept[-1])
+        if match is not None and match.group("secret"):
+            secret = match.group("secret")
+            prefix = match.group("prefix").rstrip(" ,;\t")
+            if prefix:
+                kept[-1] = prefix
+            else:
+                kept.pop()
+    return "\n".join(kept).strip(), secret
+
+
+def _take_archive_password(body: dict[str, Any]) -> str | None:
+    """Remove an archive password before any durable/request fingerprint path.
+
+    Direct clients use the top-level field.  Telegram normally extracts a
+    ``пароль: ...`` caption before its own durable queue, but accepting the same
+    layout here closes the API boundary too.  The secret is returned only to the
+    current stack frame and is never copied into ``body`` again.
+    """
+
+    raw_password = body.pop("archive_password", None)
+    document = body.get("document")
+    if isinstance(document, dict):
+        nested = document.pop("archive_password", None)
+        if raw_password is None:
+            raw_password = nested
+
+    if isinstance(document, dict):
+        for field in ("message", "caption"):
+            raw_text = body.get(field)
+            if not isinstance(raw_text, str):
+                continue
+            safe_text, directive_password = _strip_archive_password_directives(raw_text)
+            if raw_password is None and directive_password is not None:
+                raw_password = directive_password
+            body[field] = safe_text
+
+    if raw_password is None:
+        return None
+    if not isinstance(raw_password, str):
+        raise HTTPException(status_code=400, detail="archive_password must be a string")
+    encoded = raw_password.encode("utf-8", errors="strict")
+    if (
+        not encoded
+        or len(encoded) > 4096
+        or "\x00" in raw_password
+        or "\n" in raw_password
+        or "\r" in raw_password
+    ):
+        raise HTTPException(status_code=400, detail="archive_password has an invalid shape")
+    return raw_password
+
+
+def _archive_password_challenge(file_ingestion: dict[str, Any]) -> dict[str, Any] | None:
+    invalid = file_ingestion.get("archive_password_invalid") is True
+    required = file_ingestion.get("archive_password_required") is True
+    if not (invalid or required):
+        return None
+    message = (
+        "Пароль к архиву не подошёл. Пришлите другой пароль следующим сообщением."
+        if invalid
+        else (
+            "Архив защищён паролем. Пришлите пароль следующим сообщением "
+            "или укажите «пароль: …» вместе с архивом."
+        )
+    )
+    return {
+        "message": message,
+        "message_format": "plain",
+        "archive_password_required": required,
+        "archive_password_invalid": invalid,
+        "file_ingestion": file_ingestion,
+    }
 
 
 def _current_turn_file_attachment(
@@ -733,6 +828,11 @@ def _chat_request_fingerprint(
         "enable_tools": enable_tools,
         "conversation_id": str(body.get("conversation_id") or "").strip(),
         "telegram_message_id": str(body.get("telegram_message_id") or ""),
+        "reply_document_source_ref": (
+            str(body.get("reply_document_source_ref"))[:500]
+            if isinstance(body.get("reply_document_source_ref"), str)
+            else None
+        ),
         "attachments": attachments,
         "document": document_fingerprint,
     }
@@ -2084,6 +2184,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         actor = _require(request, "chat.use")
         state = request.app.state
         body = await _request_json(request)
+        archive_password = _take_archive_password(body)
         force_knowledge = _parse_json_bool(
             body.get("force_knowledge"), field="force_knowledge", default=False
         )
@@ -2112,6 +2213,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         document_value = body.get("document")
         document: dict[str, Any] | None = document_value if isinstance(document_value, dict) else None
+        reply_pointer_present = bool(
+            actor.source == "telegram-bridge" and document is None and "reply_document_source_ref" in body
+        )
+        reply_document_source_ref = ""
+        if reply_pointer_present and isinstance(body.get("reply_document_source_ref"), str):
+            candidate_reply_ref = str(body["reply_document_source_ref"]).strip()
+            if len(candidate_reply_ref) <= 500:
+                reply_document_source_ref = candidate_reply_ref
         forward_value = body.get("forward")
         forward_meta: dict[str, Any] = forward_value if isinstance(forward_value, dict) else {}
         file_content: bytes | None = None
@@ -2204,6 +2313,23 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
         try:
             file_ingestion = None
+            quoted_attachment_reference = reply_pointer_present
+            if reply_document_source_ref and state.auth_service.authorize(actor, "files.read").allowed:
+                try:
+                    reply_raw_id = await run_blocking(
+                        state.storage.resolve_owned_file_source_ref,
+                        actor.user_id,
+                        actor.own_id,
+                        reply_document_source_ref,
+                    )
+                except Exception as exc:  # noqa: BLE001 - unresolved pointer stays closed
+                    LOGGER.warning("Reply document pointer resolution failed (%s)", type(exc).__name__)
+                    reply_raw_id = None
+                if reply_raw_id:
+                    # Only the authorized opaque id crosses into Runtime.  It will
+                    # do its ordinary canonical attachment read; source_ref,
+                    # filenames and file text never come from this request field.
+                    attachments.append({"raw_object_id": reply_raw_id})
             if document:
                 state.auth_service.require(actor, "files.upload")
                 if file_content is None:  # pragma: no cover - narrowed by document validation above
@@ -2211,11 +2337,23 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 filename = str(document.get("filename") or "telegram-file.bin")
                 mime_type = str(document.get("mime_type") or "application/octet-stream")
                 if explicit_no_save:
+                    transient_kwargs = {"archive_password": archive_password} if archive_password else {}
                     transient_file = await state.ingestion.inspect_file_transient(
                         file_content,
                         filename=filename,
                         mime_type=mime_type,
+                        **transient_kwargs,
                     )
+                    password_challenge = _archive_password_challenge(transient_file)
+                    if password_challenge is not None:
+                        if source_ref and lease_token:
+                            state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
+                            lease_token = ""
+                        return _public_chat_for_actor(
+                            password_challenge,
+                            storage=state.storage,
+                            actor=actor,
+                        )
                     private_source_text = str(
                         transient_file.get("_office_source_text")
                         or transient_file.get("_runtime_source_text")
@@ -2293,6 +2431,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             "_office_source_text",
                             "_runtime_source_text",
                             "_runtime_source_truncated",
+                            "_document_metadata",
                             OFFICE_STRUCTURE_KEY,
                         }
                     }
@@ -2330,6 +2469,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # неразрешим: в общем архиве все документы лежат под одним
                     # арендатором. Замерено 2026-08-04 — 3295 документов из 3296 не
                     # несут ни одного признака автора.
+                    archive_kwargs = {"archive_password": archive_password} if archive_password else {}
                     file_ingestion = await state.ingestion.ingest_file(
                         actor.user_id,
                         None,
@@ -2339,7 +2479,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         media_kind=media_kind,
                         metadata={**file_metadata, "uploaded_by": actor.own_id},
                         source_ref=str(document.get("source_ref") or source_ref or ""),
+                        **archive_kwargs,
                     )
+                    password_challenge = _archive_password_challenge(file_ingestion)
+                    if password_challenge is not None:
+                        if source_ref and lease_token:
+                            state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
+                            lease_token = ""
+                        return _public_chat_for_actor(
+                            password_challenge,
+                            storage=state.storage,
+                            actor=actor,
+                        )
                     raw_id = str(file_ingestion.get("raw_object_id") or "")
                     current_turn_raw = (
                         await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
@@ -2516,6 +2667,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # сборки контекста: приклеенная к тексту хода цитата попала бы и в
                 # архив как слова человека, и в классификатор, решающий про граф.
                 reply_to=str(body.get("reply_to") or "").strip() or None,
+                quoted_attachment_reference=quoted_attachment_reference,
             )
             # ``make_file`` keeps inline base64 for existing clients, but the
             # durable authority is an exact-byte, person-owned artifact.  Freeze

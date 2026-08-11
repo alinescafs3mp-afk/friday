@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
+from difflib import SequenceMatcher
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -4914,6 +4915,18 @@ _SUPPORTED_FILE_ACTIVE_COMPLETION = re.compile(
     rf"^\W*(?:я\s+)?{_SUPPORTED_FILE_ACTIVE_ACTION}\b",
     re.IGNORECASE,
 )
+# A content/provenance explanation can contain the same passive word that the
+# carrier guard uses for a completed deed: ``из метаданных документа, где он
+# сохранён``.  In that clause ``сохранён`` describes the source document, while
+# ``из метаданных`` answers where a value came from.  Keep this exemption tied
+# to an explicit source relation; a mere mention of metadata must not bless
+# ``Я подготовила документ`` or ``Документ сохранён, метаданные добавлены``.
+_SUPPORTED_FILE_CONTENT_PROVENANCE_EXPLANATION = re.compile(
+    r"\b(?:из|по|в)\s+"
+    r"(?:(?:его|е[её]|их|этих|сам(?:их|ом|ой|их)?)\s+)?"
+    r"(?:метаданн|содержим|текст|пол[ея]|свойств|атрибут)\w*\b",
+    re.IGNORECASE,
+)
 _SUPPORTED_REMINDER_ACTIVE_ACTION = (
     r"(?:поставил\w*|создал\w*|сохранил\w*|установил\w*|добавил\w*|"
     r"запланировал\w*|зав[её]л\w*|активировал\w*)"
@@ -5215,6 +5228,16 @@ def _claims_an_unconfirmed_supported_deed(
         ):
             # ``Напоминание сохранено: отчёт`` names the reminder body; the
             # overlapping ``отчёт`` is not a second saved-file claim.
+            file_claim = None
+        if (
+            file_claim is not None
+            and _SUPPORTED_FILE_CONTENT_PROVENANCE_EXPLANATION.search(clause)
+            and not re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
+            and not _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+        ):
+            # This is a statement about where document data came from, not an
+            # assertion that Friday created or delivered a carrier this turn.
+            # Active first-person actions and hand-offs remain guarded above.
             file_claim = None
         if file_claim and read_only_timeline_file_report and _SUPPORTED_FILE_HISTORICAL_REPORT.search(clause):
             # This is a fact reported from the bounded archive timeline,
@@ -6699,6 +6722,57 @@ _ATTACHMENT_FILENAME_REFERENCE = re.compile(
     rf"{_ATTACHMENT_FILE_EXTENSION}(?![\w-]|\.[\w]))",
     re.IGNORECASE,
 )
+_DOCUMENT_METADATA_ACTION = re.compile(
+    r"\b(?:покаж|вывед|напиш|выдай|дай|перечисл|отобраз|сообщ)\w*\b|"
+    r"\b(?:show|display|list|give|print|write|provide)\b",
+    re.IGNORECASE,
+)
+_DOCUMENT_METADATA_NOUN = re.compile(
+    r"\b(?:метаданн|свойств|реквизит)\w*\b|\bmetadata\b|\bproperties\b",
+    re.IGNORECASE,
+)
+_DOCUMENT_METADATA_LOCAL_TARGET = re.compile(
+    rf"(?:"
+    r"\b(?:метаданн|свойств|реквизит)\w*\s+"
+    r"(?:(?:у|для)\s+)?"
+    r"(?:(?:эт|данн|выбранн|текущ|указанн|присланн|загруженн|"
+    r"прикрепл[её]нн|друг|тот)\w*\s+)?"
+    rf"{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b(?:metadata|properties)\s+(?:of\s+)?"
+    rf"(?:(?:this|that|selected|current|uploaded|attached|other)\s+)?{_ATTACHMENT_REFERENCE_NOUN}\b"
+    r")",
+    re.IGNORECASE,
+)
+_DOCUMENT_METADATA_FILENAME_TARGET = re.compile(
+    rf"(?:"
+    r"\b(?:метаданн|свойств|реквизит|metadata|properties)\w*"
+    rf"(?:\s+{_ATTACHMENT_REFERENCE_NOUN})?\s+{_ATTACHMENT_FILENAME_REFERENCE.pattern}|"
+    rf"{_ATTACHMENT_FILENAME_REFERENCE.pattern}\s*[:—-]\s*"
+    r"(?:метаданн|свойств|реквизит|metadata|properties)\w*"
+    r")",
+    re.IGNORECASE,
+)
+_DOCUMENT_METADATA_NATURAL_QUESTION = re.compile(
+    rf"(?:"
+    r"\b(?:какие|каковы)\s+(?:метаданн|свойств|реквизит)\w*\b"
+    r"[^.!?\n]{0,40}\b(?:у|для)\s+"
+    rf"(?:(?:эт|данн|выбранн|текущ)\w*\s+)?{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    r"\bwhat\s+(?:metadata|properties)\b[^.!?\n]{0,40}\bof\s+"
+    rf"(?:this\s+|the\s+)?{_ATTACHMENT_REFERENCE_NOUN}\b"
+    r")",
+    re.IGNORECASE,
+)
+_DOCUMENT_METADATA_OTHER_TARGET = re.compile(
+    rf"\bдруг\w*\s+{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b(?:other|another)\s+{_ATTACHMENT_REFERENCE_NOUN}\b",
+    re.IGNORECASE,
+)
+_NEGATED_DOCUMENT_METADATA_ACTION = re.compile(
+    r"\bне\s+(?:(?:надо|нужно|стоит)\s+)?"
+    r"(?:показыва|вывод|писа|выдава|дава|перечисля|отобража|сообща)\w*\b|"
+    r"\b(?:do\s+not|don't)\s+(?:show|display|list|give|print|write|provide)\b",
+    re.IGNORECASE,
+)
 _ATTACHMENT_COMPARISON_ACTION = re.compile(
     r"\b(?:сравн|сопостав|свер|различ|отлич|разниц|compare|contrast|differences?|similarities)\w*",
     re.IGNORECASE,
@@ -6752,6 +6826,16 @@ _ATTACHMENT_SELECTIVE_REFERENCE = re.compile(
     r"(?:файлов|документов|вложений|таблиц|files|documents|attachments|spreadsheets)\b|"
     rf"\b(?:предыдущ|предпоследн|перв|втор|трет|четв[её]рт|последн)\w*\b"
     rf"[^.!?\n]{{0,100}}{_ATTACHMENT_REFERENCE_NOUN}\b"
+    rf")",
+    re.IGNORECASE,
+)
+_RECENT_UPLOAD_ATTACHMENT_REFERENCE = re.compile(
+    rf"(?:"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,100}}\bкотор\w*\b"
+    r"[^.!?\n]{0,80}\b(?:(?:я|мы)\s+)?"
+    r"(?:скин\w*|присла\w*|отправ\w*|загруз\w*|прикреп\w*)\b|"
+    r"\b(?:files?|documents?|attachments?)\b[^.!?\n]{0,100}"
+    r"\b(?:that\s+)?(?:i\s+|we\s+)?(?:sent|uploaded|attached)\b"
     rf")",
     re.IGNORECASE,
 )
@@ -7123,20 +7207,238 @@ def _bounded_json_mapping(value: Any, *, max_chars: int = 65_536) -> dict[str, A
     return dict(parsed) if isinstance(parsed, Mapping) else {}
 
 
+def _is_document_metadata_request(message: str, *, selected_document: bool = False) -> bool:
+    """A positive request for metadata of one already identified document."""
+
+    text = " ".join(str(message or "").split())[:2_000]
+    positive_surface = bool(
+        _DOCUMENT_METADATA_ACTION.search(text)
+        or _DOCUMENT_METADATA_NATURAL_QUESTION.search(text)
+        or _DOCUMENT_METADATA_FILENAME_TARGET.search(text)
+        or (
+            selected_document
+            and re.search(r"\b(?:какие|каковы|what)\s+(?:метаданн\w*|metadata)\b", text, re.IGNORECASE)
+        )
+    )
+    if (
+        not text
+        or _NEGATED_DOCUMENT_METADATA_ACTION.search(text)
+        or not _DOCUMENT_METADATA_NOUN.search(text)
+        or not positive_surface
+    ):
+        return False
+    if selected_document and re.search(r"\b(?:метаданн\w*|metadata)\b", text, re.IGNORECASE):
+        return True
+    return bool(
+        _DOCUMENT_METADATA_LOCAL_TARGET.search(text)
+        or _DOCUMENT_METADATA_FILENAME_TARGET.search(text)
+        or _DOCUMENT_METADATA_NATURAL_QUESTION.search(text)
+    )
+
+
+_SAFE_DOCUMENT_METADATA_STRINGS = (
+    "filename",
+    "mime_type",
+    "format",
+    "document_date",
+    "title",
+    "subject",
+    "creator",
+    "initial_creator",
+    "description",
+    "language",
+    "generator",
+    "creation_date",
+    "modified_date",
+    "editing_duration",
+)
+_SAFE_DOCUMENT_METADATA_COUNTS = (
+    "size_bytes",
+    "page_count",
+    "word_count",
+    "character_count",
+    "table_count",
+    "image_count",
+    "object_count",
+    "editing_cycles",
+)
+_SAFE_DOCUMENT_HEADER_METADATA_KEYS = frozenset(
+    {
+        "title",
+        "subject",
+        "creator",
+        "initial_creator",
+        "description",
+        "language",
+        "generator",
+        "creation_date",
+        "modified_date",
+        "editing_duration",
+        "keywords",
+        "editing_cycles",
+        "page_count",
+        "word_count",
+        "character_count",
+        "table_count",
+        "image_count",
+        "object_count",
+    }
+)
+_DOCUMENT_METADATA_ON_DEMAND_MAX_BYTES = 32 * 1024 * 1024
+_SAFE_DOCUMENT_METADATA_LABELS = {
+    "filename": "Имя файла",
+    "mime_type": "MIME-тип",
+    "format": "Формат",
+    "size_bytes": "Размер, байт",
+    "document_date": "Дата документа",
+    "title": "Заголовок",
+    "subject": "Тема",
+    "creator": "Автор",
+    "initial_creator": "Первоначальный автор",
+    "description": "Описание",
+    "language": "Язык",
+    "generator": "Программа-генератор",
+    "creation_date": "Дата создания",
+    "modified_date": "Дата изменения",
+    "editing_duration": "Время редактирования",
+    "keywords": "Ключевые слова",
+    "editing_cycles": "Циклы редактирования",
+    "page_count": "Страницы",
+    "word_count": "Слова",
+    "character_count": "Символы",
+    "table_count": "Таблицы",
+    "image_count": "Изображения",
+    "object_count": "Объекты",
+}
+_SAFE_DOCUMENT_METADATA_ORDER = (
+    "filename",
+    "mime_type",
+    "format",
+    "size_bytes",
+    "document_date",
+    "title",
+    "subject",
+    "creator",
+    "initial_creator",
+    "description",
+    "language",
+    "keywords",
+    "generator",
+    "creation_date",
+    "modified_date",
+    "editing_duration",
+    "editing_cycles",
+    "page_count",
+    "word_count",
+    "character_count",
+    "table_count",
+    "image_count",
+    "object_count",
+)
+_OWNED_SAFE_DOCUMENT_METADATA = "_safe_document_metadata"
+
+
+def _clean_document_metadata_text(value: Any, *, max_chars: int = 500) -> str:
+    """One inert, single-line value copied from an untrusted document header."""
+
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or ""))
+    return " ".join(text.split())[:max_chars]
+
+
+def _safe_document_metadata_projection(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Strict allowlist for code-owned display; storage internals never pass."""
+
+    projected: dict[str, Any] = {}
+    for name in _SAFE_DOCUMENT_METADATA_STRINGS:
+        value = source.get(name)
+        if not isinstance(value, str):
+            continue
+        cleaned = _clean_document_metadata_text(
+            value,
+            max_chars=1_000 if name == "description" else 500,
+        )
+        if not cleaned:
+            continue
+        if name == "filename":
+            cleaned = cleaned.replace("\\", "/").rsplit("/", 1)[-1][:260]
+        projected[name] = cleaned
+
+    # Extractors call the byte count ``input_bytes`` while durable upload rows
+    # traditionally call it ``size_bytes``.  Expose one stable public field.
+    count_source = dict(source)
+    if "size_bytes" not in count_source and "input_bytes" in source:
+        count_source["size_bytes"] = source.get("input_bytes")
+    for name in _SAFE_DOCUMENT_METADATA_COUNTS:
+        value = count_source.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            continue
+        projected[name] = min(value, 1_000_000_000_000)
+
+    keywords = source.get("keywords")
+    if isinstance(keywords, list):
+        cleaned_keywords = [
+            cleaned
+            for item in keywords[:16]
+            if isinstance(item, str) and (cleaned := _clean_document_metadata_text(item, max_chars=120))
+        ]
+        if cleaned_keywords:
+            projected["keywords"] = cleaned_keywords
+    return projected
+
+
+def _document_metadata_answer(attachments: Sequence[Mapping[str, Any]]) -> str:
+    """Render authorised metadata without model, retrieval or file-body access."""
+
+    blocks: list[str] = []
+    for item in attachments[:_CONVERSATION_ATTACHMENT_MAX_FILES]:
+        if not (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)):
+            # JSON callers can manufacture an ordinary mapping, including all
+            # public-looking metadata keys.  Only a process-private attachment
+            # minted after storage/uploader authorization may own this answer.
+            continue
+        stored = item.get(_OWNED_SAFE_DOCUMENT_METADATA)
+        if not isinstance(stored, Mapping):
+            continue
+        metadata = _safe_document_metadata_projection(stored)
+        if not metadata:
+            continue
+        lines = ["Метаданные документа:"]
+        for name in _SAFE_DOCUMENT_METADATA_ORDER:
+            if name not in metadata:
+                continue
+            value = metadata[name]
+            shown = ", ".join(value) if isinstance(value, list) else str(value)
+            lines.append(f"- {_SAFE_DOCUMENT_METADATA_LABELS[name]}: {shown}")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return (
+            "Не удалось определить доступный выбранный документ. Укажите точное имя ранее загруженного файла."
+        )
+    rendered = "\n\n".join(blocks)
+    return rendered[:16_000].rstrip()
+
+
 def _attachment_reference_kind(message: str) -> str:
-    """Return ``explicit``, ``deictic``, ``indirect`` or ``""`` for a file hint.
+    """Return the closed navigation kind for one file hint.
 
     An explicit noun phrase may deliberately reach back through the bounded
     conversation window.  A deictic/list continuation is weaker and callers
     must additionally prove that the immediately preceding assistant answer
-    actually used attachment evidence.
+    actually used attachment evidence. ``recent_upload`` is different: it
+    names the user's latest upload event, whose message chronology is the
+    authority even when content-addressed deduplication reuses an older Raw
+    Object with an older ``received_at`` timestamp.
     """
 
     text = " ".join(str(message or "").split())
     if not text:
         return ""
+    if _is_document_metadata_request(text):
+        return "explicit"
     if _NON_ATTACHMENT_REFERENCE.search(text):
         return ""
+    if _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(text):
+        return "recent_upload"
     if _EXPLICIT_ATTACHMENT_REFERENCE.search(text):
         return "explicit"
     if _ATTACHMENT_FILENAME_REFERENCE.search(text):
@@ -7249,6 +7551,17 @@ _ATTACHMENT_REFERENCE_STOP_PREFIXES = (
     "прикреп",
     "сравн",
     "сопостав",
+    "найд",
+    "поищ",
+    "скин",
+    "дай",
+    "вывед",
+    "напиш",
+    "выдай",
+    "отобраз",
+    "метаданн",
+    "свойств",
+    "реквизит",
     "обобщ",
     "прочит",
     "посмотр",
@@ -7300,6 +7613,52 @@ _ATTACHMENT_REFERENCE_STOP_WORDS = frozenset(
         "about",
         "from",
         "with",
+    }
+)
+_ATTACHMENT_TOPIC_STOP_PREFIXES = (
+    "файл",
+    "документ",
+    "вложен",
+    "таблиц",
+    "информац",
+    "сведен",
+    "расскаж",
+    "покаж",
+    "подскаж",
+    "сообщ",
+    "найд",
+    "поищ",
+    "посмотр",
+    "сохран",
+    "вывед",
+    "напиш",
+    "выдай",
+    "отобраз",
+    "метаданн",
+    "свойств",
+    "реквизит",
+    "скольк",
+    "позиц",
+    "нужн",
+    "хочу",
+    "котор",
+)
+_ATTACHMENT_TOPIC_STOP_WORDS = frozenset(
+    {
+        "давай",
+        "дайте",
+        "мне",
+        "этот",
+        "этом",
+        "того",
+        "тому",
+        "такой",
+        "такое",
+        "только",
+        "через",
+        "после",
+        "about",
+        "please",
     }
 )
 
@@ -7453,6 +7812,189 @@ def _attachment_reference_terms(message: str) -> tuple[str, ...]:
             continue
         words.append(token)
     return tuple(dict.fromkeys([*quoted, *words]))[:12]
+
+
+def _attachment_topic_terms(message: str) -> tuple[str, ...]:
+    """Meaningful morphological hints for one positive active-file continuation."""
+
+    folded = _normalized_attachment_selector(_classification_text(message))
+    terms: list[str] = []
+    for matched in re.finditer(r"[^\W_]{5,}", folded):
+        token = matched.group(0)
+        if token in _ATTACHMENT_TOPIC_STOP_WORDS or any(
+            token.startswith(prefix) for prefix in _ATTACHMENT_TOPIC_STOP_PREFIXES
+        ):
+            continue
+        normalized = stem(token, min_input=5).casefold().replace("ё", "е")
+        if len(normalized) >= 5 and normalized not in terms:
+            terms.append(normalized)
+        if len(terms) >= 8:
+            break
+    return tuple(terms)
+
+
+def _attachment_topic_matches_source(message: str, source: str) -> bool:
+    """Strong positive overlap: one long name or two independent terms."""
+
+    terms = _attachment_topic_terms(message)
+    if not terms:
+        return False
+    folded_source = _normalized_attachment_selector(source)[:500_000]
+    matched: list[str] = []
+    for term in terms:
+        if re.search(rf"(?<!\w){re.escape(term)}[^\W_]*", folded_source):
+            matched.append(term)
+    return bool(any(len(term) >= 8 for term in matched) or len(matched) >= 2)
+
+
+def _filename_match_parts(value: str) -> tuple[str, str, tuple[str, ...], str]:
+    """A bounded Unicode filename signature, separate from body retrieval."""
+
+    normalized = _normalized_attachment_selector(value)[:260]
+    stem, extension = normalized, ""
+    if "." in normalized:
+        possible_stem, possible_extension = normalized.rsplit(".", 1)
+        if re.fullmatch(r"[a-z0-9]{1,16}", possible_extension, flags=re.IGNORECASE):
+            stem, extension = possible_stem, possible_extension
+    tokens = tuple(re.findall(r"[^\W_]+", stem))[:32]
+    compact = "".join(tokens)[:260]
+    return stem, extension, tokens, compact
+
+
+def _fuzzy_filename_score(requested: str, candidate: str) -> float:
+    """Similarity for an explicit filename only; never inspect file content."""
+
+    requested_stem, requested_extension, requested_tokens, requested_compact = _filename_match_parts(
+        requested
+    )
+    candidate_stem, candidate_extension, candidate_tokens, candidate_compact = _filename_match_parts(
+        candidate
+    )
+    if not requested_compact or not candidate_compact:
+        return 0.0
+    if requested_extension and candidate_extension != requested_extension:
+        return 0.0
+    if requested_stem == candidate_stem:
+        return 1.0
+    if requested_compact == candidate_compact:
+        return 0.99
+
+    sequence = SequenceMatcher(
+        None,
+        requested_compact,
+        candidate_compact,
+        autojunk=False,
+    ).ratio()
+    requested_set = set(requested_tokens)
+    candidate_set = set(candidate_tokens)
+    token_union = requested_set | candidate_set
+    token_overlap = len(requested_set & candidate_set) / len(token_union) if token_union else 0.0
+    score = max(sequence, sequence * 0.78 + token_overlap * 0.22)
+    shortest = min(len(requested_compact), len(candidate_compact))
+    threshold = 0.92 if shortest < 6 else 0.86 if shortest < 10 else 0.80
+    return score if score >= threshold else 0.0
+
+
+def _fuzzy_filename_ids(
+    requested: str,
+    catalog: Sequence[Mapping[str, str]],
+) -> tuple[list[str], int]:
+    """Return one unambiguous approximate filename or a closed ambiguity."""
+
+    scored: list[tuple[float, str]] = []
+    for item in catalog[:_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES]:
+        raw_id = str(item.get("raw_object_id") or "")
+        filename = str(item.get("filename") or "")
+        if not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
+            continue
+        score = _fuzzy_filename_score(requested, filename)
+        if score:
+            scored.append((score, raw_id))
+    if not scored:
+        return [], 0
+    best = max(score for score, _raw_id in scored)
+    # A small margin is intentionally conservative: two nearly identical names
+    # require clarification instead of choosing by upload time or body content.
+    winners = list(dict.fromkeys(raw_id for score, raw_id in scored if score >= best - 0.035))
+    return (winners, len(winners)) if len(winners) != 1 else (winners, 1)
+
+
+def _filename_clue_terms(message: str) -> tuple[str, ...]:
+    """Pruned descriptive filename terms, separate from file-body clues."""
+
+    result: list[str] = []
+    for phrase in _attachment_reference_terms(message):
+        for matched in re.finditer(r"[^\W_]{5,}", phrase):
+            token = matched.group(0)
+            if token in _ATTACHMENT_TOPIC_STOP_WORDS or any(
+                token.startswith(prefix) for prefix in _ATTACHMENT_TOPIC_STOP_PREFIXES
+            ):
+                continue
+            normalized = stem(token, min_input=5).casefold().replace("ё", "е")
+            if len(normalized) >= 5 and normalized not in result:
+                result.append(normalized)
+            if len(result) >= 8:
+                return tuple(result)
+    return tuple(result)
+
+
+def _filename_clue_match(term: str, token: str) -> float:
+    normalized = stem(token, min_input=5).casefold().replace("ё", "е")
+    if len(normalized) < 5:
+        return 0.0
+    if term == normalized:
+        return 1.0
+    if min(len(term), len(normalized)) >= 5 and (term.startswith(normalized) or normalized.startswith(term)):
+        return 0.96
+    ratio = SequenceMatcher(None, term, normalized, autojunk=False).ratio()
+    return ratio if ratio >= 0.84 else 0.0
+
+
+def _filename_clue_ids(
+    message: str,
+    catalog: Sequence[Mapping[str, str]],
+) -> tuple[list[str], int]:
+    """Rank descriptive terms against filenames before any body search."""
+
+    terms = _filename_clue_terms(message)
+    if not terms:
+        return [], 0
+    scored: list[tuple[float, str]] = []
+    for item in catalog[:_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES]:
+        raw_id = str(item.get("raw_object_id") or "")
+        if not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
+            continue
+        _stem, _extension, tokens, _compact = _filename_match_parts(str(item.get("filename") or ""))
+        matches = [
+            max((_filename_clue_match(term, token) for token in tokens), default=0.0) for term in terms
+        ]
+        positive = [score for score in matches if score > 0]
+        long_match = any(score > 0 and len(term) >= 8 for term, score in zip(terms, matches, strict=True))
+        if not long_match and len(positive) < 2:
+            continue
+        scored.append((len(positive) + sum(positive) / max(1, len(positive)), raw_id))
+    if not scored:
+        return [], 0
+    best = max(score for score, _raw_id in scored)
+    winners = list(dict.fromkeys(raw_id for score, raw_id in scored if score >= best - 0.15))
+    return (winners, len(winners)) if len(winners) != 1 else (winners, 1)
+
+
+def _descriptive_filename_selector(message: str) -> bool:
+    """Whether an explicit file phrase carries a plausible filename clue."""
+
+    return bool(_EXPLICIT_ATTACHMENT_REFERENCE.search(message) and _filename_clue_terms(message))
+
+
+_EXPLICIT_DESCRIPTIVE_FILENAME_CUE = re.compile(
+    rf"(?:"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b\s+"
+    r"(?:с|со|про|о|об|под\s+названи\w*|именуем\w*|назван\w*)\s+\S|"
+    r"\b(?:file|document|attachment)\b\s+"
+    r"(?:with|about|named|called|titled)\s+\S"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _raw_file_is_audio(content_type: str, metadata: Mapping[str, Any]) -> bool:
@@ -8482,6 +9024,27 @@ def _project_source_search_result(
         )
     )[:12]
     focus_conjunctive = len(focus_terms) > 1
+    has_semantic_rows = any(
+        isinstance(row, Mapping) and row.get("retrieval_match_kind") == "semantic" for row in rows
+    )
+    semantic_candidates_value = coverage.get("semantic_candidates")
+    semantic_candidates = (
+        cast(int, semantic_candidates_value) if type(semantic_candidates_value) is int else 0
+    )
+    if has_semantic_rows and (
+        coverage.get("complete") is not False
+        or coverage.get("semantic_recall") is not True
+        or type(semantic_candidates_value) is not int
+        or semantic_candidates <= 0
+        or type(coverage.get("semantic_reranked")) is not bool
+        or coverage.get("semantic_failed") is not False
+        or type(coverage.get("uploader_scoped")) is not bool
+    ):
+        # A dense hit is admissible only through the closed kernel contract:
+        # canonical promoted Raw/KO bytes, positive dense evidence and an exact
+        # uploader/tenant-scoped lookup.  Dense top-k can prove the emitted
+        # passage, never exhaustive absence, hence ``complete`` must stay false.
+        return None
     candidates_scanned_value = coverage.get("candidates_scanned")
     candidate_cap_value = coverage.get("candidate_cap")
     if (
@@ -8504,6 +9067,7 @@ def _project_source_search_result(
     excerpt_chars = 0
     saw_full_focus = False
     saw_contextual_focus = False
+    semantic_rows_seen = 0
     allowed_authority_bases = {
         "extracted_text",
         "advisory_visual",
@@ -8526,6 +9090,12 @@ def _project_source_search_result(
         if type(promoted_value) is not bool:
             return None
         promoted = bool(promoted_value)
+        retrieval_match_kind = raw.get("retrieval_match_kind")
+        if retrieval_match_kind not in {None, "semantic"}:
+            return None
+        semantic_match = retrieval_match_kind == "semantic"
+        if semantic_match and not promoted:
+            return None
         authority = raw.get("evidence_authority")
         if not isinstance(authority, Mapping):
             return None
@@ -8546,67 +9116,93 @@ def _project_source_search_result(
         focus_match_kind = raw.get("focus_match_kind")
         evidence_excerpt = _SOURCE_SEARCH_MISSING_TERM_NOTE.sub("", excerpt)
         folded_excerpt = unicodedata.normalize("NFKC", evidence_excerpt).casefold().replace("ё", "е")
-        query_term_set = frozenset(query_terms)
-        non_query_focus_terms = tuple(term for term in focus_terms if term not in query_term_set)
-        substantive_tokens = {
-            token
-            for matched in re.finditer(r"[\w@.+/-]{2,}", folded_excerpt)
-            if (token := _source_search_normalized_token(matched.group(0))) and len(token) >= 3
-            if not any(_source_excerpt_has_query_term(term, token) for term in query_terms)
-            and not any(_source_excerpt_has_focus_term(term, token) for term in non_query_focus_terms)
-            and token not in _SOURCE_SEARCH_TABLE_HEADER_SUBJECTS
-        }
-        actual_context_terms = len(substantive_tokens)
-        actual_matched = sum(
-            _source_excerpt_has_query_term(term, folded_excerpt)
-            if term in query_terms
-            else _source_excerpt_has_focus_term(term, folded_excerpt)
-            for term in focus_terms
+        focus_field_names = (
+            "focus_terms_matched",
+            "focus_terms_total",
+            "anchor_context_terms",
+            "focus_match_kind",
         )
-        if (
-            type(matched) is not int
-            or type(total) is not int
-            or total != len(focus_terms)
-            or matched < 0
-            or matched > total
-            or matched != actual_matched
-            or type(anchor_context_terms) is not int
-            or anchor_context_terms < 0
-            or anchor_context_terms != actual_context_terms
-            or focus_match_kind not in {"full", "anchor_context"}
-            or any(not _source_excerpt_has_query_term(term, folded_excerpt) for term in query_terms)
-        ):
-            return None
-        if focus_match_kind == "full":
-            if matched != total or (focus_conjunctive and not substantive_tokens):
+        focus_fields_present = sum(name in raw for name in focus_field_names)
+        if semantic_match:
+            semantic_rows_seen += 1
+        if semantic_match and focus_fields_present == 0:
+            if focus_terms != query_terms:
+                # A richer focus means the caller asked for an anchor-bound
+                # field/value passage.  The kernel must publish its closed
+                # counters; otherwise a dense neighbour could bypass the same
+                # co-occurrence proof required from literal source evidence.
                 return None
-            saw_full_focus = True
+            # An unfocused dense lookup has no lexical anchor contract.  Its
+            # canonical bounded passage remains explicitly semantic and its page
+            # remains non-exhaustive; do not fabricate literal counters.
+            focus_match_kind = "semantic"
         else:
-            if matched >= total or anchor_context_terms <= 0:
+            if semantic_match and focus_fields_present != len(focus_field_names):
                 return None
-            saw_contextual_focus = True
-        projected.append(
-            {
-                "title": title,
-                "content_type": " ".join(str(raw.get("content_type") or "").split())[:80],
-                "received_at": " ".join(str(raw.get("received_at") or "").split())[:40],
-                "review_status": review_status,
-                "promoted_to_knowledge": promoted,
-                "knowledge_state": (
-                    "promoted_knowledge"
-                    if promoted
-                    else "pending_source_not_promoted"
-                    if review_status in {"pending", "unreviewed"}
-                    else "source_not_promoted"
-                ),
-                "focus_match_kind": focus_match_kind,
-                "evidence_authority": {
-                    "verification_eligible": verification_eligible,
-                    "basis": authority_basis,
-                },
-                "excerpt": excerpt,
+            query_term_set = frozenset(query_terms)
+            non_query_focus_terms = tuple(term for term in focus_terms if term not in query_term_set)
+            substantive_tokens = {
+                token
+                for matched in re.finditer(r"[\w@.+/-]{2,}", folded_excerpt)
+                if (token := _source_search_normalized_token(matched.group(0))) and len(token) >= 3
+                if not any(_source_excerpt_has_query_term(term, token) for term in query_terms)
+                and not any(_source_excerpt_has_focus_term(term, token) for term in non_query_focus_terms)
+                and token not in _SOURCE_SEARCH_TABLE_HEADER_SUBJECTS
             }
-        )
+            actual_context_terms = len(substantive_tokens)
+            actual_matched = sum(
+                _source_excerpt_has_query_term(term, folded_excerpt)
+                if term in query_terms
+                else _source_excerpt_has_focus_term(term, folded_excerpt)
+                for term in focus_terms
+            )
+            if (
+                type(matched) is not int
+                or type(total) is not int
+                or total != len(focus_terms)
+                or matched < 0
+                or matched > total
+                or matched != actual_matched
+                or type(anchor_context_terms) is not int
+                or anchor_context_terms < 0
+                or anchor_context_terms != actual_context_terms
+                or focus_match_kind not in {"full", "anchor_context"}
+                or any(not _source_excerpt_has_query_term(term, folded_excerpt) for term in query_terms)
+            ):
+                return None
+            if focus_match_kind == "full":
+                if matched != total or (focus_conjunctive and not substantive_tokens):
+                    return None
+                saw_full_focus = True
+            else:
+                if matched >= total or anchor_context_terms <= 0:
+                    return None
+                saw_contextual_focus = True
+        projected_row = {
+            "title": title,
+            "content_type": " ".join(str(raw.get("content_type") or "").split())[:80],
+            "received_at": " ".join(str(raw.get("received_at") or "").split())[:40],
+            "review_status": review_status,
+            "promoted_to_knowledge": promoted,
+            "knowledge_state": (
+                "promoted_knowledge"
+                if promoted
+                else "pending_source_not_promoted"
+                if review_status in {"pending", "unreviewed"}
+                else "source_not_promoted"
+            ),
+            "focus_match_kind": focus_match_kind,
+            "evidence_authority": {
+                "verification_eligible": verification_eligible,
+                "basis": authority_basis,
+            },
+            "excerpt": excerpt,
+        }
+        if semantic_match:
+            projected_row["retrieval_match_kind"] = "semantic"
+        projected.append(projected_row)
+    if has_semantic_rows and semantic_rows_seen > semantic_candidates:
+        return None
     if (
         coverage.get("focus_match_found") is not saw_full_focus
         or coverage.get("focus_fallback_contextual") is not saw_contextual_focus
@@ -13981,14 +14577,35 @@ class AgentRuntime:
 
         if not _RAW_OBJECT_ID_RE.fullmatch(str(raw_id or "")):
             return None
-        raw = self.storage.get_raw_object(raw_id, tenant_id)
-        if not raw or str(raw.get("content_type") or "") != "file":
+        reader = getattr(self.storage, "get_searchable_file_sources", None)
+        rows = (
+            reader(
+                tenant_id,
+                [raw_id],
+                uploaded_by=person_id,
+                limit=1,
+                include_content=True,
+            )
+            if callable(reader)
+            else []
+        )
+        if (
+            not isinstance(rows, list)
+            or len(rows) != 1
+            or not isinstance(rows[0], Mapping)
+            or str(rows[0].get("id") or "") != raw_id
+            or str(rows[0].get("content_type") or "") != "file"
+        ):
             return None
-        metadata = bounded_raw_file_metadata(raw.get("metadata_json"))
+        # One SELECT owns the lifecycle, privacy, uploader and canonical-byte
+        # verdict.  A separate inbox/status check followed by get_raw_object()
+        # would race a reviewer marking the file ignored between those reads.
+        raw = rows[0]
+        metadata = bounded_raw_file_metadata(raw.get("_raw_metadata"))
         if str(metadata.get("uploaded_by") or "") != person_id:
             return None
 
-        raw_text = str(raw.get("raw_content") or "")
+        raw_text = str(raw.get("_raw_content") or "")
         extraction_success = metadata.get("extraction_success") is True
         advisory_only = bool(metadata.get("vision_review_required") or metadata.get("transcription"))
         archive_truncated = metadata.get("archive_truncated") is True
@@ -14070,12 +14687,130 @@ class AgentRuntime:
             # verification.  Parser-open success alone is not evidence.
             "verification_eligible": bool((usable_raw_text or empty_text) and not advisory_only),
         }
+        safe_document_metadata = _safe_document_metadata_projection(metadata)
+        if safe_document_metadata:
+            # Process-private and strictly allowlisted.  The model projector
+            # ignores this key; the dedicated metadata route renders it from
+            # code after the ordinary tenant/uploader authorization above.
+            result[_OWNED_SAFE_DOCUMENT_METADATA] = safe_document_metadata
         if empty_text:
             result["empty_text"] = True
         if office_index is not None:
             result[OFFICE_STRUCTURE_KEY] = office_index
             return trusted_office_attachment(result)
         return _OwnedAttachment(result)
+
+    async def _hydrate_legacy_document_metadata(
+        self,
+        attachments: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> list[dict[str, Any]]:
+        """Inspect only legacy file headers when durable rows predate metadata.
+
+        The stored Raw object stays immutable.  Bytes are re-authorized under
+        the same transaction-scoped reader as downloads, capped independently
+        of the upload ceiling, and passed to the ingestion pipeline's
+        metadata-only parser.  No body extraction, OCR, hierarchy or model is
+        involved.
+        """
+
+        ingestion = getattr(self.kernel, "ingestion", None)
+        inspect = getattr(ingestion, "inspect_file_transient", None)
+        if not callable(inspect):
+            return attachments
+
+        hydrated: list[dict[str, Any]] = []
+        for index, item in enumerate(attachments):
+            if index >= _CONVERSATION_ATTACHMENT_MAX_FILES:
+                hydrated.append(item)
+                continue
+            raw_id = str(item.get("raw_object_id") or "") if isinstance(item, Mapping) else ""
+            canonical = (
+                self._owned_file_attachment(
+                    raw_id,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                if _RAW_OBJECT_ID_RE.fullmatch(raw_id)
+                else item
+                if isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
+                else None
+            )
+            if canonical is None:
+                hydrated.append(item)
+                continue
+            stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
+            safe = _safe_document_metadata_projection(stored) if isinstance(stored, Mapping) else {}
+            if _SAFE_DOCUMENT_HEADER_METADATA_KEYS.intersection(safe):
+                hydrated.append(canonical)
+                continue
+            if not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
+                hydrated.append(canonical)
+                continue
+            try:
+                authorized = await run_blocking(
+                    read_authorized_file,
+                    self.storage,
+                    self.settings.files_dir,
+                    raw_id,
+                    tenant_id,
+                    person_id=person_id,
+                    max_bytes=min(
+                        max(1, int(self.settings.max_upload_bytes)),
+                        _DOCUMENT_METADATA_ON_DEMAND_MAX_BYTES,
+                    ),
+                )
+                inspected = await inspect(
+                    authorized.content,
+                    filename=authorized.filename or str(canonical.get("filename") or "attachment"),
+                    mime_type=authorized.mime_type or str(canonical.get("mime_type") or ""),
+                    metadata_only=True,
+                )
+            except (AuthorizedFileReadError, FileRecordUnavailable, TypeError, ValueError):
+                hydrated.append(canonical)
+                continue
+            except Exception as exc:  # noqa: BLE001 - optional legacy hydration fails closed
+                LOGGER.warning(
+                    "On-demand document metadata inspection failed (%s)",
+                    type(exc).__name__,
+                )
+                hydrated.append(canonical)
+                continue
+
+            # File privacy can change while the bounded parser runs.  Require
+            # the exact uploader-owned row again before admitting header data.
+            canonical = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            header = inspected.get("_document_metadata") if isinstance(inspected, Mapping) else None
+            projected_header = (
+                _safe_document_metadata_projection(header) if isinstance(header, Mapping) else {}
+            )
+            if canonical is None or not projected_header:
+                hydrated.append(item if canonical is None else canonical)
+                continue
+            canonical_stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
+            canonical_safe = _safe_document_metadata_projection(
+                canonical_stored if isinstance(canonical_stored, Mapping) else canonical
+            )
+            merged = {**canonical_safe, **projected_header}
+            # Filename/MIME/size belong to the authorized durable envelope, not
+            # to an embedded header which may disagree with it.
+            for envelope_key in ("filename", "mime_type", "format", "size_bytes"):
+                if envelope_key in canonical_safe:
+                    merged[envelope_key] = canonical_safe[envelope_key]
+            recovered = dict(canonical)
+            recovered[_OWNED_SAFE_DOCUMENT_METADATA] = merged
+            hydrated.append(
+                trusted_office_attachment(recovered)
+                if is_trusted_office_attachment(canonical)
+                else _OwnedAttachment(recovered)
+            )
+        return hydrated
 
     async def _hydrate_unreadable_visual_attachments(
         self,
@@ -14237,12 +14972,31 @@ class AgentRuntime:
         """Active selection plus immutable files actually uploaded on this turn."""
 
         result = cls._message_attachment_ids(message)
+        for raw_id in cls._message_uploaded_attachment_ids(message):
+            if raw_id not in result:
+                result.append(raw_id)
+        return result
+
+    @classmethod
+    def _message_uploaded_attachment_ids(cls, message: Mapping[str, Any]) -> list[str]:
+        """Opaque ids actually uploaded on a user-message chronology point.
+
+        New rows carry the dedicated upload set.  Legacy rows predate that
+        field, so an explicit ``attachment_origin=upload`` may fall back to the
+        active set.  Restored/replayed selections never qualify as uploads.
+        """
+
         if str(message.get("role") or "") != "user":
-            return result
+            return []
         metadata = _bounded_json_mapping(message.get("metadata_json"), max_chars=16_384)
         values = metadata.get(_CONVERSATION_UPLOADED_RAW_IDS)
         if not isinstance(values, list):
-            return result
+            return (
+                cls._message_attachment_ids(message)
+                if str(metadata.get("attachment_origin") or "") == "upload"
+                else []
+            )
+        result: list[str] = []
         for value in values[:_CONVERSATION_ATTACHMENT_MAX_FILES]:
             raw_id = str(value or "").strip()
             if _RAW_OBJECT_ID_RE.fullmatch(raw_id) and raw_id not in result:
@@ -14386,8 +15140,8 @@ class AgentRuntime:
         person_id: str,
         additional_raw_ids: Sequence[str] = (),
         include_owned_archive: bool = False,
-    ) -> list[dict[str, str]]:
-        """Body-free, uploader-scoped file catalog in stable upload chronology."""
+    ) -> tuple[list[dict[str, str]], bool]:
+        """Body-free uploader catalog plus proof that its archive page is complete."""
 
         raw_ids: list[str] = []
         for item in history:
@@ -14430,11 +15184,20 @@ class AgentRuntime:
                 catalog_reader(
                     tenant_id,
                     person_id,
-                    limit=_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES,
+                    # The extra descriptor is a body-free sentinel.  It proves
+                    # whether fuzzy filename uniqueness was evaluated against
+                    # the whole authorized catalog instead of an oldest-first
+                    # LIMIT page.
+                    limit=_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES + 1,
                 )
                 if callable(catalog_reader)
                 else []
             )
+            archive_complete = (
+                callable(catalog_reader)
+                and len(archive_descriptors) <= _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES
+            )
+            archive_descriptors = archive_descriptors[:_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES]
             archive_catalog: list[dict[str, str]] = []
             known_ids: set[str] = set()
             for descriptor in archive_descriptors:
@@ -14459,7 +15222,8 @@ class AgentRuntime:
                 known_ids.add(item["raw_object_id"])
                 archive_catalog.append(item)
             catalog = archive_catalog
-        return catalog
+            return catalog, archive_complete
+        return catalog, True
 
     def _hydrate_conversation_document_ids(
         self,
@@ -14484,6 +15248,92 @@ class AgentRuntime:
                 hydrated.append(attachment)
         return hydrated
 
+    def _restore_latest_uploaded_attachments(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Resolve the newest upload *message*, independent of Raw chronology."""
+
+        for item in reversed(history):
+            raw_ids = self._message_uploaded_attachment_ids(item)
+            if not raw_ids:
+                continue
+            metadata = _bounded_json_mapping(item.get("metadata_json"), max_chars=16_384)
+            try:
+                expected = max(0, min(int(metadata.get("attachment_count") or 0), 100))
+            except (TypeError, ValueError):
+                expected = 0
+            expected = max(expected, len(raw_ids))
+            hydrated = self._hydrate_conversation_document_ids(
+                raw_ids,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            return hydrated, expected
+        return [], 0
+
+    def _restore_recent_active_topic_continuation(
+        self,
+        message: str,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Carry the immediately preceding active file on strong topic overlap."""
+
+        dialogue = [
+            (index, item)
+            for index, item in enumerate(history)
+            if str(item.get("role") or "") in {"user", "assistant"}
+        ]
+        if not dialogue:
+            return [], 0
+        assistant_index, previous_assistant = dialogue[-1]
+        if str(previous_assistant.get("role") or "") != "assistant" or not self._message_used_attachment(
+            previous_assistant
+        ):
+            return [], 0
+        previous_user = next(
+            (
+                item
+                for index, item in reversed(dialogue[:-1])
+                if index < assistant_index and str(item.get("role") or "") == "user"
+            ),
+            None,
+        )
+        if previous_user is None:
+            return [], 0
+        raw_ids = self._message_attachment_ids(previous_user)
+        if not raw_ids:
+            return [], 0
+        hydrated = self._hydrate_conversation_document_ids(
+            raw_ids,
+            tenant_id=tenant_id,
+            person_id=person_id,
+        )
+        if not hydrated:
+            return [], 0
+        body_matches = [
+            item
+            for item in hydrated
+            if _attachment_topic_matches_source(
+                message,
+                f"{item.get('filename') or ''}\n{item.get('transient_text') or ''}",
+            )
+        ]
+        if body_matches:
+            return body_matches, len(body_matches)
+        if _attachment_topic_matches_source(
+            message,
+            str(previous_assistant.get("content") or ""),
+        ):
+            return hydrated, len(hydrated)
+        return [], 0
+
     def _resolve_conversation_attachment_reference(
         self,
         message: str,
@@ -14500,7 +15350,13 @@ class AgentRuntime:
         requests_all = bool(
             _requests_all_attachment_set(message) or _ATTACHMENT_ALL_REFERENCE.search(message)
         )
+        descriptive_filename_selector = _descriptive_filename_selector(message)
         parsed_filename_mentions = _attachment_filename_mentions(message)
+        generic_archived_content_lookup = bool(
+            _archived_source_search_query(message)
+            and not parsed_filename_mentions
+            and not _EXPLICIT_DESCRIPTIVE_FILENAME_CUE.search(message)
+        )
         exact_name_ids: list[str] = []
         exact_name_rows: list[Mapping[str, Any]] = []
         exact_name_reader = getattr(self.storage, "find_owned_files_by_filename", None)
@@ -14511,13 +15367,15 @@ class AgentRuntime:
                     if _RAW_OBJECT_ID_RE.fullmatch(raw_id) and raw_id not in exact_name_ids:
                         exact_name_ids.append(raw_id)
                         exact_name_rows.append(row)
-        catalog = self._conversation_document_catalog(
+        catalog, archive_catalog_complete = self._conversation_document_catalog(
             history,
             tenant_id=tenant_id,
             person_id=person_id,
             additional_raw_ids=(*additional_raw_ids, *exact_name_ids),
             include_owned_archive=bool(
                 parsed_filename_mentions
+                or descriptive_filename_selector
+                or _DOCUMENT_METADATA_OTHER_TARGET.search(message)
                 or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
                 or reference_kind == "indirect"
                 or requests_all
@@ -14563,6 +15421,13 @@ class AgentRuntime:
                 latest_expected = max(latest_expected, len(active_ids))
                 break
 
+        if _DOCUMENT_METADATA_OTHER_TARGET.search(message) and already_supplied_count <= 0:
+            # “Another document” is relative to a current carrier.  Without one,
+            # choosing the newest archive row invents the referent; ask for an
+            # exact name instead.  A newly attached file never reaches this
+            # branch and remains the current pointer.
+            return [], 2
+
         folded = _normalized_attachment_selector(message)
         name_groups: dict[str, list[str]] = {}
         for item in catalog:
@@ -14598,12 +15463,32 @@ class AgentRuntime:
         requested_names = list(dict.fromkeys([*known_mentions, *parsed_mentions]))
         selected_indices: set[int] = set()
         unresolved = 0
+        fuzzy_names: list[str] = []
         for name in requested_names:
             group = name_groups.get(name, [])
-            if len(group) != 1:
-                unresolved += max(1, len(group))
+            if len(group) > 1:
+                unresolved += len(group)
+                continue
+            if not group:
+                fuzzy_names.append(name)
                 continue
             selected_indices.add(catalog_ids.index(group[0]))
+
+        # Filename navigation has its own ranker and always finishes before
+        # content clues.  A body containing the typo or generic query words can
+        # therefore never outrank the filename the person actually named.
+        for name in fuzzy_names:
+            if not archive_catalog_complete:
+                # A match outside the oldest-first page could tie or beat any
+                # visible approximation.  Exact SQL filenames have already
+                # resolved above; fuzzy uniqueness cannot be claimed.
+                unresolved += 2
+                continue
+            fuzzy_ids, fuzzy_expected = _fuzzy_filename_ids(name, catalog)
+            if len(fuzzy_ids) == 1:
+                selected_indices.add(catalog_ids.index(fuzzy_ids[0]))
+                continue
+            unresolved += max(1, fuzzy_expected)
 
         ordinal_indices, invalid_ordinals = _attachment_requested_catalog_indices(
             message,
@@ -14695,9 +15580,35 @@ class AgentRuntime:
                 needed,
             )
 
+        if descriptive_filename_selector:
+            # A filename clue is resolved as a filename first, never as a
+            # blended filename/body score.  Only a complete miss may fall
+            # through to the existing content-clue search below.
+            if not archive_catalog_complete:
+                return [], 2
+            filename_clue_ids, filename_clue_expected = _filename_clue_ids(message, catalog)
+            if len(filename_clue_ids) == 1:
+                hydrated = self._hydrate_conversation_document_ids(
+                    filename_clue_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                return hydrated, 1
+            if filename_clue_expected:
+                if not generic_archived_content_lookup:
+                    return [], filename_clue_expected
+                # A content predicate such as a surname or requested field is
+                # not an ambiguous filename merely because several filenames
+                # happen to contain similar words.  With no explicit name/title
+                # carrier, fall through to the bounded archived-source route.
+                return [], 0
+            if generic_archived_content_lookup:
+                return [], 0
+
         terms = _attachment_reference_terms(message)
         selective = bool(
-            _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+            descriptive_filename_selector
+            or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
             or (_ATTACHMENT_COMPARISON_ACTION.search(message) and len(catalog) > 1)
             or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(message))
         )
@@ -14981,6 +15892,20 @@ class AgentRuntime:
                 return [], 0
         else:
             reference_kind = _attachment_reference_kind(message)
+            if (
+                not reference_kind
+                and allow_file_read
+                and not asks_for_the_web(message)
+                and not _ATTACHMENT_FILENAME_REFERENCE.search(message)
+            ):
+                topic_attachments, topic_expected = self._restore_recent_active_topic_continuation(
+                    message,
+                    recent,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                if topic_expected:
+                    return topic_attachments, topic_expected
             if not (
                 reference_kind
                 or _multi_attachment_open_task_count(message) is not None
@@ -14998,6 +15923,15 @@ class AgentRuntime:
                     tenant_id=tenant_id,
                     person_id=person_id,
                 )
+            if reference_kind == "recent_upload":
+                if not allow_file_read:
+                    return [], 1
+                latest_uploads, expected = self._restore_latest_uploaded_attachments(
+                    history,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                return latest_uploads, expected or 1
             if reference_kind == "deictic":
                 previous_assistant = next(
                     (item for item in reversed(recent) if str(item.get("role") or "") == "assistant"),
@@ -15009,6 +15943,8 @@ class AgentRuntime:
                 return [], 1
             catalog_selector = bool(
                 _ATTACHMENT_FILENAME_REFERENCE.search(message)
+                or _descriptive_filename_selector(message)
+                or _DOCUMENT_METADATA_OTHER_TARGET.search(message)
                 or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(message)
                 or _ATTACHMENT_NUMERIC_ORDINAL.search(message)
                 or _ATTACHMENT_BOTH_REFERENCE.search(message)
@@ -15072,6 +16008,7 @@ class AgentRuntime:
         mode: str | None = None,
         answer_with_voice: bool = False,
         reply_to: str | None = None,
+        quoted_attachment_reference: bool = False,
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
         clean_message = (message or "").strip()
@@ -15132,6 +16069,14 @@ class AgentRuntime:
         prior_web_source_followup = bool(prior_web_sources)
         inherited_private_context_lineage = self._history_has_private_context_lineage(prior_history)
         supplied_attachment_count = sum(1 for item in (attachments or []) if isinstance(item, dict))
+        quoted_attachment_reference = quoted_attachment_reference is True
+        document_metadata_requested = _is_document_metadata_request(
+            clean_message,
+            selected_document=quoted_attachment_reference,
+        )
+        document_metadata_other_requested = bool(
+            document_metadata_requested and _DOCUMENT_METADATA_OTHER_TARGET.search(clean_message)
+        )
         attachment_reference_kind = _attachment_reference_kind(clean_message)
         # A stop order is the emergency path: after conversation ownership and
         # the sticky private-lineage state are known, it must not depend on the
@@ -15273,11 +16218,17 @@ class AgentRuntime:
         all_attachment_set_requested = bool(
             _requests_all_attachment_set(clean_message) or _ATTACHMENT_ALL_REFERENCE.search(clean_message)
         )
-        strict_attachment_selector = bool(
+        hard_attachment_selector = bool(
             _ATTACHMENT_WORD_ORDINAL_PHRASE.search(clean_message)
             or _ATTACHMENT_NUMERIC_ORDINAL.search(clean_message)
             or _ATTACHMENT_SELECTIVE_REFERENCE.search(clean_message)
             or _attachment_filename_mentions(clean_message)
+        )
+        descriptive_filename_selector = _descriptive_filename_selector(clean_message)
+        strict_attachment_selector = bool(
+            hard_attachment_selector
+            or descriptive_filename_selector
+            or (document_metadata_other_requested and not supplied_attachment_count)
         )
         current_prior_selector = bool(
             supplied_attachment_count
@@ -15317,7 +16268,8 @@ class AgentRuntime:
         current_catalog_selector = bool(
             supplied_attachment_count
             and not synthetic_document_notice
-            and (strict_attachment_selector or attachment_reference_kind == "indirect")
+            and attachment_reference_kind != "recent_upload"
+            and (hard_attachment_selector or attachment_reference_kind == "indirect")
         )
         selector_replaces_current = bool(current_catalog_selector and not restore_prior_for_current_multi)
         attachment_catalog_history = prior_history
@@ -15442,7 +16394,7 @@ class AgentRuntime:
                 ),
                 # Closed provenance used by bounded multi-upload restoration.
                 # A follow-up carrying restored pointers is not a new upload.
-                "attachment_origin": "upload",
+                "attachment_origin": ("reply_reference" if quoted_attachment_reference else "upload"),
             }
         elif replay_had_attachments:
             # Preserve the structural fact and the already re-authorized opaque
@@ -15477,7 +16429,16 @@ class AgentRuntime:
                 **(user_metadata or {}),
                 _CONVERSATION_ATTACHMENT_RAW_IDS: resolved_turn_attachment_ids,
             }
-        if current_attachment_ids:
+        if quoted_attachment_reference:
+            # Structural Telegram reply provenance.  It may deliberately carry
+            # no Raw id when the exact source_ref failed authorization; persist
+            # only the code-owned fact and never reinterpret it as a new upload.
+            user_metadata = {
+                **(user_metadata or {}),
+                "quoted_attachment_reference": True,
+                "attachment_origin": "reply_reference",
+            }
+        if current_attachment_ids and not quoted_attachment_reference:
             # Keep upload provenance separate from the active selected set.  A
             # turn may attach `current.txt` while explicitly asking about an
             # older `report.pdf`; the next exact reference must still be able
@@ -15530,7 +16491,16 @@ class AgentRuntime:
             if raw_id:
                 active_raw_ids.add(raw_id)
             active_attachment_set.append(item)
-        if may_read_files and active_attachment_set:
+        if document_metadata_requested and may_read_files and active_attachment_set:
+            active_attachment_set = await self._hydrate_legacy_document_metadata(
+                active_attachment_set,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+        document_metadata_answer = (
+            _document_metadata_answer(active_attachment_set) if document_metadata_requested else ""
+        )
+        if may_read_files and active_attachment_set and not document_metadata_requested:
             active_attachment_set = await self._hydrate_unreadable_visual_attachments(
                 active_attachment_set,
                 tenant_id=tenant_id,
@@ -15559,11 +16529,15 @@ class AgentRuntime:
                 else withheld
             )
         whole_document_task = (
-            "summary"
-            if synthetic_document_notice and active_attachment_set
-            else _attachment_whole_document_task(
-                clean_message,
-                file_count=len(active_attachment_set),
+            ""
+            if document_metadata_requested
+            else (
+                "summary"
+                if synthetic_document_notice and active_attachment_set
+                else _attachment_whole_document_task(
+                    clean_message,
+                    file_count=len(active_attachment_set),
+                )
             )
         )
         whole_document_source_chars = sum(
@@ -15588,7 +16562,7 @@ class AgentRuntime:
         # prompt view.  A complete 20 KB DOCX may be clipped for one prompt and
         # still be fully available to hierarchy/search; that is not a partial
         # parse and must not produce the source-loss warning.
-        attachment_has_unread_tail = any(
+        attachment_has_unread_tail = bool(not document_metadata_requested) and any(
             item.get(flag) is True
             for item in active_attachment_set
             if isinstance(item, Mapping)
@@ -15602,11 +16576,18 @@ class AgentRuntime:
                 "parse_pages_truncated",
             )
         )
-        attachments, attachment_request_projection = _project_attachments_for_request(
-            clean_message,
-            active_attachment_set,
-            synthetic_document_notice=synthetic_document_notice,
-        )
+        if document_metadata_requested:
+            # Metadata is a header-only read.  Do not project body text, OCR a
+            # scan, build a hierarchy, retrieve ambient context or hand any
+            # document value to a model merely to print an allowlisted header.
+            attachments = []
+            attachment_request_projection = AttachmentRequestProjection()
+        else:
+            attachments, attachment_request_projection = _project_attachments_for_request(
+                clean_message,
+                active_attachment_set,
+                synthetic_document_notice=synthetic_document_notice,
+            )
         attachment_expected_count = (
             min(restored_attachment_expected_count, 100)
             if selector_replaces_current
@@ -15843,7 +16824,8 @@ class AgentRuntime:
         office_exact = (
             None
             if (
-                foreign_private_request
+                document_metadata_requested
+                or foreign_private_request
                 or dangerous_instruction_request
                 or fabricated_outside_deed_request
                 or private_web_search_blocked
@@ -15863,7 +16845,8 @@ class AgentRuntime:
             )
         )
         full_source_prepass_required = bool(
-            advisory_body_count == 0
+            not document_metadata_requested
+            and advisory_body_count == 0
             and (
                 office_exact_needs_full_source
                 or authenticated_attachment_scope
@@ -15885,6 +16868,7 @@ class AgentRuntime:
             office_exact = None
         if (
             not foreign_private_request
+            and not document_metadata_requested
             and not dangerous_instruction_request
             and not fabricated_outside_deed_request
             and not private_web_search_blocked
@@ -16083,6 +17067,22 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
                 current_attachment_present=bool(attachment_expected_count),
+            )
+        elif document_metadata_requested:
+            # The selected Raw Object has already crossed the ordinary
+            # tenant/uploader/files.read boundary.  Metadata display is a
+            # deterministic allowlist over its header and has no open model or
+            # tool remainder; file content is deliberately absent here.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=document_metadata_answer,
+                open_remainder="",
+                remainder_known=True,
+                current_attachment_present=bool(active_attachment_set),
             )
         elif attachment_query_closed_answer:
             # A full local scan with no lexical match is a closed result.  If
@@ -16328,6 +17328,7 @@ class AgentRuntime:
                 and not dangerous_instruction_request
                 and not fabricated_outside_deed_request
                 and not private_web_search_blocked
+                and not document_metadata_requested
                 # A backend-authored bare-upload notice grants no authority to
                 # call a tool; its filename is untrusted data.  A real caption
                 # keeps authorised local tools even when archive retrieval was
@@ -16699,6 +17700,12 @@ class AgentRuntime:
             # ordinary generator: no later refactor may let a model or tool
             # reinterpret a carrier request attached to the forbidden clause.
             response = {"content": "", "tools_used": []}
+        elif document_metadata_requested:
+            response = {
+                "content": "",
+                "tools_used": [],
+                "_document_metadata_owned": True,
+            }
         elif empty_attachment_answer:
             response = {
                 "content": "Текста в файле не оказалось.",
@@ -18262,6 +19269,7 @@ class AgentRuntime:
         # намеренно позже — файл собирается по уже проверенному тексту.
         if (
             not foreign_private_request
+            and not document_metadata_requested
             and not dangerous_instruction_request
             and not dangerous_output_replaced
             and not private_web_search_blocked
@@ -18695,7 +19703,12 @@ class AgentRuntime:
                 "verification": durable_verification,
                 "citation_check": citation_check,
                 "verification_status": verification_status,
-                "attachment_context_used": attachment_readable_count > 0,
+                "attachment_context_used": bool(
+                    attachment_readable_count > 0
+                    or response.get("_document_metadata_owned") is True
+                    and active_attachment_set
+                ),
+                "document_metadata_owned": response.get("_document_metadata_owned") is True,
                 "private_context_lineage": private_context_lineage,
                 "text_shape_regeneration": {
                     "attempted": bool(shape_regeneration_attempted),
@@ -18879,7 +19892,11 @@ class AgentRuntime:
             # visible literal and must never become a Telegram link.
             "message_format": (
                 "plain"
-                if exact_text_shape_delivery or response.get("_office_exact_owned") is True
+                if (
+                    exact_text_shape_delivery
+                    or response.get("_office_exact_owned") is True
+                    or response.get("_document_metadata_owned") is True
+                )
                 else "markdown"
             ),
             "verified": answer_verified,

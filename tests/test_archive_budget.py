@@ -27,7 +27,6 @@ from friday.documents import DocumentExtractor
 _MEMBER_BYTES = 250 * 1024
 _MEMBERS_PER_TAR = 200
 _OUTER_MEMBERS = 24
-_PREVIEW_CAP_BYTES = 128 * 1024  # _MAX_MEMBER_PREVIEW_BYTES
 
 
 def _inner_tar_gz() -> bytes:
@@ -44,9 +43,7 @@ def _inner_tar_gz() -> bytes:
 @pytest.fixture(scope="module")
 def nested_bomb() -> bytes:
     inner = _inner_tar_gz()
-    # Load-bearing: over the preview cap the member is skipped and no nesting
-    # happens, so the test would pass without exercising anything.
-    assert len(inner) < _PREVIEW_CAP_BYTES, f"inner archive grew to {len(inner)} bytes"
+    assert len(inner) < 512 * 1024, f"inner archive grew to {len(inner)} bytes"
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
         for index in range(_OUTER_MEMBERS):
@@ -112,13 +109,16 @@ def test_one_readable_zip_member_is_not_silently_cut_at_20k() -> None:
 
 def test_an_oversized_tar_member_is_reported_as_unread() -> None:
     buffer = io.BytesIO()
-    payload = b"x" * (_PREVIEW_CAP_BYTES + 1)
-    with tarfile.open(fileobj=buffer, mode="w") as archive:
+    payload = b"x" * (2 * 1024 * 1024)
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         info = tarfile.TarInfo("oversized.txt")
         info.size = len(payload)
         archive.addfile(info, io.BytesIO(payload))
 
-    result = DocumentExtractor().extract(buffer.getvalue(), "one-oversized-member.tar")
+    result = DocumentExtractor(max_input_bytes=512 * 1024).extract(
+        buffer.getvalue(),
+        "one-oversized-member.tar.gz",
+    )
 
     assert result.success is True
     assert result.metadata["archive_budget_exhausted"] is True

@@ -369,6 +369,8 @@ class BridgeShared:
     _album_caption: Callable[..., Any]
     _group_address: Callable[..., Any]
     _album_captions: dict[str, str]
+    _archive_passwords: dict[int, str]
+    _archive_document_descriptor: Callable[..., Any]
     _send_message_returning_id: Callable[..., Any]
     _offer_access_to_owner: Callable[..., Any]
     _signer_chat_id: Callable[..., Any]
@@ -384,6 +386,7 @@ class BridgeShared:
     _bot_username: str
     _may_message_chat: Callable[..., Any]
     _prepare_document: Callable[..., Any]
+    _reply_document_source_ref: Callable[..., Any]
     _process_callback_query: Callable[..., Any]
     _process_update: Callable[..., Any]
     _response_reply_markup: Callable[..., Any]

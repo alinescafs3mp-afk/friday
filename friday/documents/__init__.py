@@ -19,15 +19,21 @@ import logging
 import lzma
 import math
 import mimetypes
+import os
 import re
+import selectors
+import shutil
+import stat
+import subprocess
 import tarfile
+import tempfile
 import time
 import zipfile
 from collections.abc import Sequence
-from contextlib import closing, suppress
+from contextlib import ExitStack, closing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from bs4 import BeautifulSoup
@@ -104,12 +110,33 @@ _OPENDOCUMENT_MIME_TYPES = {
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/vnd.oasis.opendocument.presentation",
 }
+_ODF_META_MEMBER = "meta.xml"
+_MAX_ODF_METADATA_BYTES = 256 * 1024
+_ODF_OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+_ODF_META_NS = "urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+_ODF_DC_NS = "http://purl.org/dc/elements/1.1/"
+_ODF_STRING_TAGS = {
+    f"{{{_ODF_DC_NS}}}title": ("title", 500),
+    f"{{{_ODF_DC_NS}}}subject": ("subject", 500),
+    f"{{{_ODF_DC_NS}}}creator": ("creator", 300),
+    f"{{{_ODF_META_NS}}}initial-creator": ("initial_creator", 300),
+    f"{{{_ODF_DC_NS}}}description": ("description", 4000),
+    f"{{{_ODF_DC_NS}}}language": ("language", 64),
+    f"{{{_ODF_META_NS}}}generator": ("generator", 300),
+}
+_ODF_STATISTIC_ATTRIBUTES = {
+    f"{{{_ODF_META_NS}}}page-count": "page_count",
+    f"{{{_ODF_META_NS}}}word-count": "word_count",
+    f"{{{_ODF_META_NS}}}character-count": "character_count",
+    f"{{{_ODF_META_NS}}}table-count": "table_count",
+    f"{{{_ODF_META_NS}}}image-count": "image_count",
+    f"{{{_ODF_META_NS}}}object-count": "object_count",
+}
 _OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx", ".odt", ".rtf"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 _ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst"}
 _MAX_NESTING_DEPTH = 2
 _MAX_ARCHIVE_PREVIEW_FILES = 24
-_MAX_MEMBER_PREVIEW_BYTES = 128 * 1024
 _MAX_STRUCTURED_PARSE_BYTES = 2 * 1024 * 1024
 _MAX_TEXT_PARSE_BYTES = 8 * 1024 * 1024
 _MAX_OFFICE_EXPANDED_BYTES = 128 * 1024 * 1024
@@ -117,6 +144,11 @@ _MAX_OFFICE_MEMBER_BYTES = 64 * 1024 * 1024
 _MAX_ZIP_RATIO = 500.0
 _MAX_TABULAR_ROWS = 100_000
 _MAX_PDF_RENDER_AXIS_PIXELS = 16_384
+_MAX_ARCHIVE_DICTIONARY_BYTES = 128 * 1024 * 1024
+_MAX_7Z_HEADER_BYTES = 8 * 1024 * 1024
+_MAX_7Z_AES_CYCLES_POWER = 20
+_RAR_DICTIONARY_SWITCH = f"-mdx{_MAX_ARCHIVE_DICTIONARY_BYTES // (1024 * 1024)}m"
+_RAR_MEMBER_TIMEOUT_SEC = 20.0
 
 # Дата САМОГО документа, взятая из провенанса файла, а не угаданная из текста.
 #
@@ -272,6 +304,121 @@ class ArchiveLimitError(ValueError):
     """An archive exceeded configured expansion or entry limits."""
 
 
+class ArchivePasswordRequired(ValueError):
+    """An encrypted archive needs a password which was not supplied."""
+
+
+class ArchivePasswordInvalid(ValueError):
+    """An archive password was supplied but did not decrypt the archive."""
+
+
+class ArchiveBackendUnavailable(ValueError):
+    """A format-specific decompressor is not installed on this host."""
+
+
+class ArchiveExtractionError(ValueError):
+    """An archive backend failed without exposing its untrusted diagnostics."""
+
+
+def _safe_archive_member_name(value: Any) -> str:
+    """Validate an inert member name as if it could become a path later.
+
+    Friday never writes members to disk, but applying one uniform zip-slip
+    boundary prevents a future caller from accidentally turning a previously
+    accepted name into a filesystem destination.  Backslashes are separators
+    too: archives made on Windows routinely use them.
+    """
+
+    raw = str(value or "")
+    normalized = raw.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if (
+        not normalized
+        or "\x00" in normalized
+        or normalized.startswith("/")
+        or normalized.startswith("//")
+        or re.match(r"^[A-Za-z]:", normalized)
+        or ".." in path.parts
+    ):
+        raise ArchiveLimitError("Unsafe archive member path")
+    return normalized
+
+
+class _Bounded7zWriter:
+    """Small Py7zIO-compatible sink with hard per-member and shared limits."""
+
+    __slots__ = ("_buffer", "_factory", "_size")
+
+    def __init__(self, factory: _Bounded7zFactory) -> None:
+        self._buffer = io.BytesIO()
+        self._factory = factory
+        self._size = 0
+
+    def write(self, data: bytes | bytearray) -> int:
+        if self._factory.deadline is not None and time.monotonic() >= self._factory.deadline:
+            raise ArchiveExtractionError("7z extraction exceeded its deadline")
+        start = self._buffer.tell()
+        old_size = self._size
+        new_size = max(self._size, start + len(data))
+        growth = new_size - old_size
+        if (
+            new_size > self._factory.member_limit
+            or self._factory.written + growth > self._factory.total_limit
+        ):
+            raise ArchiveLimitError("Decompressed 7z member exceeds configured limit")
+        written = self._buffer.write(data)
+        self._size = max(self._size, start + written)
+        self._factory.written += max(0, self._size - old_size)
+        return written
+
+    def read(self, size: int | None = None) -> bytes:
+        return self._buffer.read(-1 if size is None else size)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._buffer.seek(offset, whence)
+
+    def flush(self) -> None:
+        self._buffer.flush()
+
+    def close(self) -> None:
+        # py7zr closes each logical output after decompression.  The factory
+        # still owns this in-memory buffer so Friday can consume it afterwards.
+        return None
+
+    def size(self) -> int:
+        return self._size
+
+
+class _Bounded7zFactory:
+    """Py7zr WriterFactory-compatible owner of bounded in-memory products."""
+
+    __slots__ = ("deadline", "member_limit", "products", "total_limit", "written")
+
+    def __init__(
+        self,
+        *,
+        member_limit: int,
+        total_limit: int,
+        deadline: float | None = None,
+    ) -> None:
+        self.member_limit = max(0, int(member_limit))
+        self.total_limit = max(0, int(total_limit))
+        self.deadline = deadline
+        self.written = 0
+        self.products: dict[str, _Bounded7zWriter] = {}
+
+    def create(self, filename: str) -> _Bounded7zWriter:
+        name = _safe_archive_member_name(filename)
+        if name in self.products:
+            raise ArchiveLimitError("Duplicate 7z member name")
+        product = _Bounded7zWriter(self)
+        self.products[name] = product
+        return product
+
+    def get(self, filename: str) -> _Bounded7zWriter:
+        return self.products[_safe_archive_member_name(filename)]
+
+
 class _BinaryReadable(Protocol):
     """Minimal binary stream contract shared by archive/decompressor readers."""
 
@@ -361,6 +508,7 @@ class DocumentExtractor:
         filename: str,
         mime_type: str = "",
         *,
+        archive_password: str | None = None,
         _depth: int = 0,
         _budget: _ArchiveBudget | None = None,
         _deadline: float | None = None,
@@ -410,8 +558,17 @@ class DocumentExtractor:
                 # Таблица и презентация OpenDocument держат текст ровно там же,
                 # где документ, — в `content.xml`. Принят был только `.odt`, и
                 # это не решение, а недосмотр: у семьи форматов один разборщик.
-                result = self._extract_xml_zip_text(
-                    content, "content.xml", _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
+                odf_format = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
+                result = self._extract_xml_zip_text(content, "content.xml", odf_format)
+                result = DocumentResult(
+                    result.text,
+                    {
+                        **result.metadata,
+                        **self.extract_document_metadata(content, safe_name, detected_mime),
+                    },
+                    result.success,
+                    result.error,
+                    result.office_structure_index,
                 )
             elif ext == ".epub" or detected_mime == "application/epub+zip":
                 result = self._extract_epub(content)
@@ -423,7 +580,15 @@ class DocumentExtractor:
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
             elif ext in _ARCHIVE_EXTENSIONS or ext.startswith(".tar."):
-                result = self._extract_archive(content, safe_name, ext, _depth, budget, deadline)
+                result = self._extract_archive(
+                    content,
+                    safe_name,
+                    ext,
+                    _depth,
+                    budget,
+                    deadline,
+                    archive_password,
+                )
             elif detected_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
             else:
@@ -433,6 +598,34 @@ class DocumentExtractor:
                     False,
                     "unsupported_document_format",
                 )
+        except ArchivePasswordRequired:
+            result = DocumentResult(
+                "",
+                {"filename": safe_name, "format": ext.lstrip(".")},
+                False,
+                "archive_password_required",
+            )
+        except ArchivePasswordInvalid:
+            result = DocumentResult(
+                "",
+                {"filename": safe_name, "format": ext.lstrip(".")},
+                False,
+                "archive_password_invalid",
+            )
+        except ArchiveBackendUnavailable:
+            result = DocumentResult(
+                "",
+                {"filename": safe_name, "format": ext.lstrip(".")},
+                False,
+                "archive_backend_unavailable",
+            )
+        except ArchiveExtractionError:
+            result = DocumentResult(
+                "",
+                {"filename": safe_name, "format": ext.lstrip(".")},
+                False,
+                "archive_extract_failed",
+            )
         except ArchiveLimitError:
             result = DocumentResult("", {"filename": safe_name}, False, "archive_limit_exceeded")
         except Exception as exc:  # defensive boundary for optional parsers
@@ -446,7 +639,11 @@ class DocumentExtractor:
 
         # Убрать собственные credential ДО обреза: иначе граница могла бы
         # разрезать секрет пополам и оставить его половину в тексте.
-        redacted_text, secrets_removed = _redact_own_secrets(result.text, self.secret_values)
+        # The password is request-ephemeral.  It is not normally part of member
+        # contents, but a hostile archive could deliberately echo it in a name or
+        # file; redact that exact value before text can reach a prompt or index.
+        turn_secrets = (*self.secret_values, archive_password) if archive_password else self.secret_values
+        redacted_text, secrets_removed = _redact_own_secrets(result.text, turn_secrets)
         text = redacted_text[: self.max_text_chars]
         metadata = {
             "filename": safe_name,
@@ -498,6 +695,141 @@ class DocumentExtractor:
             result.error,
             office_structure_index,
         )
+
+    def extract_document_metadata(
+        self,
+        content: bytes,
+        filename: str,
+        mime_type: str = "",
+    ) -> dict[str, Any]:
+        """Return a closed, header-only metadata projection for OpenDocument.
+
+        This intentionally does not call ``extract``: legacy hydration may read
+        authorised stored bytes solely to answer a metadata question, and must
+        not parse ``content.xml``, run OCR/vision, mutate Raw, or build model
+        context.  Unknown formats and malformed/oversized metadata simply have
+        no safe projection.
+        """
+
+        if not isinstance(content, bytes) or len(content) > self.max_input_bytes:
+            return {}
+        safe_name = Path(str(filename or "document")).name
+        ext = self._compound_extension(safe_name.casefold())
+        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
+        if ext not in _OPENDOCUMENT_EXTENSIONS and detected_mime not in _OPENDOCUMENT_MIME_TYPES:
+            return {}
+        format_name = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
+        try:
+            metadata = self._extract_opendocument_metadata(content)
+        except Exception:  # noqa: BLE001 - optional metadata cannot break body extraction
+            return {"format": format_name}
+        return {"format": format_name, **metadata}
+
+    @staticmethod
+    def _bounded_odf_text(element: Any, limit: int) -> str:
+        text = " ".join("".join(element.itertext()).split())
+        return text[: max(0, int(limit))]
+
+    @staticmethod
+    def _odf_iso_datetime(value: str) -> str:
+        candidate = str(value or "").strip()
+        if not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?)?",
+            candidate,
+        ):
+            return ""
+        with suppress(ValueError):
+            datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            return candidate
+        return ""
+
+    def _extract_opendocument_metadata(self, content: bytes) -> dict[str, Any]:
+        import xml.etree.ElementTree as ET
+
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = self._validate_office_zip(archive)
+            names = {member.filename for member in members}
+            if _ODF_META_MEMBER not in names:
+                return {}
+            info = archive.getinfo(_ODF_META_MEMBER)
+            if info.file_size > _MAX_ODF_METADATA_BYTES:
+                return {}
+            with archive.open(info) as stream:
+                raw, truncated = self._read_stream_preview(stream, _MAX_ODF_METADATA_BYTES)
+        if truncated or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+            return {}
+        root = ET.fromstring(raw)
+        office_meta = root.find(f".//{{{_ODF_OFFICE_NS}}}meta")
+        if office_meta is None:
+            return {}
+
+        metadata: dict[str, Any] = {}
+        keywords: list[str] = []
+        for element in list(office_meta):
+            string_spec = _ODF_STRING_TAGS.get(element.tag)
+            if string_spec is not None and string_spec[0] not in metadata:
+                key, limit = string_spec
+                value = self._bounded_odf_text(element, limit)
+                if (
+                    key == "language"
+                    and value
+                    and not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*", value)
+                ):
+                    value = ""
+                if value:
+                    metadata[key] = value
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}keyword":
+                keyword = self._bounded_odf_text(element, 200)
+                if keyword and keyword not in keywords and len(keywords) < 32:
+                    keywords.append(keyword)
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}creation-date":
+                value = self._odf_iso_datetime(self._bounded_odf_text(element, 64))
+                if value:
+                    metadata.setdefault("creation_date", value)
+                continue
+            if element.tag == f"{{{_ODF_DC_NS}}}date":
+                value = self._odf_iso_datetime(self._bounded_odf_text(element, 64))
+                if value:
+                    metadata.setdefault("modified_date", value)
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}editing-cycles":
+                value = self._bounded_odf_text(element, 16)
+                if value.isdecimal():
+                    metadata["editing_cycles"] = min(int(value), 2_147_483_647)
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}editing-duration":
+                value = self._bounded_odf_text(element, 64)
+                if re.fullmatch(
+                    r"P(?=\d|T)(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?",
+                    value,
+                ):
+                    metadata["editing_duration"] = value
+                continue
+            if element.tag == f"{{{_ODF_META_NS}}}document-statistic":
+                for attribute, key in _ODF_STATISTIC_ATTRIBUTES.items():
+                    value = str(element.attrib.get(attribute) or "")
+                    if value.isdecimal():
+                        metadata[key] = min(int(value), 2_147_483_647)
+
+        if keywords:
+            metadata["keywords"] = keywords
+        for key, value in list(metadata.items()):
+            if isinstance(value, str):
+                metadata[key] = _redact_own_secrets(value, self.secret_values)[0]
+            elif isinstance(value, list):
+                metadata[key] = [
+                    _redact_own_secrets(item, self.secret_values)[0]
+                    for item in value
+                    if isinstance(item, str)
+                ]
+        own_date = _plausible_document_date(
+            str(metadata.get("creation_date") or metadata.get("modified_date") or "")
+        )
+        if own_date:
+            metadata["document_date"] = own_date
+        return metadata
 
     def extract_visual_assets(
         self,
@@ -1080,6 +1412,7 @@ class DocumentExtractor:
         *,
         total_limit: int | None = None,
         member_limit: int | None = None,
+        allow_encrypted: bool = False,
     ) -> list[zipfile.ZipInfo]:
         members = archive.infolist()
         if len(members) > self.max_archive_entries:
@@ -1089,7 +1422,11 @@ class DocumentExtractor:
         expanded_limit = self.max_archive_uncompressed_bytes if total_limit is None else total_limit
         total = 0
         for member in members:
-            if member.flag_bits & 0x1:
+            _safe_archive_member_name(member.filename)
+            unix_mode = (int(member.external_attr) >> 16) & 0xFFFF
+            if stat.S_ISLNK(unix_mode):
+                raise ArchiveLimitError("Archive links are not supported")
+            if member.flag_bits & 0x1 and not allow_encrypted:
                 raise ArchiveLimitError("Encrypted ZIP entries are not supported")
             if member.is_dir():
                 continue
@@ -1111,11 +1448,30 @@ class DocumentExtractor:
             member_limit=min(self.max_archive_uncompressed_bytes, _MAX_OFFICE_MEMBER_BYTES),
         )
 
+    def _archive_member_limit(self, budget: _ArchiveBudget) -> int:
+        """Bytes one nested member may consume at this point in the upload.
+
+        The old fixed 128 KiB preview ceiling made ordinary nested PDF and DOCX
+        files unreadable.  The upload already has stronger shared ceilings: an
+        individual document cannot exceed ``max_input_bytes`` and every nesting
+        level spends from the same expansion budget.  Use those live limits
+        instead of a second, lossy fixed cap.
+        """
+
+        return max(0, min(self.max_input_bytes, budget.expanded_bytes))
+
     @staticmethod
-    def _read_stream_limited(stream: _BinaryReadable, limit: int) -> bytes:
+    def _read_stream_limited(
+        stream: _BinaryReadable,
+        limit: int,
+        *,
+        deadline: float | None = None,
+    ) -> bytes:
         chunks: list[bytes] = []
         total = 0
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ArchiveExtractionError("Archive member read exceeded its deadline")
             chunk = stream.read(min(64 * 1024, limit + 1 - total))
             if not chunk:
                 break
@@ -1549,27 +1905,39 @@ class DocumentExtractor:
         depth: int,
         budget: _ArchiveBudget,
         deadline: float | None = None,
+        password: str | None = None,
     ) -> DocumentResult:
         if ext == ".zip":
-            return self._extract_zip(content, depth, budget, deadline)
+            return self._extract_zip(content, depth, budget, deadline, password)
         if ext in {".tar", ".tar.gz", ".tar.bz2", ".tar.xz"}:
-            return self._extract_tar(content, ext, depth, budget, deadline)
+            return self._extract_tar(content, ext, depth, budget, deadline, password)
         if ext in {".gz", ".bz2", ".xz", ".zst"}:
-            decompressed = self._decompress_single(content, ext, budget)
+            decompressed = self._decompress_single(content, ext, budget, deadline)
             inner_name = filename[: -len(ext)] or "decompressed.txt"
             return self.extract(
-                decompressed, inner_name, _depth=depth + 1, _budget=budget, _deadline=deadline
+                decompressed,
+                inner_name,
+                archive_password=password,
+                _depth=depth + 1,
+                _budget=budget,
+                _deadline=deadline,
             )
         if ext == ".rar":
-            return self._extract_rar(content, depth, budget, deadline)
+            return self._extract_rar(content, depth, budget, deadline, password)
         if ext == ".7z":
-            return self._extract_7z(content)
+            return self._extract_7z(content, depth, budget, deadline, password)
         if ext == ".tar.zst":
-            decompressed = self._decompress_single(content, ".zst", budget)
-            return self._extract_tar(decompressed, ".tar", depth, budget, deadline)
+            decompressed = self._decompress_single(content, ".zst", budget, deadline)
+            return self._extract_tar(decompressed, ".tar", depth, budget, deadline, password)
         return DocumentResult("", {"format": ext.lstrip(".")}, False, "Unsupported archive format")
 
-    def _decompress_single(self, content: bytes, ext: str, budget: _ArchiveBudget) -> bytes:
+    def _decompress_single(
+        self,
+        content: bytes,
+        ext: str,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
+    ) -> bytes:
         limit = min(self.max_archive_uncompressed_bytes, self.max_input_bytes, budget.expanded_bytes)
         if ext == ".gz":
             stream: _BinaryReadable = gzip.GzipFile(fileobj=io.BytesIO(content))
@@ -1586,7 +1954,7 @@ class DocumentExtractor:
         else:
             raise ValueError(f"Unsupported compressor: {ext}")
         with closing(stream):
-            data = self._read_stream_limited(stream, limit)
+            data = self._read_stream_limited(stream, limit, deadline=deadline)
         budget.spend_bytes(len(data))
         return data
 
@@ -1597,8 +1965,23 @@ class DocumentExtractor:
         depth: int,
         budget: _ArchiveBudget,
         deadline: float | None = None,
+        password: str | None = None,
     ) -> tuple[str, bool]:
-        result = self.extract(data, name, _depth=depth + 1, _budget=budget, _deadline=deadline)
+        result = self.extract(
+            data,
+            name,
+            archive_password=password,
+            _depth=depth + 1,
+            _budget=budget,
+            _deadline=deadline,
+        )
+        # A nested encrypted archive is still an encrypted part of this upload.
+        # Do not flatten that into the generic "partial archive" bit or the
+        # caller would never know that supplying a password can complete it.
+        if result.error == "archive_password_required":
+            raise ArchivePasswordRequired
+        if result.error == "archive_password_invalid":
+            raise ArchivePasswordInvalid
         if not result.success:
             return "", False
         metadata = result.metadata or {}
@@ -1616,42 +1999,127 @@ class DocumentExtractor:
         )
         if not result.text:
             return "", complete
-        # A member is already bounded to 128 KiB before this recursive parse,
-        # and the outer extractor applies its global text ceiling.  The former
-        # 20k slice therefore bought no safety: it only hid the tail of an
-        # otherwise readable member and discarded the fact of that loss.
+        # A member is already bounded by the live per-upload expansion budget
+        # and ``max_input_bytes`` before this recursive parse, and the outer
+        # extractor applies its global text ceiling.  A second text slice here
+        # would buy no safety: it would only hide a readable member's tail.
         return f"\n--- {name} ---\n{result.text}", complete
 
     def _extract_zip(
-        self, content: bytes, depth: int, budget: _ArchiveBudget, deadline: float | None = None
+        self,
+        content: bytes,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
+        password: str | None = None,
     ) -> DocumentResult:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            members = self._validate_zip(archive)
-            files = [member for member in members if not member.is_dir()]
-            parts = [f"ZIP archive: {len(files)} files", *(member.filename for member in files[:100])]
+        try:
+            return self._extract_zip_members(content, depth, budget, deadline, password)
+        except (
+            ArchiveBackendUnavailable,
+            ArchiveExtractionError,
+            ArchiveLimitError,
+            ArchivePasswordInvalid,
+            ArchivePasswordRequired,
+        ):
+            raise
+        except Exception as exc:
+            # ZIP parser/decompressor diagnostics are attacker-controlled input
+            # details.  Keep them out of the public result and model context.
+            raise ArchiveExtractionError from exc
+
+    def _extract_zip_members(
+        self,
+        content: bytes,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None,
+        password: str | None,
+    ) -> DocumentResult:
+        with zipfile.ZipFile(io.BytesIO(content)) as catalog, ExitStack() as stack:
+            members = self._validate_zip(catalog, allow_encrypted=True)
+            encrypted = any(member.flag_bits & 0x1 for member in members if not member.is_dir())
+            if encrypted and not password:
+                raise ArchivePasswordRequired
+
+            reader: Any = catalog
+            read_members: list[Any] = members
+            password_bytes: bytes | None = None
+            if encrypted:
+                try:
+                    import pyzipper  # type: ignore[import-untyped]
+                except ImportError as exc:  # pragma: no cover - required runtime dependency
+                    raise ArchiveBackendUnavailable from exc
+                password_bytes = str(password).encode("utf-8")
+                reader = stack.enter_context(pyzipper.AESZipFile(io.BytesIO(content), mode="r"))
+                reader.setpassword(password_bytes)
+                read_members = list(reader.infolist())
+                if len(read_members) != len(members) or any(
+                    str(left.filename) != str(right.filename)
+                    for left, right in zip(members, read_members, strict=True)
+                ):
+                    raise ArchiveExtractionError
+
+            indexed_files = [
+                (index, member, read_members[index])
+                for index, member in enumerate(members)
+                if not member.is_dir()
+            ]
+            parts = [
+                f"ZIP archive: {len(indexed_files)} files",
+                *(member.filename for _index, member, _reader_member in indexed_files[:100]),
+            ]
+
+            # Password validity cannot depend on preview eligibility.  Put the
+            # smallest encrypted file first and read it through authenticated
+            # EOF/CRC.  If it is larger than the live bound, a correct password
+            # ends in archive_limit_exceeded while a wrong one normally fails at
+            # the encryption verifier; neither can be reported as success.
+            validation_index: int | None = None
+            ordered_files = indexed_files
+            if encrypted:
+                encrypted_files = [item for item in indexed_files if item[1].flag_bits & 0x1]
+                if not encrypted_files:
+                    raise ArchiveExtractionError
+                validation = min(encrypted_files, key=lambda item: (max(0, int(item[1].file_size)), item[0]))
+                validation_index = validation[0]
+                ordered_files = [validation, *(item for item in indexed_files if item[0] != validation_index)]
+
             previewed = 0
             exhausted = False
-            for member in files:
-                if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
-                    # Слишком крупный член — тоже НЕ прочитан, и это тот же класс
-                    # молчаливой потери: раньше он просто пропускался.
+            for index, member, reader_member in ordered_files:
+                mandatory_validation = validation_index is not None and index == validation_index
+                if deadline is not None and time.monotonic() >= deadline:
+                    if mandatory_validation:
+                        raise ArchiveExtractionError
+                    exhausted = True
+                    break
+                member_limit = self._archive_member_limit(budget)
+                if member.file_size > member_limit and not mandatory_validation:
                     exhausted = True
                     continue
                 # Count the decompression, not the success. Incrementing only when a
                 # preview came back meant a member that yields no text — an inner
-                # archive of binary blobs, say — never advanced the cap, so the loop
-                # decompressed EVERY member. Nested, that is a decompression bomb the
-                # cap was supposed to bound: a 99 KB upload (24 x 24 x 500 zero-filled
-                # members) held the event loop for 31 seconds.
-                #
-                # The allowance belongs to the UPLOAD, not to this archive: a nested
-                # member used to start over with a full one.
+                # archive of binary blobs, say — never advanced the cap.
                 if not budget.take_preview():
+                    if mandatory_validation:
+                        raise ArchiveLimitError("Archive preview budget cannot validate password")
                     exhausted = True
                     break
                 previewed += 1
-                with archive.open(member) as stream:
-                    data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
+                try:
+                    with reader.open(reader_member, pwd=password_bytes) as stream:
+                        data = self._read_stream_limited(stream, member_limit, deadline=deadline)
+                except ArchiveLimitError:
+                    raise
+                except (RuntimeError, zipfile.BadZipFile) as exc:
+                    if member.flag_bits & 0x1:
+                        raise ArchivePasswordInvalid from exc
+                    raise ArchiveExtractionError from exc
+                except ArchiveExtractionError:
+                    raise
+                except Exception as exc:
+                    raise ArchiveExtractionError from exc
                 budget.spend_bytes(len(data))
                 preview, member_complete = self._member_preview(
                     member.filename,
@@ -1659,6 +2127,7 @@ class DocumentExtractor:
                     depth,
                     budget,
                     deadline,
+                    password,
                 )
                 if not member_complete:
                     exhausted = True
@@ -1666,8 +2135,9 @@ class DocumentExtractor:
                     parts.append(preview)
         metadata: dict[str, Any] = {
             "format": "zip",
-            "files": len(files),
+            "files": len(indexed_files),
             "previewed_files": previewed,
+            "encrypted": encrypted,
         }
         if exhausted:
             # ТАR это говорил, ZIP молчал — при том что ZIP на входе встречается
@@ -1684,6 +2154,7 @@ class DocumentExtractor:
         depth: int,
         budget: _ArchiveBudget,
         deadline: float | None = None,
+        password: str | None = None,
     ) -> DocumentResult:
         # Streaming mode avoids materialising an attacker-controlled member
         # list before the configured entry limit can be enforced.
@@ -1696,9 +2167,13 @@ class DocumentExtractor:
             previewed = 0
             exhausted = False
             for member in archive:
+                if deadline is not None and time.monotonic() >= deadline:
+                    exhausted = True
+                    break
                 entry_count += 1
                 if entry_count > self.max_archive_entries:
                     raise ArchiveLimitError(f"Archive entry count exceeds limit {self.max_archive_entries}")
+                _safe_archive_member_name(member.name)
                 if member.issym() or member.islnk() or member.isdev():
                     raise ArchiveLimitError("Archive links and device entries are not supported")
                 if not member.isfile():
@@ -1708,6 +2183,12 @@ class DocumentExtractor:
                 total += member_size
                 if total > self.max_archive_uncompressed_bytes:
                     raise ArchiveLimitError("Archive uncompressed size exceeds configured limit")
+                member_limit = self._archive_member_limit(budget)
+                if member_size > budget.expanded_bytes:
+                    # Streaming past it would itself spend more than the shared
+                    # expansion budget, so stop instead of silently walking it.
+                    exhausted = True
+                    break
                 budget.spend_bytes(member_size)
                 if len(names) < 100:
                     names.append(member.name)
@@ -1715,10 +2196,7 @@ class DocumentExtractor:
                 # read past every member it skips. When the upload's allowance is
                 # gone, stop walking rather than skip in a loop — that is where the
                 # nested bomb's 107 seconds were actually spent.
-                if budget.expanded_bytes <= 0:
-                    exhausted = True
-                    break
-                if member_size > _MAX_MEMBER_PREVIEW_BYTES:
+                if member_size > member_limit:
                     exhausted = True
                     continue
                 stream = archive.extractfile(member)
@@ -1730,13 +2208,14 @@ class DocumentExtractor:
                     break
                 previewed += 1  # decompressions, not successes — see _extract_zip
                 with stream:
-                    data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
+                    data = self._read_stream_limited(stream, member_limit, deadline=deadline)
                 preview, member_complete = self._member_preview(
                     member.name,
                     data,
                     depth,
                     budget,
                     deadline,
+                    password,
                 )
                 if not member_complete:
                     exhausted = True
@@ -1754,36 +2233,236 @@ class DocumentExtractor:
             metadata["archive_budget_exhausted"] = True
         return DocumentResult("\n".join(parts), metadata)
 
+    @staticmethod
+    def _read_rar_member_with_tool(
+        source_path: str,
+        member_name: str,
+        *,
+        tool: str,
+        password: str | None,
+        limit: int,
+        deadline: float | None,
+    ) -> bytes:
+        """Stream one member through official UnRAR without exposing a password.
+
+        Bare ``-p`` is the documented prompt mode and accepts a redirected pipe;
+        the secret is therefore stdin-only, never argv or environment. ``p``
+        writes member bytes to stdout, so no extracted member touches disk. The
+        received RAR itself is supplied as one private 0600 temporary input per
+        archive because UnRAR has no memory-buffer CLI.
+        """
+
+        effective_deadline = min(
+            deadline if deadline is not None else math.inf,
+            time.monotonic() + _RAR_MEMBER_TIMEOUT_SEC,
+        )
+        safe_member = _safe_archive_member_name(member_name)
+        password_switch = "-p" if password is not None else "-p-"
+        command = [
+            tool,
+            "p",
+            "-inul",
+            "-cfg-",
+            _RAR_DICTIONARY_SWITCH,
+            password_switch,
+            "--",
+            source_path,
+            safe_member,
+        ]
+        process = subprocess.Popen(  # noqa: S603 - fixed executable and argv contract
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+            # Do not expose service credentials, HOME-based configuration, or
+            # attacker-influenced locale state to the external decoder.
+            env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        )
+        try:
+            if process.stdin is None or process.stdout is None:  # pragma: no cover - Popen invariant
+                raise ArchiveExtractionError
+            if password is not None:
+                # RAR itself truncates at 127 Unicode characters. Sending
+                # anything beyond that can only become input to a second
+                # prompt, so apply the same ceiling before the pipe.
+                process.stdin.write((str(password)[:127] + "\n").encode("utf-8"))
+            process.stdin.close()
+            descriptor = process.stdout.fileno()
+            os.set_blocking(descriptor, False)
+            output = bytearray()
+            eof = False
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_READ)
+                while not eof:
+                    remaining = effective_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ArchiveExtractionError
+                    events = selector.select(min(0.25, remaining))
+                    if not events and process.poll() is None:
+                        continue
+                    while True:
+                        try:
+                            chunk = os.read(descriptor, min(64 * 1024, limit + 1 - len(output)))
+                        except BlockingIOError:
+                            break
+                        if not chunk:
+                            eof = True
+                            break
+                        output.extend(chunk)
+                        if len(output) > limit:
+                            raise ArchiveLimitError("Decompressed RAR member exceeds configured limit")
+                    if process.poll() is not None and not events and not eof:
+                        # One more pass observes either buffered bytes or EOF.
+                        continue
+            return_code = process.wait(timeout=max(0.1, effective_deadline - time.monotonic()))
+            if return_code == 11:
+                raise ArchivePasswordInvalid
+            if return_code != 0:
+                raise ArchiveExtractionError
+            return bytes(output)
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+            with suppress(Exception):
+                process.wait(timeout=1)
+            raise
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stdin is not None:
+                process.stdin.close()
+
     def _extract_rar(
-        self, content: bytes, depth: int, budget: _ArchiveBudget, deadline: float | None = None
+        self,
+        content: bytes,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
+        password: str | None = None,
     ) -> DocumentResult:
         try:
             import rarfile  # type: ignore[import-untyped]
-        except ImportError:
-            return DocumentResult("", {"format": "rar"}, False, "rarfile is not installed")
-        with rarfile.RarFile(io.BytesIO(content)) as archive:
-            if archive.needs_password():
-                raise ArchiveLimitError("Encrypted RAR archives are not supported")
+        except ImportError as exc:  # pragma: no cover - required runtime dependency
+            raise ArchiveBackendUnavailable from exc
+
+        try:
+            return self._extract_rar_members(
+                rarfile,
+                content,
+                depth,
+                budget,
+                deadline,
+                password,
+            )
+        except rarfile.RarWrongPassword as exc:
+            raise ArchivePasswordInvalid from exc
+        except (
+            ArchiveBackendUnavailable,
+            ArchiveExtractionError,
+            ArchiveLimitError,
+            ArchivePasswordInvalid,
+            ArchivePasswordRequired,
+        ):
+            raise
+        except Exception as exc:
+            raise ArchiveExtractionError from exc
+
+    def _extract_rar_members(
+        self,
+        rarfile: Any,
+        content: bytes,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None,
+        password: str | None,
+    ) -> DocumentResult:
+        with rarfile.RarFile(io.BytesIO(content)) as archive, ExitStack() as stack:
+            encrypted = bool(archive.needs_password())
+            if encrypted and not password:
+                raise ArchivePasswordRequired
+            if password:
+                archive.setpassword(str(password))
             members = archive.infolist()
+            encrypted = encrypted or bool(archive.needs_password())
+            if encrypted and not password:
+                raise ArchivePasswordRequired
             if len(members) > self.max_archive_entries:
                 raise ArchiveLimitError("RAR entry count exceeds configured limit")
-            files = [member for member in members if not member.isdir()]
-            total = sum(max(0, int(member.file_size)) for member in files)
+            for member in members:
+                _safe_archive_member_name(member.filename)
+                if member.is_symlink():
+                    raise ArchiveLimitError("Archive links are not supported")
+            indexed_files = [(index, member) for index, member in enumerate(members) if not member.isdir()]
+            total = sum(max(0, int(member.file_size)) for _index, member in indexed_files)
             if total > self.max_archive_uncompressed_bytes:
                 raise ArchiveLimitError("RAR uncompressed size exceeds configured limit")
-            parts = [f"RAR archive: {len(files)} files", *(member.filename for member in files[:100])]
+            parts = [
+                f"RAR archive: {len(indexed_files)} files",
+                *(member.filename for _index, member in indexed_files[:100]),
+            ]
+
+            validation_index: int | None = None
+            ordered_files = indexed_files
+            if encrypted:
+                encrypted_files = [item for item in indexed_files if item[1].needs_password()]
+                if encrypted_files:
+                    validation = min(
+                        encrypted_files,
+                        key=lambda item: (max(0, int(item[1].file_size)), item[0]),
+                    )
+                    validation_index = validation[0]
+                    ordered_files = [
+                        validation,
+                        *(item for item in indexed_files if item[0] != validation_index),
+                    ]
+
+            source: Any | None = None
+            tool = ""
+
+            def rar_source_path() -> str:
+                nonlocal source, tool
+                if not tool:
+                    tool = str(shutil.which("unrar") or "")
+                    if not tool:
+                        raise ArchiveBackendUnavailable
+                if source is None:
+                    source = stack.enter_context(
+                        tempfile.NamedTemporaryFile(prefix="friday-rar-", suffix=".rar")
+                    )
+                    os.chmod(source.name, 0o600)
+                    source.write(content)
+                    source.flush()
+                return str(source.name)
+
             previewed = 0
             exhausted = False
-            for member in files:
-                if member.file_size > _MAX_MEMBER_PREVIEW_BYTES:
+            for index, member in ordered_files:
+                mandatory_validation = validation_index is not None and index == validation_index
+                if deadline is not None and time.monotonic() >= deadline:
+                    if mandatory_validation:
+                        raise ArchiveExtractionError
+                    exhausted = True
+                    break
+                member_limit = self._archive_member_limit(budget)
+                if member.file_size > member_limit and not mandatory_validation:
                     exhausted = True
                     continue
                 if not budget.take_preview():
+                    if mandatory_validation:
+                        raise ArchiveLimitError("Archive preview budget cannot validate password")
                     exhausted = True
                     break
                 previewed += 1  # decompressions, not successes — see _extract_zip
-                with archive.open(member) as stream:
-                    data = self._read_stream_limited(stream, _MAX_MEMBER_PREVIEW_BYTES)
+                data = self._read_rar_member_with_tool(
+                    rar_source_path(),
+                    member.filename,
+                    tool=tool,
+                    password=password if encrypted else None,
+                    limit=member_limit,
+                    deadline=deadline,
+                )
                 budget.spend_bytes(len(data))
                 preview, member_complete = self._member_preview(
                     member.filename,
@@ -1791,6 +2470,7 @@ class DocumentExtractor:
                     depth,
                     budget,
                     deadline,
+                    password,
                 )
                 if not member_complete:
                     exhausted = True
@@ -1798,40 +2478,320 @@ class DocumentExtractor:
                     parts.append(preview)
         rar_metadata: dict[str, Any] = {
             "format": "rar",
-            "files": len(files),
+            "files": len(indexed_files),
             "previewed_files": previewed,
+            "encrypted": encrypted,
         }
         if exhausted:
             rar_metadata["archive_budget_exhausted"] = True
         return DocumentResult("\n".join(parts), rar_metadata)
 
-    def _extract_7z(self, content: bytes) -> DocumentResult:
+    def _validate_7z_coder_folders(self, folders: Sequence[Any]) -> None:
+        """Reject 7z coder parameters that can demand unbounded RAM or CPU."""
+
+        if len(folders) > self.max_archive_entries:
+            raise ArchiveLimitError("7z folder count exceeds configured limit")
+        for folder in folders:
+            coders = list(getattr(folder, "coders", ()) or ())
+            if not coders or len(coders) > 4:
+                raise ArchiveExtractionError
+            for coder in coders:
+                method = bytes(coder.get("method") or b"")
+                raw_properties = coder.get("properties")
+                if raw_properties is not None and not isinstance(raw_properties, bytes):
+                    raise ArchiveExtractionError
+                properties = raw_properties or b""
+                dictionary_bytes = 0
+
+                if method == b"\x21":  # LZMA2
+                    if len(properties) != 1 or properties[0] > 40:
+                        raise ArchiveExtractionError
+                    value = int(properties[0])
+                    dictionary_bytes = 0xFFFFFFFF if value == 40 else (2 | (value & 1)) << (value // 2 + 11)
+                elif method == b"\x03\x01\x01":  # LZMA1
+                    if len(properties) != 5:
+                        raise ArchiveExtractionError
+                    dictionary_bytes = int.from_bytes(properties[1:5], "little")
+                elif method == b"\x03\x04\x01":  # PPMd
+                    if len(properties) not in {5, 7}:
+                        raise ArchiveExtractionError
+                    dictionary_bytes = int.from_bytes(properties[1:5], "little")
+                elif method == b"\x06\xf1\x07\x01":  # 7zAES
+                    if len(properties) < 2 or properties[0] & 0xC0 == 0:
+                        raise ArchiveExtractionError
+                    cycles_power = properties[0] & 0x3F
+                    salt_size = ((properties[0] >> 7) & 1) + (properties[1] >> 4)
+                    iv_size = ((properties[0] >> 6) & 1) + (properties[1] & 0x0F)
+                    if len(properties) != 2 + salt_size + iv_size:
+                        raise ArchiveExtractionError
+                    if cycles_power != 0x3F and cycles_power > _MAX_7Z_AES_CYCLES_POWER:
+                        raise ArchiveLimitError("7z AES work factor exceeds configured limit")
+
+                if dictionary_bytes > _MAX_ARCHIVE_DICTIONARY_BYTES:
+                    raise ArchiveLimitError("7z dictionary exceeds configured limit")
+
+    def _preflight_7z_header(self, content: bytes) -> None:
+        """Inspect an encoded 7z header before py7zr constructs its decoders.
+
+        Py7zr otherwise instantiates the encoded-header LZMA dictionary while
+        opening the archive, too early for the ordinary post-open coder check.
+        Its metadata parser is safe to use here: it only describes folders and
+        does not construct a decompressor.
+        """
+
+        from py7zr.archiveinfo import HeaderStreamsInfo, SignatureHeader
+        from py7zr.helpers import calculate_crc32
+        from py7zr.properties import MAGIC_7Z, PROPERTY
+
+        source = io.BytesIO(content)
+        if source.read(len(MAGIC_7Z)) != MAGIC_7Z:
+            raise ArchiveExtractionError
+        source.seek(0)
+        signature = SignatureHeader.retrieve(source)
+        after_header = source.tell()
+        next_size = int(signature.nextheadersize)
+        next_offset = int(signature.nextheaderofs)
+        if next_size < 0 or next_size > _MAX_7Z_HEADER_BYTES or next_offset < 0:
+            raise ArchiveLimitError("7z header exceeds configured limit")
+        next_position = after_header + next_offset
+        if next_position < after_header or next_position + next_size > len(content):
+            raise ArchiveExtractionError
+        source.seek(next_position)
+        header_bytes = source.read(next_size)
+        if len(header_bytes) != next_size or calculate_crc32(header_bytes) != signature.nextheadercrc:
+            raise ArchiveExtractionError
+        if not header_bytes:
+            return
+        header = io.BytesIO(header_bytes)
+        marker = header.read(1)
+        if marker == PROPERTY.HEADER:
+            return
+        if marker != PROPERTY.ENCODED_HEADER:
+            raise ArchiveExtractionError
+        streams = HeaderStreamsInfo.retrieve(header)
+        folders = list(streams.unpackinfo.folders)
+        self._validate_7z_coder_folders(folders)
+        expanded_header = sum(
+            max(0, int(folder.unpacksizes[-1])) for folder in folders if getattr(folder, "unpacksizes", None)
+        )
+        if expanded_header > _MAX_7Z_HEADER_BYTES:
+            raise ArchiveLimitError("Expanded 7z header exceeds configured limit")
+
+    def _validate_open_7z_coders(self, archive: Any) -> None:
+        streams = getattr(getattr(archive, "header", None), "main_streams", None)
+        unpackinfo = getattr(streams, "unpackinfo", None)
+        folders = list(getattr(unpackinfo, "folders", ()) or ())
+        if folders:
+            self._validate_7z_coder_folders(folders)
+
+    @staticmethod
+    def _encrypted_7z_member_names(archive: Any) -> set[str]:
+        """Map data-encrypted 7z folders back to their member names.
+
+        Encryption is a folder/packed-stream property in the 7z format, not an
+        archive-wide promise.  In particular, an archive may contain an older
+        plain folder followed by a newly-added encrypted one.  Py7zr attaches
+        the parsed folder object to every ``ArchiveFile`` in
+        ``_real_get_contents``; use that mapping so password validation cannot
+        accidentally stop at the ordinary 24-preview cap.
+        """
+
+        encrypted_names: set[str] = set()
+        for member in getattr(archive, "files", ()) or ():
+            folder = getattr(member, "folder", None)
+            coders = list(getattr(folder, "coders", ()) or ())
+            if not any(bytes(coder.get("method") or b"") == b"\x06\xf1\x07\x01" for coder in coders):
+                continue
+            if bool(getattr(member, "is_directory", False)):
+                continue
+            encrypted_names.add(_safe_archive_member_name(getattr(member, "filename", "")))
+        return encrypted_names
+
+    def _extract_7z(
+        self,
+        content: bytes,
+        depth: int,
+        budget: _ArchiveBudget,
+        deadline: float | None = None,
+        password: str | None = None,
+    ) -> DocumentResult:
         try:
             import py7zr  # type: ignore[import-not-found]
-        except ImportError:
-            return DocumentResult("", {"format": "7z"}, False, "py7zr is not installed")
-        with py7zr.SevenZipFile(io.BytesIO(content), mode="r") as archive:
-            entries = archive.list()
-            if len(entries) > self.max_archive_entries:
-                raise ArchiveLimitError("7z entry count exceeds configured limit")
-            total = sum(max(0, int(getattr(entry, "uncompressed", 0) or 0)) for entry in entries)
-            if total > self.max_archive_uncompressed_bytes:
-                raise ArchiveLimitError("7z uncompressed size exceeds configured limit")
-            names = [str(getattr(entry, "filename", "")) for entry in entries]
-        # Listing is intentional: py7zr extraction APIs write to a target path in
-        # several versions.  Friday does not permit archive members on disk.
+        except ImportError as exc:  # pragma: no cover - required runtime dependency
+            raise ArchiveBackendUnavailable from exc
+
+        try:
+            self._preflight_7z_header(content)
+        except (ArchiveExtractionError, ArchiveLimitError):
+            raise
+        except Exception as exc:
+            raise ArchiveExtractionError from exc
+
+        # Probe without a password first.  That distinguishes an encrypted
+        # header from a generally corrupt file before a wrong password can make
+        # py7zr fail with a codec-level TypeError/LZMAError.
+        content_encrypted = False
+        try:
+            with py7zr.SevenZipFile(io.BytesIO(content), mode="r") as probe:
+                self._validate_open_7z_coders(probe)
+                encrypted = bool(probe.needs_password())
+                content_encrypted = encrypted
+                entries = probe.list()
+        except py7zr.PasswordRequired:
+            encrypted = True
+            entries = []
+        except (ArchiveExtractionError, ArchiveLimitError):
+            raise
+        except Exception as exc:
+            raise ArchiveExtractionError from exc
+        if encrypted and not password:
+            raise ArchivePasswordRequired
+
+        try:
+            with py7zr.SevenZipFile(
+                io.BytesIO(content),
+                mode="r",
+                password=str(password) if password is not None else None,
+                max_extract_size=min(self.max_archive_uncompressed_bytes, budget.expanded_bytes),
+            ) as archive:
+                self._validate_open_7z_coders(archive)
+                entries = archive.list()
+                encrypted_member_names = self._encrypted_7z_member_names(archive)
+                if content_encrypted and not encrypted_member_names:
+                    # The password-free probe observed data encryption, so an
+                    # absent member mapping is parser ambiguity, not proof that
+                    # the supplied password is valid.  Fail closed.
+                    raise ArchiveExtractionError
+                if len(entries) > self.max_archive_entries:
+                    raise ArchiveLimitError("7z entry count exceeds configured limit")
+                names: list[str] = []
+                files: list[tuple[Any, str, int]] = []
+                seen_names: set[str] = set()
+                total = 0
+                for entry in entries:
+                    name = _safe_archive_member_name(getattr(entry, "filename", ""))
+                    if name in seen_names:
+                        raise ArchiveLimitError("Duplicate 7z member name")
+                    seen_names.add(name)
+                    if bool(getattr(entry, "is_symlink", False)):
+                        raise ArchiveLimitError("Archive links are not supported")
+                    if bool(getattr(entry, "is_directory", False)):
+                        continue
+                    member_size = max(0, int(getattr(entry, "uncompressed", 0) or 0))
+                    total += member_size
+                    if total > self.max_archive_uncompressed_bytes:
+                        raise ArchiveLimitError("7z uncompressed size exceeds configured limit")
+                    names.append(name)
+                    files.append((entry, name, member_size))
+
+                validation_item: tuple[Any, str, int] | None = None
+                if encrypted_member_names:
+                    validation_candidates = [item for item in files if item[1] in encrypted_member_names]
+                    if len(validation_candidates) != len(encrypted_member_names):
+                        raise ArchiveExtractionError
+                    validation_item = min(validation_candidates, key=lambda item: (item[2], item[1]))
+                ordered_files = files
+                if validation_item is not None:
+                    ordered_files = [
+                        validation_item,
+                        *(item for item in files if item[1] != validation_item[1]),
+                    ]
+
+                selected: list[tuple[Any, str, int]] = []
+                exhausted = False
+                reserved_bytes = 0
+                for item in ordered_files:
+                    mandatory_validation = validation_item is not None and item[1] == validation_item[1]
+                    if deadline is not None and time.monotonic() >= deadline:
+                        if mandatory_validation:
+                            raise ArchiveExtractionError
+                        exhausted = True
+                        break
+                    member_limit = max(
+                        0,
+                        min(
+                            self.max_input_bytes,
+                            budget.expanded_bytes - reserved_bytes,
+                        ),
+                    )
+                    if item[2] > member_limit and not mandatory_validation:
+                        exhausted = True
+                        continue
+                    if not budget.take_preview():
+                        if mandatory_validation:
+                            raise ArchiveLimitError("Archive preview budget cannot validate password")
+                        exhausted = True
+                        break
+                    selected.append(item)
+                    reserved_bytes += item[2]
+
+                # Content encryption is not authenticated by listing metadata.
+                # Header encryption was already authenticated while opening the
+                # archive.  An archive with only an encrypted header has no
+                # encrypted data member to force; an unusual empty encrypted
+                # archive still needs a bounded decoder attempt if possible.
+                if encrypted and files and not selected:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise ArchiveExtractionError
+                    if not budget.take_preview():
+                        raise ArchiveLimitError("Archive preview budget cannot validate password")
+                    selected = [min(files, key=lambda item: (item[2], item[1]))]
+                    exhausted = True
+
+                previews: list[str] = []
+                if selected:
+                    extraction_limit = max(0, budget.expanded_bytes)
+                    factory = _Bounded7zFactory(
+                        member_limit=min(self.max_input_bytes, extraction_limit),
+                        total_limit=extraction_limit,
+                        deadline=deadline,
+                    )
+                    archive.extract(
+                        targets=[name for _entry, name, _size in selected],
+                        factory=factory,
+                    )
+                    for _entry, name, _size in selected:
+                        if deadline is not None and time.monotonic() >= deadline:
+                            exhausted = True
+                            break
+                        product = factory.get(name)
+                        product.seek(0)
+                        data = product.read()
+                        budget.spend_bytes(len(data))
+                        preview, member_complete = self._member_preview(
+                            name,
+                            data,
+                            depth,
+                            budget,
+                            deadline,
+                            password,
+                        )
+                        if not member_complete:
+                            exhausted = True
+                        if preview:
+                            previews.append(preview)
+        except py7zr.DecompressionBombError as exc:
+            raise ArchiveLimitError("7z extraction exceeds configured limit") from exc
+        except ArchiveLimitError:
+            raise
+        except (ArchiveExtractionError, ArchivePasswordRequired, ArchivePasswordInvalid):
+            raise
+        except Exception as exc:
+            if encrypted and password is not None:
+                raise ArchivePasswordInvalid from exc
+            raise ArchiveExtractionError from exc
+
+        previewed = len(selected)
         metadata: dict[str, Any] = {
             "format": "7z",
-            "files": len(names),
-            "previewed_files": 0,
+            "files": len(files),
+            "previewed_files": previewed,
+            "encrypted": encrypted,
         }
-        if names:
-            # This parser deliberately exposes only the member listing.  Say
-            # so in the same loss channel as every other archive rather than
-            # presenting filenames as fully read member contents.
+        if exhausted:
             metadata["archive_budget_exhausted"] = True
         return DocumentResult(
-            "\n".join([f"7z archive: {len(names)} files", *names[:100]]),
+            "\n".join([f"7z archive: {len(files)} files", *names[:100], *previews]),
             metadata,
         )
 

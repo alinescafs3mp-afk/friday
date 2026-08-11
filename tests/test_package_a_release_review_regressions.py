@@ -558,6 +558,32 @@ def test_archive_answer_is_not_mistaken_for_a_delivered_file(answer: str) -> Non
     )
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Я взяла гриф из метаданных документа, где он сохранён.",
+        "Значение взято из свойств файла, в котором оно сохранено.",
+        "Автор указан в содержимом документа, где запись сохранена.",
+    ],
+)
+def test_document_content_provenance_is_not_mistaken_for_a_completed_file_deed(
+    answer: str,
+) -> None:
+    assert not _claims_an_unconfirmed_supported_deed(
+        answer,
+        has_file=False,
+        reminder_succeeded=False,
+    )
+
+
+def test_metadata_words_do_not_exempt_an_actual_completed_file_deed() -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        "Я подготовила документ с метаданными.",
+        has_file=False,
+        reminder_succeeded=False,
+    )
+
+
 @pytest.mark.parametrize("answer", ["Вот файл.", "Вот этот документ.", "Держите готовый PDF."])
 def test_bare_file_handoff_still_requires_a_real_carrier(answer: str) -> None:
     assert (

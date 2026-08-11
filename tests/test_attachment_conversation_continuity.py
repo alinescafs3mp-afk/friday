@@ -8,7 +8,10 @@ or ambient retrieval for unrelated questions.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
+import zipfile
 from dataclasses import replace
 
 import pytest
@@ -17,6 +20,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _attachment_evidence_chunks,
+    _is_document_metadata_request,
 )
 from friday.permissions import ActorContext
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
@@ -30,6 +34,7 @@ def _pending_file(
     *,
     filename: str,
     extraction_success: bool = True,
+    extra_metadata: dict[str, object] | None = None,
 ) -> RawObject:
     storage.ensure_user(tenant_id)
     if uploader != tenant_id:
@@ -46,6 +51,7 @@ def _pending_file(
             "uploaded_by": uploader,
             "extraction_success": extraction_success,
             "text_extraction_success": extraction_success,
+            **(extra_metadata or {}),
         },
     )
     storage.store_raw_object(raw)
@@ -119,6 +125,421 @@ class _EnabledButUnusedLLM:
     async def chat(self, messages, **kwargs):  # pragma: no cover - patched paths should own the turn
         del messages, kwargs
         raise AssertionError("unexpected direct LLM call")
+
+
+def test_legacy_upload_origin_is_still_an_upload_chronology_pointer() -> None:
+    raw_id = "raw_legacy_upload_pointer"
+    message = {
+        "role": "user",
+        "metadata_json": json.dumps(
+            {
+                "attachment_origin": "upload",
+                "conversation_attachment_raw_ids": [raw_id],
+            }
+        ),
+    }
+
+    assert AgentRuntime._message_uploaded_attachment_ids(message) == [raw_id]  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Напиши документ о свойствах алюминия",
+        "Напиши документ про свойства нового материала",
+        "Покажи свойства алюминия в этом документе",
+        "Покажи реквизиты компании в этом документе",
+        "Покажи свойства алюминия в report.odt",
+    ],
+)
+def test_document_creation_about_material_properties_is_not_metadata_navigation(message: str) -> None:
+    assert not _is_document_metadata_request(message)
+
+
+def test_natural_document_metadata_question_is_supported() -> None:
+    assert _is_document_metadata_request("Какие метаданные у этого документа?")
+    assert _is_document_metadata_request("report.odt: метаданные")
+
+
+@pytest.mark.asyncio
+async def test_quoted_file_pointer_owns_pronoun_metadata_without_becoming_an_upload(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "QUOTED-PRIVATE-BODY-MUST-NOT-REACH-MODEL",
+        filename="quoted-report.odt",
+        extra_metadata={
+            "title": "Quoted synthetic title",
+            "creator": "Quoted synthetic creator",
+            "mime_type": "application/vnd.oasis.opendocument.text",
+        },
+    )
+    conversation = storage.create_conversation("alice")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("quoted metadata route reached model/retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    message = "Покажи метаданные его"
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        conversation_id=conversation["id"],
+        attachments=[{"raw_object_id": raw.id}],
+        enable_tools=True,
+        quoted_attachment_reference=True,
+    )
+
+    assert "Quoted synthetic title" in result["message"]
+    assert "QUOTED-PRIVATE-BODY" not in result["message"]
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
+    user_row = next(item for item in rows if item.get("role") == "user" and item.get("content") == message)
+    metadata = json.loads(str(user_row.get("metadata_json") or "{}"))
+    assert metadata["attachment_origin"] == "reply_reference"
+    assert metadata["quoted_attachment_reference"] is True
+    assert metadata["conversation_attachment_raw_ids"] == [raw.id]
+    assert "conversation_uploaded_raw_ids" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_unresolved_quoted_file_pointer_does_not_drift_to_latest_upload(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    previous = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LATEST-UPLOAD-PRIVATE-BODY",
+        filename="latest-upload.odt",
+        extra_metadata={"title": "Latest upload private title"},
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", previous, "previous upload")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("unresolved quoted pointer reached model/retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    message = "Покажи метаданные его"
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=True,
+        quoted_attachment_reference=True,
+    )
+
+    assert "не удалось определить" in result["message"].casefold()
+    assert "Latest upload private title" not in result["message"]
+    assert "LATEST-UPLOAD-PRIVATE-BODY" not in result["message"]
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
+    user_row = next(item for item in rows if item.get("role") == "user" and item.get("content") == message)
+    metadata = json.loads(str(user_row.get("metadata_json") or "{}"))
+    assert metadata["attachment_origin"] == "reply_reference"
+    assert metadata["quoted_attachment_reference"] is True
+    assert "conversation_attachment_raw_ids" not in metadata
+    assert "conversation_uploaded_raw_ids" not in metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Покажи метаданные этого документа",
+        "Выведи метаданные выбранного документа",
+        "Напиши метаданные synthetic-report.odt",
+        "Покажи метаданные документа",
+    ],
+)
+async def test_document_metadata_is_authorised_and_rendered_without_model_or_body(
+    settings,
+    storage,
+    monkeypatch,
+    query: str,
+) -> None:
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "PRIVATE-BODY-MUST-NOT-BE-RENDERED",
+        filename="synthetic-report.odt",
+        extra_metadata={
+            "mime_type": "application/vnd.oasis.opendocument.text",
+            "size_bytes": 20_480,
+            "document_date": "2026-08-11",
+            "title": "Синтетический заголовок",
+            "creator": "Синтетический автор",
+            "creation_date": "2026-08-11T12:00:00Z",
+            "keywords": ["alpha", "beta"],
+            "page_count": 3,
+            "stored_path": "PRIVATE-STORAGE-PATH",
+            "sha256": "PRIVATE-SHA256",
+            "uploaded_by_internal": "PRIVATE-UPLOADER-INTERNAL",
+        },
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", raw, "synthetic upload")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("metadata route entered retrieval/context preparation")
+
+    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("metadata route entered response generation")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=True,
+    )
+
+    assert result["message_format"] == "plain"
+    assert result["tools_used"] == []
+    assert result["restored_attachment_count"] == 1
+    assert "synthetic-report.odt" in result["message"]
+    assert "Синтетический заголовок" in result["message"]
+    assert "Синтетический автор" in result["message"]
+    assert "Страницы: 3" in result["message"]
+    assert "alpha, beta" in result["message"]
+    serialized = json.dumps(result, ensure_ascii=False)
+    for secret in (
+        "PRIVATE-BODY-MUST-NOT-BE-RENDERED",
+        "PRIVATE-STORAGE-PATH",
+        "PRIVATE-SHA256",
+        "PRIVATE-UPLOADER-INTERNAL",
+        raw.id,
+    ):
+        assert secret not in serialized
+
+
+@pytest.mark.asyncio
+async def test_metadata_of_another_document_uses_a_newly_attached_current_pointer(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    old = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "OLD-PRIVATE-BODY",
+        filename="old.odt",
+        extra_metadata={"title": "Старый заголовок"},
+    )
+    current = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "CURRENT-PRIVATE-BODY",
+        filename="current.odt",
+        extra_metadata={"title": "Текущий заголовок"},
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", old, "old upload")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("code-owned metadata route called a model seam")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    result = await runtime.chat(
+        "alice",
+        "Покажи метаданные другого документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(current)],
+        enable_tools=True,
+    )
+
+    assert "current.odt" in result["message"]
+    assert "Текущий заголовок" in result["message"]
+    assert "old.odt" not in result["message"]
+    assert "Старый заголовок" not in result["message"]
+    assert result["restored_attachment_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_metadata_of_another_document_without_a_current_pointer_fails_closed(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    first = _pending_file(storage, "alice", "alice", "FIRST", filename="first.odt")
+    second = _pending_file(storage, "alice", "alice", "SECOND", filename="second.odt")
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", first, "first upload")
+    _record_upload(storage, conversation["id"], "alice", second, "second upload")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("ambiguous metadata request called a model seam")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    result = await runtime.chat(
+        "alice",
+        "Покажи метаданные другого документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=True,
+    )
+
+    assert "не удалось однозначно определить" in result["message"].casefold()
+    assert "first.odt" not in result["message"]
+    assert "second.odt" not in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_odt_metadata_is_hydrated_from_authorised_header_without_raw_mutation(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    from friday.ingestion import IngestionPipeline
+    from friday.knowledge_graph import KnowledgeGraph
+
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/vnd.oasis.opendocument.text",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "meta.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-meta
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/">
+ <office:meta>
+  <dc:title>LEGACY-ODT-TITLE</dc:title>
+  <dc:creator>LEGACY-ODT-CREATOR</dc:creator>
+  <meta:creation-date>2024-03-04T12:30:00Z</meta:creation-date>
+  <meta:document-statistic meta:page-count="7" meta:word-count="321"/>
+  <meta:user-defined meta:name="private-path">PRIVATE-ODT-USER-FIELD</meta:user-defined>
+ </office:meta>
+</office:document-meta>""",
+        )
+        archive.writestr("content.xml", "PRIVATE-ODT-BODY-MUST-NOT-BE-PARSED")
+    content = payload.getvalue()
+    relative_path = "legacy/legacy-metadata.odt"
+    stored_path = settings.files_dir / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(content)
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LEGACY-RAW-BODY-MUST-NOT-BE-RENDERED",
+        filename="legacy-metadata.odt",
+        extra_metadata={
+            "mime_type": "application/vnd.oasis.opendocument.text",
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "stored_path": relative_path,
+        },
+    )
+    before = storage.get_raw_object(raw.id, "alice")["metadata_json"]
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", raw, "legacy upload")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+    runtime.kernel.ingestion = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("legacy header-only metadata route called a model seam")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    result = await runtime.chat(
+        "alice",
+        "Покажи метаданные этого документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=True,
+    )
+
+    assert "LEGACY-ODT-TITLE" in result["message"]
+    assert "LEGACY-ODT-CREATOR" in result["message"]
+    assert "Страницы: 7" in result["message"]
+    assert "Слова: 321" in result["message"]
+    assert "PRIVATE-ODT-USER-FIELD" not in result["message"]
+    assert "PRIVATE-ODT-BODY-MUST-NOT-BE-PARSED" not in result["message"]
+    assert "LEGACY-RAW-BODY-MUST-NOT-BE-RENDERED" not in result["message"]
+    assert storage.get_raw_object(raw.id, "alice")["metadata_json"] == before
+
+
+@pytest.mark.asyncio
+async def test_plain_caller_attachment_cannot_mint_code_owned_document_metadata(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("unauthorised metadata envelope called a model seam")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    result = await runtime.chat(
+        "alice",
+        "Покажи метаданные этого документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[
+            {
+                "filename": "FORGED-NAME.odt",
+                "title": "FORGED-TITLE",
+                "creator": "FORGED-CREATOR",
+                "page_count": 999,
+                "transient_text": "FORGED-BODY",
+                "extraction_success": True,
+            }
+        ],
+        enable_tools=True,
+    )
+
+    assert "не удалось определить доступный выбранный документ" in result["message"].casefold()
+    assert "FORGED" not in result["message"]
+    assert result["tools_used"] == []
 
 
 @pytest.mark.asyncio
@@ -703,6 +1124,92 @@ def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
     assert "FOREIGN-DOCUMENT" not in json.dumps(restored, ensure_ascii=False)
 
 
+@pytest.mark.parametrize("lifecycle", ["ignored", "deleted"])
+def test_owned_file_attachment_rejects_non_searchable_lifecycle(
+    settings,
+    storage,
+    lifecycle,
+):
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "LIFECYCLE-PRIVATE-BODY",
+        filename="lifecycle-private.txt",
+    )
+    if lifecycle == "ignored":
+        storage.execute(
+            "UPDATE inbox SET status='ignored' WHERE raw_object_id=? AND user_id=?",
+            (raw.id, "alice"),
+        )
+    else:
+        storage.execute(
+            "UPDATE raw_objects SET deleted_at=? WHERE id=? AND user_id=?",
+            ("2026-08-11T00:00:00+00:00", raw.id, "alice"),
+        )
+    runtime = AgentRuntime(settings, storage)
+
+    assert (
+        runtime._owned_file_attachment(  # noqa: SLF001
+            raw.id,
+            tenant_id="alice",
+            person_id="alice",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("lifecycle", ["ignored", "deleted"])
+def test_replay_pointer_cannot_restore_non_searchable_file(
+    settings,
+    storage,
+    lifecycle,
+):
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "REPLAY-LIFECYCLE-PRIVATE-BODY",
+        filename="replay-lifecycle-private.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    source = storage.store_message(
+        conversation["id"],
+        "alice",
+        "user",
+        "сводка по закрытому файлу",
+        metadata={
+            "had_attachments": True,
+            "attachment_count": 1,
+            "conversation_attachment_raw_ids": [raw.id],
+        },
+    )
+    if lifecycle == "ignored":
+        storage.execute(
+            "UPDATE inbox SET status='ignored' WHERE raw_object_id=? AND user_id=?",
+            (raw.id, "alice"),
+        )
+    else:
+        storage.execute(
+            "UPDATE raw_objects SET deleted_at=? WHERE id=? AND user_id=?",
+            ("2026-08-11T00:00:00+00:00", raw.id, "alice"),
+        )
+    runtime = AgentRuntime(settings, storage)
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice")
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "сводка по закрытому файлу",
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        replay_source_message_id=str(source["id"]),
+        allow_file_read=True,
+    )
+
+    assert expected == 1
+    assert restored == []
+
+
 @pytest.mark.asyncio
 async def test_named_pair_becomes_the_exact_deictic_active_set(
     settings,
@@ -1108,6 +1615,394 @@ async def test_uploaded_current_file_stays_in_catalog_when_prior_file_is_the_act
     assert prior_metadata["conversation_uploaded_raw_ids"] == [current.id]
     assert current_metadata["conversation_attachment_raw_ids"] == [current.id]
     assert "conversation_uploaded_raw_ids" not in current_metadata
+
+
+@pytest.mark.asyncio
+async def test_file_i_sent_uses_the_latest_upload_message_not_raw_object_chronology(
+    settings,
+    storage,
+    monkeypatch,
+):
+    reused_old_raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "POINTER-SELECTED-BODY",
+        filename="synthetic-current.docx",
+    )
+    newer_raw_decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "файл который я скинул CONTENT-DECOY-ONLY",
+        filename="synthetic-decoy.xlsx",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", newer_raw_decoy, "earlier upload")
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "user",
+        "re-uploaded content-addressed object",
+        metadata={
+            "had_attachments": True,
+            "attachment_count": 1,
+            "attachment_origin": "upload",
+            "conversation_attachment_raw_ids": [reused_old_raw.id],
+            "conversation_uploaded_raw_ids": [reused_old_raw.id],
+        },
+    )
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "assistant",
+        "synthetic attachment acknowledgement",
+        metadata={"attachment_context_used": True},
+    )
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    query = "Что в файле, который я скинул?"
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [[reused_old_raw.id]]
+    assert result["restored_attachment_count"] == 1
+    assert "CONTENT-DECOY-ONLY" not in json.dumps(seen, ensure_ascii=False)
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    request_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
+    metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
+    assert metadata["conversation_attachment_raw_ids"] == [reused_old_raw.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "query"),
+    [
+        ("Quarterly Status-Report.pdf", "Что в «quarterly-status-report.pdf»?"),
+        ("regional-roster-2026.xlsx", "Что в regional-rostre-2026.xlsx?"),
+    ],
+)
+async def test_unique_normalized_or_typo_filename_selects_the_file(
+    settings,
+    storage,
+    monkeypatch,
+    filename,
+    query,
+):
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "FUZZY-FILENAME-TARGET",
+        filename=filename,
+    )
+    decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "UNRELATED-FILE",
+        filename="unrelated-notes.txt",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", target, "target")
+    _record_upload(storage, conversation["id"], "alice", decoy, "decoy")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert result["restored_attachment_count"] == 1
+    if seen:
+        assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [[target.id]]
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
+    request_row = next(row for row in rows if row.get("role") == "user" and row.get("content") == query)
+    metadata = json.loads(str(request_row.get("metadata_json") or "{}"))
+    assert metadata["conversation_attachment_raw_ids"] == [target.id]
+    assert "UNRELATED-FILE" not in json.dumps([result, seen], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_fuzzy_filename_fails_closed(
+    settings,
+    storage,
+    monkeypatch,
+):
+    first = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "AMBIGUOUS-FIRST-PRIVATE",
+        filename="sector-report-east.pdf",
+    )
+    second = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "AMBIGUOUS-SECOND-PRIVATE",
+        filename="sector-report-west.pdf",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", first, "first")
+    _record_upload(storage, conversation["id"], "alice", second, "second")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        "Что в sector-report-xest.pdf?",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert seen == []
+    assert result["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" in result["message"].casefold()
+    private = json.dumps([result, seen], ensure_ascii=False)
+    assert "AMBIGUOUS-FIRST-PRIVATE" not in private
+    assert "AMBIGUOUS-SECOND-PRIVATE" not in private
+
+
+@pytest.mark.asyncio
+async def test_filename_similarity_finishes_before_content_clue_scoring(
+    settings,
+    storage,
+    monkeypatch,
+):
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "FILENAME-WINNER-BODY",
+        filename="north-sector-roster.pdf",
+    )
+    content_decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "nort-sector-roster.pdf nort sector roster CONTENT-HIT-DECOY",
+        filename="miscellaneous.pdf",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", target, "filename target")
+    _record_upload(storage, conversation["id"], "alice", content_decoy, "content decoy")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        "Что в nort-sector-roster.pdf?",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [[target.id]]
+    assert result["restored_attachment_count"] == 1
+    assert "CONTENT-HIT-DECOY" not in json.dumps(seen, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "expected_active"),
+    [
+        ("В Североградске мне дай информацию по отделу", True),
+        ("Поищи в интернете новости о Североградске", False),
+        ("Как приготовить запеканку?", False),
+    ],
+)
+async def test_recent_active_attachment_uses_strong_topic_overlap_only(
+    settings,
+    storage,
+    monkeypatch,
+    query,
+    expected_active,
+):
+    active = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "В Североградском округе работает специализированный отдел.",
+        filename="synthetic-office-list.docx",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", active, "synthetic summary")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    expected_ids = [[active.id]] if expected_active else [[]]
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == expected_ids
+    assert result["restored_attachment_count"] == int(expected_active)
+
+
+@pytest.mark.asyncio
+async def test_no_extension_filename_clue_wins_before_body_content(
+    settings,
+    storage,
+    monkeypatch,
+):
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "нужный раздел DESCRIPTIVE-FILENAME-WINNER",
+        filename="список-комендатур.docx",
+    )
+    body_decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "список комендатур нужный раздел BODY-CONTENT-DECOY",
+        filename="оперативная-сводка.docx",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", target, "target")
+    _record_upload(storage, conversation["id"], "alice", body_decoy, "decoy")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        "Найди в файле со списком комендатру нужный раздел",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [[target.id]]
+    assert result["restored_attachment_count"] == 1
+    assert "BODY-CONTENT-DECOY" not in json.dumps(seen, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_no_extension_filename_clue_fails_closed(
+    settings,
+    storage,
+    monkeypatch,
+):
+    first = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "AMBIGUOUS-DESCRIPTIVE-FIRST",
+        filename="список-комендатур-север.docx",
+    )
+    second = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "AMBIGUOUS-DESCRIPTIVE-SECOND",
+        filename="список-комендатур-юг.docx",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", first, "first")
+    _record_upload(storage, conversation["id"], "alice", second, "second")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        "Найди в файле со списком комендатур нужный раздел",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert seen == []
+    assert result["restored_attachment_count"] == 0
+    assert "не удалось однозначно определить" in result["message"].casefold()
+    private = json.dumps(result, ensure_ascii=False)
+    assert "AMBIGUOUS-DESCRIPTIVE-FIRST" not in private
+    assert "AMBIGUOUS-DESCRIPTIVE-SECOND" not in private
+
+
+def test_saturated_filename_catalog_never_claims_fuzzy_uniqueness(
+    settings,
+    storage,
+    monkeypatch,
+):
+    descriptors = [
+        {
+            "id": f"raw_catalog_{index}",
+            "content_type": "file",
+            "received_at": f"2026-01-01T00:00:{index % 60:02d}+00:00",
+            "filename": "archive-report.pdf" if index == 0 else f"synthetic-{index}.pdf",
+        }
+        for index in range(5_001)
+    ]
+
+    def saturated_catalog(user_id, uploaded_by, *, limit=5_000):  # noqa: ANN001
+        assert (user_id, uploaded_by, limit) == ("alice", "alice", 5_001)
+        return descriptors
+
+    monkeypatch.setattr(storage, "list_owned_file_catalog", saturated_catalog)
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "Что в archive-reprot.pdf?",
+        [],
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert restored == []
+    assert expected >= 2
 
 
 @pytest.mark.asyncio

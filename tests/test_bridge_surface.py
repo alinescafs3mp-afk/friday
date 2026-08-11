@@ -315,9 +315,11 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 78
+EXPECTED_BRIDGE_COUNT = 83
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
+    "_archive_document_descriptor": "(message: 'dict[str, Any]') -> 'dict[str, Any] | None'",
+    "_bounded_ephemeral_archive_password": "(value: 'str | None') -> 'str | None'",
     "_ack_outbound": "(self, backend: 'httpx.AsyncClient', signer_chat: 'str', sent: 'list[str]', failed: 'list[str]') -> 'None'",
     "_answer_callback": "(self, client: 'httpx.AsyncClient', callback_id: 'str', text: 'str', *, alert: 'bool' = False) -> 'None'",
     "_backend_json": "(self, client: 'httpx.AsyncClient', method: 'str', path: 'str', payload: 'dict[str, Any] | None', external_user_id: 'str', chat_id: 'str') -> 'dict[str, Any]'",
@@ -348,6 +350,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_poll_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_poll_watchdog": "(self) -> 'None'",
     "_prepare_document": "(self, telegram: 'httpx.AsyncClient', message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'dict[str, Any] | None'",
+    "_reply_document_source_ref": "(message: 'dict[str, Any]') -> 'str'",
     "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
     "_post_message_chunk": "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str') -> 'httpx.Response'",
     "_offer_access_to_owner": "(self, telegram: 'httpx.AsyncClient', actor: 'dict[str, Any]', newcomer: 'dict[str, Any]') -> 'None'",
@@ -362,6 +365,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     ),
     "_retire_markup_family": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int', message: 'dict[str, Any]', family: 'str') -> 'None'",
     "_search_reply_markup": "(results: 'list[Any]') -> 'dict[str, Any] | None'",
+    "_sanitize_update_before_store": "(self, update: 'dict[str, Any]') -> 'dict[str, Any]'",
     "_select_media": "(message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'tuple[dict[str, Any] | None, str, str, str]'",
     "_group_address": (
         "(self, message: 'dict[str, Any]', chat: 'dict[str, Any]', text: 'str') -> 'tuple[bool, str]'"
@@ -395,6 +399,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_compacts": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_signer_chat_id": "(self) -> 'str'",
     "_structured_text": "(message: 'dict[str, Any]') -> 'str | None'",
+    "_strip_archive_password_directives": "(text: 'str') -> 'tuple[str, str | None]'",
     "_timeline_reply_markup": "(documents: 'Any') -> 'dict[str, Any] | None'",
     "_typing_loop": "(self, client: 'httpx.AsyncClient', chat_id: 'int') -> 'None'",
     "_unsupported_label": "(message: 'dict[str, Any]') -> 'str | None'",
@@ -404,6 +409,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "stop": "(self) -> 'None'",
 }
 EXPECTED_INBOX: dict[str, str] = {
+    "archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'dict[str, Any] | None'",
     "cache_backend_response": "(self, update_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "close": "(self) -> 'None'",
     "answer_chunks_sent": "(self, update_id: 'int') -> 'int'",
@@ -418,11 +424,13 @@ EXPECTED_INBOX: dict[str, str] = {
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
     "record_answer_chunks_sent": "(self, update_id: 'int', count: 'int') -> 'None'",
     "remember_edit_prompt": "(self, prompt_message_id: 'int', knowledge_id: 'str') -> 'None'",
+    "remember_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int', document: 'dict[str, Any]', *, safe_query: 'str' = '', original_message_id: 'int' = 0, ttl_sec: 'float' = 3600.0) -> 'None'",
     "remember_generated_file_delivery": "(self, delivery_key: 'str') -> 'None'",
     "take_edit_prompt": "(self, prompt_message_id: 'int') -> 'str'",
     "remember_delivered_notification": "(self, notification_id: 'str') -> 'None'",
     "remember_registered_chat": "(self, chat_id: 'int') -> 'None'",
     "remove": "(self, update_id: 'int') -> 'None'",
+    "clear_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'None'",
     "set_offset": "(self, offset: 'int') -> 'None'",
     "stats": "(self) -> 'dict[str, int]'",
     "store": "(self, update: 'dict[str, Any]') -> 'bool'",

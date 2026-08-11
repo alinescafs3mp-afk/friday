@@ -11,6 +11,7 @@ import io
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -1664,9 +1665,12 @@ _TOOL_EXCERPT_CHARS = 600
 _SOURCE_SEARCH_QUERY_CHARS = 240
 _SOURCE_SEARCH_FOCUS_CHARS = 480
 _SOURCE_SEARCH_CANDIDATE_CAP = 100
+_SOURCE_SEARCH_SEMANTIC_CANDIDATE_CAP = 40
+_SOURCE_SEARCH_SEMANTIC_WHOLE_CHARS = 1_400
 _SOURCE_SEARCH_COMPACT_DATA_CHARS = 7_700
 _SOURCE_SEARCH_PRETTY_DATA_CHARS = 11_500
 _SOURCE_SEARCH_TOKEN = re.compile(r"[\w@.+/-]{2,}", re.UNICODE)
+_SOURCE_SEARCH_QUOTED_LITERAL = re.compile(r'["«“](.{2,160}?)["»”]', re.UNICODE)
 _SOURCE_SIMPLE_SURNAME = re.compile(r"[а-я]{4,}(?:ов|ев|ин|ын)$")
 _SOURCE_ADJECTIVE_SURNAME = re.compile(r"[а-я]{4,}(?:ск|цк)(?:ий)?$")
 _SOURCE_SIMPLE_SURNAME_ENDINGS = frozenset({"", "а", "у", "е", "ы", "и", "ым", "ом", "ой"})
@@ -1756,6 +1760,56 @@ def _source_focus_candidate_query(
 def _source_normalized_token(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).casefold().replace("ё", "е").strip()
     return normalized if any(char.isalnum() for char in normalized) else ""
+
+
+def _source_unique_literal_is_strong(query: str, text: str) -> bool:
+    """Prove that one OR-FTS row answers the literal query conjunctively.
+
+    Raw FTS deliberately uses OR for recall.  Therefore ``len(rows) == 1`` alone
+    says only that one document contained *some* query word; a generic decoy must
+    not suppress dense recall of a differently worded answer.  The sole row is
+    strong only when every bounded query term occurs as a closed token, or when it
+    carries an exact quoted literal / identifier typed by the user.
+    """
+
+    body = str(text or "")
+    raw_terms: list[tuple[str, str]] = []
+    for match in _SOURCE_SEARCH_TOKEN.finditer(str(query or "")):
+        raw = match.group(0)
+        normalized = _source_normalized_token(raw)
+        if normalized and normalized not in {item[1] for item in raw_terms}:
+            raw_terms.append((raw, normalized))
+        if len(raw_terms) >= 12:
+            break
+    if not raw_terms or not body:
+        return False
+
+    quoted = _SOURCE_SEARCH_QUOTED_LITERAL.findall(str(query or ""))
+    if quoted:
+        folded_body = unicodedata.normalize("NFKC", body).casefold().replace("ё", "е")
+        for literal in quoted:
+            folded_literal = unicodedata.normalize("NFKC", literal).casefold().replace("ё", "е").strip()
+            if folded_literal and folded_literal in folded_body:
+                return True
+
+    remaining = {normalized for _raw, normalized in raw_terms}
+    exact_identifiers = {
+        normalized
+        for raw, normalized in raw_terms
+        if any(char.isdigit() for char in raw)
+        or any(char in "_@.+/" for char in raw)
+        or (len(raw) >= 3 and any(char.isalpha() for char in raw) and raw.isupper())
+    }
+    for match in _SOURCE_SEARCH_TOKEN.finditer(body):
+        candidate = _source_normalized_token(match.group(0))
+        if candidate in exact_identifiers:
+            return True
+        for term in tuple(remaining):
+            if _source_anchor_matches_token(term, candidate):
+                remaining.discard(term)
+        if not remaining:
+            return True
+    return False
 
 
 def _source_anchor_matches_token(term: str, token: str) -> bool:
@@ -2197,6 +2251,58 @@ def _source_anchor_context_excerpt(query: str, text: str, *, max_chars: int) -> 
     return passage
 
 
+def _source_semantic_excerpt(
+    text: str,
+    span: object,
+    *,
+    max_chars: int,
+) -> str:
+    """Project one exact Raw passage carried by a persisted dense chunk.
+
+    A dense score identifies a document, not source bytes.  For long documents
+    the persisted chunk span is therefore mandatory; returning the document head
+    would make a semantically recalled fact invisible while still presenting the
+    source as evidence.  Whole-document vectors are accepted only for genuinely
+    short sources.  Callers first prove that Knowledge ``content`` is byte-for-byte
+    the immutable Raw text, so these offsets cannot drift onto another revision.
+    """
+
+    body = str(text or "")
+    if not body:
+        return ""
+    lo = 0
+    hi = len(body)
+    valid_span = bool(
+        isinstance(span, Sequence)
+        and not isinstance(span, (str, bytes, bytearray))
+        and len(span) == 2
+        and all(type(value) is int for value in span)
+    )
+    if valid_span:
+        lo = int(span[0])  # type: ignore[index]
+        hi = int(span[1])  # type: ignore[index]
+        if lo < 0 or hi <= lo or hi > len(body):
+            return ""
+    elif len(body) > _SOURCE_SEARCH_SEMANTIC_WHOLE_CHARS:
+        return ""
+
+    budget = max(80, min(int(max_chars), _TOOL_EXCERPT_CHARS * 2))
+    centre = (lo + hi) // 2
+    start = max(0, centre - budget // 2)
+    end = min(len(body), start + budget)
+    start = max(0, end - budget)
+    # Do not present a decapitated token as a whole identifier/name.  Moving the
+    # edge inward keeps the hard budget and never crosses outside the same source.
+    while start < centre and start > 0 and body[start - 1].isalnum() and body[start].isalnum():
+        start += 1
+    while end > centre and end < len(body) and body[end - 1].isalnum() and body[end].isalnum():
+        end -= 1
+    excerpt = body[start:end].strip()
+    if not excerpt:
+        return ""
+    return f"{'…' if start > 0 else ''}{excerpt}{'…' if end < len(body) else ''}"
+
+
 def _bound_source_search_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Keep a source page valid JSON through both ToolResult projections."""
 
@@ -2279,6 +2385,12 @@ def _bound_source_search_payload(payload: dict[str, Any]) -> dict[str, Any]:
         original = str(row.get("excerpt") or "")
         if len(original) <= limit:
             return original
+        if row.get("retrieval_match_kind") == "semantic":
+            # ``best_snippet`` has no lexical anchor on a genuine dense-only
+            # passage and would fall back to its head, potentially cutting away
+            # the chunk centre that carried recall.  The input is already an
+            # exact bounded Raw passage; preserve its centre while shrinking.
+            return _source_semantic_excerpt(original, None, max_chars=limit)
         if not explicit_focus or "focus_terms_total" not in row:
             return best_snippet(query, original, max_chars=limit)
 
@@ -4192,7 +4304,11 @@ class ExecutionKernel:
         though the upload itself had succeeded.  This explicit tool reaches the
         existing verdict-aware source index: ignored/deleted/private material stays
         unreachable, and a pending hit is labelled as pending rather than being
-        presented as promoted knowledge.
+        presented as promoted knowledge.  Promoted files additionally use the same
+        dense chunk recall and cross-encoder order as ``memory_search``.  Those
+        candidates are then re-authorized against their immutable Raw source before
+        one byte becomes evidence; semantic ranking never supplies source text by
+        itself.
 
         Only bounded query-aware excerpts cross the model boundary.  The full Raw
         Object is read tenant-scoped solely to choose the passage around the match;
@@ -4231,6 +4347,14 @@ class ExecutionKernel:
             if explicit_focus and focus_terms and len(focus_terms) > 1
             else ""
         )
+        semantic_query = clean_query
+        if explicit_focus and _source_normalized_token(snippet_focus) != _source_normalized_token(
+            clean_query
+        ):
+            # Dense recall and the cross-encoder must see both sides of a focused
+            # request.  Sending only ``focus`` ("командир взвода") drops its anchor
+            # ("РЭБ") and lets the same role in another section outrank the target.
+            semantic_query = f"{clean_query} {snippet_focus}"[:_SOURCE_SEARCH_FOCUS_CHARS].rstrip()
 
         # Search the requested field/value vocabulary first, then prove the
         # anchor AND the complete focus against each returned source body below.
@@ -4239,55 +4363,269 @@ class ExecutionKernel:
         # from crowding a focused target into position 101 before focus is ever
         # considered.  Predicate-only rows cannot escape the projection's
         # anchor check and are discarded.
+        source_uploader = actor.own_id if actor.shared_tenant else None
+
         async def search_candidates(search_query: str) -> list[dict[str, Any]]:
+            kwargs: dict[str, Any] = {
+                "limit": _SOURCE_SEARCH_CANDIDATE_CAP,
+                "include_content": True,
+            }
+            if source_uploader is not None:
+                kwargs["uploaded_by"] = source_uploader
             return await run_blocking(
                 storage.search_raw_objects,
                 actor.user_id,
                 search_query,
-                limit=_SOURCE_SEARCH_CANDIDATE_CAP,
-                include_content=True,
+                **kwargs,
             )
 
-        focus_candidate_rows = await search_candidates(focus_candidate_query) if focus_candidate_query else []
-        anchor_candidate_rows = await search_candidates(clean_query)
+        async def semantic_candidates() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            """Recall promoted files, then adopt only canonical Raw bytes."""
+
+            if self.searcher is None:
+                return [], {}
+            semantic_limit = min(
+                _SOURCE_SEARCH_SEMANTIC_CANDIDATE_CAP,
+                max(20, clamped_limit * 2),
+            )
+            search_kwargs: dict[str, Any] = {
+                "limit": semantic_limit,
+                "include_entities": False,
+                "graph_expansion": False,
+                "record_usage": False,
+            }
+            if source_uploader is not None:
+                search_kwargs["uploaded_by"] = source_uploader
+            try:
+                found = await self.searcher.search(
+                    actor.user_id,
+                    semantic_query,
+                    **search_kwargs,
+                )
+            except Exception as exc:  # noqa: BLE001 - dense recall is an optional lane
+                LOGGER.warning("source-search semantic recall failed (%s)", type(exc).__name__)
+                return [], {"failed": True, "limit": semantic_limit}
+            if not isinstance(found, Mapping):
+                return [], {"failed": True, "limit": semantic_limit}
+            raw_results = found.get("results")
+            if not isinstance(raw_results, list):
+                return [], {"failed": True, "limit": semantic_limit}
+
+            hits_by_raw: dict[str, Mapping[str, Any]] = {}
+            ordered_raw_ids: list[str] = []
+            for hit in raw_results[:semantic_limit]:
+                if not isinstance(hit, Mapping):
+                    continue
+                raw_id = str(hit.get("raw_object_id") or "").strip()
+                knowledge_id = str(hit.get("id") or "").strip()
+                embedding_score = hit.get("_embedding_score")
+                rerank_score = hit.get("_rerank_score")
+                has_dense_evidence = bool(
+                    isinstance(embedding_score, (int, float))
+                    and not isinstance(embedding_score, bool)
+                    and math.isfinite(float(embedding_score))
+                    and float(embedding_score) > 0.0
+                )
+                has_rerank_evidence = bool(
+                    isinstance(rerank_score, (int, float))
+                    and not isinstance(rerank_score, bool)
+                    and math.isfinite(float(rerank_score))
+                )
+                if (
+                    not raw_id
+                    or not knowledge_id
+                    or raw_id in hits_by_raw
+                    or not (has_dense_evidence or has_rerank_evidence)
+                ):
+                    continue
+                hits_by_raw[raw_id] = hit
+                ordered_raw_ids.append(raw_id)
+            if not ordered_raw_ids:
+                strategy = found.get("strategy")
+                try:
+                    matched_at_least = max(0, int(found.get("matched_at_least") or 0))
+                except (TypeError, ValueError):
+                    matched_at_least = 0
+                return [], {
+                    "failed": False,
+                    "limit": semantic_limit,
+                    "reranked": bool(isinstance(strategy, Mapping) and strategy.get("reranked")),
+                    "matched_at_least": matched_at_least,
+                }
+
+            try:
+                rows = await run_blocking(
+                    storage.get_searchable_file_sources,
+                    actor.user_id,
+                    ordered_raw_ids,
+                    uploaded_by=source_uploader,
+                    limit=semantic_limit,
+                    include_content=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - lexical source search remains available
+                LOGGER.warning("source-search semantic adoption failed (%s)", type(exc).__name__)
+                return [], {"failed": True, "limit": semantic_limit}
+            adopted: list[dict[str, Any]] = []
+            for raw_row in rows:
+                if not isinstance(raw_row, Mapping):
+                    continue
+                raw_id = str(raw_row.get("id") or "").strip()
+                hit = hits_by_raw.get(raw_id)
+                if hit is None:
+                    continue
+                # Canonical-membership and byte identity are both mandatory.
+                # A legacy/fake searcher may rank stale or rewritten Knowledge
+                # content, but it cannot turn that text into source evidence.
+                if str(raw_row.get("knowledge_object_id") or "") != str(hit.get("id") or ""):
+                    continue
+                raw_text = str(raw_row.get("_raw_content") or "")
+                knowledge_text = str(hit.get("content") or "")
+                if raw_text != knowledge_text:
+                    continue
+                embedding_score = hit.get("_embedding_score")
+                has_dense_evidence = bool(
+                    isinstance(embedding_score, (int, float))
+                    and not isinstance(embedding_score, bool)
+                    and math.isfinite(float(embedding_score))
+                    and float(embedding_score) > 0.0
+                )
+                if raw_id in literal_by_id:
+                    # This row already has atomic literal Raw evidence.  Its
+                    # canonical Hybrid rank may still order an ambiguous literal
+                    # set even when the winning dense span was deliberately omitted
+                    # by HybridSearcher for an also-lexical hit.
+                    adopted.append(dict(raw_row))
+                    continue
+                if not has_dense_evidence:
+                    # A reranker may reorder a bounded candidate set, but it is not
+                    # a recall channel.  It must never mint a semantic-only source.
+                    continue
+                semantic_excerpt = _source_semantic_excerpt(
+                    raw_text,
+                    hit.get("_embedding_chunk_span"),
+                    max_chars=_TOOL_EXCERPT_CHARS * 2,
+                )
+                if not semantic_excerpt:
+                    continue
+                canonical = dict(raw_row)
+                canonical["_semantic_source"] = True
+                canonical["_semantic_span"] = hit.get("_embedding_chunk_span")
+                canonical["_semantic_excerpt"] = semantic_excerpt
+                adopted.append(canonical)
+            strategy = found.get("strategy")
+            try:
+                matched_at_least = max(0, int(found.get("matched_at_least") or len(raw_results)))
+            except (TypeError, ValueError):
+                matched_at_least = len(raw_results)
+            return adopted, {
+                "failed": False,
+                "limit": semantic_limit,
+                "reranked": bool(isinstance(strategy, Mapping) and strategy.get("reranked")),
+                "matched_at_least": matched_at_least,
+                "capped": bool(
+                    isinstance(strategy, Mapping)
+                    and (
+                        strategy.get("embeddings_capped")
+                        or strategy.get("embeddings_chunks_capped")
+                        or strategy.get("lexical_pool_capped")
+                    )
+                ),
+            }
+
+        tasks: list[Awaitable[list[dict[str, Any]]]] = []
+        if focus_candidate_query:
+            tasks.append(search_candidates(focus_candidate_query))
+        tasks.append(search_candidates(clean_query))
+        gathered = await asyncio.gather(*tasks)
+        if focus_candidate_query:
+            focus_candidate_rows = cast(list[dict[str, Any]], gathered[0])
+            anchor_candidate_rows = cast(list[dict[str, Any]], gathered[1])
+        else:
+            focus_candidate_rows = []
+            anchor_candidate_rows = cast(list[dict[str, Any]], gathered[0])
+        literal_by_id: dict[str, Mapping[str, Any]] = {}
+        for row in (*focus_candidate_rows, *anchor_candidate_rows):
+            if isinstance(row, Mapping):
+                raw_id = str(row.get("id") or "").strip()
+                if raw_id and raw_id not in literal_by_id:
+                    literal_by_id[raw_id] = row
+        unique_literal_strong = False
+        if self.searcher is not None and len(anchor_candidate_rows) == 1:
+            unique_literal_strong = await run_blocking(
+                _source_unique_literal_is_strong,
+                clean_query,
+                str(anchor_candidate_rows[0].get("_raw_content") or ""),
+            )
+        # Dense query + cross-encoder are the expensive fallback, not a tax on
+        # one *proved* conjunctive literal lookup.  Zero rows need semantic recall;
+        # two or more are ambiguous and need its ordering.  One OR-FTS row remains
+        # ambiguous unless its Raw body carries every term (or an exact quoted/code
+        # literal).  A focused field/value question always needs the fallback: its
+        # unique anchor can name the entity without answering the requested field.
+        semantic_needed = bool(self.searcher is not None and (explicit_focus or not unique_literal_strong))
+        semantic_rows, semantic_meta = await semantic_candidates() if semantic_needed else ([], {})
+
         candidate_rows: list[Mapping[str, Any]] = []
         seen_raw_ids: set[str] = set()
-        for row in (*focus_candidate_rows, *anchor_candidate_rows):
-            if not isinstance(row, Mapping):
+        # The hybrid searcher's order already includes the cross-encoder.  A
+        # semantic hit that is also an FTS hit keeps the atomic FTS projection,
+        # but occupies its validated hybrid rank. Pending/unpromoted literal
+        # sources follow and remain searchable exactly as before.
+        ordered_rows: list[Mapping[str, Any]] = []
+        for semantic_row in semantic_rows:
+            raw_id = str(semantic_row.get("id") or "").strip()
+            literal = literal_by_id.get(raw_id)
+            if literal is not None:
+                ranked_literal = dict(literal)
+                ranked_literal["_hybrid_ranked"] = True
+                ordered_rows.append(ranked_literal)
+            else:
+                ordered_rows.append(semantic_row)
+        ordered_rows.extend((*focus_candidate_rows, *anchor_candidate_rows))
+        for ordered_row in ordered_rows:
+            if not isinstance(ordered_row, Mapping):
                 continue
-            raw_id = str(row.get("id") or "").strip()
+            raw_id = str(ordered_row.get("id") or "").strip()
             if raw_id and raw_id in seen_raw_ids:
                 continue
             if raw_id:
                 seen_raw_ids.add(raw_id)
-            candidate_rows.append(row)
+            candidate_rows.append(ordered_row)
         valid_rows = candidate_rows
         projections: Sequence[str | tuple[str, int, int]]
-        if explicit_focus:
-            projections = await asyncio.gather(
-                *(
-                    run_blocking(
+
+        async def project_candidate(row: Mapping[str, Any]) -> str | tuple[str, int, int]:
+            if row.get("_semantic_source") is True:
+                semantic_excerpt = str(row.get("_semantic_excerpt") or "")
+                if explicit_focus:
+                    # Dense recall chooses a canonical Raw passage; it does not
+                    # prove that the requested anchor and field/value coexist in
+                    # that passage.  Focused evidence must pass the same closed
+                    # record projection as a literal candidate.
+                    return await run_blocking(
                         _source_anchor_context_projection,
                         clean_query,
                         snippet_focus,
-                        str(row.get("_raw_content") or ""),
+                        semantic_excerpt,
                         max_chars=_TOOL_EXCERPT_CHARS * 2,
                     )
-                    for row in valid_rows
+                return semantic_excerpt
+            if explicit_focus:
+                return await run_blocking(
+                    _source_anchor_context_projection,
+                    clean_query,
+                    snippet_focus,
+                    str(row.get("_raw_content") or ""),
+                    max_chars=_TOOL_EXCERPT_CHARS * 2,
                 )
+            return await run_blocking(
+                best_snippet,
+                clean_query,
+                str(row.get("_raw_content") or ""),
+                max_chars=_TOOL_EXCERPT_CHARS * 2,
             )
-        else:
-            projections = await asyncio.gather(
-                *(
-                    run_blocking(
-                        best_snippet,
-                        clean_query,
-                        str(row.get("_raw_content") or ""),
-                        max_chars=_TOOL_EXCERPT_CHARS * 2,
-                    )
-                    for row in valid_rows
-                )
-            )
+
+        projections = await asyncio.gather(*(project_candidate(row) for row in valid_rows))
         ranked_rows: list[tuple[bool, int, int, int, Mapping[str, Any], str]] = []
         for row_index, (candidate, projection) in enumerate(zip(valid_rows, projections, strict=True)):
             if explicit_focus:
@@ -4318,6 +4656,13 @@ class ExecutionKernel:
             # “должность”.  Retain an anchor-bound passage only when it contains
             # some substantive context beyond repetitions of the anchor itself.
             eligible_rows = [item for item in ranked_rows if item[2] > 0]
+        elif explicit_focus:
+            # Preserve the long-standing literal single-focus lane, but a
+            # semantic-only row never receives eligibility merely from its dense
+            # score: its exact Raw passage must prove anchor-bound context.
+            eligible_rows = [
+                item for item in ranked_rows if item[4].get("_semantic_source") is not True or item[2] > 0
+            ]
         else:
             eligible_rows = ranked_rows
         # Context vocabulary is only an anchor-only/noise gate.  It is not a
@@ -4352,7 +4697,28 @@ class ExecutionKernel:
             # ``source_ref`` can be an opaque transport id, internal path or URL
             # token.  It is provenance for code, not a user-facing filename.
             title = filename or "Исходный материал"
-            if explicit_focus:
+            semantic_source = ranked_row.get("_semantic_source") is True
+            if semantic_source and explicit_focus:
+                # Re-project only the already anchor-bound passage at the final
+                # page budget.  Re-reading the original dense span here would let
+                # eligibility and published evidence diverge.
+                excerpt, excerpt_focus_terms, excerpt_context_terms = _source_anchor_context_projection(
+                    clean_query,
+                    snippet_focus,
+                    _ranking_excerpt,
+                    max_chars=excerpt_chars,
+                )
+                if not excerpt or excerpt_context_terms <= 0:
+                    continue
+            elif semantic_source:
+                excerpt = _source_semantic_excerpt(
+                    str(ranked_row.get("_raw_content") or ""),
+                    ranked_row.get("_semantic_span"),
+                    max_chars=excerpt_chars,
+                )
+                excerpt_focus_terms = 0
+                excerpt_context_terms = 0
+            elif explicit_focus:
                 excerpt, excerpt_focus_terms, excerpt_context_terms = _source_anchor_context_projection(
                     clean_query,
                     snippet_focus,
@@ -4373,7 +4739,22 @@ class ExecutionKernel:
                 "excerpt": excerpt,
                 "evidence_authority": _closed_evidence_authority(raw_metadata),
             }
-            if explicit_focus:
+            if semantic_source:
+                item["retrieval_match_kind"] = "semantic"
+                if explicit_focus:
+                    item.update(
+                        {
+                            "focus_terms_matched": excerpt_focus_terms,
+                            "focus_terms_total": len(focus_terms),
+                            "anchor_context_terms": excerpt_context_terms,
+                            "focus_match_kind": (
+                                "full"
+                                if focus_terms and excerpt_focus_terms == len(focus_terms)
+                                else "anchor_context"
+                            ),
+                        }
+                    )
+            elif explicit_focus:
                 item.update(
                     {
                         "focus_terms_matched": excerpt_focus_terms,
@@ -4411,14 +4792,33 @@ class ExecutionKernel:
                     len(focus_candidate_rows) < _SOURCE_SEARCH_CANDIDATE_CAP
                     and len(anchor_candidate_rows) < _SOURCE_SEARCH_CANDIDATE_CAP
                     and len(eligible_rows) < clamped_limit
+                    # Dense top-k is evidence for shown passages, never a proof
+                    # that no differently worded passage exists deeper in the
+                    # corpus — including an empty dense page.  Keep exhaustive
+                    # and count claims closed whenever that lane was attempted.
+                    and not semantic_meta
                 ),
                 "limit": clamped_limit,
                 "candidates_scanned": len(candidate_rows),
-                "candidate_cap": _SOURCE_SEARCH_CANDIDATE_CAP * (2 if focus_candidate_query else 1),
+                "candidate_cap": (
+                    _SOURCE_SEARCH_CANDIDATE_CAP * (2 if focus_candidate_query else 1)
+                    + (int(semantic_meta.get("limit") or 0) if semantic_meta else 0)
+                ),
                 "focus_conjunctive": bool(explicit_focus and focus_terms and len(focus_terms) > 1),
                 "focus_match_found": emitted_full_focus,
                 "focus_fallback_contextual": emitted_contextual_focus,
                 "ignored_excluded": True,
+                **(
+                    {
+                        "semantic_recall": bool(semantic_rows),
+                        "semantic_candidates": len(semantic_rows),
+                        "semantic_reranked": bool(semantic_meta.get("reranked")),
+                        "semantic_failed": bool(semantic_meta.get("failed")),
+                        "uploader_scoped": source_uploader is not None,
+                    }
+                    if semantic_meta
+                    else {}
+                ),
             },
         }
         return _bound_source_search_payload(payload)
@@ -6421,7 +6821,10 @@ class ExecutionKernel:
         )
         spec(
             "source_search",
-            "Дословно искать в исходном тексте загруженных материалов, включая файлы, "
+            "Искать в исходном тексте загруженных материалов: дословно, а для уже "
+            "продвинутых документов также по смыслу через эмбеддинги и переранжировщик. "
+            "Текущий приложенный файл и однозначно названный файл всегда обрабатываются "
+            "раньше этого поиска; не используй общий поиск, чтобы заменить их другим. Включает файлы, "
             "которые ещё ждут решения в Inbox и поэтому не видны memory_search. Используй "
             "только когда человек явно просит найти сведения в загруженном/присланном "
             "файле или исходнике. Результаты — короткие выдержки; review_status=pending "

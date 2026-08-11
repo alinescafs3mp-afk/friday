@@ -109,6 +109,16 @@ class _UpdateInbox:
                 knowledge_id TEXT NOT NULL,
                 created_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pending_archive_passwords (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                media_json TEXT NOT NULL,
+                safe_query TEXT NOT NULL DEFAULT '',
+                original_message_id INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                PRIMARY KEY(chat_id, user_id)
+            );
             """
         )
         restrict_sqlite_files(path)
@@ -169,6 +179,10 @@ class _UpdateInbox:
         self._conn.execute(
             "DELETE FROM delivered_generated_files WHERE delivered_at < ?",
             (time.time() - DELIVERED_NOTIFICATION_TTL_SEC,),
+        )
+        self._conn.execute(
+            "DELETE FROM pending_archive_passwords WHERE expires_at < ?",
+            (time.time(),),
         )
         self._conn.commit()
 
@@ -256,6 +270,98 @@ class _UpdateInbox:
         )
         self._conn.commit()
         return str(row["knowledge_id"])
+
+    def remember_archive_password_challenge(
+        self,
+        chat_id: int,
+        user_id: int,
+        document: dict[str, Any],
+        *,
+        safe_query: str = "",
+        original_message_id: int = 0,
+        ttl_sec: float = 3600.0,
+    ) -> None:
+        """Keep only the non-secret Telegram handle needed to retry an archive.
+
+        The archive bytes are deliberately not stored here: Telegram's stable
+        ``file_id`` authorizes a fresh bounded download.  This closed descriptor
+        also prevents arbitrary update fields (captions, entities, paths or
+        credentials) from leaking into the challenge table.
+        """
+
+        file_id = str(document.get("file_id") or "")[:512]
+        if not file_id:
+            return
+        descriptor: dict[str, Any] = {"file_id": file_id}
+        file_unique_id = str(document.get("file_unique_id") or "")[:512]
+        if file_unique_id:
+            descriptor["file_unique_id"] = file_unique_id
+        filename = Path(str(document.get("file_name") or "archive.bin")).name[:255]
+        descriptor["file_name"] = filename or "archive.bin"
+        mime_type = str(document.get("mime_type") or "application/octet-stream")[:160]
+        descriptor["mime_type"] = mime_type
+        for key in ("file_size", "duration"):
+            value = document.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                descriptor[key] = value
+        now = time.time()
+        expires_at = now + max(60.0, min(float(ttl_sec), 24 * 3600.0))
+        self._conn.execute(
+            """INSERT INTO pending_archive_passwords(
+                   chat_id, user_id, media_json, safe_query,
+                   original_message_id, created_at, expires_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(chat_id, user_id) DO UPDATE SET
+                   media_json=excluded.media_json,
+                   safe_query=excluded.safe_query,
+                   original_message_id=excluded.original_message_id,
+                   created_at=excluded.created_at,
+                   expires_at=excluded.expires_at""",
+            (
+                int(chat_id),
+                int(user_id),
+                json.dumps(descriptor, ensure_ascii=False, sort_keys=True),
+                str(safe_query or "")[:4000],
+                max(0, int(original_message_id or 0)),
+                now,
+                expires_at,
+            ),
+        )
+        self._conn.commit()
+
+    def archive_password_challenge(self, chat_id: int, user_id: int) -> dict[str, Any] | None:
+        now = time.time()
+        self._conn.execute(
+            "DELETE FROM pending_archive_passwords WHERE expires_at < ?",
+            (now,),
+        )
+        row = self._conn.execute(
+            """SELECT media_json, safe_query, original_message_id
+               FROM pending_archive_passwords
+               WHERE chat_id=? AND user_id=? AND expires_at>=?""",
+            (int(chat_id), int(user_id), now),
+        ).fetchone()
+        self._conn.commit()
+        if row is None:
+            return None
+        try:
+            document = json.loads(str(row["media_json"]))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        if not isinstance(document, dict) or not str(document.get("file_id") or ""):
+            return None
+        return {
+            "document": document,
+            "safe_query": str(row["safe_query"] or ""),
+            "original_message_id": int(row["original_message_id"] or 0),
+        }
+
+    def clear_archive_password_challenge(self, chat_id: int, user_id: int) -> None:
+        self._conn.execute(
+            "DELETE FROM pending_archive_passwords WHERE chat_id=? AND user_id=?",
+            (int(chat_id), int(user_id)),
+        )
+        self._conn.commit()
 
     def remember_delivered_notification(self, notification_id: str) -> None:
         """Уведомление ушло человеку — записать это ТАМ, ГДЕ ЭТО ПРОИЗОШЛО.

@@ -1081,3 +1081,82 @@ def test_source_projection_ignores_punctuation_only_tokens_in_context_count() ->
 
     assert projection is not None
     assert projection["results"][0]["excerpt"] == "Иванов\nДолжность: инженер ..."
+
+
+def test_source_projection_accepts_only_closed_semantic_evidence() -> None:
+    payload = _synthetic_source_payload(excerpt="Иванов — ведущий инженер")
+    row = payload["results"][0]
+    row["promoted"] = True
+    row["retrieval_match_kind"] = "semantic"
+    row.update(
+        {
+            "focus_terms_matched": 1,
+            "focus_terms_total": 2,
+            "anchor_context_terms": 2,
+            "focus_match_kind": "anchor_context",
+        }
+    )
+    payload["coverage"].update(
+        {
+            "complete": False,
+            "focus_match_found": False,
+            "focus_fallback_contextual": True,
+            "semantic_recall": True,
+            "semantic_candidates": 1,
+            "semantic_reranked": True,
+            "semantic_failed": False,
+            "uploader_scoped": True,
+        }
+    )
+
+    projection = _project_source_search_result(
+        payload,
+        query="иванов",
+        focus="иванов должност",
+    )
+
+    assert projection is not None
+    assert projection["scope"]["page_complete"] is False
+    assert projection["scope"]["absence_is_exhaustive"] is False
+    assert projection["results"][0]["focus_match_kind"] == "anchor_context"
+    assert projection["results"][0]["retrieval_match_kind"] == "semantic"
+
+    for field, value in (("promoted", False), ("retrieval_match_kind", "forged")):
+        forged = copy.deepcopy(payload)
+        forged["results"][0][field] = value
+        assert (
+            _project_source_search_result(
+                forged,
+                query="иванов",
+                focus="иванов должност",
+            )
+            is None
+        )
+
+    missing_contract = copy.deepcopy(payload)
+    missing_contract["coverage"].pop("semantic_recall")
+    assert (
+        _project_source_search_result(
+            missing_contract,
+            query="иванов",
+            focus="иванов должност",
+        )
+        is None
+    )
+
+    missing_focus_contract = copy.deepcopy(payload)
+    for field in (
+        "focus_terms_matched",
+        "focus_terms_total",
+        "anchor_context_terms",
+        "focus_match_kind",
+    ):
+        missing_focus_contract["results"][0].pop(field)
+    assert (
+        _project_source_search_result(
+            missing_focus_contract,
+            query="иванов",
+            focus="иванов должност",
+        )
+        is None
+    )
