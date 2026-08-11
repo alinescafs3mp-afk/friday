@@ -2230,6 +2230,88 @@ async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
     assert grounding["nothing_arrived"] is True
 
 
+@pytest.mark.parametrize(
+    ("body_chars", "expects_partial"),
+    [(25_001, False), (73_001, True)],
+)
+@pytest.mark.asyncio
+async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
+    settings,
+    storage,
+    monkeypatch,
+    body_chars,
+    expects_partial,
+):
+    head = "ADVISORY-LONG-OCR-HEAD\n"
+    tail = "\nADVISORY-LONG-OCR-TAIL"
+    advisory_text = head + "x" * (body_chars - len(head) - len(tail)) + tail
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_UnusedEnabledLLM(),
+        kernel=ExecutionKernel(auth, settings),
+    )
+    shown: list[dict[str, Any]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            answer_mode="personal_knowledge_missing",
+        )
+
+    async def generate(context, message, attachments):
+        del context, message
+        shown.extend(list(attachments or []))
+        return {
+            "content": "Распознанный материал передан в синтез.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    async def forbidden_hierarchy(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("advisory OCR entered the verifiable hierarchy")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
+    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", forbidden_hierarchy)
+    result = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-long-scan.pdf",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[
+            agent_runtime_module._OwnedAttachment(  # noqa: SLF001 - process authority under test
+                {
+                    "filename": "synthetic-long-scan.pdf",
+                    "transient_text": advisory_text,
+                    "extraction_success": True,
+                    "advisory_only": True,
+                    "verification_eligible": False,
+                }
+            )
+        ],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert len(shown) == 1
+    projected_text = str(shown[0].get("transient_text") or "")
+    assert head.strip() in projected_text
+    assert (tail.strip() in projected_text) is not expects_partial
+    assert result["attachment_context_available"] is True
+    assert result["attachment_coverage_complete"] is not expects_partial
+    assert result["attachment_verification_complete"] is False
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
+    assert ("поместилась только часть распознанного текста" in result["message"]) is expects_partial
+
+
 @pytest.mark.asyncio
 async def test_advisory_private_turn_sanitizes_raw_verifier_issues_everywhere(
     settings,

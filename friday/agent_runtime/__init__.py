@@ -5662,6 +5662,10 @@ _ADVISORY_ATTACHMENT_CAUTION = (
     "⚠️ Ниже — результат локального распознавания вложения; он может содержать "
     "ошибки, особенно в цифрах и реквизитах. Сверяйте критичные данные с оригиналом."
 )
+_PARTIAL_ADVISORY_ATTACHMENT_CAUTION = (
+    "⚠️ В этот ход поместилась только часть распознанного текста. Это не ошибка "
+    "загрузки, но вывод о документе целиком по показанной части не подтверждён."
+)
 # Raw Objects for unreadable media store a short provenance descriptor such as
 # ``[document: a.pdf; type=application/pdf; size=…]`` or ``[photo: …]``.  That is
 # not extracted file text and must never become synthesis evidence.
@@ -15632,6 +15636,12 @@ class AgentRuntime:
             and str(item.get("transient_text") or "").strip()
             and not _is_file_provenance_stub(str(item.get("transient_text") or ""))
         )
+        advisory_projection_incomplete = any(
+            item.get("advisory_only") is True
+            and bool(str(item.get("transient_text") or "").strip())
+            and item.get("_prompt_projection_complete") is False
+            for item in attachments
+        )
         unreadable_attachment_answer = bool(
             attachment_expected_count
             and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
@@ -15707,6 +15717,13 @@ class AgentRuntime:
         )
         hierarchical_attachment_turn = bool(
             whole_document_needs_hierarchy
+            # The authenticated hierarchy proves coverage over parser-owned
+            # text.  OCR/transcription is readable reasoning material with a
+            # weaker authority: its planner deliberately excludes such bodies.
+            # Sending a long scan there therefore erased useful OCR entirely.
+            # Keep advisory text on the ordinary bounded synthesis route until
+            # a separately authority-labelled advisory mapper exists.
+            and advisory_body_count == 0
             and current_attachment_local
             and authenticated_attachment_scope
             and not attachment_query_closed_answer
@@ -15757,11 +15774,14 @@ class AgentRuntime:
             )
         )
         full_source_prepass_required = bool(
-            office_exact_needs_full_source
-            or authenticated_attachment_scope
-            and _attachment_needs_full_source_prepass(
-                [item for item in active_attachment_set if isinstance(item, dict)],
-                [item for item in attachments if isinstance(item, dict)],
+            advisory_body_count == 0
+            and (
+                office_exact_needs_full_source
+                or authenticated_attachment_scope
+                and _attachment_needs_full_source_prepass(
+                    [item for item in active_attachment_set if isinstance(item, dict)],
+                    [item for item in attachments if isinstance(item, dict)],
+                )
             )
         )
         if (
@@ -16092,6 +16112,24 @@ class AgentRuntime:
             # forgets to repeat the prompt caveat.
             context.structural_answer = "\n\n".join(
                 part for part in (context.structural_answer, _ADVISORY_ATTACHMENT_CAUTION) if part
+            )
+
+        if (
+            advisory_caution_needed
+            and advisory_projection_incomplete
+            and _PARTIAL_ADVISORY_ATTACHMENT_CAUTION not in context.structural_answer
+        ):
+            # Prompt clipping is not parser loss and must not resurrect the
+            # misleading generic "material could not be processed" warning.
+            # State the exact boundary while still letting the model reason
+            # over the OCR that did fit.
+            context.structural_answer = "\n\n".join(
+                part
+                for part in (
+                    context.structural_answer,
+                    _PARTIAL_ADVISORY_ATTACHMENT_CAUTION,
+                )
+                if part
             )
 
         if attachment_has_unread_tail:
