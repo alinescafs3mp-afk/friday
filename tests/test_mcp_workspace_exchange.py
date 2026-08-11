@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -51,6 +52,36 @@ class _TextOnlyIngestion:
             "advisory_only": False,
             "verification_eligible": True,
         }
+
+
+def test_workspace_child_imports_the_active_release_not_its_cwd(settings, tmp_path: Path) -> None:
+    configured = replace(
+        settings,
+        mcp_enabled=True,
+        mcp_workspace_inbox_dir=tmp_path / "inbox",
+        mcp_workspace_outbox_dir=tmp_path / "outbox",
+    )
+    definition = workspace_server_definition(configured)
+    decoy = tmp_path / "friday"
+    decoy.mkdir()
+    (decoy / "__init__.py").write_text("raise RuntimeError('cwd decoy imported')\n", encoding="utf-8")
+
+    completed = subprocess.run(  # noqa: S603 - exact code-owned interpreter and argv
+        [
+            definition.command,
+            "-P",
+            "-c",
+            "from pathlib import Path; import friday; print(Path(friday.__file__).resolve())",
+        ],
+        cwd=tmp_path,
+        env={"PATH": os.environ.get("PATH", ""), **definition.environment},
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    imported = Path(completed.stdout.strip())
+    assert imported.is_relative_to(Path(definition.environment["PYTHONPATH"]))
 
 
 def test_exchange_rejects_traversal_symlinks_hardlinks_and_overwrite(tmp_path: Path) -> None:
@@ -197,6 +228,7 @@ async def test_fixed_stdio_tools_use_kernel_auth_and_exact_exchange_bytes(settin
     (inbox / "note.txt").write_text("ORION-42\n" * 200, encoding="utf-8")
 
     definition = workspace_server_definition(configured)
+    assert definition.args[:2] == ("-P", "-m")
     assert definition.environment["PYTHONPATH"] == str(
         Path(workspace_server_definition.__code__.co_filename).resolve().parents[2]
     )

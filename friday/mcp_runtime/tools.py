@@ -60,6 +60,7 @@ def workspace_server_definition(settings: FridaySettings) -> MCPServerDefinition
         alias=_SERVER_ALIAS,
         command=str(executable),
         args=(
+            "-P",
             "-m",
             "friday.mcp_runtime.workspace_fs",
             "--inbox",
