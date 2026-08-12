@@ -14128,13 +14128,30 @@ _ATTACHMENT_READ_ONLY_RESULT_HEAD = re.compile(
     r"таблиц|список|value|line|field|item|fragment|data|quote|result)\w*",
     re.IGNORECASE,
 )
-_ATTACHMENT_READ_ONLY_OUTPUT_RESULT = re.compile(
+_ATTACHMENT_READ_ONLY_OUTPUT_RESULT_PREFIX = re.compile(
     r"(?:верн|вывед|привед|повтор|процитир)\w*\b"
     r"(?:\s+(?:мне|нам|только|точн\w*|дословн\w*)){0,4}\s+"
     r"\b(?:значени|строк|поле|пункт|фрагмент|данн|сведени|цитат|вывод|результат|"
     r"таблиц|список|текст|маркер|код|содержим)\w*\b",
     re.IGNORECASE,
 )
+_ATTACHMENT_READ_ONLY_OUTPUT_LOOKUP_SUFFIX = re.compile(
+    r"(?:после\s*)?|"
+    r"(?:(?:после|из)\s+)?(?:пол|строк|пункт|раздел|метк|заголов|колонк)\w*"
+    r"(?:\s+[\w@+(),\[\]-]{1,64})?",
+    re.IGNORECASE,
+)
+
+
+def _attachment_read_only_output_result_clause(tail: str) -> bool:
+    """Accept a whole bounded answer-shape clause, never a safe prefix only."""
+
+    clause = re.split(r"[.!?\n]", tail, maxsplit=1)[0].strip(" \t,:;—-")
+    matched = _ATTACHMENT_READ_ONLY_OUTPUT_RESULT_PREFIX.match(clause)
+    if matched is None:
+        return False
+    remainder = clause[matched.end() :].strip()
+    return not remainder or bool(_ATTACHMENT_READ_ONLY_OUTPUT_LOOKUP_SUFFIX.fullmatch(remainder))
 
 
 def _closed_attachment_read_only_request(message: str) -> bool:
@@ -14169,7 +14186,7 @@ def _closed_attachment_read_only_request(message: str) -> bool:
         # effect.  Admit it only when the output verb is locally bound to a
         # closed result noun; ``верни файл`` and unknown coordinated actions
         # remain outside the deterministic read-only route.
-        if _ATTACHMENT_READ_ONLY_OUTPUT_RESULT.match(tail):
+        if _attachment_read_only_output_result_clause(tail):
             continue
         if not _ATTACHMENT_READ_ONLY_ACTION.fullmatch(match.group("head")):
             return False

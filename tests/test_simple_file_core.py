@@ -493,6 +493,7 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
         "Прочитай report-unique-aug12.odt из MCP inbox и верни файл в MCP outbox.",
         ("Прочитай report-unique-aug12.odt из MCP inbox и верни файл с проверочным маркером в MCP outbox."),
         "Прочитай report-unique-aug12.odt из MCP inbox и повтори отправку, указав код.",
+        "Прочитай report-unique-aug12.odt из MCP inbox и верни данные в базу.",
     ):
         kernel.calls.clear()
         rejected = await runtime.chat("alice", unsafe_request, actor=_actor())
