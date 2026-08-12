@@ -16,13 +16,14 @@ from PIL import Image, ImageDraw
 from friday.config import PROFILES
 from friday.documents import DocumentExtractor
 from friday.ingestion import IngestionPipeline
+from friday.ingestion import _files as ingestion_files
 from friday.knowledge_graph import KnowledgeGraph
 
 
-def _raster_pdf(pages: int) -> bytes:
+def _raster_pdf(pages: int, *, width: int = 320, height: int = 240) -> bytes:
     images: list[Image.Image] = []
     for page in range(1, pages + 1):
-        image = Image.new("RGB", (320, 240), "white")
+        image = Image.new("RGB", (width, height), "white")
         ImageDraw.Draw(image).text((24, 24), f"SYNTHETIC PAGE {page}", fill="black")
         images.append(image)
     output = io.BytesIO()
@@ -40,11 +41,14 @@ class _PageVision:
         fail_from_page: int | None = None,
         omit_from_page: int | None = None,
         delay_sec: float = 0.0,
+        multi_delay_sec: float = 0.0,
     ) -> None:
         self.fail_from_page = fail_from_page
         self.omit_from_page = omit_from_page
         self.delay_sec = delay_sec
+        self.multi_delay_sec = multi_delay_sec
         self.calls: list[list[int]] = []
+        self.call_pixels: list[int] = []
 
     async def chat(self, messages, **kwargs):
         assert kwargs["temperature"] == 0.0
@@ -63,8 +67,14 @@ class _PageVision:
         assert sum(item.get("type") == "image_url" for item in content) == len(pairs)
         pages = [page for _asset_id, page in pairs]
         self.calls.append(pages)
-        if self.delay_sec:
-            await asyncio.sleep(self.delay_sec)
+        dimensions = [re.search(r"dimensions=(\d+)x(\d+)", descriptor) for descriptor in descriptors]
+        assert all(match is not None for match in dimensions)
+        self.call_pixels.append(
+            sum(int(match.group(1)) * int(match.group(2)) for match in dimensions if match)
+        )
+        delay = self.multi_delay_sec if len(pages) > 1 and self.multi_delay_sec else self.delay_sec
+        if delay:
+            await asyncio.sleep(delay)
         if self.fail_from_page is not None and pages[0] == self.fail_from_page:
             raise RuntimeError("synthetic batch failure")
         reported_pairs = pairs[:-1] if self.omit_from_page == pages[0] else pairs
@@ -203,16 +213,16 @@ async def test_six_page_raster_pdf_is_rendered_and_fully_ocr_batched(settings, s
     )
 
     assert result is not None and result["success"] is True
-    assert sorted(llm.calls) == [[1, 2, 3], [4, 5, 6]]
+    assert sorted(llm.calls) == [[1, 2], [3, 4], [5, 6]]
     assert result["pages_read"] == result["pages_total"] == 6
     assert result["pages_truncated"] is False
-    assert result["batches_read"] == result["batches_total"] == 2
+    assert result["batches_read"] == result["batches_total"] == 3
     positions = [result["text"].index(f"OCR PAGE {page}") for page in range(1, 7)]
     assert positions == sorted(positions), result["text"]
 
 
 @pytest.mark.asyncio
-async def test_five_page_scan_balances_concurrent_batches_without_a_one_page_tail(
+async def test_five_page_scan_balances_low_resolution_batches_within_aggregate_cap(
     settings,
     storage,
 ) -> None:
@@ -224,10 +234,79 @@ async def test_five_page_scan_balances_concurrent_batches_without_a_one_page_tai
     )
 
     assert result is not None and result["success"] is True
-    assert sorted(llm.calls) == [[1, 2, 3], [4, 5]]
+    assert sorted(llm.calls) == [[1, 2], [3, 4], [5]]
+    assert llm.call_pixels and max(llm.call_pixels) <= ingestion_files._VISION_BATCH_MAX_PIXELS
     assert result["pages_read"] == result["pages_total"] == 5
     assert result["pages_truncated"] is False
     assert "OCR PAGE 5" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_pdf_pages_and_each_vision_request_have_independent_pixel_bounds(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    llm = _PageVision()
+    pipeline = _pipeline(settings, storage, llm)
+    original_render = pipeline._doc_extractor.render_pdf_pages  # noqa: SLF001
+    requested_page_bounds: list[int] = []
+
+    def render(*args, **kwargs):  # noqa: ANN002, ANN003
+        requested_page_bounds.append(int(kwargs["max_pixels"]))
+        return original_render(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline._doc_extractor, "render_pdf_pages", render)  # noqa: SLF001
+    result = await pipeline._extract_visual_document(  # noqa: SLF001
+        _raster_pdf(5, width=800, height=1100),
+        filename="large-five-page-scan.pdf",
+        mime_type="application/pdf",
+    )
+
+    assert result is not None and result["success"] is True
+    assert requested_page_bounds == [ingestion_files._VISION_PAGE_MAX_PIXELS]
+    assert llm.calls == [[1], [2], [3], [4], [5]]
+    assert llm.call_pixels and max(llm.call_pixels) <= ingestion_files._VISION_BATCH_MAX_PIXELS
+    assert result["pages_read"] == result["pages_total"] == 5
+    assert result["batch_fallback_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_timed_out_multi_page_batches_retry_as_one_contiguous_single_page_prefix(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ingestion_files, "_VISION_OCR_BUDGET_SEC", 0.45)
+    monkeypatch.setattr(ingestion_files, "_VISION_OCR_FALLBACK_RESERVE_SEC", 0.3)
+    llm = _PageVision(delay_sec=0.03, multi_delay_sec=0.25)
+    result = await _pipeline(settings, storage, llm)._extract_visual_document(  # noqa: SLF001
+        _raster_pdf(5),
+        filename="fallback-five-page-scan.pdf",
+        mime_type="application/pdf",
+    )
+
+    assert result is not None and result["success"] is True
+    assert sorted(llm.calls[:2]) == [[1, 2], [3, 4]]
+    assert llm.calls[2:] == [[1], [2], [3], [4], [5]]
+    assert result["pages_read"] == result["pages_total"] == 5
+    assert result["pages_truncated"] is False
+    assert result["deadline_reached"] is False
+    assert result["batch_fallback_used"] is True
+    assert result["batches_read"] == 5
+    assert result["batches_total"] == 7
+
+    # A single page cannot be made smaller as a batch.  It receives the whole
+    # common deadline instead of being cut off at the fallback boundary.
+    single_llm = _PageVision(delay_sec=0.2)
+    single = await _pipeline(settings, storage, single_llm)._extract_visual_document(  # noqa: SLF001
+        _raster_pdf(1),
+        filename="single-page-control.pdf",
+        mime_type="application/pdf",
+    )
+    assert single is not None and single["success"] is True
+    assert single["batch_fallback_used"] is False
+    assert single_llm.calls == [[1]]
 
 
 @pytest.mark.asyncio
@@ -240,7 +319,7 @@ async def test_failed_second_vision_batch_keeps_only_honest_contiguous_prefix(se
     )
 
     assert result is not None and result["success"] is True
-    assert sorted(llm.calls) == [[1, 2, 3, 4], [5, 6, 7]]
+    assert sorted(llm.calls) == [[1, 2], [3, 4], [5, 6], [7, 8]]
     assert result["pages_total"] == 10
     assert result["pages_read"] == 4
     assert result["pages_truncated"] is True and result["partial"] is True
@@ -277,7 +356,7 @@ async def test_scan_page_cap_and_common_deadline_are_reported_without_fake_compl
     assert capped["pages_total"] == 41 and capped["pages_read"] == 40
     assert capped["page_cap_reached"] is True
     assert capped["pages_truncated"] is True and capped["partial"] is True
-    assert len(capped_llm.calls) == 10 and all(len(batch) <= 4 for batch in capped_llm.calls)
+    assert len(capped_llm.calls) == 20 and all(len(batch) == 2 for batch in capped_llm.calls)
 
     # Reuse a real PDFium render so this half measures the asynchronous common
     # OCR deadline only, without depending on machine-specific render speed.

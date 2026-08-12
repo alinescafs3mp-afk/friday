@@ -129,12 +129,15 @@ def test_two_invocations_and_both_runs_have_disjoint_fixture_identities(tmp_path
     assert len({identity.marker("FACT") for identity in identities}) == 40
     assert len({identity.source_ref("SOURCE") for identity in identities}) == 40
     assert len({identity.filename("fixture", "odt") for identity in identities}) == 40
+    assert len({f"document-live:{identity.token('chat-ref:1')}" for identity in identities}) == 40
+    assert len({int(identity.token("message:1", length=15), 16) for identity in identities}) == 40
     assert len({runner.case_state_paths(tmp_path, item.case_id, item)["root"] for item in identities}) == 40
     prompts = {
         runner._scoped_prompt(SimpleNamespace(identity=identity), "natural", "Обобщи документ.")
         for identity in identities
     }
-    assert len(prompts) == 40
+    assert prompts.issubset({"Обобщи документ.", "Пожалуйста.\nОбобщи документ."})
+    assert all("Контекст проверки" not in prompt for prompt in prompts)
     assert {identity.prompt_variant("natural", 2) for identity in identities}.issubset({0, 1})
     assert runner._scoped_prompt(SimpleNamespace(identity=identities[0]), "bare", "") == ""
     all_chats = {
@@ -145,6 +148,17 @@ def test_two_invocations_and_both_runs_have_disjoint_fixture_identities(tmp_path
     }
     assert len(all_chats) == 44
     assert all(run_id not in json.dumps(sorted(prompts)) for run_id in run_ids)
+    full_conversation_prompts = {
+        "\n".join(
+            (
+                identity.filename("fixture", "odt"),
+                identity.marker("FACT"),
+                runner._scoped_prompt(SimpleNamespace(identity=identity), "natural", "Обобщи документ."),
+            )
+        )
+        for identity in identities
+    }
+    assert len(full_conversation_prompts) == 40
 
 
 def test_explicit_source_env_forwards_only_sidecar_allowlist_and_never_its_path(tmp_path) -> None:
@@ -483,9 +497,11 @@ def test_d05_fixture_never_crosses_an_open_direct_transaction_with_ingestion() -
     class FakeStorage:
         def __init__(self) -> None:
             self.pending = False
+            self.updates: list[tuple[str, str]] = []
 
-        def execute(self, _sql, _parameters):  # noqa: ANN001
+        def execute(self, _sql, parameters):  # noqa: ANN001
             self.pending = True
+            self.updates.append((str(parameters[0]), str(parameters[1])))
 
         def commit(self) -> None:
             self.pending = False
@@ -513,6 +529,7 @@ def test_d05_fixture_never_crosses_an_open_direct_transaction_with_ingestion() -
         def __init__(self) -> None:
             self.storage = FakeStorage()
             self.selected = ["raw-jbl-3", "raw-jbl-2", "raw-jbl-1"]
+            self.refs: dict[str, str] = {}
 
         @staticmethod
         def document(filename, mime_type, content, source_ref):  # noqa: ANN001
@@ -523,8 +540,14 @@ def test_d05_fixture_never_crosses_an_open_direct_transaction_with_ingestion() -
             assert self.storage.pending is False, "HTTP turn crossed an open fixture transaction"
             if document is not None:
                 index = str(document["source_ref"]).rsplit("-", 1)[-1]
-                return {"file_ingestion": {"raw_object_id": f"raw-jbl-{index}"}}
+                self.refs[str(document["source_ref"])] = f"raw-jbl-{index}"
+                # The public API intentionally omits the private Raw id.
+                return {"file_ingestion": {"persisted": True}}
             return {"message": "JBL-FIRST-1 JBL-SECOND-1 JBL-THIRD-1"}
+
+        def resolve_ref(self, source_ref, *, uploader=None):  # noqa: ANN001
+            assert uploader == self.jbl_id
+            return self.refs.get(str(source_ref), "")
 
         def ingest(self, *_args, **_kwargs):  # noqa: ANN001
             assert self.storage.pending is False, "ingestion crossed an open fixture transaction"
@@ -544,9 +567,15 @@ def test_d05_fixture_never_crosses_an_open_direct_transaction_with_ingestion() -
                 "checks": checks,
             }
 
-    result = runner._case_05(FakeHarness())
+    harness = FakeHarness()
+    result = runner._case_05(harness)
 
     assert result["status"] == "passed"
+    assert harness.storage.updates[:3] == [
+        ("2026-08-07T09:00:00+00:00", "raw-jbl-1"),
+        ("2026-08-09T09:00:00+00:00", "raw-jbl-2"),
+        ("2026-08-11T09:00:00+00:00", "raw-jbl-3"),
+    ]
     assert result["checks"] == {
         "all_expected_ids": True,
         "uploader_reauthorized": True,

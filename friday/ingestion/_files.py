@@ -76,6 +76,15 @@ _VISION_BATCH_SIZE = 4
 _VISION_BATCH_CONCURRENCY = 2
 _VISION_PDF_MAX_PAGES = 40
 _VISION_OCR_BUDGET_SEC = 120.0
+_VISION_OCR_FALLBACK_RESERVE_SEC = 45.0
+# The model limit counts images, but image count alone does not bound visual
+# work.  Four individually legal 8M-pixel pages used to make one 32M-pixel
+# request; on the live dispatcher two such requests occupied the entire OCR
+# deadline without returning a page.  The measured safe request was exactly one
+# 1024x1024 image, so both the per-page and aggregate ceilings stay at that
+# proven point rather than extrapolating it across several images.
+_VISION_PAGE_MAX_PIXELS = 1_048_576
+_VISION_BATCH_MAX_PIXELS = 1_048_576
 _VISION_PDF_RENDER_BUDGET_FLOOR_SEC = 30.0
 _PDF_RENDER_SOURCE_RE = re.compile(r"^pdf-page-(\d+)-(?:render|image-\d+)$", re.IGNORECASE)
 _DOCUMENT_METADATA_STRING_FIELDS = (
@@ -506,7 +515,14 @@ class FilesMixin(PipelineShared):
     ) -> dict[str, Any]:
         """Run one at-most-four-image vision request and validate its advice."""
         llm = self.llm
-        if llm is None or not assets or len(assets) > _VISION_BATCH_SIZE:
+        batch_pixels = sum(max(0, int(asset.width)) * max(0, int(asset.height)) for asset in assets)
+        if (
+            llm is None
+            or not assets
+            or len(assets) > _VISION_BATCH_SIZE
+            or batch_pixels <= 0
+            or batch_pixels > _VISION_BATCH_MAX_PIXELS
+        ):
             return {
                 "success": False,
                 "error": "invalid_vision_batch",
@@ -779,7 +795,7 @@ class FilesMixin(PipelineShared):
                 filename,
                 mime_type,
                 max_pages=_VISION_PDF_MAX_PAGES,
-                max_pixels=8_000_000,
+                max_pixels=_VISION_PAGE_MAX_PIXELS,
                 max_encoded_bytes=1_500_000,
                 deadline=render_deadline,
             )
@@ -799,7 +815,7 @@ class FilesMixin(PipelineShared):
                     filename,
                     mime_type,
                     max_images=_VISION_BATCH_SIZE,
-                    max_pixels=8_000_000,
+                    max_pixels=_VISION_PAGE_MAX_PIXELS,
                     max_encoded_bytes=1_500_000,
                 )
                 if pages_total <= 0:
@@ -816,7 +832,7 @@ class FilesMixin(PipelineShared):
                 filename,
                 mime_type,
                 max_images=_VISION_BATCH_SIZE,
-                max_pixels=8_000_000,
+                max_pixels=_VISION_PAGE_MAX_PIXELS,
                 max_encoded_bytes=1_500_000,
             )
             if not assets:
@@ -862,25 +878,60 @@ class FilesMixin(PipelineShared):
                 "advisory_only": True,
             }
 
-        # Keep concurrent requests similarly sized. Fixed groups of four leave
-        # a one-page tail for five/nine/... page scans; on a batched local model
-        # that tiny request can sit behind the much heavier first request until
-        # the common deadline and make a small scan look like an incomplete
-        # four-page prefix. Balance the same finite number of batches instead
-        # (5 -> 3+2, 9 -> 3+3+3), while preserving the per-request cap and order.
-        batch_count = max(1, (len(assets) + _VISION_BATCH_SIZE - 1) // _VISION_BATCH_SIZE)
-        batch_floor, larger_batches = divmod(len(assets), batch_count)
+        # Keep concurrent requests similarly sized.  Every page is already
+        # normalized to `_VISION_PAGE_MAX_PIXELS`; the second cap turns the
+        # aggregate request into a real bound rather than merely limiting the
+        # number of images.  Balance each feasible batch count (5 -> 3+2 when
+        # the workload permits), increasing it until every contiguous group also
+        # fits the measured aggregate ceiling.
+        total_asset_pixels = sum(max(0, int(asset.width)) * max(0, int(asset.height)) for asset in assets)
+        batch_count = max(
+            1,
+            (len(assets) + _VISION_BATCH_SIZE - 1) // _VISION_BATCH_SIZE,
+            (total_asset_pixels + _VISION_BATCH_MAX_PIXELS - 1) // _VISION_BATCH_MAX_PIXELS,
+        )
         batch_specs: list[tuple[int, Sequence[VisualAsset]]] = []
-        batch_offset = 0
-        for batch_index in range(batch_count):
-            batch_size = batch_floor + (1 if batch_index < larger_batches else 0)
-            batch_specs.append((batch_offset, assets[batch_offset : batch_offset + batch_size]))
-            batch_offset += batch_size
+        while batch_count <= len(assets):
+            batch_floor, larger_batches = divmod(len(assets), batch_count)
+            candidate_specs: list[tuple[int, Sequence[VisualAsset]]] = []
+            batch_offset = 0
+            for batch_index in range(batch_count):
+                batch_size = batch_floor + (1 if batch_index < larger_batches else 0)
+                candidate_specs.append((batch_offset, assets[batch_offset : batch_offset + batch_size]))
+                batch_offset += batch_size
+            if all(
+                sum(max(0, int(asset.width)) * max(0, int(asset.height)) for asset in batch)
+                <= _VISION_BATCH_MAX_PIXELS
+                for _offset, batch in candidate_specs
+            ):
+                batch_specs = candidate_specs
+                break
+            batch_count += 1
+        if not batch_specs:
+            batch_specs = [(index, (asset,)) for index, asset in enumerate(assets)]
 
-        async def run_batch(offset: int, batch_assets: Sequence[VisualAsset]) -> dict[str, Any]:
-            remaining = common_deadline - loop.time()
+        fallback_reserve = min(
+            max(0.0, _VISION_OCR_FALLBACK_RESERVE_SEC),
+            _VISION_OCR_BUDGET_SEC / 2.0,
+        )
+        initial_deadline = (
+            common_deadline - fallback_reserve
+            if any(len(batch) > 1 for _offset, batch in batch_specs)
+            else common_deadline
+        )
+        batch_attempts = 0
+
+        async def run_batch(
+            offset: int,
+            batch_assets: Sequence[VisualAsset],
+            *,
+            deadline: float,
+        ) -> dict[str, Any]:
+            nonlocal batch_attempts
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 return {"success": False, "error": "vision_deadline_reached", "_deadline": True}
+            batch_attempts += 1
             try:
                 async with asyncio.timeout(remaining):
                     return await self._extract_visual_batch(batch_assets, asset_offset=offset)
@@ -890,6 +941,8 @@ class FilesMixin(PipelineShared):
         successful: list[tuple[Sequence[VisualAsset], dict[str, Any]]] = []
         ocr_deadline_reached = False
         batch_error = ""
+        fallback_used = False
+        fallback_mode = False
         stop = False
         # Two batches in flight use the measured spare foreground parallelism,
         # while waves preserve a contiguous prefix: after the first failed batch
@@ -897,9 +950,66 @@ class FilesMixin(PipelineShared):
         # race.  That keeps pages_read interpretable as pages 1..N.
         for wave_start in range(0, len(batch_specs), _VISION_BATCH_CONCURRENCY):
             wave = batch_specs[wave_start : wave_start + _VISION_BATCH_CONCURRENCY]
-            results = await asyncio.gather(*(run_batch(offset, batch) for offset, batch in wave))
-            for (_offset, batch), result in zip(wave, results, strict=True):
+            if fallback_mode:
+                # Once a primary multi-page request consumed its share, do not
+                # submit another aggregate request against an already-expired
+                # internal deadline.  Continue the untouched suffix as ordered
+                # singleton work inside the original common deadline.
+                for offset, batch in wave:
+                    for asset_index, asset in enumerate(batch):
+                        fallback = await run_batch(
+                            offset + asset_index,
+                            (asset,),
+                            deadline=common_deadline,
+                        )
+                        if fallback.get("_deadline"):
+                            ocr_deadline_reached = True
+                            batch_error = "vision_deadline_reached"
+                            stop = True
+                            break
+                        if fallback.get("success") is not True:
+                            batch_error = str(fallback.get("error") or "vision_batch_failed")
+                            stop = True
+                            break
+                        successful.append(((asset,), fallback))
+                    if stop:
+                        break
+                if stop:
+                    break
+                continue
+            results = await asyncio.gather(
+                *(run_batch(offset, batch, deadline=initial_deadline) for offset, batch in wave)
+            )
+            for (offset, batch), result in zip(wave, results, strict=True):
                 if result.get("_deadline"):
+                    # A multi-page call gets only the primary share of the one
+                    # common deadline.  Use the untouched tail for ordered
+                    # single-page retries; never renew the 120-second ceiling.
+                    # Results are appended only from the start of the failed
+                    # batch, so a later concurrent success can never create a
+                    # hole in the reported prefix.
+                    if (len(batch) > 1 or fallback_mode) and loop.time() < common_deadline:
+                        fallback_used = True
+                        fallback_mode = True
+                        for asset_index, asset in enumerate(batch):
+                            fallback = await run_batch(
+                                offset + asset_index,
+                                (asset,),
+                                deadline=common_deadline,
+                            )
+                            if fallback.get("_deadline"):
+                                ocr_deadline_reached = True
+                                batch_error = "vision_deadline_reached"
+                                stop = True
+                                break
+                            if fallback.get("success") is not True:
+                                batch_error = str(fallback.get("error") or "vision_batch_failed")
+                                stop = True
+                                break
+                            successful.append(((asset,), fallback))
+                        if stop:
+                            break
+                        continue
                     ocr_deadline_reached = True
                     batch_error = "vision_deadline_reached"
                     stop = True
@@ -1013,8 +1123,9 @@ class FilesMixin(PipelineShared):
             "deadline_reached": deadline_reached,
             "page_cap_reached": page_cap_reached,
             "text_truncated": text_truncated,
-            "batches_total": len(batch_specs),
+            "batches_total": batch_attempts,
             "batches_read": len(successful),
+            "batch_fallback_used": fallback_used,
             "assets": [
                 {"asset_id": f"A{index}", **asset.to_dict()}
                 for index, asset in enumerate(successful_assets, start=1)

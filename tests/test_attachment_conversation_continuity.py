@@ -19,6 +19,7 @@ import pytest
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
+    _attachment_body_query_surface,
     _attachment_evidence_chunks,
     _attachment_filename_mentions,
     _attachment_selector_message,
@@ -327,6 +328,73 @@ async def test_reply_to_assistant_selects_that_answers_file_and_records_safe_lin
     assistant_metadata = json.loads(str(rows[-1].get("metadata_json") or "{}"))
     assert assistant_metadata["attachment_context_used"] is True
     assert assistant_metadata["conversation_attachment_raw_ids"] == [selected.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "reference_kwargs", "expected_origin"),
+    [
+        (
+            "Какой контрольный код указан именно в этом документе?",
+            {"quoted_attachment_reference": True},
+            "reply_reference",
+        ),
+        (
+            "Повтори контрольный код именно из источника процитированного ответа.",
+            {"reply_assistant_reference": True},
+            "reply_assistant",
+        ),
+    ],
+)
+async def test_exact_reply_body_query_uses_structural_pointer_without_runner_identity_token(
+    settings,
+    storage,
+    monkeypatch,
+    message,
+    reference_kwargs,
+    expected_origin,
+) -> None:
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "Контрольный код: EXACT-REPLY-BODY-VALUE.",
+        filename="exact-reply-source.odt",
+    )
+    conversation = storage.create_conversation("alice")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[{"raw_object_id": target.id}],
+        enable_tools=False,
+        **reference_kwargs,
+    )
+
+    assert result["attachment_query_status"] != "not_found"
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [[target.id]]
+    assert "EXACT-REPLY-BODY-VALUE" in json.dumps(seen, ensure_ascii=False)
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=100)
+    user = next(row for row in rows if row.get("role") == "user")
+    metadata = json.loads(str(user.get("metadata_json") or "{}"))
+    assert metadata["attachment_origin"] == expected_origin
+    assert metadata["conversation_attachment_raw_ids"] == [target.id]
+
+
+def test_genuine_context_check_source_line_is_never_masked_from_body_query() -> None:
+    message = "Найди точную строку: Контекст проверки: DEADBEEF12345678."
+
+    projected = _attachment_body_query_surface(message)
+
+    assert "Контекст проверки: DEADBEEF12345678" in projected
 
 
 @pytest.mark.asyncio
@@ -1893,6 +1961,53 @@ async def test_unique_normalized_or_typo_filename_selects_the_file(
 
 
 @pytest.mark.asyncio
+async def test_fuzzy_descriptive_filename_is_not_a_required_body_anchor(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "Молодогвардейск — отдел координации, код CITY-BODY-VALUE.",
+        filename="Список комендатур Луганской Народной Республики 2026.odt",
+    )
+    decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "Совсем другой город, код DECOY-BODY-VALUE.",
+        filename="СУВ 5_222.xlsx",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", target, "target")
+    _record_upload(storage, conversation["id"], "alice", decoy, "decoy")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    query = "В ранее загруженном файле «список камендатур ЛНР» найди отдел в Молодогвардейске и его код."
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert result["attachment_query_status"] == "matched"
+    assert [[item["raw_object_id"] for item in call[1]] for call in seen] == [[target.id]]
+    evidence = json.dumps(seen, ensure_ascii=False)
+    assert "CITY-BODY-VALUE" in evidence
+    assert "DECOY-BODY-VALUE" not in evidence
+
+
+@pytest.mark.asyncio
 async def test_ambiguous_fuzzy_filename_fails_closed(
     settings,
     storage,
@@ -2398,9 +2513,7 @@ async def test_output_filename_never_displaces_exact_supplied_reply_attachment(
     runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
     seen = _patch_attachment_generation(runtime, monkeypatch)
     message = (
-        "Создай обычный Word-файл metadata-export.docx по процитированному документу. "
-        "Включи ровно четыре строки: гриф, номер документа, видимую дату документа "
-        "и подписанта из предыдущего ответа."
+        "Создай обычный Word-файл metadata-export.docx по процитированному документу. Обобщи его содержание."
     )
 
     await runtime.chat(

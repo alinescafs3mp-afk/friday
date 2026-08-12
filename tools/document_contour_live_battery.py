@@ -103,9 +103,6 @@ class CaseIdentity:
             raise BatteryFailure("prompt_variant_contract_invalid")
         return int(self.token("prompt-variant:" + key, length=8), 16) % count
 
-    def prompt_identity(self, key: str) -> str:
-        return self.token("prompt-identity:" + key)
-
 
 SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
@@ -401,15 +398,19 @@ def _filename(harness: Any, stem: str, extension: str, *, fallback: str = "") ->
 
 
 def _scoped_prompt(harness: Any, key: str, message: str) -> str:
-    """Give non-empty live prompts one of two equivalent, cache-distinct forms."""
+    """Give non-empty live prompts one of two natural equivalent forms.
+
+    Cache/run identity belongs to the isolated chat, source refs, filenames and
+    fixture facts.  It must never become an artificial body-search term in the
+    user-visible request itself.
+    """
 
     identity = getattr(harness, "identity", None)
     if not message or not isinstance(identity, CaseIdentity):
         return message
-    scope = identity.prompt_identity(key).upper()
     if identity.prompt_variant(key, 2) == 0:
-        return f"{message} Контекст проверки: {scope}."
-    return f"Контекст проверки {scope}. {message}"
+        return message
+    return f"Пожалуйста.\n{message}"
 
 
 def _load_env_file_values(path: Path) -> dict[str, str]:
@@ -566,22 +567,48 @@ def offline_self_test() -> dict[str, Any]:
         }
         if len(databases) != len(identities) or any(not _inside(path, root) for path in databases):
             raise BatteryFailure("case_database_isolation_invalid")
-        identity_sets = {
+        identity_sets: dict[str, set[Any]] = {
             "cache": {identity.cache_prefix for identity in identities},
             "marker": {identity.marker("SELFTEST") for identity in identities},
             "ref": {identity.source_ref("SELFTEST") for identity in identities},
             "filename": {identity.filename("selftest", "odt") for identity in identities},
-            "prompt": {
-                _scoped_prompt(
-                    type("PromptProbe", (), {"identity": identity})(),
-                    "selftest",
-                    "Обобщи документ.",
-                )
-                for identity in identities
-            },
+            "chat_ref": {f"document-live:{identity.token('chat-ref:1')}" for identity in identities},
+            "message": {int(identity.token("message:1", length=15), 16) for identity in identities},
         }
         if any(len(values) != len(identities) for values in identity_sets.values()):
             raise BatteryFailure("fixture_identity_not_disjoint")
+        prompt_forms = {
+            _scoped_prompt(
+                type("PromptProbe", (), {"identity": identity})(),
+                "selftest",
+                "Обобщи документ.",
+            )
+            for identity in identities
+        }
+        if not prompt_forms or not prompt_forms.issubset(
+            {"Обобщи документ.", "Пожалуйста.\nОбобщи документ."}
+        ):
+            raise BatteryFailure("prompt_variant_not_natural")
+        # A model cache sees the whole conversation, including the isolated
+        # document fact/name, not only the final natural instruction.  Assert
+        # that this real identity surface remains disjoint without teaching the
+        # product to ignore a synthetic token in user text.
+        conversation_prompts = {
+            "\n".join(
+                (
+                    identity.filename("selftest", "odt"),
+                    identity.marker("SELFTEST"),
+                    _scoped_prompt(
+                        type("PromptProbe", (), {"identity": identity})(),
+                        "selftest",
+                        "Обобщи документ.",
+                    ),
+                )
+            )
+            for identity in identities
+        }
+        if len(conversation_prompts) != len(identities):
+            raise BatteryFailure("conversation_prompt_identity_not_disjoint")
     return {
         "schema": SCHEMA,
         "self_test": "passed",
@@ -1472,7 +1499,12 @@ def _case_05(h: Harness) -> dict[str, Any]:
     dated_ids: list[tuple[int, str]] = []
     expected_markers = tuple(_marker(h, label) for label in ("JBL-FIRST", "JBL-SECOND", "JBL-THIRD"))
     for index, (day, marker) in enumerate(zip((7, 9, 11), expected_markers, strict=True), 1):
-        result = h.chat(
+        nested_source_ref = _source_ref(
+            h,
+            f"JBL-{index}",
+            fallback=f"telegram-file:JBL-{h.run_index}-{index}",
+        )
+        h.chat(
             "D05",
             "Прими документ.",
             chat=h.jbl_chat,
@@ -1480,14 +1512,12 @@ def _case_05(h: Harness) -> dict[str, Any]:
                 _filename(h, f"jbl-{index}", "odt", fallback=f"jbl-{index}.odt"),
                 "application/vnd.oasis.opendocument.text",
                 _odt_bytes([marker], title=f"JBL {index}"),
-                _source_ref(
-                    h,
-                    f"JBL-{index}",
-                    fallback=f"telegram-file:JBL-{h.run_index}-{index}",
-                ),
+                nested_source_ref,
             ),
         )
-        raw_id = str((result.get("file_ingestion") or {}).get("raw_object_id") or "")
+        raw_id = h.resolve_ref(nested_source_ref, uploader=h.jbl_id)
+        if not raw_id or raw_id in expected:
+            raise BatteryFailure("D05_fixture_source_ref_resolution_failed")
         expected.append(raw_id)
         dated_ids.append((day, raw_id))
     foreign = h.ingest(
@@ -1526,8 +1556,13 @@ def _case_05(h: Harness) -> dict[str, Any]:
     )
     answer_text = str(answer.get("message") or "")
     checks = {
-        "all_expected_ids": bool(all(expected) and selected == list(reversed(expected))),
-        "uploader_reauthorized": [str(row.get("id") or "") for row in authorized] == selected,
+        "all_expected_ids": bool(
+            len(expected) == len(set(expected)) == 3 and selected == list(reversed(expected))
+        ),
+        "uploader_reauthorized": bool(
+            len(selected) == len(authorized) == 3
+            and [str(row.get("id") or "") for row in authorized] == selected
+        ),
         "foreign_excluded": str(foreign.get("raw_object_id") or "") not in selected,
         "answer_all_markers": _contains_all(
             answer_text,

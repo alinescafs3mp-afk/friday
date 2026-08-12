@@ -463,6 +463,144 @@ async def test_parallel_map_is_bounded_and_reassembles_out_of_order_tails(
 
 
 @pytest.mark.asyncio
+async def test_a_306k_hierarchy_maps_in_two_model_safe_waves(
+    settings: Any,
+    storage: Any,
+) -> None:
+    total_chars = 306_179
+    head = "DYNAMIC_HEAD\n"
+    middle = "\nDYNAMIC_MIDDLE\n"
+    tail = "\nDYNAMIC_TAIL"
+    filler_chars = total_chars - len(head) - len(middle) - len(tail)
+    source = head + "x" * (filler_chars // 2) + middle + "y" * (filler_chars - filler_chars // 2) + tail
+    assert len(source) == total_chars
+    llm = _ConcurrentMapLLM("Итог учитывает DYNAMIC_HEAD, DYNAMIC_MIDDLE и DYNAMIC_TAIL.")
+    runtime = AgentRuntime(  # type: ignore[arg-type]
+        replace(settings, llm_foreground_slots=4), storage, llm=llm
+    )
+    context = AgentContext(
+        conversation_id="synthetic-dynamic-306k-map",
+        user_id="synthetic-dynamic-306k-owner",
+        person_id="synthetic-dynamic-306k-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(
+        context,
+        "Обобщи весь документ целиком.",
+        [_owned("dynamic-306k.txt", source)],
+        task_kind="summary",
+    )
+
+    payloads = _chunk_payloads(llm)
+    _assert_exact_coverage(payloads, [("dynamic-306k.txt", source)])
+    assert 1 < len(payloads) <= 6
+    assert all(
+        len(str(item["text"])) <= agent_runtime_module._ATTACHMENT_MAP_MAX_CHUNK_CHARS for item in payloads
+    )
+    assert llm.max_active_maps == 3
+    assert all(
+        sum(agent_runtime_module._message_chars(item) for item in call["messages"])
+        <= agent_runtime_module._attachment_map_input_char_budget(settings.profile.max_model_len)
+        for call in llm.calls
+        if any(str(item.get("content") or "").startswith(CHUNK_PREFIX) for item in call["messages"])
+    )
+    mapped = _payload(bundle.evidence, MAP_PREFIX)
+    assert mapped["coverage"]["chunks_total"] == mapped["coverage"]["chunks_mapped"] == len(payloads)
+    assert mapped["coverage"]["source_chars_planned"] == mapped["coverage"]["source_chars_total"]
+    assert mapped["coverage"]["complete"] is complete is True
+
+
+@pytest.mark.asyncio
+async def test_escape_dense_hierarchy_replans_contiguous_leaves_to_serialized_budget(
+    settings: Any,
+    storage: Any,
+) -> None:
+    pattern = '{"quoted":"\\\\path\\n"}'
+    total_chars = 306_179
+    source = (pattern * ((total_chars + len(pattern) - 1) // len(pattern)))[:total_chars]
+    llm = _ConcurrentMapLLM("unused")
+    runtime = AgentRuntime(  # type: ignore[arg-type]
+        replace(settings, llm_foreground_slots=4), storage, llm=llm
+    )
+    context = AgentContext(
+        conversation_id="synthetic-escape-dense-map",
+        user_id="synthetic-escape-dense-owner",
+        person_id="synthetic-escape-dense-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(
+        context,
+        "Обобщи весь документ целиком.",
+        [_owned("escape-dense.jsonl", source)],
+        task_kind="summary",
+    )
+
+    payloads = _chunk_payloads(llm)
+    _assert_exact_coverage(payloads, [("escape-dense.jsonl", source)])
+    assert len(payloads) > 6
+    assert all(
+        sum(agent_runtime_module._message_chars(item) for item in call["messages"])
+        <= agent_runtime_module._attachment_map_input_char_budget(settings.profile.max_model_len)
+        for call in llm.calls
+        if any(str(item.get("content") or "").startswith(CHUNK_PREFIX) for item in call["messages"])
+    )
+    mapped = _payload(bundle.evidence, MAP_PREFIX)
+    assert mapped["coverage"]["chunks_total"] == mapped["coverage"]["chunks_mapped"] == len(payloads)
+    assert mapped["coverage"]["source_chars_planned"] == mapped["coverage"]["source_chars_total"]
+    assert mapped["coverage"]["complete"] is complete is True
+
+
+def test_dynamic_hierarchy_width_keeps_small_default_and_capacity_fail_closed(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    small_source = "s" * 120_000
+    small: list[dict[str, Any]] = [_owned("ordinary-120k.txt", small_source)]
+    assert (
+        agent_runtime_module._attachment_hierarchy_map_chunk_chars(
+            small,
+            max_model_len=settings.profile.max_model_len,
+            request_chars=100,
+            parallelism=3,
+        )
+        == agent_runtime_module._ATTACHMENT_MAP_CHUNK_CHARS
+    )
+    small_chunks, *_rest = agent_runtime_module._attachment_whole_source_plan(small)
+    assert len(small_chunks) == 6
+
+    large_source = "l" * 306_179
+    large: list[dict[str, Any]] = [_owned("bounded-306k.txt", large_source)]
+    dynamic_width = agent_runtime_module._attachment_hierarchy_map_chunk_chars(
+        large,
+        max_model_len=settings.profile.max_model_len,
+        request_chars=100,
+        parallelism=3,
+    )
+    assert (
+        agent_runtime_module._ATTACHMENT_MAP_WIDE_CHUNK_CHARS
+        <= dynamic_width
+        <= (agent_runtime_module._ATTACHMENT_MAP_MAX_CHUNK_CHARS)
+    )
+
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_MAX_CHUNKS", 3)
+    (
+        planned,
+        _files,
+        _files_total,
+        _files_readable,
+        source_complete,
+        chunks_required,
+        source_chars_total,
+        source_chars_planned,
+    ) = agent_runtime_module._attachment_whole_source_plan(large, chunk_chars=dynamic_width)
+    assert source_complete is True
+    assert len(planned) == 3 < chunks_required
+    assert source_chars_planned < source_chars_total == len(large_source)
+
+
+@pytest.mark.asyncio
 async def test_parallel_map_failure_stays_partial_and_cannot_pass(
     settings: Any,
     storage: Any,
@@ -1227,8 +1365,9 @@ async def test_late_file_builder_receives_the_same_canonical_hierarchy_evidence(
         *,
         evidence: list[dict[str, str]] | None = None,
         context: AgentContext | None = None,
+        literal_source_text: str | None = None,
     ) -> dict[str, Any]:
-        del self, actor, context
+        del self, actor, context, literal_source_text
         captured.update(request=request, answer=accepted_answer, evidence=evidence)
         return {
             "kind": "document",
